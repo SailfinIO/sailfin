@@ -1,0 +1,231 @@
+// compiler/src/llvm/lowering/lowering_native_helpers.sfn
+//
+// NativeFunction / NativeInstruction / NativeStruct constructors,
+// updaters, and field accessors.  Extracted from lowering_core.sfn to
+// reduce per-file memory footprint during self-hosting compilation.
+
+import {
+    NativeImport,
+    NativeFunction,
+    NativeParameter,
+    NativeInstruction,
+    NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
+    NativeEnum,
+} from "../../native_ir";
+
+// ── NativeFunction constructors ──────────────────────────────────────
+
+// Helper: construct NativeFunction outside of if blocks.
+// The seed v0.1.1 drops struct literal constructions inside if blocks,
+// so we extract construction into standalone functions that get called.
+fn make_native_function_basic(name -> string, is_async -> boolean) -> NativeFunction {
+    return NativeFunction { name: name, is_async: is_async, parameters: [], return_type: "void", effects: [], decorators: [], is_extern: false, instructions: [] };
+}
+
+fn make_native_function_with_return(name -> string, is_async -> boolean, ret_type -> string) -> NativeFunction {
+    return NativeFunction { name: name, is_async: is_async, parameters: [], return_type: ret_type, effects: [], decorators: [], is_extern: false, instructions: [] };
+}
+
+fn make_native_function_method(name -> string, self_type -> string, ret_type -> string) -> NativeFunction {
+    let self_param = NativeParameter { name: "self", type_annotation: self_type, mutable: false, default_value: null, span: null };
+    return NativeFunction { name: name, is_async: false, parameters: [self_param], return_type: ret_type, effects: [], decorators: [], is_extern: false, instructions: [] };
+}
+
+fn make_native_parameter(pname -> string, ptype -> string) -> NativeParameter {
+    return NativeParameter { name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null };
+}
+
+fn make_native_import(module_path -> string) -> NativeImport {
+    return NativeImport { kind: "named", module: module_path, specifiers: [] };
+}
+
+fn make_native_struct_layout(sz -> number, al -> number, flds -> NativeStructLayoutField[]) -> NativeStructLayout {
+    return NativeStructLayout { size: sz, align: al, fields: flds };
+}
+
+fn make_native_struct(sname -> string, sfields -> NativeStructField[], smethods -> NativeFunction[], slayout -> NativeStructLayout?) -> NativeStruct {
+    return NativeStruct { name: sname, fields: sfields, methods: smethods, implements: [], layout: slayout };
+}
+
+fn make_native_struct_field(fname -> string, ftype -> string) -> NativeStructField {
+    return NativeStructField { name: fname, type_annotation: ftype, mutable: false };
+}
+
+fn make_native_struct_layout_field(lf_name -> string, lf_type -> string, lf_offset -> number, lf_size -> number, lf_align -> number) -> NativeStructLayoutField {
+    return NativeStructLayoutField { name: lf_name, type_annotation: lf_type, offset: lf_offset, size: lf_size, align: lf_align };
+}
+
+// ── NativeFunction updaters ──────────────────────────────────────────
+
+fn update_function_return_type(fn_val -> NativeFunction, ret_type -> string) -> NativeFunction {
+    return NativeFunction { name: fn_val.name, is_async: fn_val.is_async, parameters: fn_val.parameters, return_type: ret_type, effects: fn_val.effects, decorators: fn_val.decorators, is_extern: fn_val.is_extern, instructions: fn_val.instructions };
+}
+
+fn update_function_effects(fn_val -> NativeFunction, effects -> string[]) -> NativeFunction {
+    return NativeFunction { name: fn_val.name, is_async: fn_val.is_async, parameters: fn_val.parameters, return_type: fn_val.return_type, effects: effects, decorators: fn_val.decorators, is_extern: fn_val.is_extern, instructions: fn_val.instructions };
+}
+
+fn update_function_params(fn_val -> NativeFunction, params -> NativeParameter[]) -> NativeFunction {
+    return NativeFunction { name: fn_val.name, is_async: fn_val.is_async, parameters: params, return_type: fn_val.return_type, effects: fn_val.effects, decorators: fn_val.decorators, is_extern: fn_val.is_extern, instructions: fn_val.instructions };
+}
+
+fn update_function_instructions(fn_val -> NativeFunction, instrs -> NativeInstruction[]) -> NativeFunction {
+    return NativeFunction { name: fn_val.name, is_async: fn_val.is_async, parameters: fn_val.parameters, return_type: fn_val.return_type, effects: fn_val.effects, decorators: fn_val.decorators, is_extern: fn_val.is_extern, instructions: instrs };
+}
+
+fn append_param_to_function(func -> NativeFunction, param -> NativeParameter) -> NativeFunction {
+    let mut params = func.parameters;
+    params = params.push(param);
+    return update_function_params(func, params);
+}
+
+fn append_instruction_to_function(func -> NativeFunction, instr -> NativeInstruction) -> NativeFunction {
+    let mut instrs = func.instructions;
+    instrs = instrs.push(instr);
+    return update_function_instructions(func, instrs);
+}
+
+// ── NativeInstruction constructors ───────────────────────────────────
+
+// NativeInstruction construction helpers (seed v0.1.1 drops enum variant constructors)
+// Tags: Return=0, Expression=1, If=3, Else=4, EndIf=5, Loop=8, EndLoop=9, Break=10, Continue=11, Unknown=21
+fn make_instruction_text(tag_val -> number, text -> string) -> NativeInstruction {
+    // Seed drops this; fixup pass replaces body
+    if tag_val == 0 {
+        return NativeInstruction.Return { expression: text, span: null };
+    }
+    if tag_val == 1 {
+        return NativeInstruction.Expression { expression: text, span: null };
+    }
+    if tag_val == 3 {
+        return NativeInstruction.If { condition: text };
+    }
+    return NativeInstruction.Unknown { text: text };
+}
+
+fn make_instruction_simple(tag_val -> number) -> NativeInstruction {
+    // Seed drops this; fixup pass replaces body
+    if tag_val == 4 { return NativeInstruction.Else(); }
+    if tag_val == 5 { return NativeInstruction.EndIf(); }
+    if tag_val == 8 { return NativeInstruction.Loop(); }
+    if tag_val == 9 { return NativeInstruction.EndLoop(); }
+    if tag_val == 10 { return NativeInstruction.Break(); }
+    return NativeInstruction.Continue();
+}
+
+// ── NativeEnum field accessors ───────────────────────────────────────
+
+fn get_enum_name_at(enums -> NativeEnum[], idx -> number) -> string {
+    let e = enums[idx];
+    return e.name;
+}
+
+// ── NativeInstruction field accessors ────────────────────────────────
+// The seed v0.1.1 compiles enum field access as sailfin_runtime_get_field
+// which is a runtime stub returning empty data.  These helpers use
+// explicit array indexing; the fixup pass replaces their bodies.
+
+fn get_instruction_tag(instructions -> NativeInstruction[], idx -> number) -> number {
+    // Seed drops this; fixup pass replaces with tag read
+    let instr = instructions[idx];
+    return 21;  // fallback: Unknown
+}
+fn get_instruction_text(instructions -> NativeInstruction[], idx -> number) -> string {
+    // Seed drops this; fixup pass replaces with payload[0] read
+    let instr = instructions[idx];
+    return instr.expression;
+}
+fn get_instruction_condition(instructions -> NativeInstruction[], idx -> number) -> string {
+    // Seed drops this; fixup pass replaces with payload[0] read
+    let instr = instructions[idx];
+    return instr.condition;
+}
+fn get_instruction_let_name(instructions -> NativeInstruction[], idx -> number) -> string {
+    let instr = instructions[idx];
+    return instr.name;
+}
+fn get_instruction_let_mutable(instructions -> NativeInstruction[], idx -> number) -> boolean {
+    let instr = instructions[idx];
+    return instr.mutable;
+}
+fn get_instruction_let_type(instructions -> NativeInstruction[], idx -> number) -> string {
+    let instr = instructions[idx];
+    return instr.type_annotation;
+}
+fn get_instruction_let_value(instructions -> NativeInstruction[], idx -> number) -> string? {
+    let instr = instructions[idx];
+    return instr.value;
+}
+
+// ── NativeFunction field accessors ───────────────────────────────────
+
+fn get_function_name_at(functions -> NativeFunction[], idx -> number) -> string {
+    let f = functions[idx];
+    return f.name;
+}
+fn get_function_return_type_at(functions -> NativeFunction[], idx -> number) -> string {
+    let f = functions[idx];
+    return f.return_type;
+}
+fn get_function_is_async_at(functions -> NativeFunction[], idx -> number) -> boolean {
+    let f = functions[idx];
+    return f.is_async;
+}
+fn get_function_is_extern_at(functions -> NativeFunction[], idx -> number) -> boolean {
+    let f = functions[idx];
+    return f.is_extern;
+}
+fn get_function_parameters_at(functions -> NativeFunction[], idx -> number) -> NativeParameter[] {
+    let f = functions[idx];
+    return f.parameters;
+}
+fn get_function_instructions_at(functions -> NativeFunction[], idx -> number) -> NativeInstruction[] {
+    let f = functions[idx];
+    return f.instructions;
+}
+fn get_function_effects_at(functions -> NativeFunction[], idx -> number) -> string[] {
+    let f = functions[idx];
+    return f.effects;
+}
+fn get_function_decorators_at(functions -> NativeFunction[], idx -> number) -> string[] {
+    let f = functions[idx];
+    return f.decorators;
+}
+
+// ── NativeStruct field accessors ─────────────────────────────────────
+
+fn get_struct_name_at(structs -> NativeStruct[], idx -> number) -> string {
+    let s = structs[idx];
+    return s.name;
+}
+fn get_struct_fields_at(structs -> NativeStruct[], idx -> number) -> NativeStructField[] {
+    let s = structs[idx];
+    return s.fields;
+}
+fn get_struct_field_name_at(fields -> NativeStructField[], idx -> number) -> string {
+    let f = fields[idx];
+    return f.name;
+}
+fn get_struct_field_type_at(fields -> NativeStructField[], idx -> number) -> string {
+    let f = fields[idx];
+    return f.type_annotation;
+}
+
+// ── Import append helper ─────────────────────────────────────────────
+
+fn append_native_import(arr -> NativeImport[], item -> NativeImport) -> NativeImport[] {
+    let mut result -> NativeImport[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= arr.length {
+            break;
+        }
+        result = result.push(arr[i]);
+        i += 1;
+    }
+    result = result.push(item);
+    return result;
+}

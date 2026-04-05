@@ -150,21 +150,25 @@ import {
 import {
     lower_to_llvm_lines_with_parsed_context,
     lower_to_llvm_lines_with_parsed_context_for_tests,
-    extend_string_lines,
-    extend_string_lines_checked,
-    write_llvm_lines_chunked,
+    compile_native_text_to_llvm_file,
+} from "./lowering_core";
+import {
     recover_functions_for_lowering,
     recover_native_functions_light,
     recover_native_structs_light,
     recover_native_imports_light,
     parse_native_artifact_with_retry,
     parse_native_artifact_safe,
+} from "./lowering_recovery";
+import {
+    extend_string_lines,
+    extend_string_lines_checked,
+    write_llvm_lines_chunked,
     ensure_intrinsic_declarations,
     module_source_filename,
     append_string_lines,
     extend_lifetime_regions_checked,
-    compile_native_text_to_llvm_file,
-} from "./lowering_core";
+} from "./lowering_io";
 
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);

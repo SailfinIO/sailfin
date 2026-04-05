@@ -466,24 +466,24 @@ void* parse_native_artifact_for_import_context_api(void* text) {
     return parse_native_artifact_for_import_context(text);
 }
 
-/* ---- Lowering_core recovery function shims ---- */
+/* ---- Lowering recovery function shims (moved to lowering_recovery.sfn) ---- */
 
-extern void* recover_native_functions_light__llvm__lowering__lowering_core(void*);
+extern void* recover_native_functions_light__llvm__lowering__lowering_recovery(void*);
 __attribute__((weak))
 void* recover_native_functions_light(void* arg) {
-    return recover_native_functions_light__llvm__lowering__lowering_core(arg);
+    return recover_native_functions_light__llvm__lowering__lowering_recovery(arg);
 }
 
-extern void* recover_native_structs_light__llvm__lowering__lowering_core(void*);
+extern void* recover_native_structs_light__llvm__lowering__lowering_recovery(void*);
 __attribute__((weak))
 void* recover_native_structs_light(void* arg) {
-    return recover_native_structs_light__llvm__lowering__lowering_core(arg);
+    return recover_native_structs_light__llvm__lowering__lowering_recovery(arg);
 }
 
-extern void* recover_native_imports_light__llvm__lowering__lowering_core(void*);
+extern void* recover_native_imports_light__llvm__lowering__lowering_recovery(void*);
 __attribute__((weak))
 void* recover_native_imports_light(void* arg) {
-    return recover_native_imports_light__llvm__lowering__lowering_core(arg);
+    return recover_native_imports_light__llvm__lowering__lowering_recovery(arg);
 }
 
 extern void* build_parse_result_from_text__llvm__lowering__lowering_core(void*);
@@ -5773,10 +5773,12 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     # Scan the LLVM IR for known helper functions and replace their bodies.
     # Two patterns: mangled (seed-compiled) and unmangled (first-pass-compiled).
     _MODULE_SUFFIX = "__llvm__lowering__lowering_core"
+    _MODULE_SUFFIX_HELPERS = "__llvm__lowering__lowering_native_helpers"
     # Build a regex that matches known helper names with the module suffix.
     _helper_names_pattern = "|".join(_re.escape(k) for k in _HELPERS.keys())
+    _suffixes_pattern = "(?:" + _re.escape(_MODULE_SUFFIX) + "|" + _re.escape(_MODULE_SUFFIX_HELPERS) + ")"
     fn_re_suffixed = _re.compile(
-        r"^define\s+(?:internal\s+)?.+?\s+@(" + _helper_names_pattern + r")" + _re.escape(_MODULE_SUFFIX) + r"\("
+        r"^define\s+(?:internal\s+)?.+?\s+@(" + _helper_names_pattern + r")" + _suffixes_pattern + r"\("
     )
     # For accessor helpers that may appear without the module suffix.
     _ACCESSOR_HELPERS = set(_FN_SIGS.keys())
@@ -5827,7 +5829,7 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
         if fn_name in _FN_SIGS:
             # Fix params when they are empty "()" or contain the
             # placeholder names from _fix_duplicate_param_names.
-            _needs_sig_fix = "()" in fn_header or "%_empty" in fn_header or " %_," in fn_header or " %_)" in fn_header
+            _needs_sig_fix = "()" in fn_header or "%_empty" in fn_header or " %_," in fn_header or " %_)" in fn_header or " %a0" in fn_header
             if _needs_sig_fix:
                 sig_params, sig_ret = _FN_SIGS[fn_name]
                 at_idx = fn_header.index("@")
