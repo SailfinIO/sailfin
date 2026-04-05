@@ -90,7 +90,7 @@ import {
     get_instruction_tag,
     get_instruction_text,
     get_instruction_condition,
-} from "./lowering_core";
+} from "./lowering_native_helpers";
 
 fn lower_instruction_range(
     function -> NativeFunction,

@@ -1,0 +1,754 @@
+// compiler/src/llvm/lowering/lowering_recovery.sfn
+//
+// Light recovery parsers for NativeFunction, NativeImport, and NativeStruct.
+// These parsers work directly on .sfn-asm text and bypass the structured
+// parser (parse_native_artifact_impl) which has deeply nested if/else chains
+// that the v0.1.1 seed cannot compile correctly.
+//
+// Extracted from lowering_core.sfn to reduce per-file memory footprint.
+
+import { substring } from "../../string_utils";
+import {
+    NativeImport,
+    NativeFunction,
+    NativeInstruction,
+    NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
+    ParseNativeResult,
+} from "../../native_ir";
+import {
+    parse_native_function_count_from_text,
+    parse_native_functions_from_text,
+    parse_native_structs_from_text,
+    parse_native_imports_from_text,
+    parse_native_interfaces_from_text,
+    parse_native_enums_from_text,
+    parse_native_bindings_from_text,
+    parse_native_diagnostics_from_text,
+} from "../../native_ir_api";
+import {
+    number_to_string,
+    index_of,
+} from "../utils";
+import {
+    split_lines_local,
+    starts_with_local,
+    trim_text_local,
+    index_of_char_local,
+    extract_kv_number,
+    extract_kv_string,
+    recover_function_name_from_header,
+    recover_function_is_async_from_header,
+} from "./lowering_text_utils";
+import {
+    make_native_function_basic,
+    make_native_function_method,
+    make_native_parameter,
+    make_native_import,
+    make_native_struct_layout,
+    make_native_struct,
+    make_native_struct_field,
+    make_native_struct_layout_field,
+    make_instruction_text,
+    make_instruction_simple,
+    update_function_return_type,
+    update_function_effects,
+    append_param_to_function,
+    append_instruction_to_function,
+    append_native_import,
+} from "./lowering_native_helpers";
+import {
+    sanitize_collection_length,
+    append_native_function,
+} from "./lowering_helpers";
+
+// ── Parse wrappers ───────────────────────────────────────────────────
+
+// Construct a ParseNativeResult from individual field-extraction calls.
+// This avoids the seed v0.1.1 struct-return ABI bug: each extractor returns
+// an array (works through double→pointer shim), then we assemble locally.
+// Safe replacement for parse_native_artifact that avoids struct-return ABI bug.
+// Calls individual field extractors and assembles the result locally.
+fn parse_native_artifact_safe(text -> string) -> ParseNativeResult {
+    let functions = parse_native_functions_from_text(text);
+    let imports = parse_native_imports_from_text(text);
+    let structs = parse_native_structs_from_text(text);
+    let interfaces = parse_native_interfaces_from_text(text);
+    let enums = parse_native_enums_from_text(text);
+    let bindings = parse_native_bindings_from_text(text);
+    let diagnostics = parse_native_diagnostics_from_text(text);
+    let result = ParseNativeResult {
+        functions: functions,
+        imports: imports,
+        structs: structs,
+        interfaces: interfaces,
+        enums: enums,
+        bindings: bindings,
+        diagnostics: diagnostics,
+    };
+    return result;
+}
+
+
+
+// ── Light function recovery ──────────────────────────────────────────
+
+fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
+    // FLAT: no nested ifs, no else-if chains.
+    // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
+    // Every condition check must be a top-level if in the loop body.
+    print("DIAG: recover_native_functions_light input length=" + number_to_string(native_text.length));
+    let lines = split_lines_local(native_text);
+    print("DIAG: split_lines_local returned lines=" + number_to_string(lines.length));
+    let mut functions -> NativeFunction[] = [];
+    let mut current -> NativeFunction? = null;
+    let mut current_struct_name -> string = "";
+    let mut index -> number = 0;
+    let mut fn_count -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = trim_text_local(lines[index]);
+        let mut _if237 -> boolean = false;
+        if line.length == 0 { _if237 = true; }
+        if starts_with_local(line, ";") { _if237 = true; }
+        if starts_with_local(line, ".module ") { _if237 = true; }
+        if _if237 {
+            index += 1;
+            continue;
+        }
+        // --- Pre-compute all branch flags at the top level ---
+        let is_struct_start = starts_with_local(line, ".struct ");
+        let is_struct_end = line == ".endstruct";
+        let is_method_start = starts_with_local(line, ".method ");
+        let is_method_end = starts_with_local(line, ".endmethod");
+        let is_fn_start = starts_with_local(line, ".fn ");
+        let mut _let238 -> boolean = false;
+        if starts_with_local(line, ".endfn") { _let238 = true; }
+        if starts_with_local(line, ".endtest") { _let238 = true; }
+        let is_fn_end = _let238;
+        let is_meta_return = starts_with_local(line, ".meta return ");
+        let is_meta_effects = starts_with_local(line, ".meta effects ");
+        let is_meta_other = starts_with_local(line, ".meta ");
+        let is_param = starts_with_local(line, ".param ");
+        let mut _let239 -> boolean = false;
+        if starts_with_local(line, ".span ") { _let239 = true; }
+        if starts_with_local(line, ".init-span ") { _let239 = true; }
+        let is_span = _let239;
+        let is_eval = starts_with_local(line, "eval ");
+        let is_dotreturn = starts_with_local(line, ".return");
+        let is_ret_space = starts_with_local(line, "ret ");
+        let is_ret_bare = line == "ret";
+        let is_else_kw = line == ".else";
+        let is_endif_kw = line == ".endif";
+        let is_if_kw = starts_with_local(line, ".if ");
+        let is_loop_kw = line == ".loop";
+        let is_endloop_kw = line == ".endloop";
+        let is_break_kw = line == "break";
+        let is_continue_kw = line == "continue";
+
+        // --- Pre-compute values needed by multiple branches ---
+        let method_header = trim_text_local(substring(line, 8, line.length));
+        let method_paren_idx = index_of(method_header, "(");
+        let method_name_from_paren = trim_text_local(substring(method_header, 0, method_paren_idx));
+        let method_arrow_idx = index_of(method_header, " -> ");
+        let method_ret_from_arrow = trim_text_local(substring(method_header, method_arrow_idx + 4, method_header.length));
+        let ret_type_raw = trim_text_local(substring(line, 13, line.length));
+        let effects_text_raw = trim_text_local(substring(line, 14, line.length));
+        let param_text_raw = trim_text_local(substring(line, 7, line.length));
+        let param_arrow_idx = index_of(param_text_raw, " -> ");
+        let param_name_raw = trim_text_local(substring(param_text_raw, 0, param_arrow_idx));
+        let param_type_raw = trim_text_local(substring(param_text_raw, param_arrow_idx + 4, param_text_raw.length));
+
+        // --- Struct tracking ---
+        if is_struct_start {
+            current_struct_name = trim_text_local(substring(line, 8, line.length));
+            index += 1;
+            continue;
+        }
+        if is_struct_end {
+            current_struct_name = "";
+            index += 1;
+            continue;
+        }
+
+        // --- Flush current on function/method boundaries (FLAT — no nesting) ---
+        if is_fn_start {
+            if current != null {
+                print("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
+                functions = append_native_function(functions, current);
+                print("DIAG: after append functions.len=" + number_to_string(functions.length));
+                current = null;
+            }
+        }
+        if is_method_start {
+            if current_struct_name.length > 0 {
+                if current != null {
+                    functions = append_native_function(functions, current);
+                    current = null;
+                }
+            }
+        }
+        if is_fn_end {
+            if current != null {
+                print("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
+                functions = append_native_function(functions, current);
+                print("DIAG: after append functions.len=" + number_to_string(functions.length));
+                current = null;
+                index += 1;
+                continue;
+            }
+        }
+        if is_fn_end {
+            index += 1;
+            continue;
+        }
+        if is_method_end {
+            if current != null {
+                functions = append_native_function(functions, current);
+                current = null;
+                index += 1;
+                continue;
+            }
+        }
+        if is_method_end {
+            index += 1;
+            continue;
+        }
+
+        // --- Method start with paren and arrow (full parse) ---
+        if is_method_start {
+            if current_struct_name.length > 0 {
+                if method_paren_idx >= 0 {
+                    if method_arrow_idx >= 0 {
+                        let full_name = current_struct_name + method_name_from_paren;
+                        current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
+                        index += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        // --- Method start with paren but no arrow ---
+        if is_method_start {
+            if current_struct_name.length > 0 {
+                if method_paren_idx >= 0 {
+                    let full_name = current_struct_name + method_name_from_paren;
+                    current = make_native_function_method(full_name, current_struct_name, "void");
+                    index += 1;
+                    continue;
+                }
+            }
+        }
+        // --- Method start without paren ---
+        if is_method_start {
+            if current_struct_name.length > 0 {
+                let full_name = current_struct_name + method_header;
+                current = make_native_function_method(full_name, current_struct_name, "void");
+                index += 1;
+                continue;
+            }
+        }
+
+        // --- .fn start ---
+        if is_fn_start {
+            let name = recover_function_name_from_header(line);
+            let fn_is_async = recover_function_is_async_from_header(line);
+            current = make_native_function_basic(name, fn_is_async);
+            fn_count += 1;
+            print("DIAG: found .fn #" + number_to_string(fn_count) + " name=" + name);
+            index += 1;
+            continue;
+        }
+
+        // --- Skip lines when not inside a function ---
+        if current == null {
+            index += 1;
+            continue;
+        }
+
+        // --- .meta return ---
+        if is_meta_return {
+            if ret_type_raw.length > 0 {
+                current = update_function_return_type(current, ret_type_raw);
+                index += 1;
+                continue;
+            }
+        }
+
+        // --- .meta effects ---
+        if is_meta_effects {
+            if effects_text_raw != "none" {
+                if effects_text_raw.length > 0 {
+                    let mut parsed_effects -> string[] = [];
+                    parsed_effects.push(effects_text_raw);
+                    current = update_function_effects(current, parsed_effects);
+                    index += 1;
+                    continue;
+                }
+            }
+        }
+
+        // --- Other .meta lines ---
+        if is_meta_other {
+            index += 1;
+            continue;
+        }
+
+        // --- .param ---
+        if is_param {
+            if param_arrow_idx >= 0 {
+                if param_name_raw.length > 0 {
+                    if param_type_raw.length > 0 {
+                        let new_param = make_native_parameter(param_name_raw, param_type_raw);
+                        current = append_param_to_function(current, new_param);
+                        index += 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        if is_param {
+            index += 1;
+            continue;
+        }
+
+        // --- .span lines ---
+        if is_span {
+            index += 1;
+            continue;
+        }
+
+        // --- Instruction parsing ---
+        let mut next_instruction -> NativeInstruction = make_instruction_text(21, line);
+        if is_eval {
+            next_instruction = make_instruction_text(1, trim_text_local(substring(line, 5, line.length)));
+        }
+        if is_dotreturn {
+            next_instruction = make_instruction_text(0, trim_text_local(substring(line, 7, line.length)));
+        }
+        if is_ret_space {
+            next_instruction = make_instruction_text(0, trim_text_local(substring(line, 4, line.length)));
+        }
+        if is_ret_bare {
+            next_instruction = make_instruction_text(0, "");
+        }
+        if is_else_kw {
+            next_instruction = make_instruction_simple(4);
+        }
+        if is_endif_kw {
+            next_instruction = make_instruction_simple(5);
+        }
+        if is_if_kw {
+            next_instruction = make_instruction_text(3, trim_text_local(substring(line, 4, line.length)));
+        }
+        if is_loop_kw {
+            next_instruction = make_instruction_simple(8);
+        }
+        if is_endloop_kw {
+            next_instruction = make_instruction_simple(9);
+        }
+        if is_break_kw {
+            next_instruction = make_instruction_simple(10);
+        }
+        if is_continue_kw {
+            next_instruction = make_instruction_simple(11);
+        }
+
+        current = append_instruction_to_function(current, next_instruction);
+        index += 1;
+    }
+    if current != null {
+        functions = append_native_function(functions, current);
+    }
+    print("DIAG: recover_native_functions_light returning " + number_to_string(functions.length) + " functions");
+    return functions;
+}
+
+// ── Light import recovery ────────────────────────────────────────────
+
+fn recover_native_imports_light(native_text -> string) -> NativeImport[] {
+    let lines = split_lines_local(native_text);
+    let mut imports -> NativeImport[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = trim_text_local(lines[index]);
+        let is_import = starts_with_local(line, ".import ");
+        let rest = trim_text_local(substring(line, 8, line.length));
+        let quote1 = index_of_char_local(rest, "\"");
+        let after_quote = substring(rest, quote1 + 1, rest.length);
+        let quote2 = index_of_char_local(after_quote, "\"");
+        let module_path = substring(after_quote, 0, quote2);
+        if is_import {
+            if quote1 >= 0 {
+                if quote2 > 0 {
+                    let imp = make_native_import(module_path);
+                    imports = append_native_import(imports, imp);
+                }
+            }
+        }
+        index += 1;
+    }
+    return imports;
+}
+
+// ── Light struct recovery ────────────────────────────────────────────
+
+fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
+    let lines = split_lines_local(native_text);
+    let mut structs -> NativeStruct[] = [];
+    let mut in_struct -> boolean = false;
+    let mut struct_name -> string = "";
+    let mut struct_fields -> NativeStructField[] = [];
+    let mut struct_methods -> NativeFunction[] = [];
+    let mut struct_layout -> NativeStructLayout? = null;
+    let mut layout_fields -> NativeStructLayoutField[] = [];
+    let mut layout_size -> number = 0;
+    let mut layout_align -> number = 0;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = trim_text_local(lines[index]);
+        let mut _if240 -> boolean = false;
+        if line.length == 0 { _if240 = true; }
+        if starts_with_local(line, ";") { _if240 = true; }
+        if _if240 {
+            index += 1;
+            continue;
+        }
+        let is_struct_start = starts_with_local(line, ".struct ");
+        let is_struct_end = line == ".endstruct";
+        let is_field = starts_with_local(line, ".field ");
+        let is_layout_struct = starts_with_local(line, ".layout struct ");
+        let is_layout_field = starts_with_local(line, ".layout field ");
+        let mut _let241 -> boolean = false;
+        if starts_with_local(line, ".method ") { _let241 = true; }
+        if starts_with_local(line, ".endmethod") { _let241 = true; }
+        let is_method_line = _let241;
+
+        let field_text = trim_text_local(substring(line, 7, line.length));
+        let field_arrow_idx = index_of(field_text, " -> ");
+        let f_name = trim_text_local(substring(field_text, 0, field_arrow_idx));
+        let f_type = trim_text_local(substring(field_text, field_arrow_idx + 4, field_text.length));
+
+        let ls_text = trim_text_local(substring(line, 15, line.length));
+        let ls_size_idx = index_of(ls_text, "size=");
+        let ls_align_idx = index_of(ls_text, "align=");
+        let ls_size_val = extract_kv_number(ls_text, "size=", 5);
+        let ls_align_val = extract_kv_number(ls_text, "align=", 6);
+
+        let lf_text = trim_text_local(substring(line, 14, line.length));
+        let lf_name_end = index_of(lf_text, " ");
+        let lf_name_val = substring(lf_text, 0, lf_name_end);
+        let lf_type_val = extract_kv_string(lf_text, "type=", 5);
+        let lf_offset_val = extract_kv_number(lf_text, "offset=", 7);
+        let lf_size_val = extract_kv_number(lf_text, "size=", 5);
+        let lf_align_val = extract_kv_number(lf_text, "align=", 6);
+
+        if is_struct_start {
+            in_struct = true;
+            struct_name = trim_text_local(substring(line, 8, line.length));
+            struct_fields = [];
+            struct_methods = [];
+            layout_fields = [];
+            layout_size = 0;
+            layout_align = 0;
+            struct_layout = null;
+            index += 1;
+            continue;
+        }
+
+        let mut _if242 -> boolean = false;
+        if is_struct_end {
+            if in_struct {
+                let mut _if259 -> boolean = false;
+                if layout_size > 0 { _if259 = true; }
+                if layout_fields.length > 0 { _if259 = true; }
+                if _if259 {
+                    _if242 = true;
+                }
+            }
+        }
+        if _if242 {
+            struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields);
+            structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, struct_layout));
+            in_struct = false;
+            index += 1;
+            continue;
+        }
+        if is_struct_end {
+            if in_struct {
+                structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, null));
+                in_struct = false;
+                index += 1;
+                continue;
+            }
+        }
+        if is_struct_end {
+            index += 1;
+            continue;
+        }
+
+        if !in_struct {
+            index += 1;
+            continue;
+        }
+
+        if is_field {
+            if field_arrow_idx >= 0 {
+                struct_fields = struct_fields.push(make_native_struct_field(f_name, f_type));
+                index += 1;
+                continue;
+            }
+        }
+        if is_field {
+            index += 1;
+            continue;
+        }
+
+        if is_layout_struct {
+            if ls_size_idx >= 0 {
+                layout_size = ls_size_val;
+            }
+        }
+        if is_layout_struct {
+            if ls_align_idx >= 0 {
+                layout_align = ls_align_val;
+            }
+        }
+        if is_layout_struct {
+            index += 1;
+            continue;
+        }
+
+        if is_layout_field {
+            if lf_name_end >= 0 {
+                layout_fields = layout_fields.push(make_native_struct_layout_field(lf_name_val, lf_type_val, lf_offset_val, lf_size_val, lf_align_val));
+                index += 1;
+                continue;
+            }
+        }
+        if is_layout_field {
+            layout_fields = layout_fields.push(make_native_struct_layout_field("", lf_type_val, lf_offset_val, lf_size_val, lf_align_val));
+            index += 1;
+            continue;
+        }
+
+        if is_method_line {
+            index += 1;
+            continue;
+        }
+        index += 1;
+    }
+    let mut _if243 -> boolean = false;
+    if in_struct {
+        let mut _if260 -> boolean = false;
+        if layout_size > 0 { _if260 = true; }
+        if layout_fields.length > 0 { _if260 = true; }
+        if _if260 {
+            _if243 = true;
+        }
+    }
+    if _if243 {
+        struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields);
+        structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, struct_layout));
+    }
+    if in_struct {
+        if layout_size == 0 {
+            if layout_fields.length == 0 {
+                structs = structs.push(make_native_struct(struct_name, struct_fields, struct_methods, null));
+            }
+        }
+    }
+    return structs;
+}
+
+// ── Higher-level recovery ────────────────────────────────────────────
+
+fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_text_override_path -> string, artifact_text -> string, debug_lowering -> boolean) -> NativeFunction[] ![io] {
+    let mut safe_functions = current_functions;
+    if safe_functions == null {
+        safe_functions = [];
+    }
+    let initial_function_count = sanitize_collection_length(safe_functions.length, 200000);
+    if safe_functions.length != initial_function_count {
+        if debug_lowering {
+            print("emit-llvm: invalid function list length; dropping current parsed functions");
+        }
+        safe_functions = [];
+    }
+    if safe_functions.length > 0 {
+        let mut expected_source_text = artifact_text;
+        if expected_source_text.length == 0 {
+            if native_text_override_path.length > 0 {
+                expected_source_text = native_text_override_path;
+            }
+        }
+        if expected_source_text.length == 0 {
+            if fs.exists("build/sailfin/emit-native.tmp") {
+                expected_source_text = fs.readFile("build/sailfin/emit-native.tmp");
+            }
+        }
+
+        if expected_source_text.length > 0 {
+            let expected_functions = parse_native_functions_from_text(expected_source_text);
+            let expected_count = sanitize_collection_length(expected_functions.length, 200000);
+            if expected_count > 0 {
+                let mut use_expected = false;
+                if safe_functions.length != expected_count {
+                    use_expected = true;
+                }
+
+                let mut has_body_instructions = false;
+                let mut body_index -> number = 0;
+                loop {
+                    if body_index >= initial_function_count {
+                        break;
+                    }
+                    let function = safe_functions[body_index];
+                    if !function.is_extern {
+                        if function.instructions != null {
+                            if function.instructions.length > 0 {
+                                has_body_instructions = true;
+                                break;
+                            }
+                        }
+                    }
+                    body_index += 1;
+                }
+                if !has_body_instructions {
+                    use_expected = true;
+                }
+
+                let mut index -> number = 0;
+                loop {
+                    let mut _if245 -> boolean = false;
+                    if index >= initial_function_count { _if245 = true; }
+                    if index >= expected_count { _if245 = true; }
+                    if _if245 {
+                        break;
+                    }
+                    let safe_name = trim_text_local(safe_functions[index].name);
+                    let expected_name = trim_text_local(expected_functions[index].name);
+                    let mut _if246 -> boolean = false;
+                    if safe_name.length == 0 { _if246 = true; }
+                    if safe_name == "_" { _if246 = true; }
+                    if _if246 {
+                        use_expected = true;
+                        break;
+                    }
+                    if expected_name.length == 0 {
+                        use_expected = true;
+                        break;
+                    }
+                    if safe_name != expected_name {
+                        use_expected = true;
+                        break;
+                    }
+                    index += 1;
+                }
+
+                if use_expected {
+                    let mut replacement_functions = expected_functions;
+                    let light_functions = recover_native_functions_light(expected_source_text);
+                    let light_count = sanitize_collection_length(light_functions.length, 200000);
+                    let mut light_has_body = false;
+                    let mut light_index -> number = 0;
+                    loop {
+                        if light_index >= light_count {
+                            break;
+                        }
+                        let function = light_functions[light_index];
+                        if !function.is_extern {
+                            if function.instructions != null {
+                                if function.instructions.length > 0 {
+                                    light_has_body = true;
+                                    break;
+                                }
+                            }
+                        }
+                        light_index += 1;
+                    }
+                    if light_has_body {
+                        replacement_functions = light_functions;
+                    }
+                    if debug_lowering {
+                        print(
+                            "emit-llvm: replacing suspicious parsed functions with stable function parse"
+                        );
+                    }
+                    safe_functions = replacement_functions;
+                }
+            }
+        }
+        return safe_functions;
+    }
+
+    let mut recovery_text = "";
+    if native_text_override_path.length > 0 {
+        recovery_text = native_text_override_path;
+    }
+    if recovery_text.length == 0 {
+        if artifact_text.length > 0 {
+            recovery_text = artifact_text;
+        }
+    }
+    if recovery_text.length == 0 {
+        if fs.exists("build/sailfin/emit-native.tmp") {
+            recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+        }
+    }
+
+    let direct_count = parse_native_function_count_from_text(recovery_text);
+    if debug_lowering {
+        print("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
+    }
+    if direct_count == 0 {
+        if fs.exists("build/sailfin/emit-native.tmp") {
+            recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+        }
+    }
+
+    let parsed_recovery = parse_native_functions_from_text(recovery_text);
+    let recovered_count = sanitize_collection_length(parsed_recovery.length, 200000);
+    if parsed_recovery.length == recovered_count {
+        if parsed_recovery.length > 0 {
+            if debug_lowering {
+                print("emit-llvm: recovered functions via parse_native_functions_from_text=" + number_to_string(parsed_recovery.length));
+            }
+            return parsed_recovery;
+        }
+    }
+
+    let light_recovery = recover_native_functions_light(recovery_text);
+    let light_recovered_count = sanitize_collection_length(light_recovery.length, 200000);
+    if light_recovery.length == light_recovered_count {
+        if light_recovery.length > 0 {
+            if debug_lowering {
+                print("emit-llvm: recovered functions via light parser=" + number_to_string(light_recovery.length));
+            }
+            return light_recovery;
+        }
+    }
+
+    if fs.exists("build/sailfin/emit-native.tmp") {
+        let disk_recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
+        let disk_recovery = recover_native_functions_light(disk_recovery_text);
+        if disk_recovery.length > 0 {
+            return disk_recovery;
+        }
+    }
+    return [];
+}
+
+// build_parse_result_from_text lives in lowering_core.sfn to preserve
+// cross-module symbol mangling compatibility with the v0.1.1 seed shims.

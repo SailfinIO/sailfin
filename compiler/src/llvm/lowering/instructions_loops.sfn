@@ -182,7 +182,7 @@ import {
 
 import {
     get_instruction_tag,
-} from "./lowering_core";
+} from "./lowering_native_helpers";
 
 fn collect_if_structure(
     instructions -> NativeInstruction[],

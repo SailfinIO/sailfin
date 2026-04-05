@@ -74,7 +74,7 @@ import {
     get_instruction_tag,
     get_instruction_text,
     get_instruction_condition,
-} from "./lowering_core";
+} from "./lowering_native_helpers";
 
 // Write bindings to files for statement.sfn to read.
 // Extracted from the Expression and Return handlers where this pattern

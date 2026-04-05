@@ -125,9 +125,8 @@ fn coerce_and_emit_call(
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
             if coerced.operand == null {
-                result_diagnostics.push("llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
-                let placeholder = LLVMOperand { llvm_type: "i8*", value: "null" };
-                coerced_operands.push(placeholder);
+                result_diagnostics.push("llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`: passing original operand");
+                coerced_operands.push(operand);
             } else {
                 coerced_operands.push(coerced.operand);
             }
