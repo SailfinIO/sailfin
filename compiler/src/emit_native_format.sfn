@@ -1,0 +1,436 @@
+// compiler/src/emit_native_format.sfn
+//
+// Formatting helpers for the native emitter: expression rendering, type
+// inference, function-signature formatting, and specifier rendering.
+// Extracted from emit_native.sfn to reduce per-file memory footprint.
+
+import {
+    Decorator,
+    EnumVariant,
+    Expression,
+    FieldDeclaration,
+    FunctionSignature,
+    ImportSpecifier,
+    ExportSpecifier,
+    MatchCase,
+    Parameter,
+    Statement,
+    TypeAnnotation,
+    TypeParameter,
+    SourceSpan,
+} from "./ast";
+import {
+    join_with_separator,
+    quote_string,
+    trim_text,
+    number_to_string,
+} from "./emit_native_state";
+
+// ── Expression formatting ────────────────────────────────────────────
+
+fn format_expression(expression -> Expression) -> string {
+    if expression.variant == "Identifier" {
+        let name = expression.name;
+        return name;
+    }
+    if expression.variant == "NumberLiteral" {
+        return expression.value;
+    }
+    if expression.variant == "BooleanLiteral" {
+        return expression.value;
+    }
+    if expression.variant == "NullLiteral" {
+        return "null";
+    }
+    if expression.variant == "StringLiteral" {
+        return quote_string(expression.value);
+    }
+    if expression.variant == "Unary" {
+        return expression.operator + format_expression(expression.operand);
+    }
+    if expression.variant == "Binary" {
+        let left = format_expression(expression.left);
+        let right = format_expression(expression.right);
+        return left + " " + expression.operator + " " + right;
+    }
+    if expression.variant == "Member" {
+        return format_expression(expression.object) + "." + expression.member;
+    }
+    if expression.variant == "Call" {
+        let mut rendered -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= expression.arguments.length {
+                break;
+            }
+            rendered.push(format_expression(expression.arguments[index]));
+            index += 1;
+        }
+        let args = join_with_separator(rendered, ", ");
+        return format_expression(expression.callee) + "(" + args + ")";
+    }
+    if expression.variant == "Index" {
+        return format_expression(expression.sequence) + "[" + format_expression(expression.index) + "]";
+    }
+    if expression.variant == "Array" {
+        return format_array_expression(expression.elements);
+    }
+    if expression.variant == "Object" {
+        let mut rendered -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= expression.fields.length {
+                break;
+            }
+            let field = expression.fields[index];
+            rendered.push(field.name + ": " + format_expression(field.value));
+            index += 1;
+        }
+        return "{ " + join_with_separator(rendered, ", ") + " }";
+    }
+    if expression.variant == "Struct" {
+        let mut rendered -> string[] = [];
+        let mut index -> number = 0;
+        loop {
+            if index >= expression.fields.length {
+                break;
+            }
+            let field = expression.fields[index];
+            rendered.push(field.name + ": " + format_expression(field.value));
+            index += 1;
+        }
+        let type_name = join_with_separator(expression.type_name, ".");
+        return type_name + " { " + join_with_separator(rendered, ", ") + " }";
+    }
+    if expression.variant == "Range" {
+        return format_expression(expression.start) + ".." + format_expression(expression.end);
+    }
+    if expression.variant == "Lambda" {
+        return "<lambda>";
+    }
+    if expression.variant == "Raw" {
+        return trim_text(expression.text);
+    }
+    return "<" + expression.variant + ">";
+}
+
+fn format_array_expression(elements -> Expression[]) -> string {
+    let annotation = infer_array_element_type(elements);
+    let mut rendered -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= elements.length {
+            break;
+        }
+        rendered.push(format_expression(elements[index]));
+        index += 1;
+    }
+    if rendered.length == 0 {
+        if annotation.length == 0 {
+            return "[]";
+        }
+        return "[#element:" + annotation + "]";
+    }
+    let body = join_with_separator(rendered, ", ");
+    if annotation.length == 0 {
+        return "[" + body + "]";
+    }
+    return "[#element:" + annotation + ", " + body + "]";
+}
+
+fn infer_array_element_type(elements -> Expression[]) -> string {
+    if elements.length == 0 {
+        return "";
+    }
+    let mut candidate -> string = "";
+    let mut index -> number = 0;
+    loop {
+        if index >= elements.length {
+            break;
+        }
+        let element_type = infer_expression_type(elements[index]);
+        if element_type.length == 0 {
+            return "";
+        }
+        if candidate.length == 0 {
+            candidate = element_type;
+        } else if candidate != element_type {
+            return "";
+        }
+        index += 1;
+    }
+    return candidate;
+}
+
+fn infer_expression_type(expression -> Expression) -> string {
+    if expression.variant == "NumberLiteral" {
+        return "number";
+    }
+    if expression.variant == "BooleanLiteral" {
+        return "boolean";
+    }
+    if expression.variant == "StringLiteral" {
+        return "string";
+    }
+    if expression.variant == "Struct" {
+        if expression.type_name.length == 0 {
+            return "";
+        }
+        // For enum variants (e.g., Color.Red), type_name is ["Color", "Red"].
+        // For struct literals (e.g., Person { ... }), type_name is ["Person"].
+        // When inferring array element types, we want just the enum name (first component)
+        // so that Color.Red[] becomes [#element:Color, ...], not [#element:Color.Red, ...].
+        if expression.type_name.length == 2 {
+            // Likely an enum variant; return just the enum name.
+            return expression.type_name[0];
+        }
+        return join_with_separator(expression.type_name, ".");
+    }
+    if expression.variant == "Member" {
+        // Member expressions can represent enum variants without fields (e.g., Color.Red).
+        // We need to extract the type name from the member chain.
+        // For Color.Red, this is Member { object: Identifier("Color"), member: "Red" }.
+        // We want to return "Color" as the type.
+        if expression.object.variant == "Identifier" {
+            // Simple case: Color.Red where Color is an identifier
+            return expression.object.name;
+        }
+        if expression.object.variant == "Member" {
+            // Nested case: Namespace.Color.Red - recurse on the object
+            return infer_expression_type(expression.object);
+        }
+        return "";
+    }
+    if expression.variant == "Array" {
+        let nested = infer_array_element_type(expression.elements);
+        if nested.length == 0 {
+            return "";
+        }
+        return nested + "[]";
+    }
+    return "";
+}
+
+fn format_optional_expression(expression -> Expression?) -> string {
+    if expression == null {
+        return "";
+    }
+    let value -> Expression = expression;
+    return format_expression(value);
+}
+
+// ── Signature / parameter formatting ─────────────────────────────────
+
+fn format_function_signature(signature -> FunctionSignature) -> string {
+    let mut prefix -> string = "";
+    if signature.is_async {
+        prefix = "async ";
+    }
+    let mut line -> string = prefix + signature.name;
+    line = line + format_type_parameters(signature.type_parameters);
+    line = line + "(" + format_parameters(signature.parameters) + ")";
+    if signature.return_type != null {
+        line = line + " -> " + signature.return_type.text;
+    }
+    if signature.effects.length > 0 {
+        line = line + " ![" + join_with_separator(signature.effects, ", ") + "]";
+    }
+    return line;
+}
+
+fn format_parameters(parameters -> Parameter[]) -> string {
+    if parameters.length == 0 {
+        return "";
+    }
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        let mut entry -> string = "";
+        if parameter.mutable {
+            entry = "mut " + parameter.name;
+        } else {
+            entry = parameter.name;
+        }
+        if parameter.type_annotation != null {
+            entry = entry + " -> " + parameter.type_annotation.text;
+        }
+        if parameter.default_value != null {
+            entry = entry + " = " + format_optional_expression(parameter.default_value);
+        }
+        parts.push(entry);
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+fn format_type_parameters(parameters -> TypeParameter[]) -> string {
+    if parameters.length == 0 {
+        return "";
+    }
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= parameters.length {
+            break;
+        }
+        let parameter = parameters[index];
+        let mut entry -> string = parameter.name;
+        if parameter.bound != null {
+            entry = entry + " : " + parameter.bound.text;
+        }
+        parts.push(entry);
+        index += 1;
+    }
+    return "<" + join_with_separator(parts, ", ") + ">";
+}
+
+// ── Field / variant formatting ───────────────────────────────────────
+
+fn format_field(field -> FieldDeclaration) -> string {
+    let mut line -> string = "";
+    if field.mutable {
+        line = line + "mut ";
+    }
+    line = line + field.name + " -> " + field.type_annotation.text;
+    return line;
+}
+
+fn format_enum_variant(variant -> EnumVariant) -> string {
+    if variant.fields.length == 0 {
+        return variant.name;
+    }
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= variant.fields.length {
+            break;
+        }
+        parts.push(format_field(variant.fields[index]));
+        index += 1;
+    }
+    return variant.name + " { " + join_with_separator(parts, "; ") + " }";
+}
+
+// ── Decorator formatting ─────────────────────────────────────────────
+
+fn format_decorator(decorator -> Decorator) -> string {
+    let mut line -> string = "@" + decorator.name;
+    if decorator.arguments.length == 0 {
+        return line;
+    }
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= decorator.arguments.length {
+            break;
+        }
+        let argument = decorator.arguments[index];
+        let value = format_expression(argument.expression);
+        if argument.name != null {
+            parts.push(argument.name + "=" + value);
+        } else {
+            parts.push(value);
+        }
+        index += 1;
+    }
+    return line + "(" + join_with_separator(parts, ", ") + ")";
+}
+
+// ── Span formatting ──────────────────────────────────────────────────
+
+fn format_span(span -> SourceSpan) -> string {
+    return number_to_string(span.start_line)
+        + " "
+        + number_to_string(span.start_column)
+        + " "
+        + number_to_string(span.end_line)
+        + " "
+        + number_to_string(span.end_column);
+}
+
+// ── Specifier formatting ─────────────────────────────────────────────
+
+fn format_native_specifier(name -> string, alias -> string?) -> string {
+    let mut _if20 -> boolean = false;
+    if alias == null { _if20 = true; }
+    if alias.length == 0 { _if20 = true; }
+    if _if20 {
+        return name;
+    }
+    return name + " as " + alias;
+}
+
+fn render_native_specifiers(specifiers -> ImportSpecifier[]) -> string {
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        parts.push(format_native_specifier(specifiers[index].name, specifiers[index].alias));
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+fn render_export_specifiers(specifiers -> ExportSpecifier[]) -> string {
+    let mut parts -> string[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= specifiers.length {
+            break;
+        }
+        parts.push(format_native_specifier(specifiers[index].name, specifiers[index].alias));
+        index += 1;
+    }
+    return join_with_separator(parts, ", ");
+}
+
+// ── Optional annotation / initializer helpers ────────────────────────
+
+fn append_optional_type_annotation(line -> string, annotation -> TypeAnnotation?) -> string {
+    if annotation == null {
+        return line;
+    }
+    return line + " : " + annotation.text;
+}
+
+fn append_optional_initializer(line -> string, initializer -> Expression?) -> string {
+    if initializer == null {
+        return line;
+    }
+    let rendered = format_optional_expression(initializer);
+    if rendered.length == 0 {
+        return line;
+    }
+    return line + " = " + rendered;
+}
+
+// ── Match-case formatting helpers ────────────────────────────────────
+
+fn format_match_case_head(case -> MatchCase) -> string {
+    let mut head -> string = format_expression(case.pattern);
+    let guard = case.guard;
+    if guard == null {
+        return head;
+    }
+    return head + " if " + format_optional_expression(guard);
+}
+
+fn format_inline_case_body(statement -> Statement) -> string {
+    if statement.variant == "ExpressionStatement" {
+        return format_expression(statement.expression);
+    }
+    if statement.variant == "ReturnStatement" {
+        let rendered = format_optional_expression(statement.expression);
+        if rendered.length == 0 {
+            return "return";
+        }
+        return "return " + rendered;
+    }
+    return "";
+}
