@@ -20,7 +20,7 @@ import {
 
 import { ends_with, is_identifier_start_char } from "../../utils";
 
-import { is_simple_identifier } from "../../expressions";
+import { is_simple_identifier } from "../../expressions_helpers";
 
 import { split_array_elements } from "../splitting";
 

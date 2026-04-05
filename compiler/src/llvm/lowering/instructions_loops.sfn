@@ -30,8 +30,11 @@ import {
 
 import {
     find_local_binding,
+} from "../expressions_bindings";
+
+import {
     format_temp_name,
-} from "../expressions";
+} from "../expressions_helpers";
 
 import {
     lower_expression,

@@ -50,7 +50,9 @@ import {
     map_struct_field_annotation,
 } from "../type_mapping";
 
-import { find_local_binding, format_temp_name } from "../expressions";
+import { find_local_binding } from "../expressions_bindings";
+
+import { format_temp_name } from "../expressions_helpers";
 
 import {
     lower_expression,

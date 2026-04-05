@@ -73,7 +73,7 @@ import {
 import {
     default_return_literal,
     format_temp_name,
-} from "../expressions";
+} from "../expressions_helpers";
 
 import {
     validate_borrow_lifetimes,

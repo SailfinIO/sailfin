@@ -29,7 +29,7 @@ import {
 import {
     format_temp_name,
     default_return_literal,
-} from "../../expressions";
+} from "../../expressions_helpers";
 
 import { array_pointer_element_type } from "../arrays";
 

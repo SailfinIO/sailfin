@@ -35,7 +35,7 @@ import { substring, index_of } from "../../../string_utils";
 
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 
-import { format_temp_name, default_return_literal } from "../../expressions";
+import { format_temp_name, default_return_literal } from "../../expressions_helpers";
 
 import {
     map_type_annotation,

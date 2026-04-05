@@ -41,9 +41,12 @@ import {
 import {
     find_local_binding,
     find_parameter_binding,
+} from "../expressions_bindings";
+
+import {
     default_return_literal,
     format_temp_name,
-} from "../expressions";
+} from "../expressions_helpers";
 
 import {
     lower_expression,

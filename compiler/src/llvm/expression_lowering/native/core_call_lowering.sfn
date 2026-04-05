@@ -28,9 +28,9 @@ import { substring, index_of } from "../../../string_utils";
 
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 
-import { format_temp_name } from "../../expressions";
+import { format_temp_name } from "../../expressions_helpers";
 
-import { is_simple_identifier } from "../../expressions";
+import { is_simple_identifier } from "../../expressions_helpers";
 
 import {
     ends_with_pointer_suffix,

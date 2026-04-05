@@ -31,8 +31,11 @@ import {
 import {
     is_string_literal,
     normalise_number_literal,
+} from "../expressions_literals";
+
+import {
     default_return_literal,
-} from "../expressions";
+} from "../expressions_helpers";
 
 import {
     empty_string_constant_set,

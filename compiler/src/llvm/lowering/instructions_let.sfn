@@ -35,11 +35,14 @@ import {
 
 import {
     find_local_binding,
-    default_return_literal,
-    format_local_pointer_name,
     mark_local_consumed,
     mark_parameter_consumed,
-} from "../expressions";
+} from "../expressions_bindings";
+
+import {
+    default_return_literal,
+    format_local_pointer_name,
+} from "../expressions_helpers";
 
 import {
     lower_expression,
