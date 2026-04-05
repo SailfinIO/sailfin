@@ -1,6 +1,24 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.9 (2026-04-05)
+
+### Bug Fixes
+
+- Address PR review — remove dead code, fix diagnostics, deduplicate import parsing
+  ([`a03503a`](https://github.com/SailfinIO/sailfin/commit/a03503a19e2d7bc7de2da24e83a76c7bc6b8b1af))
+
+- Remove dead artifact_for_stable_parse branch and unused NativeArtifact import in
+  lowering_phase_sanitize.sfn (always null, dead code from original) - Fix misleading comment
+  claiming .phase_sanitize_* files are written - Fix dropped type-context diagnostics in
+  build_type_context_with_recovery: write to .phase_types_diagnostics file, orchestrator merges them
+  back - Eliminate duplicate parse in import loop: inline single-pass parse+apply_layout back into
+  orchestrator instead of two separate helpers - Use safe_function_name instead of raw
+  current_function.name field access for has_add_function detection (seed ABI safety)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.8 (2026-04-05)
 
 ### Bug Fixes
@@ -21,6 +39,25 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 The attempts parameter was unused and the function body was identical to parse_native_artifact_safe.
   Replaced the single call site in entrypoints.sfn and deleted the function from
   lowering_recovery.sfn.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Decompose 1600-line lower_to_llvm_lines_with_parsed_context into phase modules
+  ([`efeb588`](https://github.com/SailfinIO/sailfin/commit/efeb58862d955e771eab33345828c9f318bbc675))
+
+The massive function in lowering_core.sfn caused OOM during compilation on memory-constrained
+  environments. Split into 5 focused phase modules with lowering_core.sfn as a thin orchestrator
+  (~757 lines, was 1919).
+
+New modules: - lowering_phase_sanitize.sfn — input null-check, length sanitization, recovery -
+  lowering_phase_imports.sfn — per-text import parsing helpers - lowering_phase_types.sfn —
+  struct/enum serialization, type context building - lowering_phase_render.sfn — LLVM IR preamble
+  rendering - lowering_phase_functions.sfn — function lowering loop + finalization
+
+All public API functions remain in lowering_core.sfn for seed shim compatibility. selfhost_native.py
+  updated to apply NativeFunction param fixups to lowering_phase* modules.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
