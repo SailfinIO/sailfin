@@ -1,6 +1,42 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.10 (2026-04-05)
+
+### Bug Fixes
+
+- Address PR review — add missing imports and fix string_constants propagation
+  ([`f558daa`](https://github.com/SailfinIO/sailfin/commit/f558daa34b0f033baa9c444351c1e831e019681b))
+
+- Add missing `empty_string_constant_set` import in instructions_for.sfn and instructions_try.sfn -
+  Add missing `ThrowLoweringResult` import in instructions_try.sfn - Merge
+  body_result.string_constants in lower_for_range after lowering the loop body (was silently
+  dropped) - Return collected_string_constants instead of empty set in lower_for_array (was
+  discarding string constants from loop body)
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Decompose instructions_loops.sfn and instructions_match.sfn into per-construct modules
+  ([`cb5212b`](https://github.com/SailfinIO/sailfin/commit/cb5212b729a9799d8ca93f5819977ab3a1f19228))
+
+Split two oversized files (2175 and 2020 lines) that crashed the compiler during self-hosting into
+  six focused modules by control flow construct:
+
+- instructions_condition.sfn — shared utilities (allocate_block_label, lower_condition_to_i1,
+  sanitize_if_condition_text) - instructions_if.sfn — if/else lowering (collect_if_structure,
+  lower_if_instruction) - instructions_try.sfn — try/catch/throw lowering - instructions_for.sfn —
+  for-loop lowering (range and array iteration) - instructions_loops.sfn — loop lowering only (was
+  2175, now 606 lines) - instructions_match.sfn — match lowering only (was 2020, now 1139 lines)
+
+Also breaks the circular dependency between instructions_loops and instructions_match by extracting
+  shared condition utilities into instructions_condition.sfn, and DRYs up for-loop exit mutation
+  logic into a shared build_loop_exit_mutations helper.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.9 (2026-04-05)
 
 ### Bug Fixes
