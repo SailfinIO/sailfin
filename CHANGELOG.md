@@ -1,6 +1,52 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.6 (2026-04-05)
+
+### Bug Fixes
+
+- Remove unused imports per PR review
+  ([`e9c311c`](https://github.com/SailfinIO/sailfin/commit/e9c311c9f1f6c83d4e0aa0a27eeccd62f62ae6a6))
+
+- emit_native_state.sfn: drop unused char_code import - emit_native_layout.sfn: drop unused
+  substring, TextBuilder, join_with_separator, ends_with imports - emit_native.sfn: drop unused
+  append_string import
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Split emit_native.sfn into four focused modules
+  ([`528355e`](https://github.com/SailfinIO/sailfin/commit/528355ec5661a25bc9025c6fb891d60d712cda46))
+
+The 2259-line emit_native.sfn was causing OOM during self-hosting compilation on memory-constrained
+  environments. Split into:
+
+- emit_native_state.sfn (394 lines) — TextBuilder, NativeState, utilities - emit_native_format.sfn
+  (436 lines) — expression/signature formatting - emit_native_layout.sfn (666 lines) — struct/enum
+  layout computation - emit_native.sfn (926 lines) — entry points + statement emitters
+
+No functional changes. All tests pass. Build succeeds with make rebuild.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Testing
+
+- Add unit tests for emit_native split modules
+  ([`9edaf16`](https://github.com/SailfinIO/sailfin/commit/9edaf16a8063c7b730e5d36a3dadd8dfed7a0c9c))
+
+Self-contained tests covering the three extracted modules: - emit_native_state_test.sfn — ends_with,
+  quote_string, join, contains, append_unique, is_array_type, is_optional, escape_char -
+  emit_native_format_test.sfn — expression formatting patterns, signature rendering,
+  field/variant/decorator/specifier formatting - emit_native_layout_test.sfn — align_to, primitive
+  type layouts, record layout computation with padding and alignment
+
+Tests are self-contained (no cross-module imports) to avoid duplicate symbol conflicts with the
+  v0.1.1 seed compiler's import resolution.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.5 (2026-04-04)
 
 ### Bug Fixes
