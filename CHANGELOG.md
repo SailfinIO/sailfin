@@ -1,6 +1,37 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.11 (2026-04-05)
+
+### Bug Fixes
+
+- Remove unused imports from expressions_helpers.sfn
+  ([`31261ac`](https://github.com/SailfinIO/sailfin/commit/31261ace5c25ecef6ce57dededfcabc264775e8f))
+
+Address PR review — remove char_code, ends_with, and is_identifier_part_char imports that were
+  carried over from the monolithic file but not used in this submodule.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Decompose expressions.sfn into 5 focused submodules
+  ([`93ccf48`](https://github.com/SailfinIO/sailfin/commit/93ccf48a0a0b06aa9f66c12f01fcd77ec1808803))
+
+Split the 1709-line expressions.sfn into smaller, maintainable modules to reduce compiler memory
+  pressure during self-hosting:
+
+- expressions_bindings.sfn (123 lines): binding lookup/mutation - expressions_literals.sfn (270
+  lines): literal detection helpers - expressions_helpers.sfn (241 lines): identifiers, type
+  helpers, formatting - expressions_operators.sfn (359 lines): operator/separator scanning -
+  expressions_parsing.sfn (745 lines): parse_* functions
+
+expressions.sfn is now a 70-line barrel re-export. All ~30 consumer files updated to import directly
+  from the correct submodule.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.10 (2026-04-05)
 
 ### Bug Fixes
