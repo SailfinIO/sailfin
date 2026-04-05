@@ -1,9 +1,34 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.7 (2026-04-05)
+
+### Bug Fixes
+
+- Reject bare minus sign in parse_decimal_number
+  ([`7af9625`](https://github.com/SailfinIO/sailfin/commit/7af9625ff61aed99960113af9d6bc034d81693bd))
+
+A bare "-" with no trailing digits was incorrectly accepted as a successful parse returning 0. Add
+  an early bounds check after consuming the sign character to return failure when no digits follow.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.6 (2026-04-05)
 
 ### Bug Fixes
+
+- Native ir split
+  ([`60317c3`](https://github.com/SailfinIO/sailfin/commit/60317c3f92fc97d0aa2608eca8fe3ffd368e550c))
+
+- Remove dead code
+  ([`ade6fbd`](https://github.com/SailfinIO/sailfin/commit/ade6fbd1981e466ead7a6525030fc3a40bee1bab))
+
+- Remove dead code
+  ([`05b9b7d`](https://github.com/SailfinIO/sailfin/commit/05b9b7da7df5d85ac6d7a81c8d4ded520d05dd53))
+
+- Remove dead code
+  ([`8e2e321`](https://github.com/SailfinIO/sailfin/commit/8e2e3218cf844d2e25c2d059efe2ab147ca53431))
 
 - Remove unused imports per PR review
   ([`e9c311c`](https://github.com/SailfinIO/sailfin/commit/e9c311c9f1f6c83d4e0aa0a27eeccd62f62ae6a6))
@@ -27,6 +52,15 @@ The 2259-line emit_native.sfn was causing OOM during self-hosting compilation on
   layout computation - emit_native.sfn (926 lines) — entry points + statement emitters
 
 No functional changes. All tests pass. Build succeeds with make rebuild.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Split emitter_sailfin and cli_commands into focused modules
+  ([`d2c7057`](https://github.com/SailfinIO/sailfin/commit/d2c7057325163eef4ee62cce46442e841b5ef9de))
+
+Extract TextBuilder and string utilities from emitter_sailfin.sfn into emitter_sailfin_utils.sfn
+  (253 lines). Extract path/string/file/network helper functions from cli_commands.sfn into
+  cli_commands_utils.sfn (395 lines). Both parent files now under ~1000 lines.
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
 
