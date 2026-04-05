@@ -157,7 +157,6 @@ import {
     recover_native_functions_light,
     recover_native_structs_light,
     recover_native_imports_light,
-    parse_native_artifact_with_retry,
     parse_native_artifact_safe,
 } from "./lowering_recovery";
 import {
@@ -1007,7 +1006,7 @@ fn write_llvm_ir_for_tests_from_text(native_text -> string, module_name -> strin
     // in lower_to_llvm_lines_with_parsed_context reads the correct module
     // rather than stale data from a previous `run` invocation.
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
-    let parse = parse_native_artifact_with_retry(native_text, 3);
+    let parse = parse_native_artifact_safe(native_text);
     let dummy_module = NativeModule {
         module_name: module_name,
         artifacts: [NativeArtifact { name: module_name, format: "sailfin-native-text", contents: native_text }],

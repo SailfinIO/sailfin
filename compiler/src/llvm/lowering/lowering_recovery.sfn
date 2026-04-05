@@ -91,12 +91,7 @@ fn parse_native_artifact_safe(text -> string) -> ParseNativeResult {
     return result;
 }
 
-// Thin wrapper: `attempts` parameter is unused — retry logic was never
-// implemented and the body was always identical to parse_native_artifact_safe.
-// Kept for call-site compatibility (entrypoints.sfn passes an attempts arg).
-fn parse_native_artifact_with_retry(text -> string, attempts -> number) -> ParseNativeResult {
-    return parse_native_artifact_safe(text);
-}
+
 
 // ── Light function recovery ──────────────────────────────────────────
 
