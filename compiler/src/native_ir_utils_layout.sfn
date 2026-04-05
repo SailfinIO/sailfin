@@ -42,6 +42,9 @@ fn parse_decimal_number(text -> string) -> NumberParseResult {
     if trimmed[0] == "-" {
         negative = true;
         index = 1;
+        if index >= trimmed.length {
+            return NumberParseResult { success: false, value: 0 };
+        }
     }
     loop {
         if index >= trimmed.length {
