@@ -39,7 +39,6 @@ import {
     state_add_diagnostic,
     state_merge_diagnostics,
     builder_to_string,
-    append_string,
     append_unique,
     join_with_separator,
     join_type_annotations,

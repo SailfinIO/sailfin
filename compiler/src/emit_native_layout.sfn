@@ -10,7 +10,6 @@ import {
     Program,
     Statement,
 } from "./ast";
-import { substring } from "./string_utils";
 import {
     LayoutContext,
     LayoutStructDefinition,
@@ -18,13 +17,10 @@ import {
     LayoutEnumVariantDefinition,
     LayoutEnumDefinition,
     NativeState,
-    TextBuilder,
     append_string,
     contains_string,
-    join_with_separator,
     number_to_string,
     trim_text,
-    ends_with,
     is_array_type,
     is_optional_annotation,
     strip_optional_suffix,

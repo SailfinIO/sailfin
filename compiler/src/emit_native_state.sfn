@@ -5,7 +5,7 @@
 // memory footprint during self-hosting compilation.
 
 import { TypeAnnotation } from "./ast";
-import { substring, char_code } from "./string_utils";
+import { substring } from "./string_utils";
 
 // ── Data structures ──────────────────────────────────────────────────
 
