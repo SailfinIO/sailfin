@@ -69,18 +69,27 @@ import {
 } from "./phi";
 
 import {
-    lower_throw_instruction,
-    lower_try_instruction,
     append_loop_context,
     last_loop_context,
     lower_loop_instruction,
-    lower_for_instruction,
 } from "./instructions_loops";
 
 import {
+    lower_for_instruction,
+} from "./instructions_for";
+
+import {
+    lower_throw_instruction,
+    lower_try_instruction,
+} from "./instructions_try";
+
+import {
     lower_match_instruction,
-    lower_if_instruction,
 } from "./instructions_match";
+
+import {
+    lower_if_instruction,
+} from "./instructions_if";
 
 import {
     lower_let_instruction,

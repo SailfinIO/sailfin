@@ -1,9 +1,8 @@
 // compiler/src/llvm/lowering/instructions_match.sfn
 //
-// Control flow handlers: match/if/let/condition instruction lowering.
+// Control flow handler: match instruction lowering.
 
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { substring, char_code, grapheme_at } from "../../string_utils";
 
 import {
     TypeContext,
@@ -13,13 +12,8 @@ import {
     BlockLoweringResult,
     LoopContext,
     LifetimeRegionMetadata,
-    OwnershipInfo,
-    ScopeMetadata,
     LocalMutation,
     StringConstant,
-    IfStructure,
-    TryStructure,
-    LoopStructure,
     MatchStructure,
     MatchCaseStructure,
     MatchCaseCondition,
@@ -29,127 +23,57 @@ import {
     EnumVariantInfo,
     StructTypeInfo,
     StructFieldInfo,
-    ConditionConversion,
-    BlockLabelResult,
     MatchArmMutations,
 } from "../types";
 
 import {
     trim_text,
-    append_string,
     extend_string_array,
     number_to_string,
-    index_of,
-    starts_with,
-    strip_mut_prefix,
-    is_simple_identifier,
     merge_parameter_bindings,
     copy_string_array,
 } from "../utils";
 
-import {
-    append_string_constant,
-    merge_string_constants,
-} from "../strings";
+import { merge_string_constants } from "../strings";
 
 import {
-    build_type_context,
     find_struct_info_by_name,
-    find_interface_info_by_name,
     find_enum_info_by_llvm_type,
     resolve_enum_info_for_literal,
     resolve_enum_variant_info,
-    find_struct_info_by_llvm_type,
-    find_vtable_for_struct_interface,
 } from "../type_context";
 
 import {
-    map_return_type,
-    map_type_with_context,
-    render_default_value,
     ends_with_pointer_suffix,
     strip_pointer_suffix,
     layout_annotation_represents_user_value,
     map_struct_field_annotation,
-    array_struct_type_for_element,
 } from "../type_mapping";
 
-import {
-    is_number_literal,
-    normalise_number_literal,
-    find_local_binding,
-    find_parameter_binding,
-    default_return_literal,
-    format_temp_name,
-} from "../expressions";
+import { find_local_binding, format_temp_name } from "../expressions";
 
 import {
     lower_expression,
     append_match_arm_mutations,
-    format_block_entry_label,
 } from "../expression_lowering/native/core";
 
 import {
-    coerce_operand_to_type,
     emit_boolean_and,
     emit_comparison_instruction,
     harmonise_operands,
-    load_local_operand,
-    operand_to_value,
 } from "../expression_lowering/native/core_operands";
 
-import {
-    format_scope_id,
-    push_scope_metadata,
-    pop_scope_metadata,
-} from "../expression_lowering/native/core_scopes";
-
-import {
-    parse_enum_literal,
-    parse_range_iterable,
-    parse_struct_pattern,
-    extract_operand_type,
-    llvm_operand_type,
-} from "../expression_lowering/native/core_parse";
+import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
 
 import {
     extract_simple_identifier,
     is_union_llvm_type,
     parse_union_payload_types,
-    sanitize_text_for_llvm,
 } from "../expression_lowering/native/core_text";
 
-import {
-    detect_suspension_conflicts,
-    map_local_type,
-    lower_expression_statement,
-    lower_return_instruction,
-    lower_expression_for_statement,
-} from "../expression_lowering/native/statement";
+import { make_child_scope_id } from "../lifetime";
 
-import {
-    array_pointer_element_type,
-    lower_array_literal_to_value,
-} from "../expression_lowering/arrays";
-
-import {
-    make_child_scope_id,
-    validate_borrow_lifetimes,
-    format_root_scope_id,
-} from "../lifetime";
-
-import {
-    emit_phi_merges_for_match,
-    emit_phi_merges_for_straight_if,
-    emit_phi_merges_for_if_else,
-    find_last_label,
-    retarget_recent_mutations,
-    materialize_mutation_values_at_label,
-    collect_mutation_names,
-    find_mutation_for_name,
-    emit_phi_merge_block,
-    emit_phi_nodes_for_merge,
-} from "./phi";
+import { emit_phi_merges_for_match, materialize_mutation_values_at_label } from "./phi";
 
 import {
     lower_instruction_range,
@@ -159,14 +83,14 @@ import {
     clone_local_bindings,
     extend_lifetime_regions,
     extend_mutations,
-    insert_lines_before_index,
     _write_block_result_files,
     _parse_int_from_string,
 } from "./instructions_helpers";
 
 import {
-    collect_if_structure,
-} from "./instructions_loops";
+    allocate_block_label,
+    lower_condition_to_i1,
+} from "./instructions_condition";
 
 // Helper: build a LocalBinding for match arm payload extraction.
 // Kept as a separate function so loops never have inline struct literals at the loop
@@ -306,6 +230,7 @@ fn lower_match_instruction(
 ) -> BlockLoweringResult {
     let mut diagnostics -> string[] = [];
     let mut current_lines -> string[] = lines;
+    let base_lines_snapshot = copy_string_array(lines);
     let mut current_allocas -> string[] = allocas;
     let mut current_locals -> LocalBinding[] = locals;
     let mut current_temp -> number = temp_index;
@@ -581,8 +506,6 @@ fn lower_match_instruction(
                             current_lines.push("  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
 
                             // 3. Offset to field position
-                            // Field offset is relative to the enum start, but payload starts at variant offset
-                            // So we need to subtract the variant offset to get the offset within the payload
                             let field_offset_in_payload = field_binding.field_offset - variant_info_val.offset;
                             let mut field_ptr_temp -> string = byte_ptr_temp;
                             if field_offset_in_payload > 0 {
@@ -606,7 +529,6 @@ fn lower_match_instruction(
                             let local_alloca_temp = format_temp_name(current_temp);
                             current_temp += 1;
                             current_lines.push("  " + local_alloca_temp + " = alloca " + field_binding.field_type);
-                            // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
 
                             // 7. Store the value into the local
                             current_lines.push("  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
@@ -955,17 +877,13 @@ fn lower_match_case_condition(
                     condition_operand = comparison.operand;
 
                     // For variants with payload fields, collect binding information
-                    // The actual extraction will happen in lower_match_instruction after we branch to the body label
                     if variant_info.fields.length > 0 {
-                        // Parse field names from the pattern
-                        // enum_parse.fields contains the field specifications from the pattern
                         let mut field_idx -> number = 0;
                         loop {
                             if field_idx >= enum_parse.fields.length {
                                 break;
                             }
                             let pattern_field = enum_parse.fields[field_idx];
-                            // Find matching field in variant info
                             let mut variant_field_idx -> number = 0;
                             let mut found_field -> StructFieldInfo? = null;
                             loop {
@@ -1219,802 +1137,3 @@ fn lower_match_case_condition(
     string_constants: collected_string_constants,
     };
 }
-
-fn allocate_block_label(prefix -> string, counter -> number) -> BlockLabelResult {
-    return BlockLabelResult { label: prefix + number_to_string(counter), next_counter: counter + 1 };
-}
-
-fn lower_condition_to_i1(
-    function_name -> string,
-    expression -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    temp_index -> number,
-    lines -> string[],
-    functions -> NativeFunction[],
-    context -> TypeContext
-) -> ConditionConversion {
-    let mut diagnostics -> string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
-    // Write local type annotations to a file so the cross-module expression
-    // lowering can resolve struct types for method calls.  The v0.1.1 seed
-    // corrupts the locals array when passed across module boundaries, so
-    // resolve_struct_info_for_method_target can't inspect local.type_annotation.
-    let mut _lta_content -> string = "";
-    let mut _lta_i -> number = 0;
-    loop {
-        if _lta_i >= locals.length { break; }
-        if _lta_i > 0 { _lta_content = _lta_content + "\n"; }
-        let mut _lta_name = locals[_lta_i].name;
-        if _lta_name == null { _lta_name = ""; }
-        let mut _lta_type = locals[_lta_i].type_annotation;
-        if _lta_type == null { _lta_type = ""; }
-        let mut _lta_llvm = locals[_lta_i].llvm_type;
-        if _lta_llvm == null { _lta_llvm = ""; }
-        let mut _lta_ptr = locals[_lta_i].pointer;
-        if _lta_ptr == null { _lta_ptr = ""; }
-        _lta_content = _lta_content + _lta_name + "\t" + _lta_type + "\t" + _lta_llvm + "\t" + _lta_ptr;
-        _lta_i += 1;
-    }
-    fs.writeFile("build/sailfin/.condition_locals", _lta_content);
-    let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
-    let mut _ci11 -> number = 0;
-    loop {
-        if _ci11 >= lowered.diagnostics.length { break; }
-        diagnostics.push(lowered.diagnostics[_ci11]);
-        _ci11 += 1;
-    }
-    let mut current_lines -> string[] = lowered.lines;
-    let mut current_temp -> number = lowered.temp_index;
-    // Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0.
-    // Scan lines for the highest %tN assignment and use that to recover current_temp.
-    {
-        let mut _scan_i -> number = 0;
-        loop {
-            if _scan_i >= current_lines.length { break; }
-            let _scan_line = current_lines[_scan_i];
-            if starts_with(_scan_line, "  %t") {
-                let _after_t = substring(_scan_line, 4, _scan_line.length);
-                let _space = index_of(_after_t, " ");
-                if _space > 0 {
-                    let _num_str = substring(_after_t, 0, _space);
-                    let _num = _parse_int_from_string(_num_str);
-                    if _num >= current_temp {
-                        current_temp = _num + 1;
-                    }
-                }
-            }
-            _scan_i += 1;
-        }
-    }
-
-    let string_constants = lowered.string_constants;
-
-    if lowered.operand == null {
-        let rendered_condition = trim_text(expression);
-        if rendered_condition.length == 0 {
-            diagnostics.push("llvm lowering: condition produced no value in `" + function_name + "`");
-        } else {
-            diagnostics.push("llvm lowering: condition produced no value in `" + function_name + "` for `" + rendered_condition + "`");
-        }
-        return ConditionConversion { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
-    }
-
-    let operand = lowered.operand;
-    if operand.llvm_type == "i1" {
-        return ConditionConversion { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
-    }
-
-    if operand.llvm_type == "double" {
-        let temp_name = format_temp_name(current_temp);
-        current_lines.push("  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
-        let converted = LLVMOperand { llvm_type: "i1", value: temp_name };
-        return ConditionConversion { lines: current_lines, temp_index: current_temp + 1, operand: converted, diagnostics: diagnostics, string_constants: string_constants };
-    }
-
-    let mut _if226 -> boolean = false;
-    if operand.llvm_type == "i32" { _if226 = true; }
-    if operand.llvm_type == "i64" { _if226 = true; }
-    if _if226 {
-        let temp_name = format_temp_name(current_temp);
-        current_lines.push("  " + temp_name + " = icmp ne " + operand.llvm_type + " " + operand.value + ", " + default_return_literal(operand.llvm_type) + "");
-        let converted = LLVMOperand { llvm_type: "i1", value: temp_name };
-        return ConditionConversion { lines: current_lines, temp_index: current_temp + 1, operand: converted, diagnostics: diagnostics, string_constants: string_constants };
-    }
-
-    diagnostics.push("llvm lowering: unsupported condition type `" + operand.llvm_type + "` in `" + function_name + "`");
-    return ConditionConversion { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
-}
-
-fn lower_if_instruction(
-    function -> NativeFunction,
-    start_index -> number,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    allocas -> string[],
-    lines -> string[],
-    temp_index -> number,
-    block_counter -> number,
-    next_local_id -> number,
-    next_region_id -> number,
-    functions -> NativeFunction[],
-    loop_stack -> LoopContext[],
-    end -> number,
-    context -> TypeContext,
-    scope_id -> string,
-    scope_depth -> number,
-    current_label -> string
-) -> BlockLoweringResult {
-    let mut current_lines -> string[] = lines;
-    let base_lines_snapshot = copy_string_array(lines);
-    let mut current_allocas -> string[] = allocas;
-    let mut current_locals -> LocalBinding[] = locals;
-    let mut current_temp -> number = temp_index;
-    let mut current_block_counter -> number = block_counter;
-    let mut current_next_local -> number = next_local_id;
-    let mut diagnostics -> string[] = [];
-    let base_bindings -> ParameterBinding[] = bindings;
-    let mut then_bindings -> ParameterBinding[] = base_bindings;
-    let mut else_bindings -> ParameterBinding[] = base_bindings;
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut current_next_region -> number = next_region_id;
-    let mut collected_mutations -> LocalMutation[] = [];
-
-    let structure = collect_if_structure(function.instructions, start_index, end, function.name);
-    let mut _ci12 -> number = 0;
-    loop {
-        if _ci12 >= structure.diagnostics.length { break; }
-        diagnostics.push(structure.diagnostics[_ci12]);
-        _ci12 += 1;
-    }
-
-    // Defensive: If a front-end pass accidentally includes the opening block brace (or
-    // even the whole block) in the textual condition, strip the trailing block portion.
-    // This prevents `lower_expression` from swallowing statements like `return ...` as the
-    // RHS of `&&` / `||`, which can otherwise produce invalid LLVM control flow.
-    let rendered_condition_source = trim_text(function.instructions[start_index].condition);
-    let sanitized_condition_source = sanitize_if_condition_text(rendered_condition_source);
-
-    let condition = lower_condition_to_i1(
-        function.name,
-        sanitized_condition_source,
-        bindings,
-        current_locals,
-        current_temp,
-        current_lines,
-        functions,
-        context
-    );
-    let mut _ci13 -> number = 0;
-    loop {
-        if _ci13 >= condition.diagnostics.length { break; }
-        diagnostics.push(condition.diagnostics[_ci13]);
-        _ci13 += 1;
-    }
-    current_lines = condition.lines;
-    current_temp = condition.temp_index;
-    let mut collected_string_constants -> StringConstant[] = condition.string_constants;
-
-    if condition.operand == null {
-        let rendered_condition = sanitized_condition_source;
-        if rendered_condition.length == 0 {
-            diagnostics.push("llvm lowering: unable to lower if condition in `" + function.name + "`");
-        } else {
-            diagnostics.push("llvm lowering: unable to lower if condition in `" + function.name + "` for `" + rendered_condition + "`");
-        }
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
-        return BlockLoweringResult {
-            lines: current_lines,
-            allocas: current_allocas,
-            locals: current_locals,
-            bindings: base_bindings,
-            temp_index: current_temp,
-            block_counter: current_block_counter,
-            diagnostics: diagnostics,
-            terminated: false,
-            next_local_id: current_next_local,
-            lifetime_regions: lifetime_regions,
-            next_lifetime_region_id: current_next_region,
-            next_index: structure.next_index + 1,
-            mutations: [],
-            string_constants: collected_string_constants,
-        };
-    }
-
-    let then_label_alloc = allocate_block_label("then", current_block_counter);
-    let then_label = then_label_alloc.label;
-    current_block_counter = then_label_alloc.next_counter;
-
-    let mut else_label -> string = "";
-    if structure.has_else {
-        let else_alloc = allocate_block_label("else", current_block_counter);
-        else_label = else_alloc.label;
-        current_block_counter = else_alloc.next_counter;
-    }
-
-    let merge_alloc = allocate_block_label("merge", current_block_counter);
-    let merge_label = merge_alloc.label;
-    current_block_counter = merge_alloc.next_counter;
-
-    let mut false_target -> string = merge_label;
-    if structure.has_else {
-        false_target = else_label;
-    }
-
-    // Preload all locals before the branch (needed for phi nodes in both straight-line and if/else cases)
-    let mut preloaded_locals -> string[] = [];
-    let mut preload_index -> number = 0;
-    loop {
-        if preload_index >= current_locals.length {
-            break;
-        }
-        let local = current_locals[preload_index];
-        let preload_temp = format_temp_name(current_temp);
-        current_temp += 1;
-        let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
-        current_lines.push(preload_line);
-        preloaded_locals.push(preload_temp);
-        preload_index += 1;
-    }
-
-    current_lines.push("  br i1 " + condition.operand.value + ", label %" + then_label + ", label %" + false_target);
-
-    // Track the actual source block for the conditional branch so downstream phi nodes
-    // reference the correct predecessor even when the condition introduced helper blocks
-    let branch_label = find_last_label(current_lines, current_label);
-
-    let base_locals = current_locals;
-    let base_allocas = current_allocas;
-    let base_temp = current_temp;
-    let base_local_id = current_next_local;
-    let base_block_counter = current_block_counter;
-
-    current_lines.push(then_label + ":");
-    let then_scope_id = make_child_scope_id(scope_id, then_label);
-    let then_result = lower_instruction_range(
-        function,
-        structure.then_start,
-        structure.then_end,
-        llvm_return,
-        bindings,
-        base_locals,
-        base_allocas,
-        [],
-        base_temp,
-        base_block_counter,
-        base_local_id,
-        current_next_region,
-        functions,
-        loop_stack,
-        context,
-        then_scope_id,
-        scope_depth + 1,
-        then_label
-    );
-    // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-    let _br_then_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
-    let _br_then_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
-    let _br_then_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
-    let _br_then_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-    let _br_then_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-    let mut _ci14 -> number = 0;
-    loop {
-        if _ci14 >= then_result.diagnostics.length { break; }
-        diagnostics.push(then_result.diagnostics[_ci14]);
-        _ci14 += 1;
-    }
-    lifetime_regions = extend_lifetime_regions(lifetime_regions, then_result.lifetime_regions);
-    current_allocas = then_result.allocas;
-    current_locals = then_result.locals;
-    current_temp = _br_then_temp;
-    current_block_counter = _br_then_blkctr;
-    current_next_local = _br_then_nextloc;
-    then_bindings = then_result.bindings;
-    current_next_region = _br_then_nextreg;
-    current_lines = extend_string_array(current_lines, then_result.lines);
-    let then_exit_label = find_last_label(current_lines, then_label);
-    let mut then_mutations = retarget_recent_mutations(then_result.mutations, 0, then_exit_label);
-    collected_mutations = extend_mutations(collected_mutations, then_mutations);
-    collected_string_constants = merge_string_constants(collected_string_constants, then_result.string_constants);
-    let then_terminated = _br_then_term;
-    let mut then_merge_insert_index -> number = -1;
-    if !then_terminated {
-        let merge_branch_index = current_lines.length;
-        current_lines.push("  br label %" + merge_label);
-        then_merge_insert_index = merge_branch_index;
-    }
-
-    let mut else_terminated -> boolean = false;
-    let mut else_mutations -> LocalMutation[] = [];
-    let mut else_exit_label -> string = else_label;
-    let mut else_merge_insert_index -> number = -1;
-    if structure.has_else {
-        current_lines.push(else_label + ":");
-        let else_scope_id = make_child_scope_id(scope_id, else_label);
-        let else_result = lower_instruction_range(
-            function,
-            structure.else_start,
-            structure.else_end,
-            llvm_return,
-            bindings,
-            base_locals,
-            current_allocas,
-            [],
-            current_temp,
-            current_block_counter,
-            current_next_local,
-            current_next_region,
-            functions,
-            loop_stack,
-            context,
-            else_scope_id,
-            scope_depth + 1,
-            else_label
-        );
-        // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-        let _br_else_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
-        let _br_else_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
-        let _br_else_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
-        let _br_else_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-        let _br_else_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-        let mut _ci15 -> number = 0;
-        loop {
-            if _ci15 >= else_result.diagnostics.length { break; }
-            diagnostics.push(else_result.diagnostics[_ci15]);
-            _ci15 += 1;
-        }
-        lifetime_regions = extend_lifetime_regions(lifetime_regions, else_result.lifetime_regions);
-        current_allocas = else_result.allocas;
-        current_locals = else_result.locals;
-        current_temp = _br_else_temp;
-        current_block_counter = _br_else_blkctr;
-        current_next_local = _br_else_nextloc;
-        else_bindings = else_result.bindings;
-        current_next_region = _br_else_nextreg;
-        current_lines = extend_string_array(current_lines, else_result.lines);
-        else_terminated = _br_else_term;
-        let exit_label = find_last_label(current_lines, else_label);
-        else_exit_label = exit_label;
-        let mut branch_mutations = retarget_recent_mutations(else_result.mutations, 0, exit_label);
-        else_mutations = branch_mutations;
-        collected_mutations = extend_mutations(collected_mutations, else_mutations);
-        collected_string_constants = merge_string_constants(collected_string_constants, else_result.string_constants);
-        if !else_terminated {
-            let merge_branch_index = current_lines.length;
-            current_lines.push("  br label %" + merge_label);
-            else_merge_insert_index = merge_branch_index;
-        }
-    }
-
-    let mut _if227 -> boolean = false;
-    if structure.has_else {
-        let mut _if232 -> boolean = false;
-        if !then_terminated { _if232 = true; }
-        if !else_terminated { _if232 = true; }
-        if _if232 {
-            _if227 = true;
-        }
-    }
-    if _if227 {
-        let then_names = collect_mutation_names(then_mutations);
-        let else_names = collect_mutation_names(else_mutations);
-        let mut mutated_names -> string[] = then_names;
-        let mut else_idx -> number = 0;
-        loop {
-            if else_idx >= else_names.length {
-                break;
-            }
-            let else_name = else_names[else_idx];
-            let mut already_added -> boolean = false;
-            let mut check_idx -> number = 0;
-            loop {
-                if check_idx >= mutated_names.length {
-                    break;
-                }
-                if mutated_names[check_idx] == else_name {
-                    already_added = true;
-                    break;
-                }
-                check_idx += 1;
-            }
-            if !already_added {
-                mutated_names.push(else_name);
-            }
-            else_idx += 1;
-        }
-
-        let mut then_exit_loads -> string[] = [];
-        let mut then_added -> LocalMutation[] = [];
-        if !then_terminated {
-            let mut name_idx -> number = 0;
-            loop {
-                if name_idx >= mutated_names.length {
-                    break;
-                }
-                let name = mutated_names[name_idx];
-                let local = find_local_binding(base_locals, name);
-                if local != null {
-                    let load_temp = format_temp_name(current_temp);
-                    current_temp += 1;
-                    then_exit_loads = append_string(
-                        then_exit_loads,
-                        "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
-                    );
-                    let original = find_mutation_for_name(then_mutations, name);
-                    let mut original_span -> NativeSourceSpan? = null;
-                    if original != null {
-                        original_span = original.span;
-                    }
-                    let exit_mutation = LocalMutation {
-                        name: name,
-                        llvm_type: local.llvm_type,
-                        value_name: load_temp,
-                        span: original_span,
-                        originating_label: then_exit_label,
-                    };
-                    then_added.push(exit_mutation);
-                }
-                name_idx += 1;
-            }
-        }
-
-        let mut else_exit_loads -> string[] = [];
-        let mut else_added -> LocalMutation[] = [];
-        if structure.has_else {
-            if !else_terminated {
-                let mut name_idx -> number = 0;
-                loop {
-                    if name_idx >= mutated_names.length {
-                        break;
-                    }
-                    let name = mutated_names[name_idx];
-                    let local = find_local_binding(base_locals, name);
-                    if local != null {
-                        let load_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        else_exit_loads = append_string(
-                            else_exit_loads,
-                            "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
-                        );
-                        let original = find_mutation_for_name(else_mutations, name);
-                        let mut original_span -> NativeSourceSpan? = null;
-                        if original != null {
-                            original_span = original.span;
-                        }
-                        let exit_mutation = LocalMutation {
-                            name: name,
-                            llvm_type: local.llvm_type,
-                            value_name: load_temp,
-                            span: original_span,
-                            originating_label: else_exit_label,
-                        };
-                        else_added.push(exit_mutation);
-                    }
-                    name_idx += 1;
-                }
-            }
-        }
-
-        let mut inserted_then -> boolean = false;
-        let mut inserted_else -> boolean = false;
-        if then_exit_loads.length > 0 {
-            if then_merge_insert_index >= 0 {
-                if else_exit_loads.length > 0 {
-                    if else_merge_insert_index >= 0 {
-                        if then_merge_insert_index > else_merge_insert_index {
-                            current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
-                            then_mutations = extend_mutations(then_mutations, then_added);
-                            collected_mutations = extend_mutations(collected_mutations, then_added);
-                            inserted_then = true;
-
-                            current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
-                            else_mutations = extend_mutations(else_mutations, else_added);
-                            collected_mutations = extend_mutations(collected_mutations, else_added);
-                            inserted_else = true;
-                        } else {
-                            current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
-                            else_mutations = extend_mutations(else_mutations, else_added);
-                            collected_mutations = extend_mutations(collected_mutations, else_added);
-                            inserted_else = true;
-
-                            current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
-                            then_mutations = extend_mutations(then_mutations, then_added);
-                            collected_mutations = extend_mutations(collected_mutations, then_added);
-                            inserted_then = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        if !inserted_then {
-            if then_exit_loads.length > 0 {
-                if then_merge_insert_index >= 0 {
-                    current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
-                    then_mutations = extend_mutations(then_mutations, then_added);
-                    collected_mutations = extend_mutations(collected_mutations, then_added);
-                }
-            }
-        }
-
-        if !inserted_else {
-            if else_exit_loads.length > 0 {
-                if else_merge_insert_index >= 0 {
-                    current_lines = insert_lines_before_index(current_lines, else_merge_insert_index, else_exit_loads);
-                    else_mutations = extend_mutations(else_mutations, else_added);
-                    collected_mutations = extend_mutations(collected_mutations, else_added);
-                }
-            }
-        }
-    }
-
-    if !structure.has_else {
-        if !then_terminated {
-            let mutated_names = collect_mutation_names(then_mutations);
-            let mut then_exit_loads -> string[] = [];
-            let mut then_added -> LocalMutation[] = [];
-            let mut name_idx -> number = 0;
-            loop {
-                if name_idx >= mutated_names.length {
-                    break;
-                }
-                let name = mutated_names[name_idx];
-                let local = find_local_binding(base_locals, name);
-                if local != null {
-                    let load_temp = format_temp_name(current_temp);
-                    current_temp += 1;
-                    then_exit_loads = append_string(
-                        then_exit_loads,
-                        "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
-                    );
-                    let original = find_mutation_for_name(then_mutations, name);
-                    let mut original_span -> NativeSourceSpan? = null;
-                    if original != null {
-                        original_span = original.span;
-                    }
-                    let exit_mutation = LocalMutation {
-                        name: name,
-                        llvm_type: local.llvm_type,
-                        value_name: load_temp,
-                        span: original_span,
-                        originating_label: then_exit_label,
-                    };
-                    then_added.push(exit_mutation);
-                }
-                name_idx += 1;
-            }
-            if then_exit_loads.length > 0 {
-                if then_merge_insert_index >= 0 {
-                    current_lines = insert_lines_before_index(current_lines, then_merge_insert_index, then_exit_loads);
-                    then_mutations = extend_mutations(then_mutations, then_added);
-                    collected_mutations = extend_mutations(collected_mutations, then_added);
-                }
-            }
-        }
-    }
-
-    let mut terminated -> boolean = false;
-    if structure.has_else {
-        let mut _asgn228 -> boolean = false;
-        if then_terminated {
-            if else_terminated {
-                _asgn228 = true;
-            }
-        }
-        terminated = _asgn228;
-    }
-
-    let mut _if229 -> boolean = false;
-    if !terminated { _if229 = true; }
-    if !structure.has_else { _if229 = true; }
-    if _if229 {
-        current_lines.push(merge_label + ":");
-
-        // Emit phi nodes for mutated locals
-        if structure.has_else {
-            // Full if/else: emit phi nodes merging values from both branches
-            let mut _if233 -> boolean = false;
-            let mut _if235 -> boolean = false;
-            if !then_terminated { _if235 = true; }
-            if !else_terminated { _if235 = true; }
-            if _if235 {
-                if collected_mutations.length > 0 {
-                    _if233 = true;
-                }
-            }
-            if _if233 {
-                let phi_result = emit_phi_merges_for_if_else(
-                    then_mutations,
-                    else_mutations,
-                    base_locals,
-                    preloaded_locals,
-                    then_label,
-                    else_label,
-                    then_exit_label,
-                    else_exit_label,
-                    then_terminated,
-                    else_terminated,
-                    current_lines,
-                    current_temp
-                );
-                current_lines = phi_result.lines;
-                current_temp = phi_result.temp_index;
-                let materialized = materialize_mutation_values_at_label(
-                    collected_mutations,
-                    base_locals,
-                    current_lines,
-                    current_temp,
-                    merge_label
-                );
-                current_lines = materialized.lines;
-                current_temp = materialized.temp_index;
-                collected_mutations = materialized.mutations;
-            }
-        } else {
-            // Straight-line if: emit phi nodes merging then branch with base
-            if !then_terminated {
-                if collected_mutations.length > 0 {
-                    let phi_result = emit_phi_merges_for_straight_if(
-                        collected_mutations,
-                        base_locals,
-                        preloaded_locals,
-                        branch_label,
-                        then_label,
-                        then_exit_label,
-                        current_lines,
-                        current_temp
-                    );
-                    current_lines = phi_result.lines;
-                    current_temp = phi_result.temp_index;
-                    let materialized = materialize_mutation_values_at_label(
-                        collected_mutations,
-                        base_locals,
-                        current_lines,
-                        current_temp,
-                        merge_label
-                    );
-                    current_lines = materialized.lines;
-                    current_temp = materialized.temp_index;
-                    collected_mutations = materialized.mutations;
-                }
-            }
-        }
-    }
-
-    current_locals = base_locals;
-    let mut merged_bindings -> ParameterBinding[] = base_bindings;
-    if !then_terminated {
-        merged_bindings = merge_parameter_bindings(merged_bindings, then_bindings);
-    }
-    if structure.has_else {
-        if !else_terminated {
-            merged_bindings = merge_parameter_bindings(merged_bindings, else_bindings);
-        }
-    }
-
-    let mut merged_lines -> string[] = current_lines;
-    if merged_lines.length < base_lines_snapshot.length {
-        merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
-    }
-
-    _write_block_result_files(merged_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
-    return BlockLoweringResult {
-        lines: merged_lines,
-        allocas: current_allocas,
-        locals: current_locals,
-        bindings: merged_bindings,
-        temp_index: current_temp,
-        block_counter: current_block_counter,
-        diagnostics: diagnostics,
-        terminated: terminated,
-        next_local_id: current_next_local,
-        lifetime_regions: lifetime_regions,
-        next_lifetime_region_id: current_next_region,
-        next_index: structure.next_index + 1,
-    mutations: collected_mutations, string_constants: collected_string_constants,
-    };
-}
-
-fn sanitize_if_condition_text(condition -> string) -> string {
-    let trimmed = trim_text(condition);
-    if trimmed.length == 0 {
-        return trimmed;
-    }
-
-    // If the condition starts with a brace, it's likely an expression (e.g. struct literal)
-    // rather than an if-block opener.
-    if starts_with(trimmed, "{") {
-        return trimmed;
-    }
-
-    // Scan for a top-level `{` that appears after some expression content; treat it as the
-    // start of the if body and truncate.
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut in_string -> boolean = false;
-    let mut escape_next -> boolean = false;
-    let mut index -> number = 0;
-
-    loop {
-        if index >= trimmed.length {
-            break;
-        }
-        let ch = substring(trimmed, index, index + 1);
-        if in_string {
-            if escape_next {
-                escape_next = false;
-                index += 1;
-                continue;
-            }
-            if ch == "\\" {
-                escape_next = true;
-                index += 1;
-                continue;
-            }
-            if ch == "\"" {
-                in_string = false;
-            }
-            index += 1;
-            continue;
-        }
-
-        if ch == "\"" {
-            in_string = true;
-            index += 1;
-            continue;
-        }
-
-        if ch == "(" {
-            paren_depth += 1;
-            index += 1;
-            continue;
-        }
-        if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
-            index += 1;
-            continue;
-        }
-        if ch == "[" {
-            bracket_depth += 1;
-            index += 1;
-            continue;
-        }
-        if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
-            index += 1;
-            continue;
-        }
-        if ch == "{" {
-            if paren_depth == 0 {
-                if bracket_depth == 0 {
-                    if brace_depth == 0 {
-                        if index > 0 {
-                            // Truncate at the body opener.
-                            return trim_text(substring(trimmed, 0, index));
-                        }
-                    }
-                }
-            }
-            brace_depth += 1;
-            index += 1;
-            continue;
-        }
-        if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
-            index += 1;
-            continue;
-        }
-
-        index += 1;
-    }
-
-    return trimmed;
-}
-
