@@ -4,7 +4,7 @@
 // Thin wrappers around parse_native_artifact_impl (in native_ir_parser)
 // plus the layout-manifest parser.
 
-import { NativeArtifact } from "./emit_native";
+import { NativeArtifact } from "./emit_native_layout";
 
 import {
     NativeFunction,
