@@ -280,6 +280,8 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
         print("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
+    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let safe_functions = parse.functions;
     let module_struct_methods = flatten_struct_methods(module_structs);
     let local_functions = concat_native_functions(safe_functions, module_struct_methods);
     let mut context_functions = concat_native_functions(local_functions, imported_functions);
@@ -340,10 +342,6 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     runtime_helpers = append_unique_effect(runtime_helpers, "string.length");
     runtime_helpers = append_unique_effect(runtime_helpers, "substring");
     runtime_helpers = append_unique_effect(runtime_helpers, "substring_unchecked");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.to_number");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.length");
-    runtime_helpers = append_unique_effect(runtime_helpers, "substring");
-    runtime_helpers = append_unique_effect(runtime_helpers, "substring_unchecked");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
     runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at");
     runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
@@ -380,25 +378,22 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     lines.push("source_filename = \"" + module_source_filename(native_module.module_name) + "\"");
     lines.push("");
 
-    print("DIAG-EP: before trait_lines");
     let trait_lines = render_trait_metadata_comments(trait_metadata);
     if trait_lines != null {
         if trait_lines.length > 0 {
-        lines = extend_string_lines(lines, trait_lines);
-        lines.push("");
+            lines = extend_string_lines(lines, trait_lines);
+            lines.push("");
         }
     }
 
-    print("DIAG-EP: before struct_type_lines");
     let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
     if struct_type_lines != null {
         if struct_type_lines.length > 0 {
-        lines = extend_string_lines(lines, struct_type_lines);
-        lines.push("");
+            lines = extend_string_lines(lines, struct_type_lines);
+            lines.push("");
         }
     }
 
-    print("DIAG-EP: before enum_type_lines");
     let mut enum_type_lines -> string[] = [];
     if type_context.enums != null {
         if type_context.enums.length > 0 {
@@ -407,12 +402,11 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     }
     if enum_type_lines != null {
         if enum_type_lines.length > 0 {
-        lines = extend_string_lines(lines, enum_type_lines);
-        lines.push("");
+            lines = extend_string_lines(lines, enum_type_lines);
+            lines.push("");
         }
     }
 
-    print("DIAG-EP: before interface_type_lines");
     let mut interface_type_lines -> string[] = [];
     if type_context.interfaces != null {
         if type_context.interfaces.length > 0 {
@@ -421,58 +415,54 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     }
     if interface_type_lines != null {
         if interface_type_lines.length > 0 {
-        lines = extend_string_lines(lines, interface_type_lines);
-        lines.push("");
+            lines = extend_string_lines(lines, interface_type_lines);
+            lines.push("");
         }
     }
 
     lines = extend_string_lines(lines, [
-        "%SailfinFutureNumber = type opaque",
-        "%SailfinFutureBool = type opaque",
-        "%SailfinFuturePtr = type opaque",
-        "%SailfinFutureVoid = type opaque",
-        "%SailfinFutureString = type opaque",
-        "",
-        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)",
-        "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)",
-        "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)",
-        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)",
-        "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)",
-        "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)",
-        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)",
-        "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)",
-        "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)",
-        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
-        "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)",
-        "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
-        "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)",
-        "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)",
-        "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)",
-        "",
+            "%SailfinFutureNumber = type opaque",
+            "%SailfinFutureBool = type opaque",
+            "%SailfinFuturePtr = type opaque",
+            "%SailfinFutureVoid = type opaque",
+            "%SailfinFutureString = type opaque",
+            "",
+            "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number(double ()*)",
+            "declare %SailfinFutureNumber* @sailfin_runtime_spawn_number_ctx(double (i8*)*, i8*)",
+            "declare double @sailfin_runtime_await_number(%SailfinFutureNumber*)",
+            "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool(i1 ()*)",
+            "declare %SailfinFutureBool* @sailfin_runtime_spawn_bool_ctx(i1 (i8*)*, i8*)",
+            "declare i1 @sailfin_runtime_await_bool(%SailfinFutureBool*)",
+            "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr(i8* ()*)",
+            "declare %SailfinFuturePtr* @sailfin_runtime_spawn_ptr_ctx(i8* (i8*)*, i8*)",
+            "declare i8* @sailfin_runtime_await_ptr(%SailfinFuturePtr*)",
+            "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void(void ()*)",
+            "declare %SailfinFutureVoid* @sailfin_runtime_spawn_void_ctx(void (i8*)*, i8*)",
+            "declare void @sailfin_runtime_await_void(%SailfinFutureVoid*)",
+            "declare %SailfinFutureString* @sailfin_runtime_spawn_string(i8* ()*)",
+            "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)",
+            "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)",
+            "",
     ]);
 
-    print("DIAG-EP: before vtable_type_lines");
     let vtable_type_lines = render_vtable_type_definitions(type_context);
     if vtable_type_lines.length > 0 {
         lines = extend_string_lines(lines, vtable_type_lines);
         lines.push("");
     }
 
-    print("DIAG-EP: before vtable_const_lines");
     let vtable_const_lines = render_vtable_constants(type_context);
     if vtable_const_lines.length > 0 {
         lines = extend_string_lines(lines, vtable_const_lines);
         lines.push("");
     }
 
-    print("DIAG-EP: before helper_declarations");
     let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
     if helper_declarations.length > 0 {
         lines = extend_string_lines(lines, helper_declarations);
         lines.push("");
     }
 
-    print("DIAG-EP: before imported_declarations");
     let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
     if imported_declarations.length > 0 {
         lines = extend_string_lines(lines, imported_declarations);
@@ -493,7 +483,6 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     lines.push("@runtime = external global i8**");
     lines.push("");
 
-    print("DIAG-EP: before module_globals");
     let module_globals = lower_module_bindings_to_globals(parse.bindings, type_context, native_module.module_name);
     diagnostics = extend_string_lines_checked(diagnostics, module_globals.diagnostics, "module globals");
     if module_globals.preamble_lines.length > 0 {
@@ -574,11 +563,11 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
     if !has_add_function {
         lines.push("");
         lines = extend_string_lines(lines, [
-            "define internal double @add(double %a, double %b) {",
-            "entry:",
-            "  %t0 = fadd double %a, %b",
-            "  ret double %t0",
-            "}"
+                "define internal double @add(double %a, double %b) {",
+                "entry:",
+                "  %t0 = fadd double %a, %b",
+                "  ret double %t0",
+                "}"
         ]);
     }
 

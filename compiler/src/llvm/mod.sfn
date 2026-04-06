@@ -141,7 +141,6 @@ export {
 export {
     find_struct_info_by_name,
     find_struct_info_by_llvm_name,
-    find_enum_info_by_name,
     find_enum_info_by_llvm_type,
     find_interface_info_by_name,
     resolve_struct_info_for_literal,

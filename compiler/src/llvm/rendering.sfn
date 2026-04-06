@@ -1,7 +1,7 @@
 // compiler/src/llvm/rendering.sfn
 //
-// LLVM IR rendering functions for type definitions, declarations, and metadata comments.
-// Handles rendering of struct types, enum types, interfaces, vtables, and function declarations.
+// LLVM IR rendering functions for declarations and metadata comments.
+// Handles trait metadata comments, runtime helper declarations, and function declarations.
 
 import { NativeFunction, NativeParameter } from "../native_ir";
 import { substring } from "../string_utils";
