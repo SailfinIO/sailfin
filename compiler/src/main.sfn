@@ -7,14 +7,18 @@ import { Program } from "./ast";
 import { emit_program } from "./emitter_sailfin";
 import { emit_native, emit_native_with_module_name, emit_native_text_with_module_name, emit_native_text_to_file_with_module_name, NativeModule } from "./emit_native";
 import {
-    lower_to_llvm_for_tests,
     lower_to_llvm_ir,
     lower_to_llvm_ir_from_text,
     write_llvm_ir,
-    write_llvm_ir_for_tests,
-    write_llvm_ir_for_tests_from_text,
     write_llvm_ir_from_native_text_file,
 } from "./llvm/lowering/entrypoints";
+import {
+    lower_to_llvm_for_tests,
+} from "./llvm/lowering/entrypoints_tests";
+import {
+    write_llvm_ir_for_tests,
+    write_llvm_ir_for_tests_from_text,
+} from "./llvm/lowering/entrypoints_tests_writer";
 import { split_lines } from "./native_ir_utils_text";
 import { substring } from "./string_utils";
 import { Token } from "./token";
