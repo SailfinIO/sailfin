@@ -1,6 +1,37 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.12 (2026-04-06)
+
+### Bug Fixes
+
+- Remove unused imports from new submodules
+  ([`8e76243`](https://github.com/SailfinIO/sailfin/commit/8e762436f24f2b5590fb7bd14c8958853ba5211b))
+
+Drop TypeContext, OwnershipInfo, index_of, and ends_with that were carried over during extraction
+  but not referenced in the new files.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Decompose statement.sfn into 4 focused submodules
+  ([`24194fa`](https://github.com/SailfinIO/sailfin/commit/24194faa6c26214e47ac07dcee343430289c5596))
+
+Split statement.sfn (1940 lines) into manageable modules to reduce compiler memory footprint during
+  self-hosting:
+
+- statement.sfn (807 lines): core lowering functions - statement_type_mapping.sfn (570 lines):
+  context-aware type mapping with shared _map_type_core helper (DRY improvement) -
+  statement_suspension.sfn (309 lines): suspension detection + async ABI - statement_parsing.sfn
+  (234 lines): assignment/let expression parsing
+
+Updated mod.sfn re-exports and external import paths. Removed dead import
+  lower_expression_for_statement from instructions_dispatch.sfn.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.11 (2026-04-05)
 
 ### Bug Fixes
