@@ -1,6 +1,47 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.14 (2026-04-06)
+
+### Bug Fixes
+
+- Implement get_instruction_tag for fieldless enum variants
+  ([`8112b27`](https://github.com/SailfinIO/sailfin/commit/8112b275aa1e4325b472055ce58e8f080bd1a918))
+
+The loop exit condition detection in lower_loop_instruction was dead code because
+  get_instruction_tag always returned 21 (Unknown). Fix it to correctly identify all 12 fieldless
+  NativeInstruction variants using == comparison (match on enums is blocked by #50).
+
+Also update the exit condition detection to no longer require tag==3 (If) — since If is a
+  data-carrying variant we can't detect via ==, instead check that the second instruction is Break
+  (tag 10) and third is EndIf (tag 5), then extract the condition from the first instruction.
+
+The _fix_struct_construction_helpers fixup still patches the first-pass binary (seed can't compile
+  this). But once a new seed is cut from the fixed binary, the source implementation takes over,
+  enabling the loop header condition check and eliminating ~1036 unconditional loop header fixups.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Remove 4 no-op loop/control-flow fixups from selfhost_native.py
+  ([`354d2be`](https://github.com/SailfinIO/sailfin/commit/354d2be6f452c921cb5723267c884904f83057c7))
+
+Remove _fix_undefined_branch_conditions, _fix_misplaced_continue_targets, _fix_null_struct_loads,
+  and _fix_type_context_infinite_loops — all fire zero times during the current build. Verified with
+  clean rebuild and full test suite. Fixup count: 61 → 57.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Documentation
+
+- Add practical getting-started workflow to SEED_STABILIZATION.md
+  ([`e6817a5`](https://github.com/SailfinIO/sailfin/commit/e6817a5832985f5d2b1e294ff8ee1dcd67fd5df9))
+
+Adds step-by-step instructions for identifying zero-fire fixups, locating pipeline call sites, and
+  cross-referencing build output — the workflow needed before any stabilization work can begin.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.13 (2026-04-06)
 
 ### Bug Fixes
