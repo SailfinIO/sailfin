@@ -129,9 +129,31 @@ fn get_enum_name_at(enums -> NativeEnum[], idx -> number) -> string {
 // explicit array indexing; the fixup pass replaces their bodies.
 
 fn get_instruction_tag(instructions -> NativeInstruction[], idx -> number) -> number {
-    // Seed drops this; fixup pass replaces with tag read
+    // Enum tag accessor. The seed v0.1.1 can't compile this correctly;
+    // _fix_struct_construction_helpers replaces the body for the first-pass
+    // binary. Once a new seed is cut from a working binary, this source
+    // implementation takes over and the fixup is no longer needed.
+    //
+    // We use == comparison for fieldless variants (works in current compiler)
+    // and fall through to 21 (Unknown) for data-carrying variants, which
+    // require match destructuring (blocked by issue #50).
     let instr = instructions[idx];
-    return 21;  // fallback: Unknown
+    if instr == NativeInstruction.Else() { return 4; }
+    if instr == NativeInstruction.EndIf() { return 5; }
+    if instr == NativeInstruction.EndFor() { return 7; }
+    if instr == NativeInstruction.Loop() { return 8; }
+    if instr == NativeInstruction.EndLoop() { return 9; }
+    if instr == NativeInstruction.Break() { return 10; }
+    if instr == NativeInstruction.Continue() { return 11; }
+    if instr == NativeInstruction.EndMatch() { return 14; }
+    if instr == NativeInstruction.Try() { return 15; }
+    if instr == NativeInstruction.Finally() { return 17; }
+    if instr == NativeInstruction.EndTry() { return 18; }
+    if instr == NativeInstruction.Noop() { return 20; }
+    // Data-carrying variants (Return=0, Expression=1, Let=2, If=3, For=6,
+    // Match=12, Case=13, Catch=16, Throw=19, Unknown=21) need match to
+    // distinguish. Return 21 as fallback until match-on-enum is fixed.
+    return 21;
 }
 fn get_instruction_text(instructions -> NativeInstruction[], idx -> number) -> string {
     // Seed drops this; fixup pass replaces with payload[0] read
