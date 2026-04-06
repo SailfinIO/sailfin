@@ -57,8 +57,11 @@ import {
 import {
     lower_expression_statement,
     lower_return_instruction,
-    parse_inline_let_expression,
 } from "../expression_lowering/native/statement";
+
+import {
+    parse_inline_let_expression,
+} from "../expression_lowering/native/statement_parsing";
 
 import {
     apply_lifetime_release_events,

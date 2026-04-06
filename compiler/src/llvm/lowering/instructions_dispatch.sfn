@@ -46,13 +46,21 @@ import {
 } from "../expression_lowering/native/core";
 
 import {
-    detect_suspension_conflicts,
     lower_expression_statement,
     lower_return_instruction,
-    lower_expression_for_statement,
-    map_local_type,
-    parse_inline_let_expression,
 } from "../expression_lowering/native/statement";
+
+import {
+    detect_suspension_conflicts,
+} from "../expression_lowering/native/statement_suspension";
+
+import {
+    map_local_type,
+} from "../expression_lowering/native/statement_type_mapping";
+
+import {
+    parse_inline_let_expression,
+} from "../expression_lowering/native/statement_parsing";
 
 import {
     append_local_binding,
