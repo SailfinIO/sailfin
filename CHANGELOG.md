@@ -1,6 +1,69 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.15 (2026-04-06)
+
+### Bug Fixes
+
+- Import graph for seed
+  ([`804c749`](https://github.com/SailfinIO/sailfin/commit/804c7499b622005a76c70dbe01aa926a34c46e40))
+
+- Pr comments
+  ([`c3ff4b0`](https://github.com/SailfinIO/sailfin/commit/c3ff4b0ea38ee63ea6edccaa5b308cca9da5a372))
+
+- Split continuation tracking OOM
+  ([`1ddbd00`](https://github.com/SailfinIO/sailfin/commit/1ddbd00077badc46f90d4157023a6f11c27d0422))
+
+- Test refactor for OOM
+  ([`e4d3002`](https://github.com/SailfinIO/sailfin/commit/e4d300227d3c00e92b7ba4dd482a3ff83128217a))
+
+### Chores
+
+- **deps**: Bump github/gh-aw-actions from 0.65.7 to 0.67.1
+  ([`f50541e`](https://github.com/SailfinIO/sailfin/commit/f50541e464d8a23ce3142a1782000b6c06dca18b))
+
+Bumps [github/gh-aw-actions](https://github.com/github/gh-aw-actions) from 0.65.7 to 0.67.1. -
+  [Release notes](https://github.com/github/gh-aw-actions/releases) -
+  [Changelog](https://github.com/github/gh-aw-actions/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/github/gh-aw-actions/compare/742ca9c12baa13667ac53db8eb95f48414f60792...addd8a8bc8bad66050cec907c7bf182cca4d2e69)
+
+--- updated-dependencies: - dependency-name: github/gh-aw-actions dependency-version: 0.67.1
+
+dependency-type: direct:production
+
+update-type: version-update:semver-minor ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Refactoring
+
+- Split 4 more oversized compiler files to reduce per-module memory
+  ([`9f350eb`](https://github.com/SailfinIO/sailfin/commit/9f350eb1f83f15f7bc8d194ffff3de7fce431bef))
+
+Split files that exceeded the 1000-line limit: - instructions_match.sfn (1141 → 803 + 363 condition)
+  - instructions_for.sfn (1083 → 500 + 613 range) - lowering_helpers.sfn (1117 → 706 + 441 mangling)
+  - type_context.sfn (1122 → 553 + 582 queries)
+
+Updated 23 files to adjust import paths for moved functions. All tests pass (make rebuild + make
+  test).
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Split entrypoints.sfn to reduce per-module compile memory
+  ([`372ae0f`](https://github.com/SailfinIO/sailfin/commit/372ae0f6f7e78e2d832a8a21efbadfc841f070fe))
+
+entrypoints.sfn (1313 lines) was module 58/111 in the seedcheck build and consumed 4.1 GB RSS during
+  compilation, causing WSL OOM crashes.
+
+Split into three files: - entrypoints.sfn (419 lines) — non-test LLVM lowering API -
+  entrypoints_tests.sfn (254 lines) — test wrapper functions - entrypoints_tests_writer.sfn (688
+  lines) — write_llvm_ir_for_tests
+
+The split reduces entrypoints.sfn compile memory from 4.1 GB to 1.5 GB.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.14 (2026-04-06)
 
 ### Bug Fixes
