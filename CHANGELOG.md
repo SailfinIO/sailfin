@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.13 (2026-04-06)
+
+### Bug Fixes
+
+- Remove 4 no-op phi/SSA fixups from selfhost_native.py
+  ([`2accc69`](https://github.com/SailfinIO/sailfin/commit/2accc699fef460004ac63c090fd737144590937c))
+
+Remove _fix_phi_predecessor_mismatches, _fix_phi_type_mismatches, _fix_missing_parameter_stores, and
+  _rewrite_phi_store_to_load. None of these fixups fire during builds — the underlying issues were
+  either already fixed in prior compiler changes or never manifested with the current seed.
+
+Also removes unused _LLVM_PHI_RE and _LLVM_STORE_RE regex constants.
+
+Fixup count: 65 → 61
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Remove _fix_broken_phi_nodes fixup by disabling match phi emission
+  ([`c50ff60`](https://github.com/SailfinIO/sailfin/commit/c50ff607eeedfbe47e33ed037cfaebb1ee065d2b))
+
+Disable phi node emission in emit_phi_merges_for_match(), matching the existing approach in
+  emit_phi_merges_for_if_else(). Match arms already store directly to allocas, making phi nodes
+  redundant. The seed binary's corrupted struct field access produced invalid phi types (%l0 as
+  type), which the fixup was patching. Eliminating emission at the source removes the need for the
+  post-processing fixup entirely.
+
+Fixup count: 66 → 65
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Refactoring
+
+- Simplify emit_phi_merges_for_match to early-return
+  ([`b637837`](https://github.com/SailfinIO/sailfin/commit/b63783743070e835a55b3da7f0894d1b05bf5631))
+
+Remove dead computation of mutated_names, phi_inputs, and arm scanning now that phi emission is
+  disabled. The function now immediately returns the input lines and temp_index unchanged.
+
+Addresses Copilot review feedback on PR #97.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.12 (2026-04-06)
 
 ### Bug Fixes
