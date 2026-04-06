@@ -8,12 +8,11 @@
 import { NativeSourceSpan } from "../../../native_ir";
 
 import {
-    TypeContext, LocalBinding, ParameterBinding, OwnershipInfo,
+    LocalBinding, ParameterBinding,
 } from "../../types";
 
 import {
     trim_text, starts_with,
-    index_of,
     is_identifier_part_char,
     matches_keyword,
 } from "../../utils";

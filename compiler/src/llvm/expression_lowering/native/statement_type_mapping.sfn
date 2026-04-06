@@ -10,7 +10,7 @@
 import { TypeContext } from "../../types";
 
 import {
-    trim_text, starts_with, ends_with,
+    trim_text, starts_with,
     join_with_separator,
     index_of,
 } from "../../utils";
