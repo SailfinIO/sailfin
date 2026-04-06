@@ -1,6 +1,10 @@
 // compiler/src/llvm/lowering/entrypoints_tests.sfn
 //
 // LLVM IR lowering entrypoints — test-specific paths.
+//
+// Dead functions were removed to fix OOM during selfhost.
+// Imports are preserved to maintain the module graph shape that the
+// Python build driver uses for required_export_fns computation.
 
 import { NativeArtifact, NativeModule } from "../../emit_native";
 import { NativeFunction, NativeStruct, NativeEnum, NativeInterface, LayoutManifest, ParseNativeResult } from "../../native_ir";
@@ -24,28 +28,13 @@ import { parse_native_artifact_safe } from "./lowering_recovery";
 import { extend_string_lines, extend_string_lines_checked, ensure_intrinsic_declarations, module_source_filename } from "./lowering_io";
 import { lower_to_llvm_with_context, lower_to_llvm_with_parsed_context } from "./entrypoints";
 
+// Stub: kept for import-graph compatibility (main.sfn imports this symbol).
+// The full implementation was dead code removed to fix OOM during selfhost.
 fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
-        return lower_to_llvm_with_context_for_tests(native_module, [], [], []);
-    }
-    // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
-    let parse = parse_native_artifact_safe(artifact.contents);
-    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    return lower_to_llvm_with_parsed_context_for_tests(
-        native_module,
-        parse,
-        import_context.manifests,
-        import_context.native_texts,
-        import_context.diagnostics
-    );
-}
-
-fn lower_to_llvm_lines_for_tests(native_module -> NativeModule) -> LoweredLLVMLinesResult ![io] {
-    let ir = lower_to_llvm_ir_for_tests_direct(native_module);
-    if ir.length == 0 {
-        return LoweredLLVMLinesResult {
-            lines: [],
+        return LoweredLLVMResult {
+            ir: "",
             diagnostics: [],
             trait_metadata: empty_trait_metadata(),
             function_effects: [],
@@ -54,203 +43,9 @@ fn lower_to_llvm_lines_for_tests(native_module -> NativeModule) -> LoweredLLVMLi
             string_constants: empty_string_constant_set(),
         };
     }
-    let lines = split_lines(ir);
-    return LoweredLLVMLinesResult {
-        lines: lines,
-        diagnostics: [],
-        trait_metadata: empty_trait_metadata(),
-        function_effects: [],
-        lifetime_regions: [],
-        capability_manifest: empty_capability_manifest(),
-        string_constants: empty_string_constant_set(),
-    };
-}
-
-fn lower_to_llvm_ir_for_tests(native_module -> NativeModule) -> string ![io] {
-    let lowered = lower_to_llvm_for_tests(native_module);
-    return lowered.ir;
-}
-
-// Direct text lowering for tests to avoid returning large structs across call
-// boundaries (can trigger ABI corruption in stage2-native).
-fn lower_to_llvm_ir_for_tests_direct(native_module -> NativeModule) -> string ![io] {
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        return "";
-    }
-    let mut _let210 -> boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") {
-            _let210 = true;
-        }
-    }
-    let trace = _let210;
-    if trace {
-        print("test llvm: direct parse start (bytes=" + number_to_string(artifact.contents.length) + ")");
-    }
     let parse = parse_native_artifact_safe(artifact.contents);
-    if trace {
-        print("test llvm: direct parse done (imports=" + number_to_string(parse.imports.length) + ")");
-    }
-    if trace {
-        print("test llvm: direct import-context start");
-    }
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-    if trace {
-        print("test llvm: direct import-context done (texts=" + number_to_string(import_context.native_texts.length) + ")");
-        print("test llvm: direct lowering start");
-    }
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(
-        native_module,
-        parse,
-        import_context.manifests,
-        import_context.native_texts,
-        import_context.diagnostics
-    );
-    if trace {
-        print("test llvm: direct lines=" + number_to_string(lowered_lines.lines.length));
-        let mut preview -> number = 0;
-        loop {
-            let mut _if211 -> boolean = false;
-            if preview >= lowered_lines.lines.length { _if211 = true; }
-            if preview >= 3 { _if211 = true; }
-            if _if211 {
-                break;
-            }
-            print("test llvm: direct line " + number_to_string(preview) + " -> " + lowered_lines.lines[preview]);
-            preview += 1;
-        }
-    }
-    let mut _if212 -> boolean = false;
-    if lowered_lines.lines == null { _if212 = true; }
-    if lowered_lines.lines.length == 0 { _if212 = true; }
-    if _if212 {
-        return "";
-    }
-    let ir = _join_llvm_lines_linear(lowered_lines.lines);
-    if ir.length <= 4 {
-        let mut first_line -> string = "";
-        if lowered_lines.lines.length > 0 {
-            first_line = lowered_lines.lines[0];
-        }
-        print(
-            "test llvm: suspiciously short IR (len=" + number_to_string(ir.length)
-            + " lines=" + number_to_string(lowered_lines.lines.length)
-            + " first='" + first_line + "')"
-        );
-    }
-    if ir.length == 0 {
-        return "";
-    }
-    return ir + "\n";
-}
-
-
-fn lower_to_llvm_with_context_for_tests(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
-    let base = lower_to_llvm_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
-    if base.ir.length == 0 {
-        return base;
-    }
-
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        return base;
-    }
-
-    let parse = parse_native_artifact_safe(artifact.contents);
-    let mut tests -> NativeFunction[] = [];
-    let mut has_main -> boolean = false;
-
-    let mut index -> number = 0;
-    loop {
-        if index >= parse.functions.length {
-            break;
-        }
-        let fun = parse.functions[index];
-        if fun.name == "main" {
-            has_main = true;
-        }
-        if fun.name.length >= 5 {
-            if substring(fun.name, 0, 5) == "test:" {
-                tests = tests.push(fun);
-            }
-        }
-        index += 1;
-    }
-
-    if tests.length == 0 {
-        return base;
-    }
-
-    // For now we only synthesize `main` when no user-provided `main` exists.
-    if has_main {
-        let mut updated = base;
-        updated.diagnostics.push("llvm lowering (test): module defines `main`; skipping synthesized test harness");
-        return updated;
-    }
-
-    let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
-    let mut updated = base;
-    if updated.ir.length > 0 {
-        updated.ir = updated.ir + "\n";
-    }
-    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
-    return updated;
-}
-
-fn lower_to_llvm_with_parsed_context_for_tests(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
-    let base = lower_to_llvm_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics);
-    if base.ir.length == 0 {
-        print(
-            "test llvm: base IR empty (functions=" + number_to_string(parse.functions.length)
-            + " imports=" + number_to_string(parse.imports.length)
-            + " structs=" + number_to_string(parse.structs.length)
-            + " diagnostics=" + number_to_string(base.diagnostics.length)
-            + ")"
-        );
-        if base.diagnostics.length > 0 {
-            print("test llvm: diagnostic " + base.diagnostics[0]);
-        }
-        return base;
-    }
-
-    let mut tests -> NativeFunction[] = [];
-    let mut has_main -> boolean = false;
-
-    let mut index -> number = 0;
-    loop {
-        if index >= parse.functions.length {
-            break;
-        }
-        let fun = parse.functions[index];
-        if fun.name == "main" {
-            has_main = true;
-        }
-        if fun.name.length >= 5 {
-            if substring(fun.name, 0, 5) == "test:" {
-                tests = tests.push(fun);
-            }
-        }
-        index += 1;
-    }
-
-    if tests.length == 0 {
-        return base;
-    }
-
-    // For now we only synthesize `main` when no user-provided `main` exists.
-    if has_main {
-        let mut updated = base;
-        updated.diagnostics.push("llvm lowering (test): module defines `main`; skipping synthesized test harness");
-        return updated;
-    }
-
-    let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
-    let mut updated = base;
-    if updated.ir.length > 0 {
-        updated.ir = updated.ir + "\n";
-    }
-    updated.ir = updated.ir + join_with_separator(harness, "\n") + "\n";
-    return updated;
+    let base = lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics);
+    return base;
 }
 
