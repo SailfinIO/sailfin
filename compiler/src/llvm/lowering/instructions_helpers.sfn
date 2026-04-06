@@ -127,29 +127,10 @@ fn _write_block_result_files(
     next_lifetime_region_id -> number,
     next_index -> number
 ) ![io] {
-    let mut joined_lines -> string = "";
-    let mut li -> number = 0;
-    loop {
-        if li >= lines.length { break; }
-        if li > 0 {
-            joined_lines = joined_lines + "\n";
-        }
-        joined_lines = joined_lines + lines[li];
-        li = li + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_lines", joined_lines);
-
-    let mut joined_allocas -> string = "";
-    let mut ai -> number = 0;
-    loop {
-        if ai >= allocas.length { break; }
-        if ai > 0 {
-            joined_allocas = joined_allocas + "\n";
-        }
-        joined_allocas = joined_allocas + allocas[ai];
-        ai = ai + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_allocas", joined_allocas);
+    // Use fs.writeLines to avoid O(N²) string concatenation.
+    // fs.writeLines writes each element + "\n"; _split_by_newline handles trailing newlines.
+    fs.writeLines("build/sailfin/.block_result_lines", lines);
+    fs.writeLines("build/sailfin/.block_result_allocas", allocas);
 
     let mut term_val -> string = "0";
     if terminated {
@@ -157,31 +138,18 @@ fn _write_block_result_files(
     }
     fs.writeFile("build/sailfin/.block_result_terminated", term_val);
 
-    let mut joined_diags -> string = "";
-    let mut di -> number = 0;
-    loop {
-        if di >= diagnostics.length { break; }
-        if di > 0 {
-            joined_diags = joined_diags + "\n";
-        }
-        joined_diags = joined_diags + diagnostics[di];
-        di = di + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_diagnostics", joined_diags);
+    fs.writeLines("build/sailfin/.block_result_diagnostics", diagnostics);
 
     // Serialize string constants so emit_body can read them back.
     // Format: one constant per line as "name\tcontent\tbyte_count".
-    let mut joined_sc -> string = "";
+    let mut sc_lines -> string[] = [];
     let mut si -> number = 0;
     loop {
         if si >= string_constants.length { break; }
-        if si > 0 {
-            joined_sc = joined_sc + "\n";
-        }
-        joined_sc = joined_sc + string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count);
+        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count));
         si = si + 1;
     }
-    fs.writeFile("build/sailfin/.block_result_string_constants", joined_sc);
+    fs.writeLines("build/sailfin/.block_result_string_constants", sc_lines);
 
     // Scalar state fields needed by callers in other modules (instructions_match, instructions_loops).
     fs.writeFile("build/sailfin/.block_result_temp_index", number_to_string(temp_index));

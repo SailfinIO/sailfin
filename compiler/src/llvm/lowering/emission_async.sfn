@@ -49,17 +49,16 @@ import { emit_llvm_function } from "./emission";
 import { prepare_parameters_from_files } from "./emission";
 
 fn _write_async_lowered_function_files(lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) ![io] {
-    fs.writeFile("build/sailfin/.lowered_fn_lines", join_with_separator(lines, "\n"));
-    fs.writeFile("build/sailfin/.lowered_fn_diagnostics", join_with_separator(diagnostics, "\n"));
-    let mut sc_text -> string = "";
+    fs.writeLines("build/sailfin/.lowered_fn_lines", lines);
+    fs.writeLines("build/sailfin/.lowered_fn_diagnostics", diagnostics);
+    let mut sc_lines -> string[] = [];
     let mut sci -> number = 0;
     loop {
         if sci >= string_constants.length { break; }
-        if sci > 0 { sc_text = sc_text + "\n"; }
-        sc_text = sc_text + string_constants[sci].name + "\t" + string_constants[sci].content + "\t" + number_to_string(string_constants[sci].byte_count);
+        sc_lines.push(string_constants[sci].name + "\t" + string_constants[sci].content + "\t" + number_to_string(string_constants[sci].byte_count));
         sci += 1;
     }
-    fs.writeFile("build/sailfin/.lowered_fn_string_constants", sc_text);
+    fs.writeLines("build/sailfin/.lowered_fn_string_constants", sc_lines);
 }
 
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.

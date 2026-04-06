@@ -136,40 +136,9 @@ fn write_llvm_lines_chunked(path -> string, lines -> string[]) -> boolean ![io] 
         return fs.exists(path);
     }
 
-    let chunk_size = 200;
-    let mut chunks -> string[] = [];
-    let mut buffer -> string = "";
-    let mut lines_in_chunk -> number = 0;
-
-    let mut index -> number = 0;
-    loop {
-        if index >= lines.length {
-            break;
-        }
-        buffer = buffer + lines[index] + "\n";
-        lines_in_chunk += 1;
-        if lines_in_chunk >= chunk_size {
-            chunks.push(buffer);
-            buffer = "";
-            lines_in_chunk = 0;
-        }
-        index += 1;
-    }
-    if buffer.length > 0 {
-        chunks.push(buffer);
-    }
-
-    let mut output -> string = "";
-    let mut ci -> number = 0;
-    loop {
-        if ci >= chunks.length {
-            break;
-        }
-        output = output + chunks[ci];
-        ci += 1;
-    }
-
-    fs.writeFile(path, output);
+    // Write lines directly to file via the C runtime, avoiding O(N²)
+    // string concatenation from the previous chunk-and-join approach.
+    fs.writeLines(path, lines);
     return fs.exists(path);
 }
 
