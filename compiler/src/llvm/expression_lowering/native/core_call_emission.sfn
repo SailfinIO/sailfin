@@ -37,7 +37,7 @@ import {
 
 import {
     find_interface_info_by_name,
-} from "../../type_context";
+} from "../../type_context_queries";
 
 import {
     array_pointer_element_type,

@@ -50,7 +50,7 @@ import {
     resolve_enum_info_for_literal,
     resolve_enum_variant_info,
     lookup_allocation_info,
-} from "../../type_context";
+} from "../../type_context_queries";
 
 import {
     coerce_operand_to_type,

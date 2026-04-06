@@ -51,7 +51,7 @@ import {
     find_struct_info_by_name,
     find_interface_info_by_name,
     find_variant_field_info,
-} from "../../type_context";
+} from "../../type_context_queries";
 
 import { format_temp_name, default_return_literal } from "../../expressions_helpers";
 

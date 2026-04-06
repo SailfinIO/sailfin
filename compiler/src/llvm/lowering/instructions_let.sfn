@@ -31,7 +31,7 @@ import {
     find_interface_info_by_name,
     find_struct_info_by_llvm_type,
     find_vtable_for_struct_interface,
-} from "../type_context";
+} from "../type_context_queries";
 
 import {
     find_local_binding,

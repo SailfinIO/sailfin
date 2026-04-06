@@ -176,8 +176,8 @@ import {
     array_struct_type_for_element,
 } from "../../type_mapping";
 
+import { fixup_enum_layouts } from "../../type_context";
 import {
-    fixup_enum_layouts,
     find_struct_info_by_name,
     find_interface_info_by_name,
     find_vtable_for_struct_interface,
@@ -193,7 +193,7 @@ import {
     resolve_enum_info_for_literal,
     resolve_enum_variant_info,
     find_variant_field_info
-} from "../../type_context";
+} from "../../type_context_queries";
 
 import {
     find_function_by_name,

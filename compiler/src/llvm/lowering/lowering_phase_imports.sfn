@@ -19,7 +19,7 @@ import {
 
 import {
     flatten_struct_methods,
-} from "./lowering_helpers";
+} from "./lowering_helpers_mangling";
 
 // Parse imported interfaces from a single import text.
 fn parse_single_import_interfaces(native_text: string) -> NativeInterface[] {

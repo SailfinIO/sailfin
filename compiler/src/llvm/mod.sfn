@@ -131,17 +131,20 @@ export {
     unwrap_move_wrapper,
 } from "./type_mapping";
 
-// Re-export TypeContext functions
+// Re-export TypeContext building functions
 export {
     build_type_context,
     empty_type_context,
+} from "./type_context";
+
+// Re-export TypeContext query/lookup functions
+export {
     find_struct_info_by_name,
     find_struct_info_by_llvm_name,
-    find_enum_info_by_name,
     find_enum_info_by_llvm_type,
     find_interface_info_by_name,
     resolve_struct_info_for_literal,
-} from "./type_context";
+} from "./type_context_queries";
 
 // Re-export import handling functions
 export {
@@ -158,6 +161,10 @@ export {
     render_imported_function_declarations,
     render_struct_type_definitions,
     render_enum_type_definitions,
+} from "./rendering";
+
+// Re-export rendering helper functions
+export {
     render_interface_type_definitions,
     render_vtable_type_definitions,
     render_vtable_constants,
@@ -171,7 +178,7 @@ export {
     collect_exported_symbol_names,
     is_exported_symbol,
     should_internalize_function,
-} from "./rendering";
+} from "./rendering_helpers";
 
 // Re-export lifetime/borrow tracking functions
 export {

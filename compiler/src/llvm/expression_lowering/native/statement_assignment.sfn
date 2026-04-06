@@ -48,7 +48,7 @@ import {
 import {
     find_struct_info_by_llvm_type,
     find_struct_field_index,
-} from "../../type_context";
+} from "../../type_context_queries";
 
 import {
     find_parameter_binding as utils_find_parameter_binding,
