@@ -2631,50 +2631,6 @@ def _fix_srem_on_pointers(llvm_ir: str) -> tuple[str, int]:
     return "\n".join(lines), fixed
 
 
-def _fix_broken_phi_nodes(llvm_ir: str) -> tuple[str, int]:
-    """Remove broken phi nodes that have local names as types.
-
-    The first-pass binary's phi emission can produce::
-
-        %t0_dup2 = phi %l0
-        store %l0 %t0_dup2, %l0* decoded
-
-    where ``%l0`` is a local alloca pointer used as a type and ``decoded`` is
-    a Sailfin variable name used as a pointer.  These are invalid LLVM IR.
-    Since the alloca-store approach already stores values in each branch,
-    these phi nodes are redundant and can be safely removed.
-    """
-    if "_dup" not in llvm_ir:
-        return llvm_ir, 0
-
-    # Pattern: phi with a %l\d+ type (which is not a valid LLVM type)
-    phi_re = re.compile(r"^\s+(%\S+)\s*=\s*phi\s+%l\d+")
-    # Corresponding store: store %lN %tN, %lN* NAME
-    store_re = re.compile(r"^\s+store\s+%l\d+\s+%\S+,\s+%l\d+\*\s+\S+")
-
-    lines = llvm_ir.split("\n")
-    new_lines: list[str] = []
-    removed = 0
-    skip_next_store = False
-
-    for line in lines:
-        if skip_next_store and store_re.match(line):
-            removed += 1
-            skip_next_store = False
-            continue
-        skip_next_store = False
-
-        if phi_re.match(line):
-            removed += 1
-            skip_next_store = True
-            continue
-
-        new_lines.append(line)
-
-    if removed:
-        return "\n".join(new_lines), removed
-    return llvm_ir, 0
-
 
 def _count_stub_function_bodies(llvm_ir: str) -> int:
     """Count ``define`` functions with trivially stub bodies.
@@ -12641,15 +12597,6 @@ def main(argv: list[str]) -> int:
                             flush=True,
                         )
 
-                    # Remove broken phi nodes with local alloca names as types.
-                    candidate, phi_fixes = _fix_broken_phi_nodes(candidate)
-                    if phi_fixes:
-                        print(
-                            f"[selfhost] removed {phi_fixes} broken phi node(s) in {module_name}",
-                            file=sys.stderr,
-                            flush=True,
-                        )
-
                     # Fix srem on pointer operands (seed types numbers as i8*).
                     candidate, srem_fixes = _fix_srem_on_pointers(candidate)
                     if srem_fixes:
@@ -13499,24 +13446,6 @@ def main(argv: list[str]) -> int:
         if total_wb_fixes:
             print(
                 f"[selfhost] total append_string writebacks: {total_wb_fixes}",
-                file=sys.stderr,
-                flush=True,
-            )
-
-        # --- Remove broken phi nodes ---
-        total_phi_fixes = 0
-        for idx, name in enumerate(module_names):
-            ll_texts[idx], phi_fixes = _fix_broken_phi_nodes(ll_texts[idx])
-            if phi_fixes:
-                total_phi_fixes += phi_fixes
-                print(
-                    f"[selfhost] removed {phi_fixes} broken phi node(s) in {name}",
-                    file=sys.stderr,
-                    flush=True,
-                )
-        if total_phi_fixes:
-            print(
-                f"[selfhost] total broken phi node removals: {total_phi_fixes}",
                 file=sys.stderr,
                 flush=True,
             )
