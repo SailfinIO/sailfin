@@ -2,9 +2,9 @@
 //
 // LLVM IR lowering entrypoints — test-specific paths.
 //
-// Dead functions were removed to fix OOM during selfhost.
-// Imports are preserved to maintain the module graph shape that the
-// Python build driver uses for required_export_fns computation.
+// Dead function bodies were removed to fix OOM during selfhost.
+// Imports are preserved — the seed linker needs the full import graph
+// for correct cross-module symbol resolution.
 
 import { NativeArtifact, NativeModule } from "../../emit_native";
 import { NativeFunction, NativeStruct, NativeEnum, NativeInterface, LayoutManifest, ParseNativeResult } from "../../native_ir";
@@ -29,7 +29,6 @@ import { extend_string_lines, extend_string_lines_checked, ensure_intrinsic_decl
 import { lower_to_llvm_with_context, lower_to_llvm_with_parsed_context } from "./entrypoints";
 
 // Stub: kept for import-graph compatibility (main.sfn imports this symbol).
-// The full implementation was dead code removed to fix OOM during selfhost.
 fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {

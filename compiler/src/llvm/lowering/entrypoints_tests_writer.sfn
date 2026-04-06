@@ -4,8 +4,7 @@
 //
 // The original write_llvm_ir_for_tests function (~600 lines duplicating
 // the entire lowering pipeline) was removed to fix OOM during selfhost.
-// This file retains only the actually-used function which delegates to
-// the shared lowering pipeline in lowering_core.sfn.
+// Imports are preserved — the seed linker needs the full import graph.
 
 import { NativeArtifact, NativeModule } from "../../emit_native";
 import { NativeFunction, NativeStruct, NativeEnum, NativeInterface, LayoutManifest, ParseNativeResult } from "../../native_ir";
