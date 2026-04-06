@@ -211,27 +211,79 @@ Fix categories in this order for maximum impact with least risk:
 
 6. **Category 6 (Linker/Visibility)** — Mostly cosmetic at link time. Low priority.
 
+## Getting Started: Identifying What to Work On
+
+Before diving into compiler fixes, you need to know which fixups actually fire and which are already dead. Many fixups become no-ops as earlier fixes land — removing these is free progress.
+
+### Step 1: Get the current fixup count
+
+```bash
+grep -c 'def _fix\|def _inject\|def _rewrite\|def _promote\|def _ensure\|def _dedup\|def _mark\|def _patch\|def _remove' scripts/selfhost_native.py
+```
+
+### Step 2: Do a build and capture which fixups actually fire
+
+```bash
+make clean-build && make rebuild 2>&1 | tee /tmp/rebuild_output.txt
+```
+
+### Step 3: See which fixup types produced output (i.e., actually fired)
+
+```bash
+# Show all fixup log lines (excludes module progress, timing, etc.)
+grep '\[selfhost\]' /tmp/rebuild_output.txt | grep -E 'fixed|patched|injected|inserted' \
+  | grep -v 'malloc\|calloc\|append_string\|unconditional loop' \
+  | sort -u
+
+# Show totals for high-volume fixups
+grep '\[selfhost\].*total' /tmp/rebuild_output.txt
+```
+
+Fixups that produce **zero** log lines are no-ops — they can be disabled, verified with a rebuild, and deleted. This is the easiest way to reduce the fixup count.
+
+### Step 4: Find zero-fire fixups
+
+The pipeline only logs when a fixup makes changes (`if changes > 0`). Cross-reference the fixup call sites in the pipeline (search for `candidate, *_changes = _fix_` and `ll_texts[idx], *_changes = _fix_`) against the build output. Any fixup function called in the pipeline but absent from the output fires zero times.
+
+### Step 5: Pick a fixup to work on
+
+Follow the recommended attack order below. For **zero-fire fixups**, just disable the call, rebuild, run tests, delete the function, and commit. For **active fixups** (those that fire >0 times), you need to trace the root cause to `compiler/src/*.sfn` and fix it there.
+
+### Locating fixup call sites in the pipeline
+
+The pipeline has two main sections where fixups are called:
+
+1. **Per-module pipeline** (~line 11700-12400): processes each module individually during compilation. Search for `candidate, ` assignments.
+2. **Post-link pipeline** (~line 12700-13200): processes all modules after individual compilation. Search for `ll_texts[idx], ` assignments.
+
+```bash
+# Find all active fixup calls (not commented out)
+grep -n 'candidate.*= _fix_\|candidate.*= _inject_\|ll_texts\[idx\].*= _fix_\|ll_texts\[idx\].*= _inject_' scripts/selfhost_native.py | grep -v '^\s*#'
+```
+
 ## How to Test a Fix
 
 ```bash
 # 1. Make the fix in compiler/src/*.sfn
 
 # 2. Rebuild with Python driver (uses fixups for everything else)
-make rebuild
+make clean-build && make rebuild
 
 # 3. Disable the specific fixup in selfhost_native.py:
 #    - Comment out or skip the fixup call in the pipeline
 #    - Rebuild again
-make rebuild
+make clean-build && make rebuild
 
-# 4. If build succeeds, delete the fixup code and commit
+# 4. If build succeeds, run the test suite
+make test
 
-# 5. Run smoke test
-make smoke
+# 5. If tests pass, delete the fixup function and commit
 
 # 6. When ready to test full graduation:
 make check
 ```
+
+**Important:** Always `make clean-build` before `make rebuild` when testing fixup changes. The build caches intermediate `.ll` files and won't re-run fixups on cached modules.
 
 ## Tracking Progress
 
