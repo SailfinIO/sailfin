@@ -41,6 +41,10 @@ import {
     append_local_binding,
 } from "../expression_lowering/native/core_scopes";
 
+import {
+    split_lines_local,
+} from "./lowering_text_utils";
+
 fn clone_local_bindings(values -> LocalBinding[]) -> LocalBinding[] {
     let mut result -> LocalBinding[] = [];
     let mut index -> number = 0;
@@ -310,57 +314,32 @@ fn read_let_result_from_files(
 ) -> LocalBinding[] ![io] {
     let mut result_locals = current_locals;
     if fs.exists("build/sailfin/.let_result_temp_index") {
-        let _diag_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_diag_count"));
-        let mut _di -> number = 0;
-        loop {
-            if _di >= _diag_count { break; }
-            let _diag_path = "build/sailfin/.let_result_diag_" + number_to_string(_di);
-            if fs.exists(_diag_path) {
-                diagnostics.push(fs.readFile(_diag_path));
+        // Read diagnostics from bulk file
+        let _diag_raw = fs.readFile("build/sailfin/.let_result_diagnostics");
+        if _diag_raw.length > 0 {
+            let _diag_lines = split_lines_local(_diag_raw);
+            let mut _di -> number = 0;
+            loop {
+                if _di >= _diag_lines.length { break; }
+                diagnostics.push(_diag_lines[_di]);
+                _di += 1;
             }
-            _di += 1;
         }
-        let _lines_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_lines_count"));
+        // Read lines from bulk file
+        let _lines_raw = fs.readFile("build/sailfin/.let_result_lines");
         let mut _new_lines -> string[] = [];
-        let mut _li -> number = 0;
-        loop {
-            if _li >= _lines_count { break; }
-            let _line_path = "build/sailfin/.let_result_line_" + number_to_string(_li);
-            if fs.exists(_line_path) {
-                _new_lines.push(fs.readFile(_line_path));
-            }
-            _li += 1;
+        if _lines_raw.length > 0 {
+            _new_lines = split_lines_local(_lines_raw);
         }
         // Write lines for caller to read
-        let mut _joined -> string = "";
-        let mut _ji -> number = 0;
-        loop {
-            if _ji >= _new_lines.length { break; }
-            if _ji > 0 { _joined = _joined + "\n"; }
-            _joined = _joined + _new_lines[_ji];
-            _ji += 1;
-        }
-        fs.writeFile("build/sailfin/.let_ipc_lines", _joined);
-        let _allocas_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_allocas_count"));
+        fs.writeLines("build/sailfin/.let_ipc_lines", _new_lines);
+        // Read allocas from bulk file
+        let _allocas_raw = fs.readFile("build/sailfin/.let_result_allocas");
         let mut _new_allocas -> string[] = [];
-        let mut _ai -> number = 0;
-        loop {
-            if _ai >= _allocas_count { break; }
-            let _alloca_path = "build/sailfin/.let_result_alloca_" + number_to_string(_ai);
-            if fs.exists(_alloca_path) {
-                _new_allocas.push(fs.readFile(_alloca_path));
-            }
-            _ai += 1;
+        if _allocas_raw.length > 0 {
+            _new_allocas = split_lines_local(_allocas_raw);
         }
-        let mut _joined_a -> string = "";
-        let mut _jai -> number = 0;
-        loop {
-            if _jai >= _new_allocas.length { break; }
-            if _jai > 0 { _joined_a = _joined_a + "\n"; }
-            _joined_a = _joined_a + _new_allocas[_jai];
-            _jai += 1;
-        }
-        fs.writeFile("build/sailfin/.let_ipc_allocas", _joined_a);
+        fs.writeLines("build/sailfin/.let_ipc_allocas", _new_allocas);
         fs.writeFile("build/sailfin/.let_ipc_temp", fs.readFile("build/sailfin/.let_result_temp_index"));
         fs.writeFile("build/sailfin/.let_ipc_next_local", fs.readFile("build/sailfin/.let_result_next_local_id"));
         fs.writeFile("build/sailfin/.let_ipc_next_region", fs.readFile("build/sailfin/.let_result_next_region_id"));
@@ -395,7 +374,7 @@ fn read_expr_mutations(existing -> LocalMutation[]) -> LocalMutation[] ![io] {
         let _mv = fs.readFile(_mp + "_value");
         let _ml = fs.readFile(_mp + "_label");
         result = extend_mutations(result, [LocalMutation {
-            name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
+                    name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
         }]);
         _mi += 1;
     }

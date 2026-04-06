@@ -679,6 +679,15 @@ declare i1 @sailfin_runtime_has_exception()
 declare void @sailfin_runtime_clear_exception()
 declare double @sailfin_runtime_string_to_number(i8*)
 declare void @sailfin_runtime_log_execution(i8*, i8*)
+declare i1 @sailfin_intrinsic_fs_exists(i8*)
+declare i8* @sailfin_adapter_fs_read_file(i8*)
+declare void @sailfin_adapter_fs_write_file(i8*, i8*)
+declare void @sailfin_adapter_fs_append_file(i8*, i8*)
+declare void @sailfin_adapter_fs_write_lines(i8*, { i8**, i64 }*)
+declare { i8**, i64 }* @sailfin_adapter_fs_list_directory(i8*)
+declare i1 @sailfin_adapter_fs_delete_file(i8*)
+declare i1 @sailfin_adapter_fs_create_directory(i8*, i1)
+declare double @sailfin_runtime_process_run({ i8**, i64 }*)
 RUNTIME_DECLS
 
 # For each module, find called-but-undeclared symbols and inject declares.
@@ -719,6 +728,35 @@ for ll in "$RAW_DIR"/*.ll; do
     rm -f "$missing_f"
 done
 log "cross-module symbol resolution complete"
+
+# ---------------------------------------------------------------------------
+# Step 3.51: Remove empty-param declares that conflict with typed declares
+# ---------------------------------------------------------------------------
+# The compiler sometimes emits `declare ... @fn()` (empty params) for imported
+# functions whose signatures it couldn't resolve. Cross-module symbol resolution
+# above may have injected a properly-typed `declare ... @fn(type1, type2)`.
+# LLVM rejects two declares of the same function with different signatures,
+# so remove the empty-param versions when a typed version exists.
+for ll in "$RAW_DIR"/*.ll; do
+    # Collect function names that have both empty-param and typed declares.
+    # Empty-param: lines like  declare ... @name()  (paren at end of line)
+    # Typed:       declare ... @name(type ...)
+    empty_fns="$(mktemp)"
+    typed_fns="$(mktemp)"
+    { grep -P '^declare\s.*@\w+\(\)\s*$' "$ll" 2>/dev/null | grep -oP '(?<=@)[a-zA-Z_][a-zA-Z0-9_]*(?=\(\))' || true; } | sort -u > "$empty_fns"
+    { grep '^declare ' "$ll" 2>/dev/null | grep -oP '(?<=@)[a-zA-Z_][a-zA-Z0-9_]*(?=\([^)]+\))' || true; } | sort -u > "$typed_fns"
+    conflicts="$(comm -12 "$empty_fns" "$typed_fns")"
+    rm -f "$empty_fns" "$typed_fns"
+    if [[ -n "$conflicts" ]]; then
+        # Build a sed script to delete the empty-param declare lines
+        sed_script="$(mktemp)"
+        while IFS= read -r fn; do
+            echo "/@${fn}()$/d" >> "$sed_script"
+        done <<< "$conflicts"
+        sed -i -f "$sed_script" "$ll"
+        rm -f "$sed_script"
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Step 3.55: Second type resolution pass

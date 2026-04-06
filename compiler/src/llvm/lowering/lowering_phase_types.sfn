@@ -56,7 +56,7 @@ import {
 // build_type_context recovery.  Format per line:
 //   name\t%LlvmName\tfield1:type1,field2:type2,...
 fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
-    let mut content -> string = "";
+    let mut lines -> string[] = [];
     let mut idx -> number = 0;
     loop {
         if idx >= combined_structs.length { break; }
@@ -68,19 +68,14 @@ fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
             idx += 1;
             continue;
         }
-        if idx > 0 {
-            if content.length > 0 {
-                content = content + "\n";
-            }
-        }
         let llvm = "%" + sanitize_symbol(name);
-        content = content + name + "\t" + llvm + "\t";
+        let mut line = name + "\t" + llvm + "\t";
         let mut fi -> number = 0;
         let fields = get_struct_fields_at(combined_structs, idx);
         if fields != null {
             loop {
                 if fi >= fields.length { break; }
-                if fi > 0 { content = content + ","; }
+                if fi > 0 { line = line + ","; }
                 let mut fn_name = get_struct_field_name_at(fields, fi);
                 if fn_name == null { fn_name = ""; }
                 let mut ft = "i8*";
@@ -93,21 +88,22 @@ fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
                 else if ann == "usize" { ft = "i64"; }
                 else if ann == "i32" { ft = "i32"; }
                 else if ann == "u8" { ft = "i8"; }
-                content = content + fn_name + ":" + ft;
+                line = line + fn_name + ":" + ft;
                 fi += 1;
             }
         }
+        lines.push(line);
         idx += 1;
     }
-    fs.writeFile("build/sailfin/.struct_info", content);
-    return content;
+    fs.writeLines("build/sailfin/.struct_info", lines);
+    return "";
 }
 
 // Serialize enum info to build/sailfin/.enum_info for use by
 // build_type_context recovery.  Format per line:
 //   name\ttag_type\ttag_size\ttag_align\tsize\talign\tv0=0,v1=1,...
 fn serialize_enum_info(enums: NativeEnum[], _trace_enums: boolean) -> string ![io] {
-    let mut content -> string = "";
+    let mut lines -> string[] = [];
     let mut idx -> number = 0;
     loop {
         if idx >= enums.length { break; }
@@ -119,36 +115,32 @@ fn serialize_enum_info(enums: NativeEnum[], _trace_enums: boolean) -> string ![i
             idx += 1;
             continue;
         }
-        if idx > 0 {
-            if content.length > 0 {
-                content = content + "\n";
-            }
-        }
         // Assume unit-enum defaults (fixup_enum_layouts was skipped).
         let tag_type = "i32";
         let tag_size = "4";
         let tag_align = "4";
         let size = "4";
         let align = "4";
-        content = content + name + "\t" + tag_type + "\t" + tag_size + "\t" + tag_align + "\t" + size + "\t" + align + "\t";
+        let mut line = name + "\t" + tag_type + "\t" + tag_size + "\t" + tag_align + "\t" + size + "\t" + align + "\t";
         let e = enums[idx];
         let variants = e.variants;
         let mut vi -> number = 0;
         if variants != null {
             loop {
                 if vi >= variants.length { break; }
-                if vi > 0 { content = content + ","; }
-                content = content + "v" + number_to_string(vi) + "=" + number_to_string(vi);
+                if vi > 0 { line = line + ","; }
+                line = line + "v" + number_to_string(vi) + "=" + number_to_string(vi);
                 vi += 1;
             }
         }
+        lines.push(line);
         idx += 1;
     }
-    fs.writeFile("build/sailfin/.enum_info", content);
+    fs.writeLines("build/sailfin/.enum_info", lines);
     if _trace_enums {
-        print("enum_trace: wrote .enum_info bytes=" + number_to_string(content.length));
+        print("enum_trace: wrote .enum_info lines=" + number_to_string(lines.length));
     }
-    return content;
+    return "";
 }
 
 // Build the type context and recover enum info from file-based channel
@@ -182,18 +174,17 @@ fn build_type_context_with_recovery(
     let type_build = build_type_context(combined_structs, fixed_enums_list, combined_interfaces);
     // Write type-context diagnostics to file so the orchestrator can merge them.
     // The `diagnostics` parameter is local — reassigning it here would be dropped.
-    let mut _tc_diag_content -> string = "";
     let mut _tc_di -> number = 0;
     let _tc_diags = type_build.diagnostics;
+    let mut _tc_diags_lines -> string[] = [];
     if _tc_diags != null {
         loop {
             if _tc_di >= _tc_diags.length { break; }
-            if _tc_di > 0 { _tc_diag_content = _tc_diag_content + "\n"; }
-            _tc_diag_content = _tc_diag_content + _tc_diags[_tc_di];
+            _tc_diags_lines.push(_tc_diags[_tc_di]);
             _tc_di += 1;
         }
     }
-    fs.writeFile("build/sailfin/.phase_types_diagnostics", _tc_diag_content);
+    fs.writeLines("build/sailfin/.phase_types_diagnostics", _tc_diags_lines);
     let mut type_context = type_build.context;
 
     // Recover enum info from file if cross-module ABI corruption
@@ -285,15 +276,15 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
         let mut max_ps -> number = esize - etag_size;
         if max_ps < 0 { max_ps = 0; }
         recovered.push(EnumTypeInfo {
-            name: ename,
-            llvm_name: ellvm,
-            tag_type: etag_type,
-            tag_size: etag_size,
-            tag_align: etag_align,
-            max_payload_size: max_ps,
-            size: esize,
-            align: ealign,
-            variants: evariants,
+                name: ename,
+                llvm_name: ellvm,
+                tag_type: etag_type,
+                tag_size: etag_size,
+                tag_align: etag_align,
+                max_payload_size: max_ps,
+                size: esize,
+                align: ealign,
+                variants: evariants,
         });
         eli += 1;
     }
@@ -328,12 +319,12 @@ fn parse_enum_variants(variants_str: string) -> EnumVariantInfo[] {
         }
         if vname.length > 0 {
             result.push(EnumVariantInfo {
-                name: vname,
-                tag: vtag,
-                offset: 0,
-                size: 0,
-                align: 1,
-                fields: [],
+                    name: vname,
+                    tag: vtag,
+                    offset: 0,
+                    size: 0,
+                    align: 1,
+                    fields: [],
             });
         }
         vtag += 1;

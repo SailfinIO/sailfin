@@ -75,12 +75,8 @@ fn _write_assign_result_files(
 ) ![io] {
     let new_count = lines.length - pre_lines_count;
     fs.writeFile("build/sailfin/.call_result_lines_count", number_to_string(lines.length));
-    let mut wi -> number = 0;
-    loop {
-        if wi >= lines.length { break; }
-        fs.writeFile("build/sailfin/.call_result_line_" + number_to_string(wi), lines[wi]);
-        wi += 1;
-    }
+    // Write all lines as bulk array
+    fs.writeLines("build/sailfin/.call_result_lines", lines);
     fs.writeFile("build/sailfin/.call_result_temp", number_to_string(temp_index));
     fs.writeFile("build/sailfin/.expr_stmt_mutation_count", number_to_string(mutations.length));
     let mut mi -> number = 0;
@@ -537,15 +533,9 @@ fn preprocess_self_field_access(
     // Write results to files for caller to read back
     fs.writeFile("build/sailfin/.self_field_expr", result_expr);
     fs.writeFile("build/sailfin/.self_field_temp", number_to_string(result_temp));
-    // Write new lines that were added
-    let new_lines_count = result_lines.length;
-    fs.writeFile("build/sailfin/.self_field_lines_count", number_to_string(new_lines_count));
-    let mut _wli -> number = 0;
-    loop {
-        if _wli >= new_lines_count { break; }
-        fs.writeFile("build/sailfin/.self_field_line_" + number_to_string(_wli), result_lines[_wli]);
-        _wli += 1;
-    }
+    // Write new lines as bulk array
+    fs.writeFile("build/sailfin/.self_field_lines_count", number_to_string(result_lines.length));
+    fs.writeLines("build/sailfin/.self_field_lines", result_lines);
 }
 
 export { lower_lvalue_assignment_stmt, preprocess_self_field_access };

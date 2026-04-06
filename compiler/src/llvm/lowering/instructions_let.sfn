@@ -194,18 +194,18 @@ fn lower_let_instruction(
     if _if230 {
         diagnostics.push("llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
     } else {
-    // Clear stale call-result files before expression lowering so that only
-    // a call from THIS let's initializer can populate them.
-    if fs.exists("build/sailfin/.call_result_type") {
-        fs.deleteFile("build/sailfin/.call_result_type");
-    }
-    if fs.exists("build/sailfin/.call_result_value") {
-        fs.deleteFile("build/sailfin/.call_result_value");
-    }
-    if fs.exists("build/sailfin/.trace_lowering") {
+        // Clear stale call-result files before expression lowering so that only
+        // a call from THIS let's initializer can populate them.
+        if fs.exists("build/sailfin/.call_result_type") {
+            fs.deleteFile("build/sailfin/.call_result_type");
+        }
+        if fs.exists("build/sailfin/.call_result_value") {
+            fs.deleteFile("build/sailfin/.call_result_value");
+        }
+        if fs.exists("build/sailfin/.trace_lowering") {
             print("let-lowering: pre-lower_expression name=" + instruction.name + " value=" + instruction.value);
         }
-    let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
+        let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
         if fs.exists("build/sailfin/.trace_lowering") {
             print("let-lowering: post-lower_expression name=" + instruction.name);
         }
@@ -239,7 +239,7 @@ fn lower_let_instruction(
         if fs.exists("build/sailfin/.trace_lowering") {
             print("let-lowering: got operand, accessing string_constants");
         }
-    string_constants = lowered.string_constants;
+        string_constants = lowered.string_constants;
         if fs.exists("build/sailfin/.trace_lowering") {
             print("let-lowering: got string_constants, done with lowered");
         }
@@ -261,15 +261,15 @@ fn lower_let_instruction(
             }
         }
         if llvm_type.length == 0 {
-        if operand != null {
-            if fs.exists("build/sailfin/.trace_lowering") {
-                print("let-lowering: operand not null, trimming type");
+            if operand != null {
+                if fs.exists("build/sailfin/.trace_lowering") {
+                    print("let-lowering: operand not null, trimming type");
+                }
+                let operand_type = trim_text(operand.llvm_type);
+                if operand_type.length > 0 {
+                    llvm_type = operand_type;
+                }
             }
-            let operand_type = trim_text(operand.llvm_type);
-            if operand_type.length > 0 {
-                llvm_type = operand_type;
-            }
-        }
         }
     }
 
@@ -414,29 +414,10 @@ fn lower_let_instruction(
     fs.writeFile("build/sailfin/.let_result_temp_index", number_to_string(current_temp));
     fs.writeFile("build/sailfin/.let_result_next_local_id", number_to_string(next_local_id + 1));
     fs.writeFile("build/sailfin/.let_result_next_region_id", number_to_string(current_next_region));
-    fs.writeFile("build/sailfin/.let_result_diag_count", number_to_string(diagnostics.length));
-    let mut _diag_i -> number = 0;
-    loop {
-        if _diag_i >= diagnostics.length { break; }
-        fs.writeFile("build/sailfin/.let_result_diag_" + number_to_string(_diag_i), diagnostics[_diag_i]);
-        _diag_i += 1;
-    }
-    // Serialize lines array
-    fs.writeFile("build/sailfin/.let_result_lines_count", number_to_string(current_lines.length));
-    let mut _li_i -> number = 0;
-    loop {
-        if _li_i >= current_lines.length { break; }
-        fs.writeFile("build/sailfin/.let_result_line_" + number_to_string(_li_i), current_lines[_li_i]);
-        _li_i += 1;
-    }
-    // Serialize allocas array
-    fs.writeFile("build/sailfin/.let_result_allocas_count", number_to_string(current_allocas.length));
-    let mut _ai_i -> number = 0;
-    loop {
-        if _ai_i >= current_allocas.length { break; }
-        fs.writeFile("build/sailfin/.let_result_alloca_" + number_to_string(_ai_i), current_allocas[_ai_i]);
-        _ai_i += 1;
-    }
+    // Serialize diagnostics, lines, and allocas as bulk arrays
+    fs.writeLines("build/sailfin/.let_result_diagnostics", diagnostics);
+    fs.writeLines("build/sailfin/.let_result_lines", current_lines);
+    fs.writeLines("build/sailfin/.let_result_allocas", current_allocas);
     // Serialize the new local binding (last one added)
     if current_locals.length > 0 {
         let _last_local = current_locals[current_locals.length - 1];
@@ -449,7 +430,7 @@ fn lower_let_instruction(
         lines: current_lines,
         allocas: current_allocas,
         locals: current_locals,
-    bindings: current_bindings,
+        bindings: current_bindings,
         temp_index: current_temp,
         diagnostics: diagnostics,
         next_local_id: next_local_id + 1,
