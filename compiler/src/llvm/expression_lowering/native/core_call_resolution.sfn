@@ -37,7 +37,7 @@ import {
     find_interface_info_by_name,
     resolve_struct_info_for_method_target,
     resolve_interface_info_for_method_target,
-} from "../../type_context";
+} from "../../type_context_queries";
 
 import { find_function_by_name } from "../../rendering";
 

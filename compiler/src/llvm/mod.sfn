@@ -131,17 +131,21 @@ export {
     unwrap_move_wrapper,
 } from "./type_mapping";
 
-// Re-export TypeContext functions
+// Re-export TypeContext building functions
 export {
     build_type_context,
     empty_type_context,
+} from "./type_context";
+
+// Re-export TypeContext query/lookup functions
+export {
     find_struct_info_by_name,
     find_struct_info_by_llvm_name,
     find_enum_info_by_name,
     find_enum_info_by_llvm_type,
     find_interface_info_by_name,
     resolve_struct_info_for_literal,
-} from "./type_context";
+} from "./type_context_queries";
 
 // Re-export import handling functions
 export {

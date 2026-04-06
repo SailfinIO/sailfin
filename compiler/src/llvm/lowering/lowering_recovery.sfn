@@ -61,8 +61,10 @@ import {
 } from "./lowering_native_helpers";
 import {
     sanitize_collection_length,
-    append_native_function,
 } from "./lowering_helpers";
+import {
+    append_native_function,
+} from "./lowering_helpers_mangling";
 
 // ── Parse wrappers ───────────────────────────────────────────────────
 

@@ -71,7 +71,7 @@ import {
 
 import {
     apply_module_symbol_mangling,
-} from "./lowering_helpers";
+} from "./lowering_helpers_mangling";
 
 // Write function metadata to file-based IPC channels for emit_llvm_function.
 // The v0.1.1 seed compiles emission.sfn with NativeFunction as i8*,

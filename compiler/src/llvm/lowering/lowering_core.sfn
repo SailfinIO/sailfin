@@ -86,13 +86,16 @@ import {
     extend_native_functions,
     is_test_module_slug,
     render_test_harness_main_for_module,
+    collect_defined_function_symbols,
+} from "./lowering_helpers";
+
+import {
     apply_module_symbol_mangling,
     build_trait_metadata,
     concat_native_functions,
     flatten_struct_methods,
     empty_capability_manifest,
-    collect_defined_function_symbols,
-} from "./lowering_helpers";
+} from "./lowering_helpers_mangling";
 
 import {
     split_lines_local,

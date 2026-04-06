@@ -28,7 +28,7 @@ import {
 import {
     find_struct_info_by_name,
     find_interface_info_by_name,
-} from "../../type_context";
+} from "../../type_context_queries";
 
 fn map_struct_type_annotation_ctx(context -> TypeContext, annotation -> string) -> string {
     let info = find_struct_info_by_name(context, annotation);

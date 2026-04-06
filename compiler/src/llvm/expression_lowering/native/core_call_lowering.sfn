@@ -40,7 +40,7 @@ import {
 import {
     resolve_enum_info_for_literal,
     resolve_enum_variant_info,
-} from "../../type_context";
+} from "../../type_context_queries";
 
 import {
     array_pointer_element_type,

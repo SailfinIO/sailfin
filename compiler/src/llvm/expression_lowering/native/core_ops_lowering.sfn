@@ -37,7 +37,7 @@ import { format_temp_name, default_return_literal } from "../../expressions_help
 
 import { strip_pointer_suffix, ends_with_pointer_suffix } from "../../type_mapping";
 
-import { find_enum_info_by_llvm_type } from "../../type_context";
+import { find_enum_info_by_llvm_type } from "../../type_context_queries";
 
 import {
     coerce_operand_to_type,

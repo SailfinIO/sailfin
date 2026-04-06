@@ -122,30 +122,33 @@ import {
 } from "./emission";
 
 import {
-    empty_capability_manifest,
     empty_trait_metadata,
-    _join_llvm_lines_linear,
     sanitize_collection_length,
-    build_trait_metadata,
-    flatten_struct_methods,
     is_test_module_slug,
     render_test_harness_main_for_module,
     extend_native_structs,
     extend_native_enums,
     extend_native_interfaces,
     extend_native_functions,
-    concat_native_functions,
-    append_native_function,
     collect_defined_function_symbols,
     collect_available_import_module_names,
     resolve_import_provider_module_name,
-    apply_module_symbol_mangling,
     find_declare_signature,
     render_function_shim,
     insert_before_llvm_footer,
     DeclareSignature,
     MangledModuleResult,
 } from "./lowering_helpers";
+
+import {
+    empty_capability_manifest,
+    _join_llvm_lines_linear,
+    build_trait_metadata,
+    flatten_struct_methods,
+    concat_native_functions,
+    append_native_function,
+    apply_module_symbol_mangling,
+} from "./lowering_helpers_mangling";
 
 import {
     lower_to_llvm_lines_with_parsed_context,
