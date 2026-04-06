@@ -68,7 +68,7 @@ import {
 
 import {
     collect_exported_symbol_names,
-} from "../rendering";
+} from "../rendering_helpers";
 
 import {
     collect_imported_module_context_for_module,

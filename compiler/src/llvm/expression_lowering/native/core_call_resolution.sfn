@@ -39,7 +39,7 @@ import {
     resolve_interface_info_for_method_target,
 } from "../../type_context_queries";
 
-import { find_function_by_name } from "../../rendering";
+import { find_function_by_name } from "../../rendering_helpers";
 
 import { find_runtime_helper } from "../../runtime_helpers";
 
@@ -584,8 +584,8 @@ fn _find_function_from_files_res(target -> string) -> NativeFunction? ![io] {
                 let pname = fs.readFile(pp + "_name");
                 let ptype = fs.readFile(pp + "_type");
                 params = params.concat([NativeParameter {
-                    name: pname, type_annotation: ptype,
-                    mutable: false, default_value: null, span: null,
+                            name: pname, type_annotation: ptype,
+                            mutable: false, default_value: null, span: null,
                 }]);
                 j += 1;
             }
@@ -612,8 +612,8 @@ fn _find_function_from_files_res(target -> string) -> NativeFunction? ![io] {
                     let pname = fs.readFile(pp + "_name");
                     let ptype = fs.readFile(pp + "_type");
                     params = params.concat([NativeParameter {
-                        name: pname, type_annotation: ptype,
-                        mutable: false, default_value: null, span: null,
+                                name: pname, type_annotation: ptype,
+                                mutable: false, default_value: null, span: null,
                     }]);
                     j += 1;
                 }

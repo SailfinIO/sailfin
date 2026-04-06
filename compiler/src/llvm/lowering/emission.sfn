@@ -51,7 +51,7 @@ import {
 
 import {
     should_internalize_function,
-} from "../rendering";
+} from "../rendering_helpers";
 
 import {
     prepare_parameters,

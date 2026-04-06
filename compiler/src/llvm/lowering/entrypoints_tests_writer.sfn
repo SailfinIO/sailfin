@@ -10,7 +10,8 @@ import { TypeContext, TraitMetadata, LoweredLLVMLinesResult, FunctionEffectEntry
 import { append_string, join_with_separator, number_to_string, sanitize_symbol, string_array_contains, index_of } from "../utils";
 import { empty_string_constant_set, merge_string_constants, render_string_constants } from "../strings";
 import { collect_direct_function_effects, collect_function_call_graph, propagate_function_effects, collect_runtime_helper_targets, append_unique_effect, find_function_effect_entry, append_function_effect_entry } from "../effects";
-import { render_test_harness_main_for_module, collect_exported_symbol_names, render_struct_type_definitions, render_enum_type_definitions, render_interface_type_definitions, render_vtable_type_definitions, render_vtable_constants, render_trait_metadata_comments, render_runtime_helper_declarations, render_imported_function_declarations, find_function_by_name } from "../rendering";
+import { render_test_harness_main_for_module, render_struct_type_definitions, render_enum_type_definitions, render_trait_metadata_comments, render_runtime_helper_declarations, render_imported_function_declarations } from "../rendering";
+import { collect_exported_symbol_names, render_interface_type_definitions, render_vtable_type_definitions, render_vtable_constants, find_function_by_name } from "../rendering_helpers";
 import { fixup_enum_layouts, build_type_context } from "../type_context";
 import { collect_imported_module_context_for_module, apply_layout_manifest_to_module } from "../imports";
 import { lower_module_bindings_to_globals } from "./module_globals";

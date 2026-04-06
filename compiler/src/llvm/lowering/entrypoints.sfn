@@ -87,19 +87,15 @@ import {
 } from "../effects";
 
 import {
-    render_test_harness_main,
-    collect_exported_symbol_names,
-    render_struct_type_definitions,
-    render_enum_type_definitions,
-    render_interface_type_definitions,
-    render_vtable_type_definitions,
-    render_vtable_constants,
-    render_trait_metadata_comments,
-    render_runtime_helper_declarations,
+    render_struct_type_definitions, render_enum_type_definitions,
+    render_trait_metadata_comments, render_runtime_helper_declarations,
     render_imported_function_declarations,
-    should_internalize_function,
-    find_function_by_name,
 } from "../rendering";
+import {
+    render_test_harness_main, collect_exported_symbol_names,
+    render_interface_type_definitions, render_vtable_type_definitions,
+    render_vtable_constants, should_internalize_function, find_function_by_name,
+} from "../rendering_helpers";
 
 import {
     fixup_enum_layouts,
