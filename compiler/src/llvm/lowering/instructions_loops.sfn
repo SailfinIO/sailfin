@@ -68,6 +68,7 @@ import {
 
 import {
     get_instruction_tag,
+    get_instruction_condition,
 } from "./lowering_native_helpers";
 
 fn collect_loop_structure(
@@ -197,15 +198,20 @@ fn lower_loop_instruction(
     // Detect exit-condition-at-top pattern: loop { if COND { break; } ... }
     // If the first instruction in the body is If, followed by Break, followed by EndIf,
     // extract the condition so we can emit a conditional branch in the loop header.
+    //
+    // For the If check (tag 3), get_instruction_tag returns 21 (data-carrying variant
+    // fallback) because match-on-enum is not yet supported (#50). Instead, we check
+    // that the second instruction is Break (tag 10) and third is EndIf (tag 5) — both
+    // fieldless variants detected exactly — and then extract the condition from the
+    // first instruction. If it's non-empty, we have the pattern.
     let mut loop_exit_condition -> string = "";
     if structure.body_start + 2 <= structure.body_end {
-        let first_body_tag = get_instruction_tag(function.instructions, structure.body_start);
-        if first_body_tag == 3 {
-            let second_body_tag = get_instruction_tag(function.instructions, structure.body_start + 1);
-            if second_body_tag == 10 {
-                let third_body_tag = get_instruction_tag(function.instructions, structure.body_start + 2);
-                if third_body_tag == 5 {
-                    let raw_exit_cond = trim_text(function.instructions[structure.body_start].condition);
+        let second_body_tag = get_instruction_tag(function.instructions, structure.body_start + 1);
+        if second_body_tag == 10 {
+            let third_body_tag = get_instruction_tag(function.instructions, structure.body_start + 2);
+            if third_body_tag == 5 {
+                let raw_exit_cond = trim_text(get_instruction_condition(function.instructions, structure.body_start));
+                if raw_exit_cond.length > 0 {
                     loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
                     if debug_loop {
                         print("emit-llvm: lower_loop detected exit condition: " + loop_exit_condition);
