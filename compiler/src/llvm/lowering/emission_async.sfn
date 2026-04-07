@@ -178,7 +178,7 @@ fn emit_async_function(
         tramp_temp += 1;
         wrapper_lines.push("  " + tramp_ctx + " = bitcast i8* %ctx_raw to " + ctx_ptr_type);
 
-        let mut loaded_args -> LLVMOperand[] = [];
+        let mut arg_texts -> string[] = [];
         let mut load_index -> number = 0;
         loop {
             if load_index >= preparation.bindings.length { break; }
@@ -189,16 +189,8 @@ fn emit_async_function(
             let loaded = format_temp_name(tramp_temp);
             tramp_temp += 1;
             wrapper_lines.push("  " + loaded + " = load " + binding.llvm_type + ", " + binding.llvm_type + "* " + field_ptr);
-            loaded_args.push(LLVMOperand { llvm_type: binding.llvm_type, value: loaded });
+            arg_texts.push(binding.llvm_type + " " + loaded);
             load_index += 1;
-        }
-
-        let mut arg_texts -> string[] = [];
-        let mut arg_i -> number = 0;
-        loop {
-            if arg_i >= loaded_args.length { break; }
-            arg_texts.push(loaded_args[arg_i].llvm_type + " " + loaded_args[arg_i].value);
-            arg_i += 1;
         }
         let call_args = join_with_separator(arg_texts, ", ");
 

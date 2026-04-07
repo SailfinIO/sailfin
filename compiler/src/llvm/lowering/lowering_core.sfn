@@ -178,7 +178,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
         return base;
     }
 
-    let mut tests -> NativeFunction[] = [];
+    let mut test_count -> number = 0;
     let mut has_main -> boolean = false;
 
     let mut index -> number = 0;
@@ -186,19 +186,18 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
         if index >= parse.functions.length {
             break;
         }
-        let fun = parse.functions[index];
-        if fun.name == "main" {
+        if parse.functions[index].name == "main" {
             has_main = true;
         }
-        if fun.name.length >= 5 {
-            if substring(fun.name, 0, 5) == "test:" {
-                tests = tests.push(fun);
+        if parse.functions[index].name.length >= 5 {
+            if substring(parse.functions[index].name, 0, 5) == "test:" {
+                test_count += 1;
             }
         }
         index += 1;
     }
 
-    if tests.length == 0 {
+    if test_count == 0 {
         return base;
     }
 
@@ -208,10 +207,25 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
         return updated;
     }
 
-    let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
+    // Build test harness inline using string arrays only
+    // (avoids struct .push() and struct .concat() which produce unresolvable symbols)
+    let mut harness -> string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
+    let mut ti -> number = 0;
+    loop {
+        if ti >= parse.functions.length { break; }
+        if parse.functions[ti].name.length >= 5 {
+            if substring(parse.functions[ti].name, 0, 5) == "test:" {
+                let sym = sanitize_symbol(parse.functions[ti].name);
+                harness = extend_string_lines(harness, ["  call void @" + sym + "()"]);
+            }
+        }
+        ti += 1;
+    }
+    harness = extend_string_lines(harness, ["  ret i32 0", "}"]);
+
     let mut updated = base;
     if updated.lines.length > 0 {
-        updated.lines.push("");
+        updated.lines = extend_string_lines(updated.lines, [""]);  
     }
     updated.lines = extend_string_lines(updated.lines, harness);
     return updated;
@@ -637,11 +651,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     if module_preamble_lines.length > 0 {
         lines = extend_string_lines(lines, module_preamble_lines);
-        lines.push("");
+        lines = extend_string_lines(lines, [""]);
     }
     if module_init_lines.length > 0 {
         lines = extend_string_lines(lines, module_init_lines);
-        lines.push("");
+        lines = extend_string_lines(lines, [""]);
     }
     if trace {
         print("test llvm: module globals lowered");

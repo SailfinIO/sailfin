@@ -29,6 +29,7 @@ import {
 } from "../../native_ir_api";
 import { split_lines } from "../../native_ir_utils_text";
 import { substring, char_code } from "../../string_utils";
+import { extend_string_lines } from "./lowering_io";
 
 import {
     TypeContext,
@@ -177,9 +178,7 @@ fn is_test_module_slug(module_name -> string) -> boolean {
 }
 
 fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug -> string, mangle_symbols -> boolean) -> string[] {
-    let mut lines -> string[] = [];
-    lines.push("define i32 @main(i32 %argc, i8** %argv) {");
-    lines.push("entry:");
+    let mut lines -> string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
 
     let mut _let264 -> boolean = false;
     if mangle_symbols {
@@ -201,11 +200,10 @@ fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug ->
                 sym = sym + "__" + module_suffix;
             }
         }
-        lines.push("  call void @" + sym + "()");
+        lines = extend_string_lines(lines, ["  call void @" + sym + "()"]);
         index += 1;
     }
-    lines.push("  ret i32 0");
-    lines.push("}");
+    lines = extend_string_lines(lines, ["  ret i32 0", "}"]);
     return lines;
 }
 
@@ -590,7 +588,7 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                                     if angle_depth == 0 {
                                         let part = trim_text(substring(params_text, start_index, scan));
                                         if part.length > 0 {
-                                            parts.push(part);
+                                            parts = parts.concat([part]);
                                         }
                                         start_index = scan + 1;
                                     }
@@ -600,7 +598,7 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                         }
                         let final_part = trim_text(substring(params_text, start_index, params_text.length));
                         if final_part.length > 0 {
-                            parts.push(final_part);
+                            parts = parts.concat([final_part]);
                         }
                         return DeclareSignature { return_type: ret_type, param_types: parts };
                     }
@@ -622,14 +620,14 @@ fn render_function_shim(export_symbol -> string, target_symbol -> string, signat
         }
         let ty = trim_text(signature.param_types[idx]);
         if ty == "..." {
-            param_decls.push("...");
+            param_decls = param_decls.concat(["..."]);
             // Varargs shims are not supported; omit forwarding.
             idx += 1;
             continue;
         }
         let name = "%a" + number_to_string(idx);
-        param_decls.push(ty + " " + name);
-        call_args.push(ty + " " + name);
+        param_decls = param_decls.concat([ty + " " + name]);
+        call_args = call_args.concat([ty + " " + name]);
         idx += 1;
     }
 
@@ -684,11 +682,11 @@ fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[
                 if j >= inserted.length {
                     break;
                 }
-                out.push(inserted[j]);
+                out = out.concat([inserted[j]]);
                 j += 1;
             }
         }
-        out.push(lines[i]);
+        out = out.concat([lines[i]]);
         i += 1;
     }
     if footer_index == lines.length {
@@ -697,7 +695,7 @@ fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[
             if j >= inserted.length {
                 break;
             }
-            out.push(inserted[j]);
+            out = out.concat([inserted[j]]);
             j += 1;
         }
     }

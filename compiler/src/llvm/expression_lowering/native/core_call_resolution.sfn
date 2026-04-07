@@ -166,47 +166,53 @@ fn resolve_call_method_target(
     }
 
     // Defuse fused push targets (e.g. `loaded_argspush(x)` → `push`)
-    if ends_with(canonical_fused, "push") {
-        if canonical_fused.length > 4 {
-            let push_receiver_name = trim_text(substring(canonical_fused, 0, canonical_fused.length - 4));
-            if push_receiver_name.length > 0 {
-                if is_simple_identifier(push_receiver_name) {
-                    let push_local = find_local_binding(locals, push_receiver_name);
-                    let push_param = find_parameter_binding(bindings, push_receiver_name);
-                    let mut push_receiver_operand -> LLVMOperand? = null;
-
-                    if push_local != null {
-                        let push_load_result = load_local_operand(push_local, result_temp, result_lines);
-                        let mut _pci0 -> number = 0;
-                        loop {
-                            if _pci0 >= push_load_result.diagnostics.length { break; }
-                            result_diagnostics.push(push_load_result.diagnostics[_pci0]);
-                            _pci0 += 1;
-                        }
-                        result_lines = push_load_result.lines;
-                        result_temp = push_load_result.temp_index;
-                        push_receiver_operand = push_load_result.operand;
-                    }
-                    if push_param != null {
-                        if push_receiver_operand == null {
-                            push_receiver_operand = LLVMOperand { llvm_type: push_param.llvm_type, value: push_param.llvm_name };
-                        }
-                    }
-
-                    if push_receiver_operand != null {
-                        method_operand = push_receiver_operand;
-                        injected_argument_count = 1;
-                        result_target = "push";
-
-                        let push_receiver_type = trim_text(push_receiver_operand.llvm_type);
-                        let push_element_type = array_pointer_element_type(push_receiver_type);
-                        if push_element_type.length > 0 {
-                            is_array_push = true;
-                            array_push_element_type = push_element_type;
-                        }
-                    }
-                }
-            }
+    // FLAT structure — NO nested ifs — to survive seed degenerate-if bug.
+    let mut _push_score -> number = 0;
+    if ends_with(canonical_fused, "push") { _push_score += 1; }
+    if canonical_fused.length > 4 { _push_score += 1; }
+    let mut _push_receiver_name -> string = "";
+    if _push_score >= 2 {
+        _push_receiver_name = trim_text(substring(canonical_fused, 0, canonical_fused.length - 4));
+    }
+    if _push_receiver_name.length > 0 { _push_score += 1; }
+    let mut _push_is_ident -> boolean = false;
+    if _push_score >= 3 {
+        _push_is_ident = is_simple_identifier(_push_receiver_name);
+    }
+    if _push_is_ident { _push_score += 1; }
+    let mut _push_local -> LocalBinding? = null;
+    let mut _push_param -> ParameterBinding? = null;
+    if _push_score >= 4 {
+        _push_local = find_local_binding(locals, _push_receiver_name);
+        _push_param = find_parameter_binding(bindings, _push_receiver_name);
+    }
+    let mut _push_receiver_operand -> LLVMOperand? = null;
+    if _push_local != null {
+        let push_load_result = load_local_operand(_push_local, result_temp, result_lines);
+        let mut _pci0 -> number = 0;
+        loop {
+            if _pci0 >= push_load_result.diagnostics.length { break; }
+            result_diagnostics.push(push_load_result.diagnostics[_pci0]);
+            _pci0 += 1;
+        }
+        result_lines = push_load_result.lines;
+        result_temp = push_load_result.temp_index;
+        _push_receiver_operand = push_load_result.operand;
+    }
+    if _push_param != null {
+        if _push_receiver_operand == null {
+            _push_receiver_operand = LLVMOperand { llvm_type: _push_param.llvm_type, value: _push_param.llvm_name };
+        }
+    }
+    if _push_receiver_operand != null {
+        method_operand = _push_receiver_operand;
+        injected_argument_count = 1;
+        result_target = "push";
+        let push_receiver_type = trim_text(_push_receiver_operand.llvm_type);
+        let push_element_type = array_pointer_element_type(push_receiver_type);
+        if push_element_type.length > 0 {
+            is_array_push = true;
+            array_push_element_type = push_element_type;
         }
     }
 

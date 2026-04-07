@@ -207,10 +207,10 @@ fn _parse_toml_internal(text -> string) -> SailToml {
             if strings_equal(stripped_key, "entry") { toml.entry = stripped_value; }
         }
         if strings_equal(section, "dependencies") {
-            toml.dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
+            toml.dependencies = toml.dependencies.concat([TomlDependency { capsule: stripped_key, version: stripped_value }]);
         }
         if strings_equal(section, "dev-dependencies") {
-            toml.dev_dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
+            toml.dev_dependencies = toml.dev_dependencies.concat([TomlDependency { capsule: stripped_key, version: stripped_value }]);
         }
         if strings_equal(section, "capabilities") {
             if strings_equal(stripped_key, "allow") {
@@ -271,7 +271,7 @@ fn toml_add_dependency(toml_text -> string, capsule -> string, version -> string
         di += 1;
     }
     if !found {
-        t.dependencies.push(TomlDependency { capsule: capsule, version: version });
+        t.dependencies = t.dependencies.concat([TomlDependency { capsule: capsule, version: version }]);
     }
     return _write_toml(t);
 }
@@ -290,7 +290,7 @@ fn toml_add_dev_dependency(toml_text -> string, capsule -> string, version -> st
         di += 1;
     }
     if !found {
-        t.dev_dependencies.push(TomlDependency { capsule: capsule, version: version });
+        t.dev_dependencies = t.dev_dependencies.concat([TomlDependency { capsule: capsule, version: version }]);
     }
     return _write_toml(t);
 }
