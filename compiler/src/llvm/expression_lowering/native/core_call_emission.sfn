@@ -360,6 +360,14 @@ fn coerce_and_emit_call(
     if helper_descriptor != null {
         call_symbol = helper_descriptor.symbol;
     }
+    // When concat resolves with no helper_descriptor (common for method
+    // dispatch paths that set helper_descriptor: null), fall back to the
+    // canonical runtime symbol so we don't emit a bare @concat.
+    if trimmed_target == "concat" {
+        if call_symbol == "concat" {
+            call_symbol = "sailfin_runtime_concat";
+        }
+    }
     if _trace_ccl {
         print("call_lowering: checkpoint-G llvm_return=" + llvm_return + " call_symbol=" + call_symbol);
     }

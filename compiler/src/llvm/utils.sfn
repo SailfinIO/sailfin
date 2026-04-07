@@ -4,6 +4,8 @@
 // string manipulation, array helpers, and parsing utilities.
 
 import { substring, char_code, char_at as string_char_at } from "../string_utils";
+// NOTE: `char_at as string_char_at` alias kept — utils.sfn has its own local
+// `char_at` wrapper that delegates to `string_char_at`, avoiding name collision.
 import { ParameterBinding } from "./types";
 
 // =============================================================================

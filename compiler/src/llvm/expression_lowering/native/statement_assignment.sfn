@@ -4,7 +4,7 @@
 // under ~500 .sfn-asm instructions (avoids seed OOM).
 
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../../native_ir";
-import { substring, index_of as str_index_of } from "../../../string_utils";
+import { substring, index_of } from "../../../string_utils";
 
 import { lower_expression, analyze_value_ownership } from "./core";
 import { coerce_operand_to_type } from "./core_operands";
@@ -27,7 +27,7 @@ import {
 
 import {
     trim_text, starts_with, number_to_string,
-    append_parameter_binding, index_of,
+    append_parameter_binding, find_parameter_binding,
 } from "../../utils";
 
 import {
@@ -50,9 +50,7 @@ import {
     find_struct_field_index,
 } from "../../type_context_queries";
 
-import {
-    find_parameter_binding as utils_find_parameter_binding,
-} from "../../utils";
+
 
 import {
     array_pointer_element_type,
@@ -301,7 +299,7 @@ fn lower_lvalue_assignment_stmt(
                             base_pointer_type = local_pointer.llvm_type + "*";
                             base_pointer_value = local_pointer.pointer;
                         } else {
-                            let parameter_pointer = utils_find_parameter_binding(current_bindings, base_name);
+                            let parameter_pointer = find_parameter_binding(current_bindings, base_name);
                             if parameter_pointer != null {
                                 if ends_with_pointer_suffix(parameter_pointer.llvm_type) {
                                     base_pointer_type = parameter_pointer.llvm_type;

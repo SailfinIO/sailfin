@@ -692,6 +692,7 @@ declare { i8**, i64 }* @sailfin_adapter_fs_list_directory(i8*)
 declare i1 @sailfin_adapter_fs_delete_file(i8*)
 declare i1 @sailfin_adapter_fs_create_directory(i8*, i1)
 declare double @sailfin_runtime_process_run({ i8**, i64 }*)
+declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 RUNTIME_DECLS
 
 # For each module, find called-but-undeclared symbols and inject declares.
