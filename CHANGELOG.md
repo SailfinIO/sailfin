@@ -1,6 +1,135 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.16 (2026-04-07)
+
+### Bug Fixes
+
+- Declare/define, field constants
+  ([`3834086`](https://github.com/SailfinIO/sailfin/commit/38340869ec1fccaec91fffb9ebd5093babcfd119))
+
+- Fused push
+  ([`9be9177`](https://github.com/SailfinIO/sailfin/commit/9be9177cbfcafa5a50e845d0bd28f74d0da6f649))
+
+- Import alias
+  ([`e31a869`](https://github.com/SailfinIO/sailfin/commit/e31a869486867e14ae3058bfd08161a8824d1d91))
+
+- Match arms
+  ([`6de9357`](https://github.com/SailfinIO/sailfin/commit/6de9357db090f470b23d9e5354250bcdfbe6ba0a))
+
+- Parameter binding
+  ([`f0a3bba`](https://github.com/SailfinIO/sailfin/commit/f0a3bba340e2980c657998f26d95d1909eb3b46a))
+
+- Partial ssa dupe fix
+  ([`12a149e`](https://github.com/SailfinIO/sailfin/commit/12a149efa4df2de61186e23b9d5dbfc647f9aa5d))
+
+- Populate module enums in parse results for enum variant lowering
+  ([`bbf71c4`](https://github.com/SailfinIO/sailfin/commit/bbf71c47377ea6b8cf3e448e41cbb208670d10fa))
+
+- Remove fixups
+  ([`dac33df`](https://github.com/SailfinIO/sailfin/commit/dac33df864a6a4cd54f746bbfbc891f8478b5cac))
+
+- Ssa dupe fix
+  ([`321b9b0`](https://github.com/SailfinIO/sailfin/commit/321b9b06752f8109ea6d8f1f2a920f131f0b0406))
+
+- String operations to reduce memory footprint
+  ([`86befa6`](https://github.com/SailfinIO/sailfin/commit/86befa650f29626e04559e3ec5f5a82969cdaa5f))
+
+- **compiler**: Add missing runtime helper declares to hardcoded list
+  ([`cb7fe08`](https://github.com/SailfinIO/sailfin/commit/cb7fe0814abc98198ff6bdf7964caf9902be88b5))
+
+The LLVM lowering skips dynamic runtime helper collection (skip_effects=true) and uses a hardcoded
+  list instead. Many runtime prelude bindings (runtime_array_filter_fn, runtime_is_*_fn,
+  runtime_create_*, etc.) were missing from this list, causing 'use of undefined value' errors
+  during seedcheck build.
+
+Adds all 26 missing runtime helper targets plus concat and string.to_number to the unconditional
+  helper list.
+
+- **compiler**: Cap transitive imports + bulk file IPC — 85-92% memory reduction
+  ([`6cc02ab`](https://github.com/SailfinIO/sailfin/commit/6cc02ab21181e29d21229ac342a80dd28177ede9))
+
+Root causes fixed: 1. Transitive import BFS in imports.sfn loaded 90 modules (2.3 MB) of full native
+  text for lowering_core. Capped BFS to depth 1: direct imports get full native text, depth-1
+  imports only get layout manifests (struct/enum).
+
+2. Per-element file IPC (let_result_line_0, _1, ...) created hundreds of tiny files per instruction
+  with O(N²) string joins on read-back. Replaced with bulk fs.writeLines / fs.readFile +
+  split_lines_local in 7 files.
+
+3. build.sh: added empty-param declare cleanup (Step 3.51) and 9 missing C runtime function
+  declarations.
+
+Results (peak RSS, top 6 modules): lowering_core: 12,996 → 978 MB (92%, was OOM/exit 139)
+
+instructions_for_range: 10,712 → 873 MB (91%)
+
+instructions_if: 7,201 → 774 MB (89%)
+
+emission: 5,774 → 816 MB (85%)
+
+lowering_phase_functions: 2,296 → 432 MB (81%)
+
+instructions: 1,490 → 816 MB (45%)
+
+All 120 modules compile. All tests pass (29 unit + 8 integration + e2e).
+
+- **compiler**: Prevent declare-vs-define conflicts for runtime helper aliases
+  ([`7bd554c`](https://github.com/SailfinIO/sailfin/commit/7bd554c3d23d8454b63f435698be3f203426ad67))
+
+render_runtime_helper_declarations() emits declares for both the long symbol
+  (sailfin_runtime_append_string) and the short target alias (append_string). When a module also
+  defines a local function with the same name as the alias, LLVM rejects the duplicate.
+
+Fix: check local_symbols before emitting the alias declare. Also add target names to helper_symbols
+  in render_imported_function_declarations so imported functions with the same name as runtime
+  aliases are skipped.
+
+- **compiler**: Rewrite for-in loops to manual loop blocks in typecheck_types
+  ([`2a66907`](https://github.com/SailfinIO/sailfin/commit/2a66907cf71fefb63f69811a5552ac189d6fe19f))
+
+Rewrites all 13 for-in loops to manual loop blocks with index tracking to avoid type confusion in
+  LLVM lowering where loop index (double) was passed where element field (i8*) was expected. Also
+  replaces .push() with .concat() to prevent SSA duplication.
+
+### Chores
+
+- **deps**: Bump github/gh-aw-actions from 0.67.1 to 0.67.2
+  ([`889b8cd`](https://github.com/SailfinIO/sailfin/commit/889b8cd126220fa08e533e477fa26209e739892b))
+
+Bumps [github/gh-aw-actions](https://github.com/github/gh-aw-actions) from 0.67.1 to 0.67.2. -
+  [Release notes](https://github.com/github/gh-aw-actions/releases) -
+  [Changelog](https://github.com/github/gh-aw-actions/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/github/gh-aw-actions/compare/addd8a8bc8bad66050cec907c7bf182cca4d2e69...3922978bff4d7cf117e185580ad108da5a0134d8)
+
+--- updated-dependencies: - dependency-name: github/gh-aw-actions dependency-version: 0.67.2
+
+dependency-type: direct:production
+
+update-type: version-update:semver-patch ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump vite from 7.3.1 to 7.3.2 in /site
+  ([`5fad5f1`](https://github.com/SailfinIO/sailfin/commit/5fad5f17c84d7113fa515e46c8dd7f04354f2fc0))
+
+Bumps [vite](https://github.com/vitejs/vite/tree/HEAD/packages/vite) from 7.3.1 to 7.3.2. - [Release
+  notes](https://github.com/vitejs/vite/releases) -
+  [Changelog](https://github.com/vitejs/vite/blob/v7.3.2/packages/vite/CHANGELOG.md) -
+  [Commits](https://github.com/vitejs/vite/commits/v7.3.2/packages/vite)
+
+--- updated-dependencies: - dependency-name: vite dependency-version: 7.3.2
+
+dependency-type: indirect ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Documentation
+
+- Copilot instructions
+  ([`05be8c8`](https://github.com/SailfinIO/sailfin/commit/05be8c819b28f12e3adfeeac09ed8d4ae51e39a7))
+
+
 ## v0.5.0-alpha.15 (2026-04-06)
 
 ### Bug Fixes
