@@ -439,7 +439,11 @@ stage_import_context() {
     mv "$asm_dest" "$full_dest"
     awk '
     # Always keep module, import, struct, enum, layout declarations
-    /^\.(module|import|struct|enum|end-struct|end-enum|layout|end-layout)/ { print; next }
+    /^\.(module|import|struct|enum|end-struct|end-enum|endenum|endstruct|layout|end-layout)/ { print; next }
+    # Keep indented .layout lines (inside struct/enum blocks)
+    /^[[:space:]]+\.layout / { print; next }
+    # Keep .field and .variant lines (struct/enum body declarations)
+    /^[[:space:]]+\.(field|variant) / { print; next }
     # Keep function signature line (.fn) and end marker (.endfn)
     /^\.fn / { print; infn=1; next }
     /^\.endfn/ { print; infn=0; next }
@@ -679,6 +683,16 @@ declare i1 @sailfin_runtime_has_exception()
 declare void @sailfin_runtime_clear_exception()
 declare double @sailfin_runtime_string_to_number(i8*)
 declare void @sailfin_runtime_log_execution(i8*, i8*)
+declare i1 @sailfin_intrinsic_fs_exists(i8*)
+declare i8* @sailfin_adapter_fs_read_file(i8*)
+declare void @sailfin_adapter_fs_write_file(i8*, i8*)
+declare void @sailfin_adapter_fs_append_file(i8*, i8*)
+declare void @sailfin_adapter_fs_write_lines(i8*, { i8**, i64 }*)
+declare { i8**, i64 }* @sailfin_adapter_fs_list_directory(i8*)
+declare i1 @sailfin_adapter_fs_delete_file(i8*)
+declare i1 @sailfin_adapter_fs_create_directory(i8*, i1)
+declare double @sailfin_runtime_process_run({ i8**, i64 }*)
+declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
 RUNTIME_DECLS
 
 # For each module, find called-but-undeclared symbols and inject declares.

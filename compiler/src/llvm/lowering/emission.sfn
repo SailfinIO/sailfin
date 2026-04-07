@@ -843,45 +843,20 @@ fn emit_body(
 // making .lines point to garbage. This mirrors the BlockLoweringResult file IPC
 // pattern already used by lower_instruction_range / emit_body.
 fn _write_lowered_function_files(lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) ![io] {
-    // Join all lines into a single string and write once.
-    // The seed compiler drops expression statements (like fs.appendFile) inside
-    // loop bodies, so we must accumulate into a variable (assignments work) and
-    // write after the loop.
-    let mut joined_lines -> string = "";
-    let mut li -> number = 0;
-    loop {
-        if li >= lines.length { break; }
-        if li > 0 {
-            joined_lines = joined_lines + "\n";
-        }
-        joined_lines = joined_lines + lines[li];
-        li = li + 1;
-    }
-    fs.writeFile("build/sailfin/.lowered_fn_lines", joined_lines);
+    // Use fs.writeLines to avoid O(N²) string concatenation.
+    // fs.writeLines writes each element + "\n"; _split_by_newline handles trailing newlines.
+    fs.writeLines("build/sailfin/.lowered_fn_lines", lines);
+    fs.writeLines("build/sailfin/.lowered_fn_diagnostics", diagnostics);
 
-    let mut joined_diags -> string = "";
-    let mut di -> number = 0;
-    loop {
-        if di >= diagnostics.length { break; }
-        if di > 0 {
-            joined_diags = joined_diags + "\n";
-        }
-        joined_diags = joined_diags + diagnostics[di];
-        di = di + 1;
-    }
-    fs.writeFile("build/sailfin/.lowered_fn_diagnostics", joined_diags);
-
-    let mut joined_sc -> string = "";
+    // Serialize string constants: build array of "name\tcontent\tbyte_count" lines.
+    let mut sc_lines -> string[] = [];
     let mut si -> number = 0;
     loop {
         if si >= string_constants.length { break; }
-        if si > 0 {
-            joined_sc = joined_sc + "\n";
-        }
-        joined_sc = joined_sc + string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count);
+        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count));
         si = si + 1;
     }
-    fs.writeFile("build/sailfin/.lowered_fn_string_constants", joined_sc);
+    fs.writeLines("build/sailfin/.lowered_fn_string_constants", sc_lines);
 }
 
 // Parse serialized string constants from the file written by _write_block_result_files.

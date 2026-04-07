@@ -16,7 +16,12 @@ import {
 import {
     trim_text,
     append_string,
+    ends_with,
 } from "../utils";
+
+import {
+    strip_pointer_suffix,
+} from "../type_mapping";
 
 import {
     format_temp_name,
@@ -203,7 +208,21 @@ fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element
     let slot_typed = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + slot_typed + " = bitcast i8* " + slot_i8 + " to " + element_type + "*");
-    current_lines.push("  store " + element_type + " " + value.value + ", " + element_type + "* " + slot_typed);
+
+    // When the value operand is a pointer to the element type (common for
+    // nullable struct fields like `coerced.operand` of type `LLVMOperand?`),
+    // dereference it before storing.
+    let mut store_value = value.value;
+    if ends_with(value.llvm_type, "*") {
+        let deref_base = strip_pointer_suffix(value.llvm_type);
+        if deref_base == element_type {
+            let deref_temp = format_temp_name(current_temp);
+            current_temp += 1;
+            current_lines.push("  " + deref_temp + " = load " + element_type + ", " + value.llvm_type + " " + value.value);
+            store_value = deref_temp;
+        }
+    }
+    current_lines.push("  store " + element_type + " " + store_value + ", " + element_type + "* " + slot_typed);
 
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: array, diagnostics: diagnostics, string_constants: [] };
 }

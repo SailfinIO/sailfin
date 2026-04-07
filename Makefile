@@ -274,7 +274,7 @@ check:
 	@echo "[check] running test suite on first-pass binary (early gate)..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin
 	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
-	@echo "[check] verifying seed selfhost (always uses build.sh — no fixups)..."
+	@echo "[check] verifying seed selfhost..."
 	@SEED="build/native/sailfin" OUT="build/native/sailfin-seedcheck" OPT="-O0" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
 		bash scripts/build.sh
 	@echo "[check] validating seedcheck binary can run programs..."

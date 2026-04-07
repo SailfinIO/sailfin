@@ -4,7 +4,7 @@
 // under ~500 .sfn-asm instructions (avoids seed OOM).
 
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../../native_ir";
-import { substring, index_of as str_index_of } from "../../../string_utils";
+import { substring, index_of } from "../../../string_utils";
 
 import { lower_expression, analyze_value_ownership } from "./core";
 import { coerce_operand_to_type } from "./core_operands";
@@ -27,7 +27,7 @@ import {
 
 import {
     trim_text, starts_with, number_to_string,
-    append_parameter_binding, index_of,
+    append_parameter_binding, find_parameter_binding,
 } from "../../utils";
 
 import {
@@ -50,9 +50,7 @@ import {
     find_struct_field_index,
 } from "../../type_context_queries";
 
-import {
-    find_parameter_binding as utils_find_parameter_binding,
-} from "../../utils";
+
 
 import {
     array_pointer_element_type,
@@ -65,6 +63,57 @@ import {
     bindings_update_local_ownership,
 } from "../bindings";
 
+// Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
+// when returned from cross-module calls. Scan lines for the highest %tN
+// definition and use max(found+1, floor) as the recovered counter.
+fn _recover_assign_temp(lines -> string[], floor -> number) -> number {
+    let mut result -> number = floor;
+    let mut ri -> number = 0;
+    loop {
+        if ri >= lines.length { break; }
+        let rl = lines[ri];
+        if starts_with(rl, "  %t") {
+            let after_t = substring(rl, 4, rl.length);
+            let space = index_of(after_t, " ");
+            if space > 0 {
+                let num_str = substring(after_t, 0, space);
+                let rn = _assign_parse_int(num_str);
+                if rn >= result {
+                    result = rn + 1;
+                }
+            }
+        }
+        ri += 1;
+    }
+    return result;
+}
+
+fn _assign_parse_int(text -> string) -> number {
+    let len = text.length;
+    if len == 0 { return 0; }
+    let mut result -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= len { break; }
+        let ch = substring(text, i, i + 1);
+        let mut digit -> number = -1;
+        if ch == "0" { digit = 0; }
+        if ch == "1" { digit = 1; }
+        if ch == "2" { digit = 2; }
+        if ch == "3" { digit = 3; }
+        if ch == "4" { digit = 4; }
+        if ch == "5" { digit = 5; }
+        if ch == "6" { digit = 6; }
+        if ch == "7" { digit = 7; }
+        if ch == "8" { digit = 8; }
+        if ch == "9" { digit = 9; }
+        if digit < 0 { break; }
+        result = result * 10 + digit;
+        i += 1;
+    }
+    return result;
+}
+
 fn _write_assign_result_files(
     pre_lines_count -> number,
     lines -> string[],
@@ -75,13 +124,14 @@ fn _write_assign_result_files(
 ) ![io] {
     let new_count = lines.length - pre_lines_count;
     fs.writeFile("build/sailfin/.call_result_lines_count", number_to_string(lines.length));
-    let mut wi -> number = 0;
-    loop {
-        if wi >= lines.length { break; }
-        fs.writeFile("build/sailfin/.call_result_line_" + number_to_string(wi), lines[wi]);
-        wi += 1;
-    }
+    // Write all lines as bulk array
+    fs.writeLines("build/sailfin/.call_result_lines", lines);
     fs.writeFile("build/sailfin/.call_result_temp", number_to_string(temp_index));
+    // Also write to .expr_stmt_temp_index — the caller in instructions.sfn reads
+    // this file for temp counter recovery.  Without this, lvalue assignments
+    // (struct field mutations like state.index += 1) leave a stale counter and
+    // the next statement reuses the same %tN temporaries.
+    fs.writeFile("build/sailfin/.expr_stmt_temp_index", number_to_string(temp_index));
     fs.writeFile("build/sailfin/.expr_stmt_mutation_count", number_to_string(mutations.length));
     let mut mi -> number = 0;
     loop {
@@ -151,6 +201,7 @@ fn lower_lvalue_assignment_stmt(
         string_constants = lowered_value.string_constants;
         current_lines = lowered_value.lines;
         current_temp = lowered_value.temp_index;
+        current_temp = _recover_assign_temp(current_lines, current_temp);
         if lowered_value.operand == null {
             diagnostics.push("llvm lowering: failed to lower assignment value for deref target `" + assign_target + "`");
             _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
@@ -171,6 +222,7 @@ fn lower_lvalue_assignment_stmt(
         }
         current_lines = lowered_ptr.lines;
         current_temp = lowered_ptr.temp_index;
+        current_temp = _recover_assign_temp(current_lines, current_temp);
         if lowered_ptr.operand == null {
             diagnostics.push("llvm lowering: deref assignment pointer `" + pointer_text + "` produced no value");
             _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
@@ -191,6 +243,7 @@ fn lower_lvalue_assignment_stmt(
         }
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
+        current_temp = _recover_assign_temp(current_lines, current_temp);
         if coerced.operand == null {
             diagnostics.push("llvm lowering: unable to coerce deref assignment value to `" + element_type + "`");
             _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
@@ -218,6 +271,7 @@ fn lower_lvalue_assignment_stmt(
         string_constants = lowered.string_constants;
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
+        current_temp = _recover_assign_temp(current_lines, current_temp);
         if lowered.operand == null {
             diagnostics.push("llvm lowering: failed to lower assignment value for member `" + assign_target + "`");
         } else {
@@ -230,6 +284,7 @@ fn lower_lvalue_assignment_stmt(
             }
             current_lines = base_result.lines;
             current_temp = base_result.temp_index;
+            current_temp = _recover_assign_temp(current_lines, current_temp);
             if base_result.operand == null {
                 diagnostics.push("llvm lowering: member access assignment base `" + member_parse.base + "` produced no value");
             } else {
@@ -244,7 +299,7 @@ fn lower_lvalue_assignment_stmt(
                             base_pointer_type = local_pointer.llvm_type + "*";
                             base_pointer_value = local_pointer.pointer;
                         } else {
-                            let parameter_pointer = utils_find_parameter_binding(current_bindings, base_name);
+                            let parameter_pointer = find_parameter_binding(current_bindings, base_name);
                             if parameter_pointer != null {
                                 if ends_with_pointer_suffix(parameter_pointer.llvm_type) {
                                     base_pointer_type = parameter_pointer.llvm_type;
@@ -278,6 +333,7 @@ fn lower_lvalue_assignment_stmt(
                         }
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
+                        current_temp = _recover_assign_temp(current_lines, current_temp);
                         if coerced.operand != null {
                             let field_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
@@ -309,6 +365,7 @@ fn lower_lvalue_assignment_stmt(
         string_constants = lowered.string_constants;
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
+        current_temp = _recover_assign_temp(current_lines, current_temp);
         if lowered.operand == null {
             diagnostics.push("llvm lowering: failed to lower assignment value for array index `" + assign_target + "`");
         } else {
@@ -321,6 +378,7 @@ fn lower_lvalue_assignment_stmt(
             }
             current_lines = base_result.lines;
             current_temp = base_result.temp_index;
+            current_temp = _recover_assign_temp(current_lines, current_temp);
             if base_result.operand == null {
                 diagnostics.push("llvm lowering: array index assignment base `" + index_parse.base + "` produced no value");
             } else {
@@ -333,6 +391,7 @@ fn lower_lvalue_assignment_stmt(
                 }
                 current_lines = index_result.lines;
                 current_temp = index_result.temp_index;
+                current_temp = _recover_assign_temp(current_lines, current_temp);
                 if index_result.operand == null {
                     diagnostics.push("llvm lowering: array index `" + index_parse.index + "` produced no value");
                 } else {
@@ -349,6 +408,7 @@ fn lower_lvalue_assignment_stmt(
                         }
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
+                        current_temp = _recover_assign_temp(current_lines, current_temp);
                         if coerced.operand != null {
                             let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines);
                             let mut _ci10 -> number = 0;
@@ -359,6 +419,7 @@ fn lower_lvalue_assignment_stmt(
                             }
                             current_lines = coerced_index.lines;
                             current_temp = coerced_index.temp_index;
+                            current_temp = _recover_assign_temp(current_lines, current_temp);
                             if coerced_index.operand == null {
                                 diagnostics.push("llvm lowering: unable to coerce array index to i64 for `" + assign_target + "`");
                                 _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
@@ -537,15 +598,9 @@ fn preprocess_self_field_access(
     // Write results to files for caller to read back
     fs.writeFile("build/sailfin/.self_field_expr", result_expr);
     fs.writeFile("build/sailfin/.self_field_temp", number_to_string(result_temp));
-    // Write new lines that were added
-    let new_lines_count = result_lines.length;
-    fs.writeFile("build/sailfin/.self_field_lines_count", number_to_string(new_lines_count));
-    let mut _wli -> number = 0;
-    loop {
-        if _wli >= new_lines_count { break; }
-        fs.writeFile("build/sailfin/.self_field_line_" + number_to_string(_wli), result_lines[_wli]);
-        _wli += 1;
-    }
+    // Write new lines as bulk array
+    fs.writeFile("build/sailfin/.self_field_lines_count", number_to_string(result_lines.length));
+    fs.writeLines("build/sailfin/.self_field_lines", result_lines);
 }
 
 export { lower_lvalue_assignment_stmt, preprocess_self_field_access };

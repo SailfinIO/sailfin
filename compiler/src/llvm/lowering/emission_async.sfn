@@ -49,17 +49,16 @@ import { emit_llvm_function } from "./emission";
 import { prepare_parameters_from_files } from "./emission";
 
 fn _write_async_lowered_function_files(lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) ![io] {
-    fs.writeFile("build/sailfin/.lowered_fn_lines", join_with_separator(lines, "\n"));
-    fs.writeFile("build/sailfin/.lowered_fn_diagnostics", join_with_separator(diagnostics, "\n"));
-    let mut sc_text -> string = "";
+    fs.writeLines("build/sailfin/.lowered_fn_lines", lines);
+    fs.writeLines("build/sailfin/.lowered_fn_diagnostics", diagnostics);
+    let mut sc_lines -> string[] = [];
     let mut sci -> number = 0;
     loop {
         if sci >= string_constants.length { break; }
-        if sci > 0 { sc_text = sc_text + "\n"; }
-        sc_text = sc_text + string_constants[sci].name + "\t" + string_constants[sci].content + "\t" + number_to_string(string_constants[sci].byte_count);
+        sc_lines.push(string_constants[sci].name + "\t" + string_constants[sci].content + "\t" + number_to_string(string_constants[sci].byte_count));
         sci += 1;
     }
-    fs.writeFile("build/sailfin/.lowered_fn_string_constants", sc_text);
+    fs.writeLines("build/sailfin/.lowered_fn_string_constants", sc_lines);
 }
 
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.
@@ -179,7 +178,7 @@ fn emit_async_function(
         tramp_temp += 1;
         wrapper_lines.push("  " + tramp_ctx + " = bitcast i8* %ctx_raw to " + ctx_ptr_type);
 
-        let mut loaded_args -> LLVMOperand[] = [];
+        let mut arg_texts -> string[] = [];
         let mut load_index -> number = 0;
         loop {
             if load_index >= preparation.bindings.length { break; }
@@ -190,16 +189,8 @@ fn emit_async_function(
             let loaded = format_temp_name(tramp_temp);
             tramp_temp += 1;
             wrapper_lines.push("  " + loaded + " = load " + binding.llvm_type + ", " + binding.llvm_type + "* " + field_ptr);
-            loaded_args.push(LLVMOperand { llvm_type: binding.llvm_type, value: loaded });
+            arg_texts.push(binding.llvm_type + " " + loaded);
             load_index += 1;
-        }
-
-        let mut arg_texts -> string[] = [];
-        let mut arg_i -> number = 0;
-        loop {
-            if arg_i >= loaded_args.length { break; }
-            arg_texts.push(loaded_args[arg_i].llvm_type + " " + loaded_args[arg_i].value);
-            arg_i += 1;
         }
         let call_args = join_with_separator(arg_texts, ", ");
 

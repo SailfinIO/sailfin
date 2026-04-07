@@ -56,8 +56,9 @@ import { format_temp_name } from "../expressions_helpers";
 
 import {
     lower_expression,
-    append_match_arm_mutations,
 } from "../expression_lowering/native/core";
+
+import { append_match_arm_mutations } from "../expression_lowering/native/core_match_helpers";
 
 import {
     emit_boolean_and,
@@ -644,14 +645,14 @@ fn lower_match_instruction(
                         current_lines.push("  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp);
 
                         base_locals.push(LocalBinding {
-                            name: subject_name,
-                            pointer: local_alloca_temp,
-                            llvm_type: payload_type,
-                            type_annotation: "",
-                            ownership: null,
-                            consumed: false,
-                            scope_id: make_child_scope_id(scope_id, body_labels[index]),
-                            scope_depth: scope_depth + 1,
+                                name: subject_name,
+                                pointer: local_alloca_temp,
+                                llvm_type: payload_type,
+                                type_annotation: "",
+                                ownership: null,
+                                consumed: false,
+                                scope_id: make_child_scope_id(scope_id, body_labels[index]),
+                                scope_depth: scope_depth + 1,
                         });
                         base_local_id += 1;
                     }

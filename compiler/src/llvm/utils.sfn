@@ -3,7 +3,7 @@
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
 
-import { substring, char_code, char_at as string_char_at } from "../string_utils";
+import { substring, char_code } from "../string_utils";
 import { ParameterBinding } from "./types";
 
 // =============================================================================
@@ -43,9 +43,12 @@ fn trim_text(value -> string) -> string {
     return substring(value, start, end);
 }
 
-// Local wrapper to ensure a stable symbol for cross-module linking.
+// Local char_at using substring (avoids import alias which the seed can't resolve).
 fn char_at(value -> string, index -> number) -> string {
-    return string_char_at(value, index);
+    if value.length == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= value.length { return ""; }
+    return substring(value, index, index + 1);
 }
 
 fn is_trim_char(ch -> string) -> boolean {

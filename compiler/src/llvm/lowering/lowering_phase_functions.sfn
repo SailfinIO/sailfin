@@ -386,15 +386,7 @@ fn lower_all_functions(
     }
 
     // Write diagnostics and function_effects count to files
-    let mut diag_content -> string = "";
-    let mut di -> number = 0;
-    loop {
-        if di >= diagnostics.length { break; }
-        if di > 0 { diag_content = diag_content + "\n"; }
-        diag_content = diag_content + diagnostics[di];
-        di += 1;
-    }
-    fs.writeFile("build/sailfin/.phase_functions_diagnostics", diag_content);
+    fs.writeLines("build/sailfin/.phase_functions_diagnostics", diagnostics);
 
     // Write function effects count
     fs.writeFile("build/sailfin/.phase_functions_effects_count", number_to_string(function_effects.length));

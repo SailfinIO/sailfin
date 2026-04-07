@@ -161,12 +161,13 @@ fn build_parse_result_from_text(native_text -> string) -> ParseNativeResult {
     let recovered_functions = recover_native_functions_light(native_text);
     let recovered_structs = recover_native_structs_light(native_text);
     let recovered_imports = recover_native_imports_light(native_text);
+    let recovered_enums = parse_native_enums_for_import(native_text);
     return ParseNativeResult {
         functions: recovered_functions,
         imports: recovered_imports,
         structs: recovered_structs,
         interfaces: [],
-        enums: [],
+        enums: recovered_enums,
         bindings: [],
         diagnostics: [],
     };
@@ -178,7 +179,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
         return base;
     }
 
-    let mut tests -> NativeFunction[] = [];
+    let mut test_count -> number = 0;
     let mut has_main -> boolean = false;
 
     let mut index -> number = 0;
@@ -186,19 +187,18 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
         if index >= parse.functions.length {
             break;
         }
-        let fun = parse.functions[index];
-        if fun.name == "main" {
+        if parse.functions[index].name == "main" {
             has_main = true;
         }
-        if fun.name.length >= 5 {
-            if substring(fun.name, 0, 5) == "test:" {
-                tests = tests.push(fun);
+        if parse.functions[index].name.length >= 5 {
+            if substring(parse.functions[index].name, 0, 5) == "test:" {
+                test_count += 1;
             }
         }
         index += 1;
     }
 
-    if tests.length == 0 {
+    if test_count == 0 {
         return base;
     }
 
@@ -208,10 +208,25 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
         return updated;
     }
 
-    let harness = render_test_harness_main_for_module(tests, native_module.module_name, false);
+    // Build test harness inline using string arrays only
+    // (avoids struct .push() and struct .concat() which produce unresolvable symbols)
+    let mut harness -> string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
+    let mut ti -> number = 0;
+    loop {
+        if ti >= parse.functions.length { break; }
+        if parse.functions[ti].name.length >= 5 {
+            if substring(parse.functions[ti].name, 0, 5) == "test:" {
+                let sym = sanitize_symbol(parse.functions[ti].name);
+                harness = extend_string_lines(harness, ["  call void @" + sym + "()"]);
+            }
+        }
+        ti += 1;
+    }
+    harness = extend_string_lines(harness, ["  ret i32 0", "}"]);
+
     let mut updated = base;
     if updated.lines.length > 0 {
-        updated.lines.push("");
+        updated.lines = extend_string_lines(updated.lines, [""]);  
     }
     updated.lines = extend_string_lines(updated.lines, harness);
     return updated;
@@ -539,6 +554,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         runtime_helpers.push("append_string");
     }
     runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
+    runtime_helpers = append_unique_effect(runtime_helpers, "concat");
     runtime_helpers = append_unique_effect(runtime_helpers, "print");
     runtime_helpers = append_unique_effect(runtime_helpers, "print.err");
     runtime_helpers = append_unique_effect(runtime_helpers, "print.info");
@@ -548,12 +564,44 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     runtime_helpers = append_unique_effect(runtime_helpers, "substring");
     runtime_helpers = append_unique_effect(runtime_helpers, "substring_unchecked");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.to_number");
     runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at");
     runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
     runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime_raise_value_error_fn");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
     runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent");
+    // Runtime prelude helpers — these are module-level let bindings
+    // (e.g. `let runtime_array_filter_fn = runtime.array_filter;`) whose
+    // call targets are not discovered by the (currently skipped) dynamic
+    // helper collection.  Declare them unconditionally so the linker can
+    // resolve them against the C runtime.
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_array_map_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_array_filter_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_array_reduce_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_channel_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_char_code_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_grapheme_at_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_grapheme_count_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_instance_of_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_array_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_boolean_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_callable_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_number_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_string_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_void_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_log_execution_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_monotonic_millis_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_parallel_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_resolve_runtime_type_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_serve_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_sleep_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_spawn_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_to_debug_string_fn");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_capability_grant");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_filesystem_bridge");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_http_bridge");
+    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_model_bridge");
     let mut direct_effects -> FunctionEffectEntry[] = [];
     let mut aggregated_effects -> FunctionEffectEntry[] = [];
     if !skip_effects {
@@ -637,11 +685,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     if module_preamble_lines.length > 0 {
         lines = extend_string_lines(lines, module_preamble_lines);
-        lines.push("");
+        lines = extend_string_lines(lines, [""]);
     }
     if module_init_lines.length > 0 {
         lines = extend_string_lines(lines, module_init_lines);
-        lines.push("");
+        lines = extend_string_lines(lines, [""]);
     }
     if trace {
         print("test llvm: module globals lowered");

@@ -8,7 +8,7 @@
 // orchestrates calls to helper modules for operands, scopes, parsing, and text.
 
 import { NativeFunction, NativeSourceSpan, NativeStruct, NativeEnum } from "../../../native_ir";
-import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of as str_index_of } from "../../../string_utils";
+import { substring, char_code, char_at, find_char, find_last_index_of_char, index_of } from "../../../string_utils";
 
 import {
     TypeContext, StructTypeInfo, StructFieldInfo, EnumTypeInfo, EnumVariantInfo,
@@ -33,11 +33,11 @@ import {
 } from "../../types";
 
 import {
-    starts_with, ends_with, char_at as utils_char_at,
+    starts_with, ends_with,
     is_identifier_start_char, is_identifier_part_char,
     contains_text,
     matches_keyword,
-    find_parameter_binding as utils_find_parameter_binding, merge_parameter_bindings,
+    merge_parameter_bindings,
     is_effect_delimiter,
     extend_string_array,
 } from "../../utils";
@@ -321,8 +321,6 @@ import {
     try_lower_interpolated_string_literal,
 } from "./core_literals_lowering";
 
-import { append_match_arm_mutations as append_match_arm_mutations_impl } from "./core_match_helpers";
-
 fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
     return analyze_value_ownership_impl(initializer, span, locals, bindings);
 }
@@ -337,10 +335,6 @@ fn format_suspension_location(keyword -> string, borrow_span -> NativeSourceSpan
 
 fn resolve_borrow_base(target -> string, locals -> LocalBinding[]) -> string {
     return resolve_borrow_base_impl(target, locals);
-}
-
-fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[] {
-    return append_match_arm_mutations_impl(list, arm);
 }
 
 fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {

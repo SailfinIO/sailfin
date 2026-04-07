@@ -58,6 +58,10 @@ import {
     bindings_update_local_ownership,
 } from "../bindings";
 
+import {
+    split_lines_local,
+} from "../../lowering/lowering_text_utils";
+
 fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);
 }
@@ -80,6 +84,44 @@ fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership ->
 
 
 // ---------------------------------------------------------------------------
+// SSA temp counter recovery
+// ---------------------------------------------------------------------------
+
+// Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
+// when returned from cross-module calls (e.g. lower_expression,
+// coerce_operand_to_type). Scan emitted lines for the highest %tN
+// definition and use max(found+1, floor) as the recovered counter.
+fn _recover_temp_from_lines(lines -> string[], floor -> number) -> number {
+    let mut result -> number = floor;
+    let mut ri -> number = 0;
+    loop {
+        if ri >= lines.length { break; }
+        let rl = lines[ri];
+        if starts_with(rl, "  %t") {
+            let mut rn -> number = 0;
+            let mut rj -> number = 4;
+            let mut rvalid -> boolean = false;
+            loop {
+                if rj >= rl.length { break; }
+                let rc = char_code(char_at(rl, rj));
+                if rc < 48 { break; }
+                if rc > 57 { break; }
+                rn = rn * 10 + (rc - 48);
+                rvalid = true;
+                rj += 1;
+            }
+            if rvalid {
+                if rn >= result {
+                    result = rn + 1;
+                }
+            }
+        }
+        ri += 1;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // IPC file helpers
 // ---------------------------------------------------------------------------
 
@@ -95,12 +137,15 @@ fn _write_expr_stmt_result_files(
 ) ![io] {
     let delta_count = current_lines.length - input_lines_len;
     fs.writeFile("build/sailfin/.expr_stmt_delta_count", number_to_string(delta_count));
+    // Write delta lines as bulk array
+    let mut delta_lines -> string[] = [];
     let mut delta_i = 0;
     loop {
         if delta_i >= delta_count { break; }
-        fs.writeFile("build/sailfin/.expr_stmt_delta_" + number_to_string(delta_i), current_lines[input_lines_len + delta_i]);
+        delta_lines.push(current_lines[input_lines_len + delta_i]);
         delta_i += 1;
     }
+    fs.writeLines("build/sailfin/.expr_stmt_delta_lines", delta_lines);
     fs.writeFile("build/sailfin/.expr_stmt_temp_index", number_to_string(current_temp));
     fs.writeFile("build/sailfin/.expr_stmt_next_region_id", number_to_string(current_next_region));
     let mut_count = mutations.length;
@@ -133,17 +178,14 @@ fn _write_expr_stmt_result_files_with_constants(
 ) ![io] {
     _write_expr_stmt_result_files(input_lines_len, current_lines, current_temp, mutations, current_next_region);
     // Write string constants as tab-separated lines: name\tcontent\tbyte_count
-    let mut joined_sc -> string = "";
+    let mut sc_lines -> string[] = [];
     let mut si -> number = 0;
     loop {
         if si >= string_constants.length { break; }
-        if si > 0 {
-            joined_sc = joined_sc + "\n";
-        }
-        joined_sc = joined_sc + string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count);
+        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count));
         si = si + 1;
     }
-    fs.writeFile("build/sailfin/.expr_stmt_string_constants", joined_sc);
+    fs.writeLines("build/sailfin/.expr_stmt_string_constants", sc_lines);
 }
 
 fn _parse_int_local(text -> string) -> number {
@@ -321,6 +363,7 @@ fn lower_expression_statement(
             string_constants = lowered.string_constants;
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
+            current_temp = _recover_temp_from_lines(current_lines, current_temp);
             if lowered.operand == null {
                 diagnostics.push("llvm lowering: failed to lower assignment expression for `" + trimmed_assign_target + "`");
             } else {
@@ -333,6 +376,7 @@ fn lower_expression_statement(
                 }
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
+                current_temp = _recover_temp_from_lines(current_lines, current_temp);
                 if coerced.operand == null {
                     diagnostics.push("llvm lowering: unable to coerce assignment value for `" + trimmed_assign_target + "`");
                     current_lines.push("  store " + binding.llvm_type + " " + default_return_literal(binding.llvm_type) + ", " + binding.llvm_type + "* " + binding.pointer);
@@ -403,7 +447,7 @@ fn lower_expression_statement(
             mutations.push(mutation);
         }
         _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
-                return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
     }
 
     let ownership_analysis = analyze_value_ownership(expression, null, current_locals, current_bindings);
@@ -428,17 +472,10 @@ fn lower_expression_statement(
         }
     }
     if fs.exists("build/sailfin/.call_result_lines_count") {
-        let _cr_lines_count_str = fs.readFile("build/sailfin/.call_result_lines_count");
-        let _cr_lines_count = _parse_int_local(_cr_lines_count_str);
+        let _cr_lines_raw = fs.readFile("build/sailfin/.call_result_lines");
         let mut _new_lines -> string[] = [];
-        let mut _cr_li -> number = 0;
-        loop {
-            if _cr_li >= _cr_lines_count { break; }
-            let _cr_line_path = "build/sailfin/.call_result_line_" + number_to_string(_cr_li);
-            if fs.exists(_cr_line_path) {
-                _new_lines.push(fs.readFile(_cr_line_path));
-            }
-            _cr_li += 1;
+        if _cr_lines_raw.length > 0 {
+            _new_lines = split_lines_local(_cr_lines_raw);
         }
         current_lines = _new_lines;
         if debug_lowering {
@@ -446,6 +483,7 @@ fn lower_expression_statement(
         }
         let _cr_temp_str = fs.readFile("build/sailfin/.call_result_temp");
         current_temp = _parse_int_local(_cr_temp_str);
+        current_temp = _recover_temp_from_lines(current_lines, current_temp);
         // Clean up sentinel
         fs.deleteFile("build/sailfin/.call_result_lines_count");
     } else {
@@ -459,6 +497,7 @@ fn lower_expression_statement(
         string_constants = lowered.string_constants;
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
+        current_temp = _recover_temp_from_lines(current_lines, current_temp);
     }
     if consumption != null {
         if consumption.kind == "local" {
@@ -471,7 +510,7 @@ fn lower_expression_statement(
         print("stmt-lowering: pre-write _pre_call_lines_len=" + number_to_string(_pre_call_lines_len) + " current_lines.length=" + number_to_string(current_lines.length) + " delta=" + number_to_string(current_lines.length - _pre_call_lines_len));
     }
     _write_expr_stmt_result_files_with_constants(_pre_call_lines_len, current_lines, current_temp, mutations, current_next_region, string_constants);
-                return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
+    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
 }
 
 
@@ -632,22 +671,14 @@ fn lower_return_instruction(
         _ret_expr = fs.readFile("build/sailfin/.self_field_expr");
         let _sf_temp_str = fs.readFile("build/sailfin/.self_field_temp");
         current_temp = _parse_int_local(_sf_temp_str);
+        current_temp = _recover_temp_from_lines(current_lines, current_temp);
         let _sf_lc_str = fs.readFile("build/sailfin/.self_field_lines_count");
         let _sf_lc = _parse_int_local(_sf_lc_str);
         if _sf_lc > current_lines.length {
+            let _sf_lines_raw = fs.readFile("build/sailfin/.self_field_lines");
             let mut _sf_new_lines -> string[] = [];
-            let mut _sf_i -> number = 0;
-            loop {
-                if _sf_i >= _sf_lc { break; }
-                let _sf_lp = "build/sailfin/.self_field_line_" + number_to_string(_sf_i);
-                if fs.exists(_sf_lp) {
-                    _sf_new_lines.push(fs.readFile(_sf_lp));
-                } else {
-                    if _sf_i < current_lines.length {
-                        _sf_new_lines.push(current_lines[_sf_i]);
-                    }
-                }
-                _sf_i += 1;
+            if _sf_lines_raw.length > 0 {
+                _sf_new_lines = split_lines_local(_sf_lines_raw);
             }
             current_lines = _sf_new_lines;
         }
@@ -665,6 +696,7 @@ fn lower_return_instruction(
     }
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
+    current_temp = _recover_temp_from_lines(current_lines, current_temp);
     let string_constants = lowered.string_constants;
 
     if debug_lowering {
@@ -680,8 +712,8 @@ fn lower_return_instruction(
         if trace {
             print("test llvm: lower_return no_operand lines_after=" + number_to_string(current_lines.length));
         }
-    _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
+        _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
     }
 
     let operand = lowered.operand;
@@ -691,8 +723,8 @@ fn lower_return_instruction(
     if safe_llvm_return == "void" {
         diagnostics.push("llvm lowering: void function `" + fn_name + "` returned a value");
         current_lines.push("  ret void");
-    _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
+        _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
     }
 
     if debug_lowering {
@@ -710,6 +742,7 @@ fn lower_return_instruction(
     }
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
+    current_temp = _recover_temp_from_lines(current_lines, current_temp);
     if coerced.operand == null {
         diagnostics.push("llvm lowering: unable to coerce return expression to `" + safe_llvm_return + "` in `" + fn_name + "`");
         if safe_llvm_return == "void" {
@@ -720,8 +753,8 @@ fn lower_return_instruction(
         if trace {
             print("test llvm: lower_return no_coerce lines_after=" + number_to_string(current_lines.length));
         }
-    _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
+        _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
+        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
     }
 
     let coerced_operand = coerced.operand;

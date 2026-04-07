@@ -38,10 +38,13 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
     let mut diagnostics -> string[] = [];
     let mut seen -> string[] = [];
 
-    // BFS queue: parallel arrays for (module_path, parent_slug).
-    // Seeded with the direct imports of the current module.
+    // Queue: parallel arrays for (module_path, parent_slug, depth).
+    // Only direct imports (depth 0) load full native texts.  Depth-1
+    // imports load layout manifests only to keep struct/enum info
+    // available without the memory cost of parsing function bodies.
     let mut queue_paths -> string[] = [];
     let mut queue_parent_slugs -> string[] = [];
+    let mut queue_depths -> number[] = [];
 
     let mut init_index -> number = 0;
     loop {
@@ -50,8 +53,11 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         }
         queue_paths.push(imports[init_index].module);
         queue_parent_slugs.push(current_module_slug);
+        queue_depths.push(0);
         init_index += 1;
     }
+
+    let max_transitive_depth -> number = 1;
 
     let mut queue_index -> number = 0;
     loop {
@@ -68,6 +74,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
 
         let module_path = queue_paths[queue_index];
         let parent_slug = queue_parent_slugs[queue_index];
+        let depth = queue_depths[queue_index];
         queue_index += 1;
 
         let base_slug = resolve_import_module_slug_for_module(module_path, parent_slug);
@@ -94,41 +101,48 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
             diagnostics.push("layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")");
         }
 
+        // Only load the full native text for direct imports (depth 0).
+        // Transitive imports provide layout manifests for struct/enum
+        // sizing but skip the expensive function/instruction parsing.
         let mut native_text -> string = "";
-        if fs.exists(native_text_path) {
-            native_text = fs.readFile(native_text_path);
-        } else {
-            diagnostics.push("native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")");
+        if depth == 0 {
+            if fs.exists(native_text_path) {
+                native_text = fs.readFile(native_text_path);
+            } else {
+                diagnostics.push("native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")");
+            }
         }
 
         let mut updated_manifests = manifests;
         updated_manifests = updated_manifests.push(LayoutManifest {
-            structs: manifest_structs,
-            enums: manifest_enums,
-            diagnostics: [],
+                structs: manifest_structs,
+                enums: manifest_enums,
+                diagnostics: [],
         });
         manifests = updated_manifests;
         let mut updated_texts = native_texts;
         updated_texts = updated_texts.push(native_text);
         native_texts = updated_texts;
 
-        // Transitively enqueue the imports of the just-loaded module so that
-        // re-exported functions (e.g. find_char re-exported through string_utils
-        // from runtime/prelude) have their signatures available to the LLVM
-        // lowering pass when emitting declare statements.
-        if native_text.length > 0 {
-            let transitive_imports = parse_native_imports_for_import(native_text);
-            let mut ti -> number = 0;
-            loop {
-                if ti >= transitive_imports.length {
-                    break;
+        // Enqueue transitive imports up to max_transitive_depth.
+        // Depth-1 entries only load layout manifests (no native text).
+        if depth < max_transitive_depth {
+            if native_text.length > 0 {
+                let transitive_imports = parse_native_imports_for_import(native_text);
+                let mut ti -> number = 0;
+                let next_depth = depth + 1;
+                loop {
+                    if ti >= transitive_imports.length {
+                        break;
+                    }
+                    let ti_entry = transitive_imports[ti];
+                    if ti_entry.kind == "import" {
+                        queue_paths.push(ti_entry.module);
+                        queue_parent_slugs.push(slug);
+                        queue_depths.push(next_depth);
+                    }
+                    ti += 1;
                 }
-                let ti_entry = transitive_imports[ti];
-                if ti_entry.kind == "import" {
-                    queue_paths.push(ti_entry.module);
-                    queue_parent_slugs.push(slug);
-                }
-                ti += 1;
             }
         }
     }

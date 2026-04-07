@@ -68,11 +68,10 @@ fn lower_condition_to_i1(
     // lowering can resolve struct types for method calls.  The v0.1.1 seed
     // corrupts the locals array when passed across module boundaries, so
     // resolve_struct_info_for_method_target can't inspect local.type_annotation.
-    let mut _lta_content -> string = "";
+    let mut _lta_lines -> string[] = [];
     let mut _lta_i -> number = 0;
     loop {
         if _lta_i >= locals.length { break; }
-        if _lta_i > 0 { _lta_content = _lta_content + "\n"; }
         let mut _lta_name = locals[_lta_i].name;
         if _lta_name == null { _lta_name = ""; }
         let mut _lta_type = locals[_lta_i].type_annotation;
@@ -81,10 +80,10 @@ fn lower_condition_to_i1(
         if _lta_llvm == null { _lta_llvm = ""; }
         let mut _lta_ptr = locals[_lta_i].pointer;
         if _lta_ptr == null { _lta_ptr = ""; }
-        _lta_content = _lta_content + _lta_name + "\t" + _lta_type + "\t" + _lta_llvm + "\t" + _lta_ptr;
+        _lta_lines.push(_lta_name + "\t" + _lta_type + "\t" + _lta_llvm + "\t" + _lta_ptr);
         _lta_i += 1;
     }
-    fs.writeFile("build/sailfin/.condition_locals", _lta_content);
+    fs.writeLines("build/sailfin/.condition_locals", _lta_lines);
     let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
     let mut _ci11 -> number = 0;
     loop {

@@ -621,7 +621,9 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
     parser = skip_trivia(parser);
     parser = consume_symbol(parser, "{");
 
-    let mut specifiers -> NamedSpecifier[] = [];
+    let mut spec_count -> number = 0;
+    let mut spec_names -> string[] = [];
+    let mut spec_aliases -> string[] = [];
     parser = skip_trivia(parser);
     loop {
         let current = parser_peek_raw(parser);
@@ -650,7 +652,13 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
             }
         }
 
-        specifiers.push(NamedSpecifier { name: name, alias: alias });
+        spec_names = spec_names.concat([name]);
+        if alias != null {
+            spec_aliases = spec_aliases.concat([alias]);
+        } else {
+            spec_aliases = spec_aliases.concat([""]);
+        }
+        spec_count += 1;
 
         let separator = parser_peek_raw(parser);
         if symbol_matches(separator, ",") {
@@ -658,6 +666,20 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
             parser = skip_trivia(parser);
             continue;
         }
+    }
+
+    // Build NamedSpecifier array from parallel string arrays
+    // (avoids struct .push() which the first-pass binary can't lower)
+    let mut specifiers -> NamedSpecifier[] = [];
+    let mut _si -> number = 0;
+    loop {
+        if _si >= spec_count { break; }
+        let mut _a -> string? = null;
+        if spec_aliases[_si].length > 0 {
+            _a = spec_aliases[_si];
+        }
+        specifiers = specifiers.concat([NamedSpecifier { name: spec_names[_si], alias: _a }]);
+        _si += 1;
     }
 
     parser = skip_trivia(parser);

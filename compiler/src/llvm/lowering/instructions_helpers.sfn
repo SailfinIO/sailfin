@@ -41,6 +41,10 @@ import {
     append_local_binding,
 } from "../expression_lowering/native/core_scopes";
 
+import {
+    split_lines_local,
+} from "./lowering_text_utils";
+
 fn clone_local_bindings(values -> LocalBinding[]) -> LocalBinding[] {
     let mut result -> LocalBinding[] = [];
     let mut index -> number = 0;
@@ -127,29 +131,10 @@ fn _write_block_result_files(
     next_lifetime_region_id -> number,
     next_index -> number
 ) ![io] {
-    let mut joined_lines -> string = "";
-    let mut li -> number = 0;
-    loop {
-        if li >= lines.length { break; }
-        if li > 0 {
-            joined_lines = joined_lines + "\n";
-        }
-        joined_lines = joined_lines + lines[li];
-        li = li + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_lines", joined_lines);
-
-    let mut joined_allocas -> string = "";
-    let mut ai -> number = 0;
-    loop {
-        if ai >= allocas.length { break; }
-        if ai > 0 {
-            joined_allocas = joined_allocas + "\n";
-        }
-        joined_allocas = joined_allocas + allocas[ai];
-        ai = ai + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_allocas", joined_allocas);
+    // Use fs.writeLines to avoid O(N²) string concatenation.
+    // fs.writeLines writes each element + "\n"; _split_by_newline handles trailing newlines.
+    fs.writeLines("build/sailfin/.block_result_lines", lines);
+    fs.writeLines("build/sailfin/.block_result_allocas", allocas);
 
     let mut term_val -> string = "0";
     if terminated {
@@ -157,31 +142,18 @@ fn _write_block_result_files(
     }
     fs.writeFile("build/sailfin/.block_result_terminated", term_val);
 
-    let mut joined_diags -> string = "";
-    let mut di -> number = 0;
-    loop {
-        if di >= diagnostics.length { break; }
-        if di > 0 {
-            joined_diags = joined_diags + "\n";
-        }
-        joined_diags = joined_diags + diagnostics[di];
-        di = di + 1;
-    }
-    fs.writeFile("build/sailfin/.block_result_diagnostics", joined_diags);
+    fs.writeLines("build/sailfin/.block_result_diagnostics", diagnostics);
 
     // Serialize string constants so emit_body can read them back.
     // Format: one constant per line as "name\tcontent\tbyte_count".
-    let mut joined_sc -> string = "";
+    let mut sc_lines -> string[] = [];
     let mut si -> number = 0;
     loop {
         if si >= string_constants.length { break; }
-        if si > 0 {
-            joined_sc = joined_sc + "\n";
-        }
-        joined_sc = joined_sc + string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count);
+        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count));
         si = si + 1;
     }
-    fs.writeFile("build/sailfin/.block_result_string_constants", joined_sc);
+    fs.writeLines("build/sailfin/.block_result_string_constants", sc_lines);
 
     // Scalar state fields needed by callers in other modules (instructions_match, instructions_loops).
     fs.writeFile("build/sailfin/.block_result_temp_index", number_to_string(temp_index));
@@ -292,6 +264,42 @@ fn write_locals_to_files(locals -> LocalBinding[]) ![io] {
     }
 }
 
+// Read string constants from the block_result_string_constants file,
+// merging into existing. Used by if/loop/match/for/try handlers.
+fn read_block_result_string_constants(existing -> StringConstant[]) -> StringConstant[] ![io] {
+    let mut result = existing;
+    if fs.exists("build/sailfin/.block_result_string_constants") {
+        let _raw = fs.readFile("build/sailfin/.block_result_string_constants");
+        if _raw.length > 0 {
+            let mut _pos -> number = 0;
+            loop {
+                if _pos >= _raw.length { break; }
+                let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
+                let mut _line -> string = "";
+                if _nl < 0 {
+                    _line = substring(_raw, _pos, _raw.length);
+                    _pos = _raw.length;
+                } else {
+                    _line = substring(_raw, _pos, _pos + _nl);
+                    _pos = _pos + _nl + 1;
+                }
+                if _line.length == 0 { continue; }
+                let _t1 = index_of(_line, "\t");
+                if _t1 < 0 { continue; }
+                let _nm = substring(_line, 0, _t1);
+                let _r2 = substring(_line, _t1 + 1, _line.length);
+                let _t2 = index_of(_r2, "\t");
+                if _t2 < 0 { continue; }
+                let _ct = substring(_r2, 0, _t2);
+                let _bct = substring(_r2, _t2 + 1, _r2.length);
+                let _bc = _parse_int_from_string(_bct);
+                result = merge_string_constants(result, [StringConstant { name: _nm, content: _ct, byte_count: _bc }]);
+            }
+        }
+    }
+    return result;
+}
+
 // Read string constants from the expr_stmt_string_constants file,
 // merging into existing. Clears the file after reading.
 fn read_expr_string_constants(existing -> StringConstant[]) -> StringConstant[] ![io] {
@@ -342,57 +350,32 @@ fn read_let_result_from_files(
 ) -> LocalBinding[] ![io] {
     let mut result_locals = current_locals;
     if fs.exists("build/sailfin/.let_result_temp_index") {
-        let _diag_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_diag_count"));
-        let mut _di -> number = 0;
-        loop {
-            if _di >= _diag_count { break; }
-            let _diag_path = "build/sailfin/.let_result_diag_" + number_to_string(_di);
-            if fs.exists(_diag_path) {
-                diagnostics.push(fs.readFile(_diag_path));
+        // Read diagnostics from bulk file
+        let _diag_raw = fs.readFile("build/sailfin/.let_result_diagnostics");
+        if _diag_raw.length > 0 {
+            let _diag_lines = split_lines_local(_diag_raw);
+            let mut _di -> number = 0;
+            loop {
+                if _di >= _diag_lines.length { break; }
+                diagnostics.push(_diag_lines[_di]);
+                _di += 1;
             }
-            _di += 1;
         }
-        let _lines_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_lines_count"));
+        // Read lines from bulk file
+        let _lines_raw = fs.readFile("build/sailfin/.let_result_lines");
         let mut _new_lines -> string[] = [];
-        let mut _li -> number = 0;
-        loop {
-            if _li >= _lines_count { break; }
-            let _line_path = "build/sailfin/.let_result_line_" + number_to_string(_li);
-            if fs.exists(_line_path) {
-                _new_lines.push(fs.readFile(_line_path));
-            }
-            _li += 1;
+        if _lines_raw.length > 0 {
+            _new_lines = split_lines_local(_lines_raw);
         }
         // Write lines for caller to read
-        let mut _joined -> string = "";
-        let mut _ji -> number = 0;
-        loop {
-            if _ji >= _new_lines.length { break; }
-            if _ji > 0 { _joined = _joined + "\n"; }
-            _joined = _joined + _new_lines[_ji];
-            _ji += 1;
-        }
-        fs.writeFile("build/sailfin/.let_ipc_lines", _joined);
-        let _allocas_count = _parse_int_from_string(fs.readFile("build/sailfin/.let_result_allocas_count"));
+        fs.writeLines("build/sailfin/.let_ipc_lines", _new_lines);
+        // Read allocas from bulk file
+        let _allocas_raw = fs.readFile("build/sailfin/.let_result_allocas");
         let mut _new_allocas -> string[] = [];
-        let mut _ai -> number = 0;
-        loop {
-            if _ai >= _allocas_count { break; }
-            let _alloca_path = "build/sailfin/.let_result_alloca_" + number_to_string(_ai);
-            if fs.exists(_alloca_path) {
-                _new_allocas.push(fs.readFile(_alloca_path));
-            }
-            _ai += 1;
+        if _allocas_raw.length > 0 {
+            _new_allocas = split_lines_local(_allocas_raw);
         }
-        let mut _joined_a -> string = "";
-        let mut _jai -> number = 0;
-        loop {
-            if _jai >= _new_allocas.length { break; }
-            if _jai > 0 { _joined_a = _joined_a + "\n"; }
-            _joined_a = _joined_a + _new_allocas[_jai];
-            _jai += 1;
-        }
-        fs.writeFile("build/sailfin/.let_ipc_allocas", _joined_a);
+        fs.writeLines("build/sailfin/.let_ipc_allocas", _new_allocas);
         fs.writeFile("build/sailfin/.let_ipc_temp", fs.readFile("build/sailfin/.let_result_temp_index"));
         fs.writeFile("build/sailfin/.let_ipc_next_local", fs.readFile("build/sailfin/.let_result_next_local_id"));
         fs.writeFile("build/sailfin/.let_ipc_next_region", fs.readFile("build/sailfin/.let_result_next_region_id"));
@@ -427,7 +410,7 @@ fn read_expr_mutations(existing -> LocalMutation[]) -> LocalMutation[] ![io] {
         let _mv = fs.readFile(_mp + "_value");
         let _ml = fs.readFile(_mp + "_label");
         result = extend_mutations(result, [LocalMutation {
-            name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
+                    name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
         }]);
         _mi += 1;
     }
