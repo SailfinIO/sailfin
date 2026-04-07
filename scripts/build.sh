@@ -439,7 +439,11 @@ stage_import_context() {
     mv "$asm_dest" "$full_dest"
     awk '
     # Always keep module, import, struct, enum, layout declarations
-    /^\.(module|import|struct|enum|end-struct|end-enum|layout|end-layout)/ { print; next }
+    /^\.(module|import|struct|enum|end-struct|end-enum|endenum|endstruct|layout|end-layout)/ { print; next }
+    # Keep indented .layout lines (inside struct/enum blocks)
+    /^[[:space:]]+\.layout / { print; next }
+    # Keep .field and .variant lines (struct/enum body declarations)
+    /^[[:space:]]+\.(field|variant) / { print; next }
     # Keep function signature line (.fn) and end marker (.endfn)
     /^\.fn / { print; infn=1; next }
     /^\.endfn/ { print; infn=0; next }
@@ -728,96 +732,6 @@ for ll in "$RAW_DIR"/*.ll; do
     rm -f "$missing_f"
 done
 log "cross-module symbol resolution complete"
-
-# ---------------------------------------------------------------------------
-# Step 3.51: Remove empty-param declares that conflict with typed declares
-# ---------------------------------------------------------------------------
-# The compiler sometimes emits `declare ... @fn()` (empty params) for imported
-# functions whose signatures it couldn't resolve. Cross-module symbol resolution
-# above may have injected a properly-typed `declare ... @fn(type1, type2)`.
-# LLVM rejects two declares of the same function with different signatures,
-# so remove the empty-param versions when a typed version exists.
-for ll in "$RAW_DIR"/*.ll; do
-    # Collect function names that have both empty-param and typed declares.
-    # Empty-param: lines like  declare ... @name()  (paren at end of line)
-    # Typed:       declare ... @name(type ...)
-    empty_fns="$(mktemp)"
-    typed_fns="$(mktemp)"
-    { grep -P '^declare\s.*@\w+\(\)\s*$' "$ll" 2>/dev/null | grep -oP '(?<=@)[a-zA-Z_][a-zA-Z0-9_]*(?=\(\))' || true; } | sort -u > "$empty_fns"
-    { grep '^declare ' "$ll" 2>/dev/null | grep -oP '(?<=@)[a-zA-Z_][a-zA-Z0-9_]*(?=\([^)]+\))' || true; } | sort -u > "$typed_fns"
-    conflicts="$(comm -12 "$empty_fns" "$typed_fns")"
-    rm -f "$empty_fns" "$typed_fns"
-    if [[ -n "$conflicts" ]]; then
-        # Build a sed script to delete the empty-param declare lines
-        sed_script="$(mktemp)"
-        while IFS= read -r fn; do
-            echo "/@${fn}()$/d" >> "$sed_script"
-        done <<< "$conflicts"
-        sed -i -f "$sed_script" "$ll"
-        rm -f "$sed_script"
-    fi
-done
-
-# ---------------------------------------------------------------------------
-# Step 3.515: Remove declares that conflict with defines
-# ---------------------------------------------------------------------------
-# The v0.1.1 seed emits both `declare @fn(...)` and `define @fn(...)` when a
-# module imports a function it also defines locally (e.g. runtime helper
-# aliases like append_string).  selfhost_native.py has the same fixup
-# (_fix_declare_define_conflicts).  Remove after next seed.
-for ll in "$RAW_DIR"/*.ll; do
-    declare_fns="$(mktemp)"
-    define_fns="$(mktemp)"
-    { grep '^declare ' "$ll" 2>/dev/null | sed -n 's/.*@\([a-zA-Z_][a-zA-Z0-9_]*\)(.*/\1/p' || true; } | sort -u > "$declare_fns"
-    { grep '^define ' "$ll" 2>/dev/null | sed -n 's/.*@\([a-zA-Z_][a-zA-Z0-9_]*\)(.*/\1/p' || true; } | sort -u > "$define_fns"
-    conflicts="$(comm -12 "$declare_fns" "$define_fns")"
-    rm -f "$declare_fns" "$define_fns"
-    if [[ -n "$conflicts" ]]; then
-        sed_script="$(mktemp)"
-        while IFS= read -r fn; do
-            echo "/^declare .*@${fn}(/d" >> "$sed_script"
-        done <<< "$conflicts"
-        sed -i -f "$sed_script" "$ll"
-        rm -f "$sed_script"
-    fi
-done
-
-# ---------------------------------------------------------------------------
-# Step 3.52: Inject missing @.runtime.field.* string constants
-# ---------------------------------------------------------------------------
-# The v0.1.1 seed cannot propagate StringConstant objects through nested block
-# scopes (if/loop/match/for/try).  The compiler source fix (reading from file
-# IPC) is correct but the seed miscompiles it.  selfhost_native.py has the same
-# fixup (_inject_missing_runtime_field_constants).  Remove after next seed.
-for ll in "$RAW_DIR"/*.ll; do
-    python3 - "$ll" <<'FIELDPY'
-import re, sys
-path = sys.argv[1]
-content = open(path).read()
-used = set(re.findall(r'@(\.runtime\.field\.\w+)', content))
-defined = {m for m in used if f'@{m} =' in content}
-missing = sorted(used - defined)
-if not missing:
-    sys.exit(0)
-defs = []
-for sym in missing:
-    name = sym[len(".runtime.field."):]
-    n = len(name.encode("utf-8")) + 1
-    escaped = name.replace("\\", "\\\\").replace('"', '\\"')
-    defs.append(f'@{sym} = private unnamed_addr constant [{n} x i8] c"{escaped}\\00"')
-inject = "\n".join(defs) + "\n"
-# Insert before first define/declare
-lines = content.split("\n")
-insert_at = 0
-for idx, line in enumerate(lines):
-    s = line.lstrip()
-    if s.startswith("define ") or s.startswith("declare "):
-        insert_at = idx
-        break
-lines.insert(insert_at, inject)
-open(path, "w").write("\n".join(lines))
-FIELDPY
-done
 
 # ---------------------------------------------------------------------------
 # Step 3.55: Second type resolution pass
