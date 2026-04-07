@@ -226,7 +226,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
 
     let mut updated = base;
     if updated.lines.length > 0 {
-        updated.lines = extend_string_lines(updated.lines, [""]);  
+        updated.lines = extend_string_lines(updated.lines, [""]);
     }
     updated.lines = extend_string_lines(updated.lines, harness);
     return updated;
@@ -327,6 +327,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     let mut safe_imports = sanitize_imports(parse.imports, debug_lowering);
+    if debug_lowering {
+        print("emit-llvm: safe_imports.length=" + number_to_string(safe_imports.length));
+        if safe_imports.length > 0 {
+            print("emit-llvm: safe_imports[0].kind=" + safe_imports[0].kind + " module=" + safe_imports[0].module + " specs=" + number_to_string(safe_imports[0].specifiers.length));
+        }
+    }
     if is_test_module {
         safe_imports = [];
     }
@@ -729,12 +735,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     // ── Mangling ────────────────────────────────────────────────────
-    let mut effective_mangle_symbols = false;
+    let effective_mangle_symbols = mangle_symbols;
     if debug_lowering {
-        print("emit-llvm: skipping mangling (stability fallback)");
+        if !effective_mangle_symbols {
+            print("emit-llvm: skipping mangling (mangle_symbols=false)");
+        }
     }
     if effective_mangle_symbols {
-        let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts);
+        let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, native_text_override_path);
         let mut _ci0 -> number = 0;
         loop {
             if _ci0 >= mangled.diagnostics.length { break; }
