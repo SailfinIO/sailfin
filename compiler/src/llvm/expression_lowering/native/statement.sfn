@@ -483,6 +483,7 @@ fn lower_expression_statement(
         }
         let _cr_temp_str = fs.readFile("build/sailfin/.call_result_temp");
         current_temp = _parse_int_local(_cr_temp_str);
+        current_temp = _recover_temp_from_lines(current_lines, current_temp);
         // Clean up sentinel
         fs.deleteFile("build/sailfin/.call_result_lines_count");
     } else {
@@ -670,6 +671,7 @@ fn lower_return_instruction(
         _ret_expr = fs.readFile("build/sailfin/.self_field_expr");
         let _sf_temp_str = fs.readFile("build/sailfin/.self_field_temp");
         current_temp = _parse_int_local(_sf_temp_str);
+        current_temp = _recover_temp_from_lines(current_lines, current_temp);
         let _sf_lc_str = fs.readFile("build/sailfin/.self_field_lines_count");
         let _sf_lc = _parse_int_local(_sf_lc_str);
         if _sf_lc > current_lines.length {
