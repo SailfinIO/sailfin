@@ -84,6 +84,44 @@ fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership ->
 
 
 // ---------------------------------------------------------------------------
+// SSA temp counter recovery
+// ---------------------------------------------------------------------------
+
+// Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
+// when returned from cross-module calls (e.g. lower_expression,
+// coerce_operand_to_type). Scan emitted lines for the highest %tN
+// definition and use max(found+1, floor) as the recovered counter.
+fn _recover_temp_from_lines(lines -> string[], floor -> number) -> number {
+    let mut result -> number = floor;
+    let mut ri -> number = 0;
+    loop {
+        if ri >= lines.length { break; }
+        let rl = lines[ri];
+        if starts_with(rl, "  %t") {
+            let mut rn -> number = 0;
+            let mut rj -> number = 4;
+            let mut rvalid -> boolean = false;
+            loop {
+                if rj >= rl.length { break; }
+                let rc = char_code(char_at(rl, rj));
+                if rc < 48 { break; }
+                if rc > 57 { break; }
+                rn = rn * 10 + (rc - 48);
+                rvalid = true;
+                rj += 1;
+            }
+            if rvalid {
+                if rn >= result {
+                    result = rn + 1;
+                }
+            }
+        }
+        ri += 1;
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // IPC file helpers
 // ---------------------------------------------------------------------------
 
@@ -325,6 +363,7 @@ fn lower_expression_statement(
             string_constants = lowered.string_constants;
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
+            current_temp = _recover_temp_from_lines(current_lines, current_temp);
             if lowered.operand == null {
                 diagnostics.push("llvm lowering: failed to lower assignment expression for `" + trimmed_assign_target + "`");
             } else {
@@ -337,6 +376,7 @@ fn lower_expression_statement(
                 }
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
+                current_temp = _recover_temp_from_lines(current_lines, current_temp);
                 if coerced.operand == null {
                     diagnostics.push("llvm lowering: unable to coerce assignment value for `" + trimmed_assign_target + "`");
                     current_lines.push("  store " + binding.llvm_type + " " + default_return_literal(binding.llvm_type) + ", " + binding.llvm_type + "* " + binding.pointer);
@@ -456,6 +496,7 @@ fn lower_expression_statement(
         string_constants = lowered.string_constants;
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
+        current_temp = _recover_temp_from_lines(current_lines, current_temp);
     }
     if consumption != null {
         if consumption.kind == "local" {
@@ -653,6 +694,7 @@ fn lower_return_instruction(
     }
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
+    current_temp = _recover_temp_from_lines(current_lines, current_temp);
     let string_constants = lowered.string_constants;
 
     if debug_lowering {
@@ -698,6 +740,7 @@ fn lower_return_instruction(
     }
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
+    current_temp = _recover_temp_from_lines(current_lines, current_temp);
     if coerced.operand == null {
         diagnostics.push("llvm lowering: unable to coerce return expression to `" + safe_llvm_return + "` in `" + fn_name + "`");
         if safe_llvm_return == "void" {
