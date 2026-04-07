@@ -196,6 +196,10 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
         }
         current_lines = finished.lines;
         current_temp = finished.temp_index;
+        if finished.operand != null {
+            fs.writeFile("build/sailfin/.call_result_type", finished.operand.llvm_type);
+            fs.writeFile("build/sailfin/.call_result_value", finished.operand.value);
+        }
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: finished.operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
@@ -385,6 +389,8 @@ fn lower_array_literal(text -> string, bindings -> ParameterBinding[], locals ->
     current_lines.push("  store i64 " + length_text + ", i64* " + length_field_pointer);
 
     let operand = LLVMOperand { llvm_type: struct_type + "*", value: struct_pointer };
+    fs.writeFile("build/sailfin/.call_result_type", struct_type + "*");
+    fs.writeFile("build/sailfin/.call_result_value", struct_pointer);
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
@@ -448,11 +454,11 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
                                 let _f_name = substring(_f_entry, 0, _colon);
                                 let _f_type = substring(_f_entry, _colon + 1, _f_entry.length);
                                 _si_fields.push(StructFieldInfo {
-                                    name: _f_name,
-                                    llvm_type: _f_type,
-                                    type_annotation: "",
-                                    index: _fi,
-                                    offset: 0,
+                                        name: _f_name,
+                                        llvm_type: _f_type,
+                                        type_annotation: "",
+                                        index: _fi,
+                                        offset: 0,
                                 });
                                 _fi += 1;
                             }
@@ -481,6 +487,8 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
 
     if info.fields.length == 0 {
         let operand = LLVMOperand { llvm_type: info.llvm_name, value: "zeroinitializer" };
+        fs.writeFile("build/sailfin/.call_result_type", info.llvm_name);
+        fs.writeFile("build/sailfin/.call_result_value", "zeroinitializer");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
@@ -576,10 +584,14 @@ fn lower_struct_literal(parse -> StructLiteralParse, bindings -> ParameterBindin
 
     if previous_value.length == 0 {
         let operand = LLVMOperand { llvm_type: info.llvm_name, value: "zeroinitializer" };
+        fs.writeFile("build/sailfin/.call_result_type", info.llvm_name);
+        fs.writeFile("build/sailfin/.call_result_value", "zeroinitializer");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
     let operand = LLVMOperand { llvm_type: info.llvm_name, value: previous_value };
+    fs.writeFile("build/sailfin/.call_result_type", info.llvm_name);
+    fs.writeFile("build/sailfin/.call_result_value", previous_value);
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
 }
 
@@ -753,11 +765,11 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                                 }
                             }
                             current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + alloca_ptr + ", i32 0, i32 " + number_to_string(payload_field_index));
-    
+
                             let byte_array_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
                             current_lines.push("  " + byte_array_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
-    
+
                             let field_absolute_offset = variant_info.fields[field_index].offset;
                             let field_offset_in_payload = field_absolute_offset - variant_info.offset;
                             let mut field_byte_ptr_temp -> string = byte_array_ptr_temp;
@@ -767,11 +779,11 @@ fn lower_enum_literal(parse -> EnumLiteralParse, bindings -> ParameterBinding[],
                                 current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_array_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
                                 field_byte_ptr_temp = offset_ptr_temp;
                             }
-    
+
                             let field_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
                             current_lines.push("  " + field_ptr_temp + " = bitcast ptr " + field_byte_ptr_temp + " to ptr");
-    
+
                             current_lines.push("  store " + expected.llvm_type + " " + coerced.operand.value + ", ptr " + field_ptr_temp);
                         }
                     }

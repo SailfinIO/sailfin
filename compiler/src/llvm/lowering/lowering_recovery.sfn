@@ -329,6 +329,44 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         if is_eval {
             next_instruction = make_instruction_text(1, trim_text_local(substring(line, 5, line.length)));
         }
+        // --- Multiline struct literal gathering for eval instructions ---
+        // When an eval line has '{' but no '}', gather continuation lines.
+        // CRITICAL: every `if` below is top-level — NO nesting — because
+        // the seed degenerate-if bug drops all nested/else-if branches.
+        // We use a score (need 3 of 3) instead of nested AND conditions.
+        let _ml_open_idx = index_of(line, "{");
+        let _ml_close_idx = index_of(line, "}");
+        let mut _gather_score -> number = 0;
+        if is_eval { _gather_score += 1; }
+        if _ml_open_idx >= 0 { _gather_score += 1; }
+        if _ml_close_idx < 0 { _gather_score += 1; }
+        let mut _eval_gathered -> string = "";
+        if is_eval {
+            _eval_gathered = trim_text_local(substring(line, 5, line.length));
+        }
+        let mut _eval_brace_depth -> number = 1;
+        let mut _gi -> number = index + 1;
+        loop {
+            if _gather_score < 3 { break; }
+            if _gi >= lines.length { break; }
+            if _eval_brace_depth <= 0 { break; }
+            let _cont = lines[_gi];
+            let _cont_trimmed = trim_text_local(_cont);
+            let mut _is_stop_directive -> boolean = false;
+            if starts_with_local(_cont_trimmed, ".") { _is_stop_directive = true; }
+            if starts_with_local(_cont_trimmed, ".span") { _is_stop_directive = false; }
+            if _is_stop_directive { break; }
+            _eval_gathered = _eval_gathered + "\n" + _cont;
+            let _cont_open = index_of(_cont, "{");
+            let _cont_close = index_of(_cont, "}");
+            if _cont_open >= 0 { _eval_brace_depth += 1; }
+            if _cont_close >= 0 { _eval_brace_depth -= 1; }
+            _gi += 1;
+        }
+        if _gather_score >= 3 {
+            next_instruction = make_instruction_text(1, trim_text_local(_eval_gathered));
+            index = _gi - 1;
+        }
         if is_dotreturn {
             next_instruction = make_instruction_text(0, trim_text_local(substring(line, 7, line.length)));
         }

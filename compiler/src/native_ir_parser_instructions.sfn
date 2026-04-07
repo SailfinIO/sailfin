@@ -140,6 +140,9 @@ fn instruction_supports_multiline(line -> string) -> boolean {
     if starts_with(line, "ret ") {
         return true;
     }
+    if starts_with(line, ".let ") {
+        return true;
+    }
     return false;
 }
 
@@ -353,12 +356,12 @@ fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> Na
         let parsed = parse_binding_components(body);
         return InstructionParseResult {
             instructions: [NativeInstruction.Let {
-                name: parsed.name,
-                mutable: is_mutable,
-                type_annotation: parsed.type_annotation,
-                value: maybe_trim_trailing(parsed.value),
-                span: span,
-                value_span: value_span,
+                    name: parsed.name,
+                    mutable: is_mutable,
+                    type_annotation: parsed.type_annotation,
+                    value: maybe_trim_trailing(parsed.value),
+                    span: span,
+                    value_span: value_span,
             }],
             span_consumed: true,
             value_span_consumed: true,
