@@ -264,6 +264,42 @@ fn write_locals_to_files(locals -> LocalBinding[]) ![io] {
     }
 }
 
+// Read string constants from the block_result_string_constants file,
+// merging into existing. Used by if/loop/match/for/try handlers.
+fn read_block_result_string_constants(existing -> StringConstant[]) -> StringConstant[] ![io] {
+    let mut result = existing;
+    if fs.exists("build/sailfin/.block_result_string_constants") {
+        let _raw = fs.readFile("build/sailfin/.block_result_string_constants");
+        if _raw.length > 0 {
+            let mut _pos -> number = 0;
+            loop {
+                if _pos >= _raw.length { break; }
+                let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
+                let mut _line -> string = "";
+                if _nl < 0 {
+                    _line = substring(_raw, _pos, _raw.length);
+                    _pos = _raw.length;
+                } else {
+                    _line = substring(_raw, _pos, _pos + _nl);
+                    _pos = _pos + _nl + 1;
+                }
+                if _line.length == 0 { continue; }
+                let _t1 = index_of(_line, "\t");
+                if _t1 < 0 { continue; }
+                let _nm = substring(_line, 0, _t1);
+                let _r2 = substring(_line, _t1 + 1, _line.length);
+                let _t2 = index_of(_r2, "\t");
+                if _t2 < 0 { continue; }
+                let _ct = substring(_r2, 0, _t2);
+                let _bct = substring(_r2, _t2 + 1, _r2.length);
+                let _bc = _parse_int_from_string(_bct);
+                result = merge_string_constants(result, [StringConstant { name: _nm, content: _ct, byte_count: _bc }]);
+            }
+        }
+    }
+    return result;
+}
+
 // Read string constants from the expr_stmt_string_constants file,
 // merging into existing. Clears the file after reading.
 fn read_expr_string_constants(existing -> StringConstant[]) -> StringConstant[] ![io] {

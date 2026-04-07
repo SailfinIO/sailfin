@@ -40,6 +40,7 @@ import {
     _read_ipc_int_min,
     write_bindings_to_files,
     write_locals_to_files,
+    read_block_result_string_constants,
     read_expr_string_constants,
     read_let_result_from_files,
     read_expr_mutations,
@@ -394,8 +395,7 @@ fn lower_instruction_range(
                 current_next_local = _if_nextloc;
                 current_next_region = _if_nextreg;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                let temp_constants = collected_string_constants;
-                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                collected_string_constants = read_block_result_string_constants(collected_string_constants);
                 terminated = _if_term;
                 index = _if_nextidx;
                 active_label = find_last_label(current_lines, active_label);
@@ -427,8 +427,7 @@ fn lower_instruction_range(
                 current_next_local = _lp_nextloc;
                 current_next_region = _lp_nextreg;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                let temp_constants = collected_string_constants;
-                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                collected_string_constants = read_block_result_string_constants(collected_string_constants);
                 terminated = _lp_term;
                 index = _lp_nextidx;
                 active_label = find_last_label(current_lines, active_label);
@@ -460,8 +459,7 @@ fn lower_instruction_range(
                 current_next_local = _ma_nextloc;
                 current_next_region = _ma_nextreg;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                let temp_constants = collected_string_constants;
-                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                collected_string_constants = read_block_result_string_constants(collected_string_constants);
                 terminated = _ma_term;
                 index = _ma_nextidx;
                 active_label = find_last_label(current_lines, active_label);
@@ -493,8 +491,7 @@ fn lower_instruction_range(
                 current_next_local = _tr_nextloc;
                 current_next_region = _tr_nextreg;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                let temp_constants = collected_string_constants;
-                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                collected_string_constants = read_block_result_string_constants(collected_string_constants);
                 terminated = _tr_term;
                 index = _tr_nextidx;
                 active_label = find_last_label(current_lines, active_label);
@@ -544,8 +541,7 @@ fn lower_instruction_range(
                 current_next_local = _fo_nextloc;
                 current_next_region = _fo_nextreg;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                let temp_constants = collected_string_constants;
-                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
+                collected_string_constants = read_block_result_string_constants(collected_string_constants);
                 terminated = _fo_term;
                 index = _fo_nextidx;
                 active_label = find_last_label(current_lines, active_label);
