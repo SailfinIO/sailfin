@@ -161,12 +161,13 @@ fn build_parse_result_from_text(native_text -> string) -> ParseNativeResult {
     let recovered_functions = recover_native_functions_light(native_text);
     let recovered_structs = recover_native_structs_light(native_text);
     let recovered_imports = recover_native_imports_light(native_text);
+    let recovered_enums = parse_native_enums_for_import(native_text);
     return ParseNativeResult {
         functions: recovered_functions,
         imports: recovered_imports,
         structs: recovered_structs,
         interfaces: [],
-        enums: [],
+        enums: recovered_enums,
         bindings: [],
         diagnostics: [],
     };
