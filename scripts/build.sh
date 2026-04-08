@@ -452,7 +452,8 @@ stage_import_context() {
     /^\.fn / { print; infn=1; next }
     /^\.endfn/ { print; infn=0; next }
     # Inside a function keep metadata but skip body instructions
-    infn && /^\.(meta|param|return)/ { print; next }
+    # Note: .meta lines are unindented but .param/.span lines may be indented
+    infn && /^[[:space:]]*\.(meta|param|return)/ { print; next }
     infn { next }
     # Keep top-level let bindings (module bindings)
     /^\.let / { print; next }
