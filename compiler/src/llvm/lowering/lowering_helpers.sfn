@@ -514,10 +514,112 @@ fn apply_symbol_substitutions(lines -> string[], olds -> string[], news -> strin
     return out;
 }
 
+fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbol -> string) -> DeclareSignature? {
+    let at_index = index_of(trimmed, "@");
+    if at_index < 0 {
+        return null;
+    }
+    let start = at_index + 1;
+    let mut end = start;
+    loop {
+        if end >= trimmed.length {
+            break;
+        }
+        if !is_llvm_symbol_char(trimmed[end]) {
+            break;
+        }
+        end += 1;
+    }
+    if end == start {
+        return null;
+    }
+    let sym = substring(trimmed, start, end);
+    if sym != symbol {
+        return null;
+    }
+    let open_index = index_of(trimmed, "(");
+    let close_index = index_of(trimmed, ")");
+    let mut _if268 -> boolean = false;
+    if open_index < 0 { _if268 = true; }
+    if close_index < 0 { _if268 = true; }
+    if close_index <= open_index { _if268 = true; }
+    if _if268 {
+        return null;
+    }
+    let ret_type = trim_text(substring(trimmed, prefix_len, at_index));
+    let params_text = trim_text(substring(trimmed, open_index + 1, close_index));
+    let mut _if269 -> boolean = false;
+    if params_text.length == 0 { _if269 = true; }
+    if params_text == "void" { _if269 = true; }
+    if _if269 {
+        return DeclareSignature { return_type: ret_type, param_types: [] };
+    }
+
+    // Split parameters on top-level commas only (struct types include commas).
+    let mut parts -> string[] = [];
+    let mut start_index -> number = 0;
+    let mut scan -> number = 0;
+    let mut curly_depth -> number = 0;
+    let mut angle_depth -> number = 0;
+    loop {
+        if scan >= params_text.length {
+            break;
+        }
+        let ch = params_text[scan];
+        if ch == "{" {
+            curly_depth += 1;
+        } else if ch == "}" {
+            if curly_depth > 0 {
+                curly_depth -= 1;
+            }
+        } else if ch == "<" {
+            angle_depth += 1;
+        } else if ch == ">" {
+            if angle_depth > 0 {
+                angle_depth -= 1;
+            }
+        }
+        if ch == "," {
+            if curly_depth == 0 {
+                if angle_depth == 0 {
+                    let part = trim_text(substring(params_text, start_index, scan));
+                    if part.length > 0 {
+                        parts = parts.concat([part]);
+                    }
+                    start_index = scan + 1;
+                }
+            }
+        }
+        scan += 1;
+    }
+    let final_part = trim_text(substring(params_text, start_index, params_text.length));
+    if final_part.length > 0 {
+        parts = parts.concat([final_part]);
+    }
+    // Strip parameter names from define-style params (e.g. "i8* %text" → "i8*").
+    let mut stripped_parts -> string[] = [];
+    let mut pi -> number = 0;
+    loop {
+        if pi >= parts.length {
+            break;
+        }
+        let p = parts[pi];
+        let pct = index_of(p, "%");
+        if pct > 0 {
+            stripped_parts.push(trim_text(substring(p, 0, pct)));
+        } else {
+            stripped_parts.push(p);
+        }
+        pi += 1;
+    }
+    return DeclareSignature { return_type: ret_type, param_types: stripped_parts };
+}
+
 fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignature? {
     if symbol.length == 0 {
         return null;
     }
+    // First pass: check declare lines.
     let mut index -> number = 0;
     loop {
         if index >= lines.length {
@@ -525,82 +627,91 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
         }
         let trimmed = trim_text(lines[index]);
         if starts_with(trimmed, "declare ") {
-            let at_index = index_of(trimmed, "@");
-            if at_index >= 0 {
-                let start = at_index + 1;
-                let mut end = start;
-                loop {
-                    if end >= trimmed.length {
-                        break;
-                    }
-                    if !is_llvm_symbol_char(trimmed[end]) {
-                        break;
-                    }
-                    end += 1;
-                }
-                if end > start {
-                    let sym = substring(trimmed, start, end);
-                    if sym == symbol {
-                        let open_index = index_of(trimmed, "(");
-                        let close_index = index_of(trimmed, ")");
-                        let mut _if268 -> boolean = false;
-                        if open_index < 0 { _if268 = true; }
-                        if close_index < 0 { _if268 = true; }
-                        if close_index <= open_index { _if268 = true; }
-                        if _if268 {
-                            return null;
-                        }
-                        let ret_type = trim_text(substring(trimmed, 8, at_index));
-                        let params_text = trim_text(substring(trimmed, open_index + 1, close_index));
-                        let mut _if269 -> boolean = false;
-                        if params_text.length == 0 { _if269 = true; }
-                        if params_text == "void" { _if269 = true; }
-                        if _if269 {
-                            return DeclareSignature { return_type: ret_type, param_types: [] };
-                        }
-
-                        // Split parameters on top-level commas only (struct types include commas).
-                        let mut parts -> string[] = [];
-                        let mut start_index -> number = 0;
-                        let mut scan -> number = 0;
-                        let mut curly_depth -> number = 0;
-                        let mut angle_depth -> number = 0;
+            let result = _extract_signature_from_header(trimmed, 8, symbol);
+            if result != null {
+                return result;
+            }
+        }
+        index += 1;
+    }
+    // Fallback: check define lines (for symbols that are defined but have
+    // no separate declare, e.g. re-exported runtime functions).
+    index = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let trimmed = trim_text(lines[index]);
+        if starts_with(trimmed, "define ") {
+            let result = _extract_signature_from_header(trimmed, 7, symbol);
+            if result != null {
+                return result;
+            }
+        }
+        index += 1;
+    }
+    // Last resort: extract signature from a `call` instruction.
+    // This handles symbols that are neither declared nor defined in this
+    // module but are referenced via call sites (e.g. transitively imported
+    // runtime functions).
+    let call_needle = "@" + symbol + "(";
+    index = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let trimmed = trim_text(lines[index]);
+        let call_pos = index_of(trimmed, call_needle);
+        if call_pos > 0 {
+            // Extract return type: look for "call <type> @symbol("
+            let call_kw = index_of(trimmed, "call ");
+            if call_kw >= 0 {
+                let ret_start = call_kw + 5;
+                let ret_type = trim_text(substring(trimmed, ret_start, call_pos));
+                // Extract params from after the opening paren.
+                let params_start = call_pos + call_needle.length;
+                let close_paren = index_of(substring(trimmed, params_start, trimmed.length), ")");
+                if close_paren >= 0 {
+                    let params_text = substring(trimmed, params_start, params_start + close_paren);
+                    if ret_type.length > 0 {
+                        // Strip parameter values, keeping only types.
+                        let mut call_parts -> string[] = [];
+                        let mut ps -> number = 0;
+                        let mut sc -> number = 0;
+                        let mut cd -> number = 0;
                         loop {
-                            if scan >= params_text.length {
+                            if sc >= params_text.length {
                                 break;
                             }
-                            let ch = params_text[scan];
-                            if ch == "{" {
-                                curly_depth += 1;
-                            } else if ch == "}" {
-                                if curly_depth > 0 {
-                                    curly_depth -= 1;
-                                }
-                            } else if ch == "<" {
-                                angle_depth += 1;
-                            } else if ch == ">" {
-                                if angle_depth > 0 {
-                                    angle_depth -= 1;
-                                }
-                            }
-                            if ch == "," {
-                                if curly_depth == 0 {
-                                    if angle_depth == 0 {
-                                        let part = trim_text(substring(params_text, start_index, scan));
-                                        if part.length > 0 {
-                                            parts = parts.concat([part]);
+                            let pch = params_text[sc];
+                            if pch == "{" { cd += 1; }
+                            if pch == "}" { if cd > 0 { cd -= 1; } }
+                            if pch == "," {
+                                if cd == 0 {
+                                    let raw_part = trim_text(substring(params_text, ps, sc));
+                                    let space_idx = index_of(raw_part, " ");
+                                    if space_idx > 0 {
+                                        call_parts.push(trim_text(substring(raw_part, 0, space_idx)));
+                                    } else {
+                                        if raw_part.length > 0 {
+                                            call_parts.push(raw_part);
                                         }
-                                        start_index = scan + 1;
                                     }
+                                    ps = sc + 1;
                                 }
                             }
-                            scan += 1;
+                            sc += 1;
                         }
-                        let final_part = trim_text(substring(params_text, start_index, params_text.length));
-                        if final_part.length > 0 {
-                            parts = parts.concat([final_part]);
+                        let last_raw = trim_text(substring(params_text, ps, params_text.length));
+                        if last_raw.length > 0 {
+                            let sp = index_of(last_raw, " ");
+                            if sp > 0 {
+                                call_parts.push(trim_text(substring(last_raw, 0, sp)));
+                            } else {
+                                call_parts.push(last_raw);
+                            }
                         }
-                        return DeclareSignature { return_type: ret_type, param_types: parts };
+                        return DeclareSignature { return_type: ret_type, param_types: call_parts };
                     }
                 }
             }

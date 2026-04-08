@@ -13,7 +13,7 @@ import {
     CapabilityManifest,
 } from "../types";
 
-import { number_to_string, sanitize_symbol, string_array_contains, starts_with, index_of, trim_text } from "../utils";
+import { number_to_string, sanitize_symbol, string_array_contains, starts_with, index_of, trim_text, join_with_separator } from "../utils";
 
 import { substring } from "../../string_utils";
 
@@ -231,7 +231,10 @@ fn apply_module_symbol_mangling(
     }
 
     // 3) Append shims before the LLVM footer (attributes/metadata).
+    //    Also inject `declare` for any target symbol that is referenced
+    //    but has no existing declare or define in the module.
     let mut shim_lines -> string[] = [];
+    let mut injected_declares -> string[] = [];
     let mut shim_index -> number = 0;
     loop {
         let mut _if274 -> boolean = false;
@@ -247,6 +250,16 @@ fn apply_module_symbol_mangling(
             // Not a function import (e.g. struct/enum type), or declaration not emitted.
             shim_index += 1;
             continue;
+        }
+        // If the target symbol has no declare/define line, inject a declare
+        // so the shim (and any other call sites) can reference it.
+        if !_has_declare_or_define(rewritten, target_sym) {
+            if !string_array_contains(injected_declares, target_sym) {
+                let decl = _render_declare_line(target_sym, signature);
+                shim_lines.push(decl);
+                shim_lines.push("");
+                injected_declares.push(target_sym);
+            }
         }
         let _shim_result = render_function_shim(export_sym, target_sym, signature);
         let mut _ci0 -> number = 0;
@@ -264,6 +277,40 @@ fn apply_module_symbol_mangling(
     }
 
     return MangledModuleResult { lines: rewritten, diagnostics: diagnostics };
+}
+
+fn _has_declare_or_define(lines -> string[], symbol -> string) -> boolean {
+    let at_sym = "@" + symbol + "(";
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let trimmed = trim_text(lines[index]);
+        let mut _is_hdr -> boolean = false;
+        if starts_with(trimmed, "declare ") { _is_hdr = true; }
+        if starts_with(trimmed, "define ") { _is_hdr = true; }
+        if _is_hdr {
+            if index_of(trimmed, at_sym) >= 0 {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _render_declare_line(symbol -> string, signature -> DeclareSignature) -> string {
+    let mut param_types -> string[] = [];
+    let mut idx -> number = 0;
+    loop {
+        if idx >= signature.param_types.length {
+            break;
+        }
+        param_types.push(signature.param_types[idx]);
+        idx += 1;
+    }
+    return "declare " + signature.return_type + " @" + symbol + "(" + join_with_separator(param_types, ", ") + ")";
 }
 
 fn empty_capability_manifest() -> CapabilityManifest {
