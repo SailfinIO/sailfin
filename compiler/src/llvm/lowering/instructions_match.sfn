@@ -88,6 +88,7 @@ import {
     extend_mutations,
     _write_block_result_files,
     _parse_int_from_string,
+    _read_ipc_int_min,
 } from "./instructions_helpers";
 
 import {
@@ -681,10 +682,10 @@ fn lower_match_instruction(
             body_labels[index]
         );
         // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-        let _br_body_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
-        let _br_body_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
-        let _br_body_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
-        let _br_body_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+        let _br_body_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
+        let _br_body_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
+        let _br_body_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
+        let _br_body_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
         let _br_body_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
 
         let mut _ci3 -> number = 0;
