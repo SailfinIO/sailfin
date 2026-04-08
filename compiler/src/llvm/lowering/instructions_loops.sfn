@@ -141,8 +141,15 @@ fn collect_loop_structure(
 }
 
 fn append_loop_context(values -> LoopContext[], value -> LoopContext) -> LoopContext[] {
-    let mut out = values;
-    out = out.push(value);
+    // Deep-copy the array so the caller's reference is not mutated by push.
+    let mut out -> LoopContext[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= values.length { break; }
+        out.push(values[i]);
+        i += 1;
+    }
+    out.push(value);
     return out;
 }
 
