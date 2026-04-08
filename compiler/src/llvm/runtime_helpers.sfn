@@ -805,6 +805,32 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
             parameter_types: ["i8*", "i8*"],
             effects: ["io"],
     });
+    // Prelude functions called directly by their original name.
+    // These are defined in runtime/prelude.sfn and compiled into
+    // runtime__prelude.ll.  Cross-module calls reference them as
+    // @monotonic_millis, @find_char, etc. — they need declares in
+    // every module that calls them.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+            target: "monotonic_millis",
+            symbol: "monotonic_millis",
+            return_type: "double",
+            parameter_types: [],
+            effects: ["clock"],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+            target: "find_char",
+            symbol: "find_char",
+            return_type: "double",
+            parameter_types: ["i8*", "i8*", "double"],
+            effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+            target: "string_starts_with",
+            symbol: "string_starts_with",
+            return_type: "i1",
+            parameter_types: ["i8*", "i8*"],
+            effects: [],
+    });
 
     return descriptors;
 }

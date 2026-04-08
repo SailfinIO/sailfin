@@ -625,6 +625,26 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_filesystem_bridge");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_http_bridge");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_model_bridge");
+    // Filesystem adapters — the compiler emits direct calls to these C
+    // runtime symbols from modules that use fs.readFile, fs.exists, etc.
+    // Without unconditional declares, separate-compilation produces
+    // "use of undefined value" errors at clang time.
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.readFile");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.read");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.writeFile");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.write");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.appendFile");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.exists");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.deleteFile");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.listDirectory");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.writeLines");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.createDirectory");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.read_bytes");
+    // Additional helpers used by the compiler but not auto-collected
+    runtime_helpers = append_unique_effect(runtime_helpers, "monotonic_millis");
+    runtime_helpers = append_unique_effect(runtime_helpers, "find_char");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string_starts_with");
+    runtime_helpers = append_unique_effect(runtime_helpers, "process.run");
     let mut direct_effects -> FunctionEffectEntry[] = [];
     let mut aggregated_effects -> FunctionEffectEntry[] = [];
     if !skip_effects {
