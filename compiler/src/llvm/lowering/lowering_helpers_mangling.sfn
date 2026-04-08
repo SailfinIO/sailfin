@@ -13,7 +13,9 @@ import {
     CapabilityManifest,
 } from "../types";
 
-import { number_to_string, sanitize_symbol, string_array_contains, starts_with, index_of } from "../utils";
+import { number_to_string, sanitize_symbol, string_array_contains, starts_with, index_of, trim_text, join_with_separator } from "../utils";
+
+import { substring } from "../../string_utils";
 
 import {
     sanitize_module_suffix,
@@ -33,7 +35,8 @@ fn apply_module_symbol_mangling(
     lines -> string[],
     imports -> NativeImport[],
     current_module_slug -> string,
-    imported_native_texts -> string[]
+    imported_native_texts -> string[],
+    native_text_path -> string
 ) -> MangledModuleResult {
     let mut diagnostics -> string[] = [];
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
@@ -100,97 +103,136 @@ fn apply_module_symbol_mangling(
     // 2) Rewrite imported symbol references to the provider's qualified symbol,
     // and generate re-export shims so downstream modules can import symbols
     // from this module even if they're transitively provided.
+    //
+    // The v0.1.1 seed miscompiles NativeImport struct returns: the `kind`
+    // field becomes "named" instead of "import" and the specifiers array is
+    // empty.  To work around this, we re-parse .import lines directly from
+    // the raw .sfn-asm text using simple string operations.
     let mut import_olds -> string[] = [];
     let mut import_news -> string[] = [];
     let mut shim_exports -> string[] = [];
     let mut shim_targets -> string[] = [];
-    let mut import_index -> number = 0;
-    loop {
-        if import_index >= safe_imports.length {
-            break;
-        }
-        let entry = safe_imports[import_index];
-        if entry == null {
-            import_index += 1;
-            continue;
-        }
-        let mut _if271 -> boolean = false;
-        if entry.kind == null { _if271 = true; }
-        if entry.kind != "import" { _if271 = true; }
-        if _if271 {
-            import_index += 1;
-            continue;
-        }
-        let mut _if272 -> boolean = false;
-        if entry.module == null { _if272 = true; }
-        if entry.module.length == 0 { _if272 = true; }
-        if _if272 {
-            import_index += 1;
-            continue;
-        }
-        let provider_module = resolve_import_provider_module_name(entry.module, current_module_slug, available_modules);
-        let provider_is_runtime = starts_with(provider_module, "runtime/");
-        let provider_suffix = sanitize_module_suffix(provider_module);
-        let mut specifiers = entry.specifiers;
-        if specifiers == null {
-            specifiers = [];
-        }
-        let mut spec_index -> number = 0;
+
+    let mut native_text -> string = "";
+    if native_text_path.length > 0 {
+        // native_text_path carries the raw .sfn-asm text content (not a
+        // file path, despite the parameter name).
+        native_text = native_text_path;
+    }
+
+    if native_text.length > 0 {
+        // Scan native text line-by-line for .import directives.
+        let mut scan_pos -> number = 0;
         loop {
-            if spec_index >= specifiers.length {
+            if scan_pos >= native_text.length {
                 break;
             }
-            let spec -> NativeImportSpecifier = specifiers[spec_index];
-            if spec == null {
-                spec_index += 1;
+            // Find end of current line.
+            let mut line_end -> number = scan_pos;
+            loop {
+                if line_end >= native_text.length {
+                    break;
+                }
+                if native_text[line_end] == "\n" {
+                    break;
+                }
+                line_end += 1;
+            }
+            let raw_line = substring(native_text, scan_pos, line_end);
+            let line = trim_text(raw_line);
+            scan_pos = line_end + 1;
+
+            if !starts_with(line, ".import ") {
                 continue;
             }
-            let mut _if273 -> boolean = false;
-            if spec.name == null { _if273 = true; }
-            if spec.name.length == 0 { _if273 = true; }
-            if _if273 {
-                spec_index += 1;
+            // Extract module path between first pair of quotes.
+            let q1 = index_of(line, "\"");
+            if q1 < 0 {
                 continue;
             }
-            let imported_name = sanitize_symbol(spec.name);
-            let mut local_name = spec.name;
-            if spec.alias != null {
-                if spec.alias.length > 0 {
-                    local_name = spec.alias;
+            let after_q1 = substring(line, q1 + 1, line.length);
+            let q2 = index_of(after_q1, "\"");
+            if q2 <= 0 {
+                continue;
+            }
+            let import_module = substring(after_q1, 0, q2);
+            if import_module.length == 0 {
+                continue;
+            }
+
+            let provider_module = resolve_import_provider_module_name(import_module, current_module_slug, available_modules);
+            let provider_is_runtime = starts_with(provider_module, "runtime/");
+            let provider_suffix = sanitize_module_suffix(provider_module);
+
+            // Extract specifiers between { and }.
+            let brace_open = index_of(line, "{");
+            let brace_close = index_of(line, "}");
+            if brace_open < 0 {
+                continue;
+            }
+            if brace_close <= brace_open {
+                continue;
+            }
+            let specs_text = substring(line, brace_open + 1, brace_close);
+
+            // Split specifiers by comma and process each one.
+            let mut remaining = specs_text;
+            loop {
+                remaining = trim_text(remaining);
+                if remaining.length == 0 {
+                    break;
+                }
+                let comma_pos = index_of(remaining, ",");
+                let mut spec_name -> string = "";
+                if comma_pos >= 0 {
+                    spec_name = trim_text(substring(remaining, 0, comma_pos));
+                    remaining = substring(remaining, comma_pos + 1, remaining.length);
+                } else {
+                    spec_name = trim_text(remaining);
+                    remaining = "";
+                }
+                if spec_name.length == 0 {
+                    continue;
+                }
+
+                // Handle aliased imports: "name as alias" → local=alias, original=name
+                let mut local_name = spec_name;
+                let mut original_name = spec_name;
+                let as_pos = index_of(spec_name, " as ");
+                if as_pos >= 0 {
+                    original_name = trim_text(substring(spec_name, 0, as_pos));
+                    local_name = trim_text(substring(spec_name, as_pos + 4, spec_name.length));
+                }
+
+                let local_symbol = sanitize_symbol(local_name);
+                let original_symbol = sanitize_symbol(original_name);
+                if should_keep_unmangled_abi_symbol(local_symbol) {
+                    continue;
+                }
+                if string_array_contains(defined, local_symbol) {
+                    diagnostics.push("llvm lowering: import `" + local_symbol + "` shadows local function in module `" + current_module_slug + "`");
+                    continue;
+                }
+                // Don't rewrite if already qualified.
+                if index_of(local_symbol, "__") >= 0 {
+                    continue;
+                }
+                import_olds.push(local_symbol);
+                let mut target_symbol = original_symbol;
+                if !provider_is_runtime {
+                    target_symbol = original_symbol + "__" + provider_suffix;
+                }
+                import_news.push(target_symbol);
+
+                // Re-export shim: provide `local_symbol__<this_module>` as a thin
+                // wrapper forwarding to the provider's symbol.
+                let export_sym = local_symbol + "__" + module_suffix;
+                if !string_array_contains(shim_exports, export_sym) {
+                    shim_exports.push(export_sym);
+                    shim_targets.push(target_symbol);
                 }
             }
-            let local_symbol = sanitize_symbol(local_name);
-            if should_keep_unmangled_abi_symbol(local_symbol) {
-                spec_index += 1;
-                continue;
-            }
-            if string_array_contains(defined, local_symbol) {
-                diagnostics.push("llvm lowering: import `" + local_symbol + "` shadows local function in module `" + current_module_slug + "`");
-                spec_index += 1;
-                continue;
-            }
-            // Don't rewrite if already qualified.
-            if index_of(local_symbol, "__") >= 0 {
-                spec_index += 1;
-                continue;
-            }
-            import_olds.push(local_symbol);
-            let mut target_symbol = imported_name;
-            if !provider_is_runtime {
-                target_symbol = imported_name + "__" + provider_suffix;
-            }
-            import_news.push(target_symbol);
-
-            // Re-export shim: provide `local_symbol__<this_module>` as a thin
-            // wrapper forwarding to the provider's symbol.
-            let export_sym = local_symbol + "__" + module_suffix;
-            if !string_array_contains(shim_exports, export_sym) {
-                shim_exports.push(export_sym);
-                shim_targets.push(target_symbol);
-            }
-            spec_index += 1;
         }
-        import_index += 1;
     }
 
     rewritten = apply_symbol_substitutions(rewritten, import_olds, import_news);
@@ -199,7 +241,10 @@ fn apply_module_symbol_mangling(
     }
 
     // 3) Append shims before the LLVM footer (attributes/metadata).
+    //    Also inject `declare` for any target symbol that is referenced
+    //    but has no existing declare or define in the module.
     let mut shim_lines -> string[] = [];
+    let mut injected_declares -> string[] = [];
     let mut shim_index -> number = 0;
     loop {
         let mut _if274 -> boolean = false;
@@ -215,6 +260,16 @@ fn apply_module_symbol_mangling(
             // Not a function import (e.g. struct/enum type), or declaration not emitted.
             shim_index += 1;
             continue;
+        }
+        // If the target symbol has no declare/define line, inject a declare
+        // so the shim (and any other call sites) can reference it.
+        if !_has_declare_or_define(rewritten, target_sym) {
+            if !string_array_contains(injected_declares, target_sym) {
+                let decl = _render_declare_line(target_sym, signature);
+                shim_lines.push(decl);
+                shim_lines.push("");
+                injected_declares.push(target_sym);
+            }
         }
         let _shim_result = render_function_shim(export_sym, target_sym, signature);
         let mut _ci0 -> number = 0;
@@ -232,6 +287,40 @@ fn apply_module_symbol_mangling(
     }
 
     return MangledModuleResult { lines: rewritten, diagnostics: diagnostics };
+}
+
+fn _has_declare_or_define(lines -> string[], symbol -> string) -> boolean {
+    let at_sym = "@" + symbol + "(";
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let trimmed = trim_text(lines[index]);
+        let mut _is_hdr -> boolean = false;
+        if starts_with(trimmed, "declare ") { _is_hdr = true; }
+        if starts_with(trimmed, "define ") { _is_hdr = true; }
+        if _is_hdr {
+            if index_of(trimmed, at_sym) >= 0 {
+                return true;
+            }
+        }
+        index += 1;
+    }
+    return false;
+}
+
+fn _render_declare_line(symbol -> string, signature -> DeclareSignature) -> string {
+    let mut param_types -> string[] = [];
+    let mut idx -> number = 0;
+    loop {
+        if idx >= signature.param_types.length {
+            break;
+        }
+        param_types.push(signature.param_types[idx]);
+        idx += 1;
+    }
+    return "declare " + signature.return_type + " @" + symbol + "(" + join_with_separator(param_types, ", ") + ")";
 }
 
 fn empty_capability_manifest() -> CapabilityManifest {

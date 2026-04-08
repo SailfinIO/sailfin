@@ -89,11 +89,10 @@ fn sanitize_lowering_inputs(
     if native_text_override_path.length > 0 {
         let _rfns = recover_native_functions_light(native_text_override_path);
         let _rsts = recover_native_structs_light(native_text_override_path);
-        let _rims = recover_native_imports_light(native_text_override_path);
         let _rens = parse_native_enums_for_import(native_text_override_path);
         let reparsed = ParseNativeResult {
             functions: _rfns,
-            imports: _rims,
+            imports: parse_in.imports,
             structs: _rsts,
             interfaces: [],
             enums: _rens,

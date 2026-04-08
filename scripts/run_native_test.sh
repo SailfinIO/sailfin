@@ -26,17 +26,15 @@ else
 fi
 
 if [ -n "$TIMEOUT_CMD" ]; then
-    output=$("$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE" 2>&1) || {
-        echo "[test] FAIL: $BASENAME (exit code $?)"
-        echo "$output" | tail -5
-        exit 1
-    }
+    output=$("$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE" 2>&1) && RC_INNER=0 || RC_INNER=$?
 else
-    output=$("$COMPILER" test "$TEST_FILE" 2>&1) || {
-        echo "[test] FAIL: $BASENAME (exit code $?)"
-        echo "$output" | tail -5
-        exit 1
-    }
+    output=$("$COMPILER" test "$TEST_FILE" 2>&1) && RC_INNER=0 || RC_INNER=$?
+fi
+
+if [ $RC_INNER -ne 0 ]; then
+    echo "[test] FAIL: $BASENAME (exit code $RC_INNER, timeout=$TIMEOUT)"
+    echo "$output" | tail -10
+    exit 1
 fi
 
 # The binary must produce SOME output — a silent exit is not a pass
@@ -46,13 +44,16 @@ if [ -z "$output" ]; then
 fi
 
 # Check for test pass indicators
-if echo "$output" | grep -qiE "pass|ok|success|PASS"; then
+if grep -qiE "pass|ok|success" <<< "$output"; then
     echo "[test] PASS: $BASENAME"
     exit 0
 fi
 
-# If there's output but no pass indicator, check for explicit failures
-if echo "$output" | grep -qiE "fail|error|panic|abort"; then
+# If there's output but no pass indicator, check for explicit failures.
+# Use identifier-safe boundary matching to avoid false positives from
+# identifiers like "runtime_raise_value_error_fn" in debug trace output.
+# Avoids grep -P (PCRE) since BSD grep on macOS doesn't support it.
+if grep -qiE '(^|[^[:alnum:]_])(fail(ed|ure)?|error|panic|abort)([^[:alnum:]_]|$)' <<< "$output"; then
     echo "[test] FAIL: $BASENAME"
     echo "$output" | tail -5
     exit 1

@@ -170,31 +170,31 @@ import {
 
 fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
-        let mut _if206 -> boolean = false;
-        if artifact == null { _if206 = true; }
-        if artifact.contents.length == 0 { _if206 = true; }
-        if _if206 {
-            return lower_to_llvm_with_context(native_module, [], [], []);
-        }
-        let parse = parse_native_artifact_safe(artifact.contents);
-        let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
-        return lower_to_llvm_with_parsed_context(
-            native_module,
-            parse,
-            import_context.manifests,
-            import_context.native_texts,
-            import_context.diagnostics
-        );
+    let mut _if206 -> boolean = false;
+    if artifact == null { _if206 = true; }
+    if artifact.contents.length == 0 { _if206 = true; }
+    if _if206 {
+        return lower_to_llvm_with_context(native_module, [], [], []);
+    }
+    let parse = parse_native_artifact_safe(artifact.contents);
+    let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
+    return lower_to_llvm_with_parsed_context(
+        native_module,
+        parse,
+        import_context.manifests,
+        import_context.native_texts,
+        import_context.diagnostics
+    );
 }
 
 fn lower_to_llvm_lines(native_module -> NativeModule) -> LoweredLLVMLinesResult ![io] {
     let ir = lower_to_llvm_ir(native_module);
-        let mut _if207 -> boolean = false;
-        if ir == null { _if207 = true; }
-        if ir.length == 0 { _if207 = true; }
-        if _if207 {
-            return LoweredLLVMLinesResult { lines: [], diagnostics: [], trait_metadata: empty_trait_metadata(), function_effects: [], lifetime_regions: [], capability_manifest: empty_capability_manifest(), string_constants: empty_string_constant_set() };
-        }
+    let mut _if207 -> boolean = false;
+    if ir == null { _if207 = true; }
+    if ir.length == 0 { _if207 = true; }
+    if _if207 {
+        return LoweredLLVMLinesResult { lines: [], diagnostics: [], trait_metadata: empty_trait_metadata(), function_effects: [], lifetime_regions: [], capability_manifest: empty_capability_manifest(), string_constants: empty_string_constant_set() };
+    }
     let lines = split_lines(ir);
     return LoweredLLVMLinesResult {
         lines: lines,
@@ -302,7 +302,7 @@ fn write_llvm_ir(native_module -> NativeModule, out_path -> string) -> boolean !
         import_context.native_texts,
         import_context.diagnostics,
         true,
-        ""
+        artifact.contents
     );
     let lines = lowered_lines.lines;
     if lines.length == 0 {
@@ -338,7 +338,12 @@ fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifest
 
 
 fn lower_to_llvm_with_parsed_context(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
-    let lowered = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, true, "");
+    let _art = select_text_artifact(native_module.artifacts);
+    let mut _native_text -> string = "";
+    if _art != null {
+        _native_text = _art.contents;
+    }
+    let lowered = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, true, _native_text);
     if lowered.lines == null {
         return LoweredLLVMResult {
             ir: "",
@@ -413,6 +418,6 @@ fn lower_to_llvm_lines_with_context(native_module -> NativeModule, imported_mani
     }
 
     let parse = parse_native_artifact_safe(artifact.contents);
-    return lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics, true, "");
+    return lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics, true, artifact.contents);
 }
 
