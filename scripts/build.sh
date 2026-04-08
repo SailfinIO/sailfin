@@ -428,8 +428,10 @@ stage_import_context() {
 
     echo "$native_text" > "$asm_dest"
 
-    # Extract .layout lines for the manifest
-    grep '^\.\(layout\)' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
+    # Extract .layout lines for the manifest.
+    # The native emitter may indent .layout lines (e.g. inside struct blocks),
+    # so match with optional leading whitespace.
+    grep '\.layout ' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
 
     # Reduce native text to a lightweight skeleton that retains module
     # metadata, import declarations, and function signatures but strips
