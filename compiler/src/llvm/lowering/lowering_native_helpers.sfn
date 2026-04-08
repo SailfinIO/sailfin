@@ -110,10 +110,16 @@ fn make_instruction_simple(tag_val -> number) -> NativeInstruction {
     // Seed drops this; fixup pass replaces body
     if tag_val == 4 { return NativeInstruction.Else(); }
     if tag_val == 5 { return NativeInstruction.EndIf(); }
+    if tag_val == 7 { return NativeInstruction.EndFor(); }
     if tag_val == 8 { return NativeInstruction.Loop(); }
     if tag_val == 9 { return NativeInstruction.EndLoop(); }
     if tag_val == 10 { return NativeInstruction.Break(); }
     return NativeInstruction.Continue();
+}
+
+fn make_instruction_for(target -> string, iterable -> string) -> NativeInstruction {
+    // Seed drops this; fixup pass replaces body
+    return NativeInstruction.For { target: target, iterable: iterable };
 }
 
 // ── NativeEnum field accessors ───────────────────────────────────────
@@ -180,6 +186,16 @@ fn get_instruction_let_type(instructions -> NativeInstruction[], idx -> number) 
 fn get_instruction_let_value(instructions -> NativeInstruction[], idx -> number) -> string? {
     let instr = instructions[idx];
     return instr.value;
+}
+fn get_instruction_for_target(instructions -> NativeInstruction[], idx -> number) -> string {
+    // Seed drops this; fixup pass replaces with payload[0] read
+    let instr = instructions[idx];
+    return instr.target;
+}
+fn get_instruction_for_iterable(instructions -> NativeInstruction[], idx -> number) -> string {
+    // Seed drops this; fixup pass replaces with payload[1] read
+    let instr = instructions[idx];
+    return instr.iterable;
 }
 
 // ── NativeFunction field accessors ───────────────────────────────────

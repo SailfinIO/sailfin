@@ -5437,6 +5437,30 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
 
     _HELPERS["make_instruction_simple"] = _gen_make_instruction_simple()
 
+    def _gen_make_instruction_for():
+        """make_instruction_for(target: i8*, iterable: i8*) -> NativeInstruction*
+        Allocates NativeInstruction { i32 tag=6, [4 x i8] pad, [6 x i64] payload }
+        Sets payload[0] = target pointer, payload[1] = iterable pointer."""
+        NI = "%NativeInstruction"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NI)
+        # tag = 6 (For)
+        lines.append("  %tag_i32 = add i32 0, 6")
+        _set_field(lines, "f0", ptr, NI, 0, "i32", "%tag_i32")
+        lines.append(f"  %pad_p = getelementptr {NI}, {NI}* {ptr}, i32 0, i32 1")
+        lines.append("  store [4 x i8] zeroinitializer, [4 x i8]* %pad_p")
+        lines.append(f"  %pay_p = getelementptr {NI}, {NI}* {ptr}, i32 0, i32 2")
+        lines.append("  %tgt_i64 = ptrtoint i8* %target to i64")
+        lines.append("  %itr_i64 = ptrtoint i8* %iterable to i64")
+        lines.append("  %s0 = insertvalue [6 x i64] zeroinitializer, i64 %tgt_i64, 0")
+        lines.append("  %s1 = insertvalue [6 x i64] %s0, i64 %itr_i64, 1")
+        lines.append("  store [6 x i64] %s1, [6 x i64]* %pay_p")
+        lines.append(f"  %ret = bitcast {NI}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_instruction_for"] = _gen_make_instruction_for()
+
     def _gen_build_parse_result_from_text():
         """build_parse_result_from_text(native_text: i8*) -> ParseNativeResult*
         Calls intra-module recovery functions then builds ParseNativeResult."""
@@ -5611,6 +5635,8 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _HELPERS["get_instruction_let_mutable"] = _gen_instr_payload_bool_accessor(1)
     _HELPERS["get_instruction_let_type"] = _gen_instr_payload_ptr_accessor(2)
     _HELPERS["get_instruction_let_value"] = _gen_instr_payload_ptr_accessor(3)
+    _HELPERS["get_instruction_for_target"] = _gen_instr_payload_ptr_accessor(0)
+    _HELPERS["get_instruction_for_iterable"] = _gen_instr_payload_ptr_accessor(1)
 
     # --- NativeEnum field accessor helpers ---
     # NativeEnum = { i8* name[0], {NativeEnumVariant*,i64}* variants[1], NativeEnumLayout* layout[2] }
@@ -5665,6 +5691,9 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     _FN_SIGS["get_instruction_let_mutable"] = (_ni_sig_base, "i1")
     _FN_SIGS["get_instruction_let_type"] = (_ni_sig_base, "i8*")
     _FN_SIGS["get_instruction_let_value"] = (_ni_sig_base, "i8*")
+
+    _FN_SIGS["get_instruction_for_target"] = (_ni_sig_base, "i8*")
+    _FN_SIGS["get_instruction_for_iterable"] = (_ni_sig_base, "i8*")
 
     # --- NativeStruct field accessor helpers ---
     # NativeStruct = { i8* name[0], {NativeStructField*,i64}* fields[1],

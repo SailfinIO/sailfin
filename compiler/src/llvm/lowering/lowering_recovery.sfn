@@ -53,6 +53,7 @@ import {
     make_native_struct_layout_field,
     make_instruction_text,
     make_instruction_simple,
+    make_instruction_for,
     update_function_return_type,
     update_function_effects,
     append_param_to_function,
@@ -149,6 +150,8 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let is_if_kw = starts_with_local(line, ".if ");
         let is_loop_kw = line == ".loop";
         let is_endloop_kw = line == ".endloop";
+        let is_for_kw = starts_with_local(line, ".for ");
+        let is_endfor_kw = line == ".endfor";
         let is_break_kw = line == "break";
         let is_continue_kw = line == "continue";
 
@@ -164,6 +167,12 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let param_arrow_idx = index_of(param_text_raw, " -> ");
         let param_name_raw = trim_text_local(substring(param_text_raw, 0, param_arrow_idx));
         let param_type_raw = trim_text_local(substring(param_text_raw, param_arrow_idx + 4, param_text_raw.length));
+
+        // Pre-compute .for target/iterable extraction.
+        let for_body_raw = trim_text_local(substring(line, 5, line.length));
+        let for_in_idx = index_of(for_body_raw, " in ");
+        let for_target_raw = trim_text_local(substring(for_body_raw, 0, for_in_idx));
+        let for_iterable_raw = trim_text_local(substring(for_body_raw, for_in_idx + 4, for_body_raw.length));
 
         // --- Struct tracking ---
         if is_struct_start {
@@ -390,6 +399,14 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
         if is_endloop_kw {
             next_instruction = make_instruction_simple(9);
+        }
+        if is_for_kw {
+            if for_in_idx >= 0 {
+                next_instruction = make_instruction_for(for_target_raw, for_iterable_raw);
+            }
+        }
+        if is_endfor_kw {
+            next_instruction = make_instruction_simple(7);
         }
         if is_break_kw {
             next_instruction = make_instruction_simple(10);
