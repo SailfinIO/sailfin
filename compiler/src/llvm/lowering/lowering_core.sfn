@@ -330,7 +330,24 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if debug_lowering {
         print("emit-llvm: safe_imports.length=" + number_to_string(safe_imports.length));
         if safe_imports.length > 0 {
-            print("emit-llvm: safe_imports[0].kind=" + safe_imports[0].kind + " module=" + safe_imports[0].module + " specs=" + number_to_string(safe_imports[0].specifiers.length));
+            let first_import = safe_imports[0];
+            if first_import != null {
+                let mut import_kind = "<null>";
+                if first_import.kind != null {
+                    import_kind = first_import.kind;
+                }
+                let mut import_module = "<null>";
+                if first_import.module != null {
+                    import_module = first_import.module;
+                }
+                let mut import_spec_count = 0;
+                if first_import.specifiers != null {
+                    import_spec_count = first_import.specifiers.length;
+                }
+                print("emit-llvm: safe_imports[0].kind=" + import_kind + " module=" + import_module + " specs=" + number_to_string(import_spec_count));
+            } else {
+                print("emit-llvm: safe_imports[0]=<null>");
+            }
         }
     }
     if is_test_module {

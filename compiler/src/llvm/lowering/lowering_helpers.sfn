@@ -538,12 +538,29 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
         return null;
     }
     let open_index = index_of(trimmed, "(");
-    let close_index = index_of(trimmed, ")");
-    let mut _if268 -> boolean = false;
-    if open_index < 0 { _if268 = true; }
-    if close_index < 0 { _if268 = true; }
-    if close_index <= open_index { _if268 = true; }
-    if _if268 {
+    if open_index < 0 {
+        return null;
+    }
+    // Find the matching close paren by tracking depth (handles function-pointer
+    // params like `double (i8*)*`).
+    let mut paren_depth = 1;
+    let mut close_index = open_index + 1;
+    loop {
+        if close_index >= trimmed.length {
+            break;
+        }
+        let pch = trimmed[close_index];
+        if pch == "(" {
+            paren_depth += 1;
+        } else if pch == ")" {
+            paren_depth -= 1;
+            if paren_depth == 0 {
+                break;
+            }
+        }
+        close_index += 1;
+    }
+    if paren_depth != 0 {
         return null;
     }
     let ret_type = trim_text(substring(trimmed, prefix_len, at_index));
@@ -615,6 +632,45 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
     return DeclareSignature { return_type: ret_type, param_types: stripped_parts };
 }
 
+// Extract the type portion from a call-site argument like "i8* %x" or
+// "double (i8*)* %fn".  Finds the last '%' or '@' (start of the SSA/value
+// name) and returns everything before it, trimmed.  Falls back to the whole
+// token if no sigil is found (e.g. bare constants).
+fn _extract_type_from_arg(raw -> string) -> string {
+    if raw.length == 0 {
+        return raw;
+    }
+    // Scan backwards for the last '%' or '@'.
+    let mut pos = raw.length - 1;
+    loop {
+        if pos < 0 {
+            break;
+        }
+        let ch = raw[pos];
+        if ch == "%" {
+            let t = trim_text(substring(raw, 0, pos));
+            if t.length > 0 {
+                return t;
+            }
+            return raw;
+        }
+        if ch == "@" {
+            let t = trim_text(substring(raw, 0, pos));
+            if t.length > 0 {
+                return t;
+            }
+            return raw;
+        }
+        pos -= 1;
+    }
+    // No sigil found — might be a bare constant; use first-space heuristic.
+    let space_idx = index_of(raw, " ");
+    if space_idx > 0 {
+        return trim_text(substring(raw, 0, space_idx));
+    }
+    return raw;
+}
+
 fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignature? {
     if symbol.length == 0 {
         return null;
@@ -675,10 +731,14 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                     let params_text = substring(trimmed, params_start, params_start + close_paren);
                     if ret_type.length > 0 {
                         // Strip parameter values, keeping only types.
+                        // For multi-token types like `double (i8*)*`, split on
+                        // the last `%` or `@` (start of the SSA/value name)
+                        // rather than the first space.
                         let mut call_parts -> string[] = [];
                         let mut ps -> number = 0;
                         let mut sc -> number = 0;
                         let mut cd -> number = 0;
+                        let mut pd -> number = 0;
                         loop {
                             if sc >= params_text.length {
                                 break;
@@ -686,30 +746,22 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                             let pch = params_text[sc];
                             if pch == "{" { cd += 1; }
                             if pch == "}" { if cd > 0 { cd -= 1; } }
+                            if pch == "(" { pd += 1; }
+                            if pch == ")" { if pd > 0 { pd -= 1; } }
                             if pch == "," {
                                 if cd == 0 {
-                                    let raw_part = trim_text(substring(params_text, ps, sc));
-                                    let space_idx = index_of(raw_part, " ");
-                                    if space_idx > 0 {
-                                        call_parts.push(trim_text(substring(raw_part, 0, space_idx)));
-                                    } else {
-                                        if raw_part.length > 0 {
-                                            call_parts.push(raw_part);
-                                        }
+                                    if pd == 0 {
+                                        let raw_part = trim_text(substring(params_text, ps, sc));
+                                        call_parts.push(_extract_type_from_arg(raw_part));
+                                        ps = sc + 1;
                                     }
-                                    ps = sc + 1;
                                 }
                             }
                             sc += 1;
                         }
                         let last_raw = trim_text(substring(params_text, ps, params_text.length));
                         if last_raw.length > 0 {
-                            let sp = index_of(last_raw, " ");
-                            if sp > 0 {
-                                call_parts.push(trim_text(substring(last_raw, 0, sp)));
-                            } else {
-                                call_parts.push(last_raw);
-                            }
+                            call_parts.push(_extract_type_from_arg(last_raw));
                         }
                         return DeclareSignature { return_type: ret_type, param_types: call_parts };
                     }

@@ -49,10 +49,11 @@ if grep -qiE "pass|ok|success" <<< "$output"; then
     exit 0
 fi
 
-# If there's output but no pass indicator, check for explicit failures
-# Use word-boundary matching to avoid false positives from identifiers
-# like "runtime_raise_value_error_fn" in debug trace output.
-if grep -qP '(?i)\bfail(?:ed|ure)?\b|\berror\b|\bpanic\b|\babort\b' <<< "$output"; then
+# If there's output but no pass indicator, check for explicit failures.
+# Use identifier-safe boundary matching to avoid false positives from
+# identifiers like "runtime_raise_value_error_fn" in debug trace output.
+# Avoids grep -P (PCRE) since BSD grep on macOS doesn't support it.
+if grep -qiE '(^|[^[:alnum:]_])(fail(ed|ure)?|error|panic|abort)([^[:alnum:]_]|$)' <<< "$output"; then
     echo "[test] FAIL: $BASENAME"
     echo "$output" | tail -5
     exit 1

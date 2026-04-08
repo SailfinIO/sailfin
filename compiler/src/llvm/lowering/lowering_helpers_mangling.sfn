@@ -195,7 +195,17 @@ fn apply_module_symbol_mangling(
                     continue;
                 }
 
-                let local_symbol = sanitize_symbol(spec_name);
+                // Handle aliased imports: "name as alias" → local=alias, original=name
+                let mut local_name = spec_name;
+                let mut original_name = spec_name;
+                let as_pos = index_of(spec_name, " as ");
+                if as_pos >= 0 {
+                    original_name = trim_text(substring(spec_name, 0, as_pos));
+                    local_name = trim_text(substring(spec_name, as_pos + 4, spec_name.length));
+                }
+
+                let local_symbol = sanitize_symbol(local_name);
+                let original_symbol = sanitize_symbol(original_name);
                 if should_keep_unmangled_abi_symbol(local_symbol) {
                     continue;
                 }
@@ -208,9 +218,9 @@ fn apply_module_symbol_mangling(
                     continue;
                 }
                 import_olds.push(local_symbol);
-                let mut target_symbol = local_symbol;
+                let mut target_symbol = original_symbol;
                 if !provider_is_runtime {
-                    target_symbol = local_symbol + "__" + provider_suffix;
+                    target_symbol = original_symbol + "__" + provider_suffix;
                 }
                 import_news.push(target_symbol);
 
