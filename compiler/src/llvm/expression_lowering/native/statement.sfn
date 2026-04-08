@@ -487,16 +487,12 @@ fn lower_expression_statement(
         // Clean up sentinel
         fs.deleteFile("build/sailfin/.call_result_lines_count");
     } else {
-        // Fallback: try struct fields
-        let mut _ci15 -> number = 0;
-        loop {
-            if _ci15 >= lowered.diagnostics.length { break; }
-            diagnostics.push(lowered.diagnostics[_ci15]);
-            _ci15 += 1;
-        }
-        string_constants = lowered.string_constants;
-        current_lines = lowered.lines;
-        current_temp = lowered.temp_index;
+        // Fallback: struct return fields are ABI-corrupted in the v0.1.1 seed.
+        // Do NOT replace current_lines with lowered.lines — lower_expression
+        // mutated the lines array in-place, so current_lines already has the
+        // new IR.  Using the corrupted struct field would cause
+        // _recover_temp_from_lines to scan wrong data and return a stale temp
+        // counter, leading to duplicate SSA names in the next statement.
         current_temp = _recover_temp_from_lines(current_lines, current_temp);
     }
     if consumption != null {

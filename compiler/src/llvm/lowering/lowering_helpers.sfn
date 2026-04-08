@@ -622,11 +622,11 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
         }
         let p = parts[pi];
         let pct = index_of(p, "%");
+        let mut stripped -> string = p;
         if pct > 0 {
-            stripped_parts.push(trim_text(substring(p, 0, pct)));
-        } else {
-            stripped_parts.push(p);
+            stripped = trim_text(substring(p, 0, pct));
         }
+        stripped_parts.push(stripped);
         pi += 1;
     }
     return DeclareSignature { return_type: ret_type, param_types: stripped_parts };

@@ -44,6 +44,7 @@ import {
     read_expr_string_constants,
     read_let_result_from_files,
     read_expr_mutations,
+    recover_temp_from_lines,
 } from "./instructions_helpers";
 
 import {
@@ -340,6 +341,10 @@ fn lower_instruction_range(
                     write_locals_to_files(current_locals);
                     let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
                     current_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", current_temp);
+                    // Extra recovery: scan accumulated lines for the highest %tN
+                    // to guard against stale IPC temp counters from cross-module
+                    // expression lowering (v0.1.1 seed ABI corruption).
+                    current_temp = recover_temp_from_lines(current_lines, current_temp);
                     current_next_region = _read_ipc_int_min("build/sailfin/.expr_stmt_next_region_id", current_next_region);
                     current_mutations = read_expr_mutations(current_mutations);
                     collected_string_constants = read_expr_string_constants(collected_string_constants);
