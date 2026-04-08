@@ -1,6 +1,69 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.17 (2026-04-08)
+
+### Bug Fixes
+
+- Address review
+  ([`42ec9b7`](https://github.com/SailfinIO/sailfin/commit/42ec9b7955e244b6a929bfdc3b260f78bc17ef52))
+
+- **compiler**: Bypass seed NativeImport corruption in Phase 2 mangling
+  ([`963c9a8`](https://github.com/SailfinIO/sailfin/commit/963c9a8e5823ea901f0124ab9e9f0eb0552a65a0))
+
+The v0.1.1 seed miscompiles parse_import_entry, producing NativeImport structs with kind='named' and
+  empty specifiers instead of kind='import' with full specifier lists. This caused Phase 2
+  (import-side) mangling to produce zero substitutions, leaving all imported symbols unmangled and
+  causing 124 duplicate symbol errors during llvm-link.
+
+Fix: re-parse .import directives directly from the raw .sfn-asm text using simple string operations
+  (substring, index_of, trim_text) that the seed can compile correctly. This bypasses the broken
+  NativeImport struct serialization entirely.
+
+Also pass native text content through all entrypoint call sites so mangling works for every lowering
+  path (emit-llvm-file, write_llvm_ir, lower_to_llvm_with_parsed_context,
+  lower_to_llvm_lines_with_context).
+
+Result: import_subs goes from 0 to 20+ per module, and llvm-link duplicate symbol count drops from
+  124 to 1 (build_trait_metadata).
+
+- **compiler**: Enable symbol mangling and preserve imports in sanitize
+  ([`018c5db`](https://github.com/SailfinIO/sailfin/commit/018c5db2c826432beb9faae64a94b79abef42ab3))
+
+- Change effective_mangle_symbols from hardcoded false to use the mangle_symbols parameter, enabling
+  Phase 1 (define-side) mangling. - Preserve parse_in.imports through sanitize_lowering_inputs
+  instead of re-parsing with recover_native_imports_light (which loses specifiers). - Add debug
+  trace for safe_imports kind/module/specs to aid diagnosis.
+
+- **compiler**: Generate shims and declares for transitively imported symbols
+  ([`c525493`](https://github.com/SailfinIO/sailfin/commit/c5254935aeb82c8171ca124fe415371c008a1ef3))
+
+Phase 3 shim generation failed for symbols that are imported through an intermediate module (e.g.
+  emit_native imports char_code from string_utils, which re-exports it from runtime/prelude). The
+  shim needs both a declare for the target symbol and a define for the re-export wrapper.
+
+Changes: - Extract find_declare_signature logic into _extract_signature_from_header helper to share
+  between declare/define/call-site scanning. - Add define-line fallback when no declare exists for
+  the target symbol. - Add call-site signature extraction as last resort for symbols that are only
+  referenced via call instructions (no declare or define). - Inject missing declare lines for target
+  symbols before emitting shims. - Add _has_declare_or_define and _render_declare_line helpers.
+
+This fixes the undefined reference to char_code__string_utils (and similar transitive import chains)
+  during the seedcheck build.
+
+- **test**: Fix pipefail+grep -q SIGPIPE race in test harness
+  ([`b447326`](https://github.com/SailfinIO/sailfin/commit/b4473265be6fb3dd374721313ff066e121420bc6))
+
+The test harness used 'echo "$output" | grep -q ...' with set -o pipefail. When grep -q finds a
+  match early and exits, echo gets SIGPIPE (exit 141). With pipefail, the pipeline returns 141
+  instead of 0, making the pass check fail despite grep finding a match. This caused random tests to
+  report FAIL when their output was large enough for the race to trigger.
+
+Fix: use here-strings ('grep -q ... <<< "$output"') which don't involve a pipe and avoid the SIGPIPE
+  issue entirely. Also use '&& RC=0 || RC=$?' pattern instead of '|| { exit 1; }' to properly
+  capture exit codes under set -e.
+
+
 ## v0.5.0-alpha.16 (2026-04-07)
 
 ### Bug Fixes
