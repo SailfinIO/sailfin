@@ -93,7 +93,7 @@ fn coerce_and_emit_call(
 
     // Coerce operands to expected parameter types
     if _trace_ccl {
-        print("call_lowering: pre-coerce operands=" + number_to_string(operands.length) + " expected_params=" + number_to_string(expected_params.length) + " llvm_return=" + llvm_return);
+        print.err("call_lowering: pre-coerce operands=" + number_to_string(operands.length) + " expected_params=" + number_to_string(expected_params.length) + " llvm_return=" + llvm_return);
     }
     let mut coerced_operands -> LLVMOperand[] = [];
     let mut index -> number = 0;
@@ -103,7 +103,7 @@ fn coerce_and_emit_call(
         }
         let operand = operands[index];
         if _trace_ccl {
-            print("call_lowering: coerce-loop idx=" + number_to_string(index) + " operand_type=" + operand.llvm_type + " operand_value=" + operand.value);
+            print.err("call_lowering: coerce-loop idx=" + number_to_string(index) + " operand_type=" + operand.llvm_type + " operand_value=" + operand.value);
         }
         let mut target_type -> string = "";
         if expected_params.length > index {
@@ -135,11 +135,11 @@ fn coerce_and_emit_call(
     }
     let final_operands = coerced_operands;
     if _trace_ccl {
-        print("call_lowering: post-coerce operands=" + number_to_string(final_operands.length));
+        print.err("call_lowering: post-coerce operands=" + number_to_string(final_operands.length));
     }
 
     if _trace_ccl {
-        print("call_lowering: checkpoint-A is_concat=" + number_to_string(0) + " is_push=" + number_to_string(0));
+        print.err("call_lowering: checkpoint-A is_concat=" + number_to_string(0) + " is_push=" + number_to_string(0));
     }
 
     // Array concat inline lowering
@@ -215,13 +215,13 @@ fn coerce_and_emit_call(
     }
 
     if _trace_ccl {
-        print("call_lowering: checkpoint-B fn_entry_null=" + number_to_string(0));
+        print.err("call_lowering: checkpoint-B fn_entry_null=" + number_to_string(0));
     }
     let mut _if56 -> boolean = false;
     if function_entry != null { _if56 = true; }
     if helper_descriptor != null { _if56 = true; }
     if _trace_ccl {
-        print("call_lowering: checkpoint-C _if56=" + number_to_string(0));
+        print.err("call_lowering: checkpoint-C _if56=" + number_to_string(0));
     }
     if _if56 {
         if expected_params.length != final_operands.length {
@@ -230,7 +230,7 @@ fn coerce_and_emit_call(
     }
 
     if _trace_ccl {
-        print("call_lowering: checkpoint-D rendering args");
+        print.err("call_lowering: checkpoint-D rendering args");
     }
     let mut rendered_args -> string[] = [];
     index = 0;
@@ -239,13 +239,13 @@ fn coerce_and_emit_call(
             break;
         }
         if _trace_ccl {
-            print("call_lowering: render-arg idx=" + number_to_string(index));
+            print.err("call_lowering: render-arg idx=" + number_to_string(index));
         }
         rendered_args.push(format_typed_operand(final_operands[index]));
         index += 1;
     }
     if _trace_ccl {
-        print("call_lowering: checkpoint-E args rendered");
+        print.err("call_lowering: checkpoint-E args rendered");
     }
     let argument_text = join_with_separator(rendered_args, ", ");
 
@@ -354,7 +354,7 @@ fn coerce_and_emit_call(
 
     // Standard function call
     if _trace_ccl {
-        print("call_lowering: checkpoint-F call_symbol target=" + trimmed_target);
+        print.err("call_lowering: checkpoint-F call_symbol target=" + trimmed_target);
     }
     let mut call_symbol = sanitize_symbol(trimmed_target);
     if helper_descriptor != null {
@@ -369,13 +369,13 @@ fn coerce_and_emit_call(
         }
     }
     if _trace_ccl {
-        print("call_lowering: checkpoint-G llvm_return=" + llvm_return + " call_symbol=" + call_symbol);
+        print.err("call_lowering: checkpoint-G llvm_return=" + llvm_return + " call_symbol=" + call_symbol);
     }
     if llvm_return == "void" {
         let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
         result_lines.push(call_line);
         if _trace_ccl {
-            print("call_lowering: checkpoint-H void return");
+            print.err("call_lowering: checkpoint-H void return");
         }
         _write_emission_result_lines(result_lines, result_temp);
         fs.writeFile("build/sailfin/.call_result_type", "");
@@ -385,19 +385,19 @@ fn coerce_and_emit_call(
 
     let temp_name = format_temp_name(result_temp);
     if _trace_ccl {
-        print("call_lowering: checkpoint-I temp_name=" + temp_name);
+        print.err("call_lowering: checkpoint-I temp_name=" + temp_name);
     }
     let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
     result_lines.push(call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
     if _trace_ccl {
-        print("call_lowering: checkpoint-J writing result files");
+        print.err("call_lowering: checkpoint-J writing result files");
     }
     _write_emission_result_lines(result_lines, result_temp + 1);
     fs.writeFile("build/sailfin/.call_result_type", llvm_return);
     fs.writeFile("build/sailfin/.call_result_value", temp_name);
     if _trace_ccl {
-        print("call_lowering: checkpoint-K returning");
+        print.err("call_lowering: checkpoint-K returning");
     }
     return ExpressionResult { lines: result_lines, temp_index: result_temp + 1, operand: operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
 }

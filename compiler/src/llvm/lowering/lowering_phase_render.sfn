@@ -65,7 +65,7 @@ fn render_llvm_preamble(
 
     // Trait metadata comments
     if debug_lowering {
-        print("emit-llvm: phase=render_traits");
+        print.err("emit-llvm: phase=render_traits");
     }
     let trait_lines = render_trait_metadata_comments(trait_metadata);
     if trait_lines.length > 0 {
@@ -75,8 +75,8 @@ fn render_llvm_preamble(
 
     // Struct type definitions
     if debug_lowering {
-        print("emit-llvm: phase=render_structs");
-        print(
+        print.err("emit-llvm: phase=render_structs");
+        print.err(
             "emit-llvm: render_structs counts structs="
             + number_to_string(type_context.structs.length)
             + " enums="
@@ -115,7 +115,7 @@ fn render_llvm_preamble(
 
     // Enum type definitions
     if debug_lowering {
-        print("emit-llvm: phase=render_enums");
+        print.err("emit-llvm: phase=render_enums");
     }
     let enum_type_lines = render_enum_type_definitions(type_context);
     if enum_type_lines.length > 0 {
@@ -125,7 +125,7 @@ fn render_llvm_preamble(
 
     // Interface type definitions
     if debug_lowering {
-        print("emit-llvm: phase=render_interfaces");
+        print.err("emit-llvm: phase=render_interfaces");
     }
     let interface_type_lines = render_interface_type_definitions(type_context);
     if interface_type_lines.length > 0 {
@@ -179,7 +179,7 @@ fn render_llvm_preamble(
 
     // Runtime helper declarations
     if debug_lowering {
-        print("emit-llvm: phase=render_helpers");
+        print.err("emit-llvm: phase=render_helpers");
     }
     let helper_declarations = render_runtime_helper_declarations(runtime_helpers, local_functions);
     if helper_declarations != null {
@@ -191,7 +191,7 @@ fn render_llvm_preamble(
 
     // Imported function declarations
     if debug_lowering {
-        print("emit-llvm: phase=render_imports");
+        print.err("emit-llvm: phase=render_imports");
     }
     let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
     if imported_declarations != null {

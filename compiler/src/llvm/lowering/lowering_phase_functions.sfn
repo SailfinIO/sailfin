@@ -156,10 +156,10 @@ fn lower_all_functions(
     let mut diagnostics -> string[] = [];
 
     if trace {
-        print("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
+        print.err("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
     }
     if debug_lowering {
-        print("emit-llvm: phase=functions");
+        print.err("emit-llvm: phase=functions");
     }
     loop {
         if index >= local_functions.length {
@@ -215,7 +215,7 @@ fn lower_all_functions(
                 }
                 instr_index += 1;
             }
-            print(
+            print.err(
                 "test llvm: function "
                 + number_to_string(index)
                 + "/"
@@ -241,7 +241,7 @@ fn lower_all_functions(
             }
         );
         if debug_lowering {
-            print("emit-llvm: function-start " + safe_function_name + " idx=" + number_to_string(index));
+            print.err("emit-llvm: function-start " + safe_function_name + " idx=" + number_to_string(index));
         }
         // Write function metadata to file-based IPC
         write_function_ipc(
@@ -271,13 +271,13 @@ fn lower_all_functions(
         let _lfn_sc_raw = fs.readFile("build/sailfin/.lowered_fn_string_constants");
         let _lfn_string_constants = _parse_lowered_fn_string_constants(_lfn_sc_raw);
         if debug_lowering {
-            print("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
+            print.err("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
         }
         if trace {
-            print("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length) + " diagnostics=" + number_to_string(_lfn_diags.length));
+            print.err("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length) + " diagnostics=" + number_to_string(_lfn_diags.length));
             if _lfn_lines.length > 0 {
-                print("test llvm: function first line " + _lfn_lines[0]);
-                print("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
+                print.err("test llvm: function first line " + _lfn_lines[0]);
+                print.err("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
                 let mut ret_lines -> number = 0;
                 let mut scan_index -> number = 0;
                 loop {
@@ -293,7 +293,7 @@ fn lower_all_functions(
                     }
                     scan_index += 1;
                 }
-                print("test llvm: function ret_lines " + number_to_string(ret_lines));
+                print.err("test llvm: function ret_lines " + number_to_string(ret_lines));
             }
         }
         if safe_function_name == "add" {
@@ -301,44 +301,44 @@ fn lower_all_functions(
         }
         diagnostics = extend_string_lines_checked(diagnostics, _lfn_diags, "function lowering");
         if trace {
-            print("test llvm: function diagnostics merged " + safe_function_name);
+            print.err("test llvm: function diagnostics merged " + safe_function_name);
         }
         let normalized_lowered_lines = _lfn_lines;
         if normalized_lowered_lines != null {
             if normalized_lowered_lines.length > 0 {
                 lines = append_string_lines(lines, normalized_lowered_lines);
                 if trace {
-                    print("test llvm: function lines merged " + safe_function_name);
-                    print("test llvm: function post-merge check " + safe_function_name);
+                    print.err("test llvm: function lines merged " + safe_function_name);
+                    print.err("test llvm: function post-merge check " + safe_function_name);
                 }
                 let _ep_next = index + 1;
                 if _ep_next < local_functions.length {
                     lines.push("");
                 }
                 if trace {
-                    print("test llvm: function post-merge blank " + safe_function_name);
+                    print.err("test llvm: function post-merge blank " + safe_function_name);
                 }
             }
         }
         if _lfn_string_constants != null {
             if _lfn_string_constants.length > 0 {
                 if trace {
-                    print("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(_lfn_string_constants.length));
+                    print.err("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(_lfn_string_constants.length));
                 }
                 let existing_constants = all_string_constants;
                 all_string_constants = merge_string_constants(existing_constants, _lfn_string_constants);
                 if trace {
-                    print("test llvm: merged string constants " + safe_function_name);
+                    print.err("test llvm: merged string constants " + safe_function_name);
                 }
             }
         }
         index += 1;
     }
     if trace {
-        print("test llvm: lowering functions done");
+        print.err("test llvm: lowering functions done");
     }
     if debug_lowering {
-        print("emit-llvm: phase=functions_done");
+        print.err("emit-llvm: phase=functions_done");
     }
 
     // Write function_effects and has_add_function to files for orchestrator
@@ -370,19 +370,19 @@ fn lower_all_functions(
         }
     }
     if trace {
-        print("test llvm: string constants emitted");
+        print.err("test llvm: string constants emitted");
     }
     if debug_lowering {
-        print("emit-llvm: phase=string_constants");
+        print.err("emit-llvm: phase=string_constants");
     }
 
     // Intrinsics
     lines = ensure_intrinsic_declarations(lines);
     if trace {
-        print("test llvm: intrinsics ensured");
+        print.err("test llvm: intrinsics ensured");
     }
     if debug_lowering {
-        print("emit-llvm: phase=intrinsics");
+        print.err("emit-llvm: phase=intrinsics");
     }
 
     // Write diagnostics and function_effects count to files

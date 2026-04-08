@@ -10242,7 +10242,7 @@ def _prepare_seed_import_context(
             if idx % 10 == 0 or idx + 1 == len(sources):
                 print(
                     f"[selfhost] staging {idx + 1}/{len(sources)} import artifact(s)...",
-                    flush=True,
+                    file=sys.stderr, flush=True,
                 )
             _emit_one(p)
         return
@@ -10258,7 +10258,7 @@ def _prepare_seed_import_context(
             if completed % 10 == 0 or completed == len(sources):
                 print(
                     f"[selfhost] staged {completed}/{len(sources)} import artifact(s)...",
-                    flush=True,
+                    file=sys.stderr, flush=True,
                 )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
@@ -10495,7 +10495,7 @@ def main(argv: list[str]) -> int:
             resolved = seed
 
         if resolved == default_seed.resolve() and asan_seed.exists():
-            print(f"[selfhost] using ASAN seed: {asan_seed}")
+            print(f"[selfhost] using ASAN seed: {asan_seed}", file=sys.stderr)
             seed = asan_seed
 
     # Default timeouts: ASAN seeds can be much slower and may spuriously hit the
@@ -10547,7 +10547,7 @@ def main(argv: list[str]) -> int:
                 return out.splitlines()[0]
         return "(unknown version)"
 
-    print(f"[selfhost] seed: {seed} ({_seed_version(seed)})", flush=True)
+    print(f"[selfhost] seed: {seed} ({_seed_version(seed)})", file=sys.stderr, flush=True)
 
     seed_supports_emit_llvm_file = _seed_supports_emit_llvm_file(seed)
     # Default behaviour: prefer emit-llvm-file when the seed supports it.
@@ -10592,26 +10592,26 @@ def main(argv: list[str]) -> int:
             return False
 
         def _print_timing_summary(*, header: str, module_list: list[str]) -> None:
-            print(f"[selfhost] ({pass_name}) {header}:", flush=True)
+            print(f"[selfhost] ({pass_name}) {header}:", file=sys.stderr, flush=True)
             print(
                 "[selfhost] "
                 f"timing_enabled={bool(args.timing)} timed_modules={len(timing_by_module)}",
-                flush=True,
+                file=sys.stderr, flush=True,
             )
             print(
                 "[selfhost] "
                 f"attempts={seed_attempts_total} retried_modules={modules_retried} "
                 f"timeouts={seed_timeouts} seed_failures={seed_failures} "
                 f"clang_validations={clang_validations} clang_validation_failures={clang_validation_failures}",
-                flush=True,
+                file=sys.stderr, flush=True,
             )
-            print(f"[selfhost] seed emit: {seed_emit_s:.2f}s", flush=True)
+            print(f"[selfhost] seed emit: {seed_emit_s:.2f}s", file=sys.stderr, flush=True)
             print(
-                f"[selfhost] clang module compile: {clang_validate_s:.2f}s", flush=True
+                f"[selfhost] clang module compile: {clang_validate_s:.2f}s", file=sys.stderr, flush=True
             )
             print(
-                f"[selfhost] clang compile: {clang_compile_s:.2f}s", flush=True)
-            print(f"[selfhost] clang link: {clang_link_s:.2f}s", flush=True)
+                f"[selfhost] clang compile: {clang_compile_s:.2f}s", file=sys.stderr, flush=True)
+            print(f"[selfhost] clang link: {clang_link_s:.2f}s", file=sys.stderr, flush=True)
 
             if args.timing and timing_by_module and module_list:
                 def _phase_ms(name: str, phase: str) -> int:
@@ -10624,7 +10624,7 @@ def main(argv: list[str]) -> int:
                 )
 
                 print(
-                    f"[selfhost] ({pass_name}) slowest modules by lower_llvm (ms):", flush=True)
+                    f"[selfhost] ({pass_name}) slowest modules by lower_llvm (ms):", file=sys.stderr, flush=True)
                 for name in ranked[:20]:
                     phases = timing_by_module.get(name, {})
                     parse_ms = phases.get("parse", 0)
@@ -10635,7 +10635,7 @@ def main(argv: list[str]) -> int:
                     print(
                         "[selfhost] "
                         f"{name} parse={parse_ms} typecheck={type_ms} emit_native={emit_ms} lower_llvm={lower_ms} total={total_ms}",
-                        flush=True,
+                        file=sys.stderr, flush=True,
                     )
 
         work_dir = args.work_dir.resolve()
@@ -10745,7 +10745,7 @@ def main(argv: list[str]) -> int:
         }
         # Populate an isolated import-context cache for the seed compiler.
         print(
-            f"[selfhost] ({pass_name}) staging import artifacts...", flush=True)
+            f"[selfhost] ({pass_name}) staging import artifacts...", file=sys.stderr, flush=True)
         _prepare_seed_import_context(
             seed_bin=seed_bin,
             sources=sources,
@@ -10784,7 +10784,7 @@ def main(argv: list[str]) -> int:
                 if _candidate_src is not None:
                     print(
                         f"[selfhost][warn] ({pass_name}) truncated import-context artifact: {_rel} – regenerating",
-                        flush=True,
+                        file=sys.stderr, flush=True,
                     )
                     try:
                         _seed_emit_native_text(
@@ -10804,7 +10804,7 @@ def main(argv: list[str]) -> int:
         if _repaired_count:
             print(
                 f"[selfhost] ({pass_name}) repaired {_repaired_count} truncated import-context artifact(s)",
-                flush=True,
+                file=sys.stderr, flush=True,
             )
 
         # Pre-seed known enum types from layout manifests in the import-context.
@@ -10844,7 +10844,7 @@ def main(argv: list[str]) -> int:
         if known_named_type_defs:
             print(
                 f"[selfhost] ({pass_name}) pre-seeded {len(known_named_type_defs)} enum type(s) from layout manifests",
-                flush=True,
+                file=sys.stderr, flush=True,
             )
 
         try:
@@ -11013,7 +11013,7 @@ def main(argv: list[str]) -> int:
 
                     print(
                         f"[selfhost] ({pass_name}) module {idx + 1}/{len(sources)} {module_name} attempt {attempt}/{max_attempts}",
-                        flush=True,
+                        file=sys.stderr, flush=True,
                     )
 
                     attempt_path = raw_dir / \
@@ -12292,7 +12292,7 @@ def main(argv: list[str]) -> int:
             # Keep this as info/warn output rather than failing: this is often
             # recoverable (e.g. concrete vs opaque across modules).
             for w in canonical_warnings:
-                print(f"[selfhost][warn] ({pass_name}) {w}", flush=True)
+                print(f"[selfhost][warn] ({pass_name}) {w}", file=sys.stderr, flush=True)
 
         # Rewrite each module to:
         # - declare any missing referenced named types as opaque
@@ -12314,10 +12314,10 @@ def main(argv: list[str]) -> int:
         if pre_dedupe_changes > 0:
             print(
                 f"[selfhost] ({pass_name}) pre-link deduped {pre_dedupe_changes} duplicate public definitions",
-                flush=True,
+                file=sys.stderr, flush=True,
             )
         for warn_line in pre_dedupe_warnings[:40]:
-            print(f"[selfhost][warn] ({pass_name}) {warn_line}", flush=True)
+            print(f"[selfhost][warn] ({pass_name}) {warn_line}", file=sys.stderr, flush=True)
 
         # Prevent final duplicate symbols between runtime/prelude object and
         # the linked compiler object. Keep prelude symbols external and
@@ -13373,10 +13373,10 @@ def main(argv: list[str]) -> int:
                 preview + more
             )
 
-        print("[selfhost] fixed-point: AOT outputs match", flush=True)
+        print("[selfhost] fixed-point: AOT outputs match", file=sys.stderr, flush=True)
 
     total_s = time.perf_counter() - t_total_start
-    print(f"[selfhost] total wall time: {total_s:.2f}s", flush=True)
+    print(f"[selfhost] total wall time: {total_s:.2f}s", file=sys.stderr, flush=True)
     _check_budget()
     return 0
 

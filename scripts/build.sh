@@ -128,43 +128,6 @@ seed_run() {
     fi
 }
 
-# Strip CLI log prefixes from LLVM IR output and trim to module start.
-# Legacy seed compilers (< v0.5) prefix lines with "[info] ", "[warn] ", etc.
-# because they used print.info() instead of raw print(). This can be removed
-# once the seed is built from a version that uses raw print().
-strip_log_prefixes() {
-    local input="$1"
-    local output="$2"
-
-    # Step 1: strip [level] prefixes (e.g. "[info] source_filename" → "source_filename")
-    # Step 2: find first LLVM top-level line and drop everything before it
-    awk '
-    {
-        line = $0
-        # Strip log prefixes like [info], [debug], [warn]
-        if (substr(line, 1, 1) == "[") {
-            idx = index(line, "] ")
-            if (idx > 0) {
-                line = substr(line, idx + 2)
-            }
-        }
-
-        # Once we find the first LLVM top-level entity, start outputting
-        if (!started) {
-            trimmed = line
-            gsub(/^[[:space:]]+/, "", trimmed)
-            if (trimmed == "") next
-            if (trimmed ~ /^(source_filename =|; ModuleID =|target |declare |define |%|@|;|!|attributes )/) {
-                started = 1
-            } else {
-                next
-            }
-        }
-        print line
-    }
-    ' "$input" > "$output"
-}
-
 # ---------------------------------------------------------------------------
 # Find llvm-link
 # ---------------------------------------------------------------------------
@@ -330,14 +293,14 @@ build_module() {
     local abs_ll_raw="${abs_ll_path}.raw"
 
     # Prefer emit-llvm-file if available (produces link-safe IR)
-    # Run from module_cwd so the seed picks up staged import-context
+    # Run from module_cwd so the seed picks up staged import-context.
+    # Diagnostics go to stderr (via print.err) so stdout/file output is clean LLVM IR.
     local emit_ok=0
     if "$SEED" emit-llvm-file --help &>/dev/null 2>&1 || "$SEED" help 2>&1 | grep -q "emit-llvm-file"; then
         # Tolerate segfault during cleanup if the output file was written
         (cd "$module_cwd" && seed_run "$SEED" emit-llvm-file "$abs_src" "$abs_ll_raw") 2>/dev/null || true
         if [[ -s "$abs_ll_raw" ]]; then
-            strip_log_prefixes "$abs_ll_raw" "$ll_path"
-            rm -f "$abs_ll_raw"
+            mv "$abs_ll_raw" "$ll_path"
             emit_ok=1
         fi
     fi
@@ -351,10 +314,7 @@ build_module() {
             echo "[build] FAIL: seed emit produced no output for $module_name" >&2
             return 1
         fi
-        # Strip CLI log prefixes (e.g. "[info] source_filename = ...")
-        # and trim to the first LLVM top-level entity
-        strip_log_prefixes "$abs_ll_raw" "$ll_path"
-        rm -f "$abs_ll_raw"
+        mv "$abs_ll_raw" "$ll_path"
     fi
 
     # Validate: output must look like LLVM IR

@@ -30,10 +30,10 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
             effects: ["io"],
     });
 
-    // Legacy prefixed print variants — kept for backward compatibility with
-    // older compiled binaries and examples. New compiler code should use print().
-    // These will be removed once the log capsule is the recommended path and
-    // print.* is formally deprecated.
+    // Prefixed print variants — print.err/print.warn/print.error write to
+    // stderr; print.info writes to stdout with an [info] prefix.
+    // Compiler diagnostics should use print.err() so they do not pollute
+    // stdout (LLVM IR output, program output, etc.).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
             target: "print.info",
             symbol: "sailfin_runtime_print_info",

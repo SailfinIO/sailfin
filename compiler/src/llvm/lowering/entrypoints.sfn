@@ -270,7 +270,7 @@ fn lower_to_llvm_ir_from_text(native_text -> string, module_name -> string) -> s
     if lowered_lines.lines == null { _if219 = true; }
     if lowered_lines.lines.length == 0 { _if219 = true; }
     if _if219 {
-        print(
+        print.err(
             "emit-llvm: no lines from native text (functions="
             + number_to_string(parse.functions.length)
             + " structs="
@@ -306,7 +306,7 @@ fn write_llvm_ir(native_module -> NativeModule, out_path -> string) -> boolean !
     );
     let lines = lowered_lines.lines;
     if lines.length == 0 {
-        print(
+        print.err(
             "emit-llvm: no lines from module (module="
             + native_module.module_name
             + " functions="
@@ -318,7 +318,7 @@ fn write_llvm_ir(native_module -> NativeModule, out_path -> string) -> boolean !
             + ")"
         );
         if lowered_lines.diagnostics.length > 0 {
-            print("emit-llvm: diagnostic " + lowered_lines.diagnostics[0]);
+            print.err("emit-llvm: diagnostic " + lowered_lines.diagnostics[0]);
         }
         return false;
     }

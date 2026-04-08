@@ -146,8 +146,8 @@ fn lower_instruction_range(
     let max_guard = (end - start_index) * 16 + 1024;
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
-        print("emit-llvm: lower_instruction_range name=" + function.name + " start=" + number_to_string(start_index) + " end=" + number_to_string(end) + " depth=" + number_to_string(scope_depth));
-        print("emit-llvm: lower_instruction_range bindings_len=" + number_to_string(bindings.length) + " current_bindings_len=" + number_to_string(current_bindings.length));
+        print.err("emit-llvm: lower_instruction_range name=" + function.name + " start=" + number_to_string(start_index) + " end=" + number_to_string(end) + " depth=" + number_to_string(scope_depth));
+        print.err("emit-llvm: lower_instruction_range bindings_len=" + number_to_string(bindings.length) + " current_bindings_len=" + number_to_string(current_bindings.length));
     }
     let mut _let220 -> boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
@@ -159,7 +159,7 @@ fn lower_instruction_range(
     if trace {
         if start_index == 0 {
             if scope_depth == 0 {
-                print(
+                print.err(
                     "test llvm: lower_instruction_range start "
                     + function.name
                     + " end="
@@ -175,7 +175,7 @@ fn lower_instruction_range(
                         break;
                     }
                     let _preview_tag = get_instruction_tag(function.instructions, preview_index);
-                    print(
+                    print.err(
                         "test llvm: instr "
                         + number_to_string(preview_index)
                         + " tag="
@@ -190,7 +190,7 @@ fn lower_instruction_range(
     loop {
         if index >= end {
             if debug_lowering {
-                print("emit-llvm: loop-exit index=" + number_to_string(index) + " end=" + number_to_string(end) + " fn=" + function.name);
+                print.err("emit-llvm: loop-exit index=" + number_to_string(index) + " end=" + number_to_string(end) + " fn=" + function.name);
             }
             // Write block results and return directly from inside the loop.
             // The v0.1.1 seed generates unconditional `br label %loop.body` for
@@ -220,7 +220,7 @@ fn lower_instruction_range(
                 "llvm lowering: instruction loop exceeded limit in `" + function.name + "` (index=" + number_to_string(index) + ")"
             );
             if trace {
-                print(
+                print.err(
                     "test llvm: instruction loop exceeded limit in " + function.name
                     + " index=" + number_to_string(index)
                     + " end=" + number_to_string(end)
@@ -251,11 +251,11 @@ fn lower_instruction_range(
         // Use numeric tag accessor instead of .variant (which returns empty via get_field stub)
         let _instr_tag = get_instruction_tag(function.instructions, index);
         if debug_lowering {
-            print("emit-llvm: lir guard=" + number_to_string(guard) + " index=" + number_to_string(index) + " tag=" + number_to_string(_instr_tag) + " fn=" + function.name + " depth=" + number_to_string(scope_depth));
+            print.err("emit-llvm: lir guard=" + number_to_string(guard) + " index=" + number_to_string(index) + " tag=" + number_to_string(_instr_tag) + " fn=" + function.name + " depth=" + number_to_string(scope_depth));
         }
         if trace {
             if index == start_index {
-                print("test llvm: lower_instruction_range first_tag " + number_to_string(_instr_tag));
+                print.err("test llvm: lower_instruction_range first_tag " + number_to_string(_instr_tag));
             }
         }
         // Tag dispatch: flat if-blocks with continue/break to avoid deep else-if
@@ -640,7 +640,7 @@ fn lower_instruction_range(
     }
 
     if debug_lowering {
-        print("emit-llvm: lir loop-done fn=" + function.name + " current_lines=" + number_to_string(current_lines.length));
+        print.err("emit-llvm: lir loop-done fn=" + function.name + " current_lines=" + number_to_string(current_lines.length));
     }
     if trace {
         if start_index == 0 {
@@ -649,7 +649,7 @@ fn lower_instruction_range(
                 if terminated {
                     term_label = "true";
                 }
-                print(
+                print.err(
                     "test llvm: lower_instruction_range done "
                     + function.name
                     + " lines="
@@ -666,9 +666,9 @@ fn lower_instruction_range(
     // Always write block result files. The scope_depth == 0 check was unreliable
     // because the v0.1.1 seed can miscompile the comparison.
     if debug_lowering {
-        print("emit-llvm: pre-write-block current_lines.length=" + number_to_string(current_lines.length) + " scope_depth=" + number_to_string(scope_depth));
+        print.err("emit-llvm: pre-write-block current_lines.length=" + number_to_string(current_lines.length) + " scope_depth=" + number_to_string(scope_depth));
         if current_lines.length > 0 {
-            print("emit-llvm: pre-write-block line[0]=" + current_lines[0]);
+            print.err("emit-llvm: pre-write-block line[0]=" + current_lines[0]);
         }
     }
     _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);

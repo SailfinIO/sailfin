@@ -296,13 +296,13 @@ fn _clang_link(ll_path -> string, out_path -> string, runtime_root -> string) ->
 fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     let trace_argv = fs.exists("build/sailfin/.trace_argv");
     if trace_argv {
-        print("cli: argv.len=" + number_to_string(argv.length));
+        print.err("cli: argv.len=" + number_to_string(argv.length));
         let mut trace_index -> number = 0;
         loop {
             if trace_index >= argv.length {
                 break;
             }
-            print("cli: argv[" + number_to_string(trace_index) + "]=" + argv[trace_index]);
+            print.err("cli: argv[" + number_to_string(trace_index) + "]=" + argv[trace_index]);
             trace_index += 1;
         }
     }
@@ -320,8 +320,8 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         }
     }
     if trace_argv {
-        print("cli: runtime_root=" + runtime_root);
-        print("cli: start_index=" + number_to_string(start_index));
+        print.err("cli: runtime_root=" + runtime_root);
+        print.err("cli: start_index=" + number_to_string(start_index));
     }
     if runtime_root.length == 0 {
         if _runtime_bundle_exists("runtime") {
@@ -343,13 +343,13 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
         return 2;
     }
     if trace_argv {
-        print("cli: args.len=" + number_to_string(args.length));
+        print.err("cli: args.len=" + number_to_string(args.length));
         let mut arg_index_trace -> number = 0;
         loop {
             if arg_index_trace >= args.length {
                 break;
             }
-            print("cli: args[" + number_to_string(arg_index_trace) + "]=" + args[arg_index_trace]);
+            print.err("cli: args[" + number_to_string(arg_index_trace) + "]=" + args[arg_index_trace]);
             arg_index_trace += 1;
         }
         if args.length > 0 {
@@ -357,14 +357,14 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
             let eq_emit = strings_equal(cmd_check, "emit");
             let eq_version = strings_equal(cmd_check, "version");
             if eq_emit {
-                print("cli: eq_emit=true");
+                print.err("cli: eq_emit=true");
             } else {
-                print("cli: eq_emit=false");
+                print.err("cli: eq_emit=false");
             }
             if eq_version {
-                print("cli: eq_version=true");
+                print.err("cli: eq_version=true");
             } else {
-                print("cli: eq_version=false");
+                print.err("cli: eq_version=false");
             }
         }
     }
@@ -399,10 +399,10 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
     let is_login = strings_equal(cmd, "login");
     if trace_argv {
         if is_emit {
-            print("cli: cmd_is_emit=true");
+            print.err("cli: cmd_is_emit=true");
         }
         if is_version {
-            print("cli: cmd_is_version=true");
+            print.err("cli: cmd_is_version=true");
         }
     }
 

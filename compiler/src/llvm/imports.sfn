@@ -31,7 +31,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
     }
     let trace = _let189;
     if trace {
-        print("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
+        print.err("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
     }
     let mut manifests -> LayoutManifest[] = [];
     let mut native_texts -> string[] = [];
@@ -67,7 +67,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         if trace {
             if queue_index > 0 {
                 if queue_index % 50 == 0 {
-                    print("test llvm: collect_imported_module_context progress (index=" + number_to_string(queue_index) + " queued=" + number_to_string(queue_paths.length) + ")");
+                    print.err("test llvm: collect_imported_module_context progress (index=" + number_to_string(queue_index) + " queued=" + number_to_string(queue_paths.length) + ")");
                 }
             }
         }
@@ -148,7 +148,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
     }
 
     if trace {
-        print("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(seen.length) + ")");
+        print.err("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(seen.length) + ")");
     }
 
     return ImportedModuleContext { manifests: manifests, native_texts: native_texts, diagnostics: diagnostics };

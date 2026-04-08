@@ -33,7 +33,7 @@ import { extend_string_lines, extend_string_lines_checked, ensure_intrinsic_decl
 fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) -> boolean ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
-        print("test llvm writer: no text artifact found");
+        print.err("test llvm writer: no text artifact found");
         return false;
     }
     return write_llvm_ir_for_tests_from_text(artifact.contents, native_module.module_name, out_path);
@@ -42,7 +42,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
 // Build and write LLVM IR for tests from raw native text, avoiding NativeModule ABI issues.
 fn write_llvm_ir_for_tests_from_text(native_text -> string, module_name -> string, out_path -> string) -> boolean ![io] {
     if native_text.length == 0 {
-        print("test llvm: empty native text");
+        print.err("test llvm: empty native text");
         return false;
     }
     // Write the native text to emit-native.tmp so that the recovery path
@@ -64,12 +64,12 @@ fn write_llvm_ir_for_tests_from_text(native_text -> string, module_name -> strin
         []
     );
     if lowered_lines.lines.length == 0 {
-        print("test llvm: no lines emitted from native text");
+        print.err("test llvm: no lines emitted from native text");
         return false;
     }
     let ir = _join_llvm_lines_linear(lowered_lines.lines);
     if ir.length == 0 {
-        print("test llvm: empty IR after join from native text");
+        print.err("test llvm: empty IR after join from native text");
         return false;
     }
     fs.writeFile(out_path, ir + "\n");
