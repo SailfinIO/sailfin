@@ -428,39 +428,8 @@ stage_import_context() {
 
     echo "$native_text" > "$asm_dest"
 
-    # Extract .layout lines for the manifest.
-    # The native emitter may indent .layout lines (e.g. inside struct blocks),
-    # so match with optional leading whitespace.
-    grep '\.layout ' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
-
-    # Reduce native text to a lightweight skeleton that retains module
-    # metadata, import declarations, and function signatures but strips
-    # function instruction bodies.  The full native text causes OOM in
-    # early seed compilers because the transitive import BFS loads all
-    # texts into memory.  The skeleton keeps the BFS working (imports
-    # are preserved) while drastically reducing memory pressure.
-    local full_dest="${asm_dest}.full"
-    mv "$asm_dest" "$full_dest"
-    awk '
-    # Always keep module, import, struct, enum, layout declarations
-    /^\.(module|import|struct|enum|end-struct|end-enum|endenum|endstruct|layout|end-layout)/ { print; next }
-    # Keep indented .layout lines (inside struct/enum blocks)
-    /^[[:space:]]+\.layout / { print; next }
-    # Keep .field and .variant lines (struct/enum body declarations)
-    /^[[:space:]]+\.(field|variant) / { print; next }
-    # Keep function signature line (.fn) and end marker (.endfn)
-    /^\.fn / { print; infn=1; next }
-    /^\.endfn/ { print; infn=0; next }
-    # Inside a function keep metadata but skip body instructions
-    # Note: .meta lines are unindented but .param/.span lines may be indented
-    infn && /^[[:space:]]*\.(meta|param|return)/ { print; next }
-    infn { next }
-    # Keep top-level let bindings (module bindings)
-    /^\.let / { print; next }
-    # Skip everything else
-    { next }
-    ' "$full_dest" > "$asm_dest"
-    rm -f "$full_dest"
+    # Extract .layout lines for the manifest
+    grep '^\.\(layout\)' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
 }
 
 # Stage import context (sequential for safety with older seeds)

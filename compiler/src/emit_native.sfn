@@ -326,9 +326,7 @@ fn emit_extern_function(
     }
     current = state_emit_line(current, ".meta extern");
     current = emit_signature_metadata(current, signature);
-    current = state_push_indent(current);
     current = emit_parameter_metadata(current, signature.parameters);
-    current = state_pop_indent(current);
     return state_emit_line(current, ".endfn");
 }
 
@@ -403,8 +401,8 @@ fn emit_function(
     let mut current = emit_decorators(state, decorators);
     current = state_emit_line(current, ".fn " + format_function_signature(signature));
     current = emit_signature_metadata(current, signature);
-    current = state_push_indent(current);
     current = emit_parameter_metadata(current, signature.parameters);
+    current = state_push_indent(current);
     current = emit_block(current, body);
     current = state_pop_indent(current);
     return state_emit_line(current, ".endfn");
@@ -414,8 +412,8 @@ fn emit_pipeline(state -> NativeState, statement -> Statement) -> NativeState {
     let mut current = emit_decorators(state, statement.decorators);
     current = state_emit_line(current, ".pipeline " + format_function_signature(statement.signature));
     current = emit_signature_metadata(current, statement.signature);
-    current = state_push_indent(current);
     current = emit_parameter_metadata(current, statement.signature.parameters);
+    current = state_push_indent(current);
     current = emit_block(current, statement.body);
     current = state_pop_indent(current);
     return state_emit_line(current, ".endpipeline");
@@ -425,8 +423,8 @@ fn emit_tool(state -> NativeState, statement -> Statement) -> NativeState {
     let mut current = emit_decorators(state, statement.decorators);
     current = state_emit_line(current, ".tool " + format_function_signature(statement.signature));
     current = emit_signature_metadata(current, statement.signature);
-    current = state_push_indent(current);
     current = emit_parameter_metadata(current, statement.signature.parameters);
+    current = state_push_indent(current);
     current = emit_block(current, statement.body);
     current = state_pop_indent(current);
     return state_emit_line(current, ".endtool");
@@ -519,9 +517,9 @@ fn emit_enum(state -> NativeState, statement -> Statement) -> NativeState {
     let mut header -> string = ".enum " + statement.name;
     header = header + format_type_parameters(statement.type_parameters);
     current = state_emit_line(current, header);
-    current = state_push_indent(current);
     let enum_layout = compute_enum_layout_lines(state.layout_context, statement);
     current = emit_layout_lines(current, enum_layout.lines);
+    current = state_push_indent(current);
     current = state_merge_diagnostics(current, enum_layout.diagnostics);
     let mut index -> number = 0;
     loop {
@@ -546,9 +544,9 @@ fn emit_struct(state -> NativeState, statement -> Statement) -> NativeState {
         header = header + " implements " + join_type_annotations(statement.implements_types);
     }
     current = state_emit_line(current, header);
-    current = state_push_indent(current);
     let struct_layout = compute_struct_layout_lines(state.layout_context, statement.name, statement.fields);
     current = emit_layout_lines(current, struct_layout.lines);
+    current = state_push_indent(current);
     current = state_merge_diagnostics(current, struct_layout.diagnostics);
 
     let mut index -> number = 0;
@@ -583,8 +581,8 @@ fn emit_method(state -> NativeState, method -> MethodDeclaration) -> NativeState
     let mut current = emit_decorators(state, method.decorators);
     current = state_emit_line(current, ".method " + format_function_signature(method.signature));
     current = emit_signature_metadata(current, method.signature);
-    current = state_push_indent(current);
     current = emit_parameter_metadata(current, method.signature.parameters);
+    current = state_push_indent(current);
     current = emit_block(current, method.body);
     current = state_pop_indent(current);
     return state_emit_line(current, ".endmethod");
