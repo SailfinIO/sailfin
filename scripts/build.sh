@@ -6,9 +6,11 @@
 #
 #   1. Enumerate compiler/src/**/*.sfn + runtime/**/*.sfn
 #   2. Stage import-context artifacts (seed emit native → .sfn-asm + .layout-manifest)
-#   3. Per-module: seed emit llvm → .ll, clang compile → .o
-#   4. llvm-link all modules (except prelude) → linked bitcode
-#   5. Compile C runtime, link everything → final binary
+#   3. Per-module: seed emit llvm → .ll
+#   4. Compile each .ll → .o with clang
+#   5. llvm-link all modules (except prelude) → linked bitcode
+#   6. Compile C runtime
+#   7. Link everything → final binary
 #
 # NO fixup passes. If the compiler emits broken LLVM IR, the build fails.
 # Fix the compiler, not the build script.
@@ -509,309 +511,7 @@ log "compiled ${#MODULE_NAMES[@]} modules"
 printf '%s\n' "${MODULE_NAMES[@]}" > "$RAW_DIR/modules.txt"
 
 # ---------------------------------------------------------------------------
-# Step 3.4: Cross-module type resolution
-# ---------------------------------------------------------------------------
-# When modules are compiled separately, imported struct types appear as
-# `%Name = type opaque` because the compiler doesn't have a header/metadata
-# system.  This step collects all concrete (non-opaque) type definitions from
-# every module and replaces opaque stubs where a concrete definition exists.
-# This is standard separate-compilation infrastructure (analogous to C headers
-# or Rust .rmeta files), not a fixup for broken IR.
-log "resolving cross-module types..."
-
-# Build global type table: %TypeName -> full definition line
-TYPETAB="$RAW_DIR/.typetab"
-> "$TYPETAB"
-for ll in "$RAW_DIR"/*.ll; do
-    # Collect concrete type definitions (lines like: %Foo = type { ... })
-    grep -P '^%[A-Z]\w+ = type \{' "$ll" >> "$TYPETAB" 2>/dev/null || true
-done
-# Deduplicate, keeping first occurrence (most specific)
-awk -F' = ' '!seen[$1]++' "$TYPETAB" > "${TYPETAB}.dedup"
-mv "${TYPETAB}.dedup" "$TYPETAB"
-
-# Use a Python helper for iterative type resolution (handles cascading
-# dependencies where injecting a concrete type introduces references to
-# other types not yet declared in the module).
-_type_output=$(python3 - "$RAW_DIR" "$TYPETAB" <<'PYEOF'
-import sys, os, re
-
-raw_dir = sys.argv[1]
-typetab_path = sys.argv[2]
-
-# Load global type table
-type_defs = {}  # %Name -> full line
-with open(typetab_path) as f:
-    for line in f:
-        line = line.rstrip("\n")
-        m = re.match(r'^(%\w+) = type \{', line)
-        if m:
-            type_defs[m.group(1)] = line
-
-# Legitimately opaque types (runtime internals)
-SKIP_TYPES = {"%SailfinFutureNumber", "%SailfinFutureBool", "%SailfinFuturePtr",
-              "%SailfinFutureVoid", "%SailfinFutureString",
-              "%SailfinChannelNumber", "%SailfinChannelBool", "%SailfinChannelPtr",
-              "%SailfinChannelVoid", "%SailfinChannelString"}
-
-total_fixes = 0
-
-for fname in sorted(os.listdir(raw_dir)):
-    if not fname.endswith(".ll"):
-        continue
-    fpath = os.path.join(raw_dir, fname)
-    with open(fpath) as f:
-        text = f.read()
-    lines = text.split("\n")
-
-    # Iterate until stable (cascading type deps)
-    changed = True
-    passes = 0
-    while changed and passes < 20:
-        changed = False
-        passes += 1
-
-        # Build set of types declared/defined in this module
-        declared_types = set()
-        for ln in lines:
-            m = re.match(r'^(%\w+) = type ', ln)
-            if m:
-                declared_types.add(m.group(1))
-
-        # Phase 1: Replace opaque stubs with concrete defs
-        new_lines = []
-        for ln in lines:
-            m = re.match(r'^(%\w+) = type opaque$', ln)
-            if m:
-                tname = m.group(1)
-                if tname not in SKIP_TYPES and tname in type_defs:
-                    new_lines.append(type_defs[tname])
-                    total_fixes += 1
-                    changed = True
-                    continue
-            new_lines.append(ln)
-        lines = new_lines
-
-        # Phase 2: Find ALL type references (in type defs, signatures, and body)
-        all_refs = set()
-        for ln in lines:
-            for ref in re.findall(r'%[A-Z]\w+', ln):
-                all_refs.add(ref)
-
-        # Rebuild declared types set after phase 1
-        declared_types = set()
-        for ln in lines:
-            m = re.match(r'^(%\w+) = type ', ln)
-            if m:
-                declared_types.add(m.group(1))
-
-        missing = all_refs - declared_types
-        if missing:
-            # Find insertion point (after last type def line, or at line 1)
-            insert_idx = 0
-            for i, ln in enumerate(lines):
-                if re.match(r'^%\w+ = type ', ln):
-                    insert_idx = i + 1
-            inject = []
-            for tname in sorted(missing):
-                if tname in SKIP_TYPES:
-                    continue
-                if tname in type_defs:
-                    inject.append(type_defs[tname])
-                    total_fixes += 1
-                else:
-                    # No concrete def known — insert opaque stub so LLVM can parse
-                    inject.append(f"{tname} = type opaque")
-                changed = changed or bool(inject)
-            if inject:
-                for j, inj_line in enumerate(inject):
-                    lines.insert(insert_idx + j, inj_line)
-
-    # Phase 3: Fix `store %Struct null` → `store %Struct zeroinitializer`
-    # When types are resolved from opaque to concrete, `null` is no longer
-    # valid for aggregate (non-pointer) types.
-    concrete_types = set()
-    for ln in lines:
-        m = re.match(r'^(%\w+) = type \{', ln)
-        if m:
-            concrete_types.add(m.group(1))
-    new_lines = []
-    for ln in lines:
-        m = re.match(r'^(\s+store )(%\w+)( null,)(.+)$', ln)
-        if m and m.group(2) in concrete_types:
-            new_lines.append(m.group(1) + m.group(2) + " zeroinitializer," + m.group(4))
-            total_fixes += 1
-        else:
-            new_lines.append(ln)
-    lines = new_lines
-
-    with open(fpath, "w") as f:
-        f.write("\n".join(lines))
-
-print(total_fixes, flush=True)
-PYEOF
-)
-log "cross-module type resolution: ${_type_output} fix(es)"
-
-# ---------------------------------------------------------------------------
-# Step 3.5: Cross-module symbol resolution
-# ---------------------------------------------------------------------------
-# The seed compiler may not emit `declare` statements for functions defined
-# in other modules.  This step collects all `define` signatures across modules
-# and injects matching `declare` statements where a function is called but
-# neither defined nor declared.  This is analogous to what a linker does —
-# it is NOT a fixup for broken IR.
-log "resolving cross-module symbols..."
-
-# Build a global symbol table: symbol -> declare line
-SYMTAB="$RAW_DIR/.symtab"
-> "$SYMTAB"
-for ll in "$RAW_DIR"/*.ll; do
-    grep '^define ' "$ll" | sed 's/^define /declare /; s/ internal / /; s/ {$//' >> "$SYMTAB"
-done
-sort -t'@' -k2,2 -u "$SYMTAB" -o "$SYMTAB"
-
-# Add C runtime functions that the compiler references but are defined in
-# the C runtime library (linked at the final step, not in any .ll module).
-# These declarations match runtime/native/include/sailfin_runtime.h.
-cat >> "$SYMTAB" <<'RUNTIME_DECLS'
-declare double @print(i8*)
-declare i8* @calloc(i64, i64)
-declare void @sailfin_runtime_set_exception(i8*)
-declare i8* @sailfin_runtime_take_exception()
-declare i1 @sailfin_runtime_has_exception()
-declare void @sailfin_runtime_clear_exception()
-declare double @sailfin_runtime_string_to_number(i8*)
-declare void @sailfin_runtime_log_execution(i8*, i8*)
-declare i1 @sailfin_intrinsic_fs_exists(i8*)
-declare i8* @sailfin_adapter_fs_read_file(i8*)
-declare void @sailfin_adapter_fs_write_file(i8*, i8*)
-declare void @sailfin_adapter_fs_append_file(i8*, i8*)
-declare void @sailfin_adapter_fs_write_lines(i8*, { i8**, i64 }*)
-declare { i8**, i64 }* @sailfin_adapter_fs_list_directory(i8*)
-declare i1 @sailfin_adapter_fs_delete_file(i8*)
-declare i1 @sailfin_adapter_fs_create_directory(i8*, i1)
-declare double @sailfin_runtime_process_run({ i8**, i64 }*)
-declare { i8**, i64 }* @sailfin_runtime_concat({ i8**, i64 }*, { i8**, i64 }*)
-RUNTIME_DECLS
-
-# For each module, find called-but-undeclared symbols and inject declares.
-# Uses comm(1) + grep -f for fast batch lookup (avoids O(n*m) bash loops).
-for ll in "$RAW_DIR"/*.ll; do
-    called_f="$(mktemp)"
-    known_f="$(mktemp)"
-    missing_f="$(mktemp)"
-    # Extract called symbols (|| true: grep returns 1 when no matches, which kills pipefail)
-    { grep -oP '(?<=@)[a-zA-Z_][a-zA-Z0-9_]*(?=\()' "$ll" 2>/dev/null || true; } | sort -u > "$called_f"
-    # Extract declared/defined symbols
-    { grep -P '^(declare|define) ' "$ll" || true; } | { grep -oP '(?<=@)[a-zA-Z_][a-zA-Z0-9_]*(?=\()' || true; } | sort -u > "$known_f"
-    # Set difference
-    comm -23 "$called_f" "$known_f" > "$missing_f"
-    rm -f "$called_f" "$known_f"
-
-    if [[ -s "$missing_f" ]]; then
-        # Build grep patterns for batch symtab lookup
-        inject_f="$(mktemp)"
-        while IFS= read -r sym; do
-            grep -m1 "@${sym}(" "$SYMTAB" >> "$inject_f" 2>/dev/null || true
-        done < "$missing_f"
-
-        if [[ -s "$inject_f" ]]; then
-            # Insert after the last `declare` line, or before first `define`
-            last_declare=$(grep -n '^declare ' "$ll" | tail -1 | cut -d: -f1 || true)
-            if [[ -n "$last_declare" ]]; then
-                sed -i "${last_declare}r ${inject_f}" "$ll"
-            else
-                first_define=$(grep -n '^define ' "$ll" | head -1 | cut -d: -f1 || true)
-                if [[ -n "$first_define" ]]; then
-                    sed -i "$((first_define-1))r ${inject_f}" "$ll"
-                fi
-            fi
-        fi
-        rm -f "$inject_f"
-    fi
-    rm -f "$missing_f"
-done
-log "cross-module symbol resolution complete"
-
-# ---------------------------------------------------------------------------
-# Step 3.55: Second type resolution pass
-# ---------------------------------------------------------------------------
-# Symbol resolution may have injected `declare` lines referencing types not
-# yet present in the module. Run the type resolver again to pick these up.
-log "resolving cross-module types (pass 2)..."
-_type_output2=$(python3 - "$RAW_DIR" "$TYPETAB" <<'PYEOF2'
-import sys, os, re
-
-raw_dir = sys.argv[1]
-typetab_path = sys.argv[2]
-
-type_defs = {}
-with open(typetab_path) as f:
-    for line in f:
-        line = line.rstrip("\n")
-        m = re.match(r'^(%\w+) = type \{', line)
-        if m:
-            type_defs[m.group(1)] = line
-
-SKIP_TYPES = {"%SailfinFutureNumber", "%SailfinFutureBool", "%SailfinFuturePtr",
-              "%SailfinFutureVoid", "%SailfinFutureString",
-              "%SailfinChannelNumber", "%SailfinChannelBool", "%SailfinChannelPtr",
-              "%SailfinChannelVoid", "%SailfinChannelString"}
-
-total_fixes = 0
-
-for fname in sorted(os.listdir(raw_dir)):
-    if not fname.endswith(".ll"):
-        continue
-    fpath = os.path.join(raw_dir, fname)
-    with open(fpath) as f:
-        lines = f.read().split("\n")
-
-    changed = True
-    while changed:
-        changed = False
-        declared_types = set()
-        for ln in lines:
-            m = re.match(r'^(%\w+) = type ', ln)
-            if m:
-                declared_types.add(m.group(1))
-
-        all_refs = set()
-        for ln in lines:
-            for ref in re.findall(r'%[A-Z]\w+', ln):
-                all_refs.add(ref)
-
-        missing = all_refs - declared_types
-        if not missing:
-            break
-        insert_idx = 0
-        for i, ln in enumerate(lines):
-            if re.match(r'^%\w+ = type ', ln):
-                insert_idx = i + 1
-        inject = []
-        for tname in sorted(missing):
-            if tname in SKIP_TYPES:
-                continue
-            if tname in type_defs:
-                inject.append(type_defs[tname])
-                total_fixes += 1
-            else:
-                inject.append(f"{tname} = type opaque")
-            changed = True
-        for j, inj_line in enumerate(inject):
-            lines.insert(insert_idx + j, inj_line)
-
-    with open(fpath, "w") as f:
-        f.write("\n".join(lines))
-
-print(total_fixes, flush=True)
-PYEOF2
-)
-log "cross-module type resolution (pass 2): ${_type_output2} fix(es)"
-
-# ---------------------------------------------------------------------------
-# Step 3.6: Compile all modules with clang
+# Step 4: Compile all modules with clang
 # ---------------------------------------------------------------------------
 log "compiling ${#MODULE_NAMES[@]} modules with clang..."
 FAILED=0
@@ -824,7 +524,7 @@ done
 [[ "$FAILED" -eq 0 ]] || die "clang compilation failed (see errors above)"
 
 # ---------------------------------------------------------------------------
-# Step 4: llvm-link all modules (except prelude)
+# Step 5: llvm-link all modules (except prelude)
 # ---------------------------------------------------------------------------
 log "linking LLVM IR modules..."
 LLVM_LINK="$(find_llvm_link)"
@@ -864,7 +564,7 @@ mkdir -p "$OBJ_DIR/runtime"
 run "$CLANG" $CLANG_FLAGS -fPIC -c "$PRELUDE_LL" -o "$PRELUDE_O"
 
 # ---------------------------------------------------------------------------
-# Step 5: Compile C runtime
+# Step 6: Compile C runtime
 # ---------------------------------------------------------------------------
 log "compiling C runtime..."
 INCLUDE_DIR="$REPO_ROOT/runtime/native/include"
@@ -881,7 +581,7 @@ run "$CLANG" $CLANG_FLAGS -I "$INCLUDE_DIR" -c runtime/native/src/native_driver.
 run "$CLANG" $CLANG_FLAGS -c runtime/native/ir/runtime_globals.ll -o "$OBJ_DIR/runtime_globals.o"
 
 # ---------------------------------------------------------------------------
-# Step 6: Link final binary
+# Step 7: Link final binary
 # ---------------------------------------------------------------------------
 log "linking final binary..."
 

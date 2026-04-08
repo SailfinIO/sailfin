@@ -6,8 +6,25 @@ This document describes the strategy and work plan for producing a self-sufficie
 
 - **Pinned seed:** v0.1.1 (`sfn` installed at `~/.local/bin/sfn`)
 - **Build driver:** `scripts/selfhost_native.py` (Python, with ~69 IR fixup passes)
-- **Goal driver:** `scripts/build.sh` (shell, zero fixups)
+- **Goal driver:** `scripts/build.sh` (shell, zero fixups, zero post-processing)
 - **Graduation gate:** `make check` — builds seedcheck with `build.sh`, validates it runs hello-world and passes the test suite
+
+### Architecture
+
+The build pipeline has two stages:
+
+1. **Seed + Python driver** → first-pass binary (`build/native/sailfin`)
+   - The v0.1.1 seed has known bugs (cross-module types, SSA dupes, etc.)
+   - `selfhost_native.py` compensates with fixup passes — **this is acceptable**
+   - Fixups here are OK because they help the broken seed produce a working binary
+
+2. **First-pass binary + `build.sh`** → seedcheck binary
+   - `build.sh` has **zero fixups, zero post-processing, zero Python**
+   - If `build.sh` fails, the first-pass binary has a bug
+   - Fix bugs in `compiler/src/*.sfn` so the first-pass binary emits correct IR
+   - If the seed can't compile the fix, add a compensating fixup to `selfhost_native.py`
+
+**Key principle:** The Python driver fixups are technical debt from the seed. The goal is to improve the compiler source so each new seed needs fewer fixups, eventually reaching zero. `build.sh` must always stay clean.
 
 ## Strategy: Iterative Seed Promotion
 
@@ -115,7 +132,7 @@ The fixups in `selfhost_native.py` cluster into **5 root cause categories**. Fix
 - `_fix_truncated_symbol_names` — fixes dropped first character in symbol names
 - `_patch_opaque_named_types` — resolves opaque types from cross-module context
 
-**How to fix:** Improve the import-context mechanism so the seed has full type information for cross-module calls at emit time. The `.sfn-asm` / `.layout-manifest` artifacts should carry complete function signatures.
+**How to fix:** Improve the compiler's LLVM rendering pass (`compiler/src/llvm/rendering.sfn`) to emit concrete type definitions for imported structs (not just opaque stubs) and `declare` statements for cross-module function calls. The compiler already loads imported type info via layout manifests and native texts — it just needs to use that info during rendering instead of emitting `%Type = type opaque`. This is a compiler source fix, not a build script fix. `build.sh` must remain free of any post-processing.
 
 ### Category 3: Loop / Control Flow Bugs (~6 fixups)
 
