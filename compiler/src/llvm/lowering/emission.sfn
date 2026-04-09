@@ -308,7 +308,16 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
             break;
         }
         let param_name = fs.readFile("build/sailfin/.fn_param_" + number_to_string(index) + "_name");
-        let param_type = fs.readFile("build/sailfin/.fn_param_" + number_to_string(index) + "_type");
+        let raw_param_type = fs.readFile("build/sailfin/.fn_param_" + number_to_string(index) + "_type");
+        // Strip default value from type annotations like "number = 0".
+        // The native IR emitter includes default values in .param annotations;
+        // map_return_type cannot parse "number = 0" and falls back to i8*,
+        // causing ABI mismatches between caller (double) and callee (i8*).
+        let mut param_type -> string = raw_param_type;
+        let eq_idx = index_of(raw_param_type, "=");
+        if eq_idx > 0 {
+            param_type = trim_text(substring(raw_param_type, 0, eq_idx));
+        }
         let mut llvm_type = map_return_type(context, param_type);
         if llvm_type == "void" {
             llvm_type = "";
