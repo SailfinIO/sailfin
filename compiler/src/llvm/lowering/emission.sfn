@@ -82,6 +82,8 @@ import {
 
 import { emit_async_function } from "./emission_async";
 
+import { build_define_header_line } from "./emission_header";
+
 import {
     lower_instruction_range,
     lower_instruction_range_void,
@@ -159,25 +161,6 @@ fn is_safe_llvm_type_text(value -> string) -> boolean {
         index += 1;
     }
     return true;
-}
-
-// Extracted into a helper to avoid a v0.1.1 seed lowering bug that truncates
-// long instruction sequences within if-block scopes.  Keeping the concat
-// chain in its own short function sidesteps the limit entirely.
-// The result is written to an IPC file instead of returned because the seed's
-// lowering emits `ret i8* null` for local-variable string returns.
-fn _write_define_header(linkage -> string, llvm_return -> string, sanitized -> string, signature -> string) {
-    let mut h -> string = "define ";
-    h = h + linkage;
-    h = h + llvm_return;
-    h = h + " @";
-    h = h + sanitized;
-    h = h + "(";
-    h = h + signature;
-    h = h + ") {";
-    let mut header_lines -> string[] = [];
-    header_lines = append_string(header_lines, h);
-    fs.writeLines("build/sailfin/.define_header", header_lines);
 }
 
 fn parse_simple_integer(text -> string) -> number {
@@ -523,8 +506,7 @@ fn emit_llvm_function(
         print.err("emit-llvm: emit_fn phase=internalize_check name=" + fn_name + " internal=" + internalize_text);
         print.err("emit-llvm: emit_fn phase=define_header name=" + fn_name);
     }
-    _write_define_header(linkage, llvm_return, sanitized, signature);
-    let define_header -> string = fs.readFile("build/sailfin/.define_header");
+    let define_header -> string = build_define_header_line(linkage, llvm_return, sanitized, signature);
     lines = append_string(lines, define_header);
     let entry_line -> string = entry_label + ":";
     lines = append_string(lines, entry_line);
