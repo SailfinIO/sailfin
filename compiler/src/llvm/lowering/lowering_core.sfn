@@ -243,22 +243,22 @@ fn make_native_module_for_emit(module_name -> string, native_text -> string) -> 
 
 fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> string, out_path -> string) -> boolean ![io] {
     if !fs.exists(native_text_path) {
-        print("emit-llvm: native text file missing at " + native_text_path);
+        print.err("emit-llvm: native text file missing at " + native_text_path);
         return false;
     }
     let native_text = fs.readFile(native_text_path);
     if native_text.length == 0 {
-        print("emit-llvm: native text file empty at " + native_text_path);
+        print.err("emit-llvm: native text file empty at " + native_text_path);
         return false;
     }
-    print("emit-llvm: compile_native_text_to_llvm_file module=" + module_name + " bytes=" + number_to_string(native_text.length));
+    print.err("emit-llvm: compile_native_text_to_llvm_file module=" + module_name + " bytes=" + number_to_string(native_text.length));
     let parse = build_parse_result_from_text(native_text);
     let raw_imports = recover_native_imports_light(native_text);
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     let import_context = collect_imported_module_context_for_module(raw_imports, module_name);
-    print("emit-llvm: import context collected");
+    print.err("emit-llvm: import context collected");
     let dummy_module = make_native_module_for_emit(module_name, native_text);
-    print("emit-llvm: module created, entering lowering");
+    print.err("emit-llvm: module created, entering lowering");
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(
         dummy_module,
         parse,
@@ -269,13 +269,13 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
         native_text
     );
     if lowered_lines.lines == null {
-        print("emit-llvm: lowered lines null");
+        print.err("emit-llvm: lowered lines null");
         return false;
     }
     let lowered_count = lowered_lines.lines.length;
     if lowered_count > 0 {
         let defined = collect_defined_function_symbols(lowered_lines.lines);
-        print("emit-llvm: lowered (defined=" + number_to_string(defined.length) + ")");
+        print.err("emit-llvm: lowered (defined=" + number_to_string(defined.length) + ")");
         if defined.length == 0 {
             return false;
         }
@@ -285,7 +285,7 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
     if lines == null { _if247 = true; }
     if lines.length == 0 { _if247 = true; }
     if _if247 {
-        print("emit-llvm: lowering produced no output lines");
+        print.err("emit-llvm: lowering produced no output lines");
         return false;
     }
     if fs.exists(out_path) {
@@ -297,14 +297,14 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
 fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_in -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], diagnostics_in -> string[], mangle_symbols -> boolean, native_text_override_path -> string) -> LoweredLLVMLinesResult ![io] {
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
-        print("emit-llvm: phase=start");
+        print.err("emit-llvm: phase=start");
     }
     if debug_lowering {
         let mut artifact_count -> number = 0;
         if native_module.artifacts != null {
             artifact_count = native_module.artifacts.length;
         }
-        print("emit-llvm: native artifacts=" + number_to_string(artifact_count));
+        print.err("emit-llvm: native artifacts=" + number_to_string(artifact_count));
     }
 
     // ── Phase 1: Sanitize & recover inputs ──────────────────────────
@@ -314,7 +314,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let safe_imported_native_texts = sanitize_imported_native_texts(imported_native_texts, debug_lowering);
     let mut diagnostics = sanitize_diagnostics(diagnostics_in);
     if debug_lowering {
-        print("emit-llvm: dbg-F after diagnostics sanitize");
+        print.err("emit-llvm: dbg-F after diagnostics sanitize");
     }
     let safe_entry_points = sanitize_entry_points(native_module.entry_points, debug_lowering);
     let _trace_enums = fs.exists("build/sailfin/.trace_call_lowering");
@@ -328,7 +328,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
 
     let mut safe_imports = sanitize_imports(parse.imports, debug_lowering);
     if debug_lowering {
-        print("emit-llvm: safe_imports.length=" + number_to_string(safe_imports.length));
+        print.err("emit-llvm: safe_imports.length=" + number_to_string(safe_imports.length));
         if safe_imports.length > 0 {
             let first_import = safe_imports[0];
             if first_import != null {
@@ -344,9 +344,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
                 if first_import.specifiers != null {
                     import_spec_count = first_import.specifiers.length;
                 }
-                print("emit-llvm: safe_imports[0].kind=" + import_kind + " module=" + import_module + " specs=" + number_to_string(import_spec_count));
+                print.err("emit-llvm: safe_imports[0].kind=" + import_kind + " module=" + import_module + " specs=" + number_to_string(import_spec_count));
             } else {
-                print("emit-llvm: safe_imports[0]=<null>");
+                print.err("emit-llvm: safe_imports[0]=<null>");
             }
         }
     }
@@ -357,13 +357,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let safe_enums = sanitize_enums(parse.enums, diagnostics, _trace_enums);
     let safe_interfaces = sanitize_interfaces(parse.interfaces, diagnostics);
     if debug_lowering {
-        print("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
+        print.err("emit-llvm: dbg-H after structs/enums/interfaces sanitize");
     }
     let mut safe_functions = sanitize_functions(parse.functions, native_text_override_path, debug_lowering);
     safe_functions = recover_safe_functions(safe_functions, native_text_override_path, debug_lowering);
 
     if debug_lowering {
-        print("emit-llvm: functions parsed=" + number_to_string(parse.functions.length) + " safe=" + number_to_string(safe_functions.length));
+        print.err("emit-llvm: functions parsed=" + number_to_string(parse.functions.length) + " safe=" + number_to_string(safe_functions.length));
     }
 
     safe_structs = recover_structs_if_corrupt(safe_structs, native_text_override_path, debug_lowering);
@@ -388,10 +388,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let start_ms = monotonic_millis();
 
     if trace {
-        print("test llvm: lower_to_llvm_lines_with_parsed_context start");
+        print.err("test llvm: lower_to_llvm_lines_with_parsed_context start");
     }
     if timing {
-        print("test llvm: phase=parse ms=" + number_to_string(monotonic_millis() - start_ms));
+        print.err("test llvm: phase=parse ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     // ── Phase 2: Gather imported module context ─────────────────────
@@ -412,11 +412,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             module_enums = [];
         }
         if debug_lowering {
-            print("emit-llvm: phase=manifest");
+            print.err("emit-llvm: phase=manifest");
         }
     }
     if timing {
-        print("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
+        print.err("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     let mut imported_structs -> NativeStruct[] = [];
@@ -482,7 +482,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     if debug_lowering {
-        print("emit-llvm: phase=imports");
+        print.err("emit-llvm: phase=imports");
     }
 
     // ── Phase 3: Combine types, build type context ──────────────────
@@ -492,23 +492,23 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if is_test_module {
         combined_interfaces = [];
         if trace {
-            print("test llvm: skipping interface metadata for inlined tests");
+            print.err("test llvm: skipping interface metadata for inlined tests");
         }
     }
 
     if trace {
-        print("test llvm: trait metadata start");
+        print.err("test llvm: trait metadata start");
     }
     let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
     if debug_lowering {
-        print("emit-llvm: phase=trait_metadata");
+        print.err("emit-llvm: phase=trait_metadata");
     }
     if trace {
-        print("test llvm: enum layout fixup start");
+        print.err("test llvm: enum layout fixup start");
     }
 
     if trace {
-        print("test llvm: type context build start");
+        print.err("test llvm: type context build start");
     }
     let type_context = build_type_context_with_recovery(
         combined_structs, combined_enums, combined_interfaces,
@@ -521,28 +521,28 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         diagnostics = extend_string_lines_checked(diagnostics, _tc_diags, "type context");
     }
     if trace {
-        print("test llvm: type context built");
+        print.err("test llvm: type context built");
     }
     if timing {
-        print("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
+        print.err("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     // ── Build context functions ─────────────────────────────────────
     if debug_lowering {
-        print("emit-llvm: phase=struct_methods_start");
+        print.err("emit-llvm: phase=struct_methods_start");
     }
     let module_struct_methods = flatten_struct_methods(module_structs);
     if debug_lowering {
-        print("emit-llvm: phase=struct_methods_done");
+        print.err("emit-llvm: phase=struct_methods_done");
     }
     let local_functions = concat_native_functions(safe_functions, module_struct_methods);
     if debug_lowering {
-        print("emit-llvm: phase=local_functions");
+        print.err("emit-llvm: phase=local_functions");
     }
     let mut context_functions = concat_native_functions(local_functions, imported_functions);
     context_functions = concat_native_functions(context_functions, imported_struct_methods);
     if debug_lowering {
-        print("emit-llvm: phase=context_functions");
+        print.err("emit-llvm: phase=context_functions");
     }
 
     serialize_context_functions(context_functions, debug_lowering);
@@ -558,14 +558,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     if _if255 {
         if debug_lowering {
-            print("emit-llvm: phase=helpers_start");
+            print.err("emit-llvm: phase=helpers_start");
         }
         runtime_helpers = collect_runtime_helper_targets(local_functions);
         if debug_lowering {
-            print("emit-llvm: phase=helpers_done");
+            print.err("emit-llvm: phase=helpers_done");
         }
     } else if trace {
-        print("test llvm: skipping runtime helper collection for inlined tests");
+        print.err("test llvm: skipping runtime helper collection for inlined tests");
     }
     if !string_array_contains(runtime_helpers, "copy_bytes") {
         runtime_helpers.push("copy_bytes");
@@ -625,11 +625,32 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_filesystem_bridge");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_http_bridge");
     runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_model_bridge");
+    // Filesystem adapters — the compiler emits direct calls to these C
+    // runtime symbols from modules that use fs.readFile, fs.exists, etc.
+    // Without unconditional declares, separate-compilation produces
+    // "use of undefined value" errors at clang time.
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.readFile");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.read");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.writeFile");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.write");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.appendFile");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.exists");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.deleteFile");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.listDirectory");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.writeLines");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.createDirectory");
+    runtime_helpers = append_unique_effect(runtime_helpers, "fs.read_bytes");
+    // Additional helpers used by the compiler but not auto-collected
+    runtime_helpers = append_unique_effect(runtime_helpers, "monotonic_millis");
+    runtime_helpers = append_unique_effect(runtime_helpers, "find_char");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string_starts_with");
+    runtime_helpers = append_unique_effect(runtime_helpers, "process.run");
+    runtime_helpers = append_unique_effect(runtime_helpers, "is_decimal_digit");
     let mut direct_effects -> FunctionEffectEntry[] = [];
     let mut aggregated_effects -> FunctionEffectEntry[] = [];
     if !skip_effects {
         if debug_lowering {
-            print("emit-llvm: phase=direct_effects");
+            print.err("emit-llvm: phase=direct_effects");
         }
         direct_effects = collect_direct_function_effects(context_functions);
         aggregated_effects = direct_effects;
@@ -637,17 +658,17 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             let call_graph = collect_function_call_graph(context_functions);
             aggregated_effects = propagate_function_effects(direct_effects, call_graph);
         } else if trace {
-            print("test llvm: skipping effect propagation for inlined tests");
+            print.err("test llvm: skipping effect propagation for inlined tests");
         }
     }
     if trace {
-        print("test llvm: runtime helpers collected");
+        print.err("test llvm: runtime helpers collected");
     }
     if timing {
-        print("test llvm: phase=effects ms=" + number_to_string(monotonic_millis() - start_ms));
+        print.err("test llvm: phase=effects ms=" + number_to_string(monotonic_millis() - start_ms));
     }
     if debug_lowering {
-        print("emit-llvm: phase=effects");
+        print.err("emit-llvm: phase=effects");
     }
 
     // ── Phase 4: Render LLVM IR preamble ────────────────────────────
@@ -664,8 +685,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
 
     // ── Module globals ──────────────────────────────────────────────
     if debug_lowering {
-        print("emit-llvm: phase=module_globals");
-        print("emit-llvm: module bindings count=" + number_to_string(safe_bindings.length));
+        print.err("emit-llvm: phase=module_globals");
+        print.err("emit-llvm: module bindings count=" + number_to_string(safe_bindings.length));
     }
     let mut module_globals_needs_init_call -> boolean = false;
     let mut module_global_locals -> LocalBinding[] = [];
@@ -675,11 +696,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut module_string_constants -> StringConstant[] = empty_string_constant_set();
     if safe_bindings.length == 0 {
         if debug_lowering {
-            print("emit-llvm: module bindings empty; skipping module globals");
+            print.err("emit-llvm: module bindings empty; skipping module globals");
         }
     } else if fs.exists("build/sailfin/.skip_module_globals") {
         if debug_lowering {
-            print("emit-llvm: skipping module globals");
+            print.err("emit-llvm: skipping module globals");
         }
     } else {
         let _mg = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
@@ -715,10 +736,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         lines = extend_string_lines(lines, [""]);
     }
     if trace {
-        print("test llvm: module globals lowered");
+        print.err("test llvm: module globals lowered");
     }
     if timing {
-        print("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
+        print.err("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     // ── Phase 5: Lower all functions ────────────────────────────────
@@ -748,14 +769,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     if timing {
-        print("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
+        print.err("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     // ── Mangling ────────────────────────────────────────────────────
     let effective_mangle_symbols = mangle_symbols;
     if debug_lowering {
         if !effective_mangle_symbols {
-            print("emit-llvm: skipping mangling (mangle_symbols=false)");
+            print.err("emit-llvm: skipping mangling (mangle_symbols=false)");
         }
     }
     if effective_mangle_symbols {
@@ -769,13 +790,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         lines = mangled.lines;
     }
     if debug_lowering {
-        print("emit-llvm: phase=mangle");
+        print.err("emit-llvm: phase=mangle");
     }
     if trace {
-        print("test llvm: mangling stage done");
+        print.err("test llvm: mangling stage done");
     }
     if timing {
-        print("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
+        print.err("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     // ── Final result ────────────────────────────────────────────────
@@ -800,7 +821,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             }
             i += 1;
         }
-        print(
+        print.err(
             "test llvm: lowered lines=" + number_to_string(lines.length)
             + " nonempty=" + number_to_string(nonempty)
             + " first_len=" + number_to_string(first_len)
@@ -811,12 +832,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             if diag_index >= diagnostics.length {
                 break;
             }
-            print("test llvm: diagnostic " + diagnostics[diag_index]);
+            print.err("test llvm: diagnostic " + diagnostics[diag_index]);
             diag_index += 1;
         }
     }
     if lines.length == 0 {
-        print(
+        print.err(
             "emit-llvm: lowering produced no lines (functions="
             + number_to_string(local_functions.length)
             + " structs="
@@ -828,9 +849,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             + ")"
         );
     }
-    print("emit-llvm: exit lower_to_llvm_lines_with_parsed_context lines=" + number_to_string(lines.length));
+    print.err("emit-llvm: exit lower_to_llvm_lines_with_parsed_context lines=" + number_to_string(lines.length));
     if debug_lowering {
-        print("emit-llvm: phase=end lines=" + number_to_string(lines.length));
+        print.err("emit-llvm: phase=end lines=" + number_to_string(lines.length));
     }
     return LoweredLLVMLinesResult {
         lines: lines,

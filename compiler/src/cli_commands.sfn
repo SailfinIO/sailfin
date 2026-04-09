@@ -404,11 +404,11 @@ fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io]
         let base_dir = _dirname_cmd(path);
         let mut combined_source = source;
         if skip_inlining {
-            if trace_runner { print("test runner: skipping import inlining"); }
+            if trace_runner { print.err("test runner: skipping import inlining"); }
         } else {
-            if trace_runner { print("test runner: inlining start"); }
+            if trace_runner { print.err("test runner: inlining start"); }
             combined_source = _inline_relative_imports_cmd(source, base_dir, 10, []);
-            if trace_runner { print("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")"); }
+            if trace_runner { print.err("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")"); }
         }
 
         if dump_sources {
@@ -416,7 +416,7 @@ fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io]
             _write_text_cmd("build/sailfin/test-source-" + safe + ".sfn", combined_source);
         }
 
-        if trace_runner { print("test runner: compile start"); }
+        if trace_runner { print.err("test runner: compile start"); }
         let _compiled = compile_tests_to_llvm_file_with_module(combined_source, module_name, ll_path);
         if !_compiled {
             print("test runner: compile failed for " + path);
@@ -424,16 +424,16 @@ fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io]
             return 1;
         }
 
-        if trace_runner { print("test runner: link start"); }
+        if trace_runner { print.err("test runner: link start"); }
         let link_rc = _clang_link_test_cmd(ll_path, exe_path, runtime_root);
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
             fs.deleteFile(test_runner_active_path);
             return link_rc;
         }
-        if trace_runner { print("test runner: exec start"); }
+        if trace_runner { print.err("test runner: exec start"); }
         let run_rc = process.run([exe_path]);
-        if trace_runner { print("test runner: exec done (exit=" + number_to_string(run_rc) + ")"); }
+        if trace_runner { print.err("test runner: exec done (exit=" + number_to_string(run_rc) + ")"); }
         if run_rc != 0 {
             print("test failed: " + path);
             fs.deleteFile(test_runner_active_path);

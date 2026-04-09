@@ -614,6 +614,8 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
         parts = parts.concat([final_part]);
     }
     // Strip parameter names from define-style params (e.g. "i8* %text" → "i8*").
+    // Only strip the trailing `%name` when it appears at the top level (curly
+    // depth 0) so that struct types like "{ %Decorator*, i64 }*" are preserved.
     let mut stripped_parts -> string[] = [];
     let mut pi -> number = 0;
     loop {
@@ -621,12 +623,38 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
             break;
         }
         let p = parts[pi];
-        let pct = index_of(p, "%");
-        if pct > 0 {
-            stripped_parts.push(trim_text(substring(p, 0, pct)));
-        } else {
-            stripped_parts.push(p);
+        // Scan backwards to find the last '%' at curly depth 0.
+        let mut scan_pos = p.length - 1;
+        let mut pct_at_top -> number = -1;
+        let mut depth -> number = 0;
+        loop {
+            if scan_pos < 0 {
+                break;
+            }
+            let ch = substring(p, scan_pos, scan_pos + 1);
+            if ch == "}" {
+                depth += 1;
+            } else if ch == "{" {
+                if depth > 0 {
+                    depth -= 1;
+                }
+            }
+            if ch == "%" {
+                if depth == 0 {
+                    pct_at_top = scan_pos;
+                    break;
+                }
+            }
+            scan_pos -= 1;
         }
+        let mut stripped -> string = p;
+        if pct_at_top > 0 {
+            let prev_char = substring(p, pct_at_top - 1, pct_at_top);
+            if prev_char == " " {
+                stripped = trim_text(substring(p, 0, pct_at_top));
+            }
+        }
+        stripped_parts.push(stripped);
         pi += 1;
     }
     return DeclareSignature { return_type: ret_type, param_types: stripped_parts };

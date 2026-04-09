@@ -30,10 +30,10 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
             effects: ["io"],
     });
 
-    // Legacy prefixed print variants — kept for backward compatibility with
-    // older compiled binaries and examples. New compiler code should use print().
-    // These will be removed once the log capsule is the recommended path and
-    // print.* is formally deprecated.
+    // Prefixed print variants — print.err/print.warn/print.error write to
+    // stderr; print.info writes to stdout with an [info] prefix.
+    // Compiler diagnostics should use print.err() so they do not pollute
+    // stdout (LLVM IR output, program output, etc.).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
             target: "print.info",
             symbol: "sailfin_runtime_print_info",
@@ -804,6 +804,28 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
             return_type: "i8*",
             parameter_types: ["i8*", "i8*"],
             effects: ["io"],
+    });
+    // Prelude functions called directly by their original name.
+    // These are defined in runtime/prelude.sfn and compiled into
+    // runtime__prelude.ll.  Cross-module calls reference them as
+    // @find_char, etc. — they need declares in every module that
+    // calls them.
+    // Note: monotonic_millis is already registered above (target:
+    // "monotonic_millis" → sailfin_runtime_monotonic_millis) so it
+    // is not duplicated here.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+            target: "find_char",
+            symbol: "find_char",
+            return_type: "double",
+            parameter_types: ["i8*", "i8*", "double"],
+            effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+            target: "string_starts_with",
+            symbol: "string_starts_with",
+            return_type: "i1",
+            parameter_types: ["i8*", "i8*"],
+            effects: [],
     });
 
     return descriptors;

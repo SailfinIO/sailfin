@@ -834,7 +834,7 @@ fn propagate_function_effects(direct_effects -> FunctionEffectEntry[], call_grap
         }
         if iteration > max_iterations {
             if trace {
-                print("llvm effects: propagation cap reached (max=" + number_to_string(max_iterations) + ")");
+                print.err("llvm effects: propagation cap reached (max=" + number_to_string(max_iterations) + ")");
             }
             break;
         }

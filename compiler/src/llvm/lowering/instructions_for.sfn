@@ -100,6 +100,11 @@ import {
     append_loop_context,
 } from "./instructions_loops";
 
+import {
+    get_instruction_for_target,
+    get_instruction_for_iterable,
+} from "./lowering_native_helpers";
+
 // Lower a range-based for loop (e.g., `for i in 0..10`).
 // Returns null if the iterable is not a recognized range pattern.
 fn lower_for_array(
@@ -351,7 +356,10 @@ fn lower_for_instruction(
 
     let instruction = function.instructions[start_index];
 
-    let mut raw_target = trim_text(instruction.target);
+    let for_target_text = get_instruction_for_target(function.instructions, start_index);
+    let for_iterable_text = get_instruction_for_iterable(function.instructions, start_index);
+
+    let mut raw_target = trim_text(for_target_text);
     raw_target = strip_mut_prefix(raw_target);
     if raw_target.length == 0 {
         diagnostics.push("llvm lowering: `.for` loop missing iteration binding in `" + function.name + "`");
@@ -415,7 +423,7 @@ fn lower_for_instruction(
 
     // Try range-based for loop first.
     let range_result = lower_for_range(
-        function, structure, raw_target, instruction,
+        function, structure, raw_target, for_iterable_text,
         llvm_return, bindings, locals, allocas, lines,
         temp_index, block_counter, next_local_id, next_region_id,
         functions, loop_stack, context, scope_id, scope_depth, next_index
@@ -425,9 +433,9 @@ fn lower_for_instruction(
     }
 
     // Fall through to array-based for loop.
-    let range_parse = parse_range_iterable(instruction.iterable);
+    let range_parse = parse_range_iterable(for_iterable_text);
 
-    let iterable_result = lower_expression(instruction.iterable, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+    let iterable_result = lower_expression(for_iterable_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
     let mut _ci21 -> number = 0;
     loop {
         if _ci21 >= iterable_result.diagnostics.length { break; }

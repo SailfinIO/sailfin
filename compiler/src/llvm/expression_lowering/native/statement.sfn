@@ -291,7 +291,7 @@ fn lower_expression_statement(
     }
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
-        print("emit-llvm: lower_expression_statement start fn=" + function_name + " expr=" + expression + " locals_read=" + number_to_string(current_locals.length) + " bindings_read=" + number_to_string(current_bindings.length));
+        print.err("emit-llvm: lower_expression_statement start fn=" + function_name + " expr=" + expression + " locals_read=" + number_to_string(current_locals.length) + " bindings_read=" + number_to_string(current_bindings.length));
     }
     let mut diagnostics -> string[] = detect_suspension_conflicts(expression, current_locals, current_bindings, function_name, null);
     let mut current_lines -> string[] = lines;
@@ -329,7 +329,7 @@ fn lower_expression_statement(
         let trimmed_assign_target = trim_text(parsed_assignment.target);
         let trimmed_assign_value = trim_text(parsed_assignment.value);
         if debug_lowering {
-            print("emit-llvm: lower_expr_stmt simple_assignment target='" + trimmed_assign_target + "' value='" + trimmed_assign_value + "' locals_len=" + number_to_string(current_locals.length));
+            print.err("emit-llvm: lower_expr_stmt simple_assignment target='" + trimmed_assign_target + "' value='" + trimmed_assign_value + "' locals_len=" + number_to_string(current_locals.length));
         }
         let binding = find_local_binding(current_locals, trimmed_assign_target);
         if binding == null {
@@ -466,9 +466,9 @@ fn lower_expression_statement(
     if debug_lowering {
         let _cr_exists_check = fs.exists("build/sailfin/.call_result_lines_count");
         if _cr_exists_check {
-            print("stmt-lowering: call_result_lines_count EXISTS");
+            print.err("stmt-lowering: call_result_lines_count EXISTS");
         } else {
-            print("stmt-lowering: call_result_lines_count NOT FOUND");
+            print.err("stmt-lowering: call_result_lines_count NOT FOUND");
         }
     }
     if fs.exists("build/sailfin/.call_result_lines_count") {
@@ -479,7 +479,7 @@ fn lower_expression_statement(
         }
         current_lines = _new_lines;
         if debug_lowering {
-            print("stmt-lowering: read " + number_to_string(_new_lines.length) + " lines from call_result files, current_lines.length=" + number_to_string(current_lines.length));
+            print.err("stmt-lowering: read " + number_to_string(_new_lines.length) + " lines from call_result files, current_lines.length=" + number_to_string(current_lines.length));
         }
         let _cr_temp_str = fs.readFile("build/sailfin/.call_result_temp");
         current_temp = _parse_int_local(_cr_temp_str);
@@ -487,16 +487,12 @@ fn lower_expression_statement(
         // Clean up sentinel
         fs.deleteFile("build/sailfin/.call_result_lines_count");
     } else {
-        // Fallback: try struct fields
-        let mut _ci15 -> number = 0;
-        loop {
-            if _ci15 >= lowered.diagnostics.length { break; }
-            diagnostics.push(lowered.diagnostics[_ci15]);
-            _ci15 += 1;
-        }
-        string_constants = lowered.string_constants;
-        current_lines = lowered.lines;
-        current_temp = lowered.temp_index;
+        // Fallback: struct return fields are ABI-corrupted in the v0.1.1 seed.
+        // Do NOT replace current_lines with lowered.lines — lower_expression
+        // mutated the lines array in-place, so current_lines already has the
+        // new IR.  Using the corrupted struct field would cause
+        // _recover_temp_from_lines to scan wrong data and return a stale temp
+        // counter, leading to duplicate SSA names in the next statement.
         current_temp = _recover_temp_from_lines(current_lines, current_temp);
     }
     if consumption != null {
@@ -507,7 +503,7 @@ fn lower_expression_statement(
         }
     }
     if debug_lowering {
-        print("stmt-lowering: pre-write _pre_call_lines_len=" + number_to_string(_pre_call_lines_len) + " current_lines.length=" + number_to_string(current_lines.length) + " delta=" + number_to_string(current_lines.length - _pre_call_lines_len));
+        print.err("stmt-lowering: pre-write _pre_call_lines_len=" + number_to_string(_pre_call_lines_len) + " current_lines.length=" + number_to_string(current_lines.length) + " delta=" + number_to_string(current_lines.length - _pre_call_lines_len));
     }
     _write_expr_stmt_result_files_with_constants(_pre_call_lines_len, current_lines, current_temp, mutations, current_next_region, string_constants);
     return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations , string_constants: string_constants};
@@ -553,14 +549,14 @@ fn lower_return_instruction(
     let safe_llvm_return = fs.readFile("build/sailfin/.instr_llvm_return");
 
     if debug_lowering {
-        print("emit-llvm: lower_return_instruction start fn=" + fn_name + " llvm_return=" + safe_llvm_return);
+        print.err("emit-llvm: lower_return_instruction start fn=" + fn_name + " llvm_return=" + safe_llvm_return);
     }
     if trace {
         let mut expr_len -> number = 0;
         if instr_expression != null {
             expr_len = instr_expression.length;
         }
-        print(
+        print.err(
             "test llvm: lower_return start "
             + fn_name
             + " expr_len="
@@ -581,7 +577,7 @@ fn lower_return_instruction(
             current_lines.push("  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         }
         if trace {
-            print("test llvm: lower_return empty_expr lines_after=" + number_to_string(current_lines.length));
+            print.err("test llvm: lower_return empty_expr lines_after=" + number_to_string(current_lines.length));
         }
         let empty_constants = empty_string_constant_set();
         _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, empty_constants);
@@ -624,11 +620,11 @@ fn lower_return_instruction(
     }
 
     if debug_lowering {
-        print("emit-llvm: lower_return pre_suspension fn=" + fn_name);
+        print.err("emit-llvm: lower_return pre_suspension fn=" + fn_name);
     }
     let suspension_diagnostics = detect_suspension_conflicts(instr_expression, current_locals, current_bindings, fn_name, null);
     if debug_lowering {
-        print("emit-llvm: lower_return post_suspension fn=" + fn_name);
+        print.err("emit-llvm: lower_return post_suspension fn=" + fn_name);
     }
     let mut _ci16 -> number = 0;
     loop {
@@ -638,11 +634,11 @@ fn lower_return_instruction(
     }
 
     if debug_lowering {
-        print("emit-llvm: lower_return pre_ownership fn=" + fn_name);
+        print.err("emit-llvm: lower_return pre_ownership fn=" + fn_name);
     }
     let ownership_analysis = analyze_value_ownership(instr_expression, null, current_locals, current_bindings);
     if debug_lowering {
-        print("emit-llvm: lower_return post_ownership fn=" + fn_name);
+        print.err("emit-llvm: lower_return post_ownership fn=" + fn_name);
     }
     let mut _ci17 -> number = 0;
     loop {
@@ -653,14 +649,14 @@ fn lower_return_instruction(
     let consumption = ownership_analysis.consumption;
 
     if debug_lowering {
-        print("emit-llvm: lower_return pre_lower_expr fn=" + fn_name + " expr=" + instr_expression);
-        print("emit-llvm: lower_return bindings_len=" + number_to_string(current_bindings.length));
+        print.err("emit-llvm: lower_return pre_lower_expr fn=" + fn_name + " expr=" + instr_expression);
+        print.err("emit-llvm: lower_return bindings_len=" + number_to_string(current_bindings.length));
         let mut bind_i -> number = 0;
         loop {
             if bind_i >= current_bindings.length {
                 break;
             }
-            print("emit-llvm: lower_return binding[" + number_to_string(bind_i) + "] name=" + current_bindings[bind_i].name + " llvm_name=" + current_bindings[bind_i].llvm_name + " llvm_type=" + current_bindings[bind_i].llvm_type);
+            print.err("emit-llvm: lower_return binding[" + number_to_string(bind_i) + "] name=" + current_bindings[bind_i].name + " llvm_name=" + current_bindings[bind_i].llvm_name + " llvm_type=" + current_bindings[bind_i].llvm_type);
             bind_i += 1;
         }
     }
@@ -686,7 +682,7 @@ fn lower_return_instruction(
     }
     let lowered = lower_expression(_ret_expr, current_bindings, current_locals, current_temp, current_lines, functions, context, safe_llvm_return);
     if debug_lowering {
-        print("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
+        print.err("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
     }
     let mut _ci18 -> number = 0;
     loop {
@@ -704,13 +700,13 @@ fn lower_return_instruction(
         if lowered.operand != null {
             has_operand = "true";
         }
-        print("emit-llvm: lower_return operand_check fn=" + fn_name + " has_operand=" + has_operand);
+        print.err("emit-llvm: lower_return operand_check fn=" + fn_name + " has_operand=" + has_operand);
     }
     if lowered.operand == null {
         diagnostics.push("llvm lowering: unhandled return expression in `" + fn_name + "`");
         current_lines.push("  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         if trace {
-            print("test llvm: lower_return no_operand lines_after=" + number_to_string(current_lines.length));
+            print.err("test llvm: lower_return no_operand lines_after=" + number_to_string(current_lines.length));
         }
         _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
@@ -718,7 +714,7 @@ fn lower_return_instruction(
 
     let operand = lowered.operand;
     if debug_lowering {
-        print("emit-llvm: lower_return pre_coerce fn=" + fn_name + " type=" + operand.llvm_type + " value=" + operand.value);
+        print.err("emit-llvm: lower_return pre_coerce fn=" + fn_name + " type=" + operand.llvm_type + " value=" + operand.value);
     }
     if safe_llvm_return == "void" {
         diagnostics.push("llvm lowering: void function `" + fn_name + "` returned a value");
@@ -728,11 +724,11 @@ fn lower_return_instruction(
     }
 
     if debug_lowering {
-        print("emit-llvm: lower_return pre_coerce_call fn=" + fn_name);
+        print.err("emit-llvm: lower_return pre_coerce_call fn=" + fn_name);
     }
     let coerced = coerce_operand_to_type(operand, safe_llvm_return, current_temp, current_lines);
     if debug_lowering {
-        print("emit-llvm: lower_return post_coerce fn=" + fn_name);
+        print.err("emit-llvm: lower_return post_coerce fn=" + fn_name);
     }
     let mut _ci19 -> number = 0;
     loop {
@@ -751,7 +747,7 @@ fn lower_return_instruction(
             current_lines.push("  ret " + safe_llvm_return + " " + default_return_literal(safe_llvm_return));
         }
         if trace {
-            print("test llvm: lower_return no_coerce lines_after=" + number_to_string(current_lines.length));
+            print.err("test llvm: lower_return no_coerce lines_after=" + number_to_string(current_lines.length));
         }
         _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
         return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: [] , string_constants: string_constants};
@@ -764,7 +760,7 @@ fn lower_return_instruction(
     }
     current_lines.push("  ret " + coerced_operand.llvm_type + " " + coerced_operand.value);
     if trace {
-        print("test llvm: lower_return ok lines_after=" + number_to_string(current_lines.length));
+        print.err("test llvm: lower_return ok lines_after=" + number_to_string(current_lines.length));
     }
     if consumption != null {
         if consumption.kind == "local" {

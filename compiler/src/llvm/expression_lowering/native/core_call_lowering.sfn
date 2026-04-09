@@ -62,6 +62,8 @@ import { resolve_call_method_target, resolve_call_signature } from "./core_call_
 
 import { coerce_and_emit_call } from "./core_call_emission";
 
+import { find_runtime_helper } from "../../runtime_helpers";
+
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
 
@@ -87,7 +89,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let dot_index = index_of(trimmed_target, ".");
     let trace_calls = fs.exists("build/sailfin/.trace_call_lowering");
     if trace_calls {
-        print("call_lowering: target='" + trimmed_target + "' dot_index=" + number_to_string(dot_index) + " enums=" + number_to_string(context.enums.length));
+        print.err("call_lowering: target='" + trimmed_target + "' dot_index=" + number_to_string(dot_index) + " enums=" + number_to_string(context.enums.length));
     }
     if dot_index > 0 {
         let enum_name = trim_text(substring(trimmed_target, 0, dot_index));
@@ -99,7 +101,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
             if enum_info != null {
                 found_text = "found";
             }
-            print("call_lowering: enum_name='" + enum_name + "' variant='" + variant_name + "' resolved=" + found_text);
+            print.err("call_lowering: enum_name='" + enum_name + "' variant='" + variant_name + "' resolved=" + found_text);
         }
         if enum_info != null {
             let mut fields -> StructLiteralField[] = [];
@@ -164,6 +166,18 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let mut expected_params = sig.expected_params;
     let is_trait_dispatch = sig.is_trait_dispatch;
     diagnostics = extend_string_array(diagnostics, sig.diagnostics);
+
+    // If helper_descriptor is still null, try looking up the target as a
+    // runtime helper.  This covers module-level let bindings like
+    // `let runtime_char_code_fn = runtime.char_code` where the call uses
+    // the binding name directly (no dot — so resolve_call_method_target
+    // doesn't detect it as a method call).
+    if helper_descriptor == null {
+        let fallback_helper = find_runtime_helper(trimmed_target);
+        if fallback_helper != null {
+            helper_descriptor = fallback_helper;
+        }
+    }
 
     // Re-derive helper_descriptor for concat after signature resolution
     if trimmed_target == "concat" {

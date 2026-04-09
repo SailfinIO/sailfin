@@ -25,6 +25,7 @@ import {
 } from "../utils";
 
 import {
+    empty_string_constant_set,
     merge_string_constants,
 } from "../strings";
 
@@ -58,6 +59,7 @@ import {
     extend_mutations,
     _write_block_result_files,
     _parse_int_from_string,
+    _read_ipc_int_min,
 } from "./instructions_helpers";
 
 import {
@@ -139,8 +141,15 @@ fn collect_loop_structure(
 }
 
 fn append_loop_context(values -> LoopContext[], value -> LoopContext) -> LoopContext[] {
-    let mut out = values;
-    out = out.push(value);
+    // Deep-copy the array so the caller's reference is not mutated by push.
+    let mut out -> LoopContext[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= values.length { break; }
+        out.push(values[i]);
+        i += 1;
+    }
+    out.push(value);
     return out;
 }
 
@@ -188,11 +197,11 @@ fn lower_loop_instruction(
 
     let debug_loop = fs.exists("build/sailfin/.trace_lowering");
     if debug_loop {
-        print("emit-llvm: lower_loop start fn=" + function.name + " start_index=" + number_to_string(start_index) + " end=" + number_to_string(end));
+        print.err("emit-llvm: lower_loop start fn=" + function.name + " start_index=" + number_to_string(start_index) + " end=" + number_to_string(end));
     }
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     if debug_loop {
-        print("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+        print.err("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
     }
 
     // Detect exit-condition-at-top pattern: loop { if COND { break; } ... }
@@ -214,7 +223,7 @@ fn lower_loop_instruction(
                 if raw_exit_cond.length > 0 {
                     loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
                     if debug_loop {
-                        print("emit-llvm: lower_loop detected exit condition: " + loop_exit_condition);
+                        print.err("emit-llvm: lower_loop detected exit condition: " + loop_exit_condition);
                     }
                 }
             }
@@ -276,7 +285,7 @@ fn lower_loop_instruction(
     // Lower the body to discover mutations
     let body_scope_id = make_child_scope_id(scope_id, body_label);
     if debug_loop {
-        print("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+        print.err("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
     }
     let body_result = lower_instruction_range(
         function,
@@ -299,12 +308,13 @@ fn lower_loop_instruction(
         body_label
     );
     // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-    let _br_lp_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
-    let _br_lp_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
-    let _br_lp_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
-    let _br_lp_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
+    // Use _read_ipc_int_min to prevent the counter from going backwards.
+    let _br_lp_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
+    let _br_lp_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
+    let _br_lp_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
+    let _br_lp_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
     if debug_loop {
-        print("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
+        print.err("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
     }
 
     let mut _ci7 -> number = 0;

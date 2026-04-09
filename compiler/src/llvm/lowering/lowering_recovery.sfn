@@ -53,6 +53,7 @@ import {
     make_native_struct_layout_field,
     make_instruction_text,
     make_instruction_simple,
+    make_instruction_for,
     update_function_return_type,
     update_function_effects,
     append_param_to_function,
@@ -101,9 +102,9 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     // FLAT: no nested ifs, no else-if chains.
     // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
     // Every condition check must be a top-level if in the loop body.
-    print("DIAG: recover_native_functions_light input length=" + number_to_string(native_text.length));
+    print.err("DIAG: recover_native_functions_light input length=" + number_to_string(native_text.length));
     let lines = split_lines_local(native_text);
-    print("DIAG: split_lines_local returned lines=" + number_to_string(lines.length));
+    print.err("DIAG: split_lines_local returned lines=" + number_to_string(lines.length));
     let mut functions -> NativeFunction[] = [];
     let mut current -> NativeFunction? = null;
     let mut current_struct_name -> string = "";
@@ -149,6 +150,8 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let is_if_kw = starts_with_local(line, ".if ");
         let is_loop_kw = line == ".loop";
         let is_endloop_kw = line == ".endloop";
+        let is_for_kw = starts_with_local(line, ".for ");
+        let is_endfor_kw = line == ".endfor";
         let is_break_kw = line == "break";
         let is_continue_kw = line == "continue";
 
@@ -165,6 +168,12 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let param_name_raw = trim_text_local(substring(param_text_raw, 0, param_arrow_idx));
         let param_type_raw = trim_text_local(substring(param_text_raw, param_arrow_idx + 4, param_text_raw.length));
 
+        // Pre-compute .for target/iterable extraction.
+        let for_body_raw = trim_text_local(substring(line, 5, line.length));
+        let for_in_idx = index_of(for_body_raw, " in ");
+        let for_target_raw = trim_text_local(substring(for_body_raw, 0, for_in_idx));
+        let for_iterable_raw = trim_text_local(substring(for_body_raw, for_in_idx + 4, for_body_raw.length));
+
         // --- Struct tracking ---
         if is_struct_start {
             current_struct_name = trim_text_local(substring(line, 8, line.length));
@@ -180,9 +189,9 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         // --- Flush current on function/method boundaries (FLAT — no nesting) ---
         if is_fn_start {
             if current != null {
-                print("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
+                print.err("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
                 functions = append_native_function(functions, current);
-                print("DIAG: after append functions.len=" + number_to_string(functions.length));
+                print.err("DIAG: after append functions.len=" + number_to_string(functions.length));
                 current = null;
             }
         }
@@ -196,9 +205,9 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
         if is_fn_end {
             if current != null {
-                print("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
+                print.err("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
                 functions = append_native_function(functions, current);
-                print("DIAG: after append functions.len=" + number_to_string(functions.length));
+                print.err("DIAG: after append functions.len=" + number_to_string(functions.length));
                 current = null;
                 index += 1;
                 continue;
@@ -261,7 +270,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             let fn_is_async = recover_function_is_async_from_header(line);
             current = make_native_function_basic(name, fn_is_async);
             fn_count += 1;
-            print("DIAG: found .fn #" + number_to_string(fn_count) + " name=" + name);
+            print.err("DIAG: found .fn #" + number_to_string(fn_count) + " name=" + name);
             index += 1;
             continue;
         }
@@ -391,6 +400,14 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         if is_endloop_kw {
             next_instruction = make_instruction_simple(9);
         }
+        if is_for_kw {
+            if for_in_idx >= 0 {
+                next_instruction = make_instruction_for(for_target_raw, for_iterable_raw);
+            }
+        }
+        if is_endfor_kw {
+            next_instruction = make_instruction_simple(7);
+        }
         if is_break_kw {
             next_instruction = make_instruction_simple(10);
         }
@@ -404,7 +421,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     if current != null {
         functions = append_native_function(functions, current);
     }
-    print("DIAG: recover_native_functions_light returning " + number_to_string(functions.length) + " functions");
+    print.err("DIAG: recover_native_functions_light returning " + number_to_string(functions.length) + " functions");
     return functions;
 }
 
@@ -622,7 +639,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
     let initial_function_count = sanitize_collection_length(safe_functions.length, 200000);
     if safe_functions.length != initial_function_count {
         if debug_lowering {
-            print("emit-llvm: invalid function list length; dropping current parsed functions");
+            print.err("emit-llvm: invalid function list length; dropping current parsed functions");
         }
         safe_functions = [];
     }
@@ -722,7 +739,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
                         replacement_functions = light_functions;
                     }
                     if debug_lowering {
-                        print(
+                        print.err(
                             "emit-llvm: replacing suspicious parsed functions with stable function parse"
                         );
                     }
@@ -750,7 +767,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
 
     let direct_count = parse_native_function_count_from_text(recovery_text);
     if debug_lowering {
-        print("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
+        print.err("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
     }
     if direct_count == 0 {
         if fs.exists("build/sailfin/emit-native.tmp") {
@@ -763,7 +780,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
     if parsed_recovery.length == recovered_count {
         if parsed_recovery.length > 0 {
             if debug_lowering {
-                print("emit-llvm: recovered functions via parse_native_functions_from_text=" + number_to_string(parsed_recovery.length));
+                print.err("emit-llvm: recovered functions via parse_native_functions_from_text=" + number_to_string(parsed_recovery.length));
             }
             return parsed_recovery;
         }
@@ -774,7 +791,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
     if light_recovery.length == light_recovered_count {
         if light_recovery.length > 0 {
             if debug_lowering {
-                print("emit-llvm: recovered functions via light parser=" + number_to_string(light_recovery.length));
+                print.err("emit-llvm: recovered functions via light parser=" + number_to_string(light_recovery.length));
             }
             return light_recovery;
         }

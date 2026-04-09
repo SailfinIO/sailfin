@@ -32,7 +32,7 @@ fn lower_for_range(
     function -> NativeFunction,
     structure -> LoopStructure,
     raw_target -> string,
-    instruction -> NativeInstruction,
+    iterable_text -> string,
     llvm_return -> string,
     bindings -> ParameterBinding[],
     locals -> LocalBinding[],
@@ -62,7 +62,7 @@ fn lower_for_range(
     let mut collected_mutations -> LocalMutation[] = [];
     let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
 
-    let range_parse = parse_range_iterable(instruction.iterable);
+    let range_parse = parse_range_iterable(iterable_text);
     if !range_parse.success {
         return null;
     }

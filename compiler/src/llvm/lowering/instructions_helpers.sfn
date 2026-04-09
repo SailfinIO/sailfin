@@ -416,3 +416,50 @@ fn read_expr_mutations(existing -> LocalMutation[]) -> LocalMutation[] ![io] {
     }
     return result;
 }
+
+// Scan accumulated IR lines for the highest %tN temp index and return
+// max(highest + 1, floor).  This provides a robust fallback when IPC
+// files carry stale temp counters (e.g. after cross-module expression
+// lowering where struct-return scalars are ABI-corrupted).
+fn recover_temp_from_lines(lines -> string[], floor -> number) -> number {
+    let mut result -> number = floor;
+    let mut ri -> number = 0;
+    loop {
+        if ri >= lines.length { break; }
+        let rl = lines[ri];
+        if rl.length >= 5 {
+            let c0 = char_code(grapheme_at(rl, 0));
+            let c1 = char_code(grapheme_at(rl, 1));
+            let c2 = char_code(grapheme_at(rl, 2));
+            let c3 = char_code(grapheme_at(rl, 3));
+            // Match "  %t" (two spaces, percent, lowercase t)
+            if c0 == 32 {
+                if c1 == 32 {
+                    if c2 == 37 {
+                        if c3 == 116 {
+                            let mut rn -> number = 0;
+                            let mut rj -> number = 4;
+                            let mut rvalid -> boolean = false;
+                            loop {
+                                if rj >= rl.length { break; }
+                                let rc = char_code(grapheme_at(rl, rj));
+                                if rc < 48 { break; }
+                                if rc > 57 { break; }
+                                rn = rn * 10 + (rc - 48);
+                                rvalid = true;
+                                rj += 1;
+                            }
+                            if rvalid {
+                                if rn >= result {
+                                    result = rn + 1;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        ri += 1;
+    }
+    return result;
+}

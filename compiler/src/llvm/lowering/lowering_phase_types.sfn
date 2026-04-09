@@ -138,7 +138,7 @@ fn serialize_enum_info(enums: NativeEnum[], _trace_enums: boolean) -> string ![i
     }
     fs.writeLines("build/sailfin/.enum_info", lines);
     if _trace_enums {
-        print("enum_trace: wrote .enum_info lines=" + number_to_string(lines.length));
+        print.err("enum_trace: wrote .enum_info lines=" + number_to_string(lines.length));
     }
     return "";
 }
@@ -160,7 +160,7 @@ fn build_type_context_with_recovery(
     // (No diagnostics from skipped fixup.)
 
     if debug_lowering {
-        print("emit-llvm: about to fixup_enum_layouts enums=" + number_to_string(combined_enums.length));
+        print.err("emit-llvm: about to fixup_enum_layouts enums=" + number_to_string(combined_enums.length));
     }
 
     // Serialize struct/enum info BEFORE the cross-module build_type_context call.
@@ -168,7 +168,7 @@ fn build_type_context_with_recovery(
     serialize_enum_info(fixed_enums_list, _trace_enums);
 
     if _trace_enums {
-        print("enum_trace: combined_enums=" + number_to_string(combined_enums.length) + " fixed_enums=" + number_to_string(fixed_enums_list.length));
+        print.err("enum_trace: combined_enums=" + number_to_string(combined_enums.length) + " fixed_enums=" + number_to_string(fixed_enums_list.length));
     }
 
     let type_build = build_type_context(combined_structs, fixed_enums_list, combined_interfaces);
@@ -217,10 +217,10 @@ fn build_type_context_with_recovery(
         }
     }
     if _trace_enums {
-        print("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
+        print.err("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
     }
     if debug_lowering {
-        print("emit-llvm: phase=type_context");
+        print.err("emit-llvm: phase=type_context");
     }
     return type_context;
 }
@@ -290,7 +290,7 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
     }
     if recovered.length > 0 {
         if _trace_enums {
-            print("enum_trace: recovered " + number_to_string(recovered.length) + " enum(s) from .enum_info");
+            print.err("enum_trace: recovered " + number_to_string(recovered.length) + " enum(s) from .enum_info");
         }
     }
     return recovered;
@@ -386,7 +386,7 @@ fn serialize_context_functions(context_functions: NativeFunction[], debug_loweri
         cfw_i += 1;
     }
     if debug_lowering {
-        print("emit-llvm: serialized context_functions count=" + number_to_string(context_functions.length));
+        print.err("emit-llvm: serialized context_functions count=" + number_to_string(context_functions.length));
     }
     return context_functions.length;
 }
