@@ -339,12 +339,17 @@ fn lower_instruction_range(
                     fs.writeFile("build/sailfin/.instr_has_span", "0");
                     write_bindings_to_files(current_bindings);
                     write_locals_to_files(current_locals);
+                    let previous_temp = current_temp;
                     let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
                     current_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", current_temp);
-                    // Extra recovery: scan accumulated lines for the highest %tN
-                    // to guard against stale IPC temp counters from cross-module
-                    // expression lowering (v0.1.1 seed ABI corruption).
-                    current_temp = recover_temp_from_lines(current_lines, current_temp);
+                    // Extra recovery: only scan accumulated lines for the highest
+                    // %tN when the IPC temp counter failed to advance, to guard
+                    // against stale cross-module expression-lowering state from the
+                    // v0.1.1 seed ABI corruption without paying the scan cost on
+                    // every expression statement.
+                    if current_temp <= previous_temp {
+                        current_temp = recover_temp_from_lines(current_lines, current_temp);
+                    }
                     current_next_region = _read_ipc_int_min("build/sailfin/.expr_stmt_next_region_id", current_next_region);
                     current_mutations = read_expr_mutations(current_mutations);
                     collected_string_constants = read_expr_string_constants(collected_string_constants);

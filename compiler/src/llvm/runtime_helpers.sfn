@@ -808,15 +808,11 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // Prelude functions called directly by their original name.
     // These are defined in runtime/prelude.sfn and compiled into
     // runtime__prelude.ll.  Cross-module calls reference them as
-    // @monotonic_millis, @find_char, etc. — they need declares in
-    // every module that calls them.
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-            target: "monotonic_millis",
-            symbol: "monotonic_millis",
-            return_type: "double",
-            parameter_types: [],
-            effects: ["clock"],
-    });
+    // @find_char, etc. — they need declares in every module that
+    // calls them.
+    // Note: monotonic_millis is already registered above (target:
+    // "monotonic_millis" → sailfin_runtime_monotonic_millis) so it
+    // is not duplicated here.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
             target: "find_char",
             symbol: "find_char",

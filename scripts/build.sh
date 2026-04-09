@@ -296,11 +296,13 @@ build_module() {
     # Run from module_cwd so the seed picks up staged import-context.
     # Diagnostics go to stderr (via print.err) so stdout/file output is clean LLVM IR.
     local emit_ok=0
+    local stderr_log="${abs_ll_path}.stderr"
     if "$SEED" emit-llvm-file --help &>/dev/null 2>&1 || "$SEED" help 2>&1 | grep -q "emit-llvm-file"; then
         # Tolerate segfault during cleanup if the output file was written
-        (cd "$module_cwd" && seed_run "$SEED" emit-llvm-file "$abs_src" "$abs_ll_raw") 2>/dev/null || true
+        (cd "$module_cwd" && seed_run "$SEED" emit-llvm-file "$abs_src" "$abs_ll_raw") 2>"$stderr_log" || true
         if [[ -s "$abs_ll_raw" ]]; then
             mv "$abs_ll_raw" "$ll_path"
+            rm -f "$stderr_log"
             emit_ok=1
         fi
     fi
@@ -309,9 +311,11 @@ build_module() {
     if [[ "$emit_ok" -eq 0 ]]; then
         # The first-pass binary may segfault during cleanup after writing valid LLVM IR.
         # Tolerate non-zero exit if the output file contains valid LLVM IR.
-        (cd "$module_cwd" && seed_run "$SEED" emit llvm "$abs_src") > "$abs_ll_raw" 2>/dev/null || true
+        (cd "$module_cwd" && seed_run "$SEED" emit llvm "$abs_src") > "$abs_ll_raw" 2>"$stderr_log" || true
         if [[ ! -s "$abs_ll_raw" ]]; then
             echo "[build] FAIL: seed emit produced no output for $module_name" >&2
+            [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
+            rm -f "$stderr_log"
             return 1
         fi
         mv "$abs_ll_raw" "$ll_path"
@@ -321,8 +325,11 @@ build_module() {
     if ! head -20 "$ll_path" | grep -qE "define|declare|target|source_filename|ModuleID"; then
         echo "[build] FAIL: seed output for $module_name is not valid LLVM IR" >&2
         head -5 "$ll_path" >&2
+        [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
+        rm -f "$stderr_log"
         return 1
     fi
+    rm -f "$stderr_log"
 
     echo "$module_name"
     return 0
