@@ -58,6 +58,16 @@ CLANG_FLAGS="$OPT -Wno-override-module -fno-delete-null-pointer-checks"
 # Track start time for wall-time budget
 START_TIME="$(date +%s)"
 
+# Phase timers (populated as build progresses)
+T_IMPORT_START=0
+T_IMPORT_END=0
+T_EMIT_START=0
+T_EMIT_END=0
+T_CLANG_START=0
+T_CLANG_END=0
+T_LINK_START=0
+T_LINK_END=0
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -400,10 +410,12 @@ stage_import_context() {
 }
 
 # Stage import context (sequential for safety with older seeds)
+T_IMPORT_START="$(date +%s)"
 for src in "${SOURCES[@]}"; do
     check_budget
     stage_import_context "$src"
 done
+T_IMPORT_END="$(date +%s)"
 
 log "staged import-context for ${#SOURCES[@]} modules"
 
@@ -414,6 +426,7 @@ log "building ${#SOURCES[@]} modules (jobs=$JOBS)..."
 
 MODULE_NAMES=()
 FAILED=0
+T_EMIT_START="$(date +%s)"
 
 # Build modules (with optional parallelism)
 if [[ "$JOBS" -le 1 ]]; then
@@ -443,6 +456,7 @@ else
     fi
 fi
 
+T_EMIT_END="$(date +%s)"
 [[ "$FAILED" -eq 0 ]] || die "module build failed (see errors above)"
 log "compiled ${#MODULE_NAMES[@]} modules"
 
@@ -453,6 +467,7 @@ printf '%s\n' "${MODULE_NAMES[@]}" > "$RAW_DIR/modules.txt"
 # Step 4: Compile all modules with clang
 # ---------------------------------------------------------------------------
 log "compiling ${#MODULE_NAMES[@]} modules with clang..."
+T_CLANG_START="$(date +%s)"
 FAILED=0
 for name in "${MODULE_NAMES[@]}"; do
     if ! compile_module "$name"; then
@@ -460,6 +475,7 @@ for name in "${MODULE_NAMES[@]}"; do
         break
     fi
 done
+T_CLANG_END="$(date +%s)"
 [[ "$FAILED" -eq 0 ]] || die "clang compilation failed (see errors above)"
 
 # ---------------------------------------------------------------------------
@@ -522,6 +538,7 @@ run "$CLANG" $CLANG_FLAGS -c runtime/native/ir/runtime_globals.ll -o "$OBJ_DIR/r
 # ---------------------------------------------------------------------------
 # Step 7: Link final binary
 # ---------------------------------------------------------------------------
+T_LINK_START="$(date +%s)"
 log "linking final binary..."
 
 LINK_LIBS="-lm -lpthread"
@@ -547,6 +564,8 @@ run "$CLANG" $CLANG_FLAGS \
 # ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
+T_LINK_END="$(date +%s)"
+
 if [[ ! -x "$OUT" ]]; then
     die "link succeeded but output is not executable: $OUT"
 fi
@@ -555,8 +574,36 @@ ELAPSED=$(( $(date +%s) - START_TIME ))
 log "built $OUT in ${ELAPSED}s"
 
 # Quick sanity check
+VERSION_STR=""
 if "$OUT" --version &>/dev/null; then
-    log "$("$OUT" --version 2>&1 | head -1)"
+    VERSION_STR="$("$OUT" --version 2>&1 | head -1)"
+    log "$VERSION_STR"
 else
     warn "binary built but --version check failed"
 fi
+
+# ---------------------------------------------------------------------------
+# Build metrics
+# ---------------------------------------------------------------------------
+BINARY_SIZE="$(du -h "$OUT" | cut -f1)"
+IMPORT_SECS=$(( T_IMPORT_END - T_IMPORT_START ))
+EMIT_SECS=$(( T_EMIT_END - T_EMIT_START ))
+CLANG_SECS=$(( T_CLANG_END - T_CLANG_START ))
+LINK_SECS=$(( T_LINK_END - T_LINK_START ))
+
+echo ""
+echo "───────────────────────────────────────"
+echo "  Build Metrics"
+echo "───────────────────────────────────────"
+printf "  %-24s %s\n" "modules"      "${#MODULE_NAMES[@]}"
+printf "  %-24s %s\n" "binary size"  "$BINARY_SIZE"
+[[ -n "$VERSION_STR" ]] && \
+printf "  %-24s %s\n" "version"      "$VERSION_STR"
+echo ""
+printf "  %-24s %4ds\n" "import-context (native)" "$IMPORT_SECS"
+printf "  %-24s %4ds\n" "seed emit (llvm)"        "$EMIT_SECS"
+printf "  %-24s %4ds\n" "clang compile"           "$CLANG_SECS"
+printf "  %-24s %4ds\n" "link + verify"           "$LINK_SECS"
+echo "  ─────────────────────────────────────"
+printf "  %-24s %4ds\n" "total wall time"         "$ELAPSED"
+echo "───────────────────────────────────────"
