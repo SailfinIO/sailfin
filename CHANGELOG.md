@@ -1,6 +1,199 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.18 (2026-04-09)
+
+### Bug Fixes
+
+- **build**: Extract indented .layout lines for layout manifests
+  ([`f85fa05`](https://github.com/SailfinIO/sailfin/commit/f85fa05ff8f7ae517150b9d45276b84310d77336))
+
+The native emitter indents .layout directives inside struct blocks (e.g. ' .layout struct name=Foo
+  ...'). The previous grep pattern (^\.\(layout\)) required them at column 0, producing 0-byte
+  layout manifests for all modules. This caused all struct types to render as opaque in the
+  seedcheck build.
+
+Fix: match '.layout ' anywhere in the line.
+
+Seedcheck: 120/120 modules compile, link fails on prelude runtime bindings (separate issue).
+
+- **build**: Remove post-processing from build.sh
+  ([`5c224a1`](https://github.com/SailfinIO/sailfin/commit/5c224a1792d36d30dff6efa91c801d4af09459c7))
+
+Remove cross-module type resolution, symbol resolution, and second type pass (steps 3.4, 3.5, 3.55)
+  from build.sh. These were Python post-processing passes that compensated for the compiler not
+  emitting concrete imported types and cross-module declare statements.
+
+build.sh is now pure orchestration: enumerate → stage → emit → compile → link. The compiler itself
+  must emit correct LLVM IR. If it doesn't, the build fails.
+
+Update SEED_STABILIZATION.md to clarify the two-stage architecture: - Stage 1 (seed + Python
+  driver): fixups are acceptable - Stage 2 (first-pass binary + build.sh): zero fixups, ever
+
+- **compiler**: Add .for/.endfor support to light recovery parser
+  ([`aa329a3`](https://github.com/SailfinIO/sailfin/commit/aa329a399c3a65bc0b59af757c6e382e070a8396))
+
+The sfn-asm light recovery parser (recover_native_functions_light) handled .loop/.endloop but
+  silently dropped .for/.endfor instructions, causing all for-in loops to be omitted from the LLVM
+  IR — producing infinite loops or missing loop bodies entirely.
+
+Changes: - Add make_instruction_for() constructor in lowering_native_helpers.sfn - Add
+  get_instruction_for_target/iterable accessors with fixups - Parse .for/.endfor in
+  recover_native_functions_light - Update lower_for_instruction to use accessor functions instead of
+  direct enum field access (which returns empty via seed stub) - Update lower_for_range signature to
+  accept iterable_text string - Add corresponding fixup entries in selfhost_native.py
+
+- **compiler**: Add unconditional runtime helper declares for fs/prelude functions
+  ([`a0acce9`](https://github.com/SailfinIO/sailfin/commit/a0acce9fe005751a74e63d557e266f74d3b99ee9))
+
+Add runtime helper descriptors and unconditional targets for: - fs.readFile, fs.read, fs.writeFile,
+  fs.write, fs.appendFile, fs.exists, fs.deleteFile, fs.listDirectory, fs.writeLines,
+  fs.createDirectory, fs.read_bytes (C runtime functions) - monotonic_millis, find_char,
+  string_starts_with (prelude functions) - process.run (C runtime function)
+
+These declares are needed when the first-pass binary compiles itself via build.sh (zero fixups).
+  Without them, 39+ modules fail at clang with undefined symbol errors for C runtime / prelude
+  functions.
+
+Seedcheck failures: 43 → 1
+
+- **compiler**: Address PR review comments
+  ([`1f7208a`](https://github.com/SailfinIO/sailfin/commit/1f7208a4ac5e6355563c22d9ee3406aa12361ce5))
+
+- build.sh: capture seed stderr to a per-module log file instead of discarding with 2>/dev/null.
+  Show the log on failure so diagnostics (now routed to stderr) are visible when debugging build
+  issues. Clean up the log on success.
+
+- runtime_helpers.sfn: remove duplicate monotonic_millis descriptor (target: "monotonic_millis" →
+  symbol: "monotonic_millis") that shadowed the earlier entry mapping to
+  sailfin_runtime_monotonic_millis. The first match wins in find_runtime_helper, so the duplicate
+  was dead code and created ambiguity.
+
+- instructions.sfn: gate the recover_temp_from_lines() scan behind a stale-counter check
+  (current_temp <= previous_temp). Previously the full accumulated-lines scan ran on every
+  expression statement, producing O(n²) behavior in function size. Now it only fires when the IPC
+  temp counter fails to advance.
+
+https://claude.ai/code/session_01QZNQyh7CByPCu9SwJQGkLg
+
+- **compiler**: Deep-copy loop context array to prevent mutation aliasing
+  ([`659694e`](https://github.com/SailfinIO/sailfin/commit/659694ea2325e4e06b0061b5a581a699f3d0f215))
+
+append_loop_context() used 'let mut out = values' which created a reference alias, not a copy. When
+  inner loops pushed their context, the outer loop's current_loop_stack was mutated, causing
+  'continue' to branch to the inner loop's latch instead of the outer's.
+
+Fix: manually copy all elements into a fresh array before pushing.
+
+- **compiler**: Eliminate duplicate SSA temp names in expression statements
+  ([`206e0f9`](https://github.com/SailfinIO/sailfin/commit/206e0f924d4ad0ffcb2d02fa9c5f50d7197c49e3))
+
+Root cause: after cross-module expression lowering (method calls like array.push()), the v0.1.1
+  seed's ABI corruption returns stale temp counters. The next statement reuses the same %tN,
+  producing duplicate SSA names that fail clang validation.
+
+Fixes: - Add recover_temp_from_lines() to instructions_helpers.sfn — scans accumulated IR lines for
+  the highest %tN and returns max(N+1, floor) - Call it in the instruction dispatcher after every
+  expression statement IPC read, providing a robust fallback against stale counters - Restructure
+  if/else in lowering_helpers.sfn to avoid generating code in both branches (eliminates the specific
+  pattern that triggered the dupe in _extract_signature_from_header) - Fix statement.sfn fallback
+  path to not replace current_lines with ABI-corrupted struct field
+
+Seedcheck failures: 1 (SSA dupe) → 1 (opaque Diagnostic type, different issue)
+
+- **compiler**: Emit .param and .layout lines at column 0
+  ([`ada4e97`](https://github.com/SailfinIO/sailfin/commit/ada4e97fbf4e448a1567ac1b0a9574e8fdee7775))
+
+Move emit_parameter_metadata() before state_push_indent() in all function emitters (extern, fn,
+  pipeline, tool, method) so .param lines are emitted without indentation, matching .meta lines.
+
+Move emit_layout_lines() before state_push_indent() in emit_struct and emit_enum so .layout lines
+  are also at column 0.
+
+Revert build.sh to its clean state — remove the awk skeleton reduction and .layout grep fixups that
+  were compensating for indentation. build.sh is pure orchestration with zero fixups.
+
+- **compiler**: Fix cross-module parameter declarations in seedcheck build
+  ([`c634dab`](https://github.com/SailfinIO/sailfin/commit/c634dabeb4bfa9e7773d3d06e5cb4417ae4b9865))
+
+Two bugs caused cross-module function declarations to have empty parameter lists, resulting in ABI
+  mismatches and corrupted data:
+
+1. build.sh awk skeleton: the regex for .param lines required column-0 start but sfn-asm indents
+  .param lines with spaces. Changed to allow leading whitespace so indented .param directives are
+  preserved in import context skeletons.
+
+2. lowering_helpers.sfn _extract_signature_from_header(): the name- stripping code used index_of to
+  find parameter names, but this matched the first % in struct types like { %Decorator*, i64 }*,
+  truncating the type to just "{". Replaced with a backward scan that tracks curly brace depth, only
+  stripping %name at depth 0.
+
+- **compiler**: Resolve prelude runtime bindings and fix cross-module imports
+  ([`dd75bde`](https://github.com/SailfinIO/sailfin/commit/dd75bde99e3fd3e127c5bc36bda50b8b698ff4f3))
+
+Three fixes that unblock the seedcheck linker phase:
+
+1. Runtime helper call resolution: When a call target like runtime_char_code_fn (from a module-level
+  let binding) is not detected as a method call, the call resolution now falls back to
+  find_runtime_helper() to substitute the correct C runtime symbol (e.g.,
+  sailfin_runtime_char_code).
+
+2. Missing imports: Add empty_string_constant_set to instructions_loops and instructions_match (were
+  relying on Python driver's cross-module symbol resolution).
+
+3. Wrong import path: render_test_harness_main_for_module is defined in lowering_helpers.sfn, not
+  rendering.sfn. Fix imports in entrypoints_tests.sfn and entrypoints_tests_writer.sfn.
+
+4. Add is_decimal_digit to unconditional runtime helper targets.
+
+Seedcheck now builds end-to-end: 120/120 modules compile, link, and produce a functional binary.
+
+- **compiler**: Route diagnostics to stderr so they don't pollute stdout
+  ([`83bb814`](https://github.com/SailfinIO/sailfin/commit/83bb814843a06d5f5ef3e44aafbd8eb138355692))
+
+The v0.1.1 seed outputs diagnostics (phase traces, timing, lowering debug messages) to stdout via
+  print() and print.info(), contaminating LLVM IR output and program output. build.sh had a
+  strip_log_prefixes() workaround that parsed and discarded these lines before feeding IR to clang.
+
+Root-cause fix across 28 files:
+
+- compiler/src/main.sfn + compiler/src/llvm/**/*.sfn: change all ~440 diagnostic print() calls to
+  print.err() (writes to stderr via sailfin_runtime_print_err, no prefix). This covers emit-llvm
+  phase traces, timing lines, lowering checkpoints, recovery diagnostics, and typecheck error
+  reporting.
+
+- compiler/src/cli_main.sfn + cli_commands.sfn: change trace/debug prints (gated behind .trace_argv
+  / .trace_test_runner) to print.err(). User-facing messages (usage, errors, status) stay as print()
+  since the v0.1.1 seed silently drops print.err() calls it can't lower.
+
+- compiler/src/lexer.sfn, parser/mod.sfn: diagnostic prints to stderr.
+
+- scripts/selfhost_native.py: move all [selfhost] status/timing/warning prints from stdout to stderr
+  (file=sys.stderr).
+
+- scripts/build.sh: remove strip_log_prefixes() function and its two call sites; replace with plain
+  mv since the first-pass binary now emits clean LLVM IR to stdout.
+
+- compiler/src/llvm/runtime_helpers.sfn: update comment to document print.err() as the correct
+  choice for compiler diagnostics.
+
+Verified: make rebuild + make test (all pass), hello-world outputs only "Hello, Sailfin!" with no
+  diagnostic noise.
+
+https://claude.ai/code/session_01QZNQyh7CByPCu9SwJQGkLg
+
+- **compiler**: Use IPC floor guard for counter reads in if/loop/match
+  ([`ef55b65`](https://github.com/SailfinIO/sailfin/commit/ef55b6584085309ef0a591c93a1cd51fd2e39950))
+
+Replace _parse_int_from_string with _read_ipc_int_min for all IPC counter reads (temp,
+  block_counter, next_local, next_region) in instructions_if.sfn, instructions_loops.sfn, and
+  instructions_match.sfn.
+
+_read_ipc_int_min returns max(file_value, current_value), preventing counter regression when stale
+  IPC files contain outdated values. This fixes cross-module SSA temp counter issues where the
+  seed's if/else codegen could reset counters backwards.
+
+
 ## v0.5.0-alpha.17 (2026-04-08)
 
 ### Bug Fixes
