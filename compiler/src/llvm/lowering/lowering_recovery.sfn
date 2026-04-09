@@ -41,6 +41,7 @@ import {
     extract_kv_string,
     recover_function_name_from_header,
     recover_function_is_async_from_header,
+    net_unquoted_brace_depth,
 } from "./lowering_text_utils";
 import {
     make_native_function_basic,
@@ -339,16 +340,19 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             next_instruction = make_instruction_text(1, trim_text_local(substring(line, 5, line.length)));
         }
         // --- Multiline struct literal gathering for eval instructions ---
-        // When an eval line has '{' but no '}', gather continuation lines.
+        // When an eval line has an unquoted '{' with no matching '}', gather
+        // continuation lines.  Must skip braces inside string literals such as
+        // `["!", "{"]` — those are data, not struct-literal delimiters.
         // CRITICAL: every `if` below is top-level — NO nesting — because
         // the seed degenerate-if bug drops all nested/else-if branches.
         // We use a score (need 3 of 3) instead of nested AND conditions.
-        let _ml_open_idx = index_of(line, "{");
-        let _ml_close_idx = index_of(line, "}");
+        let _ml_net_depth = net_unquoted_brace_depth(line);
         let mut _gather_score -> number = 0;
         if is_eval { _gather_score += 1; }
-        if _ml_open_idx >= 0 { _gather_score += 1; }
-        if _ml_close_idx < 0 { _gather_score += 1; }
+        if _ml_net_depth > 0 { _gather_score += 1; }
+        // Only gather when there is a positive unquoted brace depth
+        // (i.e. unmatched '{' outside string literals on this line).
+        if _ml_net_depth > 0 { _gather_score += 1; }
         let mut _eval_gathered -> string = "";
         if is_eval {
             _eval_gathered = trim_text_local(substring(line, 5, line.length));
@@ -366,10 +370,8 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             if starts_with_local(_cont_trimmed, ".span") { _is_stop_directive = false; }
             if _is_stop_directive { break; }
             _eval_gathered = _eval_gathered + "\n" + _cont;
-            let _cont_open = index_of(_cont, "{");
-            let _cont_close = index_of(_cont, "}");
-            if _cont_open >= 0 { _eval_brace_depth += 1; }
-            if _cont_close >= 0 { _eval_brace_depth -= 1; }
+            let _cont_depth = net_unquoted_brace_depth(_cont);
+            _eval_brace_depth = _eval_brace_depth + _cont_depth;
             _gi += 1;
         }
         if _gather_score >= 3 {
