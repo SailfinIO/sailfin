@@ -502,8 +502,10 @@ fn emit_llvm_function(
     if debug_lowering {
         print.err("emit-llvm: emit_fn phase=define_header name=" + fn_name);
     }
-    lines.push("define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {");
-    lines.push(entry_label + ":");
+    // Use append_string instead of push to ensure the header lines survive
+    // array mutation bugs in seedcheck-compiled code.
+    lines = append_string(lines, "define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {");
+    lines = append_string(lines, entry_label + ":");
 
     if needs_module_init_call {
         lines.push("  call void " + module_init_symbol + "()");
