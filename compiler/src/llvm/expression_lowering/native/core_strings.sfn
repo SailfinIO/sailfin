@@ -51,10 +51,6 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
     current_lines.push("  store " + array_type + " c\"" + escaped + "\\00\", " + array_type + "* " + cast_temp);
 
     let operand = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
-    // Write result to IPC files so let-lowering picks up the latest value
-    // instead of a stale call_result_value from an intermediate function call.
-    fs.writeFile("build/sailfin/.call_result_type", "i8*");
-    fs.writeFile("build/sailfin/.call_result_value", malloc_temp);
     let empty_constants = empty_string_constant_set();
     return ExpressionResult {
         lines: current_lines,
