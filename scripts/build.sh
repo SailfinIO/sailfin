@@ -6,7 +6,7 @@
 #
 #   1. Enumerate compiler/src/**/*.sfn + runtime/**/*.sfn
 #   2. Stage import-context artifacts (seed emit native → .sfn-asm + .layout-manifest)
-#   3. Per-module: seed emit llvm → .ll
+#   3. Per-module: seed emit -o <out.ll> llvm → .ll
 #   4. Compile each .ll → .o with clang
 #   5. llvm-link all modules (except prelude) → linked bitcode
 #   6. Compile C runtime
@@ -302,34 +302,19 @@ build_module() {
     abs_ll_path="$(cd "$REPO_ROOT" && realpath --canonicalize-missing "$ll_path")"
     local abs_ll_raw="${abs_ll_path}.raw"
 
-    # Prefer emit-llvm-file if available (produces link-safe IR)
+    # Emit LLVM IR to file via -o flag.
     # Run from module_cwd so the seed picks up staged import-context.
     # Diagnostics go to stderr (via print.err) so stdout/file output is clean LLVM IR.
-    local emit_ok=0
     local stderr_log="${abs_ll_path}.stderr"
-    if "$SEED" emit-llvm-file --help &>/dev/null 2>&1 || "$SEED" help 2>&1 | grep -q "emit-llvm-file"; then
-        # Tolerate segfault during cleanup if the output file was written
-        (cd "$module_cwd" && seed_run "$SEED" emit-llvm-file "$abs_src" "$abs_ll_raw") 2>"$stderr_log" || true
-        if [[ -s "$abs_ll_raw" ]]; then
-            mv "$abs_ll_raw" "$ll_path"
-            rm -f "$stderr_log"
-            emit_ok=1
-        fi
+    # Tolerate segfault during cleanup if the output file was written
+    (cd "$module_cwd" && seed_run "$SEED" emit -o "$abs_ll_raw" llvm "$abs_src") 2>"$stderr_log" || true
+    if [[ ! -s "$abs_ll_raw" ]]; then
+        echo "[build] FAIL: seed emit produced no output for $module_name" >&2
+        [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
+        rm -f "$stderr_log"
+        return 1
     fi
-
-    # Fallback to streaming emit (also run from module_cwd)
-    if [[ "$emit_ok" -eq 0 ]]; then
-        # The first-pass binary may segfault during cleanup after writing valid LLVM IR.
-        # Tolerate non-zero exit if the output file contains valid LLVM IR.
-        (cd "$module_cwd" && seed_run "$SEED" emit llvm "$abs_src") > "$abs_ll_raw" 2>"$stderr_log" || true
-        if [[ ! -s "$abs_ll_raw" ]]; then
-            echo "[build] FAIL: seed emit produced no output for $module_name" >&2
-            [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
-            rm -f "$stderr_log"
-            return 1
-        fi
-        mv "$abs_ll_raw" "$ll_path"
-    fi
+    mv "$abs_ll_raw" "$ll_path"
 
     # Validate: output must look like LLVM IR
     if ! head -20 "$ll_path" | grep -qE "define|declare|target|source_filename|ModuleID"; then
