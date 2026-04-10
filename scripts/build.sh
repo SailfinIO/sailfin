@@ -307,25 +307,52 @@ build_module() {
     # Emit LLVM IR to file via -o flag.
     # Run from module_cwd so the seed picks up staged import-context.
     # Diagnostics go to stderr (via print.err) so stdout/file output is clean LLVM IR.
+    # Retry up to 3 times: memory corruption can inject stray bytes into the output.
     local stderr_log="${abs_ll_path}.stderr"
-    # Tolerate segfault during cleanup if the output file was written
-    (cd "$module_cwd" && seed_run "$SEED" emit -o "$abs_ll_raw" llvm "$abs_src") 2>"$stderr_log" || true
-    if [[ ! -s "$abs_ll_raw" ]]; then
-        echo "[build] FAIL: seed emit produced no output for $module_name" >&2
-        [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
-        rm -f "$stderr_log"
-        return 1
-    fi
+    local attempt=0
+    local max_attempts=3
+    while [[ $attempt -lt $max_attempts ]]; do
+        attempt=$((attempt + 1))
+        rm -f "$abs_ll_raw"
+        # Tolerate segfault during cleanup if the output file was written
+        (cd "$module_cwd" && seed_run "$SEED" emit -o "$abs_ll_raw" llvm "$abs_src") 2>"$stderr_log" || true
+        if [[ ! -s "$abs_ll_raw" ]]; then
+            if [[ $attempt -lt $max_attempts ]]; then
+                echo "[build] $module_name: empty output (attempt $attempt/$max_attempts), retrying..." >&2
+                continue
+            fi
+            echo "[build] FAIL: seed emit produced no output for $module_name" >&2
+            [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
+            rm -f "$stderr_log"
+            return 1
+        fi
+        # Validate: output must look like LLVM IR
+        if ! head -20 "$abs_ll_raw" | grep -qE "define|declare|target|source_filename|ModuleID"; then
+            if [[ $attempt -lt $max_attempts ]]; then
+                echo "[build] $module_name: invalid IR header (attempt $attempt/$max_attempts), retrying..." >&2
+                continue
+            fi
+            echo "[build] FAIL: seed output for $module_name is not valid LLVM IR" >&2
+            head -5 "$abs_ll_raw" >&2
+            [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
+            rm -f "$stderr_log"
+            return 1
+        fi
+        # Check for non-ASCII bytes (memory corruption injects stray UTF-8 sequences)
+        if LC_ALL=C grep -Pn '[^\x00-\x7E]' "$abs_ll_raw" >/dev/null 2>&1; then
+            if [[ $attempt -lt $max_attempts ]]; then
+                echo "[build] $module_name: non-ASCII bytes in output (attempt $attempt/$max_attempts), retrying..." >&2
+                continue
+            fi
+            echo "[build] FAIL: seed output for $module_name contains non-ASCII bytes" >&2
+            LC_ALL=C grep -Pn '[^\x00-\x7E]' "$abs_ll_raw" | head -5 >&2
+            rm -f "$stderr_log"
+            return 1
+        fi
+        # Output is valid
+        break
+    done
     mv "$abs_ll_raw" "$ll_path"
-
-    # Validate: output must look like LLVM IR
-    if ! head -20 "$ll_path" | grep -qE "define|declare|target|source_filename|ModuleID"; then
-        echo "[build] FAIL: seed output for $module_name is not valid LLVM IR" >&2
-        head -5 "$ll_path" >&2
-        [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
-        rm -f "$stderr_log"
-        return 1
-    fi
     rm -f "$stderr_log"
 
     echo "$module_name"
