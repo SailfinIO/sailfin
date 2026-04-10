@@ -74,7 +74,7 @@ runs:
         set -euo pipefail
         CONDA=$(which conda) make test
 
-    - name: Seedcheck (build + validate + test, no Python fixups)
+    - name: Build seedcheck (no Python fixups)
       shell: bash -l {0}
       run: |
         set -euo pipefail
@@ -85,20 +85,26 @@ runs:
           JOBS=1 \
           CLANG="${{ inputs.clang }}" \
           MAX_TOTAL=3600 \
-          bash scripts/build.sh
-        echo "[ci] seedcheck binary built:"
+          bash scripts/build.sh 2>&1
         ls -lh build/native/sailfin-seedcheck
         build/native/sailfin-seedcheck version || true
-        echo "[ci] validating seedcheck can run programs..."
-        sc="build/native/sailfin-seedcheck"
-        output=$(timeout 10 $sc run examples/basics/hello-world.sfn 2>&1) || true
+
+    - name: Validate seedcheck (hello-world)
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
+        output=$(timeout 10 build/native/sailfin-seedcheck run examples/basics/hello-world.sfn 2>&1) || true
         if ! echo "$output" | grep -q "Hello, Sailfin!"; then
           echo "[ci][FAIL] seedcheck cannot run hello-world.sfn"
           echo "[ci][FAIL] got: $output"
           exit 1
         fi
         echo "[ci] seedcheck runs hello-world.sfn OK"
-        echo "[ci] running full test suite with seedcheck binary..."
+
+    - name: Run tests (seedcheck binary)
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
         CONDA=$(which conda) make test NATIVE_BIN=build/native/sailfin-seedcheck
 
     - name: Package artifacts

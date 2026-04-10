@@ -297,9 +297,11 @@ build_module() {
     mkdir -p "$module_cwd/build/sailfin"
 
 
-    # Resolve output paths to absolute so they work from module_cwd
+    # Resolve output paths to absolute so they work from module_cwd.
+    # Use mkdir+realpath rather than --canonicalize-missing (GNU only, not on macOS).
     local abs_ll_path
-    abs_ll_path="$(cd "$REPO_ROOT" && realpath --canonicalize-missing "$ll_path")"
+    mkdir -p "$(dirname "$ll_path")"
+    abs_ll_path="$(cd "$REPO_ROOT" && cd "$(dirname "$ll_path")" && echo "$(pwd)/$(basename "$ll_path")")"
     local abs_ll_raw="${abs_ll_path}.raw"
 
     # Emit LLVM IR to file via -o flag.
