@@ -46,6 +46,7 @@ import {
 import {
     make_native_function_basic,
     make_native_function_method,
+    make_native_function_with_return,
     make_native_parameter,
     make_native_import,
     make_native_struct_layout,
@@ -162,6 +163,18 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let method_name_from_paren = trim_text_local(substring(method_header, 0, method_paren_idx));
         let method_arrow_idx = index_of(method_header, " -> ");
         let method_ret_from_arrow = trim_text_local(substring(method_header, method_arrow_idx + 4, method_header.length));
+        // Check whether the method has a `self` parameter.  Static methods
+        // (e.g. `fn new(w, h)`) must NOT get self injected.
+        let mut method_has_self -> boolean = false;
+        if method_paren_idx >= 0 {
+            let _close_paren = index_of(method_header, ")");
+            if _close_paren > method_paren_idx {
+                let _param_text = substring(method_header, method_paren_idx + 1, _close_paren);
+                if starts_with_local(trim_text_local(_param_text), "self") {
+                    method_has_self = true;
+                }
+            }
+        }
         let ret_type_raw = trim_text_local(substring(line, 13, line.length));
         let effects_text_raw = trim_text_local(substring(line, 14, line.length));
         let param_text_raw = trim_text_local(substring(line, 7, line.length));
@@ -237,7 +250,12 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
                 if method_paren_idx >= 0 {
                     if method_arrow_idx >= 0 {
                         let full_name = current_struct_name + method_name_from_paren;
-                        current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
+                        if method_has_self {
+                            current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
+                        }
+                        if !method_has_self {
+                            current = make_native_function_with_return(full_name, false, method_ret_from_arrow);
+                        }
                         index += 1;
                         continue;
                     }
@@ -249,7 +267,12 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             if current_struct_name.length > 0 {
                 if method_paren_idx >= 0 {
                     let full_name = current_struct_name + method_name_from_paren;
-                    current = make_native_function_method(full_name, current_struct_name, "void");
+                    if method_has_self {
+                        current = make_native_function_method(full_name, current_struct_name, "void");
+                    }
+                    if !method_has_self {
+                        current = make_native_function_with_return(full_name, false, "void");
+                    }
                     index += 1;
                     continue;
                 }
@@ -259,7 +282,12 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         if is_method_start {
             if current_struct_name.length > 0 {
                 let full_name = current_struct_name + method_header;
-                current = make_native_function_method(full_name, current_struct_name, "void");
+                if method_has_self {
+                    current = make_native_function_method(full_name, current_struct_name, "void");
+                }
+                if !method_has_self {
+                    current = make_native_function_with_return(full_name, false, "void");
+                }
                 index += 1;
                 continue;
             }
