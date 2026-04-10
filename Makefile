@@ -669,7 +669,7 @@ ci-cross-windows:
 	SHIM_O=""; \
 	SHIM_C="build/selfhost/native/obj/cross_module_shim.c"; \
 	if [ -f "$$SHIM_C" ]; then \
-		sed 's/__attribute__((weak))//' "$$SHIM_C" > "$$WIN_OBJ/cross_module_shim.c"; \
+		cp "$$SHIM_C" "$$WIN_OBJ/cross_module_shim.c"; \
 		$(MINGW_CC) -O2 -c "$$WIN_OBJ/cross_module_shim.c" -o "$$WIN_OBJ/cross_module_shim.o"; \
 		SHIM_O="$$WIN_OBJ/cross_module_shim.o"; \
 	fi; \

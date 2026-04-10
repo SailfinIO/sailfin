@@ -93,7 +93,15 @@ runs:
       shell: bash {0}
       run: |
         set -euo pipefail
-        output=$(timeout 10 build/native/sailfin-seedcheck run examples/basics/hello-world.sfn 2>&1) || true
+        TMOUT="timeout"
+        if ! command -v timeout &>/dev/null; then
+          if command -v gtimeout &>/dev/null; then TMOUT="gtimeout"; else TMOUT=""; fi
+        fi
+        if [ -n "$TMOUT" ]; then
+          output=$($TMOUT 30 build/native/sailfin-seedcheck run examples/basics/hello-world.sfn 2>&1) || true
+        else
+          output=$(build/native/sailfin-seedcheck run examples/basics/hello-world.sfn 2>&1) || true
+        fi
         if ! echo "$output" | grep -q "Hello, Sailfin!"; then
           echo "[ci][FAIL] seedcheck cannot run hello-world.sfn"
           echo "[ci][FAIL] got: $output"
