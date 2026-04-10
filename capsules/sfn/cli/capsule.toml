@@ -1,0 +1,10 @@
+[package]
+name = "sfn/cli"
+version = "0.1.1"
+description = "CLI argument parsing and terminal output for Sailfin"
+entry = "src/mod.sfn"
+
+[dependencies]
+
+[capabilities]
+allow = ["io"]

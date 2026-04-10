@@ -1,0 +1,676 @@
+// sfn/cli — CLI argument parsing and terminal output for Sailfin.
+//
+// Provides a declarative, builder-style API for defining CLI commands with
+// positional arguments, flags, and subcommands. Automatically generates
+// help text and validates user input. Also includes terminal styling
+// helpers for colored, formatted output.
+//
+// Usage:
+//   import { Command, Arg, Flag, run } from "cli"
+//
+//   let app = command("greet", "A friendly greeter")
+//       .arg(arg("name", "Person to greet"))
+//       .flag(flag("loud", "Use uppercase").short("l"));
+//
+//   let m = run(app, args);
+//   let name = get(m, "name");
+//   if has_flag(m, "loud") {
+//       print("HELLO, " + name + "!");
+//   } else {
+//       print("Hello, " + name + ".");
+//   }
+
+// ---- Types ----
+
+struct Arg {
+    name -> string;
+    description -> string;
+    is_optional -> boolean;
+    default_value -> string;
+}
+
+struct Flag {
+    long_name -> string;
+    short_name -> string;
+    description -> string;
+    takes_value -> boolean;
+}
+
+struct Command {
+    name -> string;
+    description -> string;
+    version -> string;
+    args -> Arg[];
+    flags -> Flag[];
+    subcmds -> Command[];
+}
+
+struct Matches {
+    command_name -> string;
+    subcommand_name -> string;
+    positional_names -> string[];
+    positional_values -> string[];
+    flag_names -> string[];
+    flag_values -> string[];
+}
+
+// ---- Arg builders ----
+
+fn arg(name -> string, description -> string) -> Arg {
+    // Create a required positional argument.
+    return Arg {
+        name: name,
+        description: description,
+        is_optional: false,
+        default_value: "",
+    };
+}
+
+fn arg_optional(name -> string, description -> string, default_value -> string) -> Arg {
+    // Create an optional positional argument with a default value.
+    return Arg {
+        name: name,
+        description: description,
+        is_optional: true,
+        default_value: default_value,
+    };
+}
+
+// ---- Flag builders ----
+
+fn flag(long_name -> string, description -> string) -> Flag {
+    // Create a boolean flag (e.g. --verbose).
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: false,
+    };
+}
+
+fn flag_value(long_name -> string, description -> string) -> Flag {
+    // Create a flag that takes a value (e.g. --output FILE).
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: true,
+    };
+}
+
+fn flag_short(long_name -> string, short_name -> string, description -> string) -> Flag {
+    // Create a boolean flag with a short alias (e.g. --verbose / -v).
+    return Flag {
+        long_name: long_name,
+        short_name: short_name,
+        description: description,
+        takes_value: false,
+    };
+}
+
+fn flag_value_short(long_name -> string, short_name -> string, description -> string) -> Flag {
+    // Create a value flag with a short alias (e.g. --output / -o FILE).
+    return Flag {
+        long_name: long_name,
+        short_name: short_name,
+        description: description,
+        takes_value: true,
+    };
+}
+
+// ---- Command builders ----
+
+fn command(name -> string, description -> string) -> Command {
+    // Create a new CLI command definition.
+    let empty_args -> Arg[] = [];
+    let empty_flags -> Flag[] = [];
+    let empty_cmds -> Command[] = [];
+    return Command {
+        name: name,
+        description: description,
+        version: "",
+        args: empty_args,
+        flags: empty_flags,
+        subcmds: empty_cmds,
+    };
+}
+
+fn with_version(cmd -> Command, version -> string) -> Command {
+    // Set the version string for the command.
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: version,
+        args: cmd.args,
+        flags: cmd.flags,
+        subcmds: cmd.subcmds,
+    };
+}
+
+fn with_arg(cmd -> Command, a -> Arg) -> Command {
+    // Add a positional argument to the command.
+    let mut new_args -> Arg[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.args.length { break; }
+        new_args.push(cmd.args[i]);
+        i += 1;
+    }
+    new_args.push(a);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: new_args,
+        flags: cmd.flags,
+        subcmds: cmd.subcmds,
+    };
+}
+
+fn with_flag(cmd -> Command, f -> Flag) -> Command {
+    // Add a flag to the command.
+    let mut new_flags -> Flag[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        new_flags.push(cmd.flags[i]);
+        i += 1;
+    }
+    new_flags.push(f);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: cmd.args,
+        flags: new_flags,
+        subcmds: cmd.subcmds,
+    };
+}
+
+fn with_subcommand(cmd -> Command, sub -> Command) -> Command {
+    // Add a subcommand to the command.
+    let mut new_subs -> Command[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.subcmds.length { break; }
+        new_subs.push(cmd.subcmds[i]);
+        i += 1;
+    }
+    new_subs.push(sub);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: cmd.args,
+        flags: cmd.flags,
+        subcmds: new_subs,
+    };
+}
+
+// ---- Parsing ----
+
+fn run(cmd -> Command, argv -> string[]) -> Matches ![io] {
+    // Parse command-line arguments against the command definition.
+    // Prints help/version and exits when --help/-h or --version/-V is given.
+    // Prints an error and exits with code 2 on invalid input.
+    let mut pos_names -> string[] = [];
+    let mut pos_values -> string[] = [];
+    let mut fl_names -> string[] = [];
+    let mut fl_values -> string[] = [];
+    let mut subcmd_name -> string = "";
+
+    // Skip argv[0] (the program name).
+    let mut idx -> number = 1;
+
+    // Check for subcommand at argv[1].
+    if idx < argv.length {
+        let first = argv[idx];
+        if !_starts_with(first, "-") {
+            let mut si -> number = 0;
+            loop {
+                if si >= cmd.subcmds.length { break; }
+                if strings_equal(cmd.subcmds[si].name, first) {
+                    subcmd_name = first;
+                    idx += 1;
+                    break;
+                }
+                si += 1;
+            }
+        }
+    }
+
+    // Resolve which command definition to parse against.
+    let active = _resolve_active(cmd, subcmd_name);
+
+    // Parse remaining args.
+    let mut pos_idx -> number = 0;
+    loop {
+        if idx >= argv.length { break; }
+        let token = argv[idx];
+
+        // Check built-in flags.
+        if strings_equal(token, "--help") || strings_equal(token, "-h") {
+            if subcmd_name.length > 0 {
+                print(_format_help(active, cmd.name + " " + subcmd_name));
+            } else {
+                print(_format_help(cmd, cmd.name));
+            }
+            process.exit(0);
+        }
+        if strings_equal(token, "--version") || strings_equal(token, "-V") {
+            if cmd.version.length > 0 {
+                print(cmd.name + " " + cmd.version);
+            } else {
+                print(cmd.name);
+            }
+            process.exit(0);
+        }
+
+        if _starts_with(token, "--") {
+            // Long flag: --name or --name value
+            let flag_name = substring(token, 2, token.length);
+            let f = _find_flag_long(active, flag_name);
+            if f.long_name.length == 0 {
+                print.err("error: unknown flag --" + flag_name);
+                print.err("run '" + cmd.name + " --help' for usage");
+                process.exit(2);
+            }
+            fl_names.push(f.long_name);
+            if f.takes_value {
+                idx += 1;
+                if idx >= argv.length {
+                    print.err("error: flag --" + flag_name + " requires a value");
+                    process.exit(2);
+                }
+                fl_values.push(argv[idx]);
+            } else {
+                fl_values.push("true");
+            }
+        } else if _starts_with(token, "-") && token.length > 1 {
+            // Short flag: -v or -o value
+            let short = substring(token, 1, token.length);
+            let f = _find_flag_short(active, short);
+            if f.long_name.length == 0 {
+                print.err("error: unknown flag -" + short);
+                print.err("run '" + cmd.name + " --help' for usage");
+                process.exit(2);
+            }
+            fl_names.push(f.long_name);
+            if f.takes_value {
+                idx += 1;
+                if idx >= argv.length {
+                    print.err("error: flag -" + short + " requires a value");
+                    process.exit(2);
+                }
+                fl_values.push(argv[idx]);
+            } else {
+                fl_values.push("true");
+            }
+        } else {
+            // Positional argument.
+            if pos_idx < active.args.length {
+                pos_names.push(active.args[pos_idx].name);
+                pos_values.push(token);
+                pos_idx += 1;
+            } else {
+                print.err("error: unexpected argument '" + token + "'");
+                print.err("run '" + cmd.name + " --help' for usage");
+                process.exit(2);
+            }
+        }
+        idx += 1;
+    }
+
+    // Validate required positional arguments.
+    loop {
+        if pos_idx >= active.args.length { break; }
+        let a = active.args[pos_idx];
+        if a.is_optional {
+            pos_names.push(a.name);
+            pos_values.push(a.default_value);
+        } else {
+            print.err("error: missing required argument <" + a.name + ">");
+            print.err("run '" + cmd.name + " --help' for usage");
+            process.exit(2);
+        }
+        pos_idx += 1;
+    }
+
+    return Matches {
+        command_name: cmd.name,
+        subcommand_name: subcmd_name,
+        positional_names: pos_names,
+        positional_values: pos_values,
+        flag_names: fl_names,
+        flag_values: fl_values,
+    };
+}
+
+// ---- Match accessors ----
+
+fn get(m -> Matches, name -> string) -> string {
+    // Get the value of a positional argument or value flag by name.
+    // Returns empty string if not found.
+    let mut i -> number = 0;
+    loop {
+        if i >= m.positional_names.length { break; }
+        if strings_equal(m.positional_names[i], name) {
+            return m.positional_values[i];
+        }
+        i += 1;
+    }
+    // Also search flag values.
+    i = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            return m.flag_values[i];
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn get_or(m -> Matches, name -> string, default_value -> string) -> string {
+    // Get the value of an argument or flag, returning default_value if not found.
+    let val = get(m, name);
+    if val.length == 0 { return default_value; }
+    return val;
+}
+
+fn has_flag(m -> Matches, name -> string) -> boolean {
+    // Returns true if a boolean flag was present on the command line.
+    let mut i -> number = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn subcommand(m -> Matches) -> string {
+    // Returns the matched subcommand name, or empty string if none.
+    return m.subcommand_name;
+}
+
+fn positionals(m -> Matches) -> string[] {
+    // Returns all positional argument values in order.
+    return m.positional_values;
+}
+
+// ---- Help formatting ----
+
+fn help(cmd -> Command) -> string {
+    // Generate help text for a command.
+    return _format_help(cmd, cmd.name);
+}
+
+fn print_help(cmd -> Command) -> void ![io] {
+    // Print help text for a command to stdout.
+    print(_format_help(cmd, cmd.name));
+}
+
+fn _format_help(cmd -> Command, program -> string) -> string {
+    let mut out -> string = "";
+
+    // Description.
+    if cmd.description.length > 0 {
+        out = out + cmd.description + "\n\n";
+    }
+
+    // Usage line.
+    out = out + "usage:\n";
+    out = out + "  " + program;
+    if cmd.subcmds.length > 0 {
+        out = out + " <command>";
+    }
+    if cmd.flags.length > 0 {
+        out = out + " [options]";
+    }
+    let mut ai -> number = 0;
+    loop {
+        if ai >= cmd.args.length { break; }
+        let a = cmd.args[ai];
+        if a.is_optional {
+            out = out + " [" + a.name + "]";
+        } else {
+            out = out + " <" + a.name + ">";
+        }
+        ai += 1;
+    }
+    out = out + "\n";
+
+    // Subcommands.
+    if cmd.subcmds.length > 0 {
+        out = out + "\ncommands:\n";
+        let col_width = _max_name_width(cmd) + 2;
+        let mut si -> number = 0;
+        loop {
+            if si >= cmd.subcmds.length { break; }
+            let sub = cmd.subcmds[si];
+            out = out + "  " + _pad(sub.name, col_width) + sub.description + "\n";
+            si += 1;
+        }
+    }
+
+    // Positional arguments.
+    if cmd.args.length > 0 {
+        out = out + "\narguments:\n";
+        let arg_width = _max_arg_width(cmd) + 2;
+        ai = 0;
+        loop {
+            if ai >= cmd.args.length { break; }
+            let a = cmd.args[ai];
+            let label = "<" + a.name + ">";
+            out = out + "  " + _pad(label, arg_width) + a.description;
+            if a.is_optional {
+                out = out + " (default: " + a.default_value + ")";
+            }
+            out = out + "\n";
+            ai += 1;
+        }
+    }
+
+    // Flags.
+    out = out + "\noptions:\n";
+    let flag_width = _max_flag_width(cmd) + 2;
+    let mut fi -> number = 0;
+    loop {
+        if fi >= cmd.flags.length { break; }
+        let f = cmd.flags[fi];
+        let label = _flag_label(f);
+        out = out + "  " + _pad(label, flag_width) + f.description + "\n";
+        fi += 1;
+    }
+    // Built-in flags.
+    out = out + "  " + _pad("-h, --help", flag_width) + "Show this help message\n";
+    if cmd.version.length > 0 {
+        out = out + "  " + _pad("-V, --version", flag_width) + "Show version\n";
+    }
+
+    return out;
+}
+
+fn _flag_label(f -> Flag) -> string {
+    let mut label -> string = "";
+    if f.short_name.length > 0 {
+        label = "-" + f.short_name + ", ";
+    } else {
+        label = "    ";
+    }
+    label = label + "--" + f.long_name;
+    if f.takes_value {
+        label = label + " <value>";
+    }
+    return label;
+}
+
+fn _max_name_width(cmd -> Command) -> number {
+    let mut max -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.subcmds.length { break; }
+        if cmd.subcmds[i].name.length > max {
+            max = cmd.subcmds[i].name.length;
+        }
+        i += 1;
+    }
+    return max;
+}
+
+fn _max_arg_width(cmd -> Command) -> number {
+    let mut max -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.args.length { break; }
+        // +2 for the angle brackets.
+        let w = cmd.args[i].name.length + 2;
+        if w > max { max = w; }
+        i += 1;
+    }
+    return max;
+}
+
+fn _max_flag_width(cmd -> Command) -> number {
+    let mut max -> number = 0;
+    let built_in_help = 10;  // "-h, --help"
+    let built_in_version = 13;  // "-V, --version"
+    if built_in_help > max { max = built_in_help; }
+    if built_in_version > max { max = built_in_version; }
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        let w = _flag_label(cmd.flags[i]).length;
+        if w > max { max = w; }
+        i += 1;
+    }
+    return max;
+}
+
+// ---- Terminal styling ----
+
+fn bold(text -> string) -> string {
+    // Wrap text in ANSI bold escape codes.
+    return "\x1b[1m" + text + "\x1b[0m";
+}
+
+fn dim(text -> string) -> string {
+    // Wrap text in ANSI dim escape codes.
+    return "\x1b[2m" + text + "\x1b[0m";
+}
+
+fn underline(text -> string) -> string {
+    // Wrap text in ANSI underline escape codes.
+    return "\x1b[4m" + text + "\x1b[0m";
+}
+
+fn red(text -> string) -> string {
+    return "\x1b[31m" + text + "\x1b[0m";
+}
+
+fn green(text -> string) -> string {
+    return "\x1b[32m" + text + "\x1b[0m";
+}
+
+fn yellow(text -> string) -> string {
+    return "\x1b[33m" + text + "\x1b[0m";
+}
+
+fn blue(text -> string) -> string {
+    return "\x1b[34m" + text + "\x1b[0m";
+}
+
+fn magenta(text -> string) -> string {
+    return "\x1b[35m" + text + "\x1b[0m";
+}
+
+fn cyan(text -> string) -> string {
+    return "\x1b[36m" + text + "\x1b[0m";
+}
+
+fn gray(text -> string) -> string {
+    return "\x1b[90m" + text + "\x1b[0m";
+}
+
+// ---- Styled diagnostic helpers ----
+
+fn print_error(message -> string) -> void ![io] {
+    // Print an error message to stderr in red.
+    print.err(red("error") + ": " + message);
+}
+
+fn print_warn(message -> string) -> void ![io] {
+    // Print a warning message to stderr in yellow.
+    print.err(yellow("warn") + ": " + message);
+}
+
+fn print_success(message -> string) -> void ![io] {
+    // Print a success message to stdout in green.
+    print(green("ok") + ": " + message);
+}
+
+fn print_hint(message -> string) -> void ![io] {
+    // Print a hint message to stderr in cyan.
+    print.err(cyan("hint") + ": " + message);
+}
+
+// ---- Internal helpers ----
+
+fn _starts_with(text -> string, prefix -> string) -> boolean {
+    if prefix.length > text.length { return false; }
+    return strings_equal(substring(text, 0, prefix.length), prefix);
+}
+
+fn _pad(text -> string, width -> number) -> string {
+    // Right-pad text with spaces to the given width.
+    if text.length >= width { return text + "  "; }
+    let mut out -> string = text;
+    let mut i -> number = text.length;
+    loop {
+        if i >= width { break; }
+        out = out + " ";
+        i += 1;
+    }
+    return out;
+}
+
+fn _find_flag_long(cmd -> Command, name -> string) -> Flag {
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        if strings_equal(cmd.flags[i].long_name, name) {
+            return cmd.flags[i];
+        }
+        i += 1;
+    }
+    return Flag { long_name: "", short_name: "", description: "", takes_value: false };
+}
+
+fn _find_flag_short(cmd -> Command, name -> string) -> Flag {
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        if strings_equal(cmd.flags[i].short_name, name) {
+            return cmd.flags[i];
+        }
+        i += 1;
+    }
+    return Flag { long_name: "", short_name: "", description: "", takes_value: false };
+}
+
+fn _resolve_active(cmd -> Command, subcmd_name -> string) -> Command {
+    // Return the subcommand definition if matched, otherwise the root command.
+    if subcmd_name.length == 0 { return cmd; }
+    let mut i -> number = 0;
+    loop {
+        if i >= cmd.subcmds.length { break; }
+        if strings_equal(cmd.subcmds[i].name, subcmd_name) {
+            return cmd.subcmds[i];
+        }
+        i += 1;
+    }
+    return cmd;
+}
