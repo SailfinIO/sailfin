@@ -447,7 +447,7 @@ fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
                 break;
             }
             let method = methods[method_index];
-            let qualified_name = definition.name + "::" + method.name;
+            let qualified_name = definition.name + method.name;
             // Rebuild parameters so that the `self` parameter always carries
             // the struct name as its type_annotation.  The ABI corruption in
             // the v0.1.1 seed can leave nested parameter type_annotations as

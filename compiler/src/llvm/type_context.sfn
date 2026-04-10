@@ -75,12 +75,12 @@ fn synthesize_unit_enum_layout(enum_def -> NativeEnum) -> NativeEnumLayout {
         }
         let variant = enum_def.variants[index];
         layouts.push(NativeEnumVariantLayout {
-            name: variant.name,
-            tag: index,
-            offset: 0,
-            size: tag_size,
-            align: tag_align,
-            fields: [],
+                name: variant.name,
+                tag: index,
+                offset: 0,
+                size: tag_size,
+                align: tag_align,
+                fields: [],
         });
         index += 1;
     }
@@ -301,12 +301,12 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                 variant_field_index += 1;
             }
             variants = append_enum_variant_info(variants, EnumVariantInfo {
-                name: variant_layout.name,
-                tag: variant_layout.tag,
-                offset: variant_layout.offset,
-                size: variant_layout.size,
-                align: variant_layout.align,
-                fields: variant_fields,
+                    name: variant_layout.name,
+                    tag: variant_layout.tag,
+                    offset: variant_layout.offset,
+                    size: variant_layout.size,
+                    align: variant_layout.align,
+                    fields: variant_fields,
             });
             variant_index += 1;
         }
@@ -327,15 +327,15 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             payload_scan += 1;
         }
         enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo {
-            name: enum_def.name,
-            llvm_name: llvm_enum_name,
-            tag_type: enum_layout.tag_type,
-            tag_size: enum_layout.tag_size,
-            tag_align: enum_layout.tag_align,
-            max_payload_size: max_payload_size,
-            size: enum_layout.size,
-            align: enum_align_value,
-            variants: variants,
+                name: enum_def.name,
+                llvm_name: llvm_enum_name,
+                tag_type: enum_layout.tag_type,
+                tag_size: enum_layout.tag_size,
+                tag_align: enum_layout.tag_align,
+                max_payload_size: max_payload_size,
+                size: enum_layout.size,
+                align: enum_align_value,
+                variants: variants,
         });
         enum_index += 1;
     }
@@ -351,10 +351,10 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         let sanitized_interface = sanitize_symbol(interface_def.name);
         let llvm_interface_name = "%trait." + sanitized_interface;
         interface_entries = append_interface_type_info(interface_entries, InterfaceTypeInfo {
-            name: interface_def.name,
-            llvm_name: llvm_interface_name,
-            type_parameters: interface_def.type_parameters,
-            signatures: interface_def.signatures,
+                name: interface_def.name,
+                llvm_name: llvm_interface_name,
+                type_parameters: interface_def.type_parameters,
+                signatures: interface_def.signatures,
         });
         interface_index += 1;
     }
@@ -427,19 +427,19 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                 let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
 
                 vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
-                    method_name: struct_def.name + "::" + signature.name,
-                    interface_method_name: signature.name,
-                    function_pointer_type: func_ptr_type,
+                        method_name: struct_def.name + signature.name,
+                        interface_method_name: signature.name,
+                        function_pointer_type: func_ptr_type,
                 });
                 sig_index += 1;
             }
 
             vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
-                struct_name: struct_def.name,
-                interface_name: interface_name,
-                llvm_type_name: vtable_type_name,
-                llvm_global_name: vtable_global_name,
-                entries: vtable_method_entries,
+                    struct_name: struct_def.name,
+                    interface_name: interface_name,
+                    llvm_type_name: vtable_type_name,
+                    llvm_global_name: vtable_global_name,
+                    entries: vtable_method_entries,
             });
             implements_index += 1;
         }
@@ -481,19 +481,19 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                         let return_type = map_type_annotation(signature.return_type);
                         let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
                         vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
-                            method_name: struct_def.name + "::" + signature.name,
-                            interface_method_name: signature.name,
-                            function_pointer_type: func_ptr_type,
+                                method_name: struct_def.name + signature.name,
+                                interface_method_name: signature.name,
+                                function_pointer_type: func_ptr_type,
                         });
                         sig_index += 1;
                     }
 
                     vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
-                        struct_name: struct_def.name,
-                        interface_name: interface_name,
-                        llvm_type_name: vtable_type_name,
-                        llvm_global_name: vtable_global_name,
-                        entries: vtable_method_entries,
+                            struct_name: struct_def.name,
+                            interface_name: interface_name,
+                            llvm_type_name: vtable_type_name,
+                            llvm_global_name: vtable_global_name,
+                            entries: vtable_method_entries,
                     });
                 }
             }

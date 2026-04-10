@@ -122,8 +122,8 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                         }
                         let field_info = variant_info.fields[arg_index];
                         fields.push(StructLiteralField {
-                            name: field_info.name,
-                            value: arguments[arg_index]
+                                name: field_info.name,
+                                value: arguments[arg_index]
                         });
                         arg_index += 1;
                     }

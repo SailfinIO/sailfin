@@ -310,20 +310,14 @@ fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter
         let parameter = parameters[index];
         let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
 
-        // Mirror `prepare_parameters`: infer method receiver type when `self` is unannotated.
+        // Method receiver type inference: the self parameter type is set by
+        // flatten_struct_methods in lowering_helpers_mangling.sfn. This block
+        // is a no-op fallback kept for safety — fused method names (e.g.
+        // Counteris_zero) cannot be split back into struct + method.
         if parameter.type_annotation.length == 0 {
             if parameter.name == "self" {
                 if index == 0 {
-                    let double_colon_pos = find_last_index_of_char(function_name, ":");
-                    if double_colon_pos > 0 {
-                        if substring(function_name, double_colon_pos - 1, double_colon_pos + 1) == "::" {
-                            let struct_name = substring(function_name, 0, double_colon_pos - 1);
-                            let struct_type = map_struct_type_annotation(struct_name);
-                            if struct_type.length > 0 {
-                                llvm_type = struct_type + "*";
-                            }
-                        }
-                    }
+                    // Type already set in flatten_struct_methods; no split possible.
                 }
             }
         }
