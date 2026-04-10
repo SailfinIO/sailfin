@@ -1,0 +1,268 @@
+// Regression tests for match statement lowering — exercises all pattern types
+// identified in https://github.com/SailfinIO/sailfin/issues/50
+//
+// The match statement currently segfaults during LLVM lowering (globals phase).
+// These tests exist to track which patterns work and which still crash.
+
+// ===========================================================================
+// Pattern 1: Match on number literals
+// ===========================================================================
+
+fn _classify_number(n -> number) -> string {
+    match n {
+        1 -> return "one",
+        2 -> return "two",
+        3 -> return "three",
+        _ -> return "other",
+    }
+}
+
+test "match: number literal selects correct arm for 1" {
+    assert _classify_number(1) == "one";
+}
+
+test "match: number literal selects correct arm for 2" {
+    assert _classify_number(2) == "two";
+}
+
+test "match: number literal selects correct arm for 3" {
+    assert _classify_number(3) == "three";
+}
+
+test "match: number literal wildcard arm for unmatched value" {
+    assert _classify_number(99) == "other";
+}
+
+test "match: number literal wildcard arm for zero" {
+    assert _classify_number(0) == "other";
+}
+
+test "match: number literal wildcard arm for negative" {
+    assert _classify_number(-5) == "other";
+}
+
+// ===========================================================================
+// Pattern 2: Match on enum variants
+// ===========================================================================
+
+enum Direction {
+    North,
+    South,
+    East,
+    West,
+}
+
+fn _direction_name(d -> Direction) -> string {
+    match d {
+        Direction.North -> return "north",
+        Direction.South -> return "south",
+        Direction.East  -> return "east",
+        Direction.West  -> return "west",
+    }
+}
+
+test "match: enum variant North" {
+    assert _direction_name(Direction.North) == "north";
+}
+
+test "match: enum variant South" {
+    assert _direction_name(Direction.South) == "south";
+}
+
+test "match: enum variant East" {
+    assert _direction_name(Direction.East) == "east";
+}
+
+test "match: enum variant West" {
+    assert _direction_name(Direction.West) == "west";
+}
+
+test "match: enum variant all four resolve correctly" {
+    assert _direction_name(Direction.North) == "north";
+    assert _direction_name(Direction.South) == "south";
+    assert _direction_name(Direction.East)  == "east";
+    assert _direction_name(Direction.West)  == "west";
+}
+
+// Match enum with a wildcard default arm
+
+enum Season {
+    Spring,
+    Summer,
+    Fall,
+    Winter,
+}
+
+fn _is_warm_season(s -> Season) -> string {
+    match s {
+        Season.Summer -> return "yes",
+        Season.Spring -> return "maybe",
+        _ -> return "no",
+    }
+}
+
+test "match: enum with wildcard default for Summer" {
+    assert _is_warm_season(Season.Summer) == "yes";
+}
+
+test "match: enum with wildcard default for Spring" {
+    assert _is_warm_season(Season.Spring) == "maybe";
+}
+
+test "match: enum with wildcard default for Fall" {
+    assert _is_warm_season(Season.Fall) == "no";
+}
+
+test "match: enum with wildcard default for Winter" {
+    assert _is_warm_season(Season.Winter) == "no";
+}
+
+// ===========================================================================
+// Pattern 3: Match on tagged (data-carrying) enum destructuring
+// ===========================================================================
+
+enum Shape {
+    Circle { radius -> number },
+    Rectangle { width -> number, height -> number },
+}
+
+fn _shape_area(shape -> Shape) -> number {
+    match shape {
+        Shape.Circle { radius } -> return 3 * radius * radius,
+        Shape.Rectangle { width, height } -> return width * height,
+    }
+}
+
+test "match: tagged enum destructure Circle" {
+    let c = Shape.Circle { radius: 5 };
+    assert _shape_area(c) == 75;
+}
+
+test "match: tagged enum destructure Rectangle" {
+    let r = Shape.Rectangle { width: 4, height: 6 };
+    assert _shape_area(r) == 24;
+}
+
+test "match: tagged enum destructure Circle unit" {
+    let c = Shape.Circle { radius: 1 };
+    assert _shape_area(c) == 3;
+}
+
+test "match: tagged enum destructure Rectangle square" {
+    let r = Shape.Rectangle { width: 5, height: 5 };
+    assert _shape_area(r) == 25;
+}
+
+// Second tagged enum to verify it's not a one-off
+
+enum Expr {
+    Literal { value -> number },
+    Negate { operand -> number },
+}
+
+fn _eval_expr(e -> Expr) -> number {
+    match e {
+        Expr.Literal { value } -> return value,
+        Expr.Negate { operand } -> return 0 - operand,
+    }
+}
+
+test "match: tagged enum Expr Literal" {
+    let e = Expr.Literal { value: 42 };
+    assert _eval_expr(e) == 42;
+}
+
+test "match: tagged enum Expr Negate" {
+    let e = Expr.Negate { operand: 7 };
+    assert _eval_expr(e) == -7;
+}
+
+// ===========================================================================
+// Pattern 4: Match on union return types
+// ===========================================================================
+
+struct DivError {
+    message -> string;
+}
+
+fn _safe_divide(a -> number, b -> number) -> number | DivError {
+    if b == 0 {
+        return DivError { message: "division by zero" };
+    }
+    return a / b;
+}
+
+fn _describe_divide(a -> number, b -> number) -> string {
+    let result = _safe_divide(a, b);
+    match result {
+        DivError { message } -> return "error: " + message,
+        _ -> return "ok",
+    }
+}
+
+test "match: union return type success path" {
+    assert _describe_divide(10, 2) == "ok";
+}
+
+test "match: union return type error path" {
+    assert _describe_divide(10, 0) == "error: division by zero";
+}
+
+struct NegativeError {
+    message -> string;
+}
+
+fn _parse_positive(n -> number) -> number | NegativeError {
+    if n < 0 {
+        return NegativeError { message: "negative" };
+    }
+    return n;
+}
+
+fn _describe_parse(n -> number) -> string {
+    let result = _parse_positive(n);
+    match result {
+        NegativeError { message } -> return "error: " + message,
+        _ -> return "valid",
+    }
+}
+
+test "match: union return parse positive value" {
+    assert _describe_parse(42) == "valid";
+}
+
+test "match: union return parse negative value" {
+    assert _describe_parse(-5) == "error: negative";
+}
+
+// ===========================================================================
+// Pattern 5: Match with block bodies (not just return expressions)
+// ===========================================================================
+
+fn _match_with_block(n -> number) -> number {
+    let mut result -> number = 0;
+    match n {
+        1 -> {
+            result = 100;
+        },
+        2 -> {
+            result = 200;
+        },
+        _ -> {
+            result = -1;
+        },
+    }
+    return result;
+}
+
+test "match: block body arm 1" {
+    assert _match_with_block(1) == 100;
+}
+
+test "match: block body arm 2" {
+    assert _match_with_block(2) == 200;
+}
+
+test "match: block body default arm" {
+    assert _match_with_block(99) == -1;
+}
