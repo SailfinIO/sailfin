@@ -1,6 +1,108 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.19 (2026-04-10)
+
+### Bug Fixes
+
+- **site**: Address PR review — fix hero API calls and effect system overstatements
+  ([`70dab36`](https://github.com/SailfinIO/sailfin/commit/70dab3684e348099470e97091703c58624e85621))
+
+Hero code example: - Replace parse_toml() with Config.parse() (no public parse_toml in runtime) -
+  Replace deprecated print.info() with print() - Fix serve() to use handler + config pattern
+  matching actual API - Add http.Request/Response handler function
+
+Effect system claims (all pages): - Change "enforces at every call site" to "checks direct use of
+  effectful operations" — current checker is direct-usage-only, not transitive - Change "untrusted
+  code can't access" sandbox language to "code must declare effects to directly perform" — honest
+  about current enforcement scope - Note transitive call-graph enforcement as planned for future
+  release
+
+Structured concurrency: - Qualify "Safe Concurrent Systems" use case — effect tracking works today,
+  structured concurrency is planned
+
+https://claude.ai/code/session_016hgb6cBUiNTqB8X1F5djCs
+
+- **site**: Prevent hero code block from overflowing on mobile
+  ([`f3a35ee`](https://github.com/SailfinIO/sailfin/commit/f3a35eee8fb417d4554c57049062e320b284b024))
+
+Add overflow-x: auto to the pre element so code scrolls horizontally inside the window. Constrain
+  .hero-code to 100% width at the mobile breakpoint so the code window stays within the viewport.
+
+https://claude.ai/code/session_016hgb6cBUiNTqB8X1F5djCs
+
+- **site**: Prevent install command from overflowing on mobile
+  ([`38a5ebc`](https://github.com/SailfinIO/sailfin/commit/38a5ebc1973173de35aac6656760e957444fd39a))
+
+Add overflow-x: auto to the hero install code block so the long curl command scrolls horizontally
+  instead of breaking out of its container.
+
+https://claude.ai/code/session_016hgb6cBUiNTqB8X1F5djCs
+
+- **site**: Remove nav logo text and fix misleading feature claims
+  ([`47e3970`](https://github.com/SailfinIO/sailfin/commit/47e397029ba013c19360f79fcda960afc4e3c1f3))
+
+Remove "Sailfin" text from the navigation logo (logo-only is sufficient). Replace the analyze.sfn
+  hero code block with a server.sfn example that showcases the effect system — a feature that
+  actually ships today.
+
+Audit and correct marketing copy across the site to honestly reflect pre-1.0 status: -
+  Ownership/borrowing: noted as syntax-ready, enforcement before 1.0 - AI constructs: noted as
+  language syntax, execution post-1.0 - PII/Secret types: noted as syntax-supported, enforcement
+  planned - GPU effect: replaced with clock (which is enforced) - Removed "AI-native" framing and
+  "production AI pipelines" claims
+
+The docs pages were already accurate — these fixes align the marketing pages (index, why, hero,
+  blog) with the documentation's honesty.
+
+https://claude.ai/code/session_016hgb6cBUiNTqB8X1F5djCs
+
+- **std**: Address PR review feedback on sfn/cli capsule
+  ([`dfed32b`](https://github.com/SailfinIO/sailfin/commit/dfed32b1b2cfe1f336f140e6ba5875a3c189d0af))
+
+- Fix usage example in header to use real with_arg/with_flag API instead of non-existent
+  method-chain syntax - Migrate all struct field and parameter type annotations from -> to :
+  separator per pre-1.0 syntax reform - Fix --version to print subcommand path and version when in
+  subcmd context - Fix error hints to include subcommand name (e.g. "app build --help") - Replace
+  broken \x1b ANSI escapes with _ansi_wrap() helper that gracefully degrades to plain text until
+  \xHH support lands - Fix get_or() empty-string ambiguity: now checks name presence instead of
+  value length, so explicitly-empty values are not replaced by default - Add has() accessor for
+  checking presence of any arg or flag by name - Add flag_present[] tracking to Matches struct - Add
+  comprehensive test suite in capsules/sfn/cli/tests/cli_test.sfn covering builders, parsing, match
+  accessors, help formatting, and ANSI - Update docs/status.md with sfn/cli capsule entry - Document
+  process.exit() behavior in run() docstring
+
+https://claude.ai/code/session_01Pj6RGmkoKyJdX1HWDcQ5nh
+
+### Chores
+
+- **deps**: Bump actions/github-script from 8.0.0 to 9.0.0
+  ([`3b2411c`](https://github.com/SailfinIO/sailfin/commit/3b2411c6aeeec30abf758c5c63a967645d743242))
+
+Bumps [actions/github-script](https://github.com/actions/github-script) from 8.0.0 to 9.0.0. -
+  [Release notes](https://github.com/actions/github-script/releases) -
+  [Commits](https://github.com/actions/github-script/compare/ed597411d8f924073f98dfc5c65a23a2325f34cd...3a2844b7e9c422d3c10d287c895573f7108da1b3)
+
+--- updated-dependencies: - dependency-name: actions/github-script dependency-version: 9.0.0
+
+dependency-type: direct:production
+
+update-type: version-update:semver-major ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Features
+
+- **std**: Add sfn/cli capsule for CLI arg parsing and terminal output
+  ([`948c539`](https://github.com/SailfinIO/sailfin/commit/948c539eae2b286015824958c8b024a080c69fcb))
+
+Introduces a new standard library capsule that provides declarative command-line interface
+  construction with subcommands, flags, positional arguments, auto-generated help text, and ANSI
+  terminal styling helpers.
+
+https://claude.ai/code/session_01Pj6RGmkoKyJdX1HWDcQ5nh
+
+
 ## v0.5.0-alpha.18 (2026-04-09)
 
 ### Bug Fixes
