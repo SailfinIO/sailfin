@@ -115,9 +115,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     // FLAT: no nested ifs, no else-if chains.
     // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
     // Every condition check must be a top-level if in the loop body.
-    print.err("DIAG: recover_native_functions_light input length=" + number_to_string(native_text.length));
     let lines = split_lines_local(native_text);
-    print.err("DIAG: split_lines_local returned lines=" + number_to_string(lines.length));
     let mut functions -> NativeFunction[] = [];
     let mut current -> NativeFunction? = null;
     let mut current_struct_name -> string = "";
@@ -236,9 +234,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         // --- Flush current on function/method boundaries (FLAT — no nesting) ---
         if is_fn_start {
             if current != null {
-                print.err("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
                 functions = append_native_function(functions, current);
-                print.err("DIAG: after append functions.len=" + number_to_string(functions.length));
                 current = null;
             }
         }
@@ -252,9 +248,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
         if is_fn_end {
             if current != null {
-                print.err("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
                 functions = append_native_function(functions, current);
-                print.err("DIAG: after append functions.len=" + number_to_string(functions.length));
                 current = null;
                 index += 1;
                 continue;
@@ -332,7 +326,6 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             let fn_is_async = recover_function_is_async_from_header(line);
             current = make_native_function_basic(name, fn_is_async);
             fn_count += 1;
-            print.err("DIAG: found .fn #" + number_to_string(fn_count) + " name=" + name);
             index += 1;
             continue;
         }
@@ -512,7 +505,6 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     if current != null {
         functions = append_native_function(functions, current);
     }
-    print.err("DIAG: recover_native_functions_light returning " + number_to_string(functions.length) + " functions");
     return functions;
 }
 

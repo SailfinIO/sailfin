@@ -4,8 +4,10 @@
 # Replaces tools/package_native.py.
 #
 # Produces:
-#   dist/sailfin-<target>.tar.gz       — standalone compiler binary tarball
-#   dist/installer-<target>.tar.gz     — installer layout (compiler + runtime)
+#   dist/sailfin-native-<target>-<version>.tar.gz          — standalone compiler tarball
+#   dist/sailfin-native-<target>-<version>.tar.gz.sha256   — sha256 sidecar
+#   dist/sailfin-native-<target>-<version>.manifest.json   — build metadata
+#   dist/installer-<target>.tar.gz                         — installer layout (compiler + runtime)
 #
 # Usage:
 #   tools/package.sh [--target TARGET] [--out DIR] [--compiler-bin PATH] [--skip-build]
@@ -49,11 +51,61 @@ if [[ ! -x "$COMPILER_BIN" ]]; then
     exit 1
 fi
 
-echo "[package] packaging for target: $TARGET"
+# Extract version from compiler/src/version.sfn
+VERSION="$(sed -n 's/.*__version__.*=.*"\([^"]*\)".*/\1/p' compiler/src/version.sfn)"
+if [[ -z "$VERSION" ]]; then
+    echo "[package] error: could not extract version from compiler/src/version.sfn" >&2
+    exit 1
+fi
+
+echo "[package] version: $VERSION  target: $TARGET"
 mkdir -p "$OUT_DIR"
 
-# Create installer layout
-INSTALLER_DIR="$OUT_DIR/installer-$TARGET"
+# ---------------------------------------------------------------------------
+# 1. Standalone compiler tarball
+# ---------------------------------------------------------------------------
+NATIVE_STEM="sailfin-native-${TARGET}-${VERSION}"
+NATIVE_STAGING="$(mktemp -d)"
+NATIVE_ROOT="${NATIVE_STAGING}/sailfin-native-${TARGET}"
+mkdir -p "${NATIVE_ROOT}/bin"
+cp -f "$COMPILER_BIN" "${NATIVE_ROOT}/bin/sailfin"
+cp -f "$COMPILER_BIN" "${NATIVE_ROOT}/bin/sfn"
+
+NATIVE_TAR="${OUT_DIR}/${NATIVE_STEM}.tar.gz"
+tar -czf "$NATIVE_TAR" -C "$NATIVE_STAGING" "sailfin-native-${TARGET}"
+rm -rf "$NATIVE_STAGING"
+echo "[package] created $NATIVE_TAR"
+
+# sha256 sidecar
+if command -v sha256sum &>/dev/null; then
+    sha256sum "$NATIVE_TAR" | awk '{print $1}' > "${NATIVE_TAR}.sha256"
+else
+    shasum -a 256 "$NATIVE_TAR" | awk '{print $1}' > "${NATIVE_TAR}.sha256"
+fi
+echo "[package] created ${NATIVE_TAR}.sha256"
+
+# manifest.json
+MANIFEST="${OUT_DIR}/${NATIVE_STEM}.manifest.json"
+HASH="$(cat "${NATIVE_TAR}.sha256")"
+BINARY_SIZE="$(wc -c < "$COMPILER_BIN" | tr -d ' ')"
+TARBALL_SIZE="$(wc -c < "$NATIVE_TAR" | tr -d ' ')"
+cat > "$MANIFEST" <<MANIFEST_EOF
+{
+  "name": "sailfin-native",
+  "version": "$VERSION",
+  "target": "$TARGET",
+  "sha256": "$HASH",
+  "binary_size": $BINARY_SIZE,
+  "tarball_size": $TARBALL_SIZE,
+  "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+MANIFEST_EOF
+echo "[package] created $MANIFEST"
+
+# ---------------------------------------------------------------------------
+# 2. Installer layout (compiler + runtime)
+# ---------------------------------------------------------------------------
+INSTALLER_DIR="${OUT_DIR}/installer-${TARGET}"
 rm -rf "$INSTALLER_DIR"
 mkdir -p "$INSTALLER_DIR/bin"
 cp -f "$COMPILER_BIN" "$INSTALLER_DIR/bin/sailfin"
@@ -78,15 +130,13 @@ if [[ -d "build/native/import-context" ]]; then
     cp -R "build/native/import-context" "$INSTALLER_DIR/"
 fi
 
-# Create tarball
-TARBALL="$OUT_DIR/installer-$TARGET.tar.gz"
-tar -czf "$TARBALL" -C "$INSTALLER_DIR" .
-echo "[package] created $TARBALL"
+INSTALLER_TAR="${OUT_DIR}/installer-${TARGET}.tar.gz"
+tar -czf "$INSTALLER_TAR" -C "$INSTALLER_DIR" .
+rm -rf "$INSTALLER_DIR"
+echo "[package] created $INSTALLER_TAR"
 
-# Also create a standalone compiler tarball
-COMPILER_TAR="$OUT_DIR/sailfin-$TARGET.tar.gz"
-tar -czf "$COMPILER_TAR" -C "$(dirname "$COMPILER_BIN")" "$(basename "$COMPILER_BIN")"
-echo "[package] created $COMPILER_TAR"
-
-ls -lh "$TARBALL" "$COMPILER_TAR"
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+ls -lh "$NATIVE_TAR" "${NATIVE_TAR}.sha256" "$MANIFEST" "$INSTALLER_TAR"
 echo "[package] done"

@@ -1,5 +1,5 @@
 name: "Sailfin Build + Package"
-description: "Builds the native compiler from a seed, prepares test artifacts, runs tests, and produces dist/ packages + installer archive."
+description: "Builds the native compiler from a seed, prepares test artifacts, runs tests, validates seedcheck, and produces dist/ packages + installer archive."
 inputs:
   target:
     description: "Packaging target label (e.g. linux-x86_64, macos-arm64)"
@@ -53,10 +53,7 @@ runs:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
-        # Let Makefile fetch the seed if needed.
-        # BUILD_ARGS is passed through to scripts/selfhost_native.py.
-        # Use BUILD_DRIVER=py until the shell driver is validated with a
-        # seed that emits clean LLVM IR (no fixup passes needed).
+        # Use BUILD_DRIVER=py for the first-pass build (seed needs fixups).
         CONDA=$(which conda) \
           make rebuild \
             BUILD_DRIVER=py \
@@ -65,55 +62,56 @@ runs:
             BUILD_ARGS="--max-attempts ${{ inputs.max_attempts }} --max-total-seconds 1800" \
             SEED_NATIVE="build/seed/bin/sailfin"
 
-    # Temporarily disabled: build.sh validation adds ~15 min to every CI run while
-    # the compiler still has ~66 fixup passes remaining in selfhost_native.py.
-    # Re-enable this step (remove the `if: false` line) once enough fixups have
-    # been eliminated that build.sh can complete successfully.
-    - name: Validate build.sh (no Python fixups) [informational]
-      if: false
-      shell: bash -l {0}
-      continue-on-error: true
-      run: |
-        set -euo pipefail
-        echo "[ci] validating build.sh with newly built binary as seed..."
-        scripts/build.sh \
-          --seed build/native/sailfin \
-          --out build/native/sailfin-bs \
-          --work-dir build/selfhost/native-bs \
-          --clang "${{ inputs.clang }}" \
-          --jobs 2 \
-          --timeout 120 \
-          --max-total 900 \
-          --verbose 2>&1 | tee /tmp/buildsh-output.txt
-        if [ -f build/native/sailfin-bs ]; then
-          echo "[ci] build.sh succeeded - binary produced without Python fixups"
-          ls -lh build/native/sailfin-bs
-          build/native/sailfin-bs version || true
-        else
-          echo "[ci] build.sh did not produce output binary"
-          grep -E "error|Error|FAIL|missing|undefined" /tmp/buildsh-output.txt | tail -30 || true
-        fi
-
     - name: Prepare test artifacts
       shell: bash -l {0}
       run: |
         set -euo pipefail
         CONDA=$(which conda) make ci-prepare-test-artifacts
 
-    - name: Run Sailfin-native tests
+    - name: Run tests (first-pass binary)
       shell: bash -l {0}
       run: |
         set -euo pipefail
         CONDA=$(which conda) make test
 
-    - name: Package native artifacts
+    - name: Build seedcheck (no Python fixups)
       shell: bash -l {0}
       run: |
         set -euo pipefail
-        CONDA=$(which conda) make ci-package-native TARGET="${{ inputs.target }}"
+        echo "[ci] building seedcheck with build.sh (zero fixups)..."
+        SEED="build/native/sailfin" \
+          OUT="build/native/sailfin-seedcheck" \
+          OPT="-O0" \
+          JOBS="${{ inputs.build_jobs }}" \
+          CLANG="${{ inputs.clang }}" \
+          MAX_TOTAL=3600 \
+          bash scripts/build.sh
+        echo "[ci] seedcheck binary built:"
+        ls -lh build/native/sailfin-seedcheck
+        build/native/sailfin-seedcheck version || true
 
-    - name: Package installer archive
+    - name: Validate seedcheck (hello-world)
       shell: bash -l {0}
       run: |
         set -euo pipefail
-        CONDA=$(which conda) make ci-package-installer TARGET="${{ inputs.target }}"
+        sc="build/native/sailfin-seedcheck"
+        output=$(timeout 10 $sc run examples/basics/hello-world.sfn 2>&1) || true
+        if ! echo "$output" | grep -q "Hello, Sailfin!"; then
+          echo "[ci][FAIL] seedcheck cannot run hello-world.sfn"
+          echo "[ci][FAIL] got: $output"
+          exit 1
+        fi
+        echo "[ci] seedcheck runs hello-world.sfn OK"
+
+    - name: Run tests (seedcheck binary)
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
+        echo "[ci] running full test suite with seedcheck binary..."
+        CONDA=$(which conda) make test NATIVE_BIN=build/native/sailfin-seedcheck
+
+    - name: Package artifacts
+      shell: bash -l {0}
+      run: |
+        set -euo pipefail
+        CONDA=$(which conda) make ci-package TARGET="${{ inputs.target }}"
