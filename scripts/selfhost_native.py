@@ -5728,6 +5728,21 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
         return "\n".join(lines)
 
     _HELPERS["get_instruction_tag"] = _gen_instr_tag_accessor()
+
+    def _gen_instr_tag_match_accessor():
+        """Generate body for get_instruction_tag_match(instr: NativeInstruction) -> double.
+        Takes a single instruction by value (not pointer); alloca+store to read tag."""
+        lines = []
+        # instr is passed by value as %NativeInstruction. Alloca, store, then GEP to tag.
+        lines.append(f"  %tmp = alloca {NI}")
+        lines.append(f"  store {NI} %instr, {NI}* %tmp")
+        lines.append(f"  %tag_ptr = getelementptr {NI}, {NI}* %tmp, i32 0, i32 0")
+        lines.append("  %tag_i32 = load i32, i32* %tag_ptr")
+        lines.append("  %tag_dbl = sitofp i32 %tag_i32 to double")
+        lines.append("  ret double %tag_dbl")
+        return "\n".join(lines)
+
+    _HELPERS["get_instruction_tag_match"] = _gen_instr_tag_match_accessor()
     _HELPERS["get_instruction_text"] = _gen_instr_payload_ptr_accessor(0)
     _HELPERS["get_instruction_condition"] = _gen_instr_payload_ptr_accessor(0)
     _HELPERS["get_instruction_let_name"] = _gen_instr_payload_ptr_accessor(0)
@@ -5854,9 +5869,10 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     # Two patterns: mangled (seed-compiled) and unmangled (first-pass-compiled).
     _MODULE_SUFFIX = "__llvm__lowering__lowering_core"
     _MODULE_SUFFIX_HELPERS = "__llvm__lowering__lowering_native_helpers"
+    _MODULE_SUFFIX_INSTR_TAG = "__llvm__lowering__lowering_instruction_tag"
     # Build a regex that matches known helper names with the module suffix.
     _helper_names_pattern = "|".join(_re.escape(k) for k in _HELPERS.keys())
-    _suffixes_pattern = "(?:" + _re.escape(_MODULE_SUFFIX) + "|" + _re.escape(_MODULE_SUFFIX_HELPERS) + ")"
+    _suffixes_pattern = "(?:" + _re.escape(_MODULE_SUFFIX) + "|" + _re.escape(_MODULE_SUFFIX_HELPERS) + "|" + _re.escape(_MODULE_SUFFIX_INSTR_TAG) + ")"
     fn_re_suffixed = _re.compile(
         r"^define\s+(?:internal\s+)?.+?\s+@(" + _helper_names_pattern + r")" + _suffixes_pattern + r"\("
     )
