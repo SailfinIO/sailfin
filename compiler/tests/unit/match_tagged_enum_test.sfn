@@ -1,11 +1,5 @@
 // Regression tests for match on tagged (data-carrying) enum destructuring
 // https://github.com/SailfinIO/sailfin/issues/50 — Pattern 3
-//
-// Currently FAILING. Two LLVM lowering bugs:
-//   1. Enum constructors with payload (Shape.Circle { radius: 5 }) only store
-//      the tag via insertvalue — payload fields are dropped.
-//   2. Match case bodies referencing destructured fields (radius, width)
-//      lower to `ret 0.0` instead of extractvalue on the payload.
 
 enum Shape {
     Circle { radius -> number },

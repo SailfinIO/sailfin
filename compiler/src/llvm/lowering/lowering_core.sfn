@@ -251,14 +251,11 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
         print.err("emit-llvm: native text file empty at " + native_text_path);
         return false;
     }
-    print.err("emit-llvm: compile_native_text_to_llvm_file module=" + module_name + " bytes=" + number_to_string(native_text.length));
     let parse = build_parse_result_from_text(native_text);
     let raw_imports = recover_native_imports_light(native_text);
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     let import_context = collect_imported_module_context_for_module(raw_imports, module_name);
-    print.err("emit-llvm: import context collected");
     let dummy_module = make_native_module_for_emit(module_name, native_text);
-    print.err("emit-llvm: module created, entering lowering");
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(
         dummy_module,
         parse,
@@ -275,7 +272,6 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
     let lowered_count = lowered_lines.lines.length;
     if lowered_count > 0 {
         let defined = collect_defined_function_symbols(lowered_lines.lines);
-        print.err("emit-llvm: lowered (defined=" + number_to_string(defined.length) + ")");
         if defined.length == 0 {
             return false;
         }
@@ -849,7 +845,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             + ")"
         );
     }
-    print.err("emit-llvm: exit lower_to_llvm_lines_with_parsed_context lines=" + number_to_string(lines.length));
     if debug_lowering {
         print.err("emit-llvm: phase=end lines=" + number_to_string(lines.length));
     }
