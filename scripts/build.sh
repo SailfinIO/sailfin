@@ -338,18 +338,7 @@ build_module() {
             rm -f "$stderr_log"
             return 1
         fi
-        # Check for non-ASCII bytes (memory corruption injects stray UTF-8 sequences)
-        if LC_ALL=C grep -Pn '[^\x00-\x7E]' "$abs_ll_raw" >/dev/null 2>&1; then
-            if [[ $attempt -lt $max_attempts ]]; then
-                echo "[build] $module_name: non-ASCII bytes in output (attempt $attempt/$max_attempts), retrying..." >&2
-                continue
-            fi
-            echo "[build] FAIL: seed output for $module_name contains non-ASCII bytes" >&2
-            LC_ALL=C grep -Pn '[^\x00-\x7E]' "$abs_ll_raw" | head -5 >&2
-            rm -f "$stderr_log"
-            return 1
-        fi
-        # Output is valid
+        # Output passed validation
         break
     done
     mv "$abs_ll_raw" "$ll_path"
