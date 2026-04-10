@@ -7,17 +7,20 @@ const exampleCode = `struct Config {
 
 fn load_config(path: string) -> Config ![io] {
     let raw = fs.read(path);
-    return parse_toml(raw);
+    return Config.parse(raw);
 }
 
-fn start_server(config: Config) ![io, net] {
-    print.info("Listening on " + config.host);
-    serve(config.host, config.port);
+fn handle(req: http.Request) -> http.Response ![net] {
+    return http.Response {
+        status: 200,
+        body: "Sailfin is running",
+    };
 }
 
 fn main() ![io, net] {
     let config = load_config("app.toml");
-    start_server(config);
+    print("Listening on " + config.host);
+    serve(handle, { port: config.port });
 }`;
 ---
 

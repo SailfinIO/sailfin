@@ -5,7 +5,7 @@ import Hero from "../components/Hero.astro";
 const features = [
   {
     title: "Effect Types",
-    description: "Declare what your code can do — IO, network, and more. The compiler enforces capabilities at every call site, catching violations before runtime.",
+    description: "Declare what your code can do — IO, network, and more. The compiler checks direct use of effectful operations and catches violations before runtime.",
     icon: "shield",
     href: "/docs/learn/effects",
   },
@@ -17,7 +17,7 @@ const features = [
   },
   {
     title: "Capability Security",
-    description: "Functions declare required capabilities. Untrusted code can't access the filesystem, network, or models without explicit grants.",
+    description: "Functions declare required capabilities. Code must declare effects to directly perform IO, network, or model operations.",
     icon: "key",
     href: "/docs/reference/effects",
   },
@@ -48,7 +48,7 @@ const useCases = [
   },
   {
     title: "Capability-Controlled Services",
-    description: "The effect system enforces IO, network, and other capabilities at compile time — no runtime permission checks needed.",
+    description: "The effect system checks that IO, network, and other capabilities are declared at compile time — catching direct violations before runtime.",
   },
   {
     title: "CLI Tools & Automation",
@@ -56,7 +56,7 @@ const useCases = [
   },
   {
     title: "Safe Concurrent Systems",
-    description: "Effect tracking and structured concurrency help you build reliable services where capabilities are explicit and auditable.",
+    description: "Effect tracking helps you build reliable services today, with structured concurrency planned to make capability boundaries even more explicit and auditable.",
   },
 ];
 ---

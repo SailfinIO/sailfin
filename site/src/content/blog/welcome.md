@@ -19,7 +19,7 @@ We're excited to launch **sailfin.dev** — the official home for the Sailfin pr
 Sailfin is a systems-friendly programming language designed for precision, safety, and introspection. It features:
 
 - **Effect types** that declare and enforce what your code can do at compile time
-- **Capability-based security** — the compiler rejects calls that exceed declared permissions
+- **Capability-based security** — code declares the capabilities it uses, with direct effect checks enforced at compile time
 - **A self-hosted native compiler** targeting LLVM
 - **Ownership and borrowing** syntax with full enforcement landing before 1.0
 - **AI constructs** — models, prompts, and pipelines as language-level syntax, with execution support under active development

@@ -16,9 +16,9 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         <div class="card">
           <h3>Capability-Controlled Services</h3>
           <p>
-            The effect system lets you declare and enforce what each function can do — IO, network access,
-            model calls — at compile time. The compiler rejects any call that exceeds its declared capabilities,
-            catching permission violations before your code ever runs.
+            The effect system lets you declare what each function can do — IO, network access,
+            model calls — at compile time. The compiler checks that effectful operations like file access
+            and network calls are only used in functions that declare those effects.
           </p>
         </div>
 
@@ -34,9 +34,10 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         <div class="card">
           <h3>Secure by Default</h3>
           <p>
-            Capability-based security means untrusted code can't access IO or network without explicit grants.
-            <code>PII&lt;T&gt;</code> and <code>Secret&lt;T&gt;</code> wrapper types are supported as syntax,
-            with taint-tracking enforcement planned for a future release.
+            Capability-based security means code must declare <code>io</code> or <code>net</code> effects
+            to directly perform those operations, with stronger sandboxed capability enforcement planned for
+            a future release. <code>PII&lt;T&gt;</code> and <code>Secret&lt;T&gt;</code> wrapper types are
+            supported as syntax, with taint-tracking enforcement planned for a future release.
           </p>
         </div>
 
@@ -54,8 +55,8 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         <h2>Security by Design</h2>
         <p>
           Every function declares its capabilities: <code>![io]</code>, <code>![net]</code>,
-          <code>![model]</code>, <code>![clock]</code>. The compiler rejects calls that exceed declared
-          capabilities. This isn't a lint rule — it's a type system guarantee.
+          <code>![model]</code>, <code>![clock]</code>. The compiler checks that effectful operations
+          match declared capabilities. Transitive call-graph enforcement is planned for a future release.
         </p>
         <pre><code>// This won't compile — fetch_data needs ![net] but main only grants ![io]
 fn main() ![io] {"{"}
