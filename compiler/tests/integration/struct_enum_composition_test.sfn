@@ -1,0 +1,211 @@
+// Integration tests: struct + enum composition, cross-function struct passing,
+// and complex data flow patterns.
+// Targets stabilization: cross-module ABI, struct return values, enum dispatch.
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+}
+
+fn _color_name(c -> Color) -> string {
+    if c == Color.Red { return "red"; }
+    if c == Color.Green { return "green"; }
+    if c == Color.Blue { return "blue"; }
+    return "unknown";
+}
+
+struct Pixel {
+    x -> number;
+    y -> number;
+    color -> Color;
+
+    fn move_to(self, nx -> number, ny -> number) -> Pixel {
+        return Pixel { x: nx, y: ny, color: self.color };
+    }
+
+    fn recolor(self, new_color -> Color) -> Pixel {
+        return Pixel { x: self.x, y: self.y, color: new_color };
+    }
+
+    fn describe(self) -> string {
+        return _color_name(self.color) + " at (" + _num(self.x) + "," + _num(self.y) + ")";
+    }
+}
+
+fn _num(n -> number) -> string {
+    if n == 0 { return "0"; }
+    let mut result -> string = "";
+    let mut remaining -> number = n;
+    if remaining < 0 { remaining = 0 - remaining; }
+    let digits = "0123456789";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        result = ch + result;
+        remaining = quotient;
+    }
+    if n < 0 { result = "-" + result; }
+    return result;
+}
+
+test "composition: struct with enum field" {
+    let p = Pixel { x: 10, y: 20, color: Color.Red };
+    assert p.x == 10;
+    assert p.y == 20;
+    assert p.color == Color.Red;
+}
+
+test "composition: struct method preserves enum field" {
+    let p = Pixel { x: 0, y: 0, color: Color.Blue };
+    let moved = p.move_to(5, 10);
+    assert moved.x == 5;
+    assert moved.y == 10;
+    assert moved.color == Color.Blue;
+}
+
+test "composition: recolor changes enum field" {
+    let p = Pixel { x: 1, y: 2, color: Color.Red };
+    let p2 = p.recolor(Color.Green);
+    assert p2.color == Color.Green;
+    assert p.color == Color.Red;
+}
+
+test "composition: enum through function produces correct string" {
+    assert _color_name(Color.Red) == "red";
+    assert _color_name(Color.Green) == "green";
+    assert _color_name(Color.Blue) == "blue";
+}
+
+// ---------------------------------------------------------------------------
+// Struct containing struct
+// ---------------------------------------------------------------------------
+
+struct Bounds {
+    min_x -> number;
+    min_y -> number;
+    max_x -> number;
+    max_y -> number;
+
+    fn width(self) -> number {
+        return self.max_x - self.min_x;
+    }
+
+    fn height(self) -> number {
+        return self.max_y - self.min_y;
+    }
+
+    fn area(self) -> number {
+        return self.width() * self.height();
+    }
+
+    fn contains_point(self, px -> number, py -> number) -> boolean {
+        if px < self.min_x { return false; }
+        if px > self.max_x { return false; }
+        if py < self.min_y { return false; }
+        if py > self.max_y { return false; }
+        return true;
+    }
+}
+
+fn _compute_bounds(pixels -> Pixel[]) -> Bounds {
+    if pixels.length == 0 {
+        return Bounds { min_x: 0, min_y: 0, max_x: 0, max_y: 0 };
+    }
+    let mut min_x -> number = pixels[0].x;
+    let mut min_y -> number = pixels[0].y;
+    let mut max_x -> number = pixels[0].x;
+    let mut max_y -> number = pixels[0].y;
+    let mut i -> number = 1;
+    loop {
+        if i >= pixels.length { break; }
+        let p = pixels[i];
+        if p.x < min_x { min_x = p.x; }
+        if p.y < min_y { min_y = p.y; }
+        if p.x > max_x { max_x = p.x; }
+        if p.y > max_y { max_y = p.y; }
+        i += 1;
+    }
+    return Bounds { min_x: min_x, min_y: min_y, max_x: max_x, max_y: max_y };
+}
+
+test "composition: compute bounds from pixel array" {
+    let mut pixels -> Pixel[] = [];
+    pixels.push(Pixel { x: 5, y: 3, color: Color.Red });
+    pixels.push(Pixel { x: 1, y: 8, color: Color.Green });
+    pixels.push(Pixel { x: 9, y: 1, color: Color.Blue });
+    let b = _compute_bounds(pixels);
+    assert b.min_x == 1;
+    assert b.min_y == 1;
+    assert b.max_x == 9;
+    assert b.max_y == 8;
+}
+
+test "composition: bounds methods" {
+    let b = Bounds { min_x: 2, min_y: 3, max_x: 10, max_y: 7 };
+    assert b.width() == 8;
+    assert b.height() == 4;
+    assert b.area() == 32;
+}
+
+test "composition: bounds contains_point" {
+    let b = Bounds { min_x: 0, min_y: 0, max_x: 10, max_y: 10 };
+    assert b.contains_point(5, 5) == true;
+    assert b.contains_point(0, 0) == true;
+    assert b.contains_point(10, 10) == true;
+    assert b.contains_point(-1, 5) == false;
+    assert b.contains_point(5, 11) == false;
+}
+
+// ---------------------------------------------------------------------------
+// Enum-driven dispatch with struct results
+// ---------------------------------------------------------------------------
+
+enum Op {
+    Add,
+    Sub,
+    Mul,
+}
+
+fn _apply_op(op -> Op, a -> number, b -> number) -> number {
+    if op == Op.Add { return a + b; }
+    if op == Op.Sub { return a - b; }
+    if op == Op.Mul { return a * b; }
+    return 0;
+}
+
+fn _apply_ops_to_array(ops -> Op[], values -> number[]) -> number {
+    if values.length == 0 { return 0; }
+    let mut result -> number = values[0];
+    let mut i -> number = 0;
+    loop {
+        if i >= ops.length { break; }
+        if i + 1 >= values.length { break; }
+        result = _apply_op(ops[i], result, values[i + 1]);
+        i += 1;
+    }
+    return result;
+}
+
+test "composition: enum dispatch with ops" {
+    assert _apply_op(Op.Add, 3, 4) == 7;
+    assert _apply_op(Op.Sub, 10, 3) == 7;
+    assert _apply_op(Op.Mul, 5, 6) == 30;
+}
+
+test "composition: sequential ops on array" {
+    let mut ops -> Op[] = [];
+    ops.push(Op.Add);
+    ops.push(Op.Mul);
+    ops.push(Op.Sub);
+    let vals = [2, 3, 4, 1];
+    // (((2 + 3) * 4) - 1) = 19
+    assert _apply_ops_to_array(ops, vals) == 19;
+}

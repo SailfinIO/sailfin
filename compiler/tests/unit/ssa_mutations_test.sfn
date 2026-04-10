@@ -1,0 +1,233 @@
+// Advanced SSA mutation tests — exercises mutable variable patterns that
+// stress phi node generation and predecessor tracking.
+// Targets seed stabilization category: Phi node / SSA violations (~8 fixups)
+
+// ---------------------------------------------------------------------------
+// Mutable variable modified in both branches, used after merge
+// ---------------------------------------------------------------------------
+
+fn _branch_merge_value(x -> number) -> number {
+    let mut result -> number = 0;
+    if x > 10 {
+        result = x * 2;
+    } else {
+        result = x + 100;
+    }
+    // Use result after the merge point — requires correct phi
+    return result + 1;
+}
+
+test "ssa_mut: branch merge then-path" {
+    assert _branch_merge_value(20) == 41;
+}
+
+test "ssa_mut: branch merge else-path" {
+    assert _branch_merge_value(5) == 106;
+}
+
+// ---------------------------------------------------------------------------
+// Multiple mutable variables modified in same if/else
+// ---------------------------------------------------------------------------
+
+fn _multi_var_branch(a -> number, b -> number) -> number {
+    let mut x -> number = a;
+    let mut y -> number = b;
+    if a > b {
+        x = x + 10;
+        y = y - 10;
+    } else {
+        x = x - 5;
+        y = y + 5;
+    }
+    return x + y;
+}
+
+test "ssa_mut: multi var branch then" {
+    // a=10, b=3 -> x=20, y=-7 -> 13
+    assert _multi_var_branch(10, 3) == 13;
+}
+
+test "ssa_mut: multi var branch else" {
+    // a=3, b=10 -> x=-2, y=15 -> 13
+    assert _multi_var_branch(3, 10) == 13;
+}
+
+// ---------------------------------------------------------------------------
+// Mutable variable modified in loop then used in branch
+// ---------------------------------------------------------------------------
+
+fn _loop_then_branch(n -> number) -> string {
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        total += i;
+        i += 1;
+    }
+    if total > 20 {
+        return "high";
+    } else if total > 5 {
+        return "medium";
+    }
+    return "low";
+}
+
+test "ssa_mut: loop then branch high" {
+    assert _loop_then_branch(10) == "high";
+}
+
+test "ssa_mut: loop then branch medium" {
+    assert _loop_then_branch(5) == "medium";
+}
+
+test "ssa_mut: loop then branch low" {
+    assert _loop_then_branch(2) == "low";
+}
+
+// ---------------------------------------------------------------------------
+// Swap pattern (classic phi stress test)
+// ---------------------------------------------------------------------------
+
+fn _swap_if_needed(a -> number, b -> number) -> number {
+    let mut x -> number = a;
+    let mut y -> number = b;
+    if x > y {
+        let tmp = x;
+        x = y;
+        y = tmp;
+    }
+    // After potential swap, x should be <= y
+    return x * 1000 + y;
+}
+
+test "ssa_mut: swap when needed" {
+    assert _swap_if_needed(7, 3) == 3007;
+}
+
+test "ssa_mut: no swap when already ordered" {
+    assert _swap_if_needed(2, 9) == 2009;
+}
+
+// ---------------------------------------------------------------------------
+// Accumulator modified inside nested if within loop
+// ---------------------------------------------------------------------------
+
+fn _weighted_sum(values -> number[], weights -> number[]) -> number {
+    let mut sum -> number = 0;
+    let mut i -> number = 0;
+    let limit = values.length;
+    loop {
+        if i >= limit { break; }
+        let val = values[i];
+        if i < weights.length {
+            sum += val * weights[i];
+        } else {
+            sum += val;
+        }
+        i += 1;
+    }
+    return sum;
+}
+
+test "ssa_mut: weighted sum with full weights" {
+    let vals = [2, 3, 4];
+    let wts = [10, 20, 30];
+    assert _weighted_sum(vals, wts) == 200;
+}
+
+test "ssa_mut: weighted sum with partial weights" {
+    let vals = [2, 3, 4, 5];
+    let wts = [10, 20];
+    // 2*10 + 3*20 + 4 + 5 = 89
+    assert _weighted_sum(vals, wts) == 89;
+}
+
+// ---------------------------------------------------------------------------
+// Boolean flag toggled across iterations
+// ---------------------------------------------------------------------------
+
+fn _alternating_sum(arr -> number[]) -> number {
+    let mut total -> number = 0;
+    let mut add_flag -> boolean = true;
+    let mut i -> number = 0;
+    loop {
+        if i >= arr.length { break; }
+        if add_flag {
+            total += arr[i];
+        } else {
+            total -= arr[i];
+        }
+        add_flag = !add_flag;
+        i += 1;
+    }
+    return total;
+}
+
+test "ssa_mut: alternating sum" {
+    let data = [10, 3, 7, 2, 5];
+    // +10 -3 +7 -2 +5 = 17
+    assert _alternating_sum(data) == 17;
+}
+
+test "ssa_mut: alternating sum single element" {
+    let data = [42];
+    assert _alternating_sum(data) == 42;
+}
+
+// ---------------------------------------------------------------------------
+// String built incrementally with conditional append
+// ---------------------------------------------------------------------------
+
+fn _build_csv(values -> number[]) -> string {
+    let mut result -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= values.length { break; }
+        if i > 0 {
+            result = result + ",";
+        }
+        if values[i] >= 0 {
+            result = result + "+";
+        } else {
+            result = result + "-";
+        }
+        i += 1;
+    }
+    return result;
+}
+
+test "ssa_mut: build csv positive and negative" {
+    let vals = [1, -2, 3, -4];
+    assert _build_csv(vals) == "+,-,+,-";
+}
+
+test "ssa_mut: build csv single element" {
+    let vals = [5];
+    assert _build_csv(vals) == "+";
+}
+
+test "ssa_mut: build csv empty" {
+    let mut vals -> number[] = [];
+    assert _build_csv(vals) == "";
+}
+
+// ---------------------------------------------------------------------------
+// Variable assigned in one branch only (tests phi with entry value)
+// ---------------------------------------------------------------------------
+
+fn _optional_update(x -> number) -> number {
+    let mut result -> number = x;
+    if x > 50 {
+        result = result - 50;
+    }
+    // If x <= 50, result stays as x (phi merges original with modified)
+    return result * 2;
+}
+
+test "ssa_mut: optional update taken" {
+    assert _optional_update(75) == 50;
+}
+
+test "ssa_mut: optional update not taken" {
+    assert _optional_update(30) == 60;
+}

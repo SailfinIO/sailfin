@@ -177,8 +177,49 @@ fn is_test_module_slug(module_name -> string) -> boolean {
     return false;
 }
 
+fn _escape_llvm_string_h(text -> string) -> string {
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = substring(text, i, i + 1);
+        if ch == "\"" {
+            out = out + "\\22";
+        } else if ch == "\\" {
+            out = out + "\\5C";
+        } else {
+            out = out + ch;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _test_label_from_name_h(raw_name -> string) -> string {
+    let mut name = raw_name;
+    if name.length >= 5 {
+        if substring(name, 0, 5) == "test:" {
+            name = substring(name, 5, name.length);
+        }
+    }
+    let mut cleaned -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= name.length { break; }
+        let ch = substring(name, i, i + 1);
+        if ch == "_" {
+            cleaned = cleaned + " ";
+        } else {
+            cleaned = cleaned + ch;
+        }
+        i += 1;
+    }
+    return cleaned;
+}
+
 fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug -> string, mangle_symbols -> boolean) -> string[] {
-    let mut lines -> string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
+    let mut lines -> string[] = [];
+    let test_count = tests.length;
 
     let mut _let264 -> boolean = false;
     if mangle_symbols {
@@ -189,21 +230,51 @@ fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug ->
     let should_mangle = _let264;
     let module_suffix = sanitize_module_suffix(module_slug);
 
+    // String constants for test names
     let mut index -> number = 0;
     loop {
-        if index >= tests.length {
-            break;
-        }
+        if index >= test_count { break; }
+        let label = _test_label_from_name_h(tests[index].name);
+        let msg = "  RUN  " + label;
+        let escaped = _escape_llvm_string_h(msg);
+        let idx_str = number_to_string(index);
+        lines = extend_string_lines(lines, ["@.test_name_" + idx_str + " = private unnamed_addr constant [" + number_to_string(msg.length + 1) + " x i8] c\"" + escaped + "\\00\""]);
+        index += 1;
+    }
+
+    let pass_msg = "  PASS  (all " + number_to_string(test_count) + " tests passed)";
+    let pass_escaped = _escape_llvm_string_h(pass_msg);
+    lines = extend_string_lines(lines, ["@.test_pass_msg = private unnamed_addr constant [" + number_to_string(pass_msg.length + 1) + " x i8] c\"" + pass_escaped + "\\00\""]);
+    lines = extend_string_lines(lines, ["declare i32 @puts(i8*)"]);
+
+    lines = extend_string_lines(lines, ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"]);
+
+    index = 0;
+    loop {
+        if index >= test_count { break; }
         let mut sym = sanitize_symbol(tests[index].name);
         if should_mangle {
             if index_of(sym, "__") < 0 {
                 sym = sym + "__" + module_suffix;
             }
         }
-        lines = extend_string_lines(lines, ["  call void @" + sym + "()"]);
+        let idx_str = number_to_string(index);
+        let msg = "  RUN  " + _test_label_from_name_h(tests[index].name);
+        lines = extend_string_lines(lines, [
+            "  %name_ptr_" + idx_str + " = getelementptr [" + number_to_string(msg.length + 1) + " x i8], [" + number_to_string(msg.length + 1) + " x i8]* @.test_name_" + idx_str + ", i64 0, i64 0",
+            "  call i32 @puts(i8* %name_ptr_" + idx_str + ")",
+            "  call void @" + sym + "()",
+        ]);
         index += 1;
     }
-    lines = extend_string_lines(lines, ["  ret i32 0", "}"]);
+
+    // Print summary
+    lines = extend_string_lines(lines, [
+        "  %pass_ptr = getelementptr [" + number_to_string(pass_msg.length + 1) + " x i8], [" + number_to_string(pass_msg.length + 1) + " x i8]* @.test_pass_msg, i64 0, i64 0",
+        "  call i32 @puts(i8* %pass_ptr)",
+        "  ret i32 0",
+        "}",
+    ]);
     return lines;
 }
 

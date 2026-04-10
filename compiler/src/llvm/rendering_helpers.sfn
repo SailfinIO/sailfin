@@ -6,7 +6,7 @@
 import { NativeFunction, NativeParameter, NativeInterfaceSignature, NativeImport } from "../native_ir";
 import { substring, find_last_index_of_char } from "../string_utils";
 import { TypeContext } from "./types";
-import { join_with_separator, string_array_contains, sanitize_symbol } from "./utils";
+import { join_with_separator, string_array_contains, sanitize_symbol, number_to_string } from "./utils";
 import { map_parameter_type, map_struct_type_annotation } from "./type_mapping";
 
 fn clamp_collection_length(value -> number, max -> number) -> number {
@@ -117,20 +117,85 @@ fn render_vtable_constants(context -> TypeContext) -> string[] {
 // Test Harness Rendering
 // =============================================================================
 
+fn _escape_llvm_string(text -> string) -> string {
+    let mut out -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = substring(text, i, i + 1);
+        if ch == "\"" {
+            out = out + "\\22";
+        } else if ch == "\\" {
+            out = out + "\\5C";
+        } else {
+            out = out + ch;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _test_label_from_name(raw_name -> string) -> string {
+    let mut name = raw_name;
+    if name.length >= 5 {
+        if substring(name, 0, 5) == "test:" {
+            name = substring(name, 5, name.length);
+        }
+    }
+    let mut cleaned -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= name.length { break; }
+        let ch = substring(name, i, i + 1);
+        if ch == "_" {
+            cleaned = cleaned + " ";
+        } else {
+            cleaned = cleaned + ch;
+        }
+        i += 1;
+    }
+    return cleaned;
+}
+
 fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
     let mut lines -> string[] = [];
+    let test_count = tests.length;
+
+    // String constants for test names and summary
+    let mut index -> number = 0;
+    loop {
+        if index >= test_count { break; }
+        let label = _test_label_from_name(tests[index].name);
+        let msg = "  RUN  " + label;
+        let escaped = _escape_llvm_string(msg);
+        let idx_str = number_to_string(index);
+        lines.push("@.test_name_" + idx_str + " = private unnamed_addr constant [" + number_to_string(msg.length + 1) + " x i8] c\"" + escaped + "\\00\"");
+        index += 1;
+    }
+
+    let pass_msg = "  PASS  (all " + number_to_string(test_count) + " tests passed)";
+    let pass_escaped = _escape_llvm_string(pass_msg);
+    lines.push("@.test_pass_msg = private unnamed_addr constant [" + number_to_string(pass_msg.length + 1) + " x i8] c\"" + pass_escaped + "\\00\"");
+    lines.push("declare i32 @puts(i8*)");
+
     lines.push("define i32 @main(i32 %argc, i8** %argv) {");
     lines.push("entry:");
 
-    let mut index -> number = 0;
+    index = 0;
     loop {
-        if index >= tests.length {
-            break;
-        }
+        if index >= test_count { break; }
         let sym = sanitize_symbol(tests[index].name);
+        let idx_str = number_to_string(index);
+        let msg = "  RUN  " + _test_label_from_name(tests[index].name);
+        lines.push("  %name_ptr_" + idx_str + " = getelementptr [" + number_to_string(msg.length + 1) + " x i8], [" + number_to_string(msg.length + 1) + " x i8]* @.test_name_" + idx_str + ", i64 0, i64 0");
+        lines.push("  call i32 @puts(i8* %name_ptr_" + idx_str + ")");
         lines.push("  call void @" + sym + "()");
         index += 1;
     }
+
+    // Print summary
+    lines.push("  %pass_ptr = getelementptr [" + number_to_string(pass_msg.length + 1) + " x i8], [" + number_to_string(pass_msg.length + 1) + " x i8]* @.test_pass_msg, i64 0, i64 0");
+    lines.push("  call i32 @puts(i8* %pass_ptr)");
     lines.push("  ret i32 0");
     lines.push("}");
     return lines;

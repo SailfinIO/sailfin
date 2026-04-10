@@ -1,0 +1,196 @@
+// Tests for struct method patterns that stress cross-module ABI and
+// return value handling — directly targets seed stabilization categories:
+//   - Cross-module type/ABI mismatches (~15 fixups)
+//   - Missing/duplicate definitions (~12 fixups)
+
+struct Counter {
+    value -> number;
+    name -> string;
+
+    fn increment(self) -> Counter {
+        return Counter { value: self.value + 1, name: self.name };
+    }
+
+    fn decrement(self) -> Counter {
+        return Counter { value: self.value - 1, name: self.name };
+    }
+
+    fn add(self, n -> number) -> Counter {
+        return Counter { value: self.value + n, name: self.name };
+    }
+
+    fn reset(self) -> Counter {
+        return Counter { value: 0, name: self.name };
+    }
+
+    fn is_zero(self) -> boolean {
+        return self.value == 0;
+    }
+
+    fn label(self) -> string {
+        return self.name;
+    }
+}
+
+test "struct_methods: basic increment" {
+    let c = Counter { value: 0, name: "hits" };
+    let c2 = c.increment();
+    assert c2.value == 1;
+    assert c2.name == "hits";
+}
+
+test "struct_methods: chained method calls" {
+    let c = Counter { value: 0, name: "ops" };
+    let c2 = c.increment().increment().increment();
+    assert c2.value == 3;
+}
+
+test "struct_methods: method returning boolean" {
+    let c = Counter { value: 0, name: "test" };
+    assert c.is_zero() == true;
+    let c2 = c.increment();
+    assert c2.is_zero() == false;
+}
+
+test "struct_methods: method returning string" {
+    let c = Counter { value: 5, name: "requests" };
+    assert c.label() == "requests";
+}
+
+test "struct_methods: reset after increments" {
+    let c = Counter { value: 0, name: "x" };
+    let c2 = c.add(100).increment().increment();
+    assert c2.value == 102;
+    let c3 = c2.reset();
+    assert c3.value == 0;
+    assert c3.name == "x";
+}
+
+test "struct_methods: original unchanged by method" {
+    let c1 = Counter { value: 10, name: "a" };
+    let c2 = c1.increment();
+    assert c1.value == 10;
+    assert c2.value == 11;
+}
+
+// ---------------------------------------------------------------------------
+// Struct with computed fields
+// ---------------------------------------------------------------------------
+
+struct Range {
+    start -> number;
+    end -> number;
+
+    fn length(self) -> number {
+        return self.end - self.start;
+    }
+
+    fn contains(self, value -> number) -> boolean {
+        if value >= self.start {
+            if value < self.end {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    fn overlaps(self, other -> Range) -> boolean {
+        if self.start >= other.end { return false; }
+        if other.start >= self.end { return false; }
+        return true;
+    }
+
+    fn shift(self, offset -> number) -> Range {
+        return Range { start: self.start + offset, end: self.end + offset };
+    }
+
+    fn expand(self, amount -> number) -> Range {
+        return Range { start: self.start - amount, end: self.end + amount };
+    }
+}
+
+test "struct_methods: range length" {
+    let r = Range { start: 5, end: 15 };
+    assert r.length() == 10;
+}
+
+test "struct_methods: range contains" {
+    let r = Range { start: 0, end: 10 };
+    assert r.contains(5) == true;
+    assert r.contains(0) == true;
+    assert r.contains(10) == false;
+    assert r.contains(-1) == false;
+}
+
+test "struct_methods: range overlaps" {
+    let a = Range { start: 0, end: 10 };
+    let b = Range { start: 5, end: 15 };
+    let c = Range { start: 10, end: 20 };
+    assert a.overlaps(b) == true;
+    assert a.overlaps(c) == false;
+}
+
+test "struct_methods: range shift" {
+    let r = Range { start: 0, end: 10 };
+    let shifted = r.shift(5);
+    assert shifted.start == 5;
+    assert shifted.end == 15;
+}
+
+test "struct_methods: range expand" {
+    let r = Range { start: 10, end: 20 };
+    let expanded = r.expand(3);
+    assert expanded.start == 7;
+    assert expanded.end == 23;
+}
+
+// ---------------------------------------------------------------------------
+// Struct passed to free functions
+// ---------------------------------------------------------------------------
+
+fn _range_sum(r -> Range) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = r.start;
+    loop {
+        if i >= r.end { break; }
+        total += i;
+        i += 1;
+    }
+    return total;
+}
+
+fn _merge_ranges(a -> Range, b -> Range) -> Range {
+    let mut lo -> number = a.start;
+    if b.start < lo { lo = b.start; }
+    let mut hi -> number = a.end;
+    if b.end > hi { hi = b.end; }
+    return Range { start: lo, end: hi };
+}
+
+test "struct_methods: struct passed to free function" {
+    let r = Range { start: 1, end: 5 };
+    assert _range_sum(r) == 10;
+}
+
+test "struct_methods: free function returning struct from two inputs" {
+    let a = Range { start: 3, end: 7 };
+    let b = Range { start: 1, end: 5 };
+    let merged = _merge_ranges(a, b);
+    assert merged.start == 1;
+    assert merged.end == 7;
+}
+
+// ---------------------------------------------------------------------------
+// Array of structs
+// ---------------------------------------------------------------------------
+
+test "struct_methods: array of structs" {
+    let mut ranges -> Range[] = [];
+    ranges.push(Range { start: 0, end: 5 });
+    ranges.push(Range { start: 10, end: 20 });
+    ranges.push(Range { start: 100, end: 200 });
+    assert ranges.length == 3;
+    assert ranges[0].length() == 5;
+    assert ranges[1].length() == 10;
+    assert ranges[2].length() == 100;
+}

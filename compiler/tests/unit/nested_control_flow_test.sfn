@@ -1,0 +1,287 @@
+// Regression tests for nested control flow — exercises patterns that stress
+// phi node generation, loop header placement, and break/continue targeting.
+// These directly target seed stabilization categories:
+//   - Phi node / SSA violations (~8 fixups)
+//   - Loop / control flow bugs (~6 fixups)
+
+// ---------------------------------------------------------------------------
+// Nested loops with break from inner vs outer
+// ---------------------------------------------------------------------------
+
+fn _find_pair_sum(arr -> number[], target -> number) -> number {
+    let mut i -> number = 0;
+    loop {
+        if i >= arr.length { break; }
+        let mut j -> number = i + 1;
+        loop {
+            if j >= arr.length { break; }
+            if arr[i] + arr[j] == target {
+                return arr[i] * 100 + arr[j];
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+test "nested_cf: nested loop break finds pair sum" {
+    let nums = [1, 4, 7, 2, 9];
+    assert _find_pair_sum(nums, 11) == 209;
+}
+
+test "nested_cf: nested loop break returns -1 when no pair" {
+    let nums = [1, 2, 3];
+    assert _find_pair_sum(nums, 100) == -1;
+}
+
+// ---------------------------------------------------------------------------
+// Triple-nested loop with continue in middle
+// ---------------------------------------------------------------------------
+
+fn _triple_nested_count(limit -> number) -> number {
+    let mut count -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= limit { break; }
+        let mut j -> number = 0;
+        loop {
+            if j >= limit { break; }
+            if (i + j) % 2 != 0 {
+                j += 1;
+                continue;
+            }
+            let mut k -> number = 0;
+            loop {
+                if k >= limit { break; }
+                count += 1;
+                k += 1;
+            }
+            j += 1;
+        }
+        i += 1;
+    }
+    return count;
+}
+
+test "nested_cf: triple nested loop with continue" {
+    assert _triple_nested_count(3) == 30;
+}
+
+// ---------------------------------------------------------------------------
+// Loop with multiple mutable variables and conditional updates (SSA stress)
+// ---------------------------------------------------------------------------
+
+fn _collatz_steps(start -> number) -> number {
+    let mut n -> number = start;
+    let mut steps -> number = 0;
+    loop {
+        if n <= 1 { break; }
+        if n % 2 == 0 {
+            n = n / 2;
+        } else {
+            n = n * 3 + 1;
+        }
+        steps += 1;
+    }
+    return steps;
+}
+
+test "nested_cf: collatz steps for 6" {
+    assert _collatz_steps(6) == 8;
+}
+
+test "nested_cf: collatz steps for 1" {
+    assert _collatz_steps(1) == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Early return from deeply nested branches
+// ---------------------------------------------------------------------------
+
+fn _classify_triple(a -> number, b -> number, c -> number) -> string {
+    if a > 0 {
+        if b > 0 {
+            if c > 0 {
+                return "all positive";
+            } else {
+                return "c non-positive";
+            }
+        } else {
+            if c > 0 {
+                return "b non-positive";
+            } else {
+                return "b and c non-positive";
+            }
+        }
+    } else {
+        if b > 0 {
+            if c > 0 {
+                return "a non-positive";
+            } else {
+                return "a and c non-positive";
+            }
+        } else {
+            return "a and b non-positive";
+        }
+    }
+}
+
+test "nested_cf: classify triple all positive" {
+    assert _classify_triple(1, 2, 3) == "all positive";
+}
+
+test "nested_cf: classify triple c non-positive" {
+    assert _classify_triple(1, 2, -1) == "c non-positive";
+}
+
+test "nested_cf: classify triple b non-positive" {
+    assert _classify_triple(1, -1, 3) == "b non-positive";
+}
+
+test "nested_cf: classify triple a non-positive" {
+    assert _classify_triple(-1, 2, 3) == "a non-positive";
+}
+
+test "nested_cf: classify triple a and b non-positive" {
+    assert _classify_triple(-1, -1, 3) == "a and b non-positive";
+}
+
+// ---------------------------------------------------------------------------
+// Loop with conditional break vs continue (SSA predecessor labels)
+// ---------------------------------------------------------------------------
+
+fn _first_above_threshold(arr -> number[], threshold -> number) -> number {
+    let mut result -> number = -1;
+    let mut i -> number = 0;
+    loop {
+        if i >= arr.length { break; }
+        if arr[i] <= threshold {
+            i += 1;
+            continue;
+        }
+        result = arr[i];
+        break;
+    }
+    return result;
+}
+
+test "nested_cf: first above threshold finds match" {
+    let data = [3, 7, 2, 15, 8];
+    assert _first_above_threshold(data, 10) == 15;
+}
+
+test "nested_cf: first above threshold no match" {
+    let data = [1, 2, 3];
+    assert _first_above_threshold(data, 10) == -1;
+}
+
+// ---------------------------------------------------------------------------
+// Mutable variable reassigned across multiple if/else branches (phi stress)
+// ---------------------------------------------------------------------------
+
+fn _categorize_score(score -> number) -> string {
+    let mut grade -> string = "F";
+    let mut note -> string = "none";
+    if score >= 90 {
+        grade = "A";
+        note = "excellent";
+    } else if score >= 80 {
+        grade = "B";
+        note = "good";
+    } else if score >= 70 {
+        grade = "C";
+        note = "average";
+    } else if score >= 60 {
+        grade = "D";
+        note = "below average";
+    } else {
+        note = "failing";
+    }
+    return grade + ":" + note;
+}
+
+test "nested_cf: score categorization A" {
+    assert _categorize_score(95) == "A:excellent";
+}
+
+test "nested_cf: score categorization B" {
+    assert _categorize_score(85) == "B:good";
+}
+
+test "nested_cf: score categorization F" {
+    assert _categorize_score(30) == "F:failing";
+}
+
+// ---------------------------------------------------------------------------
+// Loop building an array with conditional pushes
+// ---------------------------------------------------------------------------
+
+fn _filter_and_transform(input -> number[]) -> number[] {
+    let mut result -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= input.length { break; }
+        let val = input[i];
+        if val > 0 {
+            if val % 2 == 0 {
+                result.push(val * 2);
+            } else {
+                result.push(val);
+            }
+        }
+        i += 1;
+    }
+    return result;
+}
+
+test "nested_cf: filter and transform mixed array" {
+    let input = [-1, 2, 3, -4, 6, 5];
+    let output = _filter_and_transform(input);
+    assert output.length == 4;
+    assert output[0] == 4;
+    assert output[1] == 3;
+    assert output[2] == 12;
+    assert output[3] == 5;
+}
+
+// ---------------------------------------------------------------------------
+// Multiple sequential loops (tests phi reset between loops)
+// ---------------------------------------------------------------------------
+
+fn _multi_loop_accumulate(n -> number) -> number {
+    let mut sum1 -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        sum1 += i;
+        i += 1;
+    }
+
+    let mut sum2 -> number = 0;
+    let mut j -> number = 0;
+    loop {
+        if j >= n { break; }
+        sum2 += j * 2;
+        j += 1;
+    }
+
+    let mut sum3 -> number = 0;
+    let mut k -> number = 0;
+    loop {
+        if k >= n { break; }
+        sum3 += k * k;
+        k += 1;
+    }
+
+    return sum1 + sum2 + sum3;
+}
+
+test "nested_cf: multiple sequential loops" {
+    // n=4: sum1=0+1+2+3=6, sum2=0+2+4+6=12, sum3=0+1+4+9=14 -> 32
+    assert _multi_loop_accumulate(4) == 32;
+}
+
+test "nested_cf: multiple sequential loops with zero" {
+    assert _multi_loop_accumulate(0) == 0;
+}
