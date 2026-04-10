@@ -63,19 +63,19 @@ runs:
             SEED_NATIVE="build/seed/bin/sailfin"
 
     - name: Prepare test artifacts
-      shell: bash -l {0}
+      shell: bash {0}
       run: |
         set -euo pipefail
-        CONDA=$(which conda) make ci-prepare-test-artifacts
+        make ci-prepare-test-artifacts
 
     - name: Run tests (first-pass binary)
-      shell: bash -l {0}
+      shell: bash {0}
       run: |
         set -euo pipefail
-        CONDA=$(which conda) make test
+        make test
 
     - name: Build seedcheck (no Python fixups)
-      shell: bash -l {0}
+      shell: bash {0}
       run: |
         set -euo pipefail
         echo "[ci] building seedcheck with build.sh (zero fixups)..."
@@ -85,12 +85,12 @@ runs:
           JOBS=1 \
           CLANG="${{ inputs.clang }}" \
           MAX_TOTAL=3600 \
-          bash scripts/build.sh 2>&1
+          bash scripts/build.sh
         ls -lh build/native/sailfin-seedcheck
         build/native/sailfin-seedcheck version || true
 
     - name: Validate seedcheck (hello-world)
-      shell: bash -l {0}
+      shell: bash {0}
       run: |
         set -euo pipefail
         output=$(timeout 10 build/native/sailfin-seedcheck run examples/basics/hello-world.sfn 2>&1) || true
@@ -102,13 +102,13 @@ runs:
         echo "[ci] seedcheck runs hello-world.sfn OK"
 
     - name: Run tests (seedcheck binary)
-      shell: bash -l {0}
+      shell: bash {0}
       run: |
         set -euo pipefail
-        CONDA=$(which conda) make test NATIVE_BIN=build/native/sailfin-seedcheck
+        make test NATIVE_BIN=build/native/sailfin-seedcheck
 
     - name: Package artifacts
-      shell: bash -l {0}
+      shell: bash {0}
       run: |
         set -euo pipefail
-        CONDA=$(which conda) make ci-package TARGET="${{ inputs.target }}"
+        make ci-package TARGET="${{ inputs.target }}"
