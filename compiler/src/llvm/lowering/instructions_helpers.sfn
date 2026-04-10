@@ -166,6 +166,24 @@ fn _write_block_result_files(
     // which survive cross-module ABI corruption intact. Only scalar fields are corrupted.
 }
 
+// Read the block_result_terminated IPC file and return true only if the file
+// contains the string "1".  The seedcheck's compiled `== "1"` comparison
+// gets mis-compiled into a pointer-to-bool bitcast (double-encoding bug),
+// which reads byte 0x30 from the string "0" as non-zero (true).  Using
+// grapheme_at to extract the first character avoids the cross-module ABI
+// corruption entirely.
+fn _read_ipc_terminated() -> boolean ![io] {
+    let content = fs.readFile("build/sailfin/.block_result_terminated");
+    if content.length == 0 {
+        return false;
+    }
+    let first_char = grapheme_at(content, 0);
+    if first_char == "1" {
+        return true;
+    }
+    return false;
+}
+
 fn _parse_int_from_string(text -> string) -> number {
     let len = text.length;
     if len == 0 { return 0; }

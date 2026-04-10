@@ -38,6 +38,7 @@ import {
     _write_block_result_files,
     _parse_int_from_string,
     _read_ipc_int_min,
+    _read_ipc_terminated,
     write_bindings_to_files,
     write_locals_to_files,
     read_block_result_string_constants,
@@ -388,7 +389,7 @@ fn lower_instruction_range(
                 let _if_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
                 let _if_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
                 let _if_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _if_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                let _if_term = _read_ipc_terminated();
                 let mut _ci0 -> number = 0;
                 loop {
                     if _ci0 >= lowered.diagnostics.length { break; }
@@ -420,7 +421,7 @@ fn lower_instruction_range(
                 let _lp_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
                 let _lp_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
                 let _lp_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _lp_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                let _lp_term = _read_ipc_terminated();
                 let mut _ci1 -> number = 0;
                 loop {
                     if _ci1 >= lowered.diagnostics.length { break; }
@@ -452,7 +453,7 @@ fn lower_instruction_range(
                 let _ma_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
                 let _ma_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
                 let _ma_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _ma_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                let _ma_term = _read_ipc_terminated();
                 let mut _ci2 -> number = 0;
                 loop {
                     if _ci2 >= lowered.diagnostics.length { break; }
@@ -495,7 +496,7 @@ fn lower_instruction_range(
                 let _tr_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
                 let _tr_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
                 let _tr_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _tr_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                let _tr_term = _read_ipc_terminated();
                 current_temp = _tr_temp;
                 current_block_counter = _tr_blkctr;
                 current_next_local = _tr_nextloc;
@@ -545,7 +546,7 @@ fn lower_instruction_range(
                 let _fo_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
                 let _fo_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
                 let _fo_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _fo_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+                let _fo_term = _read_ipc_terminated();
                 current_temp = _fo_temp;
                 current_block_counter = _fo_blkctr;
                 current_next_local = _fo_nextloc;

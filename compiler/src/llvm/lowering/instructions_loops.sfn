@@ -282,14 +282,23 @@ fn lower_loop_instruction(
     let base_allocas = current_allocas;
     let base_local_id = current_next_local;
 
+    // When the exit-condition-at-top pattern was detected (if COND { break; } endif),
+    // skip those 3 instructions in the body to avoid double-processing.
+    // The seedcheck's get_instruction_tag returns 21 for the If variant, so the
+    // Break inside would set terminated=true and abort the body prematurely.
+    let mut body_start_effective = structure.body_start;
+    if loop_exit_condition.length > 0 {
+        body_start_effective = structure.body_start + 3;
+    }
+
     // Lower the body to discover mutations
     let body_scope_id = make_child_scope_id(scope_id, body_label);
     if debug_loop {
-        print.err("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+        print.err("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(body_start_effective) + " body_end=" + number_to_string(structure.body_end));
     }
     let body_result = lower_instruction_range(
         function,
-        structure.body_start,
+        body_start_effective,
         structure.body_end,
         llvm_return,
         current_bindings,
