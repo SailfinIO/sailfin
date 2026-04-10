@@ -112,6 +112,7 @@ The following capsules ship as part of the Sailfin standard library under
 | `sfn/layers` | `"layers"` | Shipped (CPU) | `gpu` (planned) | Linear layers, ReLU, sequential models |
 | `sfn/nn` | `"nn"` | Shipped (CPU) | `gpu` (planned) | Activations, normalization, argmax, one_hot |
 | `sfn/losses` | `"losses"` | Shipped | None | MSE, MAE, Huber, hinge loss functions |
+| `sfn/cli` | `"cli"` | Shipped | `io` | CLI arg parsing, subcommands, help generation, terminal styling |
 
 ## Runtime (Current)
 

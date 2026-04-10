@@ -1,0 +1,1032 @@
+// Tests for sfn/cli capsule — argument parsing, match accessors, and help generation.
+//
+// Functions are inlined here because standalone test files cannot import
+// from capsules directly. These mirror the public API in src/mod.sfn.
+
+// ---- Inlined types ----
+
+struct Arg {
+    name: string;
+    description: string;
+    is_optional: boolean;
+    default_value: string;
+}
+
+struct Flag {
+    long_name: string;
+    short_name: string;
+    description: string;
+    takes_value: boolean;
+}
+
+struct Command {
+    name: string;
+    description: string;
+    version: string;
+    args: Arg[];
+    flags: Flag[];
+    subcmds: Command[];
+}
+
+struct Matches {
+    command_name: string;
+    subcommand_name: string;
+    positional_names: string[];
+    positional_values: string[];
+    flag_names: string[];
+    flag_values: string[];
+    flag_present: boolean[];
+}
+
+// ---- Inlined builders ----
+
+fn _arg(name: string, description: string) -> Arg {
+    return Arg {
+        name: name,
+        description: description,
+        is_optional: false,
+        default_value: "",
+    };
+}
+
+fn _arg_optional(name: string, description: string, default_value: string) -> Arg {
+    return Arg {
+        name: name,
+        description: description,
+        is_optional: true,
+        default_value: default_value,
+    };
+}
+
+fn _flag(long_name: string, description: string) -> Flag {
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: false,
+    };
+}
+
+fn _flag_value(long_name: string, description: string) -> Flag {
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: true,
+    };
+}
+
+fn _flag_short(long_name: string, short_name: string, description: string) -> Flag {
+    return Flag {
+        long_name: long_name,
+        short_name: short_name,
+        description: description,
+        takes_value: false,
+    };
+}
+
+fn _flag_value_short(long_name: string, short_name: string, description: string) -> Flag {
+    return Flag {
+        long_name: long_name,
+        short_name: short_name,
+        description: description,
+        takes_value: true,
+    };
+}
+
+fn _command(name: string, description: string) -> Command {
+    let empty_args: Arg[] = [];
+    let empty_flags: Flag[] = [];
+    let empty_cmds: Command[] = [];
+    return Command {
+        name: name,
+        description: description,
+        version: "",
+        args: empty_args,
+        flags: empty_flags,
+        subcmds: empty_cmds,
+    };
+}
+
+fn _with_version(cmd: Command, version: string) -> Command {
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: version,
+        args: cmd.args,
+        flags: cmd.flags,
+        subcmds: cmd.subcmds,
+    };
+}
+
+fn _with_arg(cmd: Command, a: Arg) -> Command {
+    let mut new_args: Arg[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.args.length { break; }
+        new_args.push(cmd.args[i]);
+        i += 1;
+    }
+    new_args.push(a);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: new_args,
+        flags: cmd.flags,
+        subcmds: cmd.subcmds,
+    };
+}
+
+fn _with_flag(cmd: Command, f: Flag) -> Command {
+    let mut new_flags: Flag[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        new_flags.push(cmd.flags[i]);
+        i += 1;
+    }
+    new_flags.push(f);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: cmd.args,
+        flags: new_flags,
+        subcmds: cmd.subcmds,
+    };
+}
+
+fn _with_subcommand(cmd: Command, sub: Command) -> Command {
+    let mut new_subs: Command[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.subcmds.length { break; }
+        new_subs.push(cmd.subcmds[i]);
+        i += 1;
+    }
+    new_subs.push(sub);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: cmd.args,
+        flags: cmd.flags,
+        subcmds: new_subs,
+    };
+}
+
+// ---- Inlined match accessors ----
+
+fn _get(m: Matches, name: string) -> string {
+    let mut i: number = 0;
+    loop {
+        if i >= m.positional_names.length { break; }
+        if strings_equal(m.positional_names[i], name) {
+            return m.positional_values[i];
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            return m.flag_values[i];
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _get_or(m: Matches, name: string, default_value: string) -> string {
+    let mut i: number = 0;
+    loop {
+        if i >= m.positional_names.length { break; }
+        if strings_equal(m.positional_names[i], name) {
+            return m.positional_values[i];
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            return m.flag_values[i];
+        }
+        i += 1;
+    }
+    return default_value;
+}
+
+fn _has_flag(m: Matches, name: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _has(m: Matches, name: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= m.positional_names.length { break; }
+        if strings_equal(m.positional_names[i], name) {
+            return true;
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            return true;
+        }
+        i += 1;
+    }
+    return false;
+}
+
+fn _subcommand(m: Matches) -> string {
+    return m.subcommand_name;
+}
+
+// ---- Inlined parser (non-exiting version for tests) ----
+// This version returns a Matches struct without calling process.exit(),
+// so tests can exercise parse logic without terminating.
+
+fn _starts_with(text: string, prefix: string) -> boolean {
+    if prefix.length > text.length { return false; }
+    return strings_equal(substring(text, 0, prefix.length), prefix);
+}
+
+fn _find_flag_long(cmd: Command, name: string) -> Flag {
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        if strings_equal(cmd.flags[i].long_name, name) {
+            return cmd.flags[i];
+        }
+        i += 1;
+    }
+    return Flag { long_name: "", short_name: "", description: "", takes_value: false };
+}
+
+fn _find_flag_short(cmd: Command, name: string) -> Flag {
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        if strings_equal(cmd.flags[i].short_name, name) {
+            return cmd.flags[i];
+        }
+        i += 1;
+    }
+    return Flag { long_name: "", short_name: "", description: "", takes_value: false };
+}
+
+fn _resolve_active(cmd: Command, subcmd_name: string) -> Command {
+    if subcmd_name.length == 0 { return cmd; }
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.subcmds.length { break; }
+        if strings_equal(cmd.subcmds[i].name, subcmd_name) {
+            return cmd.subcmds[i];
+        }
+        i += 1;
+    }
+    return cmd;
+}
+
+fn _parse(cmd: Command, argv: string[]) -> Matches {
+    // Non-exiting parser for tests. Returns empty matches on error
+    // instead of calling process.exit().
+    let mut pos_names: string[] = [];
+    let mut pos_values: string[] = [];
+    let mut fl_names: string[] = [];
+    let mut fl_values: string[] = [];
+    let mut fl_present: boolean[] = [];
+    let mut subcmd_name: string = "";
+
+    let mut idx: number = 1;
+
+    if idx < argv.length {
+        let first = argv[idx];
+        if !_starts_with(first, "-") {
+            let mut si: number = 0;
+            loop {
+                if si >= cmd.subcmds.length { break; }
+                if strings_equal(cmd.subcmds[si].name, first) {
+                    subcmd_name = first;
+                    idx += 1;
+                    break;
+                }
+                si += 1;
+            }
+        }
+    }
+
+    let active = _resolve_active(cmd, subcmd_name);
+
+    let mut pos_idx: number = 0;
+    loop {
+        if idx >= argv.length { break; }
+        let token = argv[idx];
+
+        if _starts_with(token, "--") {
+            let flag_name = substring(token, 2, token.length);
+            let f = _find_flag_long(active, flag_name);
+            if f.long_name.length > 0 {
+                fl_names.push(f.long_name);
+                fl_present.push(true);
+                if f.takes_value {
+                    idx += 1;
+                    if idx < argv.length {
+                        fl_values.push(argv[idx]);
+                    } else {
+                        fl_values.push("");
+                    }
+                } else {
+                    fl_values.push("true");
+                }
+            }
+        } else if _starts_with(token, "-") && token.length > 1 {
+            let short = substring(token, 1, token.length);
+            let f = _find_flag_short(active, short);
+            if f.long_name.length > 0 {
+                fl_names.push(f.long_name);
+                fl_present.push(true);
+                if f.takes_value {
+                    idx += 1;
+                    if idx < argv.length {
+                        fl_values.push(argv[idx]);
+                    } else {
+                        fl_values.push("");
+                    }
+                } else {
+                    fl_values.push("true");
+                }
+            }
+        } else {
+            if pos_idx < active.args.length {
+                pos_names.push(active.args[pos_idx].name);
+                pos_values.push(token);
+                pos_idx += 1;
+            }
+        }
+        idx += 1;
+    }
+
+    // Fill optional arg defaults.
+    loop {
+        if pos_idx >= active.args.length { break; }
+        let a = active.args[pos_idx];
+        if a.is_optional {
+            pos_names.push(a.name);
+            pos_values.push(a.default_value);
+        }
+        pos_idx += 1;
+    }
+
+    return Matches {
+        command_name: cmd.name,
+        subcommand_name: subcmd_name,
+        positional_names: pos_names,
+        positional_values: pos_values,
+        flag_names: fl_names,
+        flag_values: fl_values,
+        flag_present: fl_present,
+    };
+}
+
+// ---- Inlined help formatter ----
+
+fn _help_hint(root_name: string, subcmd_name: string) -> string {
+    if subcmd_name.length > 0 {
+        return root_name + " " + subcmd_name + " --help";
+    }
+    return root_name + " --help";
+}
+
+fn _pad(text: string, width: number) -> string {
+    if text.length >= width { return text + "  "; }
+    let mut out: string = text;
+    let mut i: number = text.length;
+    loop {
+        if i >= width { break; }
+        out = out + " ";
+        i += 1;
+    }
+    return out;
+}
+
+fn _flag_label(f: Flag) -> string {
+    let mut label: string = "";
+    if f.short_name.length > 0 {
+        label = "-" + f.short_name + ", ";
+    } else {
+        label = "    ";
+    }
+    label = label + "--" + f.long_name;
+    if f.takes_value {
+        label = label + " <value>";
+    }
+    return label;
+}
+
+fn _max_name_width(cmd: Command) -> number {
+    let mut max: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.subcmds.length { break; }
+        if cmd.subcmds[i].name.length > max {
+            max = cmd.subcmds[i].name.length;
+        }
+        i += 1;
+    }
+    return max;
+}
+
+fn _max_arg_width(cmd: Command) -> number {
+    let mut max: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.args.length { break; }
+        let w = cmd.args[i].name.length + 2;
+        if w > max { max = w; }
+        i += 1;
+    }
+    return max;
+}
+
+fn _max_flag_width(cmd: Command) -> number {
+    let mut max: number = 0;
+    let built_in_help = 10;
+    let built_in_version = 13;
+    if built_in_help > max { max = built_in_help; }
+    if built_in_version > max { max = built_in_version; }
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        let w = _flag_label(cmd.flags[i]).length;
+        if w > max { max = w; }
+        i += 1;
+    }
+    return max;
+}
+
+fn _format_help(cmd: Command, program: string) -> string {
+    let mut out: string = "";
+    if cmd.description.length > 0 {
+        out = out + cmd.description + "\n\n";
+    }
+    out = out + "usage:\n";
+    out = out + "  " + program;
+    if cmd.subcmds.length > 0 {
+        out = out + " <command>";
+    }
+    if cmd.flags.length > 0 {
+        out = out + " [options]";
+    }
+    let mut ai: number = 0;
+    loop {
+        if ai >= cmd.args.length { break; }
+        let a = cmd.args[ai];
+        if a.is_optional {
+            out = out + " [" + a.name + "]";
+        } else {
+            out = out + " <" + a.name + ">";
+        }
+        ai += 1;
+    }
+    out = out + "\n";
+    if cmd.subcmds.length > 0 {
+        out = out + "\ncommands:\n";
+        let col_width = _max_name_width(cmd) + 2;
+        let mut si: number = 0;
+        loop {
+            if si >= cmd.subcmds.length { break; }
+            let sub = cmd.subcmds[si];
+            out = out + "  " + _pad(sub.name, col_width) + sub.description + "\n";
+            si += 1;
+        }
+    }
+    if cmd.args.length > 0 {
+        out = out + "\narguments:\n";
+        let arg_width = _max_arg_width(cmd) + 2;
+        ai = 0;
+        loop {
+            if ai >= cmd.args.length { break; }
+            let a = cmd.args[ai];
+            let label = "<" + a.name + ">";
+            out = out + "  " + _pad(label, arg_width) + a.description;
+            if a.is_optional {
+                out = out + " (default: " + a.default_value + ")";
+            }
+            out = out + "\n";
+            ai += 1;
+        }
+    }
+    out = out + "\noptions:\n";
+    let flag_width = _max_flag_width(cmd) + 2;
+    let mut fi: number = 0;
+    loop {
+        if fi >= cmd.flags.length { break; }
+        let f = cmd.flags[fi];
+        let label = _flag_label(f);
+        out = out + "  " + _pad(label, flag_width) + f.description + "\n";
+        fi += 1;
+    }
+    out = out + "  " + _pad("-h, --help", flag_width) + "Show this help message\n";
+    if cmd.version.length > 0 {
+        out = out + "  " + _pad("-V, --version", flag_width) + "Show version\n";
+    }
+    return out;
+}
+
+// ---- Inlined ANSI helpers ----
+
+fn _esc() -> string {
+    return "";
+}
+
+fn _ansi_wrap(code: string, text: string) -> string {
+    let e = _esc();
+    if e.length == 0 { return text; }
+    return e + "[" + code + "m" + text + e + "[0m";
+}
+
+fn _bold(text: string) -> string {
+    return _ansi_wrap("1", text);
+}
+
+fn _red(text: string) -> string {
+    return _ansi_wrap("31", text);
+}
+
+fn _green(text: string) -> string {
+    return _ansi_wrap("32", text);
+}
+
+// ======================================================================
+// Tests
+// ======================================================================
+
+// ---- Builder tests ----
+
+test "cli: arg creates required positional" {
+    let a = _arg("file", "Source file");
+    assert strings_equal(a.name, "file");
+    assert strings_equal(a.description, "Source file");
+    assert a.is_optional == false;
+    assert strings_equal(a.default_value, "");
+}
+
+test "cli: arg_optional creates optional positional with default" {
+    let a = _arg_optional("path", "Directory", ".");
+    assert strings_equal(a.name, "path");
+    assert a.is_optional == true;
+    assert strings_equal(a.default_value, ".");
+}
+
+test "cli: flag creates boolean flag" {
+    let f = _flag("verbose", "Enable verbose output");
+    assert strings_equal(f.long_name, "verbose");
+    assert strings_equal(f.short_name, "");
+    assert f.takes_value == false;
+}
+
+test "cli: flag_value creates value flag" {
+    let f = _flag_value("output", "Output path");
+    assert strings_equal(f.long_name, "output");
+    assert f.takes_value == true;
+}
+
+test "cli: flag_short creates flag with short alias" {
+    let f = _flag_short("verbose", "v", "Verbose output");
+    assert strings_equal(f.long_name, "verbose");
+    assert strings_equal(f.short_name, "v");
+    assert f.takes_value == false;
+}
+
+test "cli: flag_value_short creates value flag with short alias" {
+    let f = _flag_value_short("output", "o", "Output file");
+    assert strings_equal(f.long_name, "output");
+    assert strings_equal(f.short_name, "o");
+    assert f.takes_value == true;
+}
+
+test "cli: command creates empty command" {
+    let c = _command("myapp", "My application");
+    assert strings_equal(c.name, "myapp");
+    assert strings_equal(c.description, "My application");
+    assert strings_equal(c.version, "");
+    assert c.args.length == 0;
+    assert c.flags.length == 0;
+    assert c.subcmds.length == 0;
+}
+
+test "cli: with_version sets version" {
+    let c = _with_version(_command("myapp", "desc"), "1.2.3");
+    assert strings_equal(c.version, "1.2.3");
+}
+
+test "cli: with_arg adds positional argument" {
+    let c = _with_arg(_command("myapp", "desc"), _arg("file", "Source"));
+    assert c.args.length == 1;
+    assert strings_equal(c.args[0].name, "file");
+}
+
+test "cli: with_flag adds flag" {
+    let c = _with_flag(_command("myapp", "desc"), _flag("verbose", "Verbose"));
+    assert c.flags.length == 1;
+    assert strings_equal(c.flags[0].long_name, "verbose");
+}
+
+test "cli: with_subcommand adds subcommand" {
+    let sub = _command("build", "Build the project");
+    let c = _with_subcommand(_command("myapp", "desc"), sub);
+    assert c.subcmds.length == 1;
+    assert strings_equal(c.subcmds[0].name, "build");
+}
+
+test "cli: builders chain preserves all fields" {
+    let c = _with_flag(
+        _with_arg(
+            _with_version(
+                _command("myapp", "desc"),
+                "0.1.0"),
+            _arg("file", "Source")),
+        _flag("verbose", "Verbose"));
+    assert strings_equal(c.name, "myapp");
+    assert strings_equal(c.version, "0.1.0");
+    assert c.args.length == 1;
+    assert c.flags.length == 1;
+}
+
+// ---- Parsing tests ----
+
+test "cli: parse single positional argument" {
+    let cmd = _with_arg(_command("app", "desc"), _arg("file", "Source file"));
+    let argv: string[] = ["app", "hello.sfn"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get(m, "file"), "hello.sfn");
+}
+
+test "cli: parse multiple positional arguments" {
+    let cmd = _with_arg(
+        _with_arg(_command("app", "desc"), _arg("src", "Source")),
+        _arg("dst", "Destination"));
+    let argv: string[] = ["app", "a.sfn", "b.sfn"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get(m, "src"), "a.sfn");
+    assert strings_equal(_get(m, "dst"), "b.sfn");
+}
+
+test "cli: parse optional positional uses default when missing" {
+    let cmd = _with_arg(
+        _command("app", "desc"),
+        _arg_optional("path", "Directory", "."));
+    let argv: string[] = ["app"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get(m, "path"), ".");
+}
+
+test "cli: parse optional positional uses provided value" {
+    let cmd = _with_arg(
+        _command("app", "desc"),
+        _arg_optional("path", "Directory", "."));
+    let argv: string[] = ["app", "src/"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get(m, "path"), "src/");
+}
+
+test "cli: parse long boolean flag" {
+    let cmd = _with_flag(_command("app", "desc"), _flag("verbose", "Verbose"));
+    let argv: string[] = ["app", "--verbose"];
+    let m = _parse(cmd, argv);
+    assert _has_flag(m, "verbose") == true;
+}
+
+test "cli: parse long value flag" {
+    let cmd = _with_flag(_command("app", "desc"), _flag_value("output", "Out"));
+    let argv: string[] = ["app", "--output", "build/out"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get(m, "output"), "build/out");
+}
+
+test "cli: parse short boolean flag" {
+    let cmd = _with_flag(
+        _command("app", "desc"),
+        _flag_short("verbose", "v", "Verbose"));
+    let argv: string[] = ["app", "-v"];
+    let m = _parse(cmd, argv);
+    assert _has_flag(m, "verbose") == true;
+}
+
+test "cli: parse short value flag" {
+    let cmd = _with_flag(
+        _command("app", "desc"),
+        _flag_value_short("output", "o", "Out"));
+    let argv: string[] = ["app", "-o", "build/out"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get(m, "output"), "build/out");
+}
+
+test "cli: parse mixed flags and positionals" {
+    let cmd = _with_flag(
+        _with_flag(
+            _with_arg(_command("app", "desc"), _arg("file", "Source")),
+            _flag("verbose", "Verbose")),
+        _flag_value_short("output", "o", "Output"));
+    let argv: string[] = ["app", "--verbose", "-o", "out.bin", "main.sfn"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get(m, "file"), "main.sfn");
+    assert _has_flag(m, "verbose") == true;
+    assert strings_equal(_get(m, "output"), "out.bin");
+}
+
+test "cli: parse subcommand" {
+    let sub = _with_arg(_command("build", "Build"), _arg("file", "Source"));
+    let cmd = _with_subcommand(_command("app", "desc"), sub);
+    let argv: string[] = ["app", "build", "main.sfn"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_subcommand(m), "build");
+    assert strings_equal(_get(m, "file"), "main.sfn");
+}
+
+test "cli: parse subcommand with flags" {
+    let sub = _with_flag(
+        _with_arg(_command("build", "Build"), _arg("file", "Source")),
+        _flag_value_short("output", "o", "Output"));
+    let cmd = _with_subcommand(_command("app", "desc"), sub);
+    let argv: string[] = ["app", "build", "-o", "a.out", "main.sfn"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_subcommand(m), "build");
+    assert strings_equal(_get(m, "output"), "a.out");
+    assert strings_equal(_get(m, "file"), "main.sfn");
+}
+
+test "cli: no subcommand returns empty string" {
+    let cmd = _with_subcommand(
+        _command("app", "desc"),
+        _command("build", "Build"));
+    let argv: string[] = ["app"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_subcommand(m), "");
+}
+
+test "cli: unknown token treated as positional when no args defined" {
+    // When a non-flag token doesn't match a subcommand and no args are
+    // defined, _parse skips it (the real run() would exit with an error).
+    let cmd = _command("app", "desc");
+    let argv: string[] = ["app", "unknown"];
+    let m = _parse(cmd, argv);
+    assert m.positional_values.length == 0;
+}
+
+// ---- Match accessor tests ----
+
+test "cli: get returns empty string for missing name" {
+    let cmd = _with_arg(_command("app", "desc"), _arg("file", "Source"));
+    let argv: string[] = ["app", "test.sfn"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get(m, "nonexistent"), "");
+}
+
+test "cli: get_or returns default for missing name" {
+    let cmd = _with_arg(_command("app", "desc"), _arg("file", "Source"));
+    let argv: string[] = ["app", "test.sfn"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get_or(m, "missing", "fallback"), "fallback");
+}
+
+test "cli: get_or returns actual value when present" {
+    let cmd = _with_arg(_command("app", "desc"), _arg("file", "Source"));
+    let argv: string[] = ["app", "test.sfn"];
+    let m = _parse(cmd, argv);
+    assert strings_equal(_get_or(m, "file", "fallback"), "test.sfn");
+}
+
+test "cli: get_or returns empty string when explicitly provided as empty" {
+    // Construct matches manually to simulate an empty-string value.
+    let pn: string[] = ["file"];
+    let pv: string[] = [""];
+    let fn_arr: string[] = [];
+    let fv: string[] = [];
+    let fp: boolean[] = [];
+    let m = Matches {
+        command_name: "app",
+        subcommand_name: "",
+        positional_names: pn,
+        positional_values: pv,
+        flag_names: fn_arr,
+        flag_values: fv,
+        flag_present: fp,
+    };
+    // get_or should return "" (the actual value), NOT the default.
+    assert strings_equal(_get_or(m, "file", "fallback"), "");
+}
+
+test "cli: has_flag returns false for missing flag" {
+    let cmd = _with_flag(_command("app", "desc"), _flag("verbose", "V"));
+    let argv: string[] = ["app"];
+    let m = _parse(cmd, argv);
+    assert _has_flag(m, "verbose") == false;
+}
+
+test "cli: has returns true for present positional" {
+    let cmd = _with_arg(_command("app", "desc"), _arg("file", "Source"));
+    let argv: string[] = ["app", "main.sfn"];
+    let m = _parse(cmd, argv);
+    assert _has(m, "file") == true;
+}
+
+test "cli: has returns true for present flag" {
+    let cmd = _with_flag(_command("app", "desc"), _flag("verbose", "V"));
+    let argv: string[] = ["app", "--verbose"];
+    let m = _parse(cmd, argv);
+    assert _has(m, "verbose") == true;
+}
+
+test "cli: has returns false for missing name" {
+    let cmd = _command("app", "desc");
+    let argv: string[] = ["app"];
+    let m = _parse(cmd, argv);
+    assert _has(m, "anything") == false;
+}
+
+// ---- Help formatting tests ----
+
+test "cli: help contains command description" {
+    let cmd = _command("myapp", "My cool app");
+    let h = _format_help(cmd, "myapp");
+    // Description should appear at the top.
+    let mut found: boolean = false;
+    if h.length >= 11 {
+        if strings_equal(substring(h, 0, 11), "My cool app") {
+            found = true;
+        }
+    }
+    assert found == true;
+}
+
+test "cli: help contains usage line" {
+    let cmd = _command("myapp", "desc");
+    let h = _format_help(cmd, "myapp");
+    // Should contain "usage:" somewhere.
+    let mut i: number = 0;
+    let mut found: boolean = false;
+    loop {
+        if i + 6 > h.length { break; }
+        if strings_equal(substring(h, i, i + 6), "usage:") {
+            found = true;
+            break;
+        }
+        i += 1;
+    }
+    assert found == true;
+}
+
+test "cli: help lists subcommands" {
+    let cmd = _with_subcommand(
+        _command("myapp", "desc"),
+        _command("build", "Build the project"));
+    let h = _format_help(cmd, "myapp");
+    // Should contain "commands:" section and "build".
+    let mut i: number = 0;
+    let mut found_cmds: boolean = false;
+    loop {
+        if i + 9 > h.length { break; }
+        if strings_equal(substring(h, i, i + 9), "commands:") {
+            found_cmds = true;
+            break;
+        }
+        i += 1;
+    }
+    assert found_cmds == true;
+    i = 0;
+    let mut found_build: boolean = false;
+    loop {
+        if i + 5 > h.length { break; }
+        if strings_equal(substring(h, i, i + 5), "build") {
+            found_build = true;
+            break;
+        }
+        i += 1;
+    }
+    assert found_build == true;
+}
+
+test "cli: help lists arguments" {
+    let cmd = _with_arg(_command("myapp", "desc"), _arg("file", "Source file"));
+    let h = _format_help(cmd, "myapp");
+    let mut i: number = 0;
+    let mut found: boolean = false;
+    loop {
+        if i + 10 > h.length { break; }
+        if strings_equal(substring(h, i, i + 10), "arguments:") {
+            found = true;
+            break;
+        }
+        i += 1;
+    }
+    assert found == true;
+}
+
+test "cli: help lists flags" {
+    let cmd = _with_flag(
+        _command("myapp", "desc"),
+        _flag_short("verbose", "v", "Verbose output"));
+    let h = _format_help(cmd, "myapp");
+    let mut i: number = 0;
+    let mut found: boolean = false;
+    loop {
+        if i + 8 > h.length { break; }
+        if strings_equal(substring(h, i, i + 8), "options:") {
+            found = true;
+            break;
+        }
+        i += 1;
+    }
+    assert found == true;
+}
+
+test "cli: help always includes -h/--help" {
+    let cmd = _command("myapp", "desc");
+    let h = _format_help(cmd, "myapp");
+    let mut i: number = 0;
+    let mut found: boolean = false;
+    loop {
+        if i + 10 > h.length { break; }
+        if strings_equal(substring(h, i, i + 10), "-h, --help") {
+            found = true;
+            break;
+        }
+        i += 1;
+    }
+    assert found == true;
+}
+
+test "cli: help includes --version when version is set" {
+    let cmd = _with_version(_command("myapp", "desc"), "1.0.0");
+    let h = _format_help(cmd, "myapp");
+    let mut i: number = 0;
+    let mut found: boolean = false;
+    loop {
+        if i + 13 > h.length { break; }
+        if strings_equal(substring(h, i, i + 13), "-V, --version") {
+            found = true;
+            break;
+        }
+        i += 1;
+    }
+    assert found == true;
+}
+
+// ---- Help hint tests ----
+
+test "cli: help hint without subcommand" {
+    assert strings_equal(_help_hint("app", ""), "app --help");
+}
+
+test "cli: help hint with subcommand" {
+    assert strings_equal(_help_hint("app", "build"), "app build --help");
+}
+
+// ---- ANSI styling tests ----
+
+test "cli: ansi_wrap degrades to plain text when esc is empty" {
+    // With _esc() returning "", styling should be a no-op.
+    assert strings_equal(_bold("hello"), "hello");
+    assert strings_equal(_red("error"), "error");
+    assert strings_equal(_green("ok"), "ok");
+}
+
+// ---- Flag label formatting tests ----
+
+test "cli: flag_label long only" {
+    let f = _flag("verbose", "Verbose");
+    let label = _flag_label(f);
+    assert strings_equal(label, "    --verbose");
+}
+
+test "cli: flag_label with short alias" {
+    let f = _flag_short("verbose", "v", "Verbose");
+    let label = _flag_label(f);
+    assert strings_equal(label, "-v, --verbose");
+}
+
+test "cli: flag_label with value" {
+    let f = _flag_value("output", "Output");
+    let label = _flag_label(f);
+    assert strings_equal(label, "    --output <value>");
+}
+
+test "cli: flag_label with short and value" {
+    let f = _flag_value_short("output", "o", "Output");
+    let label = _flag_label(f);
+    assert strings_equal(label, "-o, --output <value>");
+}
