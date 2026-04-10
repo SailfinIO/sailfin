@@ -7,36 +7,37 @@ import BaseLayout from "../layouts/BaseLayout.astro";
     <div class="container">
       <h1>Why Sailfin?</h1>
       <p class="lead">
-        Sailfin is built for a world where AI, safety, and systems performance aren't competing concerns — they're unified in one language.
+        Sailfin is built for a world where safety and systems performance aren't competing concerns — they're unified in one language with compile-time capability enforcement.
       </p>
 
       <section id="use-cases">
         <h2>Use Cases</h2>
 
         <div class="card">
-          <h3>AI-Powered Services</h3>
+          <h3>Capability-Controlled Services</h3>
           <p>
-            Models, prompts, and pipelines are language primitives. You get type-safe model invocation,
-            structured prompt composition, and generation cards that track provenance — input hashes, cost,
-            latency, and seed — for every model call. No more stringly-typed LLM wrappers.
+            The effect system lets you declare what each function can do — IO, network access,
+            model calls — at compile time. The compiler checks that effectful operations like file access
+            and network calls are only used in functions that declare those effects.
           </p>
         </div>
 
         <div class="card">
           <h3>Systems Programming</h3>
           <p>
-            Sailfin compiles to native code via LLVM. Ownership and borrowing semantics (affine and linear types)
-            give you memory safety without a garbage collector. The effect system replaces runtime permission checks
-            with compile-time capability verification.
+            Sailfin compiles to native code via LLVM with a self-hosted compiler. The effect system replaces
+            runtime permission checks with compile-time capability verification. Ownership and borrowing syntax
+            is in place, with full enforcement landing before 1.0.
           </p>
         </div>
 
         <div class="card">
-          <h3>Secure Data Processing</h3>
+          <h3>Secure by Default</h3>
           <p>
-            <code>PII&lt;T&gt;</code> and <code>Secret&lt;T&gt;</code> wrapper types propagate through your program,
-            ensuring sensitive data can't be logged, serialized, or sent over the network without explicit handling.
-            Capability-based security means untrusted code can't access IO or network even at runtime.
+            Capability-based security means code must declare <code>io</code> or <code>net</code> effects
+            to directly perform those operations, with stronger sandboxed capability enforcement planned for
+            a future release. <code>PII&lt;T&gt;</code> and <code>Secret&lt;T&gt;</code> wrapper types are
+            supported as syntax, with taint-tracking enforcement planned for a future release.
           </p>
         </div>
 
@@ -54,8 +55,8 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         <h2>Security by Design</h2>
         <p>
           Every function declares its capabilities: <code>![io]</code>, <code>![net]</code>,
-          <code>![model]</code>, <code>![gpu]</code>. The compiler rejects calls that exceed declared
-          capabilities. This isn't a lint rule — it's a type system guarantee.
+          <code>![model]</code>, <code>![clock]</code>. The compiler checks that effectful operations
+          match declared capabilities. Transitive call-graph enforcement is planned for a future release.
         </p>
         <pre><code>// This won't compile — fetch_data needs ![net] but main only grants ![io]
 fn main() ![io] {"{"}

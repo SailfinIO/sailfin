@@ -1,20 +1,26 @@
 ---
-const exampleCode = `fn analyze(data: Dataset<Record>) -> Report ![io, model] {
-    let cleaned = data
-        .filter(|r| r.is_valid())
-        .map(|r| normalize(r));
+const exampleCode = `struct Config {
+    host: string,
+    port: number,
+    verbose: bool,
+}
 
-    model gpt4o = openai:"gpt-4o";
+fn load_config(path: string) -> Config ![io] {
+    let raw = fs.read(path);
+    return Config.parse(raw);
+}
 
-    let insights = prompt gpt4o ![model] {
-        system "You are a data analyst."
-        user "Summarize trends in: {{cleaned}}"
+fn handle(req: http.Request) -> http.Response ![net] {
+    return http.Response {
+        status: 200,
+        body: "Sailfin is running",
     };
+}
 
-    Report {
-        data: cleaned,
-        summary: insights,
-    }
+fn main() ![io, net] {
+    let config = load_config("app.toml");
+    print("Listening on " + config.host);
+    serve(handle, { port: config.port });
 }`;
 ---
 
@@ -23,7 +29,7 @@ const exampleCode = `fn analyze(data: Dataset<Record>) -> Report ![io, model] {
     <div class="hero-text">
       <h1>Build safe, intelligent systems with <span class="highlight">Sailfin</span></h1>
       <p class="hero-subtitle">
-        An AI-native, systems-friendly programming language with effect types, ownership semantics, and first-class AI constructs.
+        A systems-friendly programming language with effect types, capability-based security, and native compilation via LLVM.
       </p>
       <div class="hero-actions">
         <a href="/docs/getting-started/install" class="btn btn-primary">Get Started</a>
@@ -39,7 +45,7 @@ const exampleCode = `fn analyze(data: Dataset<Record>) -> Report ![io, model] {
           <span class="dot red"></span>
           <span class="dot yellow"></span>
           <span class="dot green"></span>
-          <span class="code-filename">analyze.sfn</span>
+          <span class="code-filename">server.sfn</span>
         </div>
         <pre><code>{exampleCode}</code></pre>
       </div>
@@ -131,6 +137,7 @@ const exampleCode = `fn analyze(data: Dataset<Record>) -> Report ![io, model] {
     padding: 0.75rem 1rem;
     border-radius: 8px;
     font-size: 0.875rem;
+    overflow-x: auto;
   }
 
   .hero-code {
@@ -175,6 +182,7 @@ const exampleCode = `fn analyze(data: Dataset<Record>) -> Report ![io, model] {
     padding: 1.25rem 1.5rem;
     background: var(--gray-900);
     border-radius: 0;
+    overflow-x: auto;
   }
 
   .code-window code {
@@ -201,6 +209,11 @@ const exampleCode = `fn analyze(data: Dataset<Record>) -> Report ![io, model] {
 
     .hero-actions {
       justify-content: center;
+    }
+
+    .hero-code {
+      width: 100%;
+      max-width: 100%;
     }
   }
 </style>
