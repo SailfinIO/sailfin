@@ -195,6 +195,19 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
                     if _has_prefix_cmd(spec, "../") { is_relative = true; }
                     if is_relative {
                         spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                    } else {
+                        // Check for capsule imports: bare name ("test") or scoped ("sfn/test")
+                        let mut is_capsule -> boolean = false;
+                        if _is_stdlib_capsule_cmd(spec) { is_capsule = true; }
+                        if !is_capsule {
+                            if _has_prefix_cmd(spec, "sfn/") {
+                                let capsule_suffix = substring(spec, 4, spec.length);
+                                if _is_stdlib_capsule_cmd(capsule_suffix) { is_capsule = true; }
+                            }
+                        }
+                        if is_capsule {
+                            spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                        }
                     }
                 }
             }
@@ -257,7 +270,26 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
     let mut index -> number = 0;
     loop {
         if index >= spans.length { break; }
-        let dep_path = _resolve_import_path_cmd(base_dir, spans[index].spec);
+        let spec = spans[index].spec;
+
+        // Resolve capsule imports to filesystem paths
+        let mut dep_path -> string = "";
+        let mut is_capsule_import -> boolean = false;
+        if _is_stdlib_capsule_cmd(spec) {
+            let resolved_name = _resolve_capsule_name_cmd(spec);
+            dep_path = "capsules/" + resolved_name + "/src/mod.sfn";
+            is_capsule_import = true;
+        } else if _has_prefix_cmd(spec, "sfn/") {
+            let capsule_suffix = substring(spec, 4, spec.length);
+            if _is_stdlib_capsule_cmd(capsule_suffix) {
+                dep_path = "capsules/" + spec + "/src/mod.sfn";
+                is_capsule_import = true;
+            }
+        }
+        if !is_capsule_import {
+            dep_path = _resolve_import_path_cmd(base_dir, spec);
+        }
+
         let is_prebuilt = _has_prefix_cmd(dep_path, "runtime/");
         if !is_prebuilt {
             if !_string_list_contains_cmd(next_visited, dep_path) {
