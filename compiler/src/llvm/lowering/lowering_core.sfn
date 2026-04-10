@@ -33,7 +33,6 @@ import {
     parse_native_functions_from_text,
     parse_native_bindings_from_text,
     parse_native_structs_for_import,
-    parse_native_enums_for_import,
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 
@@ -107,6 +106,7 @@ import {
     recover_native_functions_light,
     recover_native_imports_light,
     recover_native_structs_light,
+    recover_native_enums_light,
     recover_functions_for_lowering,
 } from "./lowering_recovery";
 
@@ -161,7 +161,7 @@ fn build_parse_result_from_text(native_text -> string) -> ParseNativeResult {
     let recovered_functions = recover_native_functions_light(native_text);
     let recovered_structs = recover_native_structs_light(native_text);
     let recovered_imports = recover_native_imports_light(native_text);
-    let recovered_enums = parse_native_enums_for_import(native_text);
+    let recovered_enums = recover_native_enums_light(native_text);
     return ParseNativeResult {
         functions: recovered_functions,
         imports: recovered_imports,
@@ -447,7 +447,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         }
         // Single-pass: parse structs+enums once, apply manifest once
         let imported_structs_safe = parse_native_structs_for_import(native_text);
-        let imported_enums_safe = parse_native_enums_for_import(native_text);
+        let imported_enums_safe = recover_native_enums_light(native_text);
         let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
         let mut applied_structs = applied_import.structs;
         if applied_structs == null {

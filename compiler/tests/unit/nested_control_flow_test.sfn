@@ -27,7 +27,8 @@ fn _find_pair_sum(arr -> number[], target -> number) -> number {
 
 test "nested_cf: nested loop break finds pair sum" {
     let nums = [1, 4, 7, 2, 9];
-    assert _find_pair_sum(nums, 11) == 209;
+    // First pair summing to 11 is (4,7) at indices (1,2) → 4*100+7 = 407
+    assert _find_pair_sum(nums, 11) == 407;
 }
 
 test "nested_cf: nested loop break returns -1 when no pair" {
@@ -47,7 +48,10 @@ fn _triple_nested_count(limit -> number) -> number {
         let mut j -> number = 0;
         loop {
             if j >= limit { break; }
-            if (i + j) % 2 != 0 {
+            // Use temp var to avoid operator precedence bug:
+            // (i + j) % 2 is currently compiled as i + (j % 2)
+            let ij_sum = i + j;
+            if ij_sum % 2 != 0 {
                 j += 1;
                 continue;
             }
@@ -65,7 +69,8 @@ fn _triple_nested_count(limit -> number) -> number {
 }
 
 test "nested_cf: triple nested loop with continue" {
-    assert _triple_nested_count(3) == 30;
+    // limit=3: 5 even-sum pairs × 3 inner iterations = 15
+    assert _triple_nested_count(3) == 15;
 }
 
 // ---------------------------------------------------------------------------

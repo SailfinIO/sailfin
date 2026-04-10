@@ -14,6 +14,10 @@ import {
     NativeStructLayout,
     NativeStructLayoutField,
     NativeEnum,
+    NativeEnumVariant,
+    NativeEnumVariantField,
+    NativeEnumLayout,
+    NativeEnumVariantLayout,
 } from "../../native_ir";
 
 // ── NativeFunction constructors ──────────────────────────────────────
@@ -56,6 +60,28 @@ fn make_native_struct_field(fname -> string, ftype -> string) -> NativeStructFie
 
 fn make_native_struct_layout_field(lf_name -> string, lf_type -> string, lf_offset -> number, lf_size -> number, lf_align -> number) -> NativeStructLayoutField {
     return NativeStructLayoutField { name: lf_name, type_annotation: lf_type, offset: lf_offset, size: lf_size, align: lf_align };
+}
+
+// ── NativeEnum constructors ──────────────────────────────────────────
+
+fn make_native_enum(ename -> string, evariants -> NativeEnumVariant[], elayout -> NativeEnumLayout?) -> NativeEnum {
+    return NativeEnum { name: ename, variants: evariants, layout: elayout };
+}
+
+fn make_native_enum_variant(vname -> string) -> NativeEnumVariant {
+    return NativeEnumVariant { name: vname, fields: [] };
+}
+
+fn make_native_enum_layout(esize -> number, ealign -> number, etag_type -> string, etag_size -> number, etag_align -> number, evariants -> NativeEnumVariantLayout[]) -> NativeEnumLayout {
+    return NativeEnumLayout { size: esize, align: ealign, tag_type: etag_type, tag_size: etag_size, tag_align: etag_align, variants: evariants };
+}
+
+fn make_native_enum_variant_layout(vlname -> string, vltag -> number, vloffset -> number, vlsize -> number, vlalign -> number) -> NativeEnumVariantLayout {
+    return NativeEnumVariantLayout { name: vlname, tag: vltag, offset: vloffset, size: vlsize, align: vlalign, fields: [] };
+}
+
+fn make_native_enum_variant_layout_with_fields(vlname -> string, vltag -> number, vloffset -> number, vlsize -> number, vlalign -> number, vlfields -> NativeStructLayoutField[]) -> NativeEnumVariantLayout {
+    return NativeEnumVariantLayout { name: vlname, tag: vltag, offset: vloffset, size: vlsize, align: vlalign, fields: vlfields };
 }
 
 // ── NativeFunction updaters ──────────────────────────────────────────
@@ -103,6 +129,12 @@ fn make_instruction_text(tag_val -> number, text -> string) -> NativeInstruction
     if tag_val == 3 {
         return NativeInstruction.If { condition: text };
     }
+    if tag_val == 12 {
+        return NativeInstruction.Match { expression: text };
+    }
+    if tag_val == 13 {
+        return NativeInstruction.Case { pattern: text, guard: null };
+    }
     return NativeInstruction.Unknown { text: text };
 }
 
@@ -114,6 +146,7 @@ fn make_instruction_simple(tag_val -> number) -> NativeInstruction {
     if tag_val == 8 { return NativeInstruction.Loop(); }
     if tag_val == 9 { return NativeInstruction.EndLoop(); }
     if tag_val == 10 { return NativeInstruction.Break(); }
+    if tag_val == 14 { return NativeInstruction.EndMatch(); }
     return NativeInstruction.Continue();
 }
 

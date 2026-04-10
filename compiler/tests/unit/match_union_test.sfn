@@ -1,0 +1,65 @@
+// Regression tests for match on union return types
+// https://github.com/SailfinIO/sailfin/issues/50 — Pattern 4
+//
+// Currently FAILING. Root cause is NOT in match lowering — the match
+// destructuring code generates correct LLVM IR (extractvalue, field
+// extraction, tag comparison). The issue is that functions with union
+// return types (e.g. `-> number | DivError`) are lowered with return
+// type `i8*` instead of the tagged union struct `{ i32, double, %DivError* }`.
+// The caller correctly expects the union struct, creating a type mismatch.
+//
+// This is a pre-existing union return type lowering issue, not a match bug.
+
+struct DivError {
+    message -> string;
+}
+
+fn _safe_divide(a -> number, b -> number) -> number | DivError {
+    if b == 0 {
+        return DivError { message: "division by zero" };
+    }
+    return a / b;
+}
+
+fn _describe_divide(a -> number, b -> number) -> string {
+    let result = _safe_divide(a, b);
+    match result {
+        DivError { message } -> return "error: " + message,
+        _ -> return "ok",
+    }
+}
+
+test "match: union return type success path" {
+    assert _describe_divide(10, 2) == "ok";
+}
+
+test "match: union return type error path" {
+    assert _describe_divide(10, 0) == "error: division by zero";
+}
+
+struct NegativeError {
+    message -> string;
+}
+
+fn _parse_positive(n -> number) -> number | NegativeError {
+    if n < 0 {
+        return NegativeError { message: "negative" };
+    }
+    return n;
+}
+
+fn _describe_parse(n -> number) -> string {
+    let result = _parse_positive(n);
+    match result {
+        NegativeError { message } -> return "error: " + message,
+        _ -> return "valid",
+    }
+}
+
+test "match: union return parse positive value" {
+    assert _describe_parse(42) == "valid";
+}
+
+test "match: union return parse negative value" {
+    assert _describe_parse(-5) == "error: negative";
+}

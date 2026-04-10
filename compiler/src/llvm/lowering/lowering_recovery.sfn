@@ -16,6 +16,11 @@ import {
     NativeStructField,
     NativeStructLayout,
     NativeStructLayoutField,
+    NativeEnum,
+    NativeEnumVariant,
+    NativeEnumVariantField,
+    NativeEnumLayout,
+    NativeEnumVariantLayout,
     ParseNativeResult,
 } from "../../native_ir";
 import {
@@ -56,6 +61,12 @@ import {
     make_instruction_text,
     make_instruction_simple,
     make_instruction_for,
+    make_native_enum,
+    make_native_enum_variant,
+    make_native_enum_layout,
+    make_native_enum_variant_layout,
+    make_native_enum_variant_layout_with_fields,
+    make_native_struct_layout_field,
     update_function_return_type,
     update_function_effects,
     append_param_to_function,
@@ -156,6 +167,11 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let is_endfor_kw = line == ".endfor";
         let is_break_kw = line == "break";
         let is_continue_kw = line == "continue";
+        let is_match_kw = starts_with_local(line, ".match ");
+        let is_endmatch_kw = line == ".endmatch";
+        let is_case_kw = starts_with_local(line, ".case ");
+        let inline_arrow_idx = index_of(line, " => ");
+        let is_inline_case = inline_arrow_idx > 0;
 
         // --- Pre-compute values needed by multiple branches ---
         let method_header = trim_text_local(substring(line, 8, line.length));
@@ -187,6 +203,23 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let for_in_idx = index_of(for_body_raw, " in ");
         let for_target_raw = trim_text_local(substring(for_body_raw, 0, for_in_idx));
         let for_iterable_raw = trim_text_local(substring(for_body_raw, for_in_idx + 4, for_body_raw.length));
+
+        // Pre-compute match/case extraction.
+        let match_expr_raw = trim_text_local(substring(line, 7, line.length));
+        let case_pattern_raw = trim_text_local(substring(line, 6, line.length));
+        // Inline case: pattern => body,
+        let inline_pattern_raw = trim_text_local(substring(line, 0, inline_arrow_idx));
+        let inline_body_full = trim_text_local(substring(line, inline_arrow_idx + 4, line.length));
+        // Strip trailing comma from inline body
+        let mut inline_body_raw -> string = inline_body_full;
+        if inline_body_full.length > 0 {
+            let last_char = substring(inline_body_full, inline_body_full.length - 1, inline_body_full.length);
+            if last_char == "," {
+                inline_body_raw = trim_text_local(substring(inline_body_full, 0, inline_body_full.length - 1));
+            }
+        }
+        let inline_body_is_return = starts_with_local(inline_body_raw, "return ");
+        let inline_return_expr = trim_text_local(substring(inline_body_raw, 7, inline_body_raw.length));
 
         // --- Struct tracking ---
         if is_struct_start {
@@ -443,6 +476,34 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
         if is_continue_kw {
             next_instruction = make_instruction_simple(11);
+        }
+        if is_match_kw {
+            next_instruction = make_instruction_text(12, match_expr_raw);
+        }
+        if is_endmatch_kw {
+            next_instruction = make_instruction_simple(14);
+        }
+        if is_case_kw {
+            next_instruction = make_instruction_text(13, case_pattern_raw);
+        }
+        // Inline match case: `pattern => body,` — emit Case + body instructions.
+        // Must NOT fire on `.case` or `.match` lines that happen to contain ` => `.
+        let mut _inline_score -> number = 0;
+        if is_inline_case { _inline_score += 1; }
+        if !is_match_kw { _inline_score += 1; }
+        if !is_case_kw { _inline_score += 1; }
+        if !is_endmatch_kw { _inline_score += 1; }
+        if !is_fn_start { _inline_score += 1; }
+        if !is_fn_end { _inline_score += 1; }
+        if _inline_score >= 6 {
+            let case_instr = make_instruction_text(13, inline_pattern_raw);
+            current = append_instruction_to_function(current, case_instr);
+            if inline_body_is_return {
+                next_instruction = make_instruction_text(0, inline_return_expr);
+            }
+            if !inline_body_is_return {
+                next_instruction = make_instruction_text(1, inline_body_raw);
+            }
         }
 
         current = append_instruction_to_function(current, next_instruction);
@@ -839,3 +900,183 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
 
 // build_parse_result_from_text lives in lowering_core.sfn to preserve
 // cross-module symbol mangling compatibility with the v0.1.1 seed shims.
+
+// ── Enum recovery ───────────────────────────────────────────────────
+// Light line-scanner for .enum/.endenum blocks, analogous to
+// recover_native_structs_light.  Avoids the cross-module ABI corruption
+// that makes parse_native_enums_for_import return empty arrays.
+
+fn recover_native_enums_light(native_text -> string) -> NativeEnum[] {
+    let lines = split_lines_local(native_text);
+    let mut enums -> NativeEnum[] = [];
+    let mut in_enum -> boolean = false;
+    let mut enum_name -> string = "";
+    let mut variants -> NativeEnumVariant[] = [];
+    let mut variant_layouts -> NativeEnumVariantLayout[] = [];
+    let mut layout_size -> number = 0;
+    let mut layout_align -> number = 0;
+    let mut layout_tag_type -> string = "i32";
+    let mut layout_tag_size -> number = 4;
+    let mut layout_tag_align -> number = 4;
+    let mut has_layout -> boolean = false;
+
+    // Deferred variant layout — accumulate payload fields before flushing.
+    let mut pending_vl_name -> string = "";
+    let mut pending_vl_tag -> number = 0;
+    let mut pending_vl_offset -> number = 0;
+    let mut pending_vl_size -> number = 0;
+    let mut pending_vl_align -> number = 0;
+    let mut pending_vl_fields -> NativeStructLayoutField[] = [];
+    let mut has_pending_vl -> boolean = false;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = trim_text_local(lines[index]);
+        let mut _skip -> boolean = false;
+        if line.length == 0 { _skip = true; }
+        if starts_with_local(line, ";") { _skip = true; }
+        if _skip {
+            index += 1;
+            continue;
+        }
+
+        let is_enum_start = starts_with_local(line, ".enum ");
+        let is_enum_end = line == ".endenum";
+        let is_layout_enum = starts_with_local(line, ".layout enum ");
+        let is_layout_variant = starts_with_local(line, ".layout variant ");
+        let is_layout_payload = starts_with_local(line, ".layout payload ");
+        let is_variant = starts_with_local(line, ".variant ");
+
+        if is_enum_start {
+            // Flush any pending variant from a previous enum (shouldn't happen)
+            if has_pending_vl {
+                variant_layouts = variant_layouts.push(make_native_enum_variant_layout_with_fields(pending_vl_name, pending_vl_tag, pending_vl_offset, pending_vl_size, pending_vl_align, pending_vl_fields));
+                has_pending_vl = false;
+            }
+            in_enum = true;
+            enum_name = trim_text_local(substring(line, 6, line.length));
+            variants = [];
+            variant_layouts = [];
+            layout_size = 0;
+            layout_align = 0;
+            layout_tag_type = "i32";
+            layout_tag_size = 4;
+            layout_tag_align = 4;
+            has_layout = false;
+            index += 1;
+            continue;
+        }
+
+        if is_enum_end {
+            if in_enum {
+                // Flush pending variant layout
+                if has_pending_vl {
+                    variant_layouts = variant_layouts.push(make_native_enum_variant_layout_with_fields(pending_vl_name, pending_vl_tag, pending_vl_offset, pending_vl_size, pending_vl_align, pending_vl_fields));
+                    has_pending_vl = false;
+                }
+                if has_layout {
+                    let elayout = make_native_enum_layout(layout_size, layout_align, layout_tag_type, layout_tag_size, layout_tag_align, variant_layouts);
+                    enums = enums.push(make_native_enum(enum_name, variants, elayout));
+                }
+                if !has_layout {
+                    enums = enums.push(make_native_enum(enum_name, variants, null));
+                }
+                in_enum = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if !in_enum {
+            index += 1;
+            continue;
+        }
+
+        // .layout enum name=X size=N align=N tag_type=TT tag_size=N tag_align=N
+        if is_layout_enum {
+            has_layout = true;
+            let le_text = trim_text_local(substring(line, 13, line.length));
+            layout_size = extract_kv_number(le_text, "size=", 5);
+            layout_align = extract_kv_number(le_text, "align=", 6);
+            layout_tag_type = extract_kv_string(le_text, "tag_type=", 9);
+            layout_tag_size = extract_kv_number(le_text, "tag_size=", 9);
+            layout_tag_align = extract_kv_number(le_text, "tag_align=", 10);
+            index += 1;
+            continue;
+        }
+
+        // .layout variant Name tag=N offset=N size=N align=N
+        // Flush any pending variant before starting the next one.
+        if is_layout_variant {
+            if has_pending_vl {
+                variant_layouts = variant_layouts.push(make_native_enum_variant_layout_with_fields(pending_vl_name, pending_vl_tag, pending_vl_offset, pending_vl_size, pending_vl_align, pending_vl_fields));
+            }
+            let lv_text = trim_text_local(substring(line, 16, line.length));
+            let lv_name_end = index_of(lv_text, " ");
+            let lv_name = substring(lv_text, 0, lv_name_end);
+            pending_vl_name = lv_name;
+            pending_vl_tag = extract_kv_number(lv_text, "tag=", 4);
+            pending_vl_offset = extract_kv_number(lv_text, "offset=", 7);
+            pending_vl_size = extract_kv_number(lv_text, "size=", 5);
+            pending_vl_align = extract_kv_number(lv_text, "align=", 6);
+            pending_vl_fields = [];
+            has_pending_vl = true;
+            index += 1;
+            continue;
+        }
+
+        // .layout payload VariantName.field_name type=T offset=N size=N align=N
+        if is_layout_payload {
+            let lp_text = trim_text_local(substring(line, 16, line.length));
+            let lp_name_end = index_of(lp_text, " ");
+            let lp_qualified = substring(lp_text, 0, lp_name_end);
+            // Extract field name after the dot: "Circle.radius" -> "radius"
+            let lp_dot = index_of(lp_qualified, ".");
+            let mut lp_field_name -> string = lp_qualified;
+            if lp_dot >= 0 {
+                lp_field_name = substring(lp_qualified, lp_dot + 1, lp_qualified.length);
+            }
+            let lp_type = extract_kv_string(lp_text, "type=", 5);
+            let lp_offset = extract_kv_number(lp_text, "offset=", 7);
+            let lp_size = extract_kv_number(lp_text, "size=", 5);
+            let lp_align = extract_kv_number(lp_text, "align=", 6);
+            pending_vl_fields = pending_vl_fields.push(make_native_struct_layout_field(lp_field_name, lp_type, lp_offset, lp_size, lp_align));
+            index += 1;
+            continue;
+        }
+
+        // .variant Name or .variant Name { field -> type, ... }
+        // Strip field text from variant name for tagged enums.
+        if is_variant {
+            let var_raw = trim_text_local(substring(line, 9, line.length));
+            let var_brace = index_of(var_raw, " {");
+            let mut var_name -> string = var_raw;
+            if var_brace > 0 {
+                var_name = trim_text_local(substring(var_raw, 0, var_brace));
+            }
+            variants = variants.push(make_native_enum_variant(var_name));
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+    }
+    // Handle unclosed enum block
+    if has_pending_vl {
+        variant_layouts = variant_layouts.push(make_native_enum_variant_layout_with_fields(pending_vl_name, pending_vl_tag, pending_vl_offset, pending_vl_size, pending_vl_align, pending_vl_fields));
+        has_pending_vl = false;
+    }
+    if in_enum {
+        if has_layout {
+            let elayout = make_native_enum_layout(layout_size, layout_align, layout_tag_type, layout_tag_size, layout_tag_align, variant_layouts);
+            enums = enums.push(make_native_enum(enum_name, variants, elayout));
+        }
+        if !has_layout {
+            enums = enums.push(make_native_enum(enum_name, variants, null));
+        }
+    }
+    return enums;
+}

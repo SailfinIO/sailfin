@@ -34,7 +34,6 @@ import {
     parse_native_structs_for_import,
     parse_native_imports_for_import,
     parse_native_interfaces_for_import,
-    parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_artifact_for_import_context,
     parse_layout_manifest,
