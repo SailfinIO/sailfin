@@ -1,0 +1,73 @@
+SAILFIN TRADEMARK POLICY
+
+The Sailfin programming language is open-source software licensed under the
+GNU General Public License v2. However, the brand assets described below are
+NOT covered by the GPL and are not licensed for unrestricted use.
+
+Trademarks
+----------
+
+The following are trademarks of Sailfin, LLC:
+
+  - The name "Sailfin"
+  - The abbreviation "sfn"
+  - The Sailfin logo and mascot ("Guillermo")
+  - The domain names sailfin.dev and sfn.dev
+
+These marks identify the official Sailfin project and distinguish it from
+derivative works or forks.
+
+Brand Assets
+------------
+
+The following files in this repository are brand assets owned by Sailfin, LLC
+and are NOT licensed under the GPLv2:
+
+  - site/public/images/sfn_lang_logo_256.svg
+  - site/public/images/sfn_lang_logo_256.png
+  - site/public/favicon.svg
+  - Any other files containing the Sailfin logo or mascot
+
+These assets are copyrighted by Sailfin, LLC and may not be used, modified,
+or distributed except as described below.
+
+Permitted Uses
+--------------
+
+You MAY:
+
+  - Use the name "Sailfin" or "sfn" to refer to the official project in a
+    factual, non-misleading way (e.g., "compatible with Sailfin",
+    "written in Sailfin", "a fork of Sailfin")
+  - Link to the Sailfin logo when referring to the official project
+  - Use screenshots of Sailfin for reviews, articles, or educational content
+
+You MAY NOT:
+
+  - Use the Sailfin name, logo, or mascot in a way that suggests your project
+    is the official Sailfin or is endorsed by Sailfin, LLC
+  - Use the logo or mascot in a fork or derivative work — forks must rebrand
+    with their own name and visual identity
+  - Use the logo or mascot on merchandise, products, or services without
+    prior written permission from Sailfin, LLC
+  - Modify the logo or mascot and present the modified version as an official
+    Sailfin mark
+
+Forks and Derivative Works
+--------------------------
+
+If you fork the Sailfin compiler or runtime, you are free to do so under the
+GPLv2. However, your fork must use a different name and must not include the
+Sailfin logo, mascot, or favicon. This ensures users can distinguish official
+releases from community forks.
+
+This is the same approach used by Mozilla (Firefox/Iceweasel), Red Hat
+(RHEL/CentOS), and other major open-source projects.
+
+Contact
+-------
+
+For trademark usage questions or permission requests, contact Sailfin, LLC
+at legal@sailfin.dev or open an issue at:
+
+  https://github.com/SailfinIO/sailfin/issues
