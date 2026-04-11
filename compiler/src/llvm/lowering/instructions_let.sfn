@@ -407,7 +407,19 @@ fn lower_let_instruction(
         current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
     }
 
-    current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: instruction.type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth });
+    // For locals that hold async futures, store the underlying return type
+    // as type_annotation so the await handler can unbox structs.
+    let mut local_type_annotation -> string = instruction.type_annotation;
+    if llvm_type == "%SailfinFuturePtr*" {
+        if fs.exists("build/sailfin/.async_inner_return_type") {
+            let async_inner = fs.readFile("build/sailfin/.async_inner_return_type");
+            if async_inner.length > 0 {
+                local_type_annotation = async_inner;
+            }
+            fs.deleteFile("build/sailfin/.async_inner_return_type");
+        }
+    }
+    current_locals = append_local_binding(current_locals, LocalBinding { name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: local_type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth });
 
     let mutation = LocalMutation {
         name: instruction.name,

@@ -463,7 +463,30 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
 
             // If we're awaiting an opaque pointer future in a typed context, try to unbox.
             // This avoids leaking boxed aggregates (struct/enum values) returned as `i8*`.
-            let trimmed_expected = trim_text(expected_type);
+            let mut trimmed_expected = trim_text(expected_type);
+            // When expected_type is empty (no annotation on the let), try to infer
+            // the concrete return type from the future's local binding.  The let
+            // lowerer stores the async function's Sailfin return type in
+            // type_annotation when it creates the future local.
+            if future_operand.llvm_type == "%SailfinFuturePtr*" {
+                if trimmed_expected.length == 0 || trimmed_expected == "i8*" {
+                    let awaited_var = trim_text(remainder);
+                    let future_local = find_local_binding(locals, awaited_var);
+                    if future_local != null {
+                        let ann = trim_text(future_local.type_annotation);
+                        if ann.length > 0 {
+                            let mapped = map_return_type(context, ann);
+                            if mapped.length > 0 {
+                                if mapped != "i8*" {
+                                    if !ends_with_pointer_suffix(mapped) {
+                                        trimmed_expected = mapped;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if future_operand.llvm_type == "%SailfinFuturePtr*" {
                 if trimmed_expected.length > 0 {
                     if trimmed_expected != "i8*" {

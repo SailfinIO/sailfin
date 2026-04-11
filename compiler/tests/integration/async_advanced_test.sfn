@@ -114,32 +114,20 @@ test "async_adv: conditional false" {
 // Async with struct return
 // ---------------------------------------------------------------------------
 
-// NOTE: async functions returning structs are a known compiler limitation —
-// await unboxes via runtime field lookup instead of typed extractvalue.
-// Test struct construction synchronously and async with scalar types instead.
 struct AsyncResult {
     value -> number;
     label -> string;
 }
 
-fn computeWithLabelSync(v -> number, l -> string) -> AsyncResult {
+async fn computeWithLabel(v -> number, l -> string) -> AsyncResult {
     return AsyncResult { value: v * 2, label: l };
 }
 
-test "async_adv: struct return sync verification" {
-    let r = computeWithLabelSync(21, "answer");
+test "async_adv: struct return" {
+    let f = computeWithLabel(21, "answer");
+    let r = await f;
     assert r.value == 42;
     assert r.label == "answer";
-}
-
-async fn computeValueOnly(v -> number) -> number {
-    return v * 2;
-}
-
-test "async_adv: scalar return as struct field substitute" {
-    let f = computeValueOnly(21);
-    let result = await f;
-    assert result == 42;
 }
 
 // ---------------------------------------------------------------------------
