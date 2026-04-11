@@ -56,7 +56,7 @@ description = "A simple Sailfin capsule"
 entry = "src/main.sfn"
 
 [capabilities]
-allow = ["io", "net", "model"]
+required = ["io", "net", "model"]
 
 [models]
 "openai.summarizer" = "gpt-foo@2.3.1"

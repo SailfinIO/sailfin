@@ -254,6 +254,8 @@ fn toml_generate(name -> string, version -> string, description -> string, entry
         out = out + "description = \"" + description + "\"\n";
     }
     out = out + "\n[dependencies]\n";
+    out = out + "\n[capabilities]\n";
+    out = out + "required = []\n";
     out = out + "\n[build]\n";
     out = out + "entry = \"" + entry + "\"\n";
     return out;
@@ -324,18 +326,16 @@ fn _write_toml(toml -> SailToml) -> string {
             j += 1;
         }
     }
-    if toml.capabilities.length > 0 {
-        out = out + "\n[capabilities]\n";
-        out = out + "required = [";
-        let mut k -> number = 0;
-        loop {
-            if k >= toml.capabilities.length { break; }
-            if k > 0 { out = out + ", "; }
-            out = out + "\"" + toml.capabilities[k] + "\"";
-            k += 1;
-        }
-        out = out + "]\n";
+    out = out + "\n[capabilities]\n";
+    out = out + "required = [";
+    let mut k -> number = 0;
+    loop {
+        if k >= toml.capabilities.length { break; }
+        if k > 0 { out = out + ", "; }
+        out = out + "\"" + toml.capabilities[k] + "\"";
+        k += 1;
     }
+    out = out + "]\n";
     out = out + "\n[build]\n";
     out = out + "entry = \"" + toml.entry + "\"\n";
     return out;
