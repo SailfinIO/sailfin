@@ -227,6 +227,8 @@ fn find_top_level_operator(expression -> string, operators -> string) -> Operato
 
 fn find_comparison_operator(expression -> string) -> OperatorMatch {
     let mut depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
     let mut index -> number = 0;
     let mut in_string -> boolean = false;
     let mut escape_next -> boolean = false;
@@ -269,7 +271,39 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
             index += 1;
             continue;
         }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
         if depth > 0 {
+            index += 1;
+            continue;
+        }
+        if brace_depth > 0 {
+            index += 1;
+            continue;
+        }
+        if bracket_depth > 0 {
             index += 1;
             continue;
         }
@@ -305,6 +339,8 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
 
 fn find_logical_operator(expression -> string) -> OperatorMatch {
     let mut depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
     let mut index -> number = 0;
     let mut in_string -> boolean = false;
     let mut escape_next -> boolean = false;
@@ -350,17 +386,47 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
             index += 1;
             continue;
         }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
         if depth == 0 {
-            let _lo_next2 = index + 2;
-            let two = substring(expression, index, _lo_next2);
-            if two == "||" {
-                return OperatorMatch { index: index, symbol: "||", success: true };
+            if brace_depth == 0 {
+                if bracket_depth == 0 {
+                    let _lo_next2 = index + 2;
+                    let two = substring(expression, index, _lo_next2);
+                    if two == "||" {
+                        return OperatorMatch { index: index, symbol: "||", success: true };
+                    }
+                }
             }
         }
         index += 1;
     }
 
     depth = 0;
+    brace_depth = 0;
+    bracket_depth = 0;
     index = 0;
     in_string = false;
     escape_next = false;
@@ -404,11 +470,39 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
             index += 1;
             continue;
         }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 {
+                brace_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 {
+                bracket_depth -= 1;
+            }
+            index += 1;
+            continue;
+        }
         if depth == 0 {
-            let _lo2_next2 = index + 2;
-            let two = substring(expression, index, _lo2_next2);
-            if two == "&&" {
-                return OperatorMatch { index: index, symbol: "&&", success: true };
+            if brace_depth == 0 {
+                if bracket_depth == 0 {
+                    let _lo2_next2 = index + 2;
+                    let two = substring(expression, index, _lo2_next2);
+                    if two == "&&" {
+                        return OperatorMatch { index: index, symbol: "&&", success: true };
+                    }
+                }
             }
         }
         index += 1;

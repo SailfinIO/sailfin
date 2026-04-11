@@ -222,10 +222,7 @@ struct Student {
 }
 
 fn _make_student(name -> string, score -> number) -> Student {
-    // Workaround: pre-compute comparison — inline comparisons in struct
-    // literals emit zeroinitializer (compiler bug).
-    let p = score >= 60;
-    return Student { name: name, score: score, passed: p };
+    return Student { name: name, score: score, passed: score >= 60 };
 }
 
 fn _count_passing(students -> Student[]) -> number {
@@ -343,8 +340,9 @@ struct QueryBuilder {
     }
 }
 
-// Workaround: method chaining (e.g. Foo.bar().baz()) produces incorrect IR.
-// Break chains into separate let bindings until the compiler is fixed.
+// NOTE: method chaining (Foo.bar().baz()) is a known compiler limitation —
+// the expression lowerer doesn't evaluate chained calls left-to-right.
+// Break chains into separate let bindings until this is fixed.
 test "pipeline: builder pattern basic query" {
     let builder = QueryBuilder.from_table("users");
     let q = builder.build();
