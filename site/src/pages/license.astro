@@ -1,0 +1,226 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+---
+
+<BaseLayout title="License" description="Sailfin is open source under the GNU General Public License v2 with a runtime library exception.">
+  <div class="page">
+    <div class="container">
+      <h1>License</h1>
+      <p class="lead">
+        Sailfin is free and open-source software maintained by <a href="https://sailfin.dev">Sailfin, LLC</a>.
+      </p>
+
+      <section class="license-section">
+        <h2>The Compiler and Runtime</h2>
+        <p>
+          The Sailfin compiler, runtime, standard library, and supporting
+          tooling code in the
+          <a href="https://github.com/SailfinIO/sailfin">SailfinIO/sailfin</a>
+          repository are licensed under the
+          <strong>GNU General Public License, version 2</strong> (GPLv2).
+          Trademarked brand assets (such as the logo, mascot, and favicon)
+          are not covered by the GPLv2 and are governed by the
+          <a href="https://github.com/SailfinIO/sailfin/blob/main/TRADEMARKS">Trademark Policy</a>.
+        </p>
+        <p>
+          This means you are free to use, study, modify, and redistribute
+          Sailfin. If you distribute a modified version of the compiler or
+          runtime, your modifications must also be made available under the
+          GPLv2. This ensures that Sailfin and all derivative works remain
+          open source.
+        </p>
+        <div class="file-link">
+          <a href="https://github.com/SailfinIO/sailfin/blob/main/LICENSE">
+            Read the full license text (LICENSE)
+          </a>
+        </div>
+      </section>
+
+      <section class="license-section">
+        <h2>Your Programs Are Yours</h2>
+        <p>
+          The Sailfin runtime libraries include a
+          <strong>Runtime Library Exception</strong> modeled after the approach
+          used by GCC. This exception means that programs you compile with
+          Sailfin are <strong>not</strong> subject to the GPL.
+        </p>
+        <p>
+          You can write Sailfin programs, compile them, and distribute the
+          resulting binaries under any license you choose — including
+          proprietary licenses. The runtime exception ensures that linking
+          against the Sailfin prelude and standard library does not create a
+          copyleft obligation on your code.
+        </p>
+        <div class="file-link">
+          <a href="https://github.com/SailfinIO/sailfin/blob/main/RUNTIME_LIBRARY_EXCEPTION">
+            Read the runtime library exception (RUNTIME_LIBRARY_EXCEPTION)
+          </a>
+        </div>
+      </section>
+
+      <section class="license-section">
+        <h2>What This Means in Practice</h2>
+        <div class="summary-grid">
+          <div class="summary-card allowed">
+            <h3>You can</h3>
+            <ul>
+              <li>Use Sailfin for any purpose, commercial or personal</li>
+              <li>Write proprietary programs in Sailfin and sell them</li>
+              <li>Fork the compiler and modify it</li>
+              <li>Distribute the compiler and runtime</li>
+              <li>Contribute to the project</li>
+            </ul>
+          </div>
+          <div class="summary-card required">
+            <h3>You must</h3>
+            <ul>
+              <li>Keep the GPL license on the compiler and runtime source</li>
+              <li>Share source code if you distribute a modified compiler or runtime</li>
+              <li>Preserve copyright notices and attribution</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="license-section">
+        <h2>Contributing</h2>
+        <p>
+          By contributing to Sailfin, you agree that your contributions will be
+          licensed under the GPLv2. See the
+          <a href="/docs/contributing/guide">contributor guide</a> for details.
+        </p>
+      </section>
+
+      <section class="license-section">
+        <h2>Questions</h2>
+        <p>
+          If you have questions about Sailfin's licensing, please
+          <a href="https://github.com/SailfinIO/sailfin/issues">open an issue</a>
+          on GitHub.
+        </p>
+      </section>
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .page {
+    padding: 3rem 0 5rem;
+  }
+
+  h1 {
+    font-size: 2.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .lead {
+    font-size: 1.2rem;
+    color: var(--color-text-secondary);
+    margin-bottom: 3rem;
+  }
+
+  .lead a {
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+
+  .lead a:hover {
+    text-decoration: underline;
+  }
+
+  .license-section {
+    margin-bottom: 2.5rem;
+  }
+
+  .license-section h2 {
+    font-size: 1.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .license-section p {
+    font-size: 1rem;
+    line-height: 1.7;
+    color: var(--color-text-secondary);
+    margin-bottom: 1rem;
+  }
+
+  .license-section a {
+    color: var(--color-primary);
+    text-decoration: none;
+  }
+
+  .license-section a:hover {
+    text-decoration: underline;
+  }
+
+  .file-link {
+    margin-top: 0.5rem;
+  }
+
+  .file-link a {
+    font-size: 0.925rem;
+    font-weight: 500;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+    margin-top: 1rem;
+  }
+
+  .summary-card {
+    padding: 1.75rem;
+    border-radius: 10px;
+    border: 1px solid var(--color-border);
+  }
+
+  .summary-card h3 {
+    font-size: 1.1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .summary-card.allowed h3 {
+    color: #28c840;
+  }
+
+  .summary-card.required h3 {
+    color: var(--color-primary);
+  }
+
+  .summary-card ul {
+    list-style: none;
+    padding: 0;
+  }
+
+  .summary-card li {
+    font-size: 0.925rem;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    padding-left: 1.25rem;
+    position: relative;
+    margin-bottom: 0.35rem;
+  }
+
+  .summary-card.allowed li::before {
+    content: "+";
+    position: absolute;
+    left: 0;
+    color: #28c840;
+    font-weight: 700;
+  }
+
+  .summary-card.required li::before {
+    content: "*";
+    position: absolute;
+    left: 0;
+    color: var(--color-primary);
+    font-weight: 700;
+  }
+
+  @media (max-width: 600px) {
+    .summary-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

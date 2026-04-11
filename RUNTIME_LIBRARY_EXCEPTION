@@ -1,0 +1,72 @@
+SAILFIN RUNTIME LIBRARY EXCEPTION
+
+Version 1.0, 11 April 2026
+
+Copyright (C) 2026 Michael Curtis <michael@sailfin.io>
+
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+This Sailfin Runtime Library Exception ("Exception") is an additional
+permission granted by the copyright holder of the Sailfin compiler and
+runtime libraries. It applies to the source files in the runtime/
+directory of the Sailfin source distribution (the "Runtime Library").
+
+The purpose of this Exception is to allow compilation of non-GPL
+(including proprietary) programs using the Sailfin compiler, so that
+such programs may use the header files, prelude, and runtime libraries
+covered by this Exception without being subject to the copyleft
+requirements of the GNU General Public License, version 2.
+
+0. Definitions.
+
+"Sailfin" means the Sailfin compiler, with or without modifications,
+distributed under the terms of the GNU General Public License version 2.
+
+"Target Code" refers to output from the Sailfin compiler for a real or
+virtual target processor architecture, in executable form or suitable
+for input to an assembler, linker, loader, and/or execution phase.
+Target Code does not include data in any format used as a compiler
+intermediate representation, or used for producing a compiler
+intermediate representation.
+
+An "Independent Module" is a program or library that either requires the
+Runtime Library for execution after compilation, or makes use of an
+interface provided by the Runtime Library, but is not otherwise based on
+or derived from the Runtime Library or the Sailfin compiler.
+
+An "Eligible Compilation Process" is a compilation performed using
+Sailfin, alone or together with other GPL-compatible software.
+
+1. Grant of Additional Permission.
+
+As a special exception to the GNU General Public License version 2, the
+copyright holder of the Runtime Library gives you permission to combine
+the Runtime Library with Independent Modules to produce an executable,
+and to copy and distribute the resulting executable under terms of your
+choice, provided that:
+
+  a) The Target Code was generated through an Eligible Compilation
+  Process; and
+
+  b) You also meet, for each linked Independent Module, the terms and
+  conditions of the license of that module.
+
+An Independent Module that uses the Runtime Library's interfaces
+(including the prelude, standard library functions, and runtime support
+routines) does not, by itself, become a work based on the Runtime
+Library, and is therefore not subject to the GNU General Public License
+version 2.
+
+2. No Weakening of Sailfin Copyleft.
+
+The availability of this Exception does not imply any general
+presumption that third-party software is unaffected by the copyleft
+requirements of the GNU General Public License version 2 as applied to
+the Sailfin compiler.
+
+This Exception applies only to the Runtime Library and only in the
+context described above. The Sailfin compiler itself, and any
+modifications to the compiler or to the Runtime Library source code,
+remain subject to the full terms of the GNU General Public License
+version 2.

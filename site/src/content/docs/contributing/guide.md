@@ -74,3 +74,9 @@ make test      # Full test suite
 2. Open a PR against the `alpha` branch
 3. Include test coverage for new features or bug fixes
 4. Update documentation if the change affects language behavior
+
+## License
+
+Sailfin is licensed under the [GNU General Public License v2](https://github.com/SailfinIO/sailfin/blob/main/LICENSE). By submitting a contribution, you agree that your work will be distributed under the same license.
+
+The runtime libraries include a [Runtime Library Exception](https://github.com/SailfinIO/sailfin/blob/main/RUNTIME_LIBRARY_EXCEPTION) so that programs compiled by Sailfin are not subject to the GPL — users can license their own programs however they choose.
