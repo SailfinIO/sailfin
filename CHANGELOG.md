@@ -1,6 +1,188 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.22 (2026-04-11)
+
+### Bug Fixes
+
+- Address PR review comments
+  ([`ac88741`](https://github.com/SailfinIO/sailfin/commit/ac8874186b939995197bb282bdc0906713b2dd24))
+
+- Reuse escape_string_for_llvm from strings.sfn instead of custom _escape_test_name_for_llvm
+  (handles control chars properly) - Remove double read_let_result_string_constants call in tag-2
+  path - Scan only new lines (from start_offset) in _infer_field_constants to avoid O(total_lines^2)
+  per let in large functions - Remove duplicate .let_result_string_constants write at end of
+  lower_let_instruction (already written immediately after scan) - Rename camelCase async test
+  helpers to snake_case - Remove misleading NOTE about match function ordering
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Address PR review comments on capsule manifest generation
+  ([`c7f4994`](https://github.com/SailfinIO/sailfin/commit/c7f4994c66915da59307491b8e603f1b950029d2))
+
+- toml_generate() now emits [capabilities] with required = [] so sfn init produces a canonical
+  manifest out of the box - _write_toml() always emits the [capabilities] section even when the list
+  is empty, preventing sfn add from stripping it - docs/proposals/package-management.md capsule.toml
+  example updated from allow to required
+
+https://claude.ai/code/session_01Dzggvk27HvYsiaqQzMaHts
+
+- Async struct return properly unboxes via typed extractvalue
+  ([`843dfab`](https://github.com/SailfinIO/sailfin/commit/843dfab149f946405f7b979a3f760edf466b1c12))
+
+When an async function returns a struct, the runtime boxes it as i8* through
+  sailfin_runtime_await_ptr. Previously the await result was stored as i8* and field access fell
+  back to sailfin_runtime_get_field (string-based runtime lookup), which doesn't work for typed
+  structs.
+
+The fix propagates the async function's concrete return type through three stages:
+
+1. Call resolution (core_call_resolution.sfn): when resolving an async function call, write the
+  Sailfin return type (e.g. "Result") to .async_inner_return_type.
+
+2. Let lowering (instructions_let.sfn): when a let binding stores a %SailfinFuturePtr*, read the
+  inner return type file and store it as the local's type_annotation.
+
+3. Await handler (core.sfn): when awaiting a %SailfinFuturePtr* with no explicit expected type, look
+  up the future local's type_annotation, map it to an LLVM struct type, and use it for the existing
+  bitcast+load unboxing path.
+
+Revert the async_advanced_test workaround to use real async struct return instead of splitting into
+  sync struct + async scalar tests.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Find_call_site returns last top-level paren for method chaining
+  ([`8462631`](https://github.com/SailfinIO/sailfin/commit/8462631c136ee481f16760f034845564e017c296))
+
+find_call_site returned the FIRST top-level '(' in an expression, so
+  `Builder.create("hello").finish()` was split as target=`Builder.create` args=`"hello").finish(` —
+  completely wrong. The receiver's arguments were treated as part of the outer call arguments.
+
+Rewrite to scan left-to-right tracking balanced parens, braces, brackets, and strings, recording the
+  LAST '(' seen at top level. Now `Builder.create("hello").finish()` correctly splits as
+  target=`Builder.create("hello").finish` args=`` (empty), and the call lowerer resolves the method
+  chain.
+
+Revert the builder pattern workaround in multi_function_pipeline_test to use real method chaining.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Operator finders skip operators inside struct literal braces
+  ([`bd102e2`](https://github.com/SailfinIO/sailfin/commit/bd102e24acad8e2e239dc721d4f16e3f2bc0a67e))
+
+find_comparison_operator and find_logical_operator only tracked parenthesis depth, so operators like
+  >= or && inside struct literal bodies (e.g. `S { passed: score >= 60 }`) were matched at the top
+  level. The entire expression was then treated as a comparison instead of a struct literal, causing
+  the lowerer to emit zeroinitializer.
+
+Add brace and bracket depth tracking to both functions so operators inside struct literals, array
+  literals, and nested blocks are ignored.
+
+This fixes the "struct literal with inline comparison" bug — struct fields can now contain
+  comparison and logical expressions directly without pre-computing into a let binding.
+
+Revert the _make_student workaround in multi_function_pipeline_test to use the direct form: `passed:
+  score >= 60`.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Reconcile capsule.toml manifest format with spec
+  ([`a014523`](https://github.com/SailfinIO/sailfin/commit/a014523b69d0454644fa9a11243cd3cd6372872e))
+
+All 19 stdlib capsule.toml files used [package]/allow which diverged from the documented spec
+  ([capsule]/required/[build]). This reconciles the entire codebase to the canonical format:
+
+- [package] → [capsule] in all capsule.toml manifests - [capabilities] allow → [capabilities]
+  required - entry moved from [capsule] to [build] section per spec - TOML parser updated to parse
+  [capsule], [build], and required - toml_generate() and _write_toml() emit canonical format - CLI
+  error messages updated (package → capsule) - toml_test.sfn updated to use [capsule] - docs/spec.md
+  and docs/proposals/package-management.md updated
+
+Also promotes capsule/workspace manifest system to a hard pre-1.0 requirement in docs/roadmap.md,
+  covering: compiler as a capsule, workspace.toml at repo root, capability policy enforcement, and
+  registry workflow.
+
+https://claude.ai/code/session_01Dzggvk27HvYsiaqQzMaHts
+
+- Recover string constants from let bindings via line scanning
+  ([`cfcb549`](https://github.com/SailfinIO/sailfin/commit/cfcb549f5f622a10a856930b885a1af70691819f))
+
+Under the seedcheck (no Python fixups), the ExpressionResult struct returned by lower_expression
+  across module boundaries has corrupted .string_constants field. This caused @.runtime.field.X
+  global string constants (used by dynamic member access fallback) to be referenced but never
+  declared, producing "use of undefined value" errors.
+
+Three-part fix:
+
+1. instructions_let.sfn: scan accumulated LLVM IR lines for @.runtime.field.X references immediately
+  after lower_expression returns, and write the inferred constants to a file before any intermediate
+  code can clobber the local variable.
+
+2. instructions.sfn: read string constants from the let-result file in BOTH the IPC path
+  (let_ipc_used=1) and the struct path, covering both tag-2 (direct Let) and tag-1 (inline Let).
+
+3. core_member_lowering.sfn + instructions_let.sfn: split the "@.runtime.field." string literal into
+  two concatenated parts to avoid triggering a bogus global constant in the selfhost IR.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Recover string constants from let bindings via line scanning
+  ([`8c193f5`](https://github.com/SailfinIO/sailfin/commit/8c193f51255a80702da91cfaab789f3f85d54fc2))
+
+Under the seedcheck (no Python fixups), the ExpressionResult struct returned by lower_expression
+  across module boundaries has corrupted .string_constants field. This caused @.runtime.field.X
+  global string constants (used by dynamic member access fallback) to be referenced but never
+  declared, producing "use of undefined value" errors.
+
+Fix: scan the accumulated LLVM IR lines for @.runtime.field.X references and infer the required
+  string constants directly. This is reliable in both the first-pass binary and the seedcheck since
+  the lines themselves are always correct (they're built in-process).
+
+Also serialize string constants to .let_result_string_constants file as a secondary IPC channel, and
+  add read_let_result_string_constants helper for future use.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+- Split enum_complex_test for seedcheck recovery parser compatibility
+  ([`73f09a1`](https://github.com/SailfinIO/sailfin/commit/73f09a11fe71fd06a3ed87c5f9a0f78d9f692d97))
+
+The seedcheck's bottom-up recovery parser drops functions with match blocks when they appear above
+  their callers, because the nested braces confuse function boundary detection.
+
+Split enum_complex_test.sfn (22 functions) into three files: - enum_complex_test.sfn: priority enum
+  + task struct basics (6 tests) - enum_state_machine_test.sfn: enum-driven state machine (4 tests)
+  - enum_match_struct_test.sfn: match + struct + loop filtering (3 tests)
+
+In enum_match_struct_test, _priority_label (uses match) is placed below _format_task (calls it) so
+  the recovery parser finds it first.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+### Features
+
+- **test**: Add 14 seed viability tests and enhance test harness
+  ([`5106912`](https://github.com/SailfinIO/sailfin/commit/5106912e9ec1acf9fdd43c6376086b6c293813d8))
+
+Add 243 tests (8 unit, 6 integration files) from the seed test branch to exercise patterns critical
+  for self-hosting: match lowering, enum dispatch, async/await, struct returns, recursive
+  processing, multi-function pipelines, and builder patterns.
+
+Enhance the test harness in lowering_core.sfn to print "RUN <name>" via stderr before each test so
+  failures identify the exact failing test even when abort() kills the process before stdout
+  flushes.
+
+Fix incorrect test expectations: - bootstrap_readiness: "fn add(a b)" produces 6 tokens, not 5 -
+  multi_function_pipeline: "x + 42 = result" has 2 words, not 3 - match_advanced: use exact
+  multiples of 10 for float division
+
+Known compiler bugs exposed (workarounds in tests, fixes pending): - Struct literals with inline
+  comparisons emit zeroinitializer - Method chaining (Foo.bar().baz()) produces incorrect IR - Async
+  struct return unboxes via runtime field lookup
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+
 ## v0.5.0-alpha.21 (2026-04-11)
 
 ### Bug Fixes
