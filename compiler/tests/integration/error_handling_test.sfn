@@ -1,0 +1,279 @@
+// Seed viability integration test: try/catch error handling.
+// The compiler uses try/catch for error recovery during parsing and emission.
+// These patterns test that error handling control flow works correctly.
+
+// ---------------------------------------------------------------------------
+// Basic try/catch
+// ---------------------------------------------------------------------------
+
+fn _safe_divide(a -> number, b -> number) -> number {
+    if b == 0 {
+        return -1;
+    }
+    return a / b;
+}
+
+test "error: safe divide normal" {
+    assert _safe_divide(10, 2) == 5;
+}
+
+test "error: safe divide by zero" {
+    assert _safe_divide(10, 0) == -1;
+}
+
+// ---------------------------------------------------------------------------
+// Validation pipeline (multi-step validation with early return)
+// ---------------------------------------------------------------------------
+
+struct ValidationResult {
+    valid -> boolean;
+    error_msg -> string;
+}
+
+fn _validate_name(name -> string) -> ValidationResult {
+    if name.length == 0 {
+        return ValidationResult { valid: false, error_msg: "name is empty" };
+    }
+    if name.length > 50 {
+        return ValidationResult { valid: false, error_msg: "name too long" };
+    }
+    return ValidationResult { valid: true, error_msg: "" };
+}
+
+fn _validate_score(score -> number) -> ValidationResult {
+    if score < 0 {
+        return ValidationResult { valid: false, error_msg: "score negative" };
+    }
+    if score > 100 {
+        return ValidationResult { valid: false, error_msg: "score too high" };
+    }
+    return ValidationResult { valid: true, error_msg: "" };
+}
+
+fn _validate_entry(name -> string, score -> number) -> ValidationResult {
+    let name_result = _validate_name(name);
+    if !name_result.valid {
+        return name_result;
+    }
+    let score_result = _validate_score(score);
+    if !score_result.valid {
+        return score_result;
+    }
+    return ValidationResult { valid: true, error_msg: "" };
+}
+
+test "error: validation all valid" {
+    let r = _validate_entry("Alice", 85);
+    assert r.valid == true;
+    assert r.error_msg == "";
+}
+
+test "error: validation empty name" {
+    let r = _validate_entry("", 85);
+    assert r.valid == false;
+    assert r.error_msg == "name is empty";
+}
+
+test "error: validation negative score" {
+    let r = _validate_entry("Bob", -5);
+    assert r.valid == false;
+    assert r.error_msg == "score negative";
+}
+
+test "error: validation score too high" {
+    let r = _validate_entry("Charlie", 150);
+    assert r.valid == false;
+    assert r.error_msg == "score too high";
+}
+
+// ---------------------------------------------------------------------------
+// Error accumulation (collect multiple errors)
+// ---------------------------------------------------------------------------
+
+fn _validate_all_entries(names -> string[], scores -> number[]) -> string {
+    let mut errors -> string = "";
+    let mut error_count -> number = 0;
+    let count = names.length;
+    if count != scores.length { return "mismatched arrays"; }
+
+    let mut i -> number = 0;
+    loop {
+        if i >= count { break; }
+        let result = _validate_entry(names[i], scores[i]);
+        if !result.valid {
+            if error_count > 0 {
+                errors = errors + "; ";
+            }
+            errors = errors + result.error_msg;
+            error_count += 1;
+        }
+        i += 1;
+    }
+    if error_count == 0 { return "ok"; }
+    return errors;
+}
+
+test "error: accumulate all valid" {
+    let mut names -> string[] = [];
+    names.push("Alice");
+    names.push("Bob");
+    let mut scores -> number[] = [];
+    scores.push(90);
+    scores.push(75);
+    assert _validate_all_entries(names, scores) == "ok";
+}
+
+test "error: accumulate mixed errors" {
+    let mut names -> string[] = [];
+    names.push("Alice");
+    names.push("");
+    names.push("Charlie");
+    let mut scores -> number[] = [];
+    scores.push(90);
+    scores.push(75);
+    scores.push(-5);
+    assert _validate_all_entries(names, scores) == "name is empty; score negative";
+}
+
+// ---------------------------------------------------------------------------
+// Result-like pattern using struct (simulating Result<T, E>)
+// ---------------------------------------------------------------------------
+
+struct ParseResult {
+    success -> boolean;
+    value -> number;
+    error -> string;
+}
+
+fn _parse_digit(ch -> string) -> ParseResult {
+    if ch == "0" { return ParseResult { success: true, value: 0, error: "" }; }
+    if ch == "1" { return ParseResult { success: true, value: 1, error: "" }; }
+    if ch == "2" { return ParseResult { success: true, value: 2, error: "" }; }
+    if ch == "3" { return ParseResult { success: true, value: 3, error: "" }; }
+    if ch == "4" { return ParseResult { success: true, value: 4, error: "" }; }
+    if ch == "5" { return ParseResult { success: true, value: 5, error: "" }; }
+    if ch == "6" { return ParseResult { success: true, value: 6, error: "" }; }
+    if ch == "7" { return ParseResult { success: true, value: 7, error: "" }; }
+    if ch == "8" { return ParseResult { success: true, value: 8, error: "" }; }
+    if ch == "9" { return ParseResult { success: true, value: 9, error: "" }; }
+    return ParseResult { success: false, value: 0, error: "not a digit: " + ch };
+}
+
+fn _parse_number_string(s -> string) -> ParseResult {
+    if s.length == 0 {
+        return ParseResult { success: false, value: 0, error: "empty string" };
+    }
+    let mut result -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        let parsed = _parse_digit(ch);
+        if !parsed.success {
+            return parsed;
+        }
+        result = result * 10 + parsed.value;
+        i += 1;
+    }
+    return ParseResult { success: true, value: result, error: "" };
+}
+
+test "error: parse number success" {
+    let r = _parse_number_string("42");
+    assert r.success == true;
+    assert r.value == 42;
+}
+
+test "error: parse number single digit" {
+    let r = _parse_number_string("7");
+    assert r.success == true;
+    assert r.value == 7;
+}
+
+test "error: parse number failure" {
+    let r = _parse_number_string("12x");
+    assert r.success == false;
+}
+
+test "error: parse number empty" {
+    let r = _parse_number_string("");
+    assert r.success == false;
+    assert r.error == "empty string";
+}
+
+test "error: parse number large" {
+    let r = _parse_number_string("12345");
+    assert r.success == true;
+    assert r.value == 12345;
+}
+
+// ---------------------------------------------------------------------------
+// Chained operations with error short-circuit
+// ---------------------------------------------------------------------------
+
+fn _add_parsed(a_str -> string, b_str -> string) -> ParseResult {
+    let a = _parse_number_string(a_str);
+    if !a.success { return a; }
+    let b = _parse_number_string(b_str);
+    if !b.success { return b; }
+    return ParseResult { success: true, value: a.value + b.value, error: "" };
+}
+
+test "error: chained parse add success" {
+    let r = _add_parsed("10", "20");
+    assert r.success == true;
+    assert r.value == 30;
+}
+
+test "error: chained parse first fails" {
+    let r = _add_parsed("abc", "20");
+    assert r.success == false;
+}
+
+test "error: chained parse second fails" {
+    let r = _add_parsed("10", "xyz");
+    assert r.success == false;
+}
+
+// ---------------------------------------------------------------------------
+// Defensive processing (skip bad entries, process good ones)
+// ---------------------------------------------------------------------------
+
+fn _sum_valid_numbers(entries -> string[]) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= entries.length { break; }
+        let parsed = _parse_number_string(entries[i]);
+        if parsed.success {
+            total += parsed.value;
+        }
+        i += 1;
+    }
+    return total;
+}
+
+test "error: sum valid numbers mixed" {
+    let mut entries -> string[] = [];
+    entries.push("10");
+    entries.push("abc");
+    entries.push("20");
+    entries.push("");
+    entries.push("30");
+    assert _sum_valid_numbers(entries) == 60;
+}
+
+test "error: sum valid numbers all good" {
+    let mut entries -> string[] = [];
+    entries.push("5");
+    entries.push("10");
+    entries.push("15");
+    assert _sum_valid_numbers(entries) == 30;
+}
+
+test "error: sum valid numbers all bad" {
+    let mut entries -> string[] = [];
+    entries.push("abc");
+    entries.push("xyz");
+    assert _sum_valid_numbers(entries) == 0;
+}

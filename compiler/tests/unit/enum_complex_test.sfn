@@ -1,0 +1,272 @@
+// Seed viability tests: complex enum patterns.
+// Targets: enum dispatch, enum-as-field, enum arrays, enum in match.
+// The compiler itself uses enums for AST node types, token types,
+// and instruction variants. Correct enum handling is essential.
+
+// ---------------------------------------------------------------------------
+// Enum used as array element
+// ---------------------------------------------------------------------------
+
+enum Priority {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+fn _priority_value(p -> Priority) -> number {
+    if p == Priority.Low { return 1; }
+    if p == Priority.Medium { return 2; }
+    if p == Priority.High { return 3; }
+    if p == Priority.Critical { return 4; }
+    return 0;
+}
+
+fn _max_priority(priorities -> Priority[]) -> Priority {
+    if priorities.length == 0 { return Priority.Low; }
+    let mut best -> Priority = priorities[0];
+    let mut best_val -> number = _priority_value(best);
+    let mut i -> number = 1;
+    loop {
+        if i >= priorities.length { break; }
+        let val = _priority_value(priorities[i]);
+        if val > best_val {
+            best = priorities[i];
+            best_val = val;
+        }
+        i += 1;
+    }
+    return best;
+}
+
+test "enum_complex: priority values" {
+    assert _priority_value(Priority.Low) == 1;
+    assert _priority_value(Priority.Medium) == 2;
+    assert _priority_value(Priority.High) == 3;
+    assert _priority_value(Priority.Critical) == 4;
+}
+
+test "enum_complex: max priority from array" {
+    let mut priorities -> Priority[] = [];
+    priorities.push(Priority.Low);
+    priorities.push(Priority.High);
+    priorities.push(Priority.Medium);
+    assert _max_priority(priorities) == Priority.High;
+}
+
+test "enum_complex: max priority single" {
+    let mut priorities -> Priority[] = [];
+    priorities.push(Priority.Critical);
+    assert _max_priority(priorities) == Priority.Critical;
+}
+
+// ---------------------------------------------------------------------------
+// Enum as struct field with multiple enums
+// ---------------------------------------------------------------------------
+
+enum TaskStatus {
+    Todo,
+    InProgress,
+    Done,
+    Blocked,
+}
+
+struct Task {
+    name -> string;
+    priority -> Priority;
+    status -> TaskStatus;
+    effort -> number;
+}
+
+fn _is_actionable(t -> Task) -> boolean {
+    if t.status == TaskStatus.Done { return false; }
+    if t.status == TaskStatus.Blocked { return false; }
+    return true;
+}
+
+fn _task_score(t -> Task) -> number {
+    let pval = _priority_value(t.priority);
+    if t.status == TaskStatus.InProgress {
+        return pval * 10 + t.effort;
+    }
+    if t.status == TaskStatus.Todo {
+        return pval * 5;
+    }
+    return 0;
+}
+
+test "enum_complex: struct with two enum fields" {
+    let t = Task {
+        name: "Fix bug",
+        priority: Priority.High,
+        status: TaskStatus.InProgress,
+        effort: 3,
+    };
+    assert t.name == "Fix bug";
+    assert t.priority == Priority.High;
+    assert t.status == TaskStatus.InProgress;
+    assert _is_actionable(t) == true;
+}
+
+test "enum_complex: blocked task not actionable" {
+    let t = Task {
+        name: "Blocked",
+        priority: Priority.Critical,
+        status: TaskStatus.Blocked,
+        effort: 5,
+    };
+    assert _is_actionable(t) == false;
+}
+
+test "enum_complex: task scoring" {
+    let t1 = Task {
+        name: "A",
+        priority: Priority.High,
+        status: TaskStatus.InProgress,
+        effort: 2,
+    };
+    // 3 * 10 + 2 = 32
+    assert _task_score(t1) == 32;
+
+    let t2 = Task {
+        name: "B",
+        priority: Priority.Low,
+        status: TaskStatus.Todo,
+        effort: 0,
+    };
+    // 1 * 5 = 5
+    assert _task_score(t2) == 5;
+}
+
+// ---------------------------------------------------------------------------
+// Enum-driven state machine
+// ---------------------------------------------------------------------------
+
+enum State {
+    Idle,
+    Running,
+    Paused,
+    Stopped,
+}
+
+fn _transition(current -> State, event -> string) -> State {
+    if current == State.Idle {
+        if event == "start" { return State.Running; }
+        return State.Idle;
+    }
+    if current == State.Running {
+        if event == "pause" { return State.Paused; }
+        if event == "stop" { return State.Stopped; }
+        return State.Running;
+    }
+    if current == State.Paused {
+        if event == "resume" { return State.Running; }
+        if event == "stop" { return State.Stopped; }
+        return State.Paused;
+    }
+    return State.Stopped;
+}
+
+fn _run_state_machine(events -> string[]) -> State {
+    let mut state -> State = State.Idle;
+    let mut i -> number = 0;
+    loop {
+        if i >= events.length { break; }
+        state = _transition(state, events[i]);
+        i += 1;
+    }
+    return state;
+}
+
+test "enum_complex: state machine basic transitions" {
+    assert _transition(State.Idle, "start") == State.Running;
+    assert _transition(State.Running, "pause") == State.Paused;
+    assert _transition(State.Paused, "resume") == State.Running;
+    assert _transition(State.Running, "stop") == State.Stopped;
+}
+
+test "enum_complex: state machine invalid transition" {
+    assert _transition(State.Idle, "pause") == State.Idle;
+    assert _transition(State.Stopped, "start") == State.Stopped;
+}
+
+test "enum_complex: state machine sequence" {
+    let mut events -> string[] = [];
+    events.push("start");
+    events.push("pause");
+    events.push("resume");
+    events.push("stop");
+    assert _run_state_machine(events) == State.Stopped;
+}
+
+test "enum_complex: state machine start only" {
+    let mut events -> string[] = [];
+    events.push("start");
+    assert _run_state_machine(events) == State.Running;
+}
+
+// ---------------------------------------------------------------------------
+// Enum equality in loops and conditions
+// ---------------------------------------------------------------------------
+
+fn _count_by_status(tasks -> Task[], status -> TaskStatus) -> number {
+    let mut count -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= tasks.length { break; }
+        if tasks[i].status == status {
+            count += 1;
+        }
+        i += 1;
+    }
+    return count;
+}
+
+test "enum_complex: count tasks by status" {
+    let mut tasks -> Task[] = [];
+    tasks.push(Task { name: "A", priority: Priority.High, status: TaskStatus.Todo, effort: 1 });
+    tasks.push(Task { name: "B", priority: Priority.Low, status: TaskStatus.Done, effort: 2 });
+    tasks.push(Task { name: "C", priority: Priority.Medium, status: TaskStatus.Todo, effort: 3 });
+    tasks.push(Task { name: "D", priority: Priority.High, status: TaskStatus.InProgress, effort: 1 });
+    tasks.push(Task { name: "E", priority: Priority.Low, status: TaskStatus.Todo, effort: 4 });
+
+    assert _count_by_status(tasks, TaskStatus.Todo) == 3;
+    assert _count_by_status(tasks, TaskStatus.Done) == 1;
+    assert _count_by_status(tasks, TaskStatus.InProgress) == 1;
+    assert _count_by_status(tasks, TaskStatus.Blocked) == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Match on enum in combination with struct
+// ---------------------------------------------------------------------------
+
+fn _priority_label(p -> Priority) -> string {
+    match p {
+        Priority.Low -> return "P3",
+        Priority.Medium -> return "P2",
+        Priority.High -> return "P1",
+        Priority.Critical -> return "P0",
+    }
+}
+
+fn _format_task(t -> Task) -> string {
+    let plabel = _priority_label(t.priority);
+    return "[" + plabel + "] " + t.name;
+}
+
+test "enum_complex: match enum and format with struct" {
+    let t = Task {
+        name: "Deploy",
+        priority: Priority.Critical,
+        status: TaskStatus.Todo,
+        effort: 5,
+    };
+    assert _format_task(t) == "[P0] Deploy";
+}
+
+test "enum_complex: match all priority labels" {
+    assert _priority_label(Priority.Low) == "P3";
+    assert _priority_label(Priority.Medium) == "P2";
+    assert _priority_label(Priority.High) == "P1";
+    assert _priority_label(Priority.Critical) == "P0";
+}

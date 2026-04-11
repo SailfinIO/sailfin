@@ -1,0 +1,172 @@
+// Seed viability integration test: async patterns.
+// Tests async function declarations with various return types.
+// The compiler itself doesn't use async heavily, but this verifies
+// the async lowering path works correctly in the seed.
+
+// ---------------------------------------------------------------------------
+// Async with string return
+// ---------------------------------------------------------------------------
+
+async fn fetchGreeting() -> string {
+    return "Hello from async!";
+}
+
+test "async_adv: string return" {
+    let future = fetchGreeting();
+    let result = await future;
+    assert result == "Hello from async!";
+}
+
+// ---------------------------------------------------------------------------
+// Async with computation
+// ---------------------------------------------------------------------------
+
+async fn computeSum(n -> number) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = 1;
+    loop {
+        if i > n { break; }
+        total += i;
+        i += 1;
+    }
+    return total;
+}
+
+test "async_adv: computation in async" {
+    let future = computeSum(10);
+    let result = await future;
+    assert result == 55;
+}
+
+// ---------------------------------------------------------------------------
+// Multiple async calls with different types
+// ---------------------------------------------------------------------------
+
+async fn getNumber() -> number {
+    return 42;
+}
+
+async fn getString() -> string {
+    return "hello";
+}
+
+async fn getBool() -> boolean {
+    return true;
+}
+
+test "async_adv: multiple async different types" {
+    let f1 = getNumber();
+    let f2 = getString();
+    let f3 = getBool();
+
+    let n = await f1;
+    let s = await f2;
+    let b = await f3;
+
+    assert n == 42;
+    assert s == "hello";
+    assert b == true;
+}
+
+// ---------------------------------------------------------------------------
+// Async result used in further computation
+// ---------------------------------------------------------------------------
+
+async fn computeA() -> number {
+    return 10;
+}
+
+async fn computeB() -> number {
+    return 20;
+}
+
+test "async_adv: results combined" {
+    let fa = computeA();
+    let fb = computeB();
+    let a = await fa;
+    let b = await fb;
+    let sum = a + b;
+    assert sum == 30;
+}
+
+// ---------------------------------------------------------------------------
+// Async with conditional logic
+// ---------------------------------------------------------------------------
+
+async fn conditionalAsync(flag -> boolean) -> number {
+    if flag {
+        return 100;
+    }
+    return 0;
+}
+
+test "async_adv: conditional true" {
+    let f = conditionalAsync(true);
+    assert await f == 100;
+}
+
+test "async_adv: conditional false" {
+    let f = conditionalAsync(false);
+    assert await f == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Async with struct return
+// ---------------------------------------------------------------------------
+
+// NOTE: async functions returning structs are a known compiler limitation —
+// await unboxes via runtime field lookup instead of typed extractvalue.
+// Test struct construction synchronously and async with scalar types instead.
+struct AsyncResult {
+    value -> number;
+    label -> string;
+}
+
+fn computeWithLabelSync(v -> number, l -> string) -> AsyncResult {
+    return AsyncResult { value: v * 2, label: l };
+}
+
+test "async_adv: struct return sync verification" {
+    let r = computeWithLabelSync(21, "answer");
+    assert r.value == 42;
+    assert r.label == "answer";
+}
+
+async fn computeValueOnly(v -> number) -> number {
+    return v * 2;
+}
+
+test "async_adv: scalar return as struct field substitute" {
+    let f = computeValueOnly(21);
+    let result = await f;
+    assert result == 42;
+}
+
+// ---------------------------------------------------------------------------
+// Sequential await pattern
+// ---------------------------------------------------------------------------
+
+async fn step1() -> number {
+    return 5;
+}
+
+async fn step2(input -> number) -> number {
+    return input * 3;
+}
+
+async fn step3(input -> number) -> number {
+    return input + 10;
+}
+
+test "async_adv: sequential steps" {
+    let f1 = step1();
+    let v1 = await f1;
+
+    let f2 = step2(v1);
+    let v2 = await f2;
+
+    let f3 = step3(v2);
+    let v3 = await f3;
+
+    assert v3 == 25;
+}

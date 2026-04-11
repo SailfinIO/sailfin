@@ -1,0 +1,275 @@
+// Seed viability tests: advanced match statement patterns.
+// Targets: match lowering correctness, enum dispatch, block bodies.
+// The self-hosted compiler uses match statements for AST node dispatch
+// and instruction type routing. These patterns must work correctly.
+
+// ---------------------------------------------------------------------------
+// Match with computation in block bodies
+// ---------------------------------------------------------------------------
+
+fn _compute_via_match(op -> number, a -> number, b -> number) -> number {
+    let mut result -> number = 0;
+    match op {
+        1 -> {
+            result = a + b;
+        },
+        2 -> {
+            result = a - b;
+        },
+        3 -> {
+            result = a * b;
+        },
+        4 -> {
+            // Division (integer-like)
+            if b != 0 {
+                result = a / b;
+            } else {
+                result = 0;
+            }
+        },
+        _ -> {
+            result = -1;
+        },
+    }
+    return result;
+}
+
+test "match_adv: block body with add" {
+    assert _compute_via_match(1, 10, 5) == 15;
+}
+
+test "match_adv: block body with subtract" {
+    assert _compute_via_match(2, 10, 5) == 5;
+}
+
+test "match_adv: block body with multiply" {
+    assert _compute_via_match(3, 10, 5) == 50;
+}
+
+test "match_adv: block body with divide" {
+    assert _compute_via_match(4, 10, 5) == 2;
+}
+
+test "match_adv: block body with divide by zero" {
+    assert _compute_via_match(4, 10, 0) == 0;
+}
+
+test "match_adv: block body default" {
+    assert _compute_via_match(99, 10, 5) == -1;
+}
+
+// ---------------------------------------------------------------------------
+// Match on enum with many variants
+// ---------------------------------------------------------------------------
+
+enum HttpStatus {
+    Ok,
+    Created,
+    BadRequest,
+    Unauthorized,
+    NotFound,
+    ServerError,
+}
+
+fn _status_code(s -> HttpStatus) -> number {
+    match s {
+        HttpStatus.Ok -> return 200,
+        HttpStatus.Created -> return 201,
+        HttpStatus.BadRequest -> return 400,
+        HttpStatus.Unauthorized -> return 401,
+        HttpStatus.NotFound -> return 404,
+        HttpStatus.ServerError -> return 500,
+    }
+}
+
+fn _is_success(s -> HttpStatus) -> boolean {
+    match s {
+        HttpStatus.Ok -> return true,
+        HttpStatus.Created -> return true,
+        _ -> return false,
+    }
+}
+
+test "match_adv: enum with 6 variants" {
+    assert _status_code(HttpStatus.Ok) == 200;
+    assert _status_code(HttpStatus.Created) == 201;
+    assert _status_code(HttpStatus.BadRequest) == 400;
+    assert _status_code(HttpStatus.Unauthorized) == 401;
+    assert _status_code(HttpStatus.NotFound) == 404;
+    assert _status_code(HttpStatus.ServerError) == 500;
+}
+
+test "match_adv: enum with wildcard" {
+    assert _is_success(HttpStatus.Ok) == true;
+    assert _is_success(HttpStatus.Created) == true;
+    assert _is_success(HttpStatus.NotFound) == false;
+    assert _is_success(HttpStatus.ServerError) == false;
+}
+
+// ---------------------------------------------------------------------------
+// Match result used in further computation
+// ---------------------------------------------------------------------------
+
+// Note: Sailfin only has float division (no integer types yet),
+// so scores must be exact multiples of 10 for match arms to hit.
+fn _grade_letter(score -> number) -> string {
+    let bracket = score / 10;
+    let mut letter -> string = "F";
+    match bracket {
+        10 -> { letter = "A+"; },
+        9 -> { letter = "A"; },
+        8 -> { letter = "B"; },
+        7 -> { letter = "C"; },
+        6 -> { letter = "D"; },
+        _ -> { letter = "F"; },
+    }
+    return letter;
+}
+
+test "match_adv: grade A plus" {
+    assert _grade_letter(100) == "A+";
+}
+
+test "match_adv: grade A" {
+    assert _grade_letter(90) == "A";
+}
+
+test "match_adv: grade B" {
+    assert _grade_letter(80) == "B";
+}
+
+test "match_adv: grade C" {
+    assert _grade_letter(70) == "C";
+}
+
+test "match_adv: grade F" {
+    assert _grade_letter(50) == "F";
+}
+
+// ---------------------------------------------------------------------------
+// Match in a loop (repeated dispatch)
+// ---------------------------------------------------------------------------
+
+fn _process_commands(commands -> number[]) -> number {
+    let mut accumulator -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= commands.length { break; }
+        let cmd = commands[i];
+        match cmd {
+            1 -> {
+                // ADD: next value to accumulator
+                if i + 1 < commands.length {
+                    accumulator += commands[i + 1];
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            },
+            2 -> {
+                // MUL: multiply accumulator by next value
+                if i + 1 < commands.length {
+                    accumulator = accumulator * commands[i + 1];
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            },
+            3 -> {
+                // RESET: set to zero
+                accumulator = 0;
+                i += 1;
+            },
+            _ -> {
+                i += 1;
+            },
+        }
+    }
+    return accumulator;
+}
+
+test "match_adv: command processing loop" {
+    // ADD 5, ADD 3, MUL 2 → (0+5+3)*2 = 16
+    let cmds = [1, 5, 1, 3, 2, 2];
+    assert _process_commands(cmds) == 16;
+}
+
+test "match_adv: command processing with reset" {
+    // ADD 10, RESET, ADD 7 → 7
+    let cmds = [1, 10, 3, 1, 7];
+    assert _process_commands(cmds) == 7;
+}
+
+test "match_adv: command processing empty" {
+    let mut cmds -> number[] = [];
+    assert _process_commands(cmds) == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Match with enum and string results
+// ---------------------------------------------------------------------------
+
+enum LogLevel {
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+fn _log_prefix(level -> LogLevel) -> string {
+    match level {
+        LogLevel.Debug -> return "[DEBUG]",
+        LogLevel.Info -> return "[INFO]",
+        LogLevel.Warn -> return "[WARN]",
+        LogLevel.Error -> return "[ERROR]",
+    }
+}
+
+fn _format_log(level -> LogLevel, message -> string) -> string {
+    let prefix = _log_prefix(level);
+    return prefix + " " + message;
+}
+
+test "match_adv: log formatting debug" {
+    assert _format_log(LogLevel.Debug, "starting") == "[DEBUG] starting";
+}
+
+test "match_adv: log formatting error" {
+    assert _format_log(LogLevel.Error, "failed") == "[ERROR] failed";
+}
+
+test "match_adv: log prefix all levels" {
+    assert _log_prefix(LogLevel.Debug) == "[DEBUG]";
+    assert _log_prefix(LogLevel.Info) == "[INFO]";
+    assert _log_prefix(LogLevel.Warn) == "[WARN]";
+    assert _log_prefix(LogLevel.Error) == "[ERROR]";
+}
+
+// ---------------------------------------------------------------------------
+// Nested match (match result drives another match)
+// ---------------------------------------------------------------------------
+
+fn _priority_level(level -> LogLevel) -> number {
+    match level {
+        LogLevel.Debug -> return 0,
+        LogLevel.Info -> return 1,
+        LogLevel.Warn -> return 2,
+        LogLevel.Error -> return 3,
+    }
+}
+
+fn _should_alert(level -> LogLevel) -> boolean {
+    let priority = _priority_level(level);
+    match priority {
+        3 -> return true,
+        2 -> return true,
+        _ -> return false,
+    }
+}
+
+test "match_adv: nested match dispatch" {
+    assert _should_alert(LogLevel.Error) == true;
+    assert _should_alert(LogLevel.Warn) == true;
+    assert _should_alert(LogLevel.Info) == false;
+    assert _should_alert(LogLevel.Debug) == false;
+}

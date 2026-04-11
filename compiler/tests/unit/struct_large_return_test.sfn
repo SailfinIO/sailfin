@@ -1,0 +1,250 @@
+// Seed viability tests: large struct returns, many-field structs, and nested structs.
+// Targets: cross-module ABI mismatches, pointer encoding, struct layout correctness.
+// These patterns stress the LLVM lowering for byval/sret calling conventions
+// that the v0.1.1 seed mishandled (~15 cross-module ABI fixups).
+
+// ---------------------------------------------------------------------------
+// Struct with many fields (>4 fields triggers byval ABI on most platforms)
+// ---------------------------------------------------------------------------
+
+struct Config {
+    width -> number;
+    height -> number;
+    depth -> number;
+    scale -> number;
+    offset_x -> number;
+    offset_y -> number;
+    rotation -> number;
+    opacity -> number;
+
+    fn total_pixels(self) -> number {
+        return self.width * self.height * self.depth;
+    }
+
+    fn apply_scale(self) -> Config {
+        return Config {
+            width: self.width * self.scale,
+            height: self.height * self.scale,
+            depth: self.depth,
+            scale: 1,
+            offset_x: self.offset_x * self.scale,
+            offset_y: self.offset_y * self.scale,
+            rotation: self.rotation,
+            opacity: self.opacity,
+        };
+    }
+}
+
+fn _make_default_config() -> Config {
+    return Config {
+        width: 800,
+        height: 600,
+        depth: 3,
+        scale: 2,
+        offset_x: 10,
+        offset_y: 20,
+        rotation: 90,
+        opacity: 255,
+    };
+}
+
+test "struct_large: 8-field struct construction and field access" {
+    let c = _make_default_config();
+    assert c.width == 800;
+    assert c.height == 600;
+    assert c.depth == 3;
+    assert c.scale == 2;
+    assert c.offset_x == 10;
+    assert c.offset_y == 20;
+    assert c.rotation == 90;
+    assert c.opacity == 255;
+}
+
+test "struct_large: method on 8-field struct" {
+    let c = _make_default_config();
+    assert c.total_pixels() == 1440000;
+}
+
+test "struct_large: method returning 8-field struct" {
+    let c = _make_default_config();
+    let scaled = c.apply_scale();
+    assert scaled.width == 1600;
+    assert scaled.height == 1200;
+    assert scaled.depth == 3;
+    assert scaled.scale == 1;
+    assert scaled.offset_x == 20;
+    assert scaled.offset_y == 40;
+}
+
+// ---------------------------------------------------------------------------
+// Struct returned from function and passed to another function
+// ---------------------------------------------------------------------------
+
+struct Vec3 {
+    x -> number;
+    y -> number;
+    z -> number;
+
+    fn length_squared(self) -> number {
+        return self.x * self.x + self.y * self.y + self.z * self.z;
+    }
+
+    fn add(self, other -> Vec3) -> Vec3 {
+        return Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z };
+    }
+
+    fn scale(self, s -> number) -> Vec3 {
+        return Vec3 { x: self.x * s, y: self.y * s, z: self.z * s };
+    }
+}
+
+fn _make_vec(a -> number, b -> number, c -> number) -> Vec3 {
+    return Vec3 { x: a, y: b, z: c };
+}
+
+fn _dot_product(a -> Vec3, b -> Vec3) -> number {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+fn _cross_product(a -> Vec3, b -> Vec3) -> Vec3 {
+    return Vec3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    };
+}
+
+test "struct_large: struct passed between functions" {
+    let v1 = _make_vec(1, 2, 3);
+    let v2 = _make_vec(4, 5, 6);
+    assert _dot_product(v1, v2) == 32;
+}
+
+test "struct_large: struct returned and chained" {
+    let v1 = _make_vec(1, 0, 0);
+    let v2 = _make_vec(0, 1, 0);
+    let cross = _cross_product(v1, v2);
+    assert cross.x == 0;
+    assert cross.y == 0;
+    assert cross.z == 1;
+}
+
+test "struct_large: method chaining with struct returns" {
+    let v = _make_vec(1, 2, 3);
+    let result = v.scale(2).add(_make_vec(10, 10, 10));
+    assert result.x == 12;
+    assert result.y == 14;
+    assert result.z == 16;
+}
+
+// ---------------------------------------------------------------------------
+// Struct containing struct (nested composition)
+// ---------------------------------------------------------------------------
+
+struct AABB {
+    min -> Vec3;
+    max -> Vec3;
+
+    fn width(self) -> number {
+        return self.max.x - self.min.x;
+    }
+
+    fn height(self) -> number {
+        return self.max.y - self.min.y;
+    }
+
+    fn depth(self) -> number {
+        return self.max.z - self.min.z;
+    }
+
+    fn volume(self) -> number {
+        return self.width() * self.height() * self.depth();
+    }
+
+    fn center(self) -> Vec3 {
+        return Vec3 {
+            x: (self.min.x + self.max.x) / 2,
+            y: (self.min.y + self.max.y) / 2,
+            z: (self.min.z + self.max.z) / 2,
+        };
+    }
+}
+
+fn _make_aabb(x1 -> number, y1 -> number, z1 -> number, x2 -> number, y2 -> number, z2 -> number) -> AABB {
+    return AABB {
+        min: Vec3 { x: x1, y: y1, z: z1 },
+        max: Vec3 { x: x2, y: y2, z: z2 },
+    };
+}
+
+test "struct_large: nested struct field access" {
+    let box = _make_aabb(0, 0, 0, 10, 20, 30);
+    assert box.min.x == 0;
+    assert box.max.x == 10;
+    assert box.max.z == 30;
+}
+
+test "struct_large: nested struct method" {
+    let box = _make_aabb(0, 0, 0, 10, 20, 30);
+    assert box.volume() == 6000;
+}
+
+test "struct_large: nested struct returns struct" {
+    let box = _make_aabb(0, 0, 0, 10, 20, 30);
+    let c = box.center();
+    assert c.x == 5;
+    assert c.y == 10;
+    assert c.z == 15;
+}
+
+// ---------------------------------------------------------------------------
+// Array of structs with aggregation
+// ---------------------------------------------------------------------------
+
+fn _sum_vectors(vecs -> Vec3[]) -> Vec3 {
+    let mut total = Vec3 { x: 0, y: 0, z: 0 };
+    let mut i -> number = 0;
+    loop {
+        if i >= vecs.length { break; }
+        total = total.add(vecs[i]);
+        i += 1;
+    }
+    return total;
+}
+
+test "struct_large: array of structs aggregation" {
+    let mut vecs -> Vec3[] = [];
+    vecs.push(Vec3 { x: 1, y: 2, z: 3 });
+    vecs.push(Vec3 { x: 4, y: 5, z: 6 });
+    vecs.push(Vec3 { x: 7, y: 8, z: 9 });
+    let total = _sum_vectors(vecs);
+    assert total.x == 12;
+    assert total.y == 15;
+    assert total.z == 18;
+}
+
+// ---------------------------------------------------------------------------
+// Struct as both parameter and return value (round-trip)
+// ---------------------------------------------------------------------------
+
+fn _transform_config(cfg -> Config, new_scale -> number) -> Config {
+    return Config {
+        width: cfg.width,
+        height: cfg.height,
+        depth: cfg.depth,
+        scale: new_scale,
+        offset_x: cfg.offset_x + 1,
+        offset_y: cfg.offset_y + 1,
+        rotation: cfg.rotation,
+        opacity: cfg.opacity,
+    };
+}
+
+test "struct_large: large struct round-trip through function" {
+    let c1 = _make_default_config();
+    let c2 = _transform_config(c1, 5);
+    assert c2.scale == 5;
+    assert c2.offset_x == 11;
+    assert c2.offset_y == 21;
+    assert c2.width == 800;
+}
