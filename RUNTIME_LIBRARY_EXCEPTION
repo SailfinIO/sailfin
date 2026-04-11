@@ -9,9 +9,8 @@ license document, but changing it is not allowed.
 
 This Sailfin Runtime Library Exception ("Exception") is an additional
 permission granted by the copyright holder of the Sailfin compiler and
-runtime libraries. It applies to files in the runtime/ directory of the
-Sailfin source distribution (the "Runtime Library") that bear a notice
-stating that they are subject to this Exception.
+runtime libraries. It applies to the source files in the runtime/
+directory of the Sailfin source distribution (the "Runtime Library").
 
 The purpose of this Exception is to allow compilation of non-GPL
 (including proprietary) programs using the Sailfin compiler, so that
