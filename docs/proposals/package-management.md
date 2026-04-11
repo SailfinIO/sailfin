@@ -40,11 +40,10 @@ sfn add --dev test bench
 Every capsule contains a `capsule.toml` descriptor:
 
 ```toml
-[package]
+[capsule]
 name = "my-sailfin-project"
 version = "1.0.0"
 description = "A simple Sailfin capsule"
-entry = "src/main.sfn"
 
 [dependencies]
 "http" = "^1.0.0"
@@ -53,8 +52,11 @@ entry = "src/main.sfn"
 [dev-dependencies]
 "test" = "^0.1.0"
 
+[build]
+entry = "src/main.sfn"
+
 [capabilities]
-allow = ["io", "net", "model"]
+required = ["io", "net", "model"]
 
 [models]
 "openai.summarizer" = "gpt-foo@2.3.1"

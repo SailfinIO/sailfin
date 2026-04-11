@@ -1,10 +1,12 @@
-[package]
+[capsule]
 name = "sfn/fmt"
 version = "0.1.1"
 description = "String formatting and manipulation for Sailfin"
-entry = "src/mod.sfn"
 
 [dependencies]
 
 [capabilities]
-allow = []
+required = []
+
+[build]
+entry = "src/mod.sfn"

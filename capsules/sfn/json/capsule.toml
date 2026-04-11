@@ -1,10 +1,12 @@
-[package]
+[capsule]
 name = "sfn/json"
 version = "0.1.1"
 description = "JSON parsing and serialization for Sailfin"
-entry = "src/mod.sfn"
 
 [dependencies]
 
 [capabilities]
-allow = []
+required = []
+
+[build]
+entry = "src/mod.sfn"

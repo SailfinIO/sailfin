@@ -150,11 +150,11 @@ test "toml: table with simple keys" {
 }
 
 test "toml: nested table access via dotted path" {
-    // Simulate [package] section: { package: { name: "foo", version: "1.0" } }
+    // Simulate [capsule] section: { capsule: { name: "foo", version: "1.0" } }
     let pkg = _table_val(["name", "version"], [_string_val("foo"), _string_val("1.0")]);
-    let root = _table_val(["package"], [pkg]);
-    assert strings_equal(_get_string(root, "package.name"), "foo");
-    assert strings_equal(_get_string(root, "package.version"), "1.0");
+    let root = _table_val(["capsule"], [pkg]);
+    assert strings_equal(_get_string(root, "capsule.name"), "foo");
+    assert strings_equal(_get_string(root, "capsule.version"), "1.0");
 }
 
 test "toml: has_key" {

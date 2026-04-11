@@ -1,6 +1,6 @@
 # Sailfin Roadmap
 
-Updated: March 31, 2026
+Updated: April 11, 2026
 Owners: Sailfin Core Team
 
 This roadmap pairs with `docs/status.md`. Update status first, then record
@@ -117,7 +117,51 @@ or C runtime**. All items below are hard requirements, not stretch goals.
    - [ ] Document artifact layout, supported platforms, and upgrade expectations.
    - [ ] Verify build/release workflows only use self-hosted compiler artifacts.
 
-6. **Documentation for public release**
+6. **Capsule and workspace manifest system (hard 1.0 prerequisite)**
+
+   The capsule manifest (`capsule.toml`) and workspace manifest (`workspace.toml`)
+   are the foundation of Sailfin's packaging, dependency resolution, and
+   capability-based security model. All three of Sailfin's differentiators —
+   the effect system, capability-based security, and structured concurrency —
+   depend on capsules being the unit of trust and compilation. Shipping 1.0
+   without this means shipping without the security story.
+
+   **Capsule manifests** — every Sailfin project (including the compiler itself)
+   must be described by a `capsule.toml` that declares its name, version,
+   dependencies, required capabilities, and build entry point.
+
+   **Workspace manifests** — multi-capsule projects (like the Sailfin repo itself,
+   which contains the compiler and 19 stdlib capsules) use a root `workspace.toml`
+   to coordinate shared dependency resolution and enforce capability policies
+   across member capsules. This is analogous to `go.work`, Cargo workspaces, or
+   npm workspaces.
+
+   **The compiler as a capsule** — the compiler (`compiler/src/`) must get its own
+   `capsule.toml` as an application capsule. This validates the manifest format at
+   scale and eliminates the special-case build path. The compiler's version
+   (currently in `compiler/src/version.sfn`) should be sourced from or synchronized
+   with its `capsule.toml` manifest.
+
+   - [ ] Add `capsule.toml` to the compiler (`compiler/`) as an application
+         capsule with `entry = "src/main.sfn"` and `required = ["io"]`.
+   - [ ] Add `workspace.toml` at the repository root listing the compiler and all
+         stdlib capsules as workspace members.
+   - [ ] Implement `[policies.<capability>]` enforcement in workspace builds —
+         reject capsules that declare capabilities not allowed by workspace policy.
+   - [ ] Wire the build system to read `capsule.toml` entry points and version
+         instead of hardcoding paths in `build.sh`.
+   - [ ] Implement capsule-scoped capability auditing — the compiler rejects
+         capsule builds that use effects not listed in `[capabilities] required`.
+   - [ ] Implement `workspace.toml` parsing in the compiler (extend `toml_parser.sfn`).
+   - [ ] Implement intra-workspace `path` dependency resolution
+         (`"core" = { path = "../core" }`).
+   - [ ] Implement `[shared-dependencies]` version pinning across workspace members.
+   - [ ] Finalize `sfn init`, `sfn add`, and `sfn publish` CLI commands.
+   - [ ] Stand up registry auth/signing for `registry.sailfin.dev`.
+   - [ ] Source the compiler version from `capsule.toml` (retire standalone
+         `version.sfn` or generate it from the manifest).
+
+7. **Documentation for public release**
    - [ ] Remove legacy compiler-stage references across docs and examples.
    - [ ] Refresh `docs/spec.md` and `docs/keywords.md` to reflect shipped syntax.
    - [ ] Ensure `docs/status.md` and `README.md` match installer defaults and CLI usage.
@@ -168,8 +212,6 @@ The AI-native features are central to Sailfin's long-term vision but ship after
       concurrency work).
 - [ ] **Runtime diagnostics** — structured tracing, allocation telemetry, and
       performance profiling hooks.
-- [ ] **Package registry workflow** — finalize manifests, implement
-      `sfn init/add/publish`, and stand up registry auth/signing.
 - [ ] **Native test framework** — golden/adversarial/replay workflows in
       `sfn test`; CI reporting.
 - [ ] **Tensor/GPU effects** — `Vector<N>`, `Tensor<Shape, DType>`, GPU batching,

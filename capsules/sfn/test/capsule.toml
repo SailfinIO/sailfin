@@ -1,10 +1,12 @@
-[package]
+[capsule]
 name = "sfn/test"
 version = "0.1.0"
 description = "Test assertion helpers and utilities for Sailfin"
-entry = "src/mod.sfn"
 
 [dependencies]
 
 [capabilities]
-allow = ["io"]
+required = ["io"]
+
+[build]
+entry = "src/mod.sfn"

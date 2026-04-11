@@ -1,10 +1,12 @@
-[package]
+[capsule]
 name = "sfn/fs"
 version = "0.1.1"
 description = "Filesystem operations for Sailfin"
-entry = "src/mod.sfn"
 
 [dependencies]
 
 [capabilities]
-allow = ["io"]
+required = ["io"]
+
+[build]
+entry = "src/mod.sfn"

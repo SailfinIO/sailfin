@@ -1,10 +1,12 @@
-[package]
+[capsule]
 name = "sfn/math"
 version = "0.1.1"
 description = "Mathematical functions and numeric utilities for Sailfin"
-entry = "src/mod.sfn"
 
 [dependencies]
 
 [capabilities]
-allow = []
+required = []
+
+[build]
+entry = "src/mod.sfn"
