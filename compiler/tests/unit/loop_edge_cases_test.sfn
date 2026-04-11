@@ -1,0 +1,305 @@
+// Seed viability tests: loop edge cases.
+// Targets: loop control flow bugs (~6 fixups), phi node correctness.
+// These patterns test loop boundaries that the v0.1.1 seed mishandled:
+// unconditional loop headers, wrong continue targets, early exits.
+
+// ---------------------------------------------------------------------------
+// Loop with zero iterations (exit condition checked before body)
+// ---------------------------------------------------------------------------
+
+fn _zero_iter_loop(limit -> number) -> number {
+    let mut count -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= limit { break; }
+        count += 1;
+        i += 1;
+    }
+    return count;
+}
+
+test "loop_edge: zero iterations when limit is zero" {
+    assert _zero_iter_loop(0) == 0;
+}
+
+test "loop_edge: zero iterations when limit is negative" {
+    assert _zero_iter_loop(-5) == 0;
+}
+
+test "loop_edge: one iteration" {
+    assert _zero_iter_loop(1) == 1;
+}
+
+// ---------------------------------------------------------------------------
+// Loop with multiple break points from different branches
+// ---------------------------------------------------------------------------
+
+fn _multi_break(arr -> number[]) -> number {
+    let mut i -> number = 0;
+    let mut found_neg -> boolean = false;
+    let mut found_big -> boolean = false;
+    loop {
+        if i >= arr.length { break; }
+        if arr[i] < 0 {
+            found_neg = true;
+            break;
+        }
+        if arr[i] > 1000 {
+            found_big = true;
+            break;
+        }
+        i += 1;
+    }
+    if found_neg { return -1; }
+    if found_big { return 1; }
+    return 0;
+}
+
+test "loop_edge: multi break finds negative" {
+    let data = [1, 2, -3, 4, 5000];
+    assert _multi_break(data) == -1;
+}
+
+test "loop_edge: multi break finds big" {
+    let data = [1, 2, 3, 5000, -1];
+    assert _multi_break(data) == 1;
+}
+
+test "loop_edge: multi break no special" {
+    let data = [1, 2, 3, 4, 5];
+    assert _multi_break(data) == 0;
+}
+
+test "loop_edge: multi break empty array" {
+    let mut data -> number[] = [];
+    assert _multi_break(data) == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Nested loop with break in outer from inner condition
+// ---------------------------------------------------------------------------
+
+fn _find_in_matrix(rows -> number, cols -> number, target -> number) -> number {
+    let mut i -> number = 0;
+    let mut found_at -> number = -1;
+    loop {
+        if i >= rows { break; }
+        let mut j -> number = 0;
+        loop {
+            if j >= cols { break; }
+            let val = i * cols + j;
+            if val == target {
+                found_at = val;
+                // Can only break inner loop; set flag for outer
+                j = cols;  // force inner break
+            }
+            j += 1;
+        }
+        if found_at >= 0 { break; }
+        i += 1;
+    }
+    return found_at;
+}
+
+test "loop_edge: find in matrix first element" {
+    assert _find_in_matrix(3, 4, 0) == 0;
+}
+
+test "loop_edge: find in matrix middle element" {
+    assert _find_in_matrix(3, 4, 7) == 7;
+}
+
+test "loop_edge: find in matrix last element" {
+    assert _find_in_matrix(3, 4, 11) == 11;
+}
+
+test "loop_edge: find in matrix not found" {
+    assert _find_in_matrix(3, 4, 99) == -1;
+}
+
+// ---------------------------------------------------------------------------
+// While-like loop with compound condition
+// ---------------------------------------------------------------------------
+
+fn _gcd(a -> number, b -> number) -> number {
+    let mut x -> number = a;
+    let mut y -> number = b;
+    loop {
+        if y == 0 { break; }
+        let temp = y;
+        y = x % y;
+        x = temp;
+    }
+    return x;
+}
+
+test "loop_edge: gcd basic" {
+    assert _gcd(12, 8) == 4;
+}
+
+test "loop_edge: gcd coprime" {
+    assert _gcd(17, 13) == 1;
+}
+
+test "loop_edge: gcd same number" {
+    assert _gcd(7, 7) == 7;
+}
+
+test "loop_edge: gcd one is zero" {
+    assert _gcd(5, 0) == 5;
+}
+
+// ---------------------------------------------------------------------------
+// Countdown loop (decrementing counter)
+// ---------------------------------------------------------------------------
+
+fn _countdown_sum(start -> number) -> number {
+    let mut total -> number = 0;
+    let mut n -> number = start;
+    loop {
+        if n <= 0 { break; }
+        total += n;
+        n -= 1;
+    }
+    return total;
+}
+
+test "loop_edge: countdown sum from 5" {
+    assert _countdown_sum(5) == 15;
+}
+
+test "loop_edge: countdown sum from 0" {
+    assert _countdown_sum(0) == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Loop with continue and mutation after continue (dead code after continue)
+// ---------------------------------------------------------------------------
+
+fn _skip_multiples_of_3(n -> number) -> number {
+    let mut sum -> number = 0;
+    let mut i -> number = 1;
+    loop {
+        if i > n { break; }
+        if i % 3 == 0 {
+            i += 1;
+            continue;
+        }
+        sum += i;
+        i += 1;
+    }
+    return sum;
+}
+
+test "loop_edge: skip multiples of 3 up to 10" {
+    // 1+2+4+5+7+8+10 = 37
+    assert _skip_multiples_of_3(10) == 37;
+}
+
+test "loop_edge: skip multiples of 3 up to 3" {
+    // 1+2 = 3
+    assert _skip_multiples_of_3(3) == 3;
+}
+
+// ---------------------------------------------------------------------------
+// Loop building string with early termination
+// ---------------------------------------------------------------------------
+
+fn _build_until_long(parts -> string[]) -> string {
+    let mut result -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= parts.length { break; }
+        result = result + parts[i];
+        if result.length > 10 {
+            break;
+        }
+        i += 1;
+    }
+    return result;
+}
+
+test "loop_edge: string build with early termination" {
+    let mut parts -> string[] = [];
+    parts.push("hello");
+    parts.push(" ");
+    parts.push("world");
+    parts.push("!!!");
+    let result = _build_until_long(parts);
+    assert result == "hello world";
+}
+
+test "loop_edge: string build no early termination" {
+    let mut parts -> string[] = [];
+    parts.push("hi");
+    let result = _build_until_long(parts);
+    assert result == "hi";
+}
+
+// ---------------------------------------------------------------------------
+// Double loop with independent counters (phi isolation)
+// ---------------------------------------------------------------------------
+
+fn _independent_loops(a -> number, b -> number) -> number {
+    let mut sum_a -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= a { break; }
+        sum_a += i + 1;
+        i += 1;
+    }
+
+    let mut sum_b -> number = 0;
+    let mut j -> number = 0;
+    loop {
+        if j >= b { break; }
+        sum_b += j + 1;
+        j += 1;
+    }
+
+    return sum_a * sum_b;
+}
+
+test "loop_edge: independent loops" {
+    // sum_a(3) = 1+2+3 = 6, sum_b(4) = 1+2+3+4 = 10
+    assert _independent_loops(3, 4) == 60;
+}
+
+test "loop_edge: independent loops one zero" {
+    assert _independent_loops(0, 5) == 0;
+}
+
+test "loop_edge: independent loops both zero" {
+    assert _independent_loops(0, 0) == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Loop with return from middle (not break)
+// ---------------------------------------------------------------------------
+
+fn _find_first_even(arr -> number[]) -> number {
+    let mut i -> number = 0;
+    loop {
+        if i >= arr.length { break; }
+        if arr[i] % 2 == 0 {
+            return arr[i];
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+test "loop_edge: return from middle of loop" {
+    let data = [1, 3, 5, 8, 9];
+    assert _find_first_even(data) == 8;
+}
+
+test "loop_edge: return from middle first element" {
+    let data = [2, 3, 5];
+    assert _find_first_even(data) == 2;
+}
+
+test "loop_edge: return from middle none found" {
+    let data = [1, 3, 5, 7];
+    assert _find_first_even(data) == -1;
+}

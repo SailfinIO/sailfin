@@ -1,0 +1,219 @@
+// Seed viability tests: deep recursion and call chain depth.
+// Targets: stack frame correctness, function call ABI, pointer handling.
+// Self-hosting requires correct recursive lowering for the parser,
+// type checker, and emitter which all recurse into nested AST nodes.
+
+// ---------------------------------------------------------------------------
+// Deep recursion (100+ levels)
+// ---------------------------------------------------------------------------
+
+fn _sum_recursive(n -> number) -> number {
+    if n <= 0 { return 0; }
+    return n + _sum_recursive(n - 1);
+}
+
+test "deep_recursion: sum to 100" {
+    assert _sum_recursive(100) == 5050;
+}
+
+test "deep_recursion: sum to 200" {
+    assert _sum_recursive(200) == 20100;
+}
+
+test "deep_recursion: sum to 0" {
+    assert _sum_recursive(0) == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Mutual recursion (two functions calling each other)
+// ---------------------------------------------------------------------------
+
+fn _is_even_rec(n -> number) -> boolean {
+    if n == 0 { return true; }
+    return _is_odd_rec(n - 1);
+}
+
+fn _is_odd_rec(n -> number) -> boolean {
+    if n == 0 { return false; }
+    return _is_even_rec(n - 1);
+}
+
+test "deep_recursion: mutual recursion even" {
+    assert _is_even_rec(0) == true;
+    assert _is_even_rec(2) == true;
+    assert _is_even_rec(10) == true;
+    assert _is_even_rec(50) == true;
+}
+
+test "deep_recursion: mutual recursion odd" {
+    assert _is_odd_rec(1) == true;
+    assert _is_odd_rec(3) == true;
+    assert _is_odd_rec(11) == true;
+    assert _is_odd_rec(51) == true;
+}
+
+test "deep_recursion: mutual recursion cross-check" {
+    assert _is_even_rec(7) == false;
+    assert _is_odd_rec(8) == false;
+}
+
+// ---------------------------------------------------------------------------
+// Recursion with struct parameter and return
+// ---------------------------------------------------------------------------
+
+struct TreeResult {
+    sum -> number;
+    depth -> number;
+    count -> number;
+}
+
+fn _tree_accumulate(depth -> number, value -> number) -> TreeResult {
+    if depth <= 0 {
+        return TreeResult { sum: value, depth: 0, count: 1 };
+    }
+    let left = _tree_accumulate(depth - 1, value);
+    let right = _tree_accumulate(depth - 1, value + 1);
+    return TreeResult {
+        sum: left.sum + right.sum + value,
+        depth: depth,
+        count: left.count + right.count + 1,
+    };
+}
+
+test "deep_recursion: recursive struct return depth 0" {
+    let r = _tree_accumulate(0, 5);
+    assert r.sum == 5;
+    assert r.depth == 0;
+    assert r.count == 1;
+}
+
+test "deep_recursion: recursive struct return depth 1" {
+    let r = _tree_accumulate(1, 10);
+    // left(0,10)={10,0,1}, right(0,11)={11,0,1}
+    // result = {10+11+10=31, 1, 3}
+    assert r.sum == 31;
+    assert r.depth == 1;
+    assert r.count == 3;
+}
+
+test "deep_recursion: recursive struct return depth 3" {
+    let r = _tree_accumulate(3, 1);
+    assert r.count == 15;
+    assert r.depth == 3;
+}
+
+// ---------------------------------------------------------------------------
+// Long call chain (A calls B calls C calls D ...)
+// ---------------------------------------------------------------------------
+
+fn _chain_a(n -> number) -> number {
+    return _chain_b(n + 1);
+}
+
+fn _chain_b(n -> number) -> number {
+    return _chain_c(n + 1);
+}
+
+fn _chain_c(n -> number) -> number {
+    return _chain_d(n + 1);
+}
+
+fn _chain_d(n -> number) -> number {
+    return _chain_e(n + 1);
+}
+
+fn _chain_e(n -> number) -> number {
+    return _chain_f(n + 1);
+}
+
+fn _chain_f(n -> number) -> number {
+    return _chain_g(n + 1);
+}
+
+fn _chain_g(n -> number) -> number {
+    return _chain_h(n + 1);
+}
+
+fn _chain_h(n -> number) -> number {
+    return n + 1;
+}
+
+test "deep_recursion: 8-deep call chain" {
+    // 0 -> +1 -> +1 -> +1 -> +1 -> +1 -> +1 -> +1 -> +1 = 8
+    assert _chain_a(0) == 8;
+}
+
+test "deep_recursion: call chain preserves large values" {
+    assert _chain_a(1000) == 1008;
+}
+
+// ---------------------------------------------------------------------------
+// Recursion with string accumulation
+// ---------------------------------------------------------------------------
+
+fn _repeat_string(s -> string, n -> number) -> string {
+    if n <= 0 { return ""; }
+    if n == 1 { return s; }
+    return s + _repeat_string(s, n - 1);
+}
+
+test "deep_recursion: string repeat 1" {
+    assert _repeat_string("ab", 1) == "ab";
+}
+
+test "deep_recursion: string repeat 3" {
+    assert _repeat_string("ab", 3) == "ababab";
+}
+
+test "deep_recursion: string repeat 0" {
+    assert _repeat_string("ab", 0) == "";
+}
+
+test "deep_recursion: string repeat 5" {
+    assert _repeat_string("x", 5) == "xxxxx";
+}
+
+// ---------------------------------------------------------------------------
+// Recursive array building (power set size calculation)
+// ---------------------------------------------------------------------------
+
+fn _power_of_two(n -> number) -> number {
+    if n == 0 { return 1; }
+    return 2 * _power_of_two(n - 1);
+}
+
+test "deep_recursion: power of two" {
+    assert _power_of_two(0) == 1;
+    assert _power_of_two(1) == 2;
+    assert _power_of_two(4) == 16;
+    assert _power_of_two(10) == 1024;
+}
+
+// ---------------------------------------------------------------------------
+// Ackermann-like function (tests deep recursion with branching)
+// ---------------------------------------------------------------------------
+
+fn _ackermann_bounded(m -> number, n -> number) -> number {
+    if m == 0 { return n + 1; }
+    if n == 0 { return _ackermann_bounded(m - 1, 1); }
+    return _ackermann_bounded(m - 1, _ackermann_bounded(m, n - 1));
+}
+
+test "deep_recursion: ackermann(0, n)" {
+    assert _ackermann_bounded(0, 0) == 1;
+    assert _ackermann_bounded(0, 5) == 6;
+}
+
+test "deep_recursion: ackermann(1, n)" {
+    assert _ackermann_bounded(1, 0) == 2;
+    assert _ackermann_bounded(1, 5) == 7;
+}
+
+test "deep_recursion: ackermann(2, n)" {
+    assert _ackermann_bounded(2, 0) == 3;
+    assert _ackermann_bounded(2, 3) == 9;
+}
+
+test "deep_recursion: ackermann(3, 3)" {
+    assert _ackermann_bounded(3, 3) == 61;
+}

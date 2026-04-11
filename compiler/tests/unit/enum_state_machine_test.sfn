@@ -1,0 +1,65 @@
+// Seed viability tests: enum-driven state machine.
+// Targets: enum dispatch in conditional chains, enum as loop accumulator.
+
+enum State {
+    Idle,
+    Running,
+    Paused,
+    Stopped,
+}
+
+fn _transition(current -> State, event -> string) -> State {
+    if current == State.Idle {
+        if event == "start" { return State.Running; }
+        return State.Idle;
+    }
+    if current == State.Running {
+        if event == "pause" { return State.Paused; }
+        if event == "stop" { return State.Stopped; }
+        return State.Running;
+    }
+    if current == State.Paused {
+        if event == "resume" { return State.Running; }
+        if event == "stop" { return State.Stopped; }
+        return State.Paused;
+    }
+    return State.Stopped;
+}
+
+fn _run_state_machine(events -> string[]) -> State {
+    let mut state -> State = State.Idle;
+    let mut i -> number = 0;
+    loop {
+        if i >= events.length { break; }
+        state = _transition(state, events[i]);
+        i += 1;
+    }
+    return state;
+}
+
+test "enum_sm: basic transitions" {
+    assert _transition(State.Idle, "start") == State.Running;
+    assert _transition(State.Running, "pause") == State.Paused;
+    assert _transition(State.Paused, "resume") == State.Running;
+    assert _transition(State.Running, "stop") == State.Stopped;
+}
+
+test "enum_sm: invalid transition" {
+    assert _transition(State.Idle, "pause") == State.Idle;
+    assert _transition(State.Stopped, "start") == State.Stopped;
+}
+
+test "enum_sm: sequence" {
+    let mut events -> string[] = [];
+    events.push("start");
+    events.push("pause");
+    events.push("resume");
+    events.push("stop");
+    assert _run_state_machine(events) == State.Stopped;
+}
+
+test "enum_sm: start only" {
+    let mut events -> string[] = [];
+    events.push("start");
+    assert _run_state_machine(events) == State.Running;
+}

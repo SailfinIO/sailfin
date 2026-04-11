@@ -1,0 +1,137 @@
+// Seed viability tests: complex enum patterns (part 1).
+// Targets: enum dispatch, enum arrays, enum as struct field.
+
+// ---------------------------------------------------------------------------
+// Enum used as array element
+// ---------------------------------------------------------------------------
+
+enum Priority {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+fn _priority_value(p -> Priority) -> number {
+    if p == Priority.Low { return 1; }
+    if p == Priority.Medium { return 2; }
+    if p == Priority.High { return 3; }
+    if p == Priority.Critical { return 4; }
+    return 0;
+}
+
+fn _max_priority(priorities -> Priority[]) -> Priority {
+    if priorities.length == 0 { return Priority.Low; }
+    let mut best -> Priority = priorities[0];
+    let mut best_val -> number = _priority_value(best);
+    let mut i -> number = 1;
+    loop {
+        if i >= priorities.length { break; }
+        let val = _priority_value(priorities[i]);
+        if val > best_val {
+            best = priorities[i];
+            best_val = val;
+        }
+        i += 1;
+    }
+    return best;
+}
+
+test "enum_complex: priority values" {
+    assert _priority_value(Priority.Low) == 1;
+    assert _priority_value(Priority.Medium) == 2;
+    assert _priority_value(Priority.High) == 3;
+    assert _priority_value(Priority.Critical) == 4;
+}
+
+test "enum_complex: max priority from array" {
+    let mut priorities -> Priority[] = [];
+    priorities.push(Priority.Low);
+    priorities.push(Priority.High);
+    priorities.push(Priority.Medium);
+    assert _max_priority(priorities) == Priority.High;
+}
+
+test "enum_complex: max priority single" {
+    let mut priorities -> Priority[] = [];
+    priorities.push(Priority.Critical);
+    assert _max_priority(priorities) == Priority.Critical;
+}
+
+// ---------------------------------------------------------------------------
+// Enum as struct field with multiple enums
+// ---------------------------------------------------------------------------
+
+enum TaskStatus {
+    Todo,
+    InProgress,
+    Done,
+    Blocked,
+}
+
+struct Task {
+    name -> string;
+    priority -> Priority;
+    status -> TaskStatus;
+    effort -> number;
+}
+
+fn _is_actionable(t -> Task) -> boolean {
+    if t.status == TaskStatus.Done { return false; }
+    if t.status == TaskStatus.Blocked { return false; }
+    return true;
+}
+
+fn _task_score(t -> Task) -> number {
+    let pval = _priority_value(t.priority);
+    if t.status == TaskStatus.InProgress {
+        return pval * 10 + t.effort;
+    }
+    if t.status == TaskStatus.Todo {
+        return pval * 5;
+    }
+    return 0;
+}
+
+test "enum_complex: struct with two enum fields" {
+    let t = Task {
+        name: "Fix bug",
+        priority: Priority.High,
+        status: TaskStatus.InProgress,
+        effort: 3,
+    };
+    assert t.name == "Fix bug";
+    assert t.priority == Priority.High;
+    assert t.status == TaskStatus.InProgress;
+    assert _is_actionable(t) == true;
+}
+
+test "enum_complex: blocked task not actionable" {
+    let t = Task {
+        name: "Blocked",
+        priority: Priority.Critical,
+        status: TaskStatus.Blocked,
+        effort: 5,
+    };
+    assert _is_actionable(t) == false;
+}
+
+test "enum_complex: task scoring" {
+    let t1 = Task {
+        name: "A",
+        priority: Priority.High,
+        status: TaskStatus.InProgress,
+        effort: 2,
+    };
+    // 3 * 10 + 2 = 32
+    assert _task_score(t1) == 32;
+
+    let t2 = Task {
+        name: "B",
+        priority: Priority.Low,
+        status: TaskStatus.Todo,
+        effort: 0,
+    };
+    // 1 * 5 = 5
+    assert _task_score(t2) == 5;
+}

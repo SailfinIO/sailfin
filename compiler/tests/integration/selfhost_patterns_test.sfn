@@ -1,0 +1,367 @@
+// Seed viability integration test: patterns critical for self-hosting.
+// These tests exercise code patterns that appear frequently in the compiler
+// source itself. If the seed can compile and run these, it has a good chance
+// of compiling the actual compiler.
+
+// ---------------------------------------------------------------------------
+// String-indexed dispatch (pattern used in instruction lowering)
+// ---------------------------------------------------------------------------
+
+fn _starts_with(s -> string, prefix -> string) -> boolean {
+    if prefix.length > s.length { return false; }
+    let sub = substring(s, 0, prefix.length);
+    return sub == prefix;
+}
+
+fn _ends_with(s -> string, suffix -> string) -> boolean {
+    if suffix.length > s.length { return false; }
+    let start = s.length - suffix.length;
+    let sub = substring(s, start, s.length);
+    return sub == suffix;
+}
+
+fn _dispatch_instruction(text -> string) -> string {
+    if _starts_with(text, "let ") { return "variable_binding"; }
+    if _starts_with(text, "return ") { return "return_statement"; }
+    if _starts_with(text, "if ") { return "conditional"; }
+    if _starts_with(text, "loop") { return "loop"; }
+    if _starts_with(text, "break") { return "break"; }
+    if _starts_with(text, "continue") { return "continue"; }
+    if _starts_with(text, "fn ") { return "function_decl"; }
+    if _starts_with(text, "struct ") { return "struct_decl"; }
+    return "expression";
+}
+
+test "selfhost: instruction dispatch let" {
+    assert _dispatch_instruction("let x = 42") == "variable_binding";
+}
+
+test "selfhost: instruction dispatch return" {
+    assert _dispatch_instruction("return result + 1") == "return_statement";
+}
+
+test "selfhost: instruction dispatch if" {
+    assert _dispatch_instruction("if x > 0") == "conditional";
+}
+
+test "selfhost: instruction dispatch loop" {
+    assert _dispatch_instruction("loop") == "loop";
+}
+
+test "selfhost: instruction dispatch expression" {
+    assert _dispatch_instruction("x + y") == "expression";
+}
+
+test "selfhost: starts_with" {
+    assert _starts_with("hello world", "hello") == true;
+    assert _starts_with("hello world", "world") == false;
+    assert _starts_with("hi", "hello") == false;
+    assert _starts_with("", "a") == false;
+}
+
+test "selfhost: ends_with" {
+    assert _ends_with("hello.sfn", ".sfn") == true;
+    assert _ends_with("hello.py", ".sfn") == false;
+    assert _ends_with("x", "xyz") == false;
+}
+
+// ---------------------------------------------------------------------------
+// Line-by-line text processing (pattern used in recovery parser)
+// ---------------------------------------------------------------------------
+
+fn _count_lines(text -> string) -> number {
+    if text.length == 0 { return 0; }
+    let mut count -> number = 1;
+    let mut i -> number = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = substring(text, i, i + 1);
+        if ch == "\n" {
+            count += 1;
+        }
+        i += 1;
+    }
+    return count;
+}
+
+fn _find_char(text -> string, target -> string) -> number {
+    let mut i -> number = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = substring(text, i, i + 1);
+        if ch == target { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _extract_before(text -> string, delimiter -> string) -> string {
+    let pos = _find_char(text, delimiter);
+    if pos < 0 { return text; }
+    return substring(text, 0, pos);
+}
+
+fn _extract_after(text -> string, delimiter -> string) -> string {
+    let pos = _find_char(text, delimiter);
+    if pos < 0 { return ""; }
+    if pos + 1 >= text.length { return ""; }
+    return substring(text, pos + 1, text.length);
+}
+
+test "selfhost: count lines single" {
+    assert _count_lines("hello") == 1;
+}
+
+test "selfhost: count lines multi" {
+    assert _count_lines("a\nb\nc") == 3;
+}
+
+test "selfhost: count lines empty" {
+    assert _count_lines("") == 0;
+}
+
+test "selfhost: find char present" {
+    assert _find_char("hello=world", "=") == 5;
+}
+
+test "selfhost: find char absent" {
+    assert _find_char("hello world", "=") == -1;
+}
+
+test "selfhost: extract before" {
+    assert _extract_before("key=value", "=") == "key";
+}
+
+test "selfhost: extract after" {
+    assert _extract_after("key=value", "=") == "value";
+}
+
+test "selfhost: extract before no delimiter" {
+    assert _extract_before("nodelim", "=") == "nodelim";
+}
+
+// ---------------------------------------------------------------------------
+// Symbol table pattern (name → index mapping via arrays)
+// ---------------------------------------------------------------------------
+
+struct SymbolTable {
+    names -> string[];
+    values -> number[];
+    count -> number;
+}
+
+fn _make_table() -> SymbolTable {
+    let mut names -> string[] = [];
+    let mut values -> number[] = [];
+    return SymbolTable { names: names, values: values, count: 0 };
+}
+
+fn _table_set(table -> SymbolTable, name -> string, value -> number) -> SymbolTable {
+    // Check if name exists
+    let mut i -> number = 0;
+    loop {
+        if i >= table.count { break; }
+        if table.names[i] == name {
+            // Update existing — create new arrays with updated value
+            let mut new_values -> number[] = [];
+            let mut j -> number = 0;
+            loop {
+                if j >= table.count { break; }
+                if j == i {
+                    new_values.push(value);
+                } else {
+                    new_values.push(table.values[j]);
+                }
+                j += 1;
+            }
+            return SymbolTable { names: table.names, values: new_values, count: table.count };
+        }
+        i += 1;
+    }
+    // Add new entry
+    let mut new_names -> string[] = [];
+    let mut new_values -> number[] = [];
+    let mut k -> number = 0;
+    loop {
+        if k >= table.count { break; }
+        new_names.push(table.names[k]);
+        new_values.push(table.values[k]);
+        k += 1;
+    }
+    new_names.push(name);
+    new_values.push(value);
+    return SymbolTable { names: new_names, values: new_values, count: table.count + 1 };
+}
+
+fn _table_get(table -> SymbolTable, name -> string) -> number {
+    let mut i -> number = 0;
+    loop {
+        if i >= table.count { break; }
+        if table.names[i] == name {
+            return table.values[i];
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _table_has(table -> SymbolTable, name -> string) -> boolean {
+    let mut i -> number = 0;
+    loop {
+        if i >= table.count { break; }
+        if table.names[i] == name { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "selfhost: symbol table add and get" {
+    let t0 = _make_table();
+    let t1 = _table_set(t0, "x", 42);
+    let t2 = _table_set(t1, "y", 100);
+    assert _table_get(t2, "x") == 42;
+    assert _table_get(t2, "y") == 100;
+    assert _table_get(t2, "z") == -1;
+}
+
+test "selfhost: symbol table has" {
+    let t0 = _make_table();
+    let t1 = _table_set(t0, "alpha", 1);
+    assert _table_has(t1, "alpha") == true;
+    assert _table_has(t1, "beta") == false;
+}
+
+test "selfhost: symbol table update" {
+    let t0 = _make_table();
+    let t1 = _table_set(t0, "x", 10);
+    let t2 = _table_set(t1, "x", 20);
+    assert _table_get(t2, "x") == 20;
+    assert t2.count == 1;
+}
+
+test "selfhost: symbol table multiple entries" {
+    let mut t = _make_table();
+    t = _table_set(t, "a", 1);
+    t = _table_set(t, "b", 2);
+    t = _table_set(t, "c", 3);
+    t = _table_set(t, "d", 4);
+    t = _table_set(t, "e", 5);
+    assert t.count == 5;
+    assert _table_get(t, "a") == 1;
+    assert _table_get(t, "e") == 5;
+}
+
+// ---------------------------------------------------------------------------
+// LLVM IR string generation (pattern used in rendering.sfn)
+// ---------------------------------------------------------------------------
+
+fn _emit_alloca(name -> string, type_str -> string) -> string {
+    return "  %" + name + " = alloca " + type_str;
+}
+
+fn _emit_store(type_str -> string, value -> string, ptr -> string) -> string {
+    return "  store " + type_str + " " + value + ", " + type_str + "* " + ptr;
+}
+
+fn _emit_load(dest -> string, type_str -> string, ptr -> string) -> string {
+    return "  %" + dest + " = load " + type_str + ", " + type_str + "* " + ptr;
+}
+
+fn _emit_function_header(name -> string, ret_type -> string, params -> string) -> string {
+    return "define " + ret_type + " @" + name + "(" + params + ")";
+}
+
+test "selfhost: emit alloca" {
+    assert _emit_alloca("x", "i64") == "  %x = alloca i64";
+}
+
+test "selfhost: emit store" {
+    assert _emit_store("i64", "42", "%x") == "  store i64 42, i64* %x";
+}
+
+test "selfhost: emit load" {
+    assert _emit_load("val", "i64", "%x") == "  %val = load i64, i64* %x";
+}
+
+test "selfhost: emit function header" {
+    let header = _emit_function_header("main", "i32", "i32 %argc, i8** %argv");
+    assert header == "define i32 @main(i32 %argc, i8** %argv)";
+}
+
+// ---------------------------------------------------------------------------
+// Complex conditional string building (pattern in type mapping)
+// ---------------------------------------------------------------------------
+
+fn _map_type(sfn_type -> string) -> string {
+    if sfn_type == "number" { return "double"; }
+    if sfn_type == "string" { return "i8*"; }
+    if sfn_type == "boolean" { return "i1"; }
+    if sfn_type == "void" { return "void"; }
+    if _ends_with(sfn_type, "[]") {
+        return "%struct.Array*";
+    }
+    // Default: pointer to struct
+    return "%struct." + sfn_type + "*";
+}
+
+test "selfhost: type mapping number" {
+    assert _map_type("number") == "double";
+}
+
+test "selfhost: type mapping string" {
+    assert _map_type("string") == "i8*";
+}
+
+test "selfhost: type mapping boolean" {
+    assert _map_type("boolean") == "i1";
+}
+
+test "selfhost: type mapping array" {
+    assert _map_type("number[]") == "%struct.Array*";
+}
+
+test "selfhost: type mapping struct" {
+    assert _map_type("Config") == "%struct.Config*";
+}
+
+// ---------------------------------------------------------------------------
+// Indentation tracking (pattern used in emission)
+// ---------------------------------------------------------------------------
+
+fn _indent(level -> number) -> string {
+    let mut result -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= level { break; }
+        result = result + "  ";
+        i += 1;
+    }
+    return result;
+}
+
+fn _emit_block(lines -> string[], indent_level -> number) -> string {
+    let mut result -> string = "";
+    let prefix = _indent(indent_level);
+    let mut i -> number = 0;
+    loop {
+        if i >= lines.length { break; }
+        result = result + prefix + lines[i] + "\n";
+        i += 1;
+    }
+    return result;
+}
+
+test "selfhost: indentation" {
+    assert _indent(0) == "";
+    assert _indent(1) == "  ";
+    assert _indent(2) == "    ";
+    assert _indent(3) == "      ";
+}
+
+test "selfhost: emit block" {
+    let mut lines -> string[] = [];
+    lines.push("a = 1");
+    lines.push("b = 2");
+    let result = _emit_block(lines, 1);
+    assert result == "  a = 1\n  b = 2\n";
+}

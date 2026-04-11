@@ -1,0 +1,212 @@
+// Seed viability tests: variable scoping and shadowing.
+// Targets: SSA name generation, phi node correctness across scopes.
+// The compiler must handle nested scopes correctly for function bodies,
+// loop bodies, and conditional branches.
+
+// ---------------------------------------------------------------------------
+// Variable shadowing in nested blocks
+// ---------------------------------------------------------------------------
+
+test "scope: outer variable unchanged after inner shadow" {
+    let x -> number = 10;
+    let mut result -> number = 0;
+    if true {
+        let x -> number = 20;
+        result = x;
+    }
+    // x in outer scope should still be 10
+    assert x == 10;
+    assert result == 20;
+}
+
+test "scope: loop variable doesn't leak" {
+    let mut sum -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= 3 { break; }
+        let val = i * 10;
+        sum += val;
+        i += 1;
+    }
+    assert sum == 30;
+}
+
+// ---------------------------------------------------------------------------
+// Multiple variables in same scope
+// ---------------------------------------------------------------------------
+
+test "scope: multiple variables independent" {
+    let a -> number = 1;
+    let b -> number = 2;
+    let c -> number = 3;
+    let d -> number = 4;
+    let e -> number = 5;
+    assert a + b + c + d + e == 15;
+}
+
+// ---------------------------------------------------------------------------
+// Mutable variable across nested scopes
+// ---------------------------------------------------------------------------
+
+fn _nested_scope_mutation(n -> number) -> number {
+    let mut result -> number = 0;
+    if n > 0 {
+        result = n;
+        if n > 10 {
+            result = result + 100;
+        }
+        result = result + 1;
+    }
+    return result;
+}
+
+test "scope: nested mutation deep path" {
+    assert _nested_scope_mutation(20) == 121;
+}
+
+test "scope: nested mutation shallow path" {
+    assert _nested_scope_mutation(5) == 6;
+}
+
+test "scope: nested mutation zero path" {
+    assert _nested_scope_mutation(0) == 0;
+}
+
+// ---------------------------------------------------------------------------
+// For loop with index reuse across loops
+// ---------------------------------------------------------------------------
+
+fn _double_loop_same_var_names() -> number {
+    let mut total -> number = 0;
+
+    let mut i -> number = 0;
+    loop {
+        if i >= 3 { break; }
+        total += 1;
+        i += 1;
+    }
+
+    // Reuse i in second loop
+    let mut i2 -> number = 0;
+    loop {
+        if i2 >= 4 { break; }
+        total += 10;
+        i2 += 1;
+    }
+
+    return total;
+}
+
+test "scope: variable reuse across loops" {
+    assert _double_loop_same_var_names() == 43;
+}
+
+// ---------------------------------------------------------------------------
+// Function calls creating new scopes
+// ---------------------------------------------------------------------------
+
+fn _scope_a(x -> number) -> number {
+    let local = x + 1;
+    return local;
+}
+
+fn _scope_b(x -> number) -> number {
+    let local = x * 2;
+    return local;
+}
+
+test "scope: same local names in different functions" {
+    assert _scope_a(5) == 6;
+    assert _scope_b(5) == 10;
+    let a = _scope_a(10);
+    let b = _scope_b(10);
+    assert a + b == 31;
+}
+
+// ---------------------------------------------------------------------------
+// Boolean conditions with short-circuit in branches
+// ---------------------------------------------------------------------------
+
+fn _complex_condition(a -> number, b -> number, c -> number) -> string {
+    if a > 0 && b > 0 {
+        if c > 0 {
+            return "all positive";
+        }
+        return "a and b positive";
+    }
+    if a > 0 || b > 0 {
+        return "at least one positive";
+    }
+    return "none positive";
+}
+
+test "scope: complex condition all positive" {
+    assert _complex_condition(1, 2, 3) == "all positive";
+}
+
+test "scope: complex condition a and b positive" {
+    assert _complex_condition(1, 2, -1) == "a and b positive";
+}
+
+test "scope: complex condition one positive" {
+    assert _complex_condition(1, -1, 3) == "at least one positive";
+}
+
+test "scope: complex condition none positive" {
+    assert _complex_condition(-1, -2, -3) == "none positive";
+}
+
+// ---------------------------------------------------------------------------
+// Deep nesting with mutable state
+// ---------------------------------------------------------------------------
+
+fn _deeply_nested(n -> number) -> number {
+    let mut x -> number = n;
+    if x > 0 {
+        x += 1;
+        if x > 5 {
+            x += 10;
+            if x > 20 {
+                x += 100;
+            }
+        }
+    }
+    return x;
+}
+
+test "scope: deeply nested all paths" {
+    assert _deeply_nested(0) == 0;
+    assert _deeply_nested(3) == 4;
+    assert _deeply_nested(5) == 16;
+    assert _deeply_nested(15) == 126;
+}
+
+// ---------------------------------------------------------------------------
+// Array mutation across scopes
+// ---------------------------------------------------------------------------
+
+test "scope: array mutation in loop" {
+    let mut arr -> number[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= 5 { break; }
+        arr.push(i * i);
+        i += 1;
+    }
+    assert arr.length == 5;
+    assert arr[0] == 0;
+    assert arr[1] == 1;
+    assert arr[2] == 4;
+    assert arr[3] == 9;
+    assert arr[4] == 16;
+}
+
+test "scope: string mutation in conditional" {
+    let mut msg -> string = "start";
+    let flag = true;
+    if flag {
+        msg = msg + "-middle";
+    }
+    msg = msg + "-end";
+    assert msg == "start-middle-end";
+}

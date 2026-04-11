@@ -908,6 +908,8 @@ fn resolve_call_signature(
                 } else {
                     llvm_return = future_return;
                 }
+                // Store the underlying return type so await can unbox structs
+                fs.writeFile("build/sailfin/.async_inner_return_type", _file_fn_return_type);
                 expected_params = _file_fn_param_types;
             } else {
                 llvm_return = map_return_type(context, _file_fn_return_type);
@@ -927,6 +929,8 @@ fn resolve_call_signature(
                 } else {
                     llvm_return = future_return;
                 }
+                // Store the underlying return type so await can unbox structs
+                fs.writeFile("build/sailfin/.async_inner_return_type", function_entry.return_type);
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
             } else {
                 llvm_return = map_return_type(context, function_entry.return_type);

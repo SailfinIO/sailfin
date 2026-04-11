@@ -1,0 +1,362 @@
+// Seed viability integration test: multi-function data flow pipelines.
+// Tests complex data transformations that mirror compiler pass patterns:
+// parse → transform → emit.
+// Targets: cross-module ABI, struct returns, array handling, string building.
+
+// ---------------------------------------------------------------------------
+// Token-like structure (mirrors compiler lexer output)
+// ---------------------------------------------------------------------------
+
+enum TokenKind {
+    Word,
+    Number,
+    Symbol,
+    Whitespace,
+}
+
+struct Token {
+    kind -> TokenKind;
+    text -> string;
+    position -> number;
+}
+
+fn _classify_char(ch -> string) -> TokenKind {
+    if ch == " " { return TokenKind.Whitespace; }
+    if ch == "+" { return TokenKind.Symbol; }
+    if ch == "-" { return TokenKind.Symbol; }
+    if ch == "*" { return TokenKind.Symbol; }
+    if ch == "=" { return TokenKind.Symbol; }
+    if ch == "(" { return TokenKind.Symbol; }
+    if ch == ")" { return TokenKind.Symbol; }
+    // Check if digit
+    if ch == "0" { return TokenKind.Number; }
+    if ch == "1" { return TokenKind.Number; }
+    if ch == "2" { return TokenKind.Number; }
+    if ch == "3" { return TokenKind.Number; }
+    if ch == "4" { return TokenKind.Number; }
+    if ch == "5" { return TokenKind.Number; }
+    if ch == "6" { return TokenKind.Number; }
+    if ch == "7" { return TokenKind.Number; }
+    if ch == "8" { return TokenKind.Number; }
+    if ch == "9" { return TokenKind.Number; }
+    return TokenKind.Word;
+}
+
+fn _tokenize_simple(input -> string) -> Token[] {
+    let mut tokens -> Token[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= input.length { break; }
+        let ch = substring(input, i, i + 1);
+        let kind = _classify_char(ch);
+        if kind == TokenKind.Whitespace {
+            i += 1;
+            continue;
+        }
+        // For symbols, each character is its own token
+        if kind == TokenKind.Symbol {
+            tokens.push(Token { kind: kind, text: ch, position: i });
+            i += 1;
+            continue;
+        }
+        // For words and numbers, consume consecutive characters of same kind
+        let mut end -> number = i + 1;
+        loop {
+            if end >= input.length { break; }
+            let next_ch = substring(input, end, end + 1);
+            let next_kind = _classify_char(next_ch);
+            if next_kind != kind { break; }
+            end += 1;
+        }
+        let text = substring(input, i, end);
+        tokens.push(Token { kind: kind, text: text, position: i });
+        i = end;
+    }
+    return tokens;
+}
+
+test "pipeline: tokenize simple expression" {
+    let tokens = _tokenize_simple("x + 42");
+    assert tokens.length == 3;
+    assert tokens[0].text == "x";
+    assert tokens[0].kind == TokenKind.Word;
+    assert tokens[1].text == "+";
+    assert tokens[1].kind == TokenKind.Symbol;
+    assert tokens[2].text == "42";
+    assert tokens[2].kind == TokenKind.Number;
+}
+
+test "pipeline: tokenize preserves positions" {
+    let tokens = _tokenize_simple("a = b");
+    assert tokens.length == 3;
+    assert tokens[0].position == 0;
+    assert tokens[1].position == 2;
+    assert tokens[2].position == 4;
+}
+
+test "pipeline: tokenize empty string" {
+    let tokens = _tokenize_simple("");
+    assert tokens.length == 0;
+}
+
+test "pipeline: tokenize only spaces" {
+    let tokens = _tokenize_simple("   ");
+    assert tokens.length == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Filter tokens (e.g., remove whitespace, extract only words)
+// ---------------------------------------------------------------------------
+
+fn _filter_by_kind(tokens -> Token[], kind -> TokenKind) -> Token[] {
+    let mut result -> Token[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= tokens.length { break; }
+        if tokens[i].kind == kind {
+            result.push(tokens[i]);
+        }
+        i += 1;
+    }
+    return result;
+}
+
+fn _token_texts(tokens -> Token[]) -> string[] {
+    let mut result -> string[] = [];
+    let mut i -> number = 0;
+    loop {
+        if i >= tokens.length { break; }
+        result.push(tokens[i].text);
+        i += 1;
+    }
+    return result;
+}
+
+fn _join_strings(arr -> string[], sep -> string) -> string {
+    let mut result -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= arr.length { break; }
+        if i > 0 {
+            result = result + sep;
+        }
+        result = result + arr[i];
+        i += 1;
+    }
+    return result;
+}
+
+test "pipeline: filter and join token texts" {
+    let tokens = _tokenize_simple("let x = y + z");
+    let words = _filter_by_kind(tokens, TokenKind.Word);
+    let texts = _token_texts(words);
+    let joined = _join_strings(texts, ",");
+    assert joined == "let,x,y,z";
+}
+
+test "pipeline: filter symbols" {
+    let tokens = _tokenize_simple("a + b - c");
+    let symbols = _filter_by_kind(tokens, TokenKind.Symbol);
+    assert symbols.length == 2;
+    assert symbols[0].text == "+";
+    assert symbols[1].text == "-";
+}
+
+// ---------------------------------------------------------------------------
+// Transform pipeline: tokenize → count → report
+// ---------------------------------------------------------------------------
+
+struct TokenStats {
+    total -> number;
+    words -> number;
+    numbers -> number;
+    symbols -> number;
+}
+
+fn _compute_token_stats(input -> string) -> TokenStats {
+    let tokens = _tokenize_simple(input);
+    let mut words -> number = 0;
+    let mut numbers -> number = 0;
+    let mut symbols -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= tokens.length { break; }
+        if tokens[i].kind == TokenKind.Word { words += 1; }
+        else if tokens[i].kind == TokenKind.Number { numbers += 1; }
+        else if tokens[i].kind == TokenKind.Symbol { symbols += 1; }
+        i += 1;
+    }
+    return TokenStats {
+        total: tokens.length,
+        words: words,
+        numbers: numbers,
+        symbols: symbols,
+    };
+}
+
+test "pipeline: token stats for expression" {
+    // "x + 42 = result" → x(Word) +(Symbol) 42(Number) =(Symbol) result(Word)
+    let stats = _compute_token_stats("x + 42 = result");
+    assert stats.total == 5;
+    assert stats.words == 2;
+    assert stats.numbers == 1;
+    assert stats.symbols == 2;
+}
+
+test "pipeline: token stats for pure numbers" {
+    let stats = _compute_token_stats("123 456 789");
+    assert stats.total == 3;
+    assert stats.numbers == 3;
+    assert stats.words == 0;
+    assert stats.symbols == 0;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-stage data transformation (array → struct → string)
+// ---------------------------------------------------------------------------
+
+struct Student {
+    name -> string;
+    score -> number;
+    passed -> boolean;
+}
+
+fn _make_student(name -> string, score -> number) -> Student {
+    return Student { name: name, score: score, passed: score >= 60 };
+}
+
+fn _count_passing(students -> Student[]) -> number {
+    let mut count -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= students.length { break; }
+        if students[i].passed {
+            count += 1;
+        }
+        i += 1;
+    }
+    return count;
+}
+
+fn _highest_score(students -> Student[]) -> number {
+    if students.length == 0 { return 0; }
+    let mut best -> number = students[0].score;
+    let mut i -> number = 1;
+    loop {
+        if i >= students.length { break; }
+        if students[i].score > best {
+            best = students[i].score;
+        }
+        i += 1;
+    }
+    return best;
+}
+
+fn _average_score(students -> Student[]) -> number {
+    if students.length == 0 { return 0; }
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= students.length { break; }
+        total += students[i].score;
+        i += 1;
+    }
+    return total / students.length;
+}
+
+test "pipeline: student struct construction" {
+    let s = _make_student("Alice", 85);
+    assert s.name == "Alice";
+    assert s.score == 85;
+    assert s.passed == true;
+}
+
+test "pipeline: student failing" {
+    let s = _make_student("Bob", 45);
+    assert s.passed == false;
+}
+
+test "pipeline: student array operations" {
+    let mut students -> Student[] = [];
+    students.push(_make_student("Alice", 90));
+    students.push(_make_student("Bob", 45));
+    students.push(_make_student("Charlie", 72));
+    students.push(_make_student("Diana", 88));
+    students.push(_make_student("Eve", 55));
+
+    assert _count_passing(students) == 3;
+    assert _highest_score(students) == 90;
+    assert _average_score(students) == 70;
+}
+
+// ---------------------------------------------------------------------------
+// Builder pattern (accumulating state through method calls)
+// ---------------------------------------------------------------------------
+
+struct QueryBuilder {
+    table -> string;
+    conditions -> string;
+    condition_count -> number;
+    limit_val -> number;
+
+    fn from_table(name -> string) -> QueryBuilder {
+        return QueryBuilder {
+            table: name,
+            conditions: "",
+            condition_count: 0,
+            limit_val: 0,
+        };
+    }
+
+    fn where_eq(self, field -> string, value -> string) -> QueryBuilder {
+        let mut conds = self.conditions;
+        if self.condition_count > 0 {
+            conds = conds + " AND ";
+        }
+        conds = conds + field + " = " + value;
+        return QueryBuilder {
+            table: self.table,
+            conditions: conds,
+            condition_count: self.condition_count + 1,
+            limit_val: self.limit_val,
+        };
+    }
+
+    fn with_limit(self, n -> number) -> QueryBuilder {
+        return QueryBuilder {
+            table: self.table,
+            conditions: self.conditions,
+            condition_count: self.condition_count,
+            limit_val: n,
+        };
+    }
+
+    fn build(self) -> string {
+        let mut sql -> string = "SELECT * FROM " + self.table;
+        if self.condition_count > 0 {
+            sql = sql + " WHERE " + self.conditions;
+        }
+        return sql;
+    }
+}
+
+test "pipeline: builder pattern basic query" {
+    let q = QueryBuilder.from_table("users").build();
+    assert q == "SELECT * FROM users";
+}
+
+test "pipeline: builder pattern with conditions" {
+    let q = QueryBuilder.from_table("users")
+        .where_eq("name", "'Alice'")
+        .where_eq("active", "'true'")
+        .build();
+    assert q == "SELECT * FROM users WHERE name = 'Alice' AND active = 'true'";
+}
+
+test "pipeline: builder preserves state across calls" {
+    let base = QueryBuilder.from_table("orders");
+    let q1 = base.where_eq("status", "'open'").build();
+    let q2 = base.where_eq("status", "'closed'").build();
+    assert q1 == "SELECT * FROM orders WHERE status = 'open'";
+    assert q2 == "SELECT * FROM orders WHERE status = 'closed'";
+}

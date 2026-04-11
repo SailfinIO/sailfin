@@ -1,0 +1,261 @@
+// Seed viability tests: complex function signatures and many parameters.
+// Targets: cross-module ABI mismatches (~15 fixups), parameter passing,
+// return type correctness.
+// The compiler itself has functions with 5-8 parameters and complex
+// return types. These tests verify ABI correctness for varied signatures.
+
+// ---------------------------------------------------------------------------
+// Functions with many parameters
+// ---------------------------------------------------------------------------
+
+fn _add5(a -> number, b -> number, c -> number, d -> number, e -> number) -> number {
+    return a + b + c + d + e;
+}
+
+fn _add6(a -> number, b -> number, c -> number, d -> number, e -> number, f -> number) -> number {
+    return a + b + c + d + e + f;
+}
+
+fn _weighted6(a -> number, b -> number, c -> number, d -> number, e -> number, f -> number) -> number {
+    return a * 1 + b * 2 + c * 3 + d * 4 + e * 5 + f * 6;
+}
+
+test "fn_sig: five parameters" {
+    assert _add5(1, 2, 3, 4, 5) == 15;
+}
+
+test "fn_sig: six parameters" {
+    assert _add6(1, 2, 3, 4, 5, 6) == 21;
+}
+
+test "fn_sig: six parameter weighted sum" {
+    assert _weighted6(1, 1, 1, 1, 1, 1) == 21;
+}
+
+// ---------------------------------------------------------------------------
+// Mixed parameter types (number, string, boolean)
+// ---------------------------------------------------------------------------
+
+fn _format_entry(name -> string, value -> number, active -> boolean) -> string {
+    let mut result -> string = name + "=";
+    if active {
+        let mut remaining -> number = value;
+        if remaining == 0 { return result + "0*"; }
+        let digits = "0123456789";
+        let mut num_str -> string = "";
+        loop {
+            if remaining <= 0 { break; }
+            let mut temp -> number = remaining;
+            let mut quotient -> number = 0;
+            loop {
+                if temp < 10 { break; }
+                temp -= 10;
+                quotient += 1;
+            }
+            num_str = substring(digits, temp, temp + 1) + num_str;
+            remaining = quotient;
+        }
+        result = result + num_str + "*";
+    } else {
+        result = result + "inactive";
+    }
+    return result;
+}
+
+test "fn_sig: mixed types active" {
+    assert _format_entry("count", 42, true) == "count=42*";
+}
+
+test "fn_sig: mixed types inactive" {
+    assert _format_entry("count", 42, false) == "count=inactive";
+}
+
+test "fn_sig: mixed types zero active" {
+    assert _format_entry("val", 0, true) == "val=0*";
+}
+
+// ---------------------------------------------------------------------------
+// Functions returning boolean
+// ---------------------------------------------------------------------------
+
+fn _in_range(val -> number, min -> number, max -> number) -> boolean {
+    if val < min { return false; }
+    if val > max { return false; }
+    return true;
+}
+
+fn _all_positive(a -> number, b -> number, c -> number) -> boolean {
+    if a <= 0 { return false; }
+    if b <= 0 { return false; }
+    if c <= 0 { return false; }
+    return true;
+}
+
+test "fn_sig: boolean return in range" {
+    assert _in_range(5, 1, 10) == true;
+    assert _in_range(0, 1, 10) == false;
+    assert _in_range(11, 1, 10) == false;
+    assert _in_range(1, 1, 10) == true;
+    assert _in_range(10, 1, 10) == true;
+}
+
+test "fn_sig: boolean return all positive" {
+    assert _all_positive(1, 2, 3) == true;
+    assert _all_positive(0, 2, 3) == false;
+    assert _all_positive(1, -1, 3) == false;
+    assert _all_positive(1, 2, 0) == false;
+}
+
+// ---------------------------------------------------------------------------
+// Functions calling functions with different signatures
+// ---------------------------------------------------------------------------
+
+fn _compute_score(base -> number, multiplier -> number) -> number {
+    return base * multiplier;
+}
+
+fn _apply_bonus(score -> number, has_bonus -> boolean) -> number {
+    if has_bonus {
+        return score + 100;
+    }
+    return score;
+}
+
+fn _format_score(label -> string, score -> number) -> string {
+    return label + ": " + _num_str(score);
+}
+
+fn _num_str(n -> number) -> string {
+    if n == 0 { return "0"; }
+    let mut result -> string = "";
+    let mut rem -> number = n;
+    let digits = "0123456789";
+    loop {
+        if rem <= 0 { break; }
+        let mut temp -> number = rem;
+        let mut q -> number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            q += 1;
+        }
+        result = substring(digits, temp, temp + 1) + result;
+        rem = q;
+    }
+    return result;
+}
+
+fn _full_pipeline(name -> string, base -> number, mult -> number, bonus -> boolean) -> string {
+    let score = _compute_score(base, mult);
+    let final_score = _apply_bonus(score, bonus);
+    return _format_score(name, final_score);
+}
+
+test "fn_sig: multi-function pipeline with bonus" {
+    assert _full_pipeline("Player", 50, 3, true) == "Player: 250";
+}
+
+test "fn_sig: multi-function pipeline without bonus" {
+    assert _full_pipeline("NPC", 20, 2, false) == "NPC: 40";
+}
+
+// ---------------------------------------------------------------------------
+// Function with array parameter and number return
+// ---------------------------------------------------------------------------
+
+fn _array_stats_sum(arr -> number[]) -> number {
+    let mut total -> number = 0;
+    let mut i -> number = 0;
+    loop {
+        if i >= arr.length { break; }
+        total += arr[i];
+        i += 1;
+    }
+    return total;
+}
+
+fn _array_stats_max(arr -> number[]) -> number {
+    if arr.length == 0 { return 0; }
+    let mut best -> number = arr[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= arr.length { break; }
+        if arr[i] > best {
+            best = arr[i];
+        }
+        i += 1;
+    }
+    return best;
+}
+
+fn _array_stats_min(arr -> number[]) -> number {
+    if arr.length == 0 { return 0; }
+    let mut best -> number = arr[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= arr.length { break; }
+        if arr[i] < best {
+            best = arr[i];
+        }
+        i += 1;
+    }
+    return best;
+}
+
+test "fn_sig: array stats sum" {
+    let data = [10, 20, 30, 40, 50];
+    assert _array_stats_sum(data) == 150;
+}
+
+test "fn_sig: array stats max" {
+    let data = [3, 7, 1, 9, 4];
+    assert _array_stats_max(data) == 9;
+}
+
+test "fn_sig: array stats min" {
+    let data = [3, 7, 1, 9, 4];
+    assert _array_stats_min(data) == 1;
+}
+
+test "fn_sig: array stats combined" {
+    let data = [5, 15, 10];
+    let total = _array_stats_sum(data);
+    let biggest = _array_stats_max(data);
+    let smallest = _array_stats_min(data);
+    assert total == 30;
+    assert biggest == 15;
+    assert smallest == 5;
+    assert biggest - smallest == 10;
+}
+
+// ---------------------------------------------------------------------------
+// Function with string array parameter
+// ---------------------------------------------------------------------------
+
+fn _longest_string(arr -> string[]) -> string {
+    if arr.length == 0 { return ""; }
+    let mut best -> string = arr[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= arr.length { break; }
+        if arr[i].length > best.length {
+            best = arr[i];
+        }
+        i += 1;
+    }
+    return best;
+}
+
+test "fn_sig: longest string in array" {
+    let mut words -> string[] = [];
+    words.push("hi");
+    words.push("hello");
+    words.push("hey");
+    assert _longest_string(words) == "hello";
+}
+
+test "fn_sig: longest string single element" {
+    let mut words -> string[] = [];
+    words.push("only");
+    assert _longest_string(words) == "only";
+}

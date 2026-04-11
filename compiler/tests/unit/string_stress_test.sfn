@@ -1,0 +1,265 @@
+// Seed viability tests: string operations at scale.
+// Targets: pointer handling, memory allocation, runtime string functions.
+// The self-hosted compiler heavily uses string concatenation and manipulation
+// for LLVM IR generation. These tests ensure the runtime string operations
+// work correctly under load.
+
+// ---------------------------------------------------------------------------
+// String concatenation in a loop
+// ---------------------------------------------------------------------------
+
+fn _concat_n(base -> string, n -> number) -> string {
+    let mut result -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= n { break; }
+        result = result + base;
+        i += 1;
+    }
+    return result;
+}
+
+test "string_stress: concat single char 10 times" {
+    let result = _concat_n("a", 10);
+    assert result.length == 10;
+}
+
+test "string_stress: concat word 5 times" {
+    let result = _concat_n("hi ", 5);
+    assert result == "hi hi hi hi hi ";
+}
+
+test "string_stress: concat zero times" {
+    assert _concat_n("x", 0) == "";
+}
+
+// ---------------------------------------------------------------------------
+// String building with conditional parts
+// ---------------------------------------------------------------------------
+
+fn _build_list(items -> string[], separator -> string) -> string {
+    let mut result -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= items.length { break; }
+        if i > 0 {
+            result = result + separator;
+        }
+        result = result + items[i];
+        i += 1;
+    }
+    return result;
+}
+
+test "string_stress: join with comma" {
+    let mut items -> string[] = [];
+    items.push("alpha");
+    items.push("beta");
+    items.push("gamma");
+    assert _build_list(items, ", ") == "alpha, beta, gamma";
+}
+
+test "string_stress: join single item" {
+    let mut items -> string[] = [];
+    items.push("only");
+    assert _build_list(items, ", ") == "only";
+}
+
+test "string_stress: join empty" {
+    let mut items -> string[] = [];
+    assert _build_list(items, ", ") == "";
+}
+
+// ---------------------------------------------------------------------------
+// Number to string conversion (critical for LLVM IR generation)
+// ---------------------------------------------------------------------------
+
+fn _num_to_str(n -> number) -> string {
+    if n == 0 { return "0"; }
+    let mut result -> string = "";
+    let mut remaining -> number = n;
+    let is_neg = remaining < 0;
+    if is_neg { remaining = 0 - remaining; }
+    let digits = "0123456789";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp -> number = remaining;
+        let mut quotient -> number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        result = ch + result;
+        remaining = quotient;
+    }
+    if is_neg { result = "-" + result; }
+    return result;
+}
+
+test "string_stress: num to str zero" {
+    assert _num_to_str(0) == "0";
+}
+
+test "string_stress: num to str positive" {
+    assert _num_to_str(42) == "42";
+}
+
+test "string_stress: num to str large" {
+    assert _num_to_str(12345) == "12345";
+}
+
+test "string_stress: num to str negative" {
+    assert _num_to_str(-7) == "-7";
+}
+
+// ---------------------------------------------------------------------------
+// String comparison operations
+// ---------------------------------------------------------------------------
+
+fn _count_occurrences(haystack -> string, needle -> string) -> number {
+    let mut count -> number = 0;
+    let mut i -> number = 0;
+    let h_len = haystack.length;
+    let n_len = needle.length;
+    loop {
+        if i + n_len > h_len { break; }
+        let sub = substring(haystack, i, i + n_len);
+        if sub == needle {
+            count += 1;
+        }
+        i += 1;
+    }
+    return count;
+}
+
+test "string_stress: count occurrences basic" {
+    assert _count_occurrences("abcabcabc", "abc") == 3;
+}
+
+test "string_stress: count occurrences overlapping" {
+    assert _count_occurrences("aaa", "aa") == 2;
+}
+
+test "string_stress: count occurrences none" {
+    assert _count_occurrences("hello", "xyz") == 0;
+}
+
+// ---------------------------------------------------------------------------
+// String character iteration and transformation
+// ---------------------------------------------------------------------------
+
+fn _to_upper_simple(s -> string) -> string {
+    let mut result -> string = "";
+    let mut i -> number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "a" { result = result + "A"; }
+        else if ch == "b" { result = result + "B"; }
+        else if ch == "c" { result = result + "C"; }
+        else if ch == "d" { result = result + "D"; }
+        else if ch == "e" { result = result + "E"; }
+        else { result = result + ch; }
+        i += 1;
+    }
+    return result;
+}
+
+test "string_stress: simple upper transform" {
+    assert _to_upper_simple("abc") == "ABC";
+}
+
+test "string_stress: upper transform mixed" {
+    assert _to_upper_simple("axbxc") == "AxBxC";
+}
+
+test "string_stress: upper transform empty" {
+    assert _to_upper_simple("") == "";
+}
+
+// ---------------------------------------------------------------------------
+// String contains check
+// ---------------------------------------------------------------------------
+
+fn _contains(haystack -> string, needle -> string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let mut i -> number = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let sub = substring(haystack, i, i + needle.length);
+        if sub == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+test "string_stress: contains found" {
+    assert _contains("hello world", "world") == true;
+}
+
+test "string_stress: contains not found" {
+    assert _contains("hello world", "xyz") == false;
+}
+
+test "string_stress: contains at start" {
+    assert _contains("hello world", "hello") == true;
+}
+
+test "string_stress: contains empty needle" {
+    assert _contains("hello", "") == true;
+}
+
+test "string_stress: contains needle longer than haystack" {
+    assert _contains("hi", "hello") == false;
+}
+
+// ---------------------------------------------------------------------------
+// Multi-step string transformation pipeline
+// ---------------------------------------------------------------------------
+
+fn _wrap_in_parens(s -> string) -> string {
+    return "(" + s + ")";
+}
+
+fn _prefix_with(prefix -> string, s -> string) -> string {
+    return prefix + s;
+}
+
+fn _suffix_with(s -> string, suffix -> string) -> string {
+    return s + suffix;
+}
+
+test "string_stress: string transformation pipeline" {
+    let base = "value";
+    let step1 = _wrap_in_parens(base);
+    let step2 = _prefix_with("fn", step1);
+    let step3 = _suffix_with(step2, ";");
+    assert step3 == "fn(value);";
+}
+
+test "string_stress: nested wrapping" {
+    let s = _wrap_in_parens(_wrap_in_parens(_wrap_in_parens("x")));
+    assert s == "(((x)))";
+}
+
+// ---------------------------------------------------------------------------
+// String equality across function boundaries
+// ---------------------------------------------------------------------------
+
+fn _make_greeting(name -> string) -> string {
+    return "Hello, " + name + "!";
+}
+
+fn _check_greeting(greeting -> string, name -> string) -> boolean {
+    let expected = _make_greeting(name);
+    return greeting == expected;
+}
+
+test "string_stress: string equality across functions" {
+    let g = _make_greeting("Sailfin");
+    assert _check_greeting(g, "Sailfin") == true;
+    assert _check_greeting(g, "Other") == false;
+}

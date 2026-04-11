@@ -43,6 +43,7 @@ import {
     write_locals_to_files,
     read_block_result_string_constants,
     read_expr_string_constants,
+    read_let_result_string_constants,
     read_let_result_from_files,
     read_expr_mutations,
     recover_temp_from_lines,
@@ -269,6 +270,8 @@ fn lower_instruction_range(
         if _instr_tag == 2 {
             let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
             current_locals = read_let_result_from_files(diagnostics, current_locals, current_lines, current_allocas, scope_id, scope_depth);
+            // Always read string constants from file IPC regardless of path
+            collected_string_constants = read_let_result_string_constants(collected_string_constants);
             if fs.readFile("build/sailfin/.let_ipc_used") == "1" {
                 current_temp = _read_ipc_int_min("build/sailfin/.let_ipc_temp", current_temp);
                 current_next_local = _read_ipc_int_min("build/sailfin/.let_ipc_next_local", current_next_local);
@@ -285,8 +288,6 @@ fn lower_instruction_range(
                 current_next_local = lowered.next_local_id;
                 current_next_region = lowered.next_region_id;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                let temp_constants = collected_string_constants;
-                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
             }
             active_label = find_last_label(current_lines, active_label);
             index += 1;
@@ -313,6 +314,8 @@ fn lower_instruction_range(
                             };
                             let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
                             current_locals = read_let_result_from_files(diagnostics, current_locals, current_lines, current_allocas, scope_id, scope_depth);
+                            // Always read string constants from file IPC regardless of path
+                            collected_string_constants = read_let_result_string_constants(collected_string_constants);
                             if fs.readFile("build/sailfin/.let_ipc_used") == "1" {
                                 current_temp = _read_ipc_int_min("build/sailfin/.let_ipc_temp", current_temp);
                                 current_next_local = _read_ipc_int_min("build/sailfin/.let_ipc_next_local", current_next_local);
@@ -329,8 +332,6 @@ fn lower_instruction_range(
                                 current_next_local = lowered.next_local_id;
                                 current_next_region = lowered.next_region_id;
                                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                                let temp_constants = collected_string_constants;
-                                collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
                             }
                             handled_inline_let = true;
                         }

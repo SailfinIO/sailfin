@@ -55,6 +55,7 @@ import {
 
 import {
     empty_string_constant_set,
+    escape_string_for_llvm,
 } from "../strings";
 
 import {
@@ -210,24 +211,54 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
 
     // Build test harness inline using string arrays only
     // (avoids struct .push() and struct .concat() which produce unresolvable symbols)
+    // Emits RUN/PASS messages via stderr so failures identify the failing test
+    // even when abort() kills the process before stdout flushes.
+    let mut harness_globals -> string[] = [];
     let mut harness -> string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
     let mut ti -> number = 0;
+    let mut test_idx -> number = 0;
     loop {
         if ti >= parse.functions.length { break; }
         if parse.functions[ti].name.length >= 5 {
             if substring(parse.functions[ti].name, 0, 5) == "test:" {
                 let sym = sanitize_symbol(parse.functions[ti].name);
-                harness = extend_string_lines(harness, ["  call void @" + sym + "()"]);
+                let label = substring(parse.functions[ti].name, 5, parse.functions[ti].name.length);
+                let msg = "  RUN  " + label;
+                let idx_s = number_to_string(test_idx);
+                let msg_arr_len = number_to_string(msg.length + 1);
+                let escaped = escape_string_for_llvm(msg);
+                harness_globals = extend_string_lines(harness_globals, [
+                    "@.tname." + idx_s + " = private unnamed_addr constant [" + msg_arr_len + " x i8] c\"" + escaped + "\\00\"",
+                ]);
+                harness = extend_string_lines(harness, [
+                    "  %tn" + idx_s + " = getelementptr [" + msg_arr_len + " x i8], [" + msg_arr_len + " x i8]* @.tname." + idx_s + ", i64 0, i64 0",
+                    "  call void @sailfin_runtime_print_err(i8* %tn" + idx_s + ")",
+                    "  call void @" + sym + "()",
+                ]);
+                test_idx += 1;
             }
         }
         ti += 1;
     }
-    harness = extend_string_lines(harness, ["  ret i32 0", "}"]);
+    let pass_msg = "  PASS  (all " + number_to_string(test_idx) + " tests passed)";
+    let pass_escaped = escape_string_for_llvm(pass_msg);
+    let pass_len_s = number_to_string(pass_msg.length + 1);
+    harness_globals = extend_string_lines(harness_globals, [
+        "@.tpass = private unnamed_addr constant [" + pass_len_s + " x i8] c\"" + pass_escaped + "\\00\"",
+    ]);
+    harness = extend_string_lines(harness, [
+        "  %tp = getelementptr [" + pass_len_s + " x i8], [" + pass_len_s + " x i8]* @.tpass, i64 0, i64 0",
+        "  call void @sailfin_runtime_print_err(i8* %tp)",
+        "  ret i32 0",
+        "}",
+    ]);
 
     let mut updated = base;
     if updated.lines.length > 0 {
         updated.lines = extend_string_lines(updated.lines, [""]);
     }
+    updated.lines = extend_string_lines(updated.lines, harness_globals);
+    updated.lines = extend_string_lines(updated.lines, [""]);
     updated.lines = extend_string_lines(updated.lines, harness);
     return updated;
 }
@@ -858,3 +889,4 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         string_constants: all_string_constants,
     };
 }
+
