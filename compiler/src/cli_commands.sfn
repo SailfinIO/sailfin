@@ -490,11 +490,11 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     let pkg_name = toml_get_name(toml_text);
     let pkg_version = toml_get_version(toml_text);
     if pkg_name.length == 0 {
-        print("capsule.toml: missing package name");
+        print("capsule.toml: missing capsule name");
         return 1;
     }
     if pkg_version.length == 0 {
-        print("capsule.toml: missing package version");
+        print("capsule.toml: missing capsule version");
         return 1;
     }
 

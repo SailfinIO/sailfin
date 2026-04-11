@@ -1,10 +1,12 @@
-[package]
+[capsule]
 name = "sfn/sync"
 version = "0.1.1"
 description = "Concurrency and synchronization primitives for Sailfin"
-entry = "src/mod.sfn"
 
 [dependencies]
 
 [capabilities]
-allow = ["io"]
+required = ["io"]
+
+[build]
+entry = "src/mod.sfn"

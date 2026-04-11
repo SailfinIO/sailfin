@@ -1,10 +1,12 @@
-[package]
+[capsule]
 name = "sfn/toml"
 version = "0.1.1"
 description = "TOML parsing and serialization for Sailfin"
-entry = "src/mod.sfn"
 
 [dependencies]
 
 [capabilities]
-allow = []
+required = []
+
+[build]
+entry = "src/mod.sfn"

@@ -200,10 +200,12 @@ fn _parse_toml_internal(text -> string) -> SailToml {
         let value = _toml_trim(substring(line, eq_pos + 1, line.length));
         let stripped_key = _toml_strip_quotes(key);
         let stripped_value = _toml_strip_quotes(value);
-        if strings_equal(section, "package") {
+        if strings_equal(section, "capsule") {
             if strings_equal(stripped_key, "name") { toml.name = stripped_value; }
             if strings_equal(stripped_key, "version") { toml.version = stripped_value; }
             if strings_equal(stripped_key, "description") { toml.description = stripped_value; }
+        }
+        if strings_equal(section, "build") {
             if strings_equal(stripped_key, "entry") { toml.entry = stripped_value; }
         }
         if strings_equal(section, "dependencies") {
@@ -213,7 +215,7 @@ fn _parse_toml_internal(text -> string) -> SailToml {
             toml.dev_dependencies = toml.dev_dependencies.concat([TomlDependency { capsule: stripped_key, version: stripped_value }]);
         }
         if strings_equal(section, "capabilities") {
-            if strings_equal(stripped_key, "allow") {
+            if strings_equal(stripped_key, "required") {
                 toml.capabilities = _toml_parse_string_array(value);
             }
         }
@@ -245,14 +247,15 @@ fn toml_get_description(text -> string) -> string {
 
 // Generate a capsule.toml string from individual fields
 fn toml_generate(name -> string, version -> string, description -> string, entry -> string) -> string {
-    let mut out -> string = "[package]\n";
+    let mut out -> string = "[capsule]\n";
     out = out + "name = \"" + name + "\"\n";
     out = out + "version = \"" + version + "\"\n";
     if description.length > 0 {
         out = out + "description = \"" + description + "\"\n";
     }
-    out = out + "entry = \"" + entry + "\"\n";
     out = out + "\n[dependencies]\n";
+    out = out + "\n[build]\n";
+    out = out + "entry = \"" + entry + "\"\n";
     return out;
 }
 
@@ -297,13 +300,12 @@ fn toml_add_dev_dependency(toml_text -> string, capsule -> string, version -> st
 
 // Write a SailToml back to string (internal)
 fn _write_toml(toml -> SailToml) -> string {
-    let mut out -> string = "[package]\n";
+    let mut out -> string = "[capsule]\n";
     out = out + "name = \"" + toml.name + "\"\n";
     out = out + "version = \"" + toml.version + "\"\n";
     if toml.description.length > 0 {
         out = out + "description = \"" + toml.description + "\"\n";
     }
-    out = out + "entry = \"" + toml.entry + "\"\n";
     out = out + "\n[dependencies]\n";
     let mut i -> number = 0;
     loop {
@@ -324,7 +326,7 @@ fn _write_toml(toml -> SailToml) -> string {
     }
     if toml.capabilities.length > 0 {
         out = out + "\n[capabilities]\n";
-        out = out + "allow = [";
+        out = out + "required = [";
         let mut k -> number = 0;
         loop {
             if k >= toml.capabilities.length { break; }
@@ -334,5 +336,7 @@ fn _write_toml(toml -> SailToml) -> string {
         }
         out = out + "]\n";
     }
+    out = out + "\n[build]\n";
+    out = out + "entry = \"" + toml.entry + "\"\n";
     return out;
 }

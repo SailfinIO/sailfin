@@ -1,10 +1,12 @@
-[package]
+[capsule]
 name = "sfn/crypto"
 version = "0.1.1"
 description = "Cryptographic hashing and digest functions for Sailfin"
-entry = "src/mod.sfn"
 
 [dependencies]
 
 [capabilities]
-allow = []
+required = []
+
+[build]
+entry = "src/mod.sfn"

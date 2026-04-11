@@ -717,7 +717,7 @@ The `unsafe` capability must be declared in the capsule manifest before any unsa
 
 ```toml
 # capsule.toml
-[package]
+[capsule]
 name = "my-native-lib"
 version = "0.1.0"
 
