@@ -1,6 +1,59 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.21 (2026-04-11)
+
+### Bug Fixes
+
+- Address PR review comments on license and trademark consistency
+  ([`f73056c`](https://github.com/SailfinIO/sailfin/commit/f73056cbdf693d857d401092134c0255bc4cae13))
+
+- license.astro: clarify that brand assets are not GPLv2, link to Trademark Policy -
+  RUNTIME_LIBRARY_EXCEPTION: remove per-file notice requirement so the exception applies to all
+  runtime/ files by default - COPYING: minor wording alignment with the exception text
+
+https://claude.ai/code/session_01QYZ1okRfBvMgbDqddXK4rT
+
+### Features
+
+- Add GPLv2 license with runtime library exception
+  ([`c9b711f`](https://github.com/SailfinIO/sailfin/commit/c9b711f7eb0cd1ea4aedd4df368b1e05b781e2c4))
+
+Sailfin is licensed under the GNU General Public License v2. The runtime libraries include an
+  additional permission (modeled after the GCC Runtime Library Exception) so that programs compiled
+  by Sailfin are not subject to the GPL — users can distribute their compiled programs under any
+  license they choose.
+
+Files added: - LICENSE: Full GPLv2 text - COPYING: Project-level copyright notice explaining the
+  licensing - RUNTIME_LIBRARY_EXCEPTION: Exception for the runtime libraries
+
+https://claude.ai/code/session_01QYZ1okRfBvMgbDqddXK4rT
+
+- Add trademark policy for Sailfin name, logo, and mascot
+  ([`9a44551`](https://github.com/SailfinIO/sailfin/commit/9a445513ced29d3c640dfbdf45ea187671125205))
+
+Brand assets (name, logo, mascot "Guillermo") are trademarks of Sailfin, LLC and are explicitly
+  excluded from the GPLv2. Forks must rebrand with their own name and visual identity.
+
+- Add TRADEMARKS file with full policy, permitted/prohibited uses, and fork rebranding requirement -
+  Update COPYING to reference trademark policy - Update site /terms page to mention Guillermo and
+  link to policy
+
+https://claude.ai/code/session_01QYZ1okRfBvMgbDqddXK4rT
+
+- **site**: Add license, privacy, and terms pages; update site for GPLv2
+  ([`d74375f`](https://github.com/SailfinIO/sailfin/commit/d74375fd92db0057c5ba2d5e063b30dc44296b7a))
+
+- Add /license page explaining GPLv2 + runtime library exception in plain language with "you can" /
+  "you must" summary cards - Add /privacy page covering Cloudflare hosting and Google Fonts - Add
+  /terms page with trademarks section for Sailfin/sfn marks - Update footer: copyright to Sailfin,
+  LLC; add License link - Update community page: add License card to the grid - Update homepage:
+  mention open source in Self-Hosted Compiler card - Update contributor guide: add License section
+  explaining GPLv2
+
+https://claude.ai/code/session_01QYZ1okRfBvMgbDqddXK4rT
+
+
 ## v0.5.0-alpha.20 (2026-04-11)
 
 ### Bug Fixes

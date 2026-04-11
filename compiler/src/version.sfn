@@ -3,7 +3,7 @@
 // Native compiler CLI/compiler version string.
 //
 // Release tooling (python-semantic-release) bumps the `__version__` string.
-let __version__ = "0.5.0-alpha.20";
+let __version__ = "0.5.0-alpha.21";
 
 fn sailfin_version() -> string {
     return __version__;
