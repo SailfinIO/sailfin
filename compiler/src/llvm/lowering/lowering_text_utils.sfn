@@ -266,6 +266,41 @@ fn _parse_module_globals_locals(raw -> string) -> LocalBinding[] {
     return result;
 }
 
+// ── Quote-aware brace counting ───────────────────────────────────────
+
+// Return the net brace depth of `text` counting only `{` and `}` that
+// appear outside of double-quoted string literals.  For example:
+//   `collect_until(p, ["!", "{"])` → 0  (the `{` is inside quotes)
+//   `Statement.TestDeclaration {`  → 1
+fn net_unquoted_brace_depth(text -> string) -> number {
+    let mut depth -> number = 0;
+    let mut in_quote -> boolean = false;
+    let mut escape -> boolean = false;
+    let mut i -> number = 0;
+    loop {
+        if i >= text.length { break; }
+        let ch = text[i];
+        // Handle escape inside quotes — skip the next character.
+        if escape {
+            escape = false;
+            i += 1;
+            continue;
+        }
+        if in_quote {
+            if ch == "\\" { escape = true; }
+            if ch == "\"" { in_quote = false; }
+            i += 1;
+            continue;
+        }
+        // Outside quotes
+        if ch == "\"" { in_quote = true; }
+        if ch == "{" { depth += 1; }
+        if ch == "}" { depth -= 1; }
+        i += 1;
+    }
+    return depth;
+}
+
 // ── Header recovery helpers ──────────────────────────────────────────
 
 fn recover_function_name_from_header(line -> string) -> string {

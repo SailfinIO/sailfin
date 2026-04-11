@@ -5743,3 +5743,36 @@ void sailfin_runtime_debug_validate_identifier(void *expr_ptr, void *name_ptr)
 #endif
     }
 }
+
+/* Read the i32 tag from a Sailfin enum passed by value.
+   Sailfin enums are laid out as { i32 tag, [4 x i8] pad, [N x i64] payload }.
+   The LLVM calling convention passes small structs in registers, but the ABI
+   maps to pointer-based access for the generic interface.
+
+   This function is called from get_instruction_tag in lowering_native_helpers.sfn
+   when the seedcheck binary cannot use match or field-access to read the tag.
+   The first-pass binary uses a fixup that reads the tag directly; the seedcheck
+   uses this C helper.
+
+   Arguments:
+     arr_ptr — pointer to an array header { elem_type*, i64 length }
+     idx     — element index (as double, Sailfin's number type)
+   Returns: tag value as double */
+/* NativeInstruction = { i32 tag, [4 x i8] pad, [6 x i64] payload }
+   Mirror the LLVM struct layout so sizeof() tracks any future changes. */
+struct SailfnNativeInstruction {
+    int32_t  tag;
+    uint8_t  _pad[4];
+    int64_t  payload[6];
+};
+
+double sailfin_enum_tag_from_instruction_array(void *arr_ptr, double idx)
+{
+    struct { void *data; int64_t length; } *hdr = arr_ptr;
+    if (!hdr || !hdr->data) return 21.0; /* Unknown */
+    int64_t i = (int64_t)idx;
+    if (i < 0 || i >= hdr->length) return 21.0;
+    struct SailfnNativeInstruction *elem =
+        (struct SailfnNativeInstruction *)hdr->data + i;
+    return (double)elem->tag;
+}

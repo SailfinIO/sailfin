@@ -1,0 +1,155 @@
+// Regression tests for match statement lowering — exercises all pattern types
+// identified in https://github.com/SailfinIO/sailfin/issues/50
+//
+// Status after recovery parser fix:
+//   PASS: Pattern 1 — match on number literals
+//   PASS: Pattern 2 — match on enum variants (simple, no payload)
+//   PASS: Pattern 5 — match with block bodies
+//
+// See match_tagged_enum_test.sfn and match_union_test.sfn for patterns that
+// still fail (tagged enum destructuring and union return type matching).
+
+// ===========================================================================
+// Pattern 1: Match on number literals
+// ===========================================================================
+
+fn _classify_number(n -> number) -> string {
+    match n {
+        1 -> return "one",
+        2 -> return "two",
+        3 -> return "three",
+        _ -> return "other",
+    }
+}
+
+test "match: number literal selects correct arm for 1" {
+    assert _classify_number(1) == "one";
+}
+
+test "match: number literal selects correct arm for 2" {
+    assert _classify_number(2) == "two";
+}
+
+test "match: number literal selects correct arm for 3" {
+    assert _classify_number(3) == "three";
+}
+
+test "match: number literal wildcard arm for unmatched value" {
+    assert _classify_number(99) == "other";
+}
+
+test "match: number literal wildcard arm for zero" {
+    assert _classify_number(0) == "other";
+}
+
+test "match: number literal wildcard arm for negative" {
+    assert _classify_number(-5) == "other";
+}
+
+// ===========================================================================
+// Pattern 2: Match on enum variants (simple, no payload)
+// ===========================================================================
+
+enum Direction {
+    North,
+    South,
+    East,
+    West,
+}
+
+fn _direction_name(d -> Direction) -> string {
+    match d {
+        Direction.North -> return "north",
+        Direction.South -> return "south",
+        Direction.East  -> return "east",
+        Direction.West  -> return "west",
+    }
+}
+
+test "match: enum variant North" {
+    assert _direction_name(Direction.North) == "north";
+}
+
+test "match: enum variant South" {
+    assert _direction_name(Direction.South) == "south";
+}
+
+test "match: enum variant East" {
+    assert _direction_name(Direction.East) == "east";
+}
+
+test "match: enum variant West" {
+    assert _direction_name(Direction.West) == "west";
+}
+
+test "match: enum variant all four resolve correctly" {
+    assert _direction_name(Direction.North) == "north";
+    assert _direction_name(Direction.South) == "south";
+    assert _direction_name(Direction.East)  == "east";
+    assert _direction_name(Direction.West)  == "west";
+}
+
+// Match enum with a wildcard default arm
+
+enum Season {
+    Spring,
+    Summer,
+    Fall,
+    Winter,
+}
+
+fn _is_warm_season(s -> Season) -> string {
+    match s {
+        Season.Summer -> return "yes",
+        Season.Spring -> return "maybe",
+        _ -> return "no",
+    }
+}
+
+test "match: enum with wildcard default for Summer" {
+    assert _is_warm_season(Season.Summer) == "yes";
+}
+
+test "match: enum with wildcard default for Spring" {
+    assert _is_warm_season(Season.Spring) == "maybe";
+}
+
+test "match: enum with wildcard default for Fall" {
+    assert _is_warm_season(Season.Fall) == "no";
+}
+
+test "match: enum with wildcard default for Winter" {
+    assert _is_warm_season(Season.Winter) == "no";
+}
+
+// ===========================================================================
+// Pattern 5: Match with block bodies
+// ===========================================================================
+
+fn _match_with_block(n -> number) -> number {
+    let mut result -> number = 0;
+    match n {
+        1 -> {
+            result = 100;
+        },
+        2 -> {
+            result = 200;
+        },
+        _ -> {
+            result = -1;
+        },
+    }
+    return result;
+}
+
+test "match: block body arm 1" {
+    assert _match_with_block(1) == 100;
+}
+
+test "match: block body arm 2" {
+    assert _match_with_block(2) == 200;
+}
+
+test "match: block body default arm" {
+    assert _match_with_block(99) == -1;
+}

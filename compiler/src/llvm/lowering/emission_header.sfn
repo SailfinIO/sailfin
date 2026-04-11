@@ -1,0 +1,19 @@
+// compiler/src/llvm/lowering/emission_header.sfn
+//
+// Builds the LLVM IR `define` function header line.
+// Extracted into a separate module so that the cross-module IPC call path
+// avoids the v0.1.1 seed's `ret i8* null` bug for local-variable string returns.
+//
+// CRITICAL: The `{` character must NEVER appear in a concat expression or return
+// value in code compiled by the first-pass binary — the lowering silently drops
+// all subsequent instructions.  We extract `{` at runtime via substring() from
+// a simple assignment (which the lowering handles correctly).
+
+import { trim_text, substring } from "../utils";
+
+fn build_define_header_line(linkage -> string, llvm_return -> string, sanitized -> string, signature -> string) -> string {
+    let _b -> string = "(){}";
+    let h1 -> string = "define " + linkage + llvm_return + " @" + sanitized;
+    let h2 -> string = h1 + "(" + signature + ") " + substring(_b, 2, 3);
+    return trim_text(h2);
+}

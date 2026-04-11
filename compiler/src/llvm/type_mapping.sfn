@@ -625,50 +625,80 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
 // =============================================================================
 
 fn map_union_type(context -> TypeContext, annotation -> string) -> string {
-    // Union types: `A | B | C` => opaque pointer for simplicity
+    // Union types: `A | B | C` => tagged struct { i32, <A_llvm>, <B_llvm>, ... }
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
     }
-    // Check for pipe character (union)
+    // Split on top-level `|` separators (skip nested generics)
+    let mut parts -> string[] = [];
+    let mut start -> number = 0;
     let mut index -> number = 0;
     let mut depth -> number = 0;
+    let mut found_pipe -> boolean = false;
     loop {
         if index >= trimmed.length {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        let mut _if318 -> boolean = false;
-        if ch == "<" { _if318 = true; }
-        if ch == "(" { _if318 = true; }
-        if ch == "[" { _if318 = true; }
-        if _if318 {
+        let mut _is_open -> boolean = false;
+        if ch == "<" { _is_open = true; }
+        if ch == "(" { _is_open = true; }
+        if ch == "[" { _is_open = true; }
+        if _is_open {
             depth += 1;
-        } else {
-            let mut _elif331 -> boolean = false;
-            if ch == ">" { _elif331 = true; }
-            if ch == ")" { _elif331 = true; }
-            if ch == "]" { _elif331 = true; }
-            if _elif331 {
-                if depth > 0 {
-                    depth -= 1;
+        }
+        let mut _is_close -> boolean = false;
+        if ch == ">" { _is_close = true; }
+        if ch == ")" { _is_close = true; }
+        if ch == "]" { _is_close = true; }
+        if _is_close {
+            if depth > 0 {
+                depth -= 1;
+            }
+        }
+        if ch == "|" {
+            if depth == 0 {
+                let part = trim_text(substring(trimmed, start, index));
+                if part.length > 0 {
+                    parts.push(part);
                 }
-            } else {
-                let mut _elif332 -> boolean = false;
-                if ch == "|" {
-                    if depth == 0 {
-                        _elif332 = true;
-                    }
-                }
-                if _elif332 {
-                    // Found a union separator at top level
-                    return "i8*";
-                }
+                start = index + 1;
+                found_pipe = true;
             }
         }
         index += 1;
     }
-    return "";
+    if !found_pipe {
+        return "";
+    }
+    // Collect the last part
+    let last_part = trim_text(substring(trimmed, start, trimmed.length));
+    if last_part.length > 0 {
+        parts.push(last_part);
+    }
+    if parts.length < 2 {
+        return "";
+    }
+    // Map each variant type and build the tagged struct
+    let mut result -> string = "{ i32";
+    let mut pi -> number = 0;
+    loop {
+        if pi >= parts.length {
+            break;
+        }
+        let mapped = map_type_annotation(parts[pi]);
+        let mut _bad -> boolean = false;
+        if mapped.length == 0 { _bad = true; }
+        if mapped == "void" { _bad = true; }
+        if _bad {
+            return "";
+        }
+        result = result + ", " + mapped;
+        pi += 1;
+    }
+    result = result + " }";
+    return result;
 }
 
 fn map_optional_type(context -> TypeContext, annotation -> string) -> string {

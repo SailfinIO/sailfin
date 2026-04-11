@@ -250,18 +250,21 @@ fn coerce_and_emit_call(
     let argument_text = join_with_separator(rendered_args, ", ");
 
     // Trait dispatch call
-    if substring(trimmed_target, 0, 16) == "trait_dispatch::" {
+    if substring(trimmed_target, 0, 16) == "trait_dispatch__" {
         let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
-        let double_colon_pos = find_last_index_of_char(after_prefix, ":");
-        let mut _if57 -> boolean = false;
-        if double_colon_pos > 0 {
-            if substring(after_prefix, double_colon_pos - 1, double_colon_pos + 1) == "::" {
-                _if57 = true;
+        // Find the last "__" separator to split interface name from method name
+        let mut _td_split -> number = -1;
+        let mut _td_i -> number = 0;
+        loop {
+            if _td_i >= after_prefix.length { break; }
+            if substring(after_prefix, _td_i, _td_i + 2) == "__" {
+                _td_split = _td_i;
             }
+            _td_i += 1;
         }
-        if _if57 {
-            let interface_name = substring(after_prefix, 0, double_colon_pos - 1);
-            let method_name = substring(after_prefix, double_colon_pos + 1, after_prefix.length);
+        if _td_split > 0 {
+            let interface_name = substring(after_prefix, 0, _td_split);
+            let method_name = substring(after_prefix, _td_split + 2, after_prefix.length);
 
             if final_operands.length > 0 {
                 let trait_object = final_operands[0];

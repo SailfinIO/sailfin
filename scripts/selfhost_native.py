@@ -5204,6 +5204,101 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
 
     _HELPERS["make_native_struct_layout_field"] = _gen_make_native_struct_layout_field()
 
+    # --- NativeEnum constructor helpers ---
+    # NativeEnum = { i8* name[0], {NativeEnumVariant*,i64}* variants[1], NativeEnumLayout* layout[2] }
+    # NativeEnumVariant = { i8* name[0], {NativeEnumVariantField*,i64}* fields[1] }
+    # NativeEnumLayout = { double size[0], double align[1], i8* tag_type[2], double tag_size[3], double tag_align[4], {NativeEnumVariantLayout*,i64}* variants[5] }
+    # NativeEnumVariantLayout = { i8* name[0], double tag[1], double offset[2], double size[3], double align[4], {NativeStructLayoutField*,i64}* fields[5] }
+
+    def _gen_make_native_enum():
+        """make_native_enum(ename: i8*, evariants: {NEV*,i64}*, elayout: NEL*) -> NativeEnum*"""
+        NE = "%NativeEnum"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NE)
+        _set_field(lines, "f0", ptr, NE, 0, "i8*", "%ename")
+        _set_field(lines, "f1", ptr, NE, 1, "{ %NativeEnumVariant*, i64 }*", "%evariants")
+        _set_field(lines, "f2", ptr, NE, 2, "%NativeEnumLayout*", "%elayout")
+        lines.append(f"  %ret = bitcast {NE}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_enum"] = _gen_make_native_enum()
+
+    def _gen_make_native_enum_variant():
+        """make_native_enum_variant(vname: i8*) -> NativeEnumVariant*
+        Creates variant with empty fields array."""
+        NEV = "%NativeEnumVariant"
+        NEVF = "%NativeEnumVariantField"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NEV)
+        _set_field(lines, "f0", ptr, NEV, 0, "i8*", "%vname")
+        fields_arr = _empty_array(lines, "ef", "NativeEnumVariantField", NEVF)
+        _set_field(lines, "f1", ptr, NEV, 1, f"{{ {NEVF}*, i64 }}*", fields_arr)
+        lines.append(f"  %ret = bitcast {NEV}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_enum_variant"] = _gen_make_native_enum_variant()
+
+    def _gen_make_native_enum_layout():
+        """make_native_enum_layout(esize: double, ealign: double, etag_type: i8*,
+        etag_size: double, etag_align: double, evariants: {NEVL*,i64}*) -> NativeEnumLayout*"""
+        NEL = "%NativeEnumLayout"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NEL)
+        _set_field(lines, "f0", ptr, NEL, 0, "double", "%esize")
+        _set_field(lines, "f1", ptr, NEL, 1, "double", "%ealign")
+        _set_field(lines, "f2", ptr, NEL, 2, "i8*", "%etag_type")
+        _set_field(lines, "f3", ptr, NEL, 3, "double", "%etag_size")
+        _set_field(lines, "f4", ptr, NEL, 4, "double", "%etag_align")
+        _set_field(lines, "f5", ptr, NEL, 5, "{ %NativeEnumVariantLayout*, i64 }*", "%evariants")
+        lines.append(f"  %ret = bitcast {NEL}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_enum_layout"] = _gen_make_native_enum_layout()
+
+    def _gen_make_native_enum_variant_layout():
+        """make_native_enum_variant_layout(vlname: i8*, vltag: double, vloffset: double,
+        vlsize: double, vlalign: double) -> NativeEnumVariantLayout*
+        Creates variant layout with empty fields array."""
+        NEVL = "%NativeEnumVariantLayout"
+        NSLF = "%NativeStructLayoutField"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NEVL)
+        _set_field(lines, "f0", ptr, NEVL, 0, "i8*", "%vlname")
+        _set_field(lines, "f1", ptr, NEVL, 1, "double", "%vltag")
+        _set_field(lines, "f2", ptr, NEVL, 2, "double", "%vloffset")
+        _set_field(lines, "f3", ptr, NEVL, 3, "double", "%vlsize")
+        _set_field(lines, "f4", ptr, NEVL, 4, "double", "%vlalign")
+        fields_arr = _empty_array(lines, "vf", "NativeStructLayoutField", NSLF)
+        _set_field(lines, "f5", ptr, NEVL, 5, f"{{ {NSLF}*, i64 }}*", fields_arr)
+        lines.append(f"  %ret = bitcast {NEVL}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_enum_variant_layout"] = _gen_make_native_enum_variant_layout()
+
+    def _gen_make_native_enum_variant_layout_with_fields():
+        """make_native_enum_variant_layout_with_fields(vlname: i8*, vltag: double,
+        vloffset: double, vlsize: double, vlalign: double,
+        vlfields: {NSLF*,i64}*) -> NativeEnumVariantLayout*
+        Creates variant layout with provided fields array."""
+        NEVL = "%NativeEnumVariantLayout"
+        lines = []
+        ptr = _alloc_struct(lines, "s", NEVL)
+        _set_field(lines, "f0", ptr, NEVL, 0, "i8*", "%vlname")
+        _set_field(lines, "f1", ptr, NEVL, 1, "double", "%vltag")
+        _set_field(lines, "f2", ptr, NEVL, 2, "double", "%vloffset")
+        _set_field(lines, "f3", ptr, NEVL, 3, "double", "%vlsize")
+        _set_field(lines, "f4", ptr, NEVL, 4, "double", "%vlalign")
+        _set_field(lines, "f5", ptr, NEVL, 5, "{ %NativeStructLayoutField*, i64 }*", "%vlfields")
+        lines.append(f"  %ret = bitcast {NEVL}* {ptr} to i8*")
+        lines.append("  ret i8* %ret")
+        return "\n".join(lines)
+
+    _HELPERS["make_native_enum_variant_layout_with_fields"] = _gen_make_native_enum_variant_layout_with_fields()
+
     def _gen_make_native_parameter():
         NP = "%NativeParameter"
         lines = []
@@ -5471,6 +5566,7 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
         lines.append("  %fns = call { %NativeFunction*, i64 }* @recover_native_functions_light__llvm__lowering__lowering_core(i8* %native_text)")
         lines.append("  %sts = call { %NativeStruct*, i64 }* @recover_native_structs_light__llvm__lowering__lowering_core(i8* %native_text)")
         lines.append("  %ims = call { %NativeImport*, i64 }* @recover_native_imports_light__llvm__lowering__lowering_core(i8* %native_text)")
+        lines.append("  %ens = call { %NativeEnum*, i64 }* @recover_native_enums_light__llvm__lowering__lowering_core(i8* %native_text)")
         # Allocate ParseNativeResult (7 pointer fields = 56 bytes).
         ptr = _alloc_struct(lines, "s", PNR)
         # Field 0: functions
@@ -5482,12 +5578,15 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
         # Field 2: structs
         lines.append(f"  %sts_i8 = bitcast {{ %NativeStruct*, i64 }}* %sts to i8*")
         _set_field(lines, "f2", ptr, PNR, 2, "i8*", "%sts_i8")
-        # Fields 3-6: empty arrays (interfaces, enums, bindings, diagnostics)
-        for idx, label in [(3, "ifc"), (4, "enm"), (5, "bnd"), (6, "dia")]:
+        # Field 4: enums (from recovery parser)
+        lines.append(f"  %ens_i8 = bitcast {{ %NativeEnum*, i64 }}* %ens to i8*")
+        # Fields 3, 5, 6: empty arrays (interfaces, bindings, diagnostics)
+        for idx, label in [(3, "ifc"), (5, "bnd"), (6, "dia")]:
             arr = _empty_array(lines, label, "empty", "i8*")
             arr_i8 = f"%{label}_arr_i8"
             lines.append(f"  {arr_i8} = bitcast {{ i8**, i64 }}* {arr} to i8*")
             _set_field(lines, f"f{idx}", ptr, PNR, idx, "i8*", arr_i8)
+        _set_field(lines, "f4", ptr, PNR, 4, "i8*", "%ens_i8")
         lines.append(f"  %ret = bitcast {PNR}* {ptr} to i8*")
         lines.append("  ret i8* %ret")
         return "\n".join(lines)
@@ -5629,6 +5728,21 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
         return "\n".join(lines)
 
     _HELPERS["get_instruction_tag"] = _gen_instr_tag_accessor()
+
+    def _gen_instr_tag_match_accessor():
+        """Generate body for get_instruction_tag_match(instr: NativeInstruction) -> double.
+        Takes a single instruction by value (not pointer); alloca+store to read tag."""
+        lines = []
+        # instr is passed by value as %NativeInstruction. Alloca, store, then GEP to tag.
+        lines.append(f"  %tmp = alloca {NI}")
+        lines.append(f"  store {NI} %instr, {NI}* %tmp")
+        lines.append(f"  %tag_ptr = getelementptr {NI}, {NI}* %tmp, i32 0, i32 0")
+        lines.append("  %tag_i32 = load i32, i32* %tag_ptr")
+        lines.append("  %tag_dbl = sitofp i32 %tag_i32 to double")
+        lines.append("  ret double %tag_dbl")
+        return "\n".join(lines)
+
+    _HELPERS["get_instruction_tag_match"] = _gen_instr_tag_match_accessor()
     _HELPERS["get_instruction_text"] = _gen_instr_payload_ptr_accessor(0)
     _HELPERS["get_instruction_condition"] = _gen_instr_payload_ptr_accessor(0)
     _HELPERS["get_instruction_let_name"] = _gen_instr_payload_ptr_accessor(0)
@@ -5755,9 +5869,10 @@ def _fix_struct_construction_helpers(llvm_ir: str) -> tuple[str, int]:
     # Two patterns: mangled (seed-compiled) and unmangled (first-pass-compiled).
     _MODULE_SUFFIX = "__llvm__lowering__lowering_core"
     _MODULE_SUFFIX_HELPERS = "__llvm__lowering__lowering_native_helpers"
+    _MODULE_SUFFIX_INSTR_TAG = "__llvm__lowering__lowering_instruction_tag"
     # Build a regex that matches known helper names with the module suffix.
     _helper_names_pattern = "|".join(_re.escape(k) for k in _HELPERS.keys())
-    _suffixes_pattern = "(?:" + _re.escape(_MODULE_SUFFIX) + "|" + _re.escape(_MODULE_SUFFIX_HELPERS) + ")"
+    _suffixes_pattern = "(?:" + _re.escape(_MODULE_SUFFIX) + "|" + _re.escape(_MODULE_SUFFIX_HELPERS) + "|" + _re.escape(_MODULE_SUFFIX_INSTR_TAG) + ")"
     fn_re_suffixed = _re.compile(
         r"^define\s+(?:internal\s+)?.+?\s+@(" + _helper_names_pattern + r")" + _suffixes_pattern + r"\("
     )

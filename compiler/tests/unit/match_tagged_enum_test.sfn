@@ -1,0 +1,58 @@
+// Regression tests for match on tagged (data-carrying) enum destructuring
+// https://github.com/SailfinIO/sailfin/issues/50 — Pattern 3
+
+enum Shape {
+    Circle { radius -> number },
+    Rectangle { width -> number, height -> number },
+}
+
+fn _shape_area(shape -> Shape) -> number {
+    match shape {
+        Shape.Circle { radius } -> return 3 * radius * radius,
+        Shape.Rectangle { width, height } -> return width * height,
+    }
+}
+
+test "match: tagged enum destructure Circle" {
+    let c = Shape.Circle { radius: 5 };
+    assert _shape_area(c) == 75;
+}
+
+test "match: tagged enum destructure Rectangle" {
+    let r = Shape.Rectangle { width: 4, height: 6 };
+    assert _shape_area(r) == 24;
+}
+
+test "match: tagged enum destructure Circle unit" {
+    let c = Shape.Circle { radius: 1 };
+    assert _shape_area(c) == 3;
+}
+
+test "match: tagged enum destructure Rectangle square" {
+    let r = Shape.Rectangle { width: 5, height: 5 };
+    assert _shape_area(r) == 25;
+}
+
+// Second tagged enum to verify it's not a one-off
+
+enum Expr {
+    Literal { value -> number },
+    Negate { operand -> number },
+}
+
+fn _eval_expr(e -> Expr) -> number {
+    match e {
+        Expr.Literal { value } -> return value,
+        Expr.Negate { operand } -> return 0 - operand,
+    }
+}
+
+test "match: tagged enum Expr Literal" {
+    let e = Expr.Literal { value: 42 };
+    assert _eval_expr(e) == 42;
+}
+
+test "match: tagged enum Expr Negate" {
+    let e = Expr.Negate { operand: 7 };
+    assert _eval_expr(e) == -7;
+}

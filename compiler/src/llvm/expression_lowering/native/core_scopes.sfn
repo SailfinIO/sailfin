@@ -151,7 +151,7 @@ fn make_child_scope_id(parent -> string, child -> string) -> string {
     if parent.length == 0 {
         return sanitized_child;
     }
-    return parent + "::" + sanitized_child;
+    return parent + "__" + sanitized_child;
 }
 
 fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
@@ -164,7 +164,7 @@ fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
     if candidate == parent {
         return true;
     }
-    let prefix = parent + "::";
+    let prefix = parent + "__";
     if candidate.length <= prefix.length {
         return false;
     }

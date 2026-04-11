@@ -109,7 +109,27 @@ fn format_expression(expression -> Expression) -> string {
         return "<lambda>";
     }
     if expression.variant == "Raw" {
-        return trim_text(expression.text);
+        let raw_text = trim_text(expression.text);
+        // Normalize multi-line raw expressions to single line so that
+        // the .sfn-asm IR never contains multi-line eval instructions.
+        // Multi-line expressions cause null array literals in the LLVM
+        // lowering due to instruction gathering issues in the compiled binary.
+        let mut normalized -> string = "";
+        let mut ri -> number = 0;
+        loop {
+            if ri >= raw_text.length { break; }
+            let rch = raw_text[ri];
+            let mut is_nl -> boolean = false;
+            if rch == "\n" { is_nl = true; }
+            if rch == "\r" { is_nl = true; }
+            if is_nl {
+                normalized = normalized + " ";
+            } else {
+                normalized = normalized + rch;
+            }
+            ri += 1;
+        }
+        return trim_text(normalized);
     }
     return "<" + expression.variant + ">";
 }

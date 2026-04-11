@@ -6,7 +6,7 @@
 #
 #   1. Enumerate compiler/src/**/*.sfn + runtime/**/*.sfn
 #   2. Stage import-context artifacts (seed emit native → .sfn-asm + .layout-manifest)
-#   3. Per-module: seed emit llvm → .ll
+#   3. Per-module: seed emit -o <out.ll> llvm → .ll
 #   4. Compile each .ll → .o with clang
 #   5. llvm-link all modules (except prelude) → linked bitcode
 #   6. Compile C runtime
@@ -57,6 +57,16 @@ CLANG_FLAGS="$OPT -Wno-override-module -fno-delete-null-pointer-checks"
 
 # Track start time for wall-time budget
 START_TIME="$(date +%s)"
+
+# Phase timers (populated as build progresses)
+T_IMPORT_START=0
+T_IMPORT_END=0
+T_EMIT_START=0
+T_EMIT_END=0
+T_CLANG_START=0
+T_CLANG_END=0
+T_LINK_START=0
+T_LINK_END=0
 
 # ---------------------------------------------------------------------------
 # Argument parsing
@@ -287,48 +297,51 @@ build_module() {
     mkdir -p "$module_cwd/build/sailfin"
 
 
-    # Resolve output paths to absolute so they work from module_cwd
+    # Resolve output paths to absolute so they work from module_cwd.
+    # Use mkdir+realpath rather than --canonicalize-missing (GNU only, not on macOS).
     local abs_ll_path
-    abs_ll_path="$(cd "$REPO_ROOT" && realpath --canonicalize-missing "$ll_path")"
+    mkdir -p "$(dirname "$ll_path")"
+    abs_ll_path="$(cd "$REPO_ROOT" && cd "$(dirname "$ll_path")" && echo "$(pwd)/$(basename "$ll_path")")"
     local abs_ll_raw="${abs_ll_path}.raw"
 
-    # Prefer emit-llvm-file if available (produces link-safe IR)
+    # Emit LLVM IR to file via -o flag.
     # Run from module_cwd so the seed picks up staged import-context.
     # Diagnostics go to stderr (via print.err) so stdout/file output is clean LLVM IR.
-    local emit_ok=0
+    # Retry up to 3 times: memory corruption can inject stray bytes into the output.
     local stderr_log="${abs_ll_path}.stderr"
-    if "$SEED" emit-llvm-file --help &>/dev/null 2>&1 || "$SEED" help 2>&1 | grep -q "emit-llvm-file"; then
+    local attempt=0
+    local max_attempts=3
+    while [[ $attempt -lt $max_attempts ]]; do
+        attempt=$((attempt + 1))
+        rm -f "$abs_ll_raw"
         # Tolerate segfault during cleanup if the output file was written
-        (cd "$module_cwd" && seed_run "$SEED" emit-llvm-file "$abs_src" "$abs_ll_raw") 2>"$stderr_log" || true
-        if [[ -s "$abs_ll_raw" ]]; then
-            mv "$abs_ll_raw" "$ll_path"
-            rm -f "$stderr_log"
-            emit_ok=1
-        fi
-    fi
-
-    # Fallback to streaming emit (also run from module_cwd)
-    if [[ "$emit_ok" -eq 0 ]]; then
-        # The first-pass binary may segfault during cleanup after writing valid LLVM IR.
-        # Tolerate non-zero exit if the output file contains valid LLVM IR.
-        (cd "$module_cwd" && seed_run "$SEED" emit llvm "$abs_src") > "$abs_ll_raw" 2>"$stderr_log" || true
+        (cd "$module_cwd" && seed_run "$SEED" emit -o "$abs_ll_raw" llvm "$abs_src") 2>"$stderr_log" || true
         if [[ ! -s "$abs_ll_raw" ]]; then
+            if [[ $attempt -lt $max_attempts ]]; then
+                echo "[build] $module_name: empty output (attempt $attempt/$max_attempts), retrying..." >&2
+                continue
+            fi
             echo "[build] FAIL: seed emit produced no output for $module_name" >&2
             [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
             rm -f "$stderr_log"
             return 1
         fi
-        mv "$abs_ll_raw" "$ll_path"
-    fi
-
-    # Validate: output must look like LLVM IR
-    if ! head -20 "$ll_path" | grep -qE "define|declare|target|source_filename|ModuleID"; then
-        echo "[build] FAIL: seed output for $module_name is not valid LLVM IR" >&2
-        head -5 "$ll_path" >&2
-        [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
-        rm -f "$stderr_log"
-        return 1
-    fi
+        # Validate: output must look like LLVM IR
+        if ! head -20 "$abs_ll_raw" | grep -qE "define|declare|target|source_filename|ModuleID"; then
+            if [[ $attempt -lt $max_attempts ]]; then
+                echo "[build] $module_name: invalid IR header (attempt $attempt/$max_attempts), retrying..." >&2
+                continue
+            fi
+            echo "[build] FAIL: seed output for $module_name is not valid LLVM IR" >&2
+            head -5 "$abs_ll_raw" >&2
+            [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
+            rm -f "$stderr_log"
+            return 1
+        fi
+        # Output passed validation
+        break
+    done
+    mv "$abs_ll_raw" "$ll_path"
     rm -f "$stderr_log"
 
     echo "$module_name"
@@ -400,10 +413,12 @@ stage_import_context() {
 }
 
 # Stage import context (sequential for safety with older seeds)
+T_IMPORT_START="$(date +%s)"
 for src in "${SOURCES[@]}"; do
     check_budget
     stage_import_context "$src"
 done
+T_IMPORT_END="$(date +%s)"
 
 log "staged import-context for ${#SOURCES[@]} modules"
 
@@ -414,6 +429,7 @@ log "building ${#SOURCES[@]} modules (jobs=$JOBS)..."
 
 MODULE_NAMES=()
 FAILED=0
+T_EMIT_START="$(date +%s)"
 
 # Build modules (with optional parallelism)
 if [[ "$JOBS" -le 1 ]]; then
@@ -443,6 +459,7 @@ else
     fi
 fi
 
+T_EMIT_END="$(date +%s)"
 [[ "$FAILED" -eq 0 ]] || die "module build failed (see errors above)"
 log "compiled ${#MODULE_NAMES[@]} modules"
 
@@ -453,6 +470,7 @@ printf '%s\n' "${MODULE_NAMES[@]}" > "$RAW_DIR/modules.txt"
 # Step 4: Compile all modules with clang
 # ---------------------------------------------------------------------------
 log "compiling ${#MODULE_NAMES[@]} modules with clang..."
+T_CLANG_START="$(date +%s)"
 FAILED=0
 for name in "${MODULE_NAMES[@]}"; do
     if ! compile_module "$name"; then
@@ -460,6 +478,7 @@ for name in "${MODULE_NAMES[@]}"; do
         break
     fi
 done
+T_CLANG_END="$(date +%s)"
 [[ "$FAILED" -eq 0 ]] || die "clang compilation failed (see errors above)"
 
 # ---------------------------------------------------------------------------
@@ -522,6 +541,7 @@ run "$CLANG" $CLANG_FLAGS -c runtime/native/ir/runtime_globals.ll -o "$OBJ_DIR/r
 # ---------------------------------------------------------------------------
 # Step 7: Link final binary
 # ---------------------------------------------------------------------------
+T_LINK_START="$(date +%s)"
 log "linking final binary..."
 
 LINK_LIBS="-lm -lpthread"
@@ -547,6 +567,8 @@ run "$CLANG" $CLANG_FLAGS \
 # ---------------------------------------------------------------------------
 # Verify
 # ---------------------------------------------------------------------------
+T_LINK_END="$(date +%s)"
+
 if [[ ! -x "$OUT" ]]; then
     die "link succeeded but output is not executable: $OUT"
 fi
@@ -555,8 +577,36 @@ ELAPSED=$(( $(date +%s) - START_TIME ))
 log "built $OUT in ${ELAPSED}s"
 
 # Quick sanity check
+VERSION_STR=""
 if "$OUT" --version &>/dev/null; then
-    log "$("$OUT" --version 2>&1 | head -1)"
+    VERSION_STR="$("$OUT" --version 2>&1 | head -1)"
+    log "$VERSION_STR"
 else
     warn "binary built but --version check failed"
 fi
+
+# ---------------------------------------------------------------------------
+# Build metrics
+# ---------------------------------------------------------------------------
+BINARY_SIZE="$(du -h "$OUT" | cut -f1)"
+IMPORT_SECS=$(( T_IMPORT_END - T_IMPORT_START ))
+EMIT_SECS=$(( T_EMIT_END - T_EMIT_START ))
+CLANG_SECS=$(( T_CLANG_END - T_CLANG_START ))
+LINK_SECS=$(( T_LINK_END - T_LINK_START ))
+
+echo ""
+echo "───────────────────────────────────────"
+echo "  Build Metrics"
+echo "───────────────────────────────────────"
+printf "  %-24s %s\n" "modules"      "${#MODULE_NAMES[@]}"
+printf "  %-24s %s\n" "binary size"  "$BINARY_SIZE"
+[[ -n "$VERSION_STR" ]] && \
+printf "  %-24s %s\n" "version"      "$VERSION_STR"
+echo ""
+printf "  %-24s %4ds\n" "import-context (native)" "$IMPORT_SECS"
+printf "  %-24s %4ds\n" "seed emit (llvm)"        "$EMIT_SECS"
+printf "  %-24s %4ds\n" "clang compile"           "$CLANG_SECS"
+printf "  %-24s %4ds\n" "link + verify"           "$LINK_SECS"
+echo "  ─────────────────────────────────────"
+printf "  %-24s %4ds\n" "total wall time"         "$ELAPSED"
+echo "───────────────────────────────────────"

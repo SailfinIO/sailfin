@@ -72,7 +72,7 @@ PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/nul
 
 .PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean
 
-.PHONY: ci-prepare-test-artifacts ci-package-native ci-package-installer
+.PHONY: ci-prepare-test-artifacts ci-package ci-package-native ci-package-installer
 
 .PHONY: rebuild rebuild-sh rebuild-py rebuild-asan smoke smoke-sh smoke-py
 
@@ -333,12 +333,21 @@ ci-prepare-test-artifacts:
 	cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
 	true
 
-# Package native compiler artifacts for a given target label.
+# Package native compiler + installer artifacts for a given target label.
+# Uses tools/package.sh (pure bash, no Python dependency).
+# Produces: dist/sailfin-native-<target>-<version>.tar.gz (+.sha256, +.manifest.json)
+#           dist/installer-<target>.tar.gz
+ci-package:
+	@if [ -z "$(TARGET)" ]; then \
+		echo "[ci-package][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
+		exit 1; \
+	fi
+	TARGET="$(TARGET)" COMPILER_BIN="$(NATIVE_BIN)" OUT_DIR=dist \
+		bash tools/package.sh --skip-build
+
+# Legacy Python-based packaging (kept until seed is promoted and Python removed).
 # Usage:
 #   make ci-package-native TARGET=linux-x86_64
-# Notes:
-# - Requires the compiler already built at $(NATIVE_BIN).
-# - Exposes the staged import context to the packager.
 ci-package-native: check-conda
 	@if [ -z "$(TARGET)" ]; then \
 		echo "[ci-package-native][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
@@ -660,7 +669,7 @@ ci-cross-windows:
 	SHIM_O=""; \
 	SHIM_C="build/selfhost/native/obj/cross_module_shim.c"; \
 	if [ -f "$$SHIM_C" ]; then \
-		sed 's/__attribute__((weak))//' "$$SHIM_C" > "$$WIN_OBJ/cross_module_shim.c"; \
+		cp "$$SHIM_C" "$$WIN_OBJ/cross_module_shim.c"; \
 		$(MINGW_CC) -O2 -c "$$WIN_OBJ/cross_module_shim.c" -o "$$WIN_OBJ/cross_module_shim.o"; \
 		SHIM_O="$$WIN_OBJ/cross_module_shim.o"; \
 	fi; \

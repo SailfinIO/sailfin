@@ -23,7 +23,7 @@ import { lower_module_bindings_to_globals } from "./module_globals";
 import { emit_llvm_function } from "./emission";
 import { empty_trait_metadata, is_test_module_slug, extend_native_structs, extend_native_enums, extend_native_interfaces, extend_native_functions } from "./lowering_helpers";
 import { empty_capability_manifest, _join_llvm_lines_linear, concat_native_functions, flatten_struct_methods } from "./lowering_helpers_mangling";
-import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core";
+import { lower_to_llvm_lines_with_parsed_context_for_tests, build_parse_result_from_text } from "./lowering_core";
 import { parse_native_artifact_safe } from "./lowering_recovery";
 import { extend_string_lines, extend_string_lines_checked, ensure_intrinsic_declarations, module_source_filename } from "./lowering_io";
 
@@ -49,7 +49,15 @@ fn write_llvm_ir_for_tests_from_text(native_text -> string, module_name -> strin
     // in lower_to_llvm_lines_with_parsed_context reads the correct module
     // rather than stale data from a previous `run` invocation.
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
-    let parse = parse_native_artifact_safe(native_text);
+    // Use the recovery parser (build_parse_result_from_text) instead of the
+    // structured parser (parse_native_artifact_safe).  The recovery parser
+    // creates ALL instructions as Expression(tag→21) with parseable text,
+    // which the tag-21 fallback handler in the instruction lowerer can
+    // dispatch correctly.  The structured parser creates typed variants
+    // (Let, Return, If) that the seedcheck's get_instruction_tag cannot
+    // distinguish (always returns 21) and whose payload fields are not
+    // accessible via the generic .expression accessor.
+    let parse = build_parse_result_from_text(native_text);
     let dummy_module = NativeModule {
         module_name: module_name,
         artifacts: [NativeArtifact { name: module_name, format: "sailfin-native-text", contents: native_text }],

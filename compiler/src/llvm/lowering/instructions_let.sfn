@@ -329,19 +329,31 @@ fn lower_let_instruction(
 
     let mut stored_value -> string = default_return_literal(llvm_type);
     // Fix operand if its llvm_type was corrupted crossing module boundaries.
-    // Always try file-based reconstruction first — the operand's fields may be
-    // corrupted pointers that crash on access.
+    // Only use file-based reconstruction when the operand's type is clearly
+    // wrong (empty or mismatch). When the operand type matches the expected
+    // llvm_type, the operand is correct and the IPC file may contain stale
+    // intermediate values (e.g., from number_to_string inside a string concat chain).
     if operand != null {
-        if fs.exists("build/sailfin/.call_result_type") {
-            let _fixup_type = fs.readFile("build/sailfin/.call_result_type");
-            if _fixup_type.length > 0 {
-                let mut _fixup_value -> string = "";
-                if fs.exists("build/sailfin/.call_result_value") {
-                    _fixup_value = fs.readFile("build/sailfin/.call_result_value");
-                }
-                operand = LLVMOperand { llvm_type: _fixup_type, value: _fixup_value };
-                if fs.exists("build/sailfin/.trace_lowering") {
-                    print.err("let-lowering: operand reconstructed type=" + _fixup_type + " value=" + _fixup_value);
+        let mut _use_ipc_override -> boolean = false;
+        let _op_type = trim_text(operand.llvm_type);
+        if _op_type.length == 0 { _use_ipc_override = true; }
+        if _op_type != llvm_type {
+            if llvm_type.length > 0 {
+                _use_ipc_override = true;
+            }
+        }
+        if _use_ipc_override {
+            if fs.exists("build/sailfin/.call_result_type") {
+                let _fixup_type = fs.readFile("build/sailfin/.call_result_type");
+                if _fixup_type.length > 0 {
+                    let mut _fixup_value -> string = "";
+                    if fs.exists("build/sailfin/.call_result_value") {
+                        _fixup_value = fs.readFile("build/sailfin/.call_result_value");
+                    }
+                    operand = LLVMOperand { llvm_type: _fixup_type, value: _fixup_value };
+                    if fs.exists("build/sailfin/.trace_lowering") {
+                        print.err("let-lowering: operand reconstructed type=" + _fixup_type + " value=" + _fixup_value);
+                    }
                 }
             }
         }

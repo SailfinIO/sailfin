@@ -82,6 +82,8 @@ import {
 
 import { emit_async_function } from "./emission_async";
 
+import { build_define_header_line } from "./emission_header";
+
 import {
     lower_instruction_range,
     lower_instruction_range_void,
@@ -222,20 +224,20 @@ fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
                 let mut _pi -> number = 0;
                 loop {
                     if _pi >= block_phi_lines.length { break; }
-                    out.push(block_phi_lines[_pi]);
+                    out = out.push(block_phi_lines[_pi]);
                     _pi += 1;
                 }
                 let mut _oi -> number = 0;
                 loop {
                     if _oi >= block_other_lines.length { break; }
-                    out.push(block_other_lines[_oi]);
+                    out = out.push(block_other_lines[_oi]);
                     _oi += 1;
                 }
             }
             block_phi_lines = [];
             block_other_lines = [];
             in_block = true;
-            out.push(line);
+            out = out.push(line);
             i += 1;
             // skip next line if it's empty (cosmetic)
             // no, just continue
@@ -251,12 +253,12 @@ fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
                     }
                 }
                 if is_phi {
-                    block_phi_lines.push(line);
+                    block_phi_lines = block_phi_lines.push(line);
                 } else {
-                    block_other_lines.push(line);
+                    block_other_lines = block_other_lines.push(line);
                 }
             } else {
-                out.push(line);
+                out = out.push(line);
             }
             i += 1;
         }
@@ -266,13 +268,13 @@ fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
         let mut _pi2 -> number = 0;
         loop {
             if _pi2 >= block_phi_lines.length { break; }
-            out.push(block_phi_lines[_pi2]);
+            out = out.push(block_phi_lines[_pi2]);
             _pi2 += 1;
         }
         let mut _oi2 -> number = 0;
         loop {
             if _oi2 >= block_other_lines.length { break; }
-            out.push(block_other_lines[_oi2]);
+            out = out.push(block_other_lines[_oi2]);
             _oi2 += 1;
         }
     }
@@ -308,7 +310,16 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
             break;
         }
         let param_name = fs.readFile("build/sailfin/.fn_param_" + number_to_string(index) + "_name");
-        let param_type = fs.readFile("build/sailfin/.fn_param_" + number_to_string(index) + "_type");
+        let raw_param_type = fs.readFile("build/sailfin/.fn_param_" + number_to_string(index) + "_type");
+        // Strip default value from type annotations like "number = 0".
+        // The native IR emitter includes default values in .param annotations;
+        // map_return_type cannot parse "number = 0" and falls back to i8*,
+        // causing ABI mismatches between caller (double) and callee (i8*).
+        let mut param_type -> string = raw_param_type;
+        let eq_idx = index_of(raw_param_type, "=");
+        if eq_idx > 0 {
+            param_type = trim_text(substring(raw_param_type, 0, eq_idx));
+        }
         let mut llvm_type = map_return_type(context, param_type);
         if llvm_type == "void" {
             llvm_type = "";
@@ -318,7 +329,8 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
             llvm_type = "i8*";
         }
         if param_type.length == 0 {
-            diagnostics.push("llvm lowering: parameter `" + param_name + "` missing type annotation; defaulting to `" + llvm_type + "`");
+            let param_diag = "llvm lowering: parameter `" + param_name + "` missing type annotation; defaulting to `" + llvm_type + "`";
+            diagnostics = append_string(diagnostics, param_diag);
         }
         let sanitized = sanitize_symbol(param_name);
         // Deduplicate parameter names: if this name was already used,
@@ -415,11 +427,13 @@ fn emit_llvm_function(
         print.err("emit-llvm: ret_type safe_check=" + safe_text + " llvm_return=" + llvm_return + " fn=" + fn_name);
     }
     if !safe_check {
-        diagnostics.push("llvm lowering: suspicious return type `" + llvm_return + "` in " + fn_name + "; defaulting to i8*");
+        let suspicious_diag = "llvm lowering: suspicious return type `" + llvm_return + "` in " + fn_name + "; defaulting to i8*";
+        diagnostics = append_string(diagnostics, suspicious_diag);
         llvm_return = "i8*";
     }
     if llvm_return.length == 0 {
-        diagnostics.push("llvm lowering: unsupported return type `" + fn_return_type + "` in " + fn_name);
+        let unsupported_diag = "llvm lowering: unsupported return type `" + fn_return_type + "` in " + fn_name;
+        diagnostics = append_string(diagnostics, unsupported_diag);
         let empty_constants = empty_string_constant_set();
         let _empty_lines -> string[] = [];
         _write_lowered_function_files(_empty_lines, diagnostics, empty_constants);
@@ -470,7 +484,8 @@ fn emit_llvm_function(
 
     let mut lines -> string[] = [];
     if effects.length > 0 {
-        lines.push("; fn " + fn_name + " effects: ![" + join_with_separator(effects, ", ") + "]");
+        let effects_comment = "; fn " + fn_name + " effects: ![" + join_with_separator(effects, ", ") + "]";
+        lines = append_string(lines, effects_comment);
     }
     let mut signature -> string = join_with_separator(preparation.signature, ", ");
     if signature.length == 0 {
@@ -489,15 +504,16 @@ fn emit_llvm_function(
             internalize_text = "true";
         }
         print.err("emit-llvm: emit_fn phase=internalize_check name=" + fn_name + " internal=" + internalize_text);
-    }
-    if debug_lowering {
         print.err("emit-llvm: emit_fn phase=define_header name=" + fn_name);
     }
-    lines.push("define " + linkage + llvm_return + " @" + sanitized + "(" + signature + ") {");
-    lines.push(entry_label + ":");
+    let define_header -> string = build_define_header_line(linkage, llvm_return, sanitized, signature);
+    lines = append_string(lines, define_header);
+    let entry_line -> string = entry_label + ":";
+    lines = append_string(lines, entry_line);
 
     if needs_module_init_call {
-        lines.push("  call void " + module_init_symbol + "()");
+        let init_call = "  call void " + module_init_symbol + "()";
+        lines = append_string(lines, init_call);
     }
 
     // Apply minimal decorator semantics at entry.
@@ -520,11 +536,11 @@ fn emit_llvm_function(
             let content = fn_name;
             let constant_name = make_string_constant_name_for_module(module_name, content);
             let constant = StringConstant { name: constant_name, content: content, byte_count: content.length };
-            decorator_string_constants.push(constant);
+            decorator_string_constants = append_string_constant(decorator_string_constants, constant);
             let array_length = content.length + 1;
             let array_type = "[" + number_to_string(array_length) + " x i8]";
             let call_line = "  call i8* @sailfin_runtime_log_execution(i8* getelementptr inbounds (" + array_type + ", " + array_type + "* " + constant_name + ", i32 0, i32 0))";
-            lines.push(call_line);
+            lines = append_string(lines, call_line);
         }
         decorator_index += 1;
     }
@@ -562,9 +578,11 @@ fn emit_llvm_function(
     }
     // Bounds check: protect against stale .fn_index values or run-away loop
     if _eb_fn_index >= functions.length {
-        diagnostics.push("llvm lowering: fn_index " + number_to_string(_eb_fn_index) + " out of range (max " + number_to_string(functions.length) + ") for `" + fn_name + "`");
-        lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
-        lines.push("}");
+        let bounds_diag = "llvm lowering: fn_index " + number_to_string(_eb_fn_index) + " out of range (max " + number_to_string(functions.length) + ") for `" + fn_name + "`";
+        diagnostics = append_string(diagnostics, bounds_diag);
+        let ret_fallback = "  ret " + llvm_return + " " + default_return_literal(llvm_return);
+        lines = append_string(lines, ret_fallback);
+        lines = append_string(lines, "}");
         let empty_constants = empty_string_constant_set();
         _write_lowered_function_files(lines, diagnostics, empty_constants);
         let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
@@ -638,10 +656,12 @@ fn emit_llvm_function(
     if !_eb_has_terminator { _if201 = true; }
     if _if201 {
         if llvm_return == "void" {
-            lines.push("  ret void");
+            lines = append_string(lines, "  ret void");
         } else {
-            diagnostics.push("llvm lowering: missing return in function `" + fn_name + "`");
-            lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
+            let missing_ret_diag = "llvm lowering: missing return in function `" + fn_name + "`";
+            diagnostics = append_string(diagnostics, missing_ret_diag);
+            let ret_line = "  ret " + llvm_return + " " + default_return_literal(llvm_return);
+            lines = append_string(lines, ret_line);
         }
     }
 
@@ -684,7 +704,7 @@ fn emit_llvm_function(
     // Ensure phi nodes appear at the top of each basic block (LLVM requirement).
     lines = _reorder_phis_to_block_start(lines);
 
-    lines.push("}");
+    lines = append_string(lines, "}");
 
     if emit_main_wrapper {
         // C ABI wrapper. Always returns 0 (success) after invoking the Sailfin main.
@@ -818,10 +838,12 @@ fn emit_body(
     if !has_terminator { _if204 = true; }
     if _if204 {
         if llvm_return == "void" {
-            lines.push("  ret void");
+            lines = append_string(lines, "  ret void");
         } else {
-            diagnostics.push("llvm lowering: missing return in function `" + fn_name + "`");
-            lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
+            let missing_ret_diag2 = "llvm lowering: missing return in function `" + fn_name + "`";
+            diagnostics = append_string(diagnostics, missing_ret_diag2);
+            let ret_line2 = "  ret " + llvm_return + " " + default_return_literal(llvm_return);
+            lines = append_string(lines, ret_line2);
         }
     }
 
@@ -853,7 +875,8 @@ fn _write_lowered_function_files(lines -> string[], diagnostics -> string[], str
     let mut si -> number = 0;
     loop {
         if si >= string_constants.length { break; }
-        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count));
+        let sc_entry = string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count);
+        sc_lines = append_string(sc_lines, sc_entry);
         si = si + 1;
     }
     fs.writeLines("build/sailfin/.lowered_fn_string_constants", sc_lines);

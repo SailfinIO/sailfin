@@ -16,6 +16,11 @@ import {
     NativeStructField,
     NativeStructLayout,
     NativeStructLayoutField,
+    NativeEnum,
+    NativeEnumVariant,
+    NativeEnumVariantField,
+    NativeEnumLayout,
+    NativeEnumVariantLayout,
     ParseNativeResult,
 } from "../../native_ir";
 import {
@@ -41,10 +46,12 @@ import {
     extract_kv_string,
     recover_function_name_from_header,
     recover_function_is_async_from_header,
+    net_unquoted_brace_depth,
 } from "./lowering_text_utils";
 import {
     make_native_function_basic,
     make_native_function_method,
+    make_native_function_with_return,
     make_native_parameter,
     make_native_import,
     make_native_struct_layout,
@@ -54,6 +61,12 @@ import {
     make_instruction_text,
     make_instruction_simple,
     make_instruction_for,
+    make_native_enum,
+    make_native_enum_variant,
+    make_native_enum_layout,
+    make_native_enum_variant_layout,
+    make_native_enum_variant_layout_with_fields,
+    make_native_struct_layout_field,
     update_function_return_type,
     update_function_effects,
     append_param_to_function,
@@ -102,9 +115,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     // FLAT: no nested ifs, no else-if chains.
     // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
     // Every condition check must be a top-level if in the loop body.
-    print.err("DIAG: recover_native_functions_light input length=" + number_to_string(native_text.length));
     let lines = split_lines_local(native_text);
-    print.err("DIAG: split_lines_local returned lines=" + number_to_string(lines.length));
     let mut functions -> NativeFunction[] = [];
     let mut current -> NativeFunction? = null;
     let mut current_struct_name -> string = "";
@@ -154,6 +165,11 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let is_endfor_kw = line == ".endfor";
         let is_break_kw = line == "break";
         let is_continue_kw = line == "continue";
+        let is_match_kw = starts_with_local(line, ".match ");
+        let is_endmatch_kw = line == ".endmatch";
+        let is_case_kw = starts_with_local(line, ".case ");
+        let inline_arrow_idx = index_of(line, " => ");
+        let is_inline_case = inline_arrow_idx > 0;
 
         // --- Pre-compute values needed by multiple branches ---
         let method_header = trim_text_local(substring(line, 8, line.length));
@@ -161,6 +177,18 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let method_name_from_paren = trim_text_local(substring(method_header, 0, method_paren_idx));
         let method_arrow_idx = index_of(method_header, " -> ");
         let method_ret_from_arrow = trim_text_local(substring(method_header, method_arrow_idx + 4, method_header.length));
+        // Check whether the method has a `self` parameter.  Static methods
+        // (e.g. `fn new(w, h)`) must NOT get self injected.
+        let mut method_has_self -> boolean = false;
+        if method_paren_idx >= 0 {
+            let _close_paren = index_of(method_header, ")");
+            if _close_paren > method_paren_idx {
+                let _param_text = substring(method_header, method_paren_idx + 1, _close_paren);
+                if starts_with_local(trim_text_local(_param_text), "self") {
+                    method_has_self = true;
+                }
+            }
+        }
         let ret_type_raw = trim_text_local(substring(line, 13, line.length));
         let effects_text_raw = trim_text_local(substring(line, 14, line.length));
         let param_text_raw = trim_text_local(substring(line, 7, line.length));
@@ -173,6 +201,23 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let for_in_idx = index_of(for_body_raw, " in ");
         let for_target_raw = trim_text_local(substring(for_body_raw, 0, for_in_idx));
         let for_iterable_raw = trim_text_local(substring(for_body_raw, for_in_idx + 4, for_body_raw.length));
+
+        // Pre-compute match/case extraction.
+        let match_expr_raw = trim_text_local(substring(line, 7, line.length));
+        let case_pattern_raw = trim_text_local(substring(line, 6, line.length));
+        // Inline case: pattern => body,
+        let inline_pattern_raw = trim_text_local(substring(line, 0, inline_arrow_idx));
+        let inline_body_full = trim_text_local(substring(line, inline_arrow_idx + 4, line.length));
+        // Strip trailing comma from inline body
+        let mut inline_body_raw -> string = inline_body_full;
+        if inline_body_full.length > 0 {
+            let last_char = substring(inline_body_full, inline_body_full.length - 1, inline_body_full.length);
+            if last_char == "," {
+                inline_body_raw = trim_text_local(substring(inline_body_full, 0, inline_body_full.length - 1));
+            }
+        }
+        let inline_body_is_return = starts_with_local(inline_body_raw, "return ");
+        let inline_return_expr = trim_text_local(substring(inline_body_raw, 7, inline_body_raw.length));
 
         // --- Struct tracking ---
         if is_struct_start {
@@ -189,9 +234,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         // --- Flush current on function/method boundaries (FLAT — no nesting) ---
         if is_fn_start {
             if current != null {
-                print.err("DIAG: flush fn-start current=" + current.name + " functions.len=" + number_to_string(functions.length));
                 functions = append_native_function(functions, current);
-                print.err("DIAG: after append functions.len=" + number_to_string(functions.length));
                 current = null;
             }
         }
@@ -205,9 +248,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
         if is_fn_end {
             if current != null {
-                print.err("DIAG: flush fn-end current=" + current.name + " functions.len=" + number_to_string(functions.length));
                 functions = append_native_function(functions, current);
-                print.err("DIAG: after append functions.len=" + number_to_string(functions.length));
                 current = null;
                 index += 1;
                 continue;
@@ -236,7 +277,12 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
                 if method_paren_idx >= 0 {
                     if method_arrow_idx >= 0 {
                         let full_name = current_struct_name + method_name_from_paren;
-                        current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
+                        if method_has_self {
+                            current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
+                        }
+                        if !method_has_self {
+                            current = make_native_function_with_return(full_name, false, method_ret_from_arrow);
+                        }
                         index += 1;
                         continue;
                     }
@@ -248,7 +294,12 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             if current_struct_name.length > 0 {
                 if method_paren_idx >= 0 {
                     let full_name = current_struct_name + method_name_from_paren;
-                    current = make_native_function_method(full_name, current_struct_name, "void");
+                    if method_has_self {
+                        current = make_native_function_method(full_name, current_struct_name, "void");
+                    }
+                    if !method_has_self {
+                        current = make_native_function_with_return(full_name, false, "void");
+                    }
                     index += 1;
                     continue;
                 }
@@ -258,7 +309,12 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         if is_method_start {
             if current_struct_name.length > 0 {
                 let full_name = current_struct_name + method_header;
-                current = make_native_function_method(full_name, current_struct_name, "void");
+                if method_has_self {
+                    current = make_native_function_method(full_name, current_struct_name, "void");
+                }
+                if !method_has_self {
+                    current = make_native_function_with_return(full_name, false, "void");
+                }
                 index += 1;
                 continue;
             }
@@ -270,7 +326,6 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             let fn_is_async = recover_function_is_async_from_header(line);
             current = make_native_function_basic(name, fn_is_async);
             fn_count += 1;
-            print.err("DIAG: found .fn #" + number_to_string(fn_count) + " name=" + name);
             index += 1;
             continue;
         }
@@ -339,16 +394,19 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             next_instruction = make_instruction_text(1, trim_text_local(substring(line, 5, line.length)));
         }
         // --- Multiline struct literal gathering for eval instructions ---
-        // When an eval line has '{' but no '}', gather continuation lines.
+        // When an eval line has an unquoted '{' with no matching '}', gather
+        // continuation lines.  Must skip braces inside string literals such as
+        // `["!", "{"]` — those are data, not struct-literal delimiters.
         // CRITICAL: every `if` below is top-level — NO nesting — because
         // the seed degenerate-if bug drops all nested/else-if branches.
         // We use a score (need 3 of 3) instead of nested AND conditions.
-        let _ml_open_idx = index_of(line, "{");
-        let _ml_close_idx = index_of(line, "}");
+        let _ml_net_depth = net_unquoted_brace_depth(line);
         let mut _gather_score -> number = 0;
         if is_eval { _gather_score += 1; }
-        if _ml_open_idx >= 0 { _gather_score += 1; }
-        if _ml_close_idx < 0 { _gather_score += 1; }
+        if _ml_net_depth > 0 { _gather_score += 1; }
+        // Only gather when there is a positive unquoted brace depth
+        // (i.e. unmatched '{' outside string literals on this line).
+        if _ml_net_depth > 0 { _gather_score += 1; }
         let mut _eval_gathered -> string = "";
         if is_eval {
             _eval_gathered = trim_text_local(substring(line, 5, line.length));
@@ -366,10 +424,8 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
             if starts_with_local(_cont_trimmed, ".span") { _is_stop_directive = false; }
             if _is_stop_directive { break; }
             _eval_gathered = _eval_gathered + "\n" + _cont;
-            let _cont_open = index_of(_cont, "{");
-            let _cont_close = index_of(_cont, "}");
-            if _cont_open >= 0 { _eval_brace_depth += 1; }
-            if _cont_close >= 0 { _eval_brace_depth -= 1; }
+            let _cont_depth = net_unquoted_brace_depth(_cont);
+            _eval_brace_depth = _eval_brace_depth + _cont_depth;
             _gi += 1;
         }
         if _gather_score >= 3 {
@@ -414,6 +470,34 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         if is_continue_kw {
             next_instruction = make_instruction_simple(11);
         }
+        if is_match_kw {
+            next_instruction = make_instruction_text(12, match_expr_raw);
+        }
+        if is_endmatch_kw {
+            next_instruction = make_instruction_simple(14);
+        }
+        if is_case_kw {
+            next_instruction = make_instruction_text(13, case_pattern_raw);
+        }
+        // Inline match case: `pattern => body,` — emit Case + body instructions.
+        // Must NOT fire on `.case` or `.match` lines that happen to contain ` => `.
+        let mut _inline_score -> number = 0;
+        if is_inline_case { _inline_score += 1; }
+        if !is_match_kw { _inline_score += 1; }
+        if !is_case_kw { _inline_score += 1; }
+        if !is_endmatch_kw { _inline_score += 1; }
+        if !is_fn_start { _inline_score += 1; }
+        if !is_fn_end { _inline_score += 1; }
+        if _inline_score >= 6 {
+            let case_instr = make_instruction_text(13, inline_pattern_raw);
+            current = append_instruction_to_function(current, case_instr);
+            if inline_body_is_return {
+                next_instruction = make_instruction_text(0, inline_return_expr);
+            }
+            if !inline_body_is_return {
+                next_instruction = make_instruction_text(1, inline_body_raw);
+            }
+        }
 
         current = append_instruction_to_function(current, next_instruction);
         index += 1;
@@ -421,7 +505,6 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
     if current != null {
         functions = append_native_function(functions, current);
     }
-    print.err("DIAG: recover_native_functions_light returning " + number_to_string(functions.length) + " functions");
     return functions;
 }
 
@@ -809,3 +892,183 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
 
 // build_parse_result_from_text lives in lowering_core.sfn to preserve
 // cross-module symbol mangling compatibility with the v0.1.1 seed shims.
+
+// ── Enum recovery ───────────────────────────────────────────────────
+// Light line-scanner for .enum/.endenum blocks, analogous to
+// recover_native_structs_light.  Avoids the cross-module ABI corruption
+// that makes parse_native_enums_for_import return empty arrays.
+
+fn recover_native_enums_light(native_text -> string) -> NativeEnum[] {
+    let lines = split_lines_local(native_text);
+    let mut enums -> NativeEnum[] = [];
+    let mut in_enum -> boolean = false;
+    let mut enum_name -> string = "";
+    let mut variants -> NativeEnumVariant[] = [];
+    let mut variant_layouts -> NativeEnumVariantLayout[] = [];
+    let mut layout_size -> number = 0;
+    let mut layout_align -> number = 0;
+    let mut layout_tag_type -> string = "i32";
+    let mut layout_tag_size -> number = 4;
+    let mut layout_tag_align -> number = 4;
+    let mut has_layout -> boolean = false;
+
+    // Deferred variant layout — accumulate payload fields before flushing.
+    let mut pending_vl_name -> string = "";
+    let mut pending_vl_tag -> number = 0;
+    let mut pending_vl_offset -> number = 0;
+    let mut pending_vl_size -> number = 0;
+    let mut pending_vl_align -> number = 0;
+    let mut pending_vl_fields -> NativeStructLayoutField[] = [];
+    let mut has_pending_vl -> boolean = false;
+
+    let mut index -> number = 0;
+    loop {
+        if index >= lines.length {
+            break;
+        }
+        let line = trim_text_local(lines[index]);
+        let mut _skip -> boolean = false;
+        if line.length == 0 { _skip = true; }
+        if starts_with_local(line, ";") { _skip = true; }
+        if _skip {
+            index += 1;
+            continue;
+        }
+
+        let is_enum_start = starts_with_local(line, ".enum ");
+        let is_enum_end = line == ".endenum";
+        let is_layout_enum = starts_with_local(line, ".layout enum ");
+        let is_layout_variant = starts_with_local(line, ".layout variant ");
+        let is_layout_payload = starts_with_local(line, ".layout payload ");
+        let is_variant = starts_with_local(line, ".variant ");
+
+        if is_enum_start {
+            // Flush any pending variant from a previous enum (shouldn't happen)
+            if has_pending_vl {
+                variant_layouts = variant_layouts.push(make_native_enum_variant_layout_with_fields(pending_vl_name, pending_vl_tag, pending_vl_offset, pending_vl_size, pending_vl_align, pending_vl_fields));
+                has_pending_vl = false;
+            }
+            in_enum = true;
+            enum_name = trim_text_local(substring(line, 6, line.length));
+            variants = [];
+            variant_layouts = [];
+            layout_size = 0;
+            layout_align = 0;
+            layout_tag_type = "i32";
+            layout_tag_size = 4;
+            layout_tag_align = 4;
+            has_layout = false;
+            index += 1;
+            continue;
+        }
+
+        if is_enum_end {
+            if in_enum {
+                // Flush pending variant layout
+                if has_pending_vl {
+                    variant_layouts = variant_layouts.push(make_native_enum_variant_layout_with_fields(pending_vl_name, pending_vl_tag, pending_vl_offset, pending_vl_size, pending_vl_align, pending_vl_fields));
+                    has_pending_vl = false;
+                }
+                if has_layout {
+                    let elayout = make_native_enum_layout(layout_size, layout_align, layout_tag_type, layout_tag_size, layout_tag_align, variant_layouts);
+                    enums = enums.push(make_native_enum(enum_name, variants, elayout));
+                }
+                if !has_layout {
+                    enums = enums.push(make_native_enum(enum_name, variants, null));
+                }
+                in_enum = false;
+            }
+            index += 1;
+            continue;
+        }
+
+        if !in_enum {
+            index += 1;
+            continue;
+        }
+
+        // .layout enum name=X size=N align=N tag_type=TT tag_size=N tag_align=N
+        if is_layout_enum {
+            has_layout = true;
+            let le_text = trim_text_local(substring(line, 13, line.length));
+            layout_size = extract_kv_number(le_text, "size=", 5);
+            layout_align = extract_kv_number(le_text, "align=", 6);
+            layout_tag_type = extract_kv_string(le_text, "tag_type=", 9);
+            layout_tag_size = extract_kv_number(le_text, "tag_size=", 9);
+            layout_tag_align = extract_kv_number(le_text, "tag_align=", 10);
+            index += 1;
+            continue;
+        }
+
+        // .layout variant Name tag=N offset=N size=N align=N
+        // Flush any pending variant before starting the next one.
+        if is_layout_variant {
+            if has_pending_vl {
+                variant_layouts = variant_layouts.push(make_native_enum_variant_layout_with_fields(pending_vl_name, pending_vl_tag, pending_vl_offset, pending_vl_size, pending_vl_align, pending_vl_fields));
+            }
+            let lv_text = trim_text_local(substring(line, 16, line.length));
+            let lv_name_end = index_of(lv_text, " ");
+            let lv_name = substring(lv_text, 0, lv_name_end);
+            pending_vl_name = lv_name;
+            pending_vl_tag = extract_kv_number(lv_text, "tag=", 4);
+            pending_vl_offset = extract_kv_number(lv_text, "offset=", 7);
+            pending_vl_size = extract_kv_number(lv_text, "size=", 5);
+            pending_vl_align = extract_kv_number(lv_text, "align=", 6);
+            pending_vl_fields = [];
+            has_pending_vl = true;
+            index += 1;
+            continue;
+        }
+
+        // .layout payload VariantName.field_name type=T offset=N size=N align=N
+        if is_layout_payload {
+            let lp_text = trim_text_local(substring(line, 16, line.length));
+            let lp_name_end = index_of(lp_text, " ");
+            let lp_qualified = substring(lp_text, 0, lp_name_end);
+            // Extract field name after the dot: "Circle.radius" -> "radius"
+            let lp_dot = index_of(lp_qualified, ".");
+            let mut lp_field_name -> string = lp_qualified;
+            if lp_dot >= 0 {
+                lp_field_name = substring(lp_qualified, lp_dot + 1, lp_qualified.length);
+            }
+            let lp_type = extract_kv_string(lp_text, "type=", 5);
+            let lp_offset = extract_kv_number(lp_text, "offset=", 7);
+            let lp_size = extract_kv_number(lp_text, "size=", 5);
+            let lp_align = extract_kv_number(lp_text, "align=", 6);
+            pending_vl_fields = pending_vl_fields.push(make_native_struct_layout_field(lp_field_name, lp_type, lp_offset, lp_size, lp_align));
+            index += 1;
+            continue;
+        }
+
+        // .variant Name or .variant Name { field -> type, ... }
+        // Strip field text from variant name for tagged enums.
+        if is_variant {
+            let var_raw = trim_text_local(substring(line, 9, line.length));
+            let var_brace = index_of(var_raw, " {");
+            let mut var_name -> string = var_raw;
+            if var_brace > 0 {
+                var_name = trim_text_local(substring(var_raw, 0, var_brace));
+            }
+            variants = variants.push(make_native_enum_variant(var_name));
+            index += 1;
+            continue;
+        }
+
+        index += 1;
+    }
+    // Handle unclosed enum block
+    if has_pending_vl {
+        variant_layouts = variant_layouts.push(make_native_enum_variant_layout_with_fields(pending_vl_name, pending_vl_tag, pending_vl_offset, pending_vl_size, pending_vl_align, pending_vl_fields));
+        has_pending_vl = false;
+    }
+    if in_enum {
+        if has_layout {
+            let elayout = make_native_enum_layout(layout_size, layout_align, layout_tag_type, layout_tag_size, layout_tag_align, variant_layouts);
+            enums = enums.push(make_native_enum(enum_name, variants, elayout));
+        }
+        if !has_layout {
+            enums = enums.push(make_native_enum(enum_name, variants, null));
+        }
+    }
+    return enums;
+}

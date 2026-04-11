@@ -20,7 +20,6 @@ import {
 import {
     parse_native_functions_from_text,
     parse_native_bindings_from_text,
-    parse_native_enums_for_import,
 } from "../../native_ir_api";
 
 import {
@@ -45,6 +44,7 @@ import {
     recover_native_functions_light,
     recover_native_structs_light,
     recover_native_imports_light,
+    recover_native_enums_light,
     recover_functions_for_lowering,
     parse_native_artifact_safe,
 } from "./lowering_recovery";
@@ -89,7 +89,7 @@ fn sanitize_lowering_inputs(
     if native_text_override_path.length > 0 {
         let _rfns = recover_native_functions_light(native_text_override_path);
         let _rsts = recover_native_structs_light(native_text_override_path);
-        let _rens = parse_native_enums_for_import(native_text_override_path);
+        let _rens = recover_native_enums_light(native_text_override_path);
         let reparsed = ParseNativeResult {
             functions: _rfns,
             imports: parse_in.imports,

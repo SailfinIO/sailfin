@@ -157,6 +157,9 @@ fn render_llvm_preamble(
         "declare %SailfinFutureString* @sailfin_runtime_spawn_string_ctx(i8* (i8*)*, i8*)",
         "declare i8* @sailfin_runtime_await_string(%SailfinFutureString*)",
         "",
+        "; Enum tag reader for seedcheck - reads i32 tag from NativeInstruction array",
+        "declare double @sailfin_enum_tag_from_instruction_array(i8*, double)",
+        "",
     ]);
 
     // Vtable type definitions
