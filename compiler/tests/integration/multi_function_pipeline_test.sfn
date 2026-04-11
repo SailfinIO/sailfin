@@ -340,29 +340,23 @@ struct QueryBuilder {
     }
 }
 
-// NOTE: method chaining (Foo.bar().baz()) is a known compiler limitation —
-// the expression lowerer doesn't evaluate chained calls left-to-right.
-// Break chains into separate let bindings until this is fixed.
 test "pipeline: builder pattern basic query" {
-    let builder = QueryBuilder.from_table("users");
-    let q = builder.build();
+    let q = QueryBuilder.from_table("users").build();
     assert q == "SELECT * FROM users";
 }
 
 test "pipeline: builder pattern with conditions" {
-    let b0 = QueryBuilder.from_table("users");
-    let b1 = b0.where_eq("name", "'Alice'");
-    let b2 = b1.where_eq("active", "'true'");
-    let q = b2.build();
+    let q = QueryBuilder.from_table("users")
+        .where_eq("name", "'Alice'")
+        .where_eq("active", "'true'")
+        .build();
     assert q == "SELECT * FROM users WHERE name = 'Alice' AND active = 'true'";
 }
 
 test "pipeline: builder preserves state across calls" {
     let base = QueryBuilder.from_table("orders");
-    let w1 = base.where_eq("status", "'open'");
-    let q1 = w1.build();
-    let w2 = base.where_eq("status", "'closed'");
-    let q2 = w2.build();
+    let q1 = base.where_eq("status", "'open'").build();
+    let q2 = base.where_eq("status", "'closed'").build();
     assert q1 == "SELECT * FROM orders WHERE status = 'open'";
     assert q2 == "SELECT * FROM orders WHERE status = 'closed'";
 }

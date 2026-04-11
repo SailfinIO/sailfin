@@ -10,26 +10,80 @@ import {
 } from "../../utils";
 
 fn find_call_site(expression -> string) -> number {
-    let mut depth -> number = 0;
+    // Find the opening paren of the outermost (last) call in a chained
+    // expression like `Builder.create("hello").finish()`.  We scan
+    // left-to-right, tracking balanced parens/braces/brackets/strings,
+    // and record the last `(` seen at depth-0.
+    let mut paren_depth -> number = 0;
+    let mut brace_depth -> number = 0;
+    let mut bracket_depth -> number = 0;
+    let mut in_double -> boolean = false;
+    let mut in_single -> boolean = false;
+    let mut escape_next -> boolean = false;
+    let mut last_top_level_open -> number = -1;
     let mut index -> number = 0;
     loop {
         if index >= expression.length {
             break;
         }
         let ch = char_at(expression, index);
-        if ch == "(" {
-            if depth == 0 {
-                return index;
+        if in_double {
+            if escape_next {
+                escape_next = false;
+            } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "\"" {
+                in_double = false;
             }
-            depth += 1;
+            index += 1;
+            continue;
+        }
+        if in_single {
+            if escape_next {
+                escape_next = false;
+            } else if ch == "\\" {
+                escape_next = true;
+            } else if ch == "'" {
+                in_single = false;
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_double = true;
+            index += 1;
+            continue;
+        }
+        if ch == "'" {
+            in_single = true;
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+        } else if ch == "}" {
+            if brace_depth > 0 { brace_depth -= 1; }
+        } else if ch == "[" {
+            bracket_depth += 1;
+        } else if ch == "]" {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+        } else if ch == "(" {
+            if paren_depth == 0 {
+                if brace_depth == 0 {
+                    if bracket_depth == 0 {
+                        last_top_level_open = index;
+                    }
+                }
+            }
+            paren_depth += 1;
         } else if ch == ")" {
-            if depth > 0 {
-                depth -= 1;
+            if paren_depth > 0 {
+                paren_depth -= 1;
             }
         }
         index += 1;
     }
-    return -1;
+    return last_top_level_open;
 }
 
 fn split_call_arguments(text -> string) -> string[] {
