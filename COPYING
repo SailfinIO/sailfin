@@ -1,0 +1,19 @@
+Sailfin - An AI-native, systems-friendly programming language
+Copyright (C) 2026 Michael Curtis <michael@sailfin.io>
+
+The Sailfin compiler is free software; you can redistribute it and/or
+modify it under the terms of the GNU General Public License as published
+by the Free Software Foundation; version 2 of the License.
+
+The Sailfin runtime libraries (runtime/) are distributed under the same
+license with an additional permission described in the file
+RUNTIME_LIBRARY_EXCEPTION. This exception allows programs compiled by
+Sailfin to link against the runtime without those programs being subject
+to the GPL. See RUNTIME_LIBRARY_EXCEPTION for details.
+
+The full text of the GNU General Public License version 2 is in the file
+LICENSE.
+
+You should have received a copy of the GNU General Public License along
+with this program; if not, write to the Free Software Foundation, Inc.,
+51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
