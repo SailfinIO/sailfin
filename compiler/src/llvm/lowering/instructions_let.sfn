@@ -245,8 +245,19 @@ fn lower_let_instruction(
         // so .string_constants is often null/garbage.  Scanning the lines
         // is reliable in both the first-pass and seedcheck.
         string_constants = _infer_field_constants_from_lines(current_lines);
+        // Write the string constants file IMMEDIATELY after scanning,
+        // before any intermediate code can clobber the local variable
+        // (seedcheck stack corruption risk).
+        let mut _sc_imm -> string[] = [];
+        let mut _sci2 -> number = 0;
+        loop {
+            if _sci2 >= string_constants.length { break; }
+            _sc_imm.push(string_constants[_sci2].name + "\t" + string_constants[_sci2].content + "\t" + number_to_string(string_constants[_sci2].byte_count));
+            _sci2 += 1;
+        }
+        fs.writeLines("build/sailfin/.let_result_string_constants", _sc_imm);
         if fs.exists("build/sailfin/.trace_lowering") {
-            print.err("let-lowering: got string_constants count=" + number_to_string(string_constants.length) + ", done with lowered");
+            print.err("let-lowering: got string_constants count=" + number_to_string(string_constants.length) + " wrote=" + number_to_string(_sc_imm.length) + ", done with lowered");
         }
     }
 
@@ -458,6 +469,9 @@ fn lower_let_instruction(
         _sci += 1;
     }
     fs.writeLines("build/sailfin/.let_result_string_constants", _sc_lines);
+    if fs.exists("build/sailfin/.trace_lowering") {
+        print.err("let-lowering: wrote " + number_to_string(_sc_lines.length) + " string constant entries to file, string_constants.length=" + number_to_string(string_constants.length));
+    }
     // Serialize the new local binding (last one added)
     if current_locals.length > 0 {
         let _last_local = current_locals[current_locals.length - 1];
@@ -488,7 +502,9 @@ fn lower_let_instruction(
 // where FOO is the sanitized field name and N-1 is the byte count.
 fn _infer_field_constants_from_lines(lines -> string[]) -> StringConstant[] {
     let mut result -> StringConstant[] = [];
-    let marker = "@.runtime.field.";
+    // Build in two parts to avoid a single "@.runtime.field." literal that
+    // triggers a bogus global constant in the selfhost IR.
+    let marker = "@.runtime" + ".field.";
     let marker_len = marker.length;
     let mut i -> number = 0;
     loop {

@@ -87,7 +87,10 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     let mut dynamic_string_constants -> StringConstant[] = string_constants;
 
     let sanitized_field = sanitize_symbol(field);
-    let constant_name = "@.runtime.field." + sanitized_field;
+    // Build the constant name in two parts to avoid a single "@.runtime.field."
+    // string literal that triggers a bogus global constant in the selfhost IR.
+    let _rf_prefix = "@.runtime" + ".field.";
+    let constant_name = _rf_prefix + sanitized_field;
     let existing_constant = find_string_constant_by_name(dynamic_string_constants, constant_name);
     let mut field_constant -> StringConstant = StringConstant { name: constant_name, content: field, byte_count: field.length };
     if existing_constant != null {
