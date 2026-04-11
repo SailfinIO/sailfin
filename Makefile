@@ -60,17 +60,16 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-# Build driver selection: "py" (default, uses selfhost_native.py with fixups)
-# or "sh" (scripts/build.sh, no fixups — requires a seed that doesn't need them).
-# The current 0.1.1 seed needs the Python fixups, so py is the default.
-# Once we have a clean seed, flip this to sh and remove the Python driver.
-BUILD_DRIVER ?= py
+# Build driver selection: "sh" (default, uses scripts/build.sh — no fixups)
+# or "py" (scripts/selfhost_native.py with fixups — legacy, for 0.1.1 seed only).
+# The 0.5.0-alpha.22 seed produces clean LLVM IR, so sh is now the default.
+BUILD_DRIVER ?= sh
 
 # Python executable for the build driver. selfhost_native.py uses only stdlib,
 # so any Python 3 works — no Conda or virtualenv required.
 PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
 
-.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean
+.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean bench
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-native ci-package-installer
 
@@ -116,11 +115,12 @@ help:
 	@echo "  make smoke          # Rebuild + run smoke tests"
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
+	@echo "  make bench          # Benchmark per-module compile time and memory"
 	@echo "  make rebuild-asan   # Rebuild with AddressSanitizer (requires Python 3)"
 	@echo "  make env            # Create/update Conda env (CI/release only)"
 	@echo "  make clean          # Remove packaged artifacts (dist/)"
 	@echo ""
-	@echo "Build driver: BUILD_DRIVER=$(BUILD_DRIVER) (py=with fixups [default], sh=no fixups)"
+	@echo "Build driver: BUILD_DRIVER=$(BUILD_DRIVER) (sh=no fixups [default], py=with fixups [legacy])"
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
@@ -158,14 +158,14 @@ test: test-unit test-integration test-e2e
 # Install a released seed compiler into the workspace.
 # Requires a GitHub token in GITHUB_TOKEN.
 SEED_REPO ?= SailfinIO/sailfin
-SEED_VERSION ?= latest
+SEED_VERSION ?= 0.5.0-alpha.22
 SEED_EXCLUDE_TAG ?=
 SEED_INSTALL_BASE ?= build/seed/versions
 SEED_GLOBAL_BIN_DIR ?= build/seed/bin
 
-# Default seed compiler used for self-hosting (can be a command on PATH).
-# Override with a full path if needed, e.g. SEED=build/seed/bin/sailfin.
-SEED ?= sfn
+# Default seed compiler used for self-hosting.
+# Points to the fetched seed binary (0.5.0-alpha.22+).
+SEED ?= build/seed/bin/sailfin
 
 FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
 
@@ -235,6 +235,27 @@ test-e2e:
 .PHONY: test-selfhost
 test-selfhost:
 	@$(MAKE) test
+
+# Benchmark per-module compile time and peak memory.
+# Usage:
+#   make bench                           # all modules
+#   make bench BENCH_ARGS="--top 10"     # top 10 slowest
+#   make bench BENCH_ARGS="--csv build/bench.csv"
+#   make bench BENCH_ARGS="--budget-time 60 --budget-mem 512000"
+BENCH_ARGS ?=
+bench:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[bench] missing $(NATIVE_BIN); run 'make compile' first"; \
+		exit 1; \
+	fi
+	@if [ ! -d build/native/import-context ]; then \
+		echo "[bench] missing import-context; run 'make compile' first"; \
+		exit 1; \
+	fi
+	@bash scripts/bench_compile.sh \
+		--seed "$(NATIVE_BIN)" \
+		--import-context build/native/import-context \
+		$(BENCH_ARGS)
 
 clean:
 	rm -rf dist
@@ -429,7 +450,7 @@ rebuild-sh:
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
 	echo "[rebuild-sh] running shell build (seed=$$seed)..."; \
-	SEED="$$seed" OUT="$(NATIVE_OUT)" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" \
+	SEED="$$seed" OUT="$(NATIVE_OUT)" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" SEED_TIMEOUT=600 MAX_TOTAL=7200 \
 		bash scripts/build.sh
 	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
 	if [ -d "$$SRC" ]; then \

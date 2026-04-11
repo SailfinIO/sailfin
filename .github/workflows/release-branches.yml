@@ -2,8 +2,8 @@ name: Release (branches)
 
 env:
     # Pinned seed used for self-host bootstrap in CI.
-    # Bump this once the latest release assets are healthy again.
-    SEED_VERSION: 0.1.1
+    # 0.5.0-alpha.22: first seed that produces clean LLVM IR (no Python fixups needed).
+    SEED_VERSION: 0.5.0-alpha.22
 
 on:
     push:

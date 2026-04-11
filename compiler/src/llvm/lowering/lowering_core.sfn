@@ -786,7 +786,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         trace,
         debug_lowering
     );
-    lines = append_string_lines(lines, function_lines);
+    lines = extend_string_lines(lines, function_lines);
 
     // Read function phase diagnostics
     let _fn_diags_raw = fs.readFile("build/sailfin/.phase_functions_diagnostics");

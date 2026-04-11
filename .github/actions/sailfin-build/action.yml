@@ -53,14 +53,12 @@ runs:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
-        # Use BUILD_DRIVER=py for the first-pass build (seed needs fixups).
-        CONDA=$(which conda) \
-          make rebuild \
-            BUILD_DRIVER=py \
-            CLANG="${{ inputs.clang }}" \
-            BUILD_JOBS="${{ inputs.build_jobs }}" \
-            BUILD_ARGS="--max-attempts ${{ inputs.max_attempts }} --max-total-seconds 1800" \
-            SEED_NATIVE="build/seed/bin/sailfin"
+        # Use BUILD_DRIVER=sh — the 0.5.0-alpha.22 seed produces clean LLVM IR.
+        make rebuild \
+          BUILD_DRIVER=sh \
+          CLANG="${{ inputs.clang }}" \
+          BUILD_JOBS="${{ inputs.build_jobs }}" \
+          SEED_NATIVE="build/seed/bin/sailfin"
 
     - name: Prepare test artifacts
       shell: bash {0}
