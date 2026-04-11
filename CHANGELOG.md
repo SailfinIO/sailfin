@@ -1,6 +1,312 @@
 # CHANGELOG
 
 
+## v0.5.0-alpha.20 (2026-04-11)
+
+### Bug Fixes
+
+- Add tag-21 fallback in instruction dispatch for seedcheck viability
+  ([`b76820f`](https://github.com/SailfinIO/sailfin/commit/b76820f1a4dc9006a3fecc077efe3434245ec980))
+
+The seedcheck binary's compiled get_instruction_tag cannot distinguish data-carrying
+  NativeInstruction enum variants (Expression, Let, Return, If, For, etc.) because it uses ==
+  comparison which only works for fieldless variants. The Python fixup replaces the function body in
+  the first-pass binary, but the seedcheck has no fixups.
+
+When get_instruction_tag returns 21 (unknown data-carrying variant), the dispatch now falls back to
+  treating the instruction as Expression (which also handles inline `let` prefixes) or Return
+  (detected by checking if the instruction text starts with "ret"). This enables the seedcheck to
+  lower all instructions that the recovery parser creates from .sfn-asm text.
+
+https://claude.ai/code/session_01TGbE7C32vC9L8xMERgRZMD
+
+- Duplicate logs in ci and realpath in macos
+  ([`1ec1d19`](https://github.com/SailfinIO/sailfin/commit/1ec1d191d4a5fb04f270faff62c5e23ddaf9f779))
+
+- Lowering - all tests in first pass and seedcheck pass
+  ([`2b8094a`](https://github.com/SailfinIO/sailfin/commit/2b8094ab8ee7eb8dbe3703fccda19baa540cc16c))
+
+- Merge redundant emit commands
+  ([`01201f8`](https://github.com/SailfinIO/sailfin/commit/01201f8d57d834e4a97f94066a80a99195ccd2bf))
+
+- Normalize multi-line Raw expressions to single line in sfn-asm emitter
+  ([`fa4b368`](https://github.com/SailfinIO/sailfin/commit/fa4b368421fe1107de0c77bce2656d7cede64cd7))
+
+Multi-line array literals (and other Raw expressions spanning multiple source lines) were being
+  emitted as multi-line eval instructions in the .sfn-asm intermediate representation. The LLVM
+  lowering in the compiled first-pass binary has a bug in its multi-line instruction gathering that
+  causes these expressions to produce null instead of proper array construction code.
+
+The fix replaces newline characters with spaces in the Raw expression formatter, ensuring all eval
+  instructions in .sfn-asm are single-line. This eliminates the null array literal issue and fixes
+  the seedcheck binary's segfault in number_to_string.
+
+https://claude.ai/code/session_01TGbE7C32vC9L8xMERgRZMD
+
+- Only use IPC file override in let-lowering when operand type mismatches
+  ([`1e00eb4`](https://github.com/SailfinIO/sailfin/commit/1e00eb4546c30ff291e759ac49dfbcc19c36f94c))
+
+The let-lowering IPC override always replaced the expression operand with the .call_result_value
+  file, even when the operand was correct. For chained string concatenation (e.g., "declare " + type
+  + " @" + name), intermediate function calls (like number_to_string) wrote stale values to
+  .call_result_value, causing the let binding to store the wrong intermediate result instead of the
+  final concat result.
+
+The fix restricts the IPC override to only apply when the operand's type doesn't match the expected
+  type, indicating actual ABI corruption. When types match, the operand is used directly, preserving
+  the correct expression result.
+
+https://claude.ai/code/session_01TGbE7C32vC9L8xMERgRZMD
+
+- Remove IPC write from lower_string_literal that broke boolean let bindings
+  ([`224668e`](https://github.com/SailfinIO/sailfin/commit/224668e19cebd2e4ab41d4715311d6647d0e251c))
+
+The IPC write added to lower_string_literal in the previous commit caused a regression in
+  path_test.sfn: expressions like `let absolute = path[0] == "/"` had their strings_equal boolean
+  result overwritten by the "/" string literal's IPC write, storing the wrong type (i8* instead of
+  i1) and wrong value.
+
+String literals should NOT write to .call_result_value because they are intermediate operands, not
+  final expression results. Only emit_string_concat (the final operation in a concat chain) should
+  write to IPC files.
+
+https://claude.ai/code/session_01TGbE7C32vC9L8xMERgRZMD
+
+- Remove leftover diagnostics and enable seedcheck ci
+  ([`b6bb351`](https://github.com/SailfinIO/sailfin/commit/b6bb351f4b145a6036994e77cd6fc537a9f4d96a))
+
+- Sporadic char check
+  ([`e2d1e35`](https://github.com/SailfinIO/sailfin/commit/e2d1e351dc4083f3ab9269fed22c7cb754e0ae66))
+
+- Sporadic char check
+  ([`b7f50c1`](https://github.com/SailfinIO/sailfin/commit/b7f50c151c4d18ad6a1c9e550ec4eea117d6a32c))
+
+- Strip default values from parameter type annotations in LLVM lowering
+  ([`13bba3a`](https://github.com/SailfinIO/sailfin/commit/13bba3ae6fe5ddf2e4886e1491f165de388d53e9))
+
+The native IR emitter includes default values in .param type annotations (e.g., "number = 0" for
+  `start -> number = 0`). The parameter preparation code in emission.sfn passes this raw annotation
+  to map_return_type, which cannot parse "number = 0" and returns empty string. This causes the
+  fallback to i8*, creating an ABI mismatch between the caller (which correctly uses double) and the
+  callee definition (which incorrectly uses i8*).
+
+This specifically caused find_char in the prelude to receive garbage for its start parameter,
+  resulting in an infinite loop that hung the seedcheck binary during LLVM lowering.
+
+The fix strips everything after "=" from parameter type annotations before type mapping.
+
+https://claude.ai/code/session_01TGbE7C32vC9L8xMERgRZMD
+
+- Test suites in first pass - lowering issues
+  ([`b3c900a`](https://github.com/SailfinIO/sailfin/commit/b3c900a33488fecb644795b7f0827a249a58366e))
+
+- Timeout on macos and shim on mingw
+  ([`807bb77`](https://github.com/SailfinIO/sailfin/commit/807bb77212c6b4970d5811a218829a2cfb3acdcd))
+
+- Write IPC result files from string concat/literal and use append_string for function header
+  ([`b15d794`](https://github.com/SailfinIO/sailfin/commit/b15d794f25c04dc12382ccc209a90c6971e17289))
+
+Two fixes for seedcheck LLVM IR generation:
+
+1. String concat chain IPC: when a let binding initializer contains chained string concatenation
+  (e.g., "[" + number_to_string(n) + " x i8]"), intermediate function calls (like number_to_string)
+  wrote stale values to .call_result_value. The let lowering then picked up the intermediate value
+  instead of the final concat result. Fixed by having lower_string_literal and emit_string_concat
+  write their results to the IPC files.
+
+2. Function header emission: use append_string instead of push for the "define" and "block.entry:"
+  header lines to ensure they survive array mutation in seedcheck-compiled code.
+
+https://claude.ai/code/session_01TGbE7C32vC9L8xMERgRZMD
+
+- **compiler**: Extract define header builder to avoid seed lowering bugs
+  ([`1c52194`](https://github.com/SailfinIO/sailfin/commit/1c52194c84386dfe886879a8a70b0debbdf11580))
+
+The v0.1.1 seed's lowering has two bugs that prevent the seedcheck from emitting correct LLVM
+  function headers:
+
+1. `{` in any concat expression silently drops all subsequent instructions 2. `ret i8* null` for
+  local-variable string returns
+
+Work around both by extracting build_define_header_line() into a separate module
+  (emission_header.sfn) that: - Uses substring("(){}", 2, 3) to obtain `{` at runtime without the
+  character appearing in any eval concat expression - Returns via trim_text() (a call result)
+  instead of a bare local variable
+
+With this fix, the seedcheck binary successfully compiles and runs hello-world.sfn, passing the make
+  check validation gate.
+
+- **compiler**: Fix seedcheck loop lowering and terminated IPC corruption
+  ([`d771e92`](https://github.com/SailfinIO/sailfin/commit/d771e926eab99e66734ee4ffe903736c04e7e6a1))
+
+Two fixes that move seedcheck unit tests from 16/32 to 24/32:
+
+1. Skip exit-condition instructions in loop body (instructions_loops.sfn): When
+  lower_loop_instruction detects the 'if COND { break; } endif' exit pattern at the top of a loop,
+  it now advances body_start by 3 to skip those instructions. Previously they were double-processed:
+  the seedcheck's get_instruction_tag returns 21 (fallback) for the If variant, the Break at index+1
+  sets terminated=true, and the body exits immediately — dropping all remaining loop body
+  instructions.
+
+2. Fix terminated IPC file read (instructions_helpers.sfn, instructions.sfn): The seedcheck's
+  compiled 'fs.readFile(...) == "1"' gets mis-compiled into a pointer-to-bool bitcast
+  (double-encoding bug), reading byte 0x30 from the string "0" as non-zero (true). Replaced all 5
+  occurrences with a new _read_ipc_terminated() helper that uses grapheme_at to extract the first
+  character, avoiding the cross-module ABI corruption.
+
+- **compiler**: Quote-aware brace counting in recovery parser
+  ([`6580c8c`](https://github.com/SailfinIO/sailfin/commit/6580c8ce158d380d1878fc7d1d261520c023f657))
+
+The multi-line struct literal gathering code in recover_native_functions_light used naive
+  index_of(line, "{") / index_of(line, "}") to detect struct literal boundaries. This counted braces
+  inside string literals, causing the recovery parser to enter multi-line gathering mode for
+  single-line eval instructions, consuming subsequent lines and corrupting the instruction stream.
+
+Add net_unquoted_brace_depth() to lowering_text_utils.sfn which walks characters tracking quote
+  state, only counting braces outside double-quoted strings. Replace all naive index_of brace checks
+  with this function.
+
+Fixes the universal test segfault (0/29 to 14/29 tests passing on seedcheck).
+
+- **compiler**: Replace :: separator with direct concatenation for method names
+  ([`f4d0881`](https://github.com/SailfinIO/sailfin/commit/f4d088183ca3afb0b6f7897084e82026feb37fee))
+
+The :: separator was never valid Sailfin syntax (not in spec or EBNF). The v0.1.1 seed silently
+  dropped :: during string concatenation, producing fused names like Counteris_zero instead of
+  Counter::is_zero. This caused:
+
+- Struct method fallback searches to fail (looking for Counter::is_zero when context files contained
+  Counteris_zero) - All trait dispatch reader code to be dead (never finding :: to split on) - Self
+  type inference from function names to be dead
+
+Changes: - Method qualified names: direct concatenation (Counter + is_zero = Counteris_zero)
+  matching the seed convention confirmed via sfn --emit llvm output - Scope names: __ (double
+  underscore) separator for scope hierarchy - Trait dispatch prefix: trait_dispatch__ with __
+  separator - VTable naming: unchanged (uses LLVM . convention for types/globals) - Removed dead
+  self-type inference code that tried to split fused names - Added struct method fallback using
+  fused name search in context.structs
+
+First-pass: 29/32 PASS (struct_methods_test now passes)
+
+- **compiler**: Resume loop body after inline EndIf/Else terminators
+  ([`6d057a7`](https://github.com/SailfinIO/sailfin/commit/6d057a7dd975b812d0f684c17281df9c2ea5fa64))
+
+When the seedcheck processes If instructions via the tag=21 fallback (data-carrying variants can't
+  be distinguished), EndIf (tag=5) and Else (tag=4) act as premature block terminators. This drops
+  all instructions after the If block—including loop counter increments— causing infinite loops in
+  compiled test binaries.
+
+Instead of modifying the global dispatch terminator behavior (which caused regressions in 3 other
+  tests), handle this in lower_loop_instruction: after lower_instruction_range returns, check if it
+  stopped early via IPC next_index. If stopped at EndIf, skip it and resume. If stopped at Else,
+  scan to matching EndIf and resume. Repeat until the full body is processed (max 20 iterations).
+
+Result: seedcheck 24/32 → 27/32 PASS, zero regressions. Previously-timeouts emit_native_layout_test
+  and nn_test now pass. nested_control_flow_test also now passes on seedcheck.
+
+- **compiler**: Skip self injection for static struct methods in recovery parser
+  ([`8a14af4`](https://github.com/SailfinIO/sailfin/commit/8a14af4452614121e83fb4a5fec026f25aea8106))
+
+The recovery parser (lowering_recovery.sfn) used make_native_function_method() for ALL .method
+  directives, which always injects a `self` parameter. Static methods like Rectangle.new(w, h) don't
+  have self, causing an ABI mismatch: definition got 3 params (self, w, h) but call sites correctly
+  passed 2 (w, h).
+
+Now checks whether the method header's parameter list starts with `self` before deciding which
+  constructor to use. Static methods use make_native_function_with_return() instead.
+
+Fixes structs_test (30/32 first-pass PASS, up from 29/32).
+
+- **compiler**: Switch test path to recovery parser for seedcheck compatibility
+  ([`fbc83fe`](https://github.com/SailfinIO/sailfin/commit/fbc83fe212a6ca5d1ee77551ff16a29cac6631c9))
+
+The test compilation path used parse_native_artifact_safe (structured parser) which creates typed
+  instruction variants (Let, Return, If). The seedcheck's get_instruction_tag cannot distinguish
+  data-carrying variants — it always returns 21 for them — and get_instruction_text returns wrong
+  data for non-Expression variants due to union layout overlap.
+
+Switch to build_parse_result_from_text (recovery parser) which creates all instructions as
+  Expression type with parseable text. The tag-21 fallback handler in the instruction lowerer
+  dispatches correctly by checking text prefixes ("ret ", "let ") and falls through to
+  lower_expression_statement.
+
+Improves seedcheck test results from 14/29 to 25/29 passing.
+
+### Chores
+
+- **deps**: Bump astro from 6.1.3 to 6.1.5 in /site
+  ([`7a37f5d`](https://github.com/SailfinIO/sailfin/commit/7a37f5d163b30c50c6dc75ffe2f502b58889d33f))
+
+Bumps [astro](https://github.com/withastro/astro/tree/HEAD/packages/astro) from 6.1.3 to 6.1.5. -
+  [Release notes](https://github.com/withastro/astro/releases) -
+  [Changelog](https://github.com/withastro/astro/blob/main/packages/astro/CHANGELOG.md) -
+  [Commits](https://github.com/withastro/astro/commits/astro@6.1.5/packages/astro)
+
+--- updated-dependencies: - dependency-name: astro dependency-version: 6.1.5
+
+dependency-type: direct:production
+
+update-type: version-update:semver-patch ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+- **deps**: Bump github/gh-aw-actions from 0.67.2 to 0.68.0
+  ([`13c3409`](https://github.com/SailfinIO/sailfin/commit/13c34090016aaa03ade7b1487b6f6359b6cd90eb))
+
+Bumps [github/gh-aw-actions](https://github.com/github/gh-aw-actions) from 0.67.2 to 0.68.0. -
+  [Release notes](https://github.com/github/gh-aw-actions/releases) -
+  [Changelog](https://github.com/github/gh-aw-actions/blob/main/CHANGELOG.md) -
+  [Commits](https://github.com/github/gh-aw-actions/compare/3922978bff4d7cf117e185580ad108da5a0134d8...6715c81fe97e4bcbfa0734c3422491672ebda34f)
+
+--- updated-dependencies: - dependency-name: github/gh-aw-actions dependency-version: 0.68.0
+
+dependency-type: direct:production
+
+update-type: version-update:semver-minor ...
+
+Signed-off-by: dependabot[bot] <support@github.com>
+
+### Features
+
+- **test**: Add sfn/test assertion capsule, test harness reporting, and stabilization tests
+  ([`8fc6652`](https://github.com/SailfinIO/sailfin/commit/8fc665254bc5c43df7637e3b7e4b7db000a3f698))
+
+Introduce three improvements to the Sailfin testing infrastructure:
+
+1. **sfn/test capsule** — new standard library capsule with rich assertion helpers (assert_eq,
+  assert_ne, assert_gt, assert_lt, assert_contains, assert_approx, assert_starts_with,
+  assert_ends_with, assert_true, assert_false, assert_length) that print diagnostic messages showing
+  expected vs actual values on failure.
+
+2. **Test harness reporting** — modify render_test_harness_main and
+  render_test_harness_main_for_module to print each test name before execution ("RUN <name>") and a
+  summary line on success ("PASS (all N tests passed)"), making test runs informative instead of
+  silent.
+
+3. **Stabilization-targeted tests** — 6 new test files (~550 lines) covering: - Nested control flow
+  with break/continue (phi/SSA stress) - Mutable variable mutations across branches (phi predecessor
+  tracking) - Struct method chaining and struct-as-parameter patterns (ABI) - Struct + enum
+  composition (cross-type data flow) - String building across functions and loops - Data pipeline
+  patterns (filter/transform/aggregate with struct arrays)
+
+https://claude.ai/code/session_01Q2iVnbpK386HkCq4dwoRRN
+
+- **test-runner**: Resolve stdlib capsule imports in test inlining
+  ([`ac8d1af`](https://github.com/SailfinIO/sailfin/commit/ac8d1affb5a829eabf66434d71222555e0d48850))
+
+Extend the test runner's import inlining to recognize and resolve standard library capsule imports.
+  Previously, only relative imports (./foo, ../bar) were inlined; bare capsule names like `from
+  "test"` or scoped names like `from "sfn/test"` were silently skipped, causing link failures.
+
+Now `_collect_relative_import_spans_cmd` captures capsule imports alongside relative ones, and
+  `_inline_relative_imports_cmd` resolves them to `capsules/sfn/<name>/src/mod.sfn` using the
+  existing `_is_stdlib_capsule_cmd` and `_resolve_capsule_name_cmd` helpers.
+
+This enables test files to write: import { assert_eq } from "test";
+
+https://claude.ai/code/session_01Q2iVnbpK386HkCq4dwoRRN
+
+
 ## v0.5.0-alpha.19 (2026-04-10)
 
 ### Bug Fixes
