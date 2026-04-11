@@ -7,12 +7,12 @@
 // Async with string return
 // ---------------------------------------------------------------------------
 
-async fn fetchGreeting() -> string {
+async fn fetch_greeting() -> string {
     return "Hello from async!";
 }
 
 test "async_adv: string return" {
-    let future = fetchGreeting();
+    let future = fetch_greeting();
     let result = await future;
     assert result == "Hello from async!";
 }
@@ -21,7 +21,7 @@ test "async_adv: string return" {
 // Async with computation
 // ---------------------------------------------------------------------------
 
-async fn computeSum(n -> number) -> number {
+async fn compute_sum(n -> number) -> number {
     let mut total -> number = 0;
     let mut i -> number = 1;
     loop {
@@ -33,7 +33,7 @@ async fn computeSum(n -> number) -> number {
 }
 
 test "async_adv: computation in async" {
-    let future = computeSum(10);
+    let future = compute_sum(10);
     let result = await future;
     assert result == 55;
 }
@@ -42,22 +42,22 @@ test "async_adv: computation in async" {
 // Multiple async calls with different types
 // ---------------------------------------------------------------------------
 
-async fn getNumber() -> number {
+async fn get_number() -> number {
     return 42;
 }
 
-async fn getString() -> string {
+async fn get_string() -> string {
     return "hello";
 }
 
-async fn getBool() -> boolean {
+async fn get_bool() -> boolean {
     return true;
 }
 
 test "async_adv: multiple async different types" {
-    let f1 = getNumber();
-    let f2 = getString();
-    let f3 = getBool();
+    let f1 = get_number();
+    let f2 = get_string();
+    let f3 = get_bool();
 
     let n = await f1;
     let s = await f2;
@@ -72,17 +72,17 @@ test "async_adv: multiple async different types" {
 // Async result used in further computation
 // ---------------------------------------------------------------------------
 
-async fn computeA() -> number {
+async fn compute_a() -> number {
     return 10;
 }
 
-async fn computeB() -> number {
+async fn compute_b() -> number {
     return 20;
 }
 
 test "async_adv: results combined" {
-    let fa = computeA();
-    let fb = computeB();
+    let fa = compute_a();
+    let fb = compute_b();
     let a = await fa;
     let b = await fb;
     let sum = a + b;
@@ -93,7 +93,7 @@ test "async_adv: results combined" {
 // Async with conditional logic
 // ---------------------------------------------------------------------------
 
-async fn conditionalAsync(flag -> boolean) -> number {
+async fn conditional_async(flag -> boolean) -> number {
     if flag {
         return 100;
     }
@@ -101,12 +101,12 @@ async fn conditionalAsync(flag -> boolean) -> number {
 }
 
 test "async_adv: conditional true" {
-    let f = conditionalAsync(true);
+    let f = conditional_async(true);
     assert await f == 100;
 }
 
 test "async_adv: conditional false" {
-    let f = conditionalAsync(false);
+    let f = conditional_async(false);
     assert await f == 0;
 }
 
@@ -119,12 +119,12 @@ struct AsyncResult {
     label -> string;
 }
 
-async fn computeWithLabel(v -> number, l -> string) -> AsyncResult {
+async fn compute_with_label(v -> number, l -> string) -> AsyncResult {
     return AsyncResult { value: v * 2, label: l };
 }
 
 test "async_adv: struct return" {
-    let f = computeWithLabel(21, "answer");
+    let f = compute_with_label(21, "answer");
     let r = await f;
     assert r.value == 42;
     assert r.label == "answer";

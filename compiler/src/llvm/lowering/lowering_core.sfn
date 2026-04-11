@@ -55,6 +55,7 @@ import {
 
 import {
     empty_string_constant_set,
+    escape_string_for_llvm,
 } from "../strings";
 
 import {
@@ -225,7 +226,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
                 let msg = "  RUN  " + label;
                 let idx_s = number_to_string(test_idx);
                 let msg_arr_len = number_to_string(msg.length + 1);
-                let escaped = _escape_test_name_for_llvm(msg);
+                let escaped = escape_string_for_llvm(msg);
                 harness_globals = extend_string_lines(harness_globals, [
                     "@.tname." + idx_s + " = private unnamed_addr constant [" + msg_arr_len + " x i8] c\"" + escaped + "\\00\"",
                 ]);
@@ -240,7 +241,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
         ti += 1;
     }
     let pass_msg = "  PASS  (all " + number_to_string(test_idx) + " tests passed)";
-    let pass_escaped = _escape_test_name_for_llvm(pass_msg);
+    let pass_escaped = escape_string_for_llvm(pass_msg);
     let pass_len_s = number_to_string(pass_msg.length + 1);
     harness_globals = extend_string_lines(harness_globals, [
         "@.tpass = private unnamed_addr constant [" + pass_len_s + " x i8] c\"" + pass_escaped + "\\00\"",
@@ -889,21 +890,3 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     };
 }
 
-// Escape a test name string for use inside an LLVM IR c"..." constant.
-fn _escape_test_name_for_llvm(text -> string) -> string {
-    let mut out -> string = "";
-    let mut i -> number = 0;
-    loop {
-        if i >= text.length { break; }
-        let ch = substring(text, i, i + 1);
-        if ch == "\"" {
-            out = out + "\\22";
-        } else if ch == "\\" {
-            out = out + "\\5C";
-        } else {
-            out = out + ch;
-        }
-        i += 1;
-    }
-    return out;
-}

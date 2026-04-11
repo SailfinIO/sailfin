@@ -288,10 +288,6 @@ fn lower_instruction_range(
                 current_next_local = lowered.next_local_id;
                 current_next_region = lowered.next_region_id;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                // Read string constants from file IPC (the struct
-                // return's .string_constants field is ABI-corrupted
-                // by the seedcheck).
-                collected_string_constants = read_let_result_string_constants(collected_string_constants);
             }
             active_label = find_last_label(current_lines, active_label);
             index += 1;

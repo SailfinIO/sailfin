@@ -205,6 +205,7 @@ fn lower_let_instruction(
         if fs.exists("build/sailfin/.trace_lowering") {
             print.err("let-lowering: pre-lower_expression name=" + instruction.name + " value=" + instruction.value);
         }
+        let _pre_expr_line_count = current_lines.length;
         let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
         if fs.exists("build/sailfin/.trace_lowering") {
             print.err("let-lowering: post-lower_expression name=" + instruction.name);
@@ -239,15 +240,13 @@ fn lower_let_instruction(
         if fs.exists("build/sailfin/.trace_lowering") {
             print.err("let-lowering: got operand, accessing string_constants");
         }
-        // Always scan generated lines for @.runtime.field.X references.
-        // Under the seedcheck, the ExpressionResult struct return from
-        // lower_expression (in core.sfn, a different module) is ABI-corrupted
-        // so .string_constants is often null/garbage.  Scanning the lines
-        // is reliable in both the first-pass and seedcheck.
-        string_constants = _infer_field_constants_from_lines(current_lines);
-        // Write the string constants file IMMEDIATELY after scanning,
-        // before any intermediate code can clobber the local variable
-        // (seedcheck stack corruption risk).
+        // Scan only the NEW lines (appended by this let's lower_expression)
+        // for @.runtime.field.X references.  Under the seedcheck the
+        // ExpressionResult struct return is ABI-corrupted so
+        // .string_constants is garbage; scanning the lines is reliable.
+        string_constants = _infer_field_constants_from_lines(current_lines, _pre_expr_line_count);
+        // Write immediately — seedcheck stack corruption can clobber
+        // the local before the end-of-function serialization.
         let mut _sc_imm -> string[] = [];
         let mut _sci2 -> number = 0;
         loop {
@@ -256,9 +255,6 @@ fn lower_let_instruction(
             _sci2 += 1;
         }
         fs.writeLines("build/sailfin/.let_result_string_constants", _sc_imm);
-        if fs.exists("build/sailfin/.trace_lowering") {
-            print.err("let-lowering: got string_constants count=" + number_to_string(string_constants.length) + " wrote=" + number_to_string(_sc_imm.length) + ", done with lowered");
-        }
     }
 
     if fs.exists("build/sailfin/.trace_lowering") {
@@ -458,20 +454,9 @@ fn lower_let_instruction(
     fs.writeLines("build/sailfin/.let_result_diagnostics", diagnostics);
     fs.writeLines("build/sailfin/.let_result_lines", current_lines);
     fs.writeLines("build/sailfin/.let_result_allocas", current_allocas);
-    // Serialize string constants so callers can recover them across module
-    // boundaries (the LetLoweringResult struct return is ABI-corrupted by
-    // the seedcheck).
-    let mut _sc_lines -> string[] = [];
-    let mut _sci -> number = 0;
-    loop {
-        if _sci >= string_constants.length { break; }
-        _sc_lines.push(string_constants[_sci].name + "\t" + string_constants[_sci].content + "\t" + number_to_string(string_constants[_sci].byte_count));
-        _sci += 1;
-    }
-    fs.writeLines("build/sailfin/.let_result_string_constants", _sc_lines);
-    if fs.exists("build/sailfin/.trace_lowering") {
-        print.err("let-lowering: wrote " + number_to_string(_sc_lines.length) + " string constant entries to file, string_constants.length=" + number_to_string(string_constants.length));
-    }
+    // String constants are already written to .let_result_string_constants
+    // immediately after scanning (see above) to avoid seedcheck stack
+    // corruption clobbering the local variable before we reach this point.
     // Serialize the new local binding (last one added)
     if current_locals.length > 0 {
         let _last_local = current_locals[current_locals.length - 1];
@@ -496,17 +481,15 @@ fn lower_let_instruction(
     };
 }
 
-// Scan emitted lines for @.runtime.field.X references and infer the
-// string constants that need to be declared.  The reference pattern is:
-//   getelementptr inbounds [N x i8], [N x i8]* @.runtime.field.FOO, ...
-// where FOO is the sanitized field name and N-1 is the byte count.
-fn _infer_field_constants_from_lines(lines -> string[]) -> StringConstant[] {
+// Scan emitted lines starting at `start_offset` for @.runtime.field.X
+// references and infer the string constants that need to be declared.
+fn _infer_field_constants_from_lines(lines -> string[], start_offset -> number) -> StringConstant[] {
     let mut result -> StringConstant[] = [];
     // Build in two parts to avoid a single "@.runtime.field." literal that
     // triggers a bogus global constant in the selfhost IR.
     let marker = "@.runtime" + ".field.";
     let marker_len = marker.length;
-    let mut i -> number = 0;
+    let mut i -> number = start_offset;
     loop {
         if i >= lines.length { break; }
         let line = lines[i];

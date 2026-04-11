@@ -1,8 +1,5 @@
 // Seed viability tests: enum match + struct field access + loop filtering.
 // Targets: match on enum, enum equality in loops, struct with enum fields.
-//
-// NOTE: functions with `match` must appear BELOW their callers in test
-// files so the seedcheck's bottom-up recovery parser finds them first.
 
 enum Priority {
     Low,
