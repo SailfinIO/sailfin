@@ -140,27 +140,34 @@ bench_module() {
     local abs_src
     abs_src="$(cd "$REPO_ROOT" && realpath "$src" 2>/dev/null || echo "$REPO_ROOT/$src")"
 
+    # Resolve output paths to absolute so they work from module_cwd
+    mkdir -p "$(dirname "$out_ll")"
+    local abs_out_ll
+    abs_out_ll="$(cd "$(dirname "$out_ll")" && echo "$(pwd)/$(basename "$out_ll")")"
+    local abs_time_log
+    abs_time_log="$(cd "$(dirname "$time_log")" && echo "$(pwd)/$(basename "$time_log")")"
+
     local wall_s=0 peak_kb=0 ll_lines=0 status="ok"
 
     if [[ -n "$GNU_TIME" ]]; then
         # GNU time: capture wall time + peak RSS
-        $GNU_TIME -v -o "$time_log" \
-            bash -c "cd '$module_cwd' && '$SEED' emit -o '$out_ll' llvm '$abs_src'" \
+        $GNU_TIME -v -o "$abs_time_log" \
+            bash -c "cd '$module_cwd' && '$SEED' emit -o '$abs_out_ll' llvm '$abs_src'" \
             2>/dev/null || true
 
-        if [[ -f "$time_log" ]]; then
-            wall_s="$(grep 'Elapsed (wall clock)' "$time_log" | sed 's/.*: //' | awk -F: '{
+        if [[ -f "$abs_time_log" ]]; then
+            wall_s="$(grep 'Elapsed (wall clock)' "$abs_time_log" | sed 's/.*: //' | awk -F: '{
                 if (NF==3) printf "%.2f", $1*3600+$2*60+$3;
                 else if (NF==2) printf "%.2f", $1*60+$2;
                 else printf "%.2f", $1
             }')"
-            peak_kb="$(grep 'Maximum resident' "$time_log" | sed 's/[^0-9]//g')"
+            peak_kb="$(grep 'Maximum resident' "$abs_time_log" | sed 's/[^0-9]//g')"
         fi
     else
         # Fallback: bash time builtin (wall time only, no memory)
         local start_s
         start_s=$(date +%s)
-        (cd "$module_cwd" && "$SEED" emit -o "$out_ll" llvm "$abs_src") 2>/dev/null || true
+        (cd "$module_cwd" && "$SEED" emit -o "$abs_out_ll" llvm "$abs_src") 2>/dev/null || true
         local end_s
         end_s=$(date +%s)
         wall_s=$(( end_s - start_s ))
@@ -171,8 +178,8 @@ bench_module() {
     wall_s="${wall_s:-0}"
     peak_kb="${peak_kb:-0}"
 
-    if [[ -f "$out_ll" ]] && [[ -s "$out_ll" ]]; then
-        ll_lines="$(wc -l < "$out_ll")"
+    if [[ -f "$abs_out_ll" ]] && [[ -s "$abs_out_ll" ]]; then
+        ll_lines="$(wc -l < "$abs_out_ll")"
     else
         status="FAIL"
     fi
