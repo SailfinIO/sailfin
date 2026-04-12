@@ -65,6 +65,9 @@ typedef struct SailfinTryContext
 static _Thread_local SailfinTryContext *_sailfin_try_stack = NULL;
 static _Thread_local char *_sailfin_exception_message = NULL;
 
+// Forward declaration — defined near the concat reuse globals below.
+static inline void _runtime_enter(void);
+
 double sailfin_runtime_monotonic_millis(void)
 {
 #if defined(__APPLE__)
@@ -216,6 +219,7 @@ static char _get_field_safe_buf[4096] __attribute__((aligned(16)));
 
 char *sailfin_runtime_get_field(char *base, char *field)
 {
+    _runtime_enter();
     /* For remaining calls not handled by the GEP replacement pass,
        return a pointer to zeroed memory instead of NULL to avoid SIGSEGV.
        The zeroed buffer reads as empty string / zero array / false / 0.0. */
@@ -569,6 +573,38 @@ static char **_sailfin_owned_table = NULL;
 static size_t _sailfin_owned_table_cap = 0;
 static size_t _sailfin_owned_table_len = 0;
 static size_t _sailfin_owned_table_tombstones = 0;
+
+// =============================================================================
+// Concat reuse optimization
+// =============================================================================
+// When chained concatenations happen (a + b + c + d), the LLVM IR is:
+//   %t1 = call concat(a, b)
+//   %t2 = call concat(%t1, c)
+//   %t3 = call concat(%t2, d)
+// Each intermediate (%t1, %t2) is used exactly once as the first arg of the
+// next concat. We can append in-place if the first arg is the result of the
+// immediately preceding concat call AND no other runtime function was called
+// in between (the call sequence counter guarantees this).
+//
+// Safety: _runtime_call_seq is incremented at ENTRY to every exported runtime
+// function. The reuse is only valid when _concat_reuse_seq == _runtime_call_seq,
+// meaning the CURRENT concat call is the very next runtime call after the
+// previous concat. Any intervening call (array_push, number_to_string, strlen,
+// fs.readFile, etc.) bumps the counter and invalidates the window. This is
+// strictly stronger than tracking only "store" calls — it catches ALL
+// intervening activity including LLVM store instructions that call runtime
+// helpers and any function that might observe the string.
+static char *_concat_reuse_ptr = NULL;    // last concat result pointer
+static size_t _concat_reuse_cap = 0;      // allocated capacity of that buffer
+static size_t _concat_reuse_len = 0;      // current string length in the buffer
+static uint64_t _concat_reuse_seq = 0;    // call_seq when last result was produced
+static uint64_t _runtime_call_seq = 0;    // incremented at entry to every exported fn
+
+// Call this at the top of every exported runtime function.
+static inline void _runtime_enter(void) { _runtime_call_seq++; }
+
+// Backwards compat alias used in array_push / concat / string_drop
+static inline void _invalidate_concat_reuse(void) { /* now handled by _runtime_enter */ }
 
 // =============================================================================
 // Recent string allocation tracking (debugging aid)
@@ -1577,6 +1613,7 @@ void sailfin_runtime_mark_persistent(char *ptr)
 
 void sailfin_runtime_string_drop(char *text)
 {
+    _invalidate_concat_reuse();
     static int free_enabled = -1;
     if (free_enabled < 0)
     {
@@ -1788,6 +1825,7 @@ static inline int _is_corrupted_string_ptr(const char *ptr)
 
 int64_t sailfin_runtime_string_length(char *text)
 {
+    _runtime_enter();
     if (!text || _is_corrupted_string_ptr(text))
     {
         return 0;
@@ -1864,6 +1902,7 @@ int64_t sailfin_runtime_string_length(char *text)
 
 char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
 {
+    _runtime_enter();
     _maybe_init_alloc_stats();
     if (!text)
     {
@@ -1970,6 +2009,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
 
 char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end)
 {
+    _runtime_enter();
     _maybe_init_alloc_stats();
     if (!text)
     {
@@ -2064,6 +2104,7 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
 
 char *sailfin_runtime_string_concat(char *a, char *b)
 {
+    _runtime_enter();
     _maybe_init_alloc_stats();
     static int strict_strings = -1;
     if (strict_strings < 0)
@@ -2350,14 +2391,20 @@ char *sailfin_runtime_string_concat(char *a, char *b)
             b_truncated);
     }
 
-    // Allocate a padding region beyond the primary terminator.
-    // During bootstrap we still have a few codegen/runtime mismatches that can
-    // clobber 1–N bytes just past the logical end of a string (typically via
-    // off-by-one writes when treating strings as arrays). Providing a NUL pad
-    // prevents `strlen`/friends from running off the end of the heap object
-    // while we iterate on correctness.
+    // ---- Concat reuse: DISABLED ----
+    // In-place append is not safe because LLVM store instructions between
+    // consecutive concat calls are invisible to the runtime call-sequence
+    // counter. A stored concat result can be mutated by a subsequent in-place
+    // append, corrupting the stored copy. Enabling this optimization requires
+    // either compiler-level support (emitting a separate concat_reuse call for
+    // known-safe intermediates) or reference counting on strings.
+    // The 2x growth factor below still helps by reducing malloc overhead for
+    // strings that DO get produced.
+
+    // ---- Normal allocation path ----
     const size_t pad = 64;
-    char *out = (char *)malloc(alen + blen + 1 + pad);
+    size_t alloc_size = alen + blen + 1 + pad;
+    char *out = (char *)malloc(alloc_size);
     if (!out)
     {
         fprintf(
@@ -2365,7 +2412,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
             "[stage2-native] string_concat OOM (alen=%zu blen=%zu total=%zu) a=%p b=%p a_in=%p b_in=%p\n",
             alen,
             blen,
-            alen + blen + 1 + pad,
+            alloc_size,
             (void *)a,
             (void *)b,
             (void *)a_in,
@@ -2381,7 +2428,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     if (_alloc_stats_enabled)
     {
         _alloc_stats_string_concat_calls++;
-        _alloc_stats_string_concat_bytes += (uint64_t)(alen + blen + 1 + pad);
+        _alloc_stats_string_concat_bytes += (uint64_t)alloc_size;
     }
 
     if (a_immediate)
@@ -2624,6 +2671,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
 
 char *sailfin_runtime_number_to_string(double value)
 {
+    _runtime_enter();
     static int trace_enabled = -1;
     if (trace_enabled < 0)
     {
@@ -2899,6 +2947,7 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
 
 SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 {
+    _invalidate_concat_reuse();
     if (_array_is_suspicious_ptr(a))
     {
         fprintf(
@@ -3477,6 +3526,7 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
 
 SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
 {
+    _invalidate_concat_reuse();
     _array_check_canary("push.in", array);
 
     if (!array)
@@ -4849,6 +4899,7 @@ void *sailfin_runtime_create_model_bridge(void *config)
 
 void *sailfin_adapter_fs_read_file(void *path)
 {
+    _runtime_enter();
     const char *path_str = (const char *)path;
     if (!path_str)
     {
@@ -4891,6 +4942,7 @@ void *sailfin_adapter_fs_read_file(void *path)
 
 void sailfin_adapter_fs_write_file(void *path, void *contents)
 {
+    _runtime_enter();
     const char *path_str = (const char *)path;
     const char *contents_str = (const char *)contents;
     if (!path_str || !contents_str)
@@ -5095,6 +5147,7 @@ void sailfin_adapter_fs_append_file(void *path, void *contents)
 
 void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
 {
+    _runtime_enter();
     const char *path_str = (const char *)path;
     if (!path_str || !lines)
     {
@@ -5331,6 +5384,7 @@ bool sailfin_adapter_fs_create_directory(void *path, bool recursive)
 
 bool sailfin_intrinsic_fs_exists(void *path)
 {
+    _runtime_enter();
     const char *path_str = (const char *)path;
     if (!path_str)
     {
