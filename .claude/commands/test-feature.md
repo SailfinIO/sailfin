@@ -19,7 +19,7 @@ Run targeted tests for a specific compiler feature or area.
 
 3. If tests pass, also run the full suite to check for regressions:
    ```
-   make test-unit
+   make test
    ```
 
 4. Report results: which tests passed, which failed, and for failures include the diagnostic output with source locations.
