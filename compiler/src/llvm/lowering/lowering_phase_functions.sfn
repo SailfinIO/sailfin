@@ -337,13 +337,6 @@ fn lower_all_functions(
         print.err("emit-llvm: phase=functions_done");
     }
 
-    // Write function_effects and has_add_function to files for orchestrator
-    let mut _has_add_flag -> string = "0";
-    if has_add_function {
-        _has_add_flag = "1";
-    }
-    fs.writeFile("build/sailfin/.phase_functions_has_add", _has_add_flag);
-
     // Append the add helper if not defined
     if !has_add_function {
         lines.push("");
@@ -381,14 +374,8 @@ fn lower_all_functions(
         print.err("emit-llvm: phase=intrinsics");
     }
 
-    // Write diagnostics and function_effects count to files
+    // Write diagnostics to file for lowering_core.sfn to read
     fs.writeLines("build/sailfin/.phase_functions_diagnostics", diagnostics);
-
-    // Write function effects count
-    fs.writeFile("build/sailfin/.phase_functions_effects_count", number_to_string(function_effects.length));
-
-    // Write all_string_constants count for orchestrator
-    fs.writeFile("build/sailfin/.phase_functions_string_constants_count", number_to_string(all_string_constants.length));
 
     return lines;
 }

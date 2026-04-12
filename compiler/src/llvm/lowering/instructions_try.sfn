@@ -200,7 +200,6 @@ fn lower_throw_instruction(
     if lowered_expr.operand == null {
         diagnostics.push("llvm lowering: unsupported throw expression in `" + function_name + "`");
         current_lines.push("  unreachable");
-        fs.writeFile("build/sailfin/.block_result_temp_index", number_to_string(current_temp));
         return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
     }
 
@@ -216,7 +215,6 @@ fn lower_throw_instruction(
     if coerced.operand == null {
         diagnostics.push("llvm lowering: unable to coerce throw value to string in `" + function_name + "`");
         current_lines.push("  unreachable");
-        fs.writeFile("build/sailfin/.block_result_temp_index", number_to_string(current_temp));
         return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
     }
 
@@ -226,8 +224,7 @@ fn lower_throw_instruction(
     } else {
         current_lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
     }
-    fs.writeFile("build/sailfin/.block_result_temp_index", number_to_string(current_temp));
-        return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
+    return ThrowLoweringResult { lines: current_lines, temp_index: current_temp, diagnostics: diagnostics, terminated: true, string_constants: collected_string_constants };
 }
 
 // Read all BlockLoweringResult fields from the file IPC written by _write_block_result_files.

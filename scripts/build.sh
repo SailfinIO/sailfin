@@ -136,12 +136,18 @@ else
     TIMEOUT_CMD=""
 fi
 
+SEED_MEM_LIMIT="${SEED_MEM_LIMIT:-10485760}"  # 10 GB virtual address space cap (kbytes)
+
 seed_run() {
-    if [[ -n "$TIMEOUT_CMD" ]]; then
-        "$TIMEOUT_CMD" "$SEED_TIMEOUT" "$@"
-    else
-        "$@"
-    fi
+    # Run in a subshell so ulimit only affects this invocation
+    (
+        ulimit -v "$SEED_MEM_LIMIT" 2>/dev/null || true
+        if [[ -n "$TIMEOUT_CMD" ]]; then
+            "$TIMEOUT_CMD" "$SEED_TIMEOUT" "$@"
+        else
+            "$@"
+        fi
+    )
 }
 
 # ---------------------------------------------------------------------------

@@ -131,21 +131,13 @@ fn _write_block_result_files(
     next_lifetime_region_id -> number,
     next_index -> number
 ) ![io] {
-    // Use fs.writeLines to avoid O(N²) string concatenation.
-    // fs.writeLines writes each element + "\n"; _split_by_newline handles trailing newlines.
-    fs.writeLines("build/sailfin/.block_result_lines", lines);
-    fs.writeLines("build/sailfin/.block_result_allocas", allocas);
-
+    // Only write the two IPC files that still have live readers.
     let mut term_val -> string = "0";
     if terminated {
         term_val = "1";
     }
     fs.writeFile("build/sailfin/.block_result_terminated", term_val);
 
-    fs.writeLines("build/sailfin/.block_result_diagnostics", diagnostics);
-
-    // Serialize string constants so emit_body can read them back.
-    // Format: one constant per line as "name\tcontent\tbyte_count".
     let mut sc_lines -> string[] = [];
     let mut si -> number = 0;
     loop {
@@ -154,16 +146,6 @@ fn _write_block_result_files(
         si = si + 1;
     }
     fs.writeLines("build/sailfin/.block_result_string_constants", sc_lines);
-
-    // Scalar state fields needed by callers in other modules (instructions_match, instructions_loops).
-    fs.writeFile("build/sailfin/.block_result_temp_index", number_to_string(temp_index));
-    fs.writeFile("build/sailfin/.block_result_block_counter", number_to_string(block_counter));
-    fs.writeFile("build/sailfin/.block_result_next_local_id", number_to_string(next_local_id));
-    fs.writeFile("build/sailfin/.block_result_next_lifetime_region_id", number_to_string(next_lifetime_region_id));
-    fs.writeFile("build/sailfin/.block_result_next_index", number_to_string(next_index));
-    // Note: array fields (locals, bindings, mutations, lifetime_regions) are NOT written here
-    // because callers access them directly via the returned BlockLoweringResult pointer fields,
-    // which survive cross-module ABI corruption intact. Only scalar fields are corrupted.
 }
 
 // Read the block_result_terminated IPC file and return true only if the file

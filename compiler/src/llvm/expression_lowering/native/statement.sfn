@@ -135,17 +135,6 @@ fn _write_expr_stmt_result_files(
     mutations -> LocalMutation[],
     current_next_region -> number
 ) ![io] {
-    let delta_count = current_lines.length - input_lines_len;
-    fs.writeFile("build/sailfin/.expr_stmt_delta_count", number_to_string(delta_count));
-    // Write delta lines as bulk array
-    let mut delta_lines -> string[] = [];
-    let mut delta_i = 0;
-    loop {
-        if delta_i >= delta_count { break; }
-        delta_lines.push(current_lines[input_lines_len + delta_i]);
-        delta_i += 1;
-    }
-    fs.writeLines("build/sailfin/.expr_stmt_delta_lines", delta_lines);
     fs.writeFile("build/sailfin/.expr_stmt_temp_index", number_to_string(current_temp));
     fs.writeFile("build/sailfin/.expr_stmt_next_region_id", number_to_string(current_next_region));
     let mut_count = mutations.length;

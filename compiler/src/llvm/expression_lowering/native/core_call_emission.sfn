@@ -58,9 +58,7 @@ import { sanitize_symbol } from "./core_text";
 import { coerce_operand_to_type } from "./core_operands";
 
 fn _write_emission_result_lines(result_lines -> string[], result_temp -> number) -> void ![io] {
-    let line_count = result_lines.length;
-    fs.writeFile("build/sailfin/.call_result_line_count", number_to_string(line_count));
-    fs.writeFile("build/sailfin/.call_result_temp_index", number_to_string(result_temp));
+    // Dead IPC files removed — .call_result_line_count and .call_result_temp_index have no reader.
 }
 
 // Coerce operands to expected types and emit the final call instruction.
