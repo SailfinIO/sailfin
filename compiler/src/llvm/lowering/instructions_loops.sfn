@@ -57,10 +57,7 @@ import {
 import {
     extend_lifetime_regions,
     extend_mutations,
-    _write_block_result_files,
     _parse_int_from_string,
-    _read_ipc_int_min,
-    _read_ipc_terminated,
 } from "./instructions_helpers";
 
 import {
@@ -716,7 +713,6 @@ fn lower_loop_instruction(
 
     collected_mutations = extend_mutations(body_scoped_mutations, exit_mutations);
 
-    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,

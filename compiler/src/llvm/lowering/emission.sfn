@@ -434,8 +434,6 @@ fn emit_llvm_function(
         let unsupported_diag = "llvm lowering: unsupported return type `" + fn_return_type + "` in " + fn_name;
         diagnostics = append_string(diagnostics, unsupported_diag);
         let empty_constants = empty_string_constant_set();
-        let _empty_lines -> string[] = [];
-        _write_lowered_function_files(_empty_lines, diagnostics, empty_constants);
         return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
@@ -461,7 +459,6 @@ fn emit_llvm_function(
         }
         let empty_constants = empty_string_constant_set();
         let lines -> string[] = ["declare " + llvm_return + " @" + sanitized + "(" + signature + ")"];
-        _write_lowered_function_files(lines, diagnostics, empty_constants);
         return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
@@ -579,7 +576,6 @@ fn emit_llvm_function(
         lines = append_string(lines, ret_fallback);
         lines = append_string(lines, "}");
         let empty_constants = empty_string_constant_set();
-        _write_lowered_function_files(lines, diagnostics, empty_constants);
         let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
         return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: empty_constants };
     }
@@ -675,7 +671,6 @@ fn emit_llvm_function(
     }
 
     let merged_constants = merge_string_constants(_eb_string_constants, decorator_string_constants);
-    _write_lowered_function_files(lines, diagnostics, merged_constants);
     let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
     return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: merged_constants };
 }
@@ -799,28 +794,6 @@ fn emit_body(
     return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: lowered.string_constants };
 }
 
-// Write the LoweredLLVMFunction result to files so that cross-module callers
-// can read the data reliably. The v0.1.1 seed corrupts cross-module struct
-// returns (LoweredLLVMFunction is returned from emission.sfn to lowering_core.sfn),
-// making .lines point to garbage. This mirrors the BlockLoweringResult file IPC
-// pattern already used by lower_instruction_range / emit_body.
-fn _write_lowered_function_files(lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) ![io] {
-    // Use fs.writeLines to avoid O(N²) string concatenation.
-    // fs.writeLines writes each element + "\n"; _split_by_newline handles trailing newlines.
-    fs.writeLines("build/sailfin/.lowered_fn_lines", lines);
-    fs.writeLines("build/sailfin/.lowered_fn_diagnostics", diagnostics);
-
-    // Serialize string constants: build array of "name\tcontent\tbyte_count" lines.
-    let mut sc_lines -> string[] = [];
-    let mut si -> number = 0;
-    loop {
-        if si >= string_constants.length { break; }
-        let sc_entry = string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count);
-        sc_lines = append_string(sc_lines, sc_entry);
-        si = si + 1;
-    }
-    fs.writeLines("build/sailfin/.lowered_fn_string_constants", sc_lines);
-}
 
 // Parse serialized string constants from the file written by _write_block_result_files.
 // Format: one constant per line as "name\tcontent\tbyte_count".

@@ -35,13 +35,10 @@ import {
 import {
     extend_lifetime_regions,
     extend_mutations,
-    _write_block_result_files,
     _parse_int_from_string,
     _read_ipc_int_min,
-    _read_ipc_terminated,
     write_bindings_to_files,
     write_locals_to_files,
-    read_block_result_string_constants,
     read_expr_string_constants,
     read_let_result_string_constants,
     read_let_result_from_files,
@@ -198,7 +195,6 @@ fn lower_instruction_range(
             // The v0.1.1 seed generates unconditional `br label %loop.body` for
             // loop.header20, meaning `break` never actually exits. Using `return`
             // instead bypasses the broken loop header entirely.
-            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -229,7 +225,6 @@ fn lower_instruction_range(
                 );
             }
             // Return directly (same loop-break workaround as index>=end case)
-            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -566,7 +561,6 @@ fn lower_instruction_range(
             if _instr_tag == 14 { _is_terminator = true; }
             if _is_terminator {
                 // Return directly to avoid seed loop-break bug.
-                _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
                 return BlockLoweringResult {
                     lines: current_lines,
                     allocas: current_allocas,
@@ -691,7 +685,6 @@ fn lower_instruction_range(
         // For terminated instructions (return, throw, break, continue), exit loop.
         if terminated {
             // Return directly to avoid seed loop-break bug.
-            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -746,7 +739,6 @@ fn lower_instruction_range(
             print.err("emit-llvm: pre-write-block line[0]=" + current_lines[0]);
         }
     }
-    _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
 
     return BlockLoweringResult {
         lines: current_lines,

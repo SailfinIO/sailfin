@@ -81,10 +81,7 @@ import {
     extend_lifetime_regions,
     extend_mutations,
     insert_lines_before_index,
-    _write_block_result_files,
     _parse_int_from_string,
-    _read_ipc_int_min,
-    _read_ipc_terminated,
 } from "./instructions_helpers";
 
 import {
@@ -259,7 +256,6 @@ fn lower_if_instruction(
         } else {
             diagnostics.push("llvm lowering: unable to lower if condition in `" + function.name + "` for `" + rendered_condition + "`");
         }
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -742,7 +738,6 @@ fn lower_if_instruction(
         merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
     }
 
-    _write_block_result_files(merged_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
     return BlockLoweringResult {
         lines: merged_lines,
         allocas: current_allocas,

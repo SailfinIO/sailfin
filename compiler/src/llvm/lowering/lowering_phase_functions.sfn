@@ -263,13 +263,9 @@ fn lower_all_functions(
             module_init_symbol,
             module_globals_needs_init_call
         );
-        // Read results from file-based IPC
-        let _lfn_lines_raw = fs.readFile("build/sailfin/.lowered_fn_lines");
-        let _lfn_lines = split_lines_local(_lfn_lines_raw);
-        let _lfn_diags_raw = fs.readFile("build/sailfin/.lowered_fn_diagnostics");
-        let _lfn_diags = split_lines_local(_lfn_diags_raw);
-        let _lfn_sc_raw = fs.readFile("build/sailfin/.lowered_fn_string_constants");
-        let _lfn_string_constants = _parse_lowered_fn_string_constants(_lfn_sc_raw);
+        let _lfn_lines = lowered.lines;
+        let _lfn_diags = lowered.diagnostics;
+        let _lfn_string_constants = lowered.string_constants;
         if debug_lowering {
             print.err("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
         }
