@@ -86,7 +86,6 @@ import { build_define_header_line } from "./emission_header";
 
 import {
     lower_instruction_range,
-    lower_instruction_range_void,
 } from "./instructions";
 
 import {
@@ -549,10 +548,6 @@ fn emit_llvm_function(
         print.err("emit-llvm: emit_fn phase=pre_body name=" + fn_name + " instrs=" + number_to_string(fn_instr_count));
     }
 
-    // Inline body lowering: the v0.1.1 seed compiles emit_body as unreachable
-    // (it cannot resolve the BlockLoweringResult struct return from lower_instruction_range).
-    // By inlining the logic here and using lower_instruction_range_void (which returns void),
-    // we avoid the cross-module struct-return ABI bug entirely.
     // Read .fn_index with fallback: the first-pass binary may fail to write it.
     let mut _eb_fn_index -> number = 0;
     if fs.exists("build/sailfin/.fn_index") {
@@ -589,7 +584,7 @@ fn emit_llvm_function(
         return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: empty_constants };
     }
     let _eb_function = functions[_eb_fn_index];
-    lower_instruction_range_void(
+    let _eb_result = lower_instruction_range(
         _eb_function,
         0,
         fn_instr_count,
@@ -610,15 +605,10 @@ fn emit_llvm_function(
         entry_label
     );
 
-    // Read results from file IPC (written by _write_block_result_files in lower_instruction_range)
-    let _eb_lines_raw = fs.readFile("build/sailfin/.block_result_lines");
-    let _eb_body_lines = _split_by_newline(_eb_lines_raw);
-    let _eb_allocas_raw = fs.readFile("build/sailfin/.block_result_allocas");
-    let _eb_allocas = _split_by_newline(_eb_allocas_raw);
-    let _eb_term_str = fs.readFile("build/sailfin/.block_result_terminated");
-    let _eb_terminated = _eb_term_str == "1";
-    let _eb_diags_raw = fs.readFile("build/sailfin/.block_result_diagnostics");
-    let _eb_body_diagnostics = _split_by_newline(_eb_diags_raw);
+    let _eb_body_lines = _eb_result.lines;
+    let _eb_allocas = _eb_result.allocas;
+    let _eb_terminated = _eb_result.terminated;
+    let _eb_body_diagnostics = _eb_result.diagnostics;
 
     if debug_lowering {
         print.err("emit-llvm: emit_fn phase=body_done name=" + fn_name + " body_lines=" + number_to_string(_eb_body_lines.length) + " allocas=" + number_to_string(_eb_allocas.length));
@@ -665,41 +655,7 @@ fn emit_llvm_function(
         }
     }
 
-    // Read string constants from file IPC.
-    // Parse inline to avoid calling _parse_string_constants_from_file which
-    // may be compiled as unreachable by the seed.
-    let mut _eb_string_constants = empty_string_constant_set();
-    if fs.exists("build/sailfin/.block_result_string_constants") {
-        let _sc_raw = fs.readFile("build/sailfin/.block_result_string_constants");
-        if _sc_raw.length > 0 {
-            // Inline tab-delimited parsing: name\tcontent\tbyte_count per line
-            let _sc_lines = _split_by_newline(_sc_raw);
-            let mut _sci -> number = 0;
-            loop {
-                if _sci >= _sc_lines.length { break; }
-                let _sc_line = _sc_lines[_sci];
-                if _sc_line.length > 0 {
-                    let _tab1 = index_of(_sc_line, "\t");
-                    if _tab1 >= 0 {
-                        let _sc_name = substring(_sc_line, 0, _tab1);
-                        let _sc_rest = substring(_sc_line, _tab1 + 1, _sc_line.length);
-                        let _tab2 = index_of(_sc_rest, "\t");
-                        if _tab2 >= 0 {
-                            let _sc_content = substring(_sc_rest, 0, _tab2);
-                            let _sc_bc_text = substring(_sc_rest, _tab2 + 1, _sc_rest.length);
-                            let _sc_bc = parse_simple_integer(_sc_bc_text);
-                            _eb_string_constants = append_string_constant(_eb_string_constants, StringConstant {
-                                name: _sc_name,
-                                content: _sc_content,
-                                byte_count: _sc_bc,
-                            });
-                        }
-                    }
-                }
-                _sci += 1;
-            }
-        }
-    }
+    let _eb_string_constants = _eb_result.string_constants;
 
     // Ensure phi nodes appear at the top of each basic block (LLVM requirement).
     lines = _reorder_phis_to_block_start(lines);
@@ -781,17 +737,9 @@ fn emit_body(
         entry_label
     );
 
-    // The v0.1.1 seed compiles BlockLoweringResult as double/i8* null for
-    // cross-module struct returns.  Read results from files written by
-    // lower_instruction_range instead of accessing struct fields.
-    let _blk_lines_raw = fs.readFile("build/sailfin/.block_result_lines");
-    let _blk_body_lines = _split_by_newline(_blk_lines_raw);
-    let _blk_allocas_raw = fs.readFile("build/sailfin/.block_result_allocas");
-    let _blk_allocas = _split_by_newline(_blk_allocas_raw);
-    let _blk_term_str = fs.readFile("build/sailfin/.block_result_terminated");
-    let _blk_terminated = _blk_term_str == "1";
-    let _blk_diags_raw = fs.readFile("build/sailfin/.block_result_diagnostics");
-
+    let _blk_body_lines = lowered.lines;
+    let _blk_allocas = lowered.allocas;
+    let _blk_terminated = lowered.terminated;
     if trace {
         let mut term_label -> string = "false";
         if _blk_terminated {
@@ -808,7 +756,7 @@ fn emit_body(
             + term_label
         );
     }
-    let mut diagnostics -> string[] = _split_by_newline(_blk_diags_raw);
+    let mut diagnostics -> string[] = lowered.diagnostics;
     let mut lines -> string[] = [];
     lines = extend_string_array(lines, _blk_allocas);
     lines = extend_string_array(lines, _blk_body_lines);
@@ -848,15 +796,7 @@ fn emit_body(
     }
 
     let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
-    // Read string constants written by _write_block_result_files in instructions.sfn.
-    let mut _body_string_constants = empty_string_constant_set();
-    if fs.exists("build/sailfin/.block_result_string_constants") {
-        let sc_raw = fs.readFile("build/sailfin/.block_result_string_constants");
-        if sc_raw.length > 0 {
-            _body_string_constants = _parse_string_constants_from_file(sc_raw);
-        }
-    }
-    return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: _body_string_constants };
+    return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: lowered.string_constants };
 }
 
 // Write the LoweredLLVMFunction result to files so that cross-module callers
