@@ -54,10 +54,10 @@ WORK_DIR="${WORK_DIR:-build/selfhost/native}"
 
 # Clang flags shared across all compilations
 CLANG_FLAGS="$OPT -Wno-override-module -fno-delete-null-pointer-checks"
-# WORKAROUND: macOS clang 16+ defaults to opaque pointers, but the current seed
-# emits typed pointer IR. Pass -Xclang -no-opaque-pointers on macOS.
+# WORKAROUND: The current seed emits typed pointer IR, but newer LLVM versions
+# default to opaque pointers. Try adding the compatibility flag if clang accepts it.
 # TODO: Remove once the compiler emits opaque pointer IR natively.
-if [[ "$(uname -s)" == "Darwin" ]]; then
+if echo "" | "$CLANG" -Xclang -no-opaque-pointers -x c -c - -o /dev/null 2>/dev/null; then
     CLANG_FLAGS="$CLANG_FLAGS -Xclang -no-opaque-pointers"
 fi
 
