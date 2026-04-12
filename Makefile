@@ -73,10 +73,10 @@ PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/nul
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-native ci-package-installer
 
-.PHONY: rebuild rebuild-sh rebuild-py rebuild-asan smoke smoke-sh smoke-py
+.PHONY: rebuild rebuild-sh rebuild-py rebuild-asan
 
 # Back-compat aliases (deprecated; will be removed).
-.PHONY: selfhost-native selfhost-native-asan selfhost-smoke-native
+.PHONY: selfhost-native selfhost-native-asan
 
 ifeq ($(origin CONDA_EXE), undefined)
 # `conda` is often a shell function (e.g. in zsh/bash init). We need the actual
@@ -112,7 +112,6 @@ help:
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e       # Run Sailfin-native end-to-end tests"
-	@echo "  make smoke          # Rebuild + run smoke tests"
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
 	@echo "  make bench          # Benchmark per-module compile time and memory"
@@ -557,78 +556,6 @@ rebuild-py:
 	@mkdir -p build/native
 	@echo "[rebuild-py] built $(NATIVE_OUT)"
 
-# Smoke: selfhost native and run hello-world + emit-llvm-file.
-# Usage:
-#   make smoke
-#   make smoke SEED_NATIVE=path/to/sailfin
-#   make smoke SMOKE_ARGS="--keep-work-dir"
-SMOKE_OUT ?= $(NATIVE_OUT)
-SMOKE_ARGS ?=
-smoke:
-ifeq ($(BUILD_DRIVER),sh)
-	@$(MAKE) smoke-sh
-else
-	@$(MAKE) smoke-py
-endif
-
-# Shell-based smoke test (no Python, no Conda required).
-smoke-sh:
-	@seed="$${SEED_NATIVE:-$(SEED)}"; \
-	resolved_seed="$$seed"; \
-	if command -v "$$seed" >/dev/null 2>&1; then \
-		resolved_seed="$$(command -v "$$seed")"; \
-	fi; \
-	seed="$$resolved_seed"; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[smoke-sh] missing seed compiler: $$seed"; \
-		echo "[smoke-sh] fetching seed with: make fetch-seed"; \
-		$(MAKE) fetch-seed; \
-		seed="$(FETCHED_SEED)"; \
-	fi; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[smoke-sh] missing seed compiler: $$seed"; \
-		exit 1; \
-	fi; \
-	echo "[smoke-sh] running smoke harness..."; \
-	SEED="$$seed" OUT="$(SMOKE_OUT)" bash scripts/smoke.sh
-	@echo "[smoke-sh] OK"
-
-# Python-based smoke test (only needs Python 3 stdlib).
-smoke-py:
-	@if [ -z "$(PYTHON)" ]; then \
-		echo "[smoke-py][error] python3 not found on PATH" >&2; \
-		exit 1; \
-	fi
-	@seed="$${SEED_NATIVE:-$(SEED)}"; \
-	resolved_seed="$$seed"; \
-	if command -v "$$seed" >/dev/null 2>&1; then \
-		resolved_seed="$$(command -v "$$seed")"; \
-	fi; \
-	seed="$$resolved_seed"; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[smoke-py] missing seed compiler: $$seed"; \
-		echo "[smoke-py] fetching seed with: make fetch-seed"; \
-		$(MAKE) fetch-seed; \
-		seed="$(FETCHED_SEED)"; \
-	fi; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[smoke-py] missing seed compiler: $$seed"; \
-		exit 1; \
-	fi; \
-	if ! "$$seed" emit native compiler/src/version.sfn >/dev/null 2>&1; then \
-		echo "[smoke-py][error] seed compiler does not support 'emit native'" >&2; \
-		echo "[smoke-py][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
-		exit 1; \
-	fi; \
-	echo "[smoke-py] running smoke harness..."; \
-	$(PYTHON) -u scripts/selfhost_smoke_native.py \
-		--seed "$$seed" \
-		--out $(SMOKE_OUT) \
-		--jobs $(BUILD_JOBS) \
-		--import-context-jobs 1 \
-		$(SMOKE_ARGS)
-	@echo "[smoke-py] OK"
-
 rebuild-asan:
 	@if [ -z "$(PYTHON)" ]; then \
 		echo "[rebuild-asan][error] python3 not found on PATH" >&2; \
@@ -772,5 +699,4 @@ ci-cross-windows:
 
 # Deprecated aliases.
 selfhost-native: rebuild
-selfhost-smoke-native: smoke
 selfhost-native-asan: rebuild-asan
