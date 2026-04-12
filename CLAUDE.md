@@ -107,9 +107,78 @@ The runtime currently ships as C under `runtime/native/`. Higher-level integrati
 - **Integration tests**: `compiler/tests/integration/*_test.sfn`
 - **E2E tests**: `compiler/tests/e2e/*_test.sfn`
 
+## Workflow Orchestration
+
+Slash commands orchestrate multi-phase workflows using specialized subagents. Use them instead of manually driving each step. The user types a single command and Claude drives the full workflow, stopping only at explicit approval gates.
+
+### Available Workflows
+
+| Command | Phases | When to use |
+|---|---|---|
+| `/add-feature <name>` | architect → implement → review → test → docs | Adding any new language feature |
+| `/debug-compile <file>` | isolate → trace → deep diagnosis → fix → verify | Any compilation failure |
+| `/check` | clean build → full test suite → seedcheck | Pre-commit validation |
+| `/test-feature <name>` | find tests → run targeted → run full suite | Testing a specific area |
+| `/release` | version check → confirm → dispatch workflow | Cutting a new release |
+
+### Specialized Agents
+
+| Agent | Model | Role | When to spawn |
+|---|---|---|---|
+| `compiler-architect` | Opus | Designs features, refactors, and fixes with forward-thinking plans | Before implementing anything non-trivial; when a change touches multiple pipeline stages |
+| `seed-stabilizer` | Opus | Deep diagnosis of compiler bugs — miscompilation, IR errors, performance regressions | When a build fails or produces wrong output and the cause isn't obvious |
+| `compiler-explorer` | Sonnet | Traces how features flow through the pipeline; finds implementations | When you need to understand how something currently works |
+| `code-reviewer` | Sonnet | Reviews changes for correctness, safety, and conventions | After implementing, before committing |
+| `test-runner` | Sonnet | Runs tests safely with memory caps; analyzes failures | After changes, to validate correctness |
+| `docs-updater` | Sonnet | Updates status.md, spec.md, roadmap.md in sync | After a feature ships or changes status |
+
+### Workflow Patterns for Unscripted Tasks
+
+Not every task has a slash command. For tasks that don't, follow these patterns:
+
+**Performance optimization:**
+1. Spawn `seed-stabilizer` to profile and identify the bottleneck
+2. Spawn `compiler-architect` to design the fix (if non-trivial)
+3. Implement the fix
+4. Benchmark with `make bench` before and after
+5. Spawn `test-runner` to verify no regressions
+
+**Refactoring compiler internals:**
+1. Spawn `compiler-architect` to produce a migration plan where each step self-hosts
+2. Implement one step at a time, running `make compile` after each
+3. Spawn `code-reviewer` after all steps complete
+4. Spawn `test-runner` for full validation
+
+**Investigating "how does X work":**
+1. Spawn `compiler-explorer` — it traces features through the full pipeline with file/line references
+
+**Fixing a self-hosting break:**
+1. Spawn `seed-stabilizer` to diagnose the root cause (Opus — these bugs are hard)
+2. If the fix is structural, spawn `compiler-architect` to validate the approach
+3. Implement the fix
+4. Run `make clean-build && make check` to fully validate
+
+### Approval Gates
+
+Workflows pause for user approval at these points:
+- **Design gate** (`/add-feature`): After the architect produces a plan, before any code is written
+- **Destructive operations**: Before `make clean-build`, force pushes, or branch deletions
+- All other phases proceed autonomously unless a failure occurs
+
+### When NOT to Use Agents
+
+Use direct tools (Read, Grep, Glob) instead of agents when:
+- You already know which file to read or edit
+- The search is a simple keyword lookup
+- The task is a one-line change with obvious correctness
+
+Agents add value for open-ended investigation, cross-cutting analysis, and tasks requiring deep reasoning. Don't spawn an agent for work you can do in one tool call.
+
 ## Common Development Patterns
 
 ### Adding a Language Feature
+
+Use `/add-feature <name>` for the full orchestrated workflow. The pipeline stages are:
 
 1. Update `compiler/src/parser.sfn` to recognize new syntax
 2. Add AST node(s) to `compiler/src/ast.sfn`
