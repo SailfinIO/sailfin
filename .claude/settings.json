@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(make *)",
+      "Bash(build/native/sailfin *)",
+      "Bash(timeout * build/native/sailfin *)",
+      "Bash(ulimit *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(git show*)",
+      "Bash(gh pr *)",
+      "Bash(gh issue *)",
+      "Bash(gh run *)",
+      "Bash(gh api *)",
+      "Bash(ls *)",
+      "Bash(wc *)"
+    ]
+  }
+}

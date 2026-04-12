@@ -60,6 +60,7 @@ The compiler (`compiler/src/`) follows this flow:
 
 **Critical files:**
 
+- `compiler/capsule.toml` — Version source of truth and capsule manifest
 - `compiler/src/main.sfn` — Entry point orchestrating all passes
 - `compiler/src/ast.sfn` — Canonical AST node definitions
 - `compiler/src/native_ir.sfn` — `.sfn-asm` intermediate representation
@@ -310,18 +311,45 @@ The compiler must always compile itself. Breaking changes require:
 
 ## Versioning & Releases
 
-- **Semantic versioning:** `v0.1.1-alpha.32` (main branch prerelease), `v0.x.y` (main branch stable release)
-- **Version source:** `compiler/src/version.sfn:__version__` (drives `sfn --version`)
-- **Release automation:** GitHub Actions + `python-semantic-release`
-- **Artifacts:** `dist/` is used for packaged artifacts as part of release tooling
+- **Semantic versioning:** `v0.5.0-alpha.22` format — `MAJOR.MINOR.PATCH[-channel.N]`
+- **Version source of truth:** `compiler/capsule.toml` (`[capsule] version`)
+- **Version mirror:** `compiler/src/version.sfn:__version__` (read by the compiler binary; kept in sync by the release workflow — TODO: read from capsule.toml at build time)
+- **Release automation:** `.github/workflows/release.yml` — manually triggered via `workflow_dispatch`, pure bash, no Python dependencies
+- **Release notes:** `.github/workflows/release-notes.md` — agentic workflow that posts structured, categorized changelog comments on published releases (supplements the auto-generated notes from `gh release create`)
+- **Artifacts:** `dist/` is used for packaged artifacts; `release-tag.yml` builds and uploads platform binaries
+- **Claude skill:** Use `/release` to trigger a new release from Claude Code
+
+### Triggering a Release
+
+Releases are **not** automatic on merge. Use the GitHub Actions UI or CLI:
+
+```bash
+# Cut a new alpha prerelease
+gh workflow run release.yml -f channel=alpha -f bump=prerelease
+
+# Promote current version to beta
+gh workflow run release.yml -f channel=beta -f bump=prerelease
+
+# Promote to release candidate
+gh workflow run release.yml -f channel=rc -f bump=prerelease
+
+# Ship a stable GA release
+gh workflow run release.yml -f channel=stable -f bump=prerelease
+
+# Start a new minor alpha cycle
+gh workflow run release.yml -f channel=alpha -f bump=minor
+
+# Dry run (compute version without making changes)
+gh workflow run release.yml -f channel=alpha -f bump=prerelease -f dry_run=true
+```
 
 ## Branch Strategy (trunk-based)
 
-- `main`: Primary development branch — all feature work merges here. Produces `-alpha.N` prereleases via semantic-release. `main` is the source of truth for `compiler/src/version.sfn` and `CHANGELOG.md`.
+- `main`: Primary development branch — all feature work merges here. Releases are cut from `main` via the manual release workflow.
 - `beta`: Short-lived, cut from `main` when ready for beta testing. Produces `-beta.N` prereleases. Do **not** merge `beta` back into `main`; delete the branch after the beta cycle completes.
 - `rc`: Short-lived, cut from `main` (or `beta`) for release candidates. Produces `-rc.N` prereleases. Do **not** merge `rc` back into `main`; delete the branch after the RC cycle completes.
-- Fixes always land on `main` first, then cherry-pick or merge forward from `main` to `beta`/`rc` if needed. If a change made on `beta`/`rc` must be kept, cherry-pick only the non-release commits back to `main` (avoid commits that modify `compiler/src/version.sfn` or `CHANGELOG.md`).
-- When ready for a stable release, toggle `prerelease = false` on `main`'s branch config in `pyproject.toml`; no merge back from `beta`/`rc` is required.
+- Fixes always land on `main` first, then cherry-pick or merge forward from `main` to `beta`/`rc` if needed. If a change made on `beta`/`rc` must be kept, cherry-pick only the non-release commits back to `main` (avoid commits that modify `compiler/capsule.toml`, `compiler/src/version.sfn`, or `CHANGELOG.md`).
+- To promote to stable, run the release workflow with `channel=stable bump=prerelease` from `main`.
 
 ## Key Terminology
 
