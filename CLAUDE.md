@@ -30,12 +30,12 @@ make env              # Create/update Conda environment (CI/release only — loc
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
 make install          # Install the built compiler into PREFIX/bin (default: ~/.local/bin)
 make rebuild          # Force a rebuild from a released seed
-make smoke            # Rebuild + run smoke tests
 make rebuild-asan     # Rebuild with ASAN (diagnostic)
 make check            # Compile (if needed) then run the full test suite
 make test             # Run full suite
 make test-unit        # Run Sailfin-native unit tests
 make test-integration # Run Sailfin-native integration tests
+make bench            # Benchmark per-module compile time and memory
 ```
 
 ### Build Artifacts
@@ -76,7 +76,7 @@ fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 
 **Canonical effects:** `io`, `net`, `model`, `gpu`, `rand`, `clock`
 
-**Bootstrap enforcement** (via `effect_checker.sfn` and `bootstrap/effect_checker.py`):
+**Enforcement** (via `effect_checker.sfn`):
 
 - `model`: required for `prompt` blocks
 - `io`: required for `print.*`, `console.*`, `fs.*`, decorators like `@logExecution`
@@ -169,51 +169,44 @@ When uncertain about feature status or semantics:
 
 The project is marching toward a 1.0 release with a **pure Sailfin toolchain** — no Python, no C runtime, no downstream fixup scripts. All compiler improvements must target the compiler source code itself (`compiler/src/*.sfn`), not external workarounds.
 
-**Full stabilization guide:** See `SEED_STABILIZATION.md` for the complete fixup catalog, root cause analysis, and attack plan.
+**Full stabilization guide:** See `docs/build-performance.md` for the build performance analysis and optimization plan.
 
-### Seed Stabilization Strategy
+### Seed Strategy
 
-The v0.1.1 seed requires `scripts/selfhost_native.py` (Python build driver) with **~69 IR fixup passes** to produce a working binary. The goal is to fix these bugs in the compiler source so a new seed can build itself using `scripts/build.sh` (shell driver, zero fixups).
+The compiler self-hosts from a released seed binary using `scripts/build.sh` (pure shell, no fixups). The current seed (0.5.0-alpha.22+) produces clean LLVM IR — no Python post-processing required.
 
-**Approach:** Iterative seed promotion — fix bugs in `compiler/src/*.sfn`, remove the corresponding fixups from `selfhost_native.py`, cut a new seed when a batch is stable. See `SEED_STABILIZATION.md` for details.
-
-**Root cause categories (by fixup count):**
-1. **Cross-module type/ABI mismatches** (~15) — seed can't resolve cross-module function signatures
-2. **Double-encoded pointers** (~12) — pointers encoded as `double` via ptrtoint→sitofp
-3. **Missing/duplicate definitions** (~12) — dropped function bodies, duplicate globals/types
-4. **Phi node / SSA violations** (~8) — wrong placement, types, predecessor labels, duplicate names
-5. **Loop / control flow bugs** (~6) — unconditional loop headers, wrong continue targets
-6. **Linker / visibility** (~6) — symbol dedup and linkage issues
-
-**Recommended attack order:** Phi/SSA → Loops → Double-encoding → Missing defs → Cross-module ABI → Linker
+**Build flow:**
+1. Fetch a released seed: `make fetch-seed`
+2. Build the compiler from the seed: `make compile` (uses `build.sh`)
+3. Run tests: `make test`
+4. Validate self-hosting: `make check` (builds seedcheck from first-pass binary, runs tests on it)
 
 ### Build Driver Configuration
 
 ```bash
-# Default: Python driver (has fixups, works with current seed)
-make compile                    # BUILD_DRIVER=py by default
+# Default: shell driver (no fixups, uses current seed)
+make compile                    # BUILD_DRIVER=sh by default
 
 # Explicit driver selection
-make rebuild BUILD_DRIVER=py    # Python with fixups
-make rebuild BUILD_DRIVER=sh    # Shell, no fixups (needs clean seed)
+make rebuild BUILD_DRIVER=sh    # Shell, no fixups (default)
+make rebuild BUILD_DRIVER=py    # Python with fixups (legacy, for 0.1.1 seed only)
 ```
 
 ### Development Principles
 
-- **Fix the compiler, not the build script.** `scripts/selfhost_native.py` has ~69 post-processing fixup passes that patch generated LLVM IR. These are technical debt. Every fix should go into the compiler source (`compiler/src/*.sfn`) so the fixup passes can be removed.
-- **The seedcheck binary must be a fully functional standalone compiler.** `make check` validates that it can run `hello-world.sfn` and pass the test suite directly — no Python fallbacks, no fallback compilers.
-- **Build must be fast and deterministic.** Target: under 5 minutes, zero retries. If the build needs retries, the compiler has a bug to fix.
-- **Reduce complexity, don't add it.** The fixup pass count should decrease over time. Don't add new fixup passes — fix the root cause in the compiler source.
-- **Track progress by fixup count.** The number of active fixup functions in `selfhost_native.py` is the primary metric. When it reaches 0, `make check` should pass.
+- **Fix the compiler, not the build script.** All compiler improvements go into `compiler/src/*.sfn`. The build script (`scripts/build.sh`) is pure orchestration — no fixups, no post-processing.
+- **The seedcheck binary must be a fully functional standalone compiler.** `make check` validates that it can run `hello-world.sfn` and pass the test suite directly.
+- **Build must be fast and deterministic.** Current: ~13 min. Target: under 5 minutes. See `docs/build-performance.md` for the optimization plan.
+- **Reduce complexity, don't add it.** The Python build driver (`scripts/selfhost_native.py`) is legacy and will be removed once the new seed is fully validated.
 
 ### `make check` Validation
 
 `make check` does:
-1. Builds the compiler from the seed using `BUILD_DRIVER` (default: Python with fixups)
-2. Runs the full test suite on the first-pass binary (early gate — if this fails, no point continuing)
-3. Builds seedcheck from the first-pass binary using `build.sh` (**always no fixups** — this is the graduation test)
-4. Validates the seedcheck can actually run `examples/basics/hello-world.sfn` (fails if it hangs)
-5. Runs the full test suite using the seedcheck binary directly (no fallbacks)
+1. Builds the compiler from the seed using `build.sh`
+2. Runs the full test suite on the first-pass binary (early gate)
+3. Builds seedcheck from the first-pass binary using `build.sh`
+4. Validates the seedcheck can actually run `examples/basics/hello-world.sfn`
+5. Runs the full test suite using the seedcheck binary directly
 
 If `make check` fails, it means the compiler has a bug. Fix the compiler.
 
