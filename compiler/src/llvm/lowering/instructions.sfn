@@ -36,8 +36,6 @@ import {
     extend_lifetime_regions,
     extend_mutations,
     _parse_int_from_string,
-    write_bindings_to_files,
-    write_locals_to_files,
 } from "./instructions_helpers";
 
 import {
@@ -311,8 +309,6 @@ fn lower_instruction_range(
                     }
                 }
                 if !handled_inline_let {
-                    write_bindings_to_files(current_bindings);
-                    write_locals_to_files(current_locals);
                     let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
                     current_temp = lowered.temp_index;
                     current_next_region = lowered.next_region_id;
@@ -326,16 +322,6 @@ fn lower_instruction_range(
         }
         if !_tag_handled {
             if _instr_tag == 0 {
-                let _ret_expr = get_instruction_text(function.instructions, index);
-                let mut safe_instr_expr -> string = "";
-                if _ret_expr != null {
-                    safe_instr_expr = _ret_expr;
-                }
-                fs.writeFile("build/sailfin/.instr_fn_name", function.name);
-                fs.writeFile("build/sailfin/.instr_expression", safe_instr_expr);
-                fs.writeFile("build/sailfin/.instr_llvm_return", llvm_return);
-                write_bindings_to_files(current_bindings);
-                write_locals_to_files(current_locals);
                 let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
                 current_temp = lowered.temp_index;
                 current_next_region = lowered.next_region_id;
@@ -568,11 +554,6 @@ fn lower_instruction_range(
                     if trimmed_21.length > 4 {
                         _ret_val_21 = trim_text(substring(trimmed_21, 4, trimmed_21.length));
                     }
-                    fs.writeFile("build/sailfin/.instr_fn_name", function.name);
-                    fs.writeFile("build/sailfin/.instr_expression", _ret_val_21);
-                    fs.writeFile("build/sailfin/.instr_llvm_return", llvm_return);
-                    write_bindings_to_files(current_bindings);
-                    write_locals_to_files(current_locals);
                     let _lowered_ret_21 = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
                     current_temp = _lowered_ret_21.temp_index;
                     current_next_region = _lowered_ret_21.next_region_id;
@@ -617,8 +598,6 @@ fn lower_instruction_range(
                             }
                         }
                         if !handled_inline_let_21 {
-                            write_bindings_to_files(current_bindings);
-                            write_locals_to_files(current_locals);
                             let lowered = lower_expression_statement(function.name, instruction, trimmed_21, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
                             current_temp = lowered.temp_index;
                             current_next_region = lowered.next_region_id;
