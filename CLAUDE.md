@@ -322,7 +322,7 @@ The compiler must always compile itself. Breaking changes require:
 - **Version source of truth:** `compiler/capsule.toml` (`[capsule] version`)
 - **Version mirror:** `compiler/src/version.sfn:__version__` (read by the compiler binary; kept in sync by the release workflow — TODO: read from capsule.toml at build time)
 - **Release automation:** `.github/workflows/release.yml` — manually triggered via `workflow_dispatch`, pure bash, no Python dependencies
-- **Release notes:** `.github/workflows/release-notes.md` — agentic workflow that generates structured changelogs when a release is published
+- **Release notes:** `.github/workflows/release-notes.md` — agentic workflow that posts structured, categorized changelog comments on published releases (supplements the auto-generated notes from `gh release create`)
 - **Artifacts:** `dist/` is used for packaged artifacts; `release-tag.yml` builds and uploads platform binaries
 - **Claude skill:** Use `/release` to trigger a new release from Claude Code
 

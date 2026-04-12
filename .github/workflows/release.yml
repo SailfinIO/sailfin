@@ -176,6 +176,18 @@ jobs:
               ;;
           esac
 
+          # --- Guard against no-op releases ------------------------------------
+          if [ "$NEXT" = "$current" ]; then
+            echo "::error::Computed version '$NEXT' is the same as the current version. Nothing to release. Use a different bump or channel."
+            exit 1
+          fi
+
+          # --- Guard against re-tagging an existing tag -----------------------
+          if git rev-parse "v${NEXT}" >/dev/null 2>&1; then
+            echo "::error::Tag 'v${NEXT}' already exists. Choose a different bump/channel combination."
+            exit 1
+          fi
+
           echo "Next version: $NEXT"
           echo "version=${NEXT}" >> "$GITHUB_OUTPUT"
           echo "tag=v${NEXT}" >> "$GITHUB_OUTPUT"
@@ -188,16 +200,37 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Update capsule.toml
-          sed -i "s/^version = \"[^\"]*\"/version = \"${NEXT}\"/" compiler/capsule.toml
+          # Update capsule.toml (whitespace-tolerant around = and quotes)
+          capsule_matches=$(grep -c '^version *=' compiler/capsule.toml || true)
+          if [ "$capsule_matches" -ne 1 ]; then
+            echo "::error::Expected exactly 1 'version =' line in capsule.toml, found $capsule_matches"
+            exit 1
+          fi
+          sed -i "s/^version *= *\"[^\"]*\"/version = \"${NEXT}\"/" compiler/capsule.toml
 
-          # Update version.sfn
-          sed -i "s/let __version__ = \"[^\"]*\"/let __version__ = \"${NEXT}\"/" compiler/src/version.sfn
+          # Update version.sfn (whitespace-tolerant around = and quotes)
+          sfn_matches=$(grep -c 'let __version__ *=' compiler/src/version.sfn || true)
+          if [ "$sfn_matches" -ne 1 ]; then
+            echo "::error::Expected exactly 1 '__version__' assignment in version.sfn, found $sfn_matches"
+            exit 1
+          fi
+          sed -i "s/let __version__ *= *\"[^\"]*\"/let __version__ = \"${NEXT}\"/" compiler/src/version.sfn
 
+          # Verify the replacements took effect
           echo "--- compiler/capsule.toml ---"
           grep '^version' compiler/capsule.toml
           echo "--- compiler/src/version.sfn ---"
           grep '__version__' compiler/src/version.sfn
+
+          # Final sanity check: the new version must appear in both files
+          if ! grep -q "\"${NEXT}\"" compiler/capsule.toml; then
+            echo "::error::capsule.toml was not updated to version ${NEXT}"
+            exit 1
+          fi
+          if ! grep -q "\"${NEXT}\"" compiler/src/version.sfn; then
+            echo "::error::version.sfn was not updated to version ${NEXT}"
+            exit 1
+          fi
 
       - name: Commit & tag
         if: inputs.dry_run != true
@@ -225,6 +258,7 @@ jobs:
           TAG: ${{ steps.bump.outputs.tag }}
           VERSION: ${{ steps.bump.outputs.version }}
           CHANNEL: ${{ inputs.channel }}
+          PREV_TAG: ${{ steps.bump.outputs.prev_tag }}
         run: |
           set -euo pipefail
           PRERELEASE_FLAG=""
@@ -237,10 +271,16 @@ jobs:
             LATEST_FLAG="--latest"
           fi
 
+          # Only pass --notes-start-tag if the previous tag actually exists
+          NOTES_START=""
+          if git rev-parse "$PREV_TAG" >/dev/null 2>&1; then
+            NOTES_START="--notes-start-tag $PREV_TAG"
+          fi
+
           gh release create "$TAG" \
             --title "Sailfin $VERSION" \
             --generate-notes \
-            --notes-start-tag "${{ steps.bump.outputs.prev_tag }}" \
+            $NOTES_START \
             $PRERELEASE_FLAG \
             $LATEST_FLAG
 

@@ -1,8 +1,8 @@
 ---
 description: |
   Generates rich, categorized release notes when a new GitHub Release is
-  published.  Analyzes all commits since the previous tag and writes a
-  structured changelog body on the release.
+  published.  Analyzes all commits since the previous tag and posts a
+  structured changelog as a comment on the release.
 
 on:
   release:
@@ -95,7 +95,9 @@ rand, clock]`), ownership types, and AI-native constructs.
    **Full Changelog**: https://github.com/SailfinIO/sailfin/compare/<prev_tag>...<this_tag>
    ```
 
-6. **Update the GitHub release body** with the generated notes.
+6. **Post a comment on the release** with the generated notes. The release
+   already has auto-generated notes from `gh release create --generate-notes`;
+   your comment supplements those with richer categorization and context.
 
 ## Guidelines
 

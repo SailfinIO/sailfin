@@ -50,8 +50,9 @@ The workflow accepts two inputs:
 5. After dispatching, let the user know:
    - The workflow has been triggered
    - They can monitor it at: https://github.com/SailfinIO/sailfin/actions/workflows/release.yml
-   - The release-notes agentic workflow will auto-generate changelog content
-     once the GitHub Release is published
+   - The release-notes agentic workflow will post a structured changelog
+     comment on the release once it's published (supplementing the
+     auto-generated notes)
 
 ## Version math reference
 
