@@ -1,0 +1,270 @@
+name: Release
+
+# Manually-triggered release workflow.  Replaces python-semantic-release.
+#
+# Reads the current version from compiler/capsule.toml, computes the next
+# version based on `channel` and `bump` inputs, updates capsule.toml +
+# version.sfn, commits, tags, pushes, creates a GitHub Release, then calls
+# release-tag.yml to build and upload platform assets.
+#
+# Channel semantics:
+#   alpha       → v0.5.0-alpha.23   (prerelease on main)
+#   beta        → v0.5.0-beta.1     (promote to beta)
+#   rc          → v0.5.0-rc.1       (release candidate)
+#   stable      → v0.5.0            (GA release)
+#
+# Bump semantics (within the chosen channel):
+#   prerelease  → increment the .N suffix (or start .1 when promoting)
+#   patch       → bump patch, reset to <channel>.1  (or clean for stable)
+#   minor       → bump minor, reset patch + prerelease
+#   major       → bump major, reset minor + patch + prerelease
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Release channel"
+        required: true
+        type: choice
+        options:
+          - alpha
+          - beta
+          - rc
+          - stable
+      bump:
+        description: "Version bump type"
+        required: true
+        type: choice
+        options:
+          - prerelease
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: "Dry run (compute version but don't tag/release)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  RELEASE_PAT_SECRET: ${{ secrets.RELEASE_PAT }}
+
+jobs:
+  release:
+    name: Bump version & tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+      prev_tag: ${{ steps.bump.outputs.prev_tag }}
+
+    steps:
+      - name: Require RELEASE_PAT
+        if: env.RELEASE_PAT_SECRET == ''
+        run: |
+          echo "::error::RELEASE_PAT secret is required so the new tag triggers downstream workflows."
+          exit 1
+
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Configure git credentials
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          git config user.name "Sailfin Release Bot"
+          git config user.email "releases@sailfin.io"
+          git remote set-url origin "https://x-access-token:${RELEASE_TOKEN}@github.com/${{ github.repository }}.git"
+
+      - name: Compute next version
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CHANNEL="${{ inputs.channel }}"
+          BUMP="${{ inputs.bump }}"
+
+          # --- Read current version from capsule.toml -------------------------
+          current="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml)"
+          if [ -z "$current" ]; then
+            echo "::error::Could not read version from compiler/capsule.toml"
+            exit 1
+          fi
+          echo "Current version: $current"
+          echo "prev_tag=v${current}" >> "$GITHUB_OUTPUT"
+
+          # --- Parse semver components ----------------------------------------
+          # Matches: MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-pre.N
+          if [[ "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)(-([a-z]+)\.([0-9]+))?$ ]]; then
+            MAJOR="${BASH_REMATCH[1]}"
+            MINOR="${BASH_REMATCH[2]}"
+            PATCH="${BASH_REMATCH[3]}"
+            PRE_LABEL="${BASH_REMATCH[5]:-}"
+            PRE_NUM="${BASH_REMATCH[6]:-0}"
+          else
+            echo "::error::Cannot parse version '$current' as semver"
+            exit 1
+          fi
+
+          # --- Channel ordering for promotion checks -------------------------
+          channel_rank() {
+            case "$1" in
+              alpha)  echo 0 ;;
+              beta)   echo 1 ;;
+              rc)     echo 2 ;;
+              stable) echo 3 ;;
+              *)      echo -1 ;;
+            esac
+          }
+
+          cur_rank=$(channel_rank "${PRE_LABEL:-stable}")
+          new_rank=$(channel_rank "$CHANNEL")
+
+          # --- Compute next version -------------------------------------------
+          case "$BUMP" in
+            major)
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              if [ "$CHANNEL" = "stable" ]; then
+                NEXT="${MAJOR}.${MINOR}.${PATCH}"
+              else
+                NEXT="${MAJOR}.${MINOR}.${PATCH}-${CHANNEL}.1"
+              fi
+              ;;
+            minor)
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              if [ "$CHANNEL" = "stable" ]; then
+                NEXT="${MAJOR}.${MINOR}.${PATCH}"
+              else
+                NEXT="${MAJOR}.${MINOR}.${PATCH}-${CHANNEL}.1"
+              fi
+              ;;
+            patch)
+              PATCH=$((PATCH + 1))
+              if [ "$CHANNEL" = "stable" ]; then
+                NEXT="${MAJOR}.${MINOR}.${PATCH}"
+              else
+                NEXT="${MAJOR}.${MINOR}.${PATCH}-${CHANNEL}.1"
+              fi
+              ;;
+            prerelease)
+              if [ "$CHANNEL" = "stable" ]; then
+                # Promote to stable: strip prerelease suffix
+                NEXT="${MAJOR}.${MINOR}.${PATCH}"
+              elif [ "$CHANNEL" = "$PRE_LABEL" ]; then
+                # Same channel: increment prerelease number
+                NEXT="${MAJOR}.${MINOR}.${PATCH}-${CHANNEL}.$((PRE_NUM + 1))"
+              elif [ "$new_rank" -gt "$cur_rank" ]; then
+                # Promoting to a higher channel: start at .1
+                NEXT="${MAJOR}.${MINOR}.${PATCH}-${CHANNEL}.1"
+              else
+                echo "::error::Cannot demote from '${PRE_LABEL:-stable}' to '${CHANNEL}'. Use a higher channel or bump major/minor/patch first."
+                exit 1
+              fi
+              ;;
+          esac
+
+          echo "Next version: $NEXT"
+          echo "version=${NEXT}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NEXT}" >> "$GITHUB_OUTPUT"
+
+      - name: Update version files
+        if: inputs.dry_run != true
+        shell: bash
+        env:
+          NEXT: ${{ steps.bump.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # Update capsule.toml
+          sed -i "s/^version = \"[^\"]*\"/version = \"${NEXT}\"/" compiler/capsule.toml
+
+          # Update version.sfn
+          sed -i "s/let __version__ = \"[^\"]*\"/let __version__ = \"${NEXT}\"/" compiler/src/version.sfn
+
+          echo "--- compiler/capsule.toml ---"
+          grep '^version' compiler/capsule.toml
+          echo "--- compiler/src/version.sfn ---"
+          grep '__version__' compiler/src/version.sfn
+
+      - name: Commit & tag
+        if: inputs.dry_run != true
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git add compiler/capsule.toml compiler/src/version.sfn
+          git commit -m "chore(release): ${TAG#v}"
+          git tag -a "$TAG" -m "Release ${TAG}"
+
+      - name: Push commit & tag
+        if: inputs.dry_run != true
+        env:
+          TAG: ${{ steps.bump.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git push origin HEAD
+          git push origin "$TAG"
+
+      - name: Create GitHub Release
+        if: inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+          TAG: ${{ steps.bump.outputs.tag }}
+          VERSION: ${{ steps.bump.outputs.version }}
+          CHANNEL: ${{ inputs.channel }}
+        run: |
+          set -euo pipefail
+          PRERELEASE_FLAG=""
+          if [ "$CHANNEL" != "stable" ]; then
+            PRERELEASE_FLAG="--prerelease"
+          fi
+
+          LATEST_FLAG=""
+          if [ "$CHANNEL" = "stable" ]; then
+            LATEST_FLAG="--latest"
+          fi
+
+          gh release create "$TAG" \
+            --title "Sailfin $VERSION" \
+            --generate-notes \
+            --notes-start-tag "${{ steps.bump.outputs.prev_tag }}" \
+            $PRERELEASE_FLAG \
+            $LATEST_FLAG
+
+      - name: Dry run summary
+        if: inputs.dry_run == true
+        run: |
+          echo "## Dry Run Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Current | ${{ steps.bump.outputs.prev_tag }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Next | ${{ steps.bump.outputs.tag }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Channel | ${{ inputs.channel }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Bump | ${{ inputs.bump }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "No changes were made (dry run)." >> "$GITHUB_STEP_SUMMARY"
+
+  build-assets:
+    name: Build release assets
+    needs: release
+    if: inputs.dry_run != true
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-tag.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets: inherit
