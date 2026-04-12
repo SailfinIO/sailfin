@@ -20,6 +20,10 @@ inputs:
     description: "Optional tag to exclude"
     required: false
     default: ""
+  run_seedcheck:
+    description: "Whether to build and test the seedcheck binary (expensive, skip on PRs)"
+    required: false
+    default: "true"
 runs:
   using: "composite"
   steps:
@@ -63,6 +67,7 @@ runs:
         make test
 
     - name: Build seedcheck (no Python fixups)
+      if: inputs.run_seedcheck == 'true'
       shell: bash {0}
       run: |
         set -euo pipefail
@@ -79,6 +84,7 @@ runs:
         build/native/sailfin-seedcheck version || true
 
     - name: Validate seedcheck (hello-world)
+      if: inputs.run_seedcheck == 'true'
       shell: bash {0}
       run: |
         set -euo pipefail
@@ -99,6 +105,7 @@ runs:
         echo "[ci] seedcheck runs hello-world.sfn OK"
 
     - name: Run tests (seedcheck binary)
+      if: inputs.run_seedcheck == 'true'
       shell: bash {0}
       run: |
         set -euo pipefail
