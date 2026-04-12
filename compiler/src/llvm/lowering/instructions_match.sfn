@@ -89,6 +89,7 @@ import {
     _write_block_result_files,
     _parse_int_from_string,
     _read_ipc_int_min,
+    _read_ipc_terminated,
 } from "./instructions_helpers";
 
 import {
@@ -686,7 +687,7 @@ fn lower_match_instruction(
         let _br_body_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
         let _br_body_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
         let _br_body_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-        let _br_body_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+        let _br_body_term = _read_ipc_terminated();
 
         let mut _ci3 -> number = 0;
         loop {

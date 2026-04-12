@@ -84,6 +84,7 @@ import {
     _write_block_result_files,
     _parse_int_from_string,
     _read_ipc_int_min,
+    _read_ipc_terminated,
 } from "./instructions_helpers";
 
 import {
@@ -354,7 +355,7 @@ fn lower_if_instruction(
     let _br_then_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
     let _br_then_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
     let _br_then_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-    let _br_then_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+    let _br_then_term = _read_ipc_terminated();
     let mut _ci14 -> number = 0;
     loop {
         if _ci14 >= then_result.diagnostics.length { break; }
@@ -414,7 +415,7 @@ fn lower_if_instruction(
         let _br_else_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
         let _br_else_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
         let _br_else_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-        let _br_else_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+        let _br_else_term = _read_ipc_terminated();
         let mut _ci15 -> number = 0;
         loop {
             if _ci15 >= else_result.diagnostics.length { break; }

@@ -66,6 +66,7 @@ import {
     extend_lifetime_regions,
     _write_block_result_files,
     _parse_int_from_string,
+    _read_ipc_terminated,
 } from "./instructions_helpers";
 
 import {
@@ -328,7 +329,7 @@ fn lower_try_instruction(
     let _br_try_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
     let _br_try_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
     let _br_try_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-    let _br_try_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+    let _br_try_term = _read_ipc_terminated();
     let mut _ci3 -> number = 0;
     loop {
         if _ci3 >= try_result.diagnostics.length { break; }
@@ -418,7 +419,7 @@ fn lower_try_instruction(
         let _br_catch_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
         let _br_catch_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
         let _br_catch_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-        let _br_catch_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+        let _br_catch_term = _read_ipc_terminated();
         let mut _ci4 -> number = 0;
         loop {
             if _ci4 >= catch_result.diagnostics.length { break; }
@@ -471,7 +472,7 @@ fn lower_try_instruction(
         let _br_fin_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
         let _br_fin_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
         let _br_fin_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-        let _br_fin_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+        let _br_fin_term = _read_ipc_terminated();
         let mut _ci5 -> number = 0;
         loop {
             if _ci5 >= finally_result.diagnostics.length { break; }

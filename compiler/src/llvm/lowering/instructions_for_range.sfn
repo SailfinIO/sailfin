@@ -22,7 +22,7 @@ import { parse_range_iterable } from "../expression_lowering/native/core_parse";
 import { make_child_scope_id } from "../lifetime";
 import { collect_mutation_names, find_mutation_for_name } from "./phi";
 import { lower_instruction_range } from "./instructions";
-import { extend_lifetime_regions, extend_mutations, _write_block_result_files, _parse_int_from_string } from "./instructions_helpers";
+import { extend_lifetime_regions, extend_mutations, _write_block_result_files, _parse_int_from_string, _read_ipc_terminated } from "./instructions_helpers";
 import { allocate_block_label } from "./instructions_condition";
 import { append_loop_context } from "./instructions_loops";
 
@@ -447,7 +447,7 @@ fn lower_for_range(
     let _br_fo_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
     let _br_fo_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
     let _br_fo_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-    let _br_fo_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
+    let _br_fo_term = _read_ipc_terminated();
 
     let mut _ci19 -> number = 0;
     loop {
