@@ -187,48 +187,92 @@ test-unit:
 		echo "[test-unit] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@set -e; \
+	@pass=0; fail=0; failed_files=""; \
 	files=$$(find compiler/tests/unit -name '*_test.sfn' -print | sort); \
 	if [ -z "$$files" ]; then \
 		echo "[test-unit] no *_test.sfn files found under compiler/tests/unit"; \
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
-	done
+		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
+	done; \
+	total=$$((pass + fail)); \
+	echo ""; \
+	echo "═══ unit: $$pass/$$total passed, $$fail failed ═══"; \
+	if [ $$fail -gt 0 ]; then \
+		echo ""; \
+		printf "$$failed_files"; \
+		exit 1; \
+	fi
 
 test-integration:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-integration] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@set -e; \
+	@pass=0; fail=0; failed_files=""; \
 	files=$$(find compiler/tests/integration -name '*_test.sfn' -print | sort); \
 	if [ -z "$$files" ]; then \
 		echo "[test-integration] no *_test.sfn files found under compiler/tests/integration"; \
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
-	done
+		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
+	done; \
+	total=$$((pass + fail)); \
+	echo ""; \
+	echo "═══ integration: $$pass/$$total passed, $$fail failed ═══"; \
+	if [ $$fail -gt 0 ]; then \
+		echo ""; \
+		printf "$$failed_files"; \
+		exit 1; \
+	fi
 
 test-e2e:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@set -e; \
+	@pass=0; fail=0; failed_files=""; \
 	files=$$(find compiler/tests/e2e -name '*_test.sfn' -print | sort); \
 	if [ -z "$$files" ]; then \
 		echo "[test-e2e] no *_test.sfn files found under compiler/tests/e2e"; \
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
+		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
 	done; \
 	for f in $$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); do \
-		bash "$$f" $(NATIVE_BIN); \
-	done
+		if bash "$$f" $(NATIVE_BIN); then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
+	done; \
+	total=$$((pass + fail)); \
+	echo ""; \
+	echo "═══ e2e: $$pass/$$total passed, $$fail failed ═══"; \
+	if [ $$fail -gt 0 ]; then \
+		echo ""; \
+		printf "$$failed_files"; \
+		exit 1; \
+	fi
 
 # Run the full Sailfin-native test suite using the *self-hosted* compiler.
 # This ensures tests cover the same binary we intend to ship for 1.0.
