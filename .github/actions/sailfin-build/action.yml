@@ -4,13 +4,6 @@ inputs:
   target:
     description: "Packaging target label (e.g. linux-x86_64, macos-arm64)"
     required: true
-  max_attempts:
-    description: "Max attempts for selfhost rebuild (passed via BUILD_ARGS)"
-    required: true
-  build_jobs:
-    description: "Parallelism for build orchestrator"
-    required: false
-    default: "2"
   clang:
     description: "Clang executable"
     required: false
@@ -53,11 +46,8 @@ runs:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
-        # Use BUILD_DRIVER=sh — the 0.5.0-alpha.22 seed produces clean LLVM IR.
         make rebuild \
-          BUILD_DRIVER=sh \
           CLANG="${{ inputs.clang }}" \
-          BUILD_JOBS="${{ inputs.build_jobs }}" \
           SEED_NATIVE="build/seed/bin/sailfin"
 
     - name: Prepare test artifacts
@@ -82,7 +72,8 @@ runs:
           OPT="-O0" \
           JOBS=1 \
           CLANG="${{ inputs.clang }}" \
-          MAX_TOTAL=3600 \
+          SEED_TIMEOUT=600 \
+          MAX_TOTAL=7200 \
           bash scripts/build.sh
         ls -lh build/native/sailfin-seedcheck
         build/native/sailfin-seedcheck version || true

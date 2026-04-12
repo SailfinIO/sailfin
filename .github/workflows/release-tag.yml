@@ -37,11 +37,9 @@ jobs:
           - os: macos-latest
             package_label: macos-arm64
             clang: clang
-            max_attempts: 15
           - os: ubuntu-24.04
             package_label: linux-x86_64
             clang: clang-18
-            max_attempts: 10
 
     steps:
       - name: Checkout repository (tag)
@@ -88,7 +86,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         with:
           target: ${{ matrix.package_label }}
-          max_attempts: ${{ matrix.max_attempts }}
           clang: ${{ matrix.clang }}
           seed_version: ${{ env.SEED_VERSION }}
 

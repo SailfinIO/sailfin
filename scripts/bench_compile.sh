@@ -87,7 +87,12 @@ module_name_from_path() {
 }
 
 slug_from_path() {
-    module_name_from_path "$1"
+    # Import-context uses slash-delimited paths (e.g. llvm/types.sfn-asm),
+    # so the slug must preserve slashes for artifact cleanup to work.
+    local src="$1"
+    local rel="${src#$REPO_ROOT/compiler/src/}"
+    rel="${rel%.sfn}"
+    echo "$rel"
 }
 
 SOURCES=()
@@ -138,7 +143,7 @@ bench_module() {
     local out_ll="$WORK_DIR/${name}.ll"
     local time_log="$WORK_DIR/${name}.time"
     local abs_src
-    abs_src="$(cd "$REPO_ROOT" && realpath "$src" 2>/dev/null || echo "$REPO_ROOT/$src")"
+    abs_src="$(cd "$REPO_ROOT" && realpath "$src" 2>/dev/null || ([ "${src#/}" != "$src" ] && echo "$src" || echo "$REPO_ROOT/$src"))"
 
     # Resolve output paths to absolute so they work from module_cwd
     mkdir -p "$(dirname "$out_ll")"
