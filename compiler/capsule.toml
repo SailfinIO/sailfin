@@ -1,0 +1,17 @@
+[capsule]
+name = "sailfin"
+version = "0.5.0-alpha.22"
+description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm IR"
+
+[dependencies]
+
+[capabilities]
+required = ["io"]
+
+[build]
+entry = "src/main.sfn"
+
+# TODO: The compiler should read its version from this file at build time
+# (via capsule.toml parsing or build-time injection) so that
+# compiler/src/version.sfn no longer needs to be maintained separately.
+# Track this as part of the pre-1.0 toolchain self-sufficiency goal.

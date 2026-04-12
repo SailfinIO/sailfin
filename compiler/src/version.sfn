@@ -2,7 +2,11 @@
 //
 // Native compiler CLI/compiler version string.
 //
-// Release tooling (python-semantic-release) bumps the `__version__` string.
+// The canonical version lives in compiler/capsule.toml.  Release tooling
+// (`.github/workflows/release.yml`) bumps both files in lockstep.
+//
+// TODO: Read version from capsule.toml at build time so this file can be
+// removed.  See the comment in compiler/capsule.toml.
 let __version__ = "0.5.0-alpha.22";
 
 fn sailfin_version() -> string {
