@@ -72,7 +72,6 @@ jobs:
           target: ${{ matrix.package_label }}
           clang: ${{ matrix.clang }}
           seed_version: ${{ env.SEED_VERSION }}
-          run_seedcheck: "false"
 
       - name: Report compiler metadata
         shell: bash -l {0}
