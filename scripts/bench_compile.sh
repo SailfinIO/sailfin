@@ -46,6 +46,9 @@ if [[ ! -x "$SEED" ]]; then
     echo "[bench] hint: run 'make compile' first" >&2
     exit 1
 fi
+# Resolve to absolute — the seed is invoked from per-module working directories.
+SEED="$(cd "$(dirname "$SEED")" && echo "$(pwd)/$(basename "$SEED")")"
+IMPORT_CONTEXT="$(cd "$IMPORT_CONTEXT" && pwd)"
 
 # Detect GNU time for memory measurement (optional).
 GNU_TIME=""
