@@ -7,7 +7,7 @@
 //
 // TODO: Read version from capsule.toml at build time so this file can be
 // removed.  See the comment in compiler/capsule.toml.
-let __version__ = "0.5.0-alpha.22";
+let __version__ = "0.5.0-alpha.23";
 
 fn sailfin_version() -> string {
     return __version__;
