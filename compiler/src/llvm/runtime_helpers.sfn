@@ -561,6 +561,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
             effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+            target: "string.append",
+            symbol: "sailfin_runtime_string_append",
+            return_type: "i8*",
+            parameter_types: ["i8*", "i8*"],
+            effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
             target: "string.drop",
             symbol: "sailfin_runtime_string_drop",
             return_type: "void",

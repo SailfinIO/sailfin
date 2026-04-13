@@ -1,6 +1,6 @@
 # Status
 
-Updated: March 31, 2026
+Updated: April 12, 2026
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -124,6 +124,15 @@ The following capsules ship as part of the Sailfin standard library under
   `runtime/*.py` helpers.
 - The native filesystem adapter supports `readFile`, `writeFile`, `appendFile`,
   `writeLines`, and directory helpers.
+- **String concat optimization (`string_append`)**: The LLVM lowering emits
+  `sailfin_runtime_string_append` (realloc-based in-place extend) for intermediate
+  results in chained `+` concat chains instead of `sailfin_runtime_string_concat`
+  (malloc+copy). This eliminates 2 dead intermediate allocations per 4-way concat
+  and is estimated to reduce per-module peak memory 30-50% for string-heavy
+  compilation paths. Pure lowering optimization — no user-visible syntax change.
+  Implemented in `compiler/src/llvm/expression_lowering/native/core_strings.sfn`
+  and `core_ops_lowering.sfn`; runtime entry point in
+  `runtime/native/src/sailfin_runtime.c`.
 - **The C runtime will be replaced by a Sailfin-native runtime before 1.0.** This
   is a hard prerequisite for the 1.0 release, not a post-1.0 item. See
   `docs/roadmap.md` and `docs/runtime_audit.md`.

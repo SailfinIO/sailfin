@@ -49,6 +49,8 @@ import { strip_enclosing_parentheses, lines_end_with_terminator } from "./core_o
 
 import { operation_name_for_symbol } from "./core_helpers";
 
+import { is_appendable_concat_result } from "./core_strings";
+
 // NOTE: this module imports lower_expression from core.sfn; this is mutually recursive.
 import { lower_expression } from "./core";
 
@@ -205,7 +207,11 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 let mut current_temp = right_result.temp_index;
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + rhs.value + ")");
+                let mut _rt_fn = "sailfin_runtime_string_concat";
+                if is_appendable_concat_result(lhs.value, current_lines) {
+                    _rt_fn = "sailfin_runtime_string_append";
+                }
+                current_lines.push("  " + concat_name + " = call i8* @" + _rt_fn + "(i8* " + lhs.value + ", i8* " + rhs.value + ")");
                 let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
             }
@@ -221,11 +227,15 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 if coerced.operand == null {
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
                 }
-    
+
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + coerced.operand.value + ")");
-    
+                let mut _rt_fn2 = "sailfin_runtime_string_concat";
+                if is_appendable_concat_result(lhs.value, current_lines) {
+                    _rt_fn2 = "sailfin_runtime_string_append";
+                }
+                current_lines.push("  " + concat_name + " = call i8* @" + _rt_fn2 + "(i8* " + lhs.value + ", i8* " + coerced.operand.value + ")");
+
                 let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
             }
@@ -241,11 +251,15 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 if coerced.operand == null {
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
                 }
-    
+
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + coerced.operand.value + ", i8* " + rhs.value + ")");
-    
+                let mut _rt_fn3 = "sailfin_runtime_string_concat";
+                if is_appendable_concat_result(coerced.operand.value, current_lines) {
+                    _rt_fn3 = "sailfin_runtime_string_append";
+                }
+                current_lines.push("  " + concat_name + " = call i8* @" + _rt_fn3 + "(i8* " + coerced.operand.value + ", i8* " + rhs.value + ")");
+
                 let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
             }
@@ -255,7 +269,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
             if rhs_type == "i8" {
                 let mut current_lines = right_result.lines;
                 let mut current_temp = right_result.temp_index;
-    
+
                 let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines);
                 diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics);
                 current_lines = lhs_coerced.lines;
@@ -263,7 +277,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 if lhs_coerced.operand == null {
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
                 }
-    
+
                 let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
                 diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics);
                 current_lines = rhs_coerced.lines;
@@ -271,11 +285,15 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 if rhs_coerced.operand == null {
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
                 }
-    
+
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
-                current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")");
-    
+                let mut _rt_fn4 = "sailfin_runtime_string_concat";
+                if is_appendable_concat_result(lhs_coerced.operand.value, current_lines) {
+                    _rt_fn4 = "sailfin_runtime_string_append";
+                }
+                current_lines.push("  " + concat_name + " = call i8* @" + _rt_fn4 + "(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")");
+
                 let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
             }
@@ -306,7 +324,11 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
 
             let concat_name = format_temp_name(current_temp);
             current_temp += 1;
-            current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")");
+            let mut _rt_fn5 = "sailfin_runtime_string_concat";
+            if is_appendable_concat_result(lhs_coerced.operand.value, current_lines) {
+                _rt_fn5 = "sailfin_runtime_string_append";
+            }
+            current_lines.push("  " + concat_name + " = call i8* @" + _rt_fn5 + "(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")");
             let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
             return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
         }
@@ -422,7 +444,11 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
     if match.symbol == "+" {
         if result_type == "i8*" {
             let temp_name = format_temp_name(harmonised.temp_index);
-            let line = "  " + temp_name + " = call i8* @sailfin_runtime_string_concat(i8* " + left_aligned.value + ", i8* " + right_aligned.value + ")";
+            let mut _rt_fn6 = "sailfin_runtime_string_concat";
+            if is_appendable_concat_result(left_aligned.value, harmonised.lines) {
+                _rt_fn6 = "sailfin_runtime_string_append";
+            }
+            let line = "  " + temp_name + " = call i8* @" + _rt_fn6 + "(i8* " + left_aligned.value + ", i8* " + right_aligned.value + ")";
             let updated_lines = append_string(harmonised.lines, line);
             let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
             return ExpressionResult { lines: updated_lines, temp_index: harmonised.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };

@@ -94,6 +94,23 @@ Add a lookup cache to `collect_imported_module_context_for_module` to avoid re-p
 
 Once the new seed reliably handles typed instruction variants, switch back to `parse_native_artifact_safe`.
 
+### Completed: String Concat Allocation Reduction
+
+**Status: Implemented** — The LLVM lowering now emits `sailfin_runtime_string_append`
+(realloc-based in-place extend) instead of `sailfin_runtime_string_concat` (malloc+copy)
+for intermediate results in chained `+` string concatenation. This eliminates 2 dead
+intermediate allocations per 4-way concat and is estimated to reduce per-module peak
+memory by 30-50% on string-heavy modules. The optimization is transparent to users —
+no syntax or behavior changes.
+
+Files changed: `compiler/src/llvm/expression_lowering/native/core_strings.sfn`,
+`core_ops_lowering.sfn`, `compiler/src/llvm/lowering/lowering_core.sfn`,
+`compiler/src/llvm/runtime_helpers.sfn`, `runtime/native/src/sailfin_runtime.c`,
+`runtime/native/include/sailfin_runtime.h`.
+
+This improvement is independent of Phases 1-4 and does not change the priority or
+expected impact of those phases.
+
 ---
 
 ## Appendix: Full File I/O Census

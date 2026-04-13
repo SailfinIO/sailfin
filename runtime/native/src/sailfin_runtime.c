@@ -628,6 +628,8 @@ static int _alloc_stats_init = 0;
 static int _alloc_stats_enabled = 0;
 static uint64_t _alloc_stats_string_concat_calls = 0;
 static uint64_t _alloc_stats_string_concat_bytes = 0;
+static uint64_t _alloc_stats_string_append_calls = 0;
+static uint64_t _alloc_stats_string_append_bytes = 0;
 static uint64_t _alloc_stats_substring_calls = 0;
 static uint64_t _alloc_stats_substring_bytes = 0;
 static uint64_t _alloc_stats_array_alloc_calls = 0;
@@ -661,9 +663,11 @@ static void _print_alloc_stats(void)
     }
     fprintf(
         stderr,
-        "[stage2-native] alloc_stats string_concat calls=%llu bytes=%llu substring calls=%llu bytes=%llu array_alloc calls=%llu bytes=%llu\n",
+        "[stage2-native] alloc_stats string_concat calls=%llu bytes=%llu string_append calls=%llu bytes=%llu substring calls=%llu bytes=%llu array_alloc calls=%llu bytes=%llu\n",
         (unsigned long long)_alloc_stats_string_concat_calls,
         (unsigned long long)_alloc_stats_string_concat_bytes,
+        (unsigned long long)_alloc_stats_string_append_calls,
+        (unsigned long long)_alloc_stats_string_append_bytes,
         (unsigned long long)_alloc_stats_substring_calls,
         (unsigned long long)_alloc_stats_substring_bytes,
         (unsigned long long)_alloc_stats_array_alloc_calls,
@@ -2664,6 +2668,145 @@ char *sailfin_runtime_string_concat(char *a, char *b)
                 preview_buf);
             fflush(stderr);
         }
+    }
+
+    return out;
+}
+
+// =============================================================================
+// String Append (compiler-emitted optimization for chained concatenation)
+// =============================================================================
+//
+// The compiler emits string_append instead of string_concat when it can prove
+// the first argument (`buf`) is an intermediate that:
+//   - Was produced by a prior string_concat or string_append call
+//   - Has not been stored to memory or passed to any other function
+//   - Will not be used after this call (it is consumed)
+//
+// This allows in-place buffer reuse via realloc, avoiding a fresh malloc+copy
+// for each link in a concatenation chain like `a + b + c + d`.
+
+char *sailfin_runtime_string_append(char *buf, char *suffix)
+{
+    _runtime_enter();
+    _maybe_init_alloc_stats();
+
+    // buf is CONSUMED: caller transfers ownership, old pointer becomes invalid.
+    // suffix is BORROWED: not freed, not modified.
+
+    if (!buf || _is_corrupted_string_ptr(buf))
+    {
+        // Degenerate case: fall back to concat semantics.
+        return sailfin_runtime_string_concat(buf, suffix);
+    }
+    if (!suffix || _is_corrupted_string_ptr(suffix))
+    {
+        // Nothing to append — return buf unchanged.
+        if (!suffix)
+        {
+            return buf;
+        }
+        // Corrupted suffix: fall back to concat for its diagnostics.
+        return sailfin_runtime_string_concat(buf, suffix);
+    }
+
+    bool buf_truncated = false;
+    size_t buf_len = _safe_strlen_asan(buf, &buf_truncated);
+    if (buf_truncated)
+    {
+        // Unterminated buffer — fall back to concat for safety.
+        return sailfin_runtime_string_concat(buf, suffix);
+    }
+
+    uint32_t suffix_codepoint = 0;
+    bool suffix_immediate = _is_immediate_codepoint_string(suffix, &suffix_codepoint);
+    unsigned char suffix_buf[5] = {0};
+    bool suffix_truncated = false;
+    size_t suffix_len = suffix_immediate
+                            ? _utf8_encode(suffix_codepoint, suffix_buf)
+                            : _safe_strlen_asan(suffix, &suffix_truncated);
+
+    if (suffix_truncated)
+    {
+        return sailfin_runtime_string_concat(buf, suffix);
+    }
+
+    if (suffix_len == 0)
+    {
+        return buf;
+    }
+
+    // Overflow / limit checks (same as string_concat).
+    static int concat_limit_init = 0;
+    static size_t concat_limit = 0;
+    if (!concat_limit_init)
+    {
+        concat_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_STRING_CONCAT", 20000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        concat_limit = (size_t)limit;
+    }
+    if (concat_limit > 0 && (buf_len + suffix_len) > concat_limit)
+    {
+        fprintf(stderr,
+                "[stage2-native] string_append limit exceeded (buf_len=%zu suffix_len=%zu limit=%zu)\n",
+                buf_len, suffix_len, concat_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string append limit exceeded");
+    }
+    if (buf_len > SIZE_MAX - suffix_len)
+    {
+        sailfin_runtime_raise_value_error("string append overflow");
+    }
+
+    const size_t pad = 64;
+    size_t alloc_size = buf_len + suffix_len + 1 + pad;
+    char *out = (char *)realloc(buf, alloc_size);
+    if (!out)
+    {
+        // On POSIX, realloc failure does not free buf — it remains valid.
+        // buf is still in the owned table so string_drop can eventually free it.
+        fprintf(stderr,
+                "[stage2-native] string_append OOM (buf_len=%zu suffix_len=%zu total=%zu)\n",
+                buf_len, suffix_len, alloc_size);
+        fflush(stderr);
+        return NULL;
+    }
+
+    // Remove old buf pointer from owned table now that realloc succeeded.
+    // (realloc may have returned the same pointer or a new one; either way,
+    // remove the old entry and track the new one below.)
+    if (out != buf)
+    {
+        pthread_mutex_lock(&_sailfin_owned_string_lock);
+        _owned_table_remove_unlocked(buf);
+        pthread_mutex_unlock(&_sailfin_owned_string_lock);
+    }
+
+    if (suffix_immediate)
+    {
+        memcpy(out + buf_len, suffix_buf, suffix_len);
+    }
+    else
+    {
+        memcpy(out + buf_len, suffix, suffix_len);
+    }
+    memset(out + buf_len + suffix_len, 0, 1 + pad);
+
+    _track_owned_string(out);
+
+    if (_alloc_stats_enabled)
+    {
+        _alloc_stats_string_append_calls++;
+        _alloc_stats_string_append_bytes += (uint64_t)alloc_size;
+    }
+
+    if (buf_len + suffix_len >= 1024)
+    {
+        _recent_string_record(out, buf_len + suffix_len);
     }
 
     return out;
