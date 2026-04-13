@@ -426,6 +426,14 @@ fn lower_expression_statement(
     let consumption = ownership_analysis.consumption;
 
     let _pre_call_lines_len = current_lines.length;
+    // Clear the call_result sentinel BEFORE the nested lower_expression call
+    // so that its presence afterwards is a guaranteed signal from THIS call,
+    // not a stale leftover from a prior lvalue assignment in another function.
+    // Without this, the post-call IPC-read branch would overwrite current_temp
+    // and current_lines with stale data, producing duplicate %tN in the IR.
+    if fs.exists("build/sailfin/.call_result_lines_count") {
+        fs.deleteFile("build/sailfin/.call_result_lines_count");
+    }
     let lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
     // ExpressionResult struct fields may be ABI-corrupted crossing module boundaries.
     // Read lines/temp from files written by lower_call_expression instead.
@@ -448,7 +456,16 @@ fn lower_expression_statement(
             print.err("stmt-lowering: read " + number_to_string(_new_lines.length) + " lines from call_result files, current_lines.length=" + number_to_string(current_lines.length));
         }
         let _cr_temp_str = fs.readFile("build/sailfin/.call_result_temp");
-        current_temp = _parse_int_local(_cr_temp_str);
+        let _cr_parsed = _parse_int_local(_cr_temp_str);
+        // Floor-protect: if the file is stale from a prior statement (e.g. a
+        // chained `arr.push(...); pi += 1;`), _cr_parsed can be much lower
+        // than the counter we already have, which would produce duplicate
+        // %tN in the next emission. Never let the counter go below its
+        // current value; _recover_temp_from_lines below also bumps past any
+        // %tN already present in `current_lines`.
+        if _cr_parsed > current_temp {
+            current_temp = _cr_parsed;
+        }
         current_temp = _recover_temp_from_lines(current_lines, current_temp);
         // Clean up sentinel
         fs.deleteFile("build/sailfin/.call_result_lines_count");
