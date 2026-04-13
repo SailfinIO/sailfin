@@ -529,15 +529,7 @@ fn replace_symbol_refs_in_line(line -> string, olds -> string[], news -> string[
     if line.length == 0 {
         return line;
     }
-    // Chunked: walk the line tracking the start of an unchanged run, flushing
-    // a single `substring` when we hit a substitution boundary. Replaces
-    // O(N^2) per-character `out = out + ch` (N = line.length) with O(K^2)
-    // where K = number-of-substitutions-on-the-line. Called for every IR
-    // line, so this is the biggest single hot path on emit_native.sfn —
-    // turning thousands of 50-char lines into thousands of O(2500)-byte
-    // accumulations is what blows the 12GB seedcheck cap.
-    let mut chunks -> string[] = [];
-    let mut run_start -> number = 0;
+    let mut out -> string = "";
     let mut index -> number = 0;
     let mut in_string -> boolean = false;
     loop {
@@ -547,22 +539,28 @@ fn replace_symbol_refs_in_line(line -> string, olds -> string[], news -> string[
         let ch = line[index];
         if ch == "\"" {
             in_string = !in_string;
+            out = out + ch;
             index += 1;
             continue;
         }
         if in_string {
+            out = out + ch;
             index += 1;
             continue;
         }
         if ch != "@" {
+            out = out + ch;
             index += 1;
             continue;
         }
+
         let start = index + 1;
         if start >= line.length {
+            out = out + ch;
             index += 1;
             continue;
         }
+
         let mut end = start;
         loop {
             if end >= line.length {
@@ -575,47 +573,19 @@ fn replace_symbol_refs_in_line(line -> string, olds -> string[], news -> string[
         }
         if end == start {
             // Not a function symbol (e.g. @.str), leave it untouched.
+            out = out + ch;
             index += 1;
             continue;
         }
+
         let sym = substring(line, start, end);
         let replacement_index = find_substitution_index(olds, news, sym);
-        let mut replacement -> string = sym;
         if replacement_index >= 0 {
-            replacement = news[replacement_index];
+            out = out + "@" + news[replacement_index];
+        } else {
+            out = out + "@" + sym;
         }
-        if replacement == sym {
-            // No actual change — keep walking, the original text stays in the
-            // current run (which spans through the @sym).
-            index = end;
-            continue;
-        }
-        // Flush the unchanged prefix [run_start .. index) (includes the '@').
-        if index + 1 > run_start {
-            chunks.push(substring(line, run_start, index + 1));
-        }
-        chunks.push(replacement);
-        run_start = end;
         index = end;
-    }
-    // Trailing unchanged run.
-    if run_start < line.length {
-        chunks.push(substring(line, run_start, line.length));
-    }
-    if chunks.length == 0 {
-        return line;
-    }
-    if chunks.length == 1 {
-        return chunks[0];
-    }
-    let mut out -> string = chunks[0];
-    let mut i -> number = 1;
-    loop {
-        if i >= chunks.length {
-            break;
-        }
-        out = out + chunks[i];
-        i += 1;
     }
     return out;
 }
