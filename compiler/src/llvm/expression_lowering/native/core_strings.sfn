@@ -11,7 +11,6 @@ import {
 import {
     append_string,
     number_to_string,
-    starts_with,
 } from "../../utils";
 
 import {
@@ -62,37 +61,6 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
     };
 }
 
-// Check if an SSA value was defined by a string_concat or string_append call
-// in the given lines array. Used by the peephole to decide whether to emit
-// string_append (in-place realloc) instead of string_concat (fresh malloc).
-fn is_appendable_concat_result(value -> string, lines -> string[]) -> boolean {
-    if value.length == 0 {
-        return false;
-    }
-    // Only SSA temps (%tN) can be intermediate concat results.
-    if !starts_with(value, "%t") {
-        return false;
-    }
-    let concat_prefix = "  " + value + " = call i8* @sailfin_runtime_string_concat(";
-    let append_prefix = "  " + value + " = call i8* @sailfin_runtime_string_append(";
-    // Search backwards — the definition is typically near the end.
-    let mut index -> number = lines.length - 1;
-    loop {
-        if index < 0 {
-            break;
-        }
-        let line = lines[index];
-        if starts_with(line, concat_prefix) {
-            return true;
-        }
-        if starts_with(line, append_prefix) {
-            return true;
-        }
-        index -= 1;
-    }
-    return false;
-}
-
 fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> number, lines -> string[]) -> ExpressionResult {
     let harmonised = harmonise_operands(left, right, temp_index, lines);
     let mut _if121 -> boolean = false;
@@ -123,14 +91,7 @@ fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
         return ExpressionResult { lines: right_aligned.lines, temp_index: right_aligned.temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
     }
     let temp_name = format_temp_name(right_aligned.temp_index);
-    // Peephole: if left operand is a fresh concat/append result, reuse its
-    // buffer via string_append instead of allocating a new one.
-    let use_append = is_appendable_concat_result(left_aligned.operand.value, right_aligned.lines);
-    let mut runtime_fn = "sailfin_runtime_string_concat";
-    if use_append {
-        runtime_fn = "sailfin_runtime_string_append";
-    }
-    let line = "  " + temp_name + " = call i8* @" + runtime_fn + "(i8* " + left_aligned.operand.value + ", i8* " + right_aligned.operand.value + ")";
+    let line = "  " + temp_name + " = call i8* @sailfin_runtime_string_concat(i8* " + left_aligned.operand.value + ", i8* " + right_aligned.operand.value + ")";
     let mut out_lines = append_string(right_aligned.lines, line);
     let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
     // Write result to IPC files so let-lowering picks up the latest value

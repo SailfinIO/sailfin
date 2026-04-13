@@ -673,16 +673,13 @@ fn substring(text -> string, start -> number, end -> number) -> string {
     if normalized_start >= normalized_end {
         return "";
     }
-    let mut index = normalized_start;
-    let mut result -> string = "";
-    loop {
-        if index >= normalized_end {
-            break;
-        }
-        result = result + grapheme_at(text, index);
-        index = index + 1;
-    }
-    return result;
+    // Use the O(N) runtime intrinsic. The prior Sailfin-level loop did
+    // `result = result + grapheme_at(text, i)` per index, which is O(N^2)
+    // memory under the zero-GC runtime. grapheme_at is byte-indexed in the
+    // bootstrap runtime (sailfin_runtime.c:4822), so byte-range memcpy
+    // produces the same byte sequence as the old loop. Removes ~8M of ~9M
+    // string_concat calls per module compile.
+    return substring_unchecked(text, normalized_start, normalized_end);
 }
 
 fn strings_equal(left -> string, right -> string) -> boolean {

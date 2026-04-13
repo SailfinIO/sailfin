@@ -651,27 +651,58 @@ fn encode_string_literal_for_sailfin(content -> string) -> string {
 }
 
 fn escape_string_for_sailfin_literal(content -> string) -> string {
-    let mut result -> string = "";
+    // Chunked: collect runs of unchanged text + escape sequences, then
+    // assemble. Avoids the O(N^2) memory of `result = result + ch` per
+    // character under the zero-GC runtime (every intermediate `result`
+    // survives forever, so a 1KB literal accumulates ~500KB of dead
+    // intermediates per invocation; emit_native.sfn calls this on every
+    // string literal it emits to the .sfn-asm output).
+    let mut chunks -> string[] = [];
+    let mut chunk_start -> number = 0;
     let mut index -> number = 0;
     loop {
         if index >= content.length {
             break;
         }
         let ch = substring(content, index, index + 1);
+        let mut esc -> string = "";
         if ch == "\\" {
-            result = result + "\\\\";
+            esc = "\\\\";
         } else if ch == "\"" {
-            result = result + "\\\"";
+            esc = "\\\"";
         } else if ch == "\n" {
-            result = result + "\\n";
+            esc = "\\n";
         } else if ch == "\r" {
-            result = result + "\\r";
+            esc = "\\r";
         } else if ch == "\t" {
-            result = result + "\\t";
-        } else {
-            result = result + ch;
+            esc = "\\t";
+        }
+        if esc.length > 0 {
+            if index > chunk_start {
+                chunks.push(substring(content, chunk_start, index));
+            }
+            chunks.push(esc);
+            chunk_start = index + 1;
         }
         index += 1;
+    }
+    if chunk_start < content.length {
+        chunks.push(substring(content, chunk_start, content.length));
+    }
+    if chunks.length == 0 {
+        return "";
+    }
+    if chunks.length == 1 {
+        return chunks[0];
+    }
+    let mut result -> string = chunks[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= chunks.length {
+            break;
+        }
+        result = result + chunks[i];
+        i += 1;
     }
     return result;
 }

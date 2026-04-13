@@ -150,27 +150,58 @@ fn escape_string_for_llvm(content -> string) -> string {
     if content == null {
         return "";
     }
-    let mut result -> string = "";
+    // Build the result by collecting unchanged-text runs and escape sequences
+    // as chunks, then assemble at the end. The previous implementation did
+    // `result = result + ch` per character, which is O(N^2) in memory under
+    // the zero-GC runtime — every intermediate `result` survives forever.
+    // Chunking reduces concats from N to ~(2 * number-of-escape-chars + 1),
+    // which is small for typical LLVM string constants.
+    let mut chunks -> string[] = [];
+    let mut chunk_start -> number = 0;
     let mut index -> number = 0;
     loop {
         if index >= content.length {
             break;
         }
         let ch = substring(content, index, index + 1);
+        let mut esc -> string = "";
         if ch == "\n" {
-            result = result + "\\0A";
+            esc = "\\0A";
         } else if ch == "\r" {
-            result = result + "\\0D";
+            esc = "\\0D";
         } else if ch == "\t" {
-            result = result + "\\09";
+            esc = "\\09";
         } else if ch == "\"" {
-            result = result + "\\22";
+            esc = "\\22";
         } else if ch == "\\" {
-            result = result + "\\5C";
-        } else {
-            result = result + ch;
+            esc = "\\5C";
+        }
+        if esc.length > 0 {
+            if index > chunk_start {
+                chunks.push(substring(content, chunk_start, index));
+            }
+            chunks.push(esc);
+            chunk_start = index + 1;
         }
         index += 1;
+    }
+    if chunk_start < content.length {
+        chunks.push(substring(content, chunk_start, content.length));
+    }
+    if chunks.length == 0 {
+        return "";
+    }
+    if chunks.length == 1 {
+        return chunks[0];
+    }
+    let mut result -> string = chunks[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= chunks.length {
+            break;
+        }
+        result = result + chunks[i];
+        i += 1;
     }
     return result;
 }
