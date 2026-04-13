@@ -174,6 +174,73 @@ Use direct tools (Read, Grep, Glob) instead of agents when:
 
 Agents add value for open-ended investigation, cross-cutting analysis, and tasks requiring deep reasoning. Don't spawn an agent for work you can do in one tool call.
 
+## Task Tracking
+
+The roadmap (`docs/roadmap.md`) is strategic — it lists epics, not session-sized work. Actual day-to-day work lives in **GitHub Issues**, scoped tightly enough that a single Claude session can take an issue from open to merged PR.
+
+### The flow
+
+```
+docs/roadmap.md (epics)
+       │
+       │  /groom <epic>           — compiler-architect breaks epic into XS/S/M issues
+       ▼
+GitHub Issues (claude-ready)
+       │
+       │  /triage                 — auto-audits issue hygiene; releases stale work
+       ▼
+GitHub Issues (pickable)
+       │
+       │  /pickup [#N]            — claim, branch, work, PR (autonomous)
+       ▼
+PR opened, issue auto-closed on merge
+```
+
+### Issue contract
+
+Every `claude-ready` issue uses the template at `.github/ISSUE_TEMPLATE/claude-task.md` and contains:
+
+- **Goal** — one sentence
+- **Scope** — explicit `In:` and `Out:` lists (prevents scope creep)
+- **Acceptance Criteria** — verifiable, pass/fail items
+- **Files Affected** — every file the implementation touches
+- **Verification** — exact commands a reviewer can run
+- **Size** — XS (<1hr) / S (1-3hr) / M (3-6hr) — never L
+- **Type** — feature / bug / perf / refactor (determines workflow)
+- **Blocked by** — issue numbers that must close first
+
+If any section is missing or vague, the issue is not pickable.
+
+### Labels
+
+| Label | Meaning |
+|---|---|
+| `claude-ready` | Fully groomed, no blockers, ready for `/pickup` |
+| `needs-grooming` | Exists as a placeholder; needs scope/criteria filled in |
+| `in-progress` | Currently being worked; do not pick up |
+| `blocked` | Has open dependencies; recheck after blocker closes |
+| `type:feature` / `type:bug` / `type:perf` / `type:refactor` | Determines pickup workflow |
+| `size:xs` / `size:s` / `size:m` | Effort estimate (no `size:l` — L items must be groomed down) |
+| `priority:critical` / `priority:high` | Pickup priority overrides |
+
+### When to use what
+
+| Situation | Command |
+|---|---|
+| User requests a roadmap-sized initiative | `/groom <epic>` to break into issues, then work them |
+| User requests a specific small change | Skip the issue tracker — just do the work or use `/add-feature` directly |
+| Scheduled / autonomous session | `/pickup` (no args) — picks the highest-priority unblocked issue |
+| Working a specific known issue | `/pickup <N>` |
+| Issue queue feels stale | `/triage` |
+| Performance hot path identified | `/perf <subsystem>` (with or without an issue) |
+
+### Anti-patterns
+
+- **Don't pick up a `needs-grooming` issue.** Run `/groom` on it first to flesh out the contract, then pick it up.
+- **Don't expand scope mid-session.** If an issue's `In:` is wrong, comment on the issue and pause for human input.
+- **Don't bundle multiple issues into one PR** unless they're explicitly listed as a single issue. Issues were sized to be standalone.
+- **Don't use `/pickup` to pull from the roadmap directly.** The roadmap isn't pickable. Issues are.
+
 ## Common Development Patterns
 
 ### Adding a Language Feature
