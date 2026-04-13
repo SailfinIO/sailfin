@@ -320,7 +320,7 @@ clean-build:
 clean-all: clean clean-build
 
 compile:
-	@if [ -x "$(NATIVE_BIN)" ] && \
+	@if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
 		[ -z "$$(find compiler/src runtime -type f \( -name '*.sfn' -o -name '*.py' \) -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
 	else \

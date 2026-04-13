@@ -45,6 +45,10 @@ CLANG="${CLANG:-clang}"
 SEED_TIMEOUT="${SEED_TIMEOUT:-180}"
 MAX_TOTAL="${MAX_TOTAL:-1200}"
 VERBOSE="${VERBOSE:-0}"
+# EMIT_RETRIES: how many times to re-run seed emit on empty/invalid output.
+#   Production default: 3 (tolerates sporadic memory corruption).
+#   Diagnostic runs:    1 (measures raw failure rate — no re-rolling the dice).
+EMIT_RETRIES="${EMIT_RETRIES:-3}"
 BUILD_MODULE_WORKER=0
 WORKER_INDEX=""
 WORKER_SRC=""
@@ -52,14 +56,6 @@ WORKER_SRC=""
 # Build directories (overridable via --work-dir)
 WORK_DIR="${WORK_DIR:-build/selfhost/native}"
 
-# Clang flags shared across all compilations
-CLANG_FLAGS="$OPT -Wno-override-module -fno-delete-null-pointer-checks"
-# WORKAROUND: The current seed emits typed pointer IR, but newer LLVM versions
-# default to opaque pointers. Try adding the compatibility flag if clang accepts it.
-# TODO: Remove once the compiler emits opaque pointer IR natively.
-if echo "" | "$CLANG" -Xclang -no-opaque-pointers -x c -c - -o /dev/null 2>/dev/null; then
-    CLANG_FLAGS="$CLANG_FLAGS -Xclang -no-opaque-pointers"
-fi
 
 # Track start time for wall-time budget
 START_TIME="$(date +%s)"
@@ -81,7 +77,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --seed)     SEED="$2"; shift 2 ;;
         --out)      OUT="$2"; shift 2 ;;
-        --opt)      OPT="$2"; CLANG_FLAGS="$OPT -Wno-override-module -fno-delete-null-pointer-checks"; shift 2 ;;
+        --opt)      OPT="$2"; shift 2 ;;
         --jobs)     JOBS="$2"; shift 2 ;;
         --clang)    CLANG="$2"; shift 2 ;;
         --timeout)  SEED_TIMEOUT="$2"; shift 2 ;;
@@ -103,6 +99,44 @@ RAW_DIR="$WORK_DIR/raw"
 OBJ_DIR="$WORK_DIR/obj"
 SEED_CWD="$WORK_DIR/seed_cwd"
 IMPORT_CACHE="$SEED_CWD/build/native/import-context"
+
+# Diagnostic artifacts (per-build, written under $WORK_DIR so diff experiments
+# using --work-dir get their own logs automatically).
+RETRY_LOG="${RETRY_LOG:-$WORK_DIR/retries.log}"
+CORRUPTED_DIR="${CORRUPTED_DIR:-$WORK_DIR/corrupted}"
+
+# Clang flags shared across all compilations. Composed post-argparse so that
+# --opt, --clang, and OPAQUE_POINTERS are all honored consistently.
+CLANG_FLAGS="$OPT -Wno-override-module -fno-delete-null-pointer-checks"
+# Opaque pointer handling. Pin explicitly via OPAQUE_POINTERS env var when
+# mixing clang versions across machines, so the IR pipeline doesn't silently
+# diverge between runs:
+#   OPAQUE_POINTERS=auto (default) — probe clang, add -no-opaque-pointers if supported
+#   OPAQUE_POINTERS=off             — force -Xclang -no-opaque-pointers (fail if rejected)
+#   OPAQUE_POINTERS=on              — leave clang in default (modern) opaque-pointer mode
+# TODO: Remove once the compiler emits opaque pointer IR natively.
+OPAQUE_POINTERS_MODE="${OPAQUE_POINTERS:-auto}"
+case "$OPAQUE_POINTERS_MODE" in
+    off)
+        if echo "" | "$CLANG" -Xclang -no-opaque-pointers -x c -c - -o /dev/null 2>/dev/null; then
+            CLANG_FLAGS="$CLANG_FLAGS -Xclang -no-opaque-pointers"
+        else
+            echo "[build][error] OPAQUE_POINTERS=off but $CLANG does not accept -no-opaque-pointers" >&2
+            exit 1
+        fi
+        ;;
+    on)
+        : ;;
+    auto)
+        if echo "" | "$CLANG" -Xclang -no-opaque-pointers -x c -c - -o /dev/null 2>/dev/null; then
+            CLANG_FLAGS="$CLANG_FLAGS -Xclang -no-opaque-pointers"
+        fi
+        ;;
+    *)
+        echo "[build][error] OPAQUE_POINTERS must be one of: auto, on, off (got: $OPAQUE_POINTERS_MODE)" >&2
+        exit 1
+        ;;
+esac
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -151,6 +185,58 @@ seed_run() {
 }
 
 # ---------------------------------------------------------------------------
+# Diagnostic helpers for the emit retry loop
+# ---------------------------------------------------------------------------
+# _retry_log module attempt reason exit_code
+#   Append one structured line per retry attempt (including post-success
+#   records when a retry was needed or the seed exited non-zero). Single-line
+#   printf >> append is atomic for lines under PIPE_BUF (~4KB on Linux),
+#   which is enough for our schema.
+_retry_log() {
+    local module="$1" attempt="$2" reason="$3" exit_code="$4"
+    [[ -n "${RETRY_LOG:-}" ]] || return 0
+    mkdir -p "$(dirname "$RETRY_LOG")" 2>/dev/null || true
+    printf 'timestamp=%s module=%s attempt=%s reason=%s exit_code=%s\n' \
+        "$(date +%s)" "$module" "$attempt" "$reason" "$exit_code" \
+        >>"$RETRY_LOG" 2>/dev/null || true
+}
+
+# _capture_corrupted module attempt bad_ll err_log reason
+#   Stash the bad .ll and stderr so we can build a corruption corpus across
+#   many builds (pattern-hunting: always at offset X, always near identifier
+#   Y, always after construct Z).
+_capture_corrupted() {
+    local module="$1" attempt="$2" bad_ll="$3" err_log="$4" reason="$5"
+    [[ -n "${CORRUPTED_DIR:-}" ]] || return 0
+    mkdir -p "$CORRUPTED_DIR" 2>/dev/null || true
+    local ts
+    ts="$(date +%s)"
+    local dest="$CORRUPTED_DIR/${module}.${ts}.attempt${attempt}.${reason}"
+    if [[ -s "$bad_ll" ]]; then
+        cp -f "$bad_ll" "${dest}.ll" 2>/dev/null || true
+    fi
+    if [[ -s "$err_log" ]]; then
+        cp -f "$err_log" "${dest}.stderr" 2>/dev/null || true
+    fi
+}
+
+# _validate_ll path
+#   Full-file LLVM IR parse. Catches mid-file corruption (stray UTF-8 bytes
+#   in a function body, truncated globals, etc.) that the fast head-20 check
+#   doesn't see. Uses llvm-as when available (cheap parse, no codegen);
+#   falls back to clang with the same flags as the downstream compile so
+#   behavior matches what the later step would produce.
+_validate_ll() {
+    local ll="$1"
+    if [[ -n "${LLVM_AS:-}" ]]; then
+        "$LLVM_AS" -disable-output "$ll"
+    else
+        # shellcheck disable=SC2086
+        "$CLANG" $CLANG_FLAGS -c -emit-llvm -x ir -o /dev/null "$ll"
+    fi
+}
+
+# ---------------------------------------------------------------------------
 # Find llvm-link
 # ---------------------------------------------------------------------------
 find_llvm_link() {
@@ -175,6 +261,35 @@ find_llvm_link() {
     fi
     die "llvm-link not found (set LLVM_LINK or install LLVM tools)"
 }
+
+# ---------------------------------------------------------------------------
+# Find llvm-as (used by _validate_ll to parse IR for full-file validation)
+# ---------------------------------------------------------------------------
+find_llvm_as() {
+    if [[ -n "${LLVM_AS_BIN:-}" ]] && command -v "$LLVM_AS_BIN" &>/dev/null; then
+        echo "$LLVM_AS_BIN"
+        return
+    fi
+    for cand in llvm-as llvm-as-{30..14}; do
+        if command -v "$cand" &>/dev/null; then
+            echo "$cand"
+            return
+        fi
+    done
+    if [[ "$(uname -s)" == "Darwin" ]]; then
+        local brew_prefix
+        brew_prefix="$(brew --prefix llvm 2>/dev/null || true)"
+        if [[ -n "$brew_prefix" && -x "$brew_prefix/bin/llvm-as" ]]; then
+            echo "$brew_prefix/bin/llvm-as"
+            return
+        fi
+    fi
+    echo ""  # not found — _validate_ll falls back to clang
+}
+
+# Discover llvm-as once so build_module (main + worker) can reuse it.
+LLVM_AS="$(find_llvm_as)"
+export LLVM_AS
 
 # ---------------------------------------------------------------------------
 # Resolve seed compiler
@@ -209,10 +324,10 @@ RUNTIME_SRC="$REPO_ROOT/runtime"
 SOURCES=()
 while IFS= read -r -d '' f; do
     SOURCES+=("$f")
-done < <(find "$COMPILER_SRC" -name '*.sfn' -print0 | sort -z)
+done < <(find "$COMPILER_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
 while IFS= read -r -d '' f; do
     SOURCES+=("$f")
-done < <(find "$RUNTIME_SRC" -name '*.sfn' -print0 | sort -z)
+done < <(find "$RUNTIME_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
 
 [[ ${#SOURCES[@]} -gt 0 ]] || die "no .sfn sources found"
 log "found ${#SOURCES[@]} source modules"
@@ -319,29 +434,55 @@ build_module() {
     # Emit LLVM IR to file via -o flag.
     # Run from module_cwd so the seed picks up staged import-context.
     # Diagnostics go to stderr (via print.err) so stdout/file output is clean LLVM IR.
-    # Retry up to 3 times: memory corruption can inject stray bytes into the output.
+    #
+    # Retry policy: controlled by EMIT_RETRIES (default 3; set to 1 for
+    # diagnostic runs to measure raw per-module failure rate).
+    #
+    # Every failed attempt:
+    #   - captures the bad .ll + stderr to $CORRUPTED_DIR (corpus-building)
+    #   - writes a structured line to $RETRY_LOG
+    # The seed's exit code is captured — not swallowed by `|| true` — so a
+    # segfault after a write-through is logged even when the output looks OK.
     local stderr_log="${abs_ll_path}.stderr"
+    local validate_log="${abs_ll_path}.validate"
     local attempt=0
-    local max_attempts=3
+    local max_attempts="${EMIT_RETRIES:-3}"
+    [[ "$max_attempts" =~ ^[0-9]+$ ]] || max_attempts=3
+    [[ "$max_attempts" -ge 1 ]] || max_attempts=1
+    local seed_exit=0
     while [[ $attempt -lt $max_attempts ]]; do
         attempt=$((attempt + 1))
-        rm -f "$abs_ll_raw"
-        # Tolerate segfault during cleanup if the output file was written
-        (cd "$module_cwd" && seed_run "$SEED" emit -o "$abs_ll_raw" llvm "$abs_src") 2>"$stderr_log" || true
+        rm -f "$abs_ll_raw" "$validate_log"
+
+        # Capture seed exit code explicitly (don't swallow with `|| true`).
+        # `set +e` scopes the suspension to just this invocation.
+        set +e
+        (cd "$module_cwd" && seed_run "$SEED" emit -o "$abs_ll_raw" llvm "$abs_src") 2>"$stderr_log"
+        seed_exit=$?
+        set -e
+
+        # --- Failure mode 1: empty or missing output ------------------------
         if [[ ! -s "$abs_ll_raw" ]]; then
+            _capture_corrupted "$module_name" "$attempt" "$abs_ll_raw" "$stderr_log" "empty_output"
+            _retry_log "$module_name" "$attempt" "empty_output" "$seed_exit"
             if [[ $attempt -lt $max_attempts ]]; then
-                echo "[build] $module_name: empty output (attempt $attempt/$max_attempts), retrying..." >&2
+                echo "[build] $module_name: empty output (attempt $attempt/$max_attempts, exit=$seed_exit), retrying..." >&2
                 continue
             fi
-            echo "[build] FAIL: seed emit produced no output for $module_name" >&2
+            echo "[build] FAIL: seed emit produced no output for $module_name (exit=$seed_exit)" >&2
             [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
             rm -f "$stderr_log"
             return 1
         fi
-        # Validate: output must look like LLVM IR
+
+        # --- Failure mode 2: header doesn't look like LLVM IR --------------
+        # Fast-path check — catches header-region corruption cheaply before
+        # we pay for a full parse.
         if ! head -20 "$abs_ll_raw" | grep -qE "define|declare|target|source_filename|ModuleID"; then
+            _capture_corrupted "$module_name" "$attempt" "$abs_ll_raw" "$stderr_log" "invalid_header"
+            _retry_log "$module_name" "$attempt" "invalid_header" "$seed_exit"
             if [[ $attempt -lt $max_attempts ]]; then
-                echo "[build] $module_name: invalid IR header (attempt $attempt/$max_attempts), retrying..." >&2
+                echo "[build] $module_name: invalid IR header (attempt $attempt/$max_attempts, exit=$seed_exit), retrying..." >&2
                 continue
             fi
             echo "[build] FAIL: seed output for $module_name is not valid LLVM IR" >&2
@@ -350,11 +491,38 @@ build_module() {
             rm -f "$stderr_log"
             return 1
         fi
-        # Output passed validation
+
+        # --- Failure mode 3: mid-file corruption ---------------------------
+        # Full-file parse via llvm-as (or clang fallback). This is the check
+        # the head-20 grep can't make: stray bytes inside a function body,
+        # truncated constants, etc., which otherwise sail through to clang
+        # and surface as confusing errors at a completely different step.
+        if ! _validate_ll "$abs_ll_raw" >"$validate_log" 2>&1; then
+            _capture_corrupted "$module_name" "$attempt" "$abs_ll_raw" "$validate_log" "invalid_ir"
+            _retry_log "$module_name" "$attempt" "invalid_ir" "$seed_exit"
+            if [[ $attempt -lt $max_attempts ]]; then
+                echo "[build] $module_name: IR validation failed (attempt $attempt/$max_attempts, exit=$seed_exit), retrying..." >&2
+                continue
+            fi
+            echo "[build] FAIL: seed output for $module_name fails IR validation (exit=$seed_exit)" >&2
+            [[ -s "$validate_log" ]] && tail -20 "$validate_log" >&2
+            [[ -s "$stderr_log" ]] && cat "$stderr_log" >&2
+            rm -f "$stderr_log" "$validate_log"
+            return 1
+        fi
+
+        # --- Success path --------------------------------------------------
+        # Log eventual-success cases so retries.log stays informative:
+        #   - attempt > 1 means we hit corruption and recovered
+        #   - seed_exit != 0 means the seed segfaulted after writing valid IR
+        #     (a known-bug workaround today, but worth recording as signal)
+        if [[ $attempt -gt 1 || $seed_exit -ne 0 ]]; then
+            _retry_log "$module_name" "$attempt" "success_after_retry" "$seed_exit"
+        fi
         break
     done
     mv "$abs_ll_raw" "$ll_path"
-    rm -f "$stderr_log"
+    rm -f "$stderr_log" "$validate_log"
 
     echo "$module_name"
     return 0
@@ -411,14 +579,15 @@ stage_import_context() {
 
     mkdir -p "$(dirname "$asm_dest")"
 
-    # Emit native text (.sfn-asm)
-    local native_text
-    if ! native_text="$(seed_run "$SEED" emit native "$src" 2>/dev/null)"; then
+    # Emit native text (.sfn-asm) with a direct redirect. Bash command
+    # substitution strips trailing newlines and re-encodes through the
+    # shell's locale, which can mangle any non-ASCII bytes in the seed's
+    # output (intentional or from corruption). Pipe straight to the file.
+    if ! seed_run "$SEED" emit native "$src" >"$asm_dest" 2>/dev/null; then
         warn "failed to emit native for $slug"
+        rm -f "$asm_dest"
         return 0
     fi
-
-    echo "$native_text" > "$asm_dest"
 
     # Extract .layout lines for the manifest
     grep '^\.\(layout\)' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
@@ -465,6 +634,12 @@ else
     ' _ 2>"$RAW_DIR/build_errors.txt" || FAILED=1
 
     if [[ "$FAILED" -eq 0 ]]; then
+        # Parallel workers append to MODULES_LIST concurrently. Even if each
+        # append is atomic (single-line printf, well under PIPE_BUF), the
+        # *order* of lines is nondeterministic — and downstream llvm-link
+        # input order affects the final linked bitcode. Sort here so every
+        # run with the same source tree produces the same link order.
+        LC_ALL=C sort -o "$MODULES_LIST" "$MODULES_LIST"
         while IFS= read -r name; do
             MODULE_NAMES+=("$name")
         done < "$MODULES_LIST"
