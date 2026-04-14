@@ -49,8 +49,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 
 ## Critical Constraints
 
-- **Never modify `scripts/selfhost_native.py` to work around compiler bugs** — fix the compiler source instead
-- **Never add new fixup passes** — reduce the existing ~30 passes by fixing root causes
+- **Never add fixup passes to build scripts** — fix the compiler source instead
 - **Never use the Python bootstrap (Stage0)** — all work targets the native compiler
 - **Self-hosting invariant:** the compiler must always compile itself after your changes
 - **No pipeline operator (`|>`)** — use function calls (bootstrap limitation)

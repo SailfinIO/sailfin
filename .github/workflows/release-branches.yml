@@ -53,14 +53,6 @@ jobs:
             - name: Checkout repository
               uses: actions/checkout@v6
 
-            - name: Set up Miniconda
-              uses: conda-incubator/setup-miniconda@v3
-              with:
-                  activate-environment: sailfin
-                  environment-file: environment.yml
-                  auto-update-conda: false
-                  use-mamba: true
-
             - name: Install clang (Linux)
               if: runner.os == 'Linux'
               run: |
@@ -85,7 +77,7 @@ jobs:
                   seed_version: ${{ env.SEED_VERSION }}
 
             - name: Report compiler metadata
-              shell: bash -l {0}
+              shell: bash {0}
               run: |
                   set -euo pipefail
                   ls -lh build/native/sailfin

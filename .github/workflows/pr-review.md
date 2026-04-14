@@ -85,7 +85,7 @@ Verify code quality, test coverage, and project standards.
 - [ ] Effects declared explicitly and minimally on all functions
 - [ ] `CamelCase` for types/models/capsules, `snake_case` for functions/locals
 - [ ] Commits use Conventional Commit prefixes
-- [ ] No new fixup passes added to `scripts/selfhost_native.py`
+- [ ] No fixup passes added to build scripts
 - [ ] No Python bootstrap (Stage0) usage
 
 ### Test Coverage

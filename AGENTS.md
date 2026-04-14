@@ -9,18 +9,12 @@
 
 ## Build, Test, and Development Commands
 
-- `make env` provisions or updates the `sailfin` Conda env defined in `environment.yml`.
 - `make test` runs all test cases (using an already compiled build).
 - `make compile` builds the compiler by self-hosting from the latest released seed.
 - `make check` compiles (if needed) and runs the full test suite.
 - `make install` installs the built compiler binary into `PREFIX/bin` (default: `~/.local/bin`).
 - `make clean` removes packaged artifacts (`dist/`).
-- if you need to do some debugging, use the /scratch directory and run/place scripts there. This is a conda environment so you may have to account for your path to the compiler when running scripts.
-- Do not under any circumstances use here-doc (<<'PY') commands. They WILL NOT WORK in your environment. Use scratch files instead.
-
-## Coding Style & Naming Conventions
-
-- Python modules observe PEP 8 with four-space indentation, `snake_case` functions, and narrow compiler passes; share helpers instead of duplicating parsing logic.
+- If you need to do some debugging, use the /scratch directory and run/place scripts there.
 - Sailfin files spell effects explicitly (`fn foo() -> Bar ![io, model]`), keep lists ordered by impact, and use `CamelCase` for models or capsules while locals remain `snake_case`.
 - Align terminology with `docs/spec.md` (capsule, fleet, provenance card) and note currency or latency literals as comments until syntax support arrives.
 

@@ -32,12 +32,9 @@ Key language features:
 ## Build, Test, and Development Commands
 
 ```bash
-make env              # Create/update the 'sailfin' Conda environment
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
 make install          # Install the built compiler into PREFIX/bin (default: /usr/local/bin)
 make rebuild          # Force a rebuild from a released seed
-make smoke            # Rebuild + run smoke tests
-make rebuild-asan     # Rebuild with AddressSanitizer (diagnostic)
 make check            # Compile (if needed) then run the full test suite
 make test             # Run unit + integration + e2e suites
 make test-unit        # Run Sailfin-native unit tests
@@ -46,7 +43,7 @@ make clean            # Remove dist/ artifacts
 make clean-build      # Remove build/* artifacts (keeps build/seed by default)
 ```
 
-For debugging, place scripts in `/scratch` (a conda environment — account for your path to the compiler). **Never use here-doc (`<<'PY'`) syntax — it will not work. Use scratch files instead.**
+For debugging, place scripts in `/scratch`.
 
 ## Compiler Pipeline
 
@@ -135,7 +132,7 @@ Update documents in this order when behaviour changes:
 - Use Conventional Commit prefixes: `feat(compiler): …`, `fix(bootstrap): …`, etc.
 - Keep commits atomic; mention touched capsules; co-author doc changes in the same PR.
 - PRs must include: scope summary, verification commands (`make test`, targeted runs), and notes on doc updates.
-- `python-semantic-release` drives automated releases — use `fix:` or `feat:` prefixes when a new prerelease is expected.
+- Releases are manually triggered via `.github/workflows/release.yml` (pure bash) — use `fix:` or `feat:` prefixes in commit messages.
 
 ## Source of Truth Documents
 

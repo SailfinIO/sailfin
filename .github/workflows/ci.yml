@@ -2,8 +2,8 @@ name: CI (PR)
 
 env:
   # Pinned seed used for self-host bootstrap in CI.
-  # 0.5.0-alpha.22: first seed that produces clean LLVM IR (no Python fixups needed).
-  SEED_VERSION: 0.5.0-alpha.22
+  # 0.5.0-alpha.24: ring-buffer corruption fix, consistent -O2, diagnostic scripts.
+  SEED_VERSION: 0.5.0-alpha.24
 
 permissions:
   contents: read
@@ -41,14 +41,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Set up Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          activate-environment: sailfin
-          environment-file: environment.yml
-          auto-update-conda: false
-          use-mamba: true
-
       - name: Install clang (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -74,7 +66,7 @@ jobs:
           seed_version: ${{ env.SEED_VERSION }}
 
       - name: Report compiler metadata
-        shell: bash -l {0}
+        shell: bash {0}
         run: |
           set -euo pipefail
           ls -lh build/native/sailfin
@@ -83,7 +75,7 @@ jobs:
 
       - name: Enable test runner trace (macOS)
         if: runner.os == 'macOS'
-        shell: bash -l {0}
+        shell: bash {0}
         run: |
           set -euo pipefail
           mkdir -p build/sailfin
@@ -93,7 +85,7 @@ jobs:
         if: runner.os == 'macOS'
         id: mac_test_preflight
         continue-on-error: true
-        shell: bash -l {0}
+        shell: bash {0}
         run: |
           set -euo pipefail
           build/native/sailfin test compiler/tests/unit/cli_version_test.sfn
@@ -102,7 +94,7 @@ jobs:
         if: >-
           (matrix.package_label == 'linux-x86_64' || matrix.package_label == 'macos-arm64') &&
           (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/rc')
-        shell: bash -l {0}
+        shell: bash {0}
         run: |
           set -euo pipefail
           SEED="build/native/sailfin" \
@@ -145,10 +137,10 @@ jobs:
 
       - name: Cross-compile for Windows (Linux)
         if: matrix.package_label == 'linux-x86_64'
-        shell: bash -l {0}
+        shell: bash {0}
         run: |
           set -euo pipefail
-          CONDA=$(which conda) make ci-cross-windows
+          make ci-cross-windows
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v7

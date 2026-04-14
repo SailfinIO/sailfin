@@ -14,11 +14,7 @@ The primary compiler is the self-hosted native compiler (legacy name: stage2). T
 
 To get started with the Sailfin project, please refer to the [README.md](README.md) for a project overview and the [docs/README.md](docs/README.md) for the documentation navigation map.
 
-Before you begin, ensure you have the `sailfin` Conda environment set up:
-
-```bash
-make env
-```
+Prerequisites: `clang`, `bash`, and LLVM tools required by the native build scripts (notably `llvm-link`). `jq` is also useful for `make fetch-seed`. No Conda or Python is required.
 
 ## Development Workflow
 
@@ -37,14 +33,11 @@ The primary workflow for development is as follows:
 
 The following commands are available for development:
 
-- `make env`: Create or update the Conda environment used for the compiler.
+- `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
 - `make install`: Install the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
 - `make test`: Run the full suite.
-- `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
 - `make check`: Compile (if needed) then run the full test suite.
 - `make rebuild`: Force rebuild the compiler from a released seed.
-- `make smoke`: Rebuild + run smoke tests.
-- `make rebuild-asan`: Rebuild with AddressSanitizer instrumentation (diagnostic).
 - `make clean`: Remove packaged artifacts (`dist/`).
 
 ## Documentation
