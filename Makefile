@@ -338,8 +338,9 @@ check:
 	@echo "[check] running test suite on first-pass binary (early gate)..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin
 	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
-	@echo "[check] verifying seed selfhost..."
+	@echo "[check] verifying seed selfhost (stage2)..."
 	@SEED="build/native/sailfin" OUT="build/native/sailfin-seedcheck" OPT="-O0" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
+		WORK_DIR="build/selfhost/native-seedcheck" \
 		bash scripts/build.sh
 	@echo "[check] validating seedcheck binary can run programs..."
 	@sc="build/native/sailfin-seedcheck"; \
@@ -353,6 +354,49 @@ check:
 	echo "[check] seedcheck binary runs hello-world.sfn OK"
 	@echo "[check] running test suite with seedcheck binary (no fallbacks)..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
+	@echo ""
+	@echo "[check] stage2 tests passed — building stage3 for fixed-point comparison..."
+	@SEED="build/native/sailfin-seedcheck" OUT="build/native/sailfin-stage3" OPT="-O0" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
+		WORK_DIR="build/selfhost/native-stage3" \
+		bash scripts/build.sh
+	@echo "[check] comparing stage2 vs stage3 LLVM IR (fixed-point check)..."
+	@s2="build/selfhost/native-seedcheck/raw"; \
+	s3="build/selfhost/native-stage3/raw"; \
+	s2_hashes=$$(find "$$s2" -name '*.ll' -exec sha256sum {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | sha256sum | awk '{print $$1}'); \
+	s3_hashes=$$(find "$$s3" -name '*.ll' -exec sha256sum {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | sha256sum | awk '{print $$1}'); \
+	if [ "$$s2_hashes" = "$$s3_hashes" ]; then \
+		echo "[check] stage2 == stage3: compiler is a fixed point ✓"; \
+	else \
+		echo "[check][WARN] stage2 != stage3: compiler output is not yet a fixed point"; \
+		echo "[check][WARN] differing modules:"; \
+		for f in $$s2/*.ll; do \
+			base=$$(basename "$$f"); \
+			s3f="$$s3/$$base"; \
+			if [ -f "$$s3f" ]; then \
+				h2=$$(sha256sum "$$f" | awk '{print $$1}'); \
+				h3=$$(sha256sum "$$s3f" | awk '{print $$1}'); \
+				if [ "$$h2" != "$$h3" ]; then \
+					echo "[check][WARN]   $$base (stage2=$${h2:0:12}... stage3=$${h3:0:12}...)"; \
+				fi; \
+			else \
+				echo "[check][WARN]   $$base (missing in stage3)"; \
+			fi; \
+		done; \
+		echo "[check][WARN] this may indicate intermittent IR corruption — rerun or investigate"; \
+	fi
+
+# Pre-release determinism gate. Runs the emit harness at parallel load to
+# detect intermittent IR corruption. Use before cutting a seed release.
+# Override iteration count via CHECK_DET_ITERS (default 10).
+CHECK_DET_ITERS ?= 10
+CHECK_DET_JOBS ?= 4
+check-determinism:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[check-determinism] missing $(NATIVE_BIN) (run: make compile)"; \
+		exit 1; \
+	fi
+	@echo "[check-determinism] running determinism sweep (jobs=$(CHECK_DET_JOBS) iters=$(CHECK_DET_ITERS))..."
+	@bash scripts/diag_determinism_sweep.sh --seed "$(NATIVE_BIN)" --jobs $(CHECK_DET_JOBS) --iters $(CHECK_DET_ITERS)
 
 # =============================================================================
 # Packaging (release artifacts)
