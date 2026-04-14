@@ -723,13 +723,13 @@ Subprocess execution and process lifecycle. Requires `![io]`.
 
 ```sfn
 // Planned — not yet implemented
-process.exec(command: string) -> ProcessResult ![io]
-process.exit(code: int) -> never ![io]
+process.exec(command: String) -> ProcessResult ![io]
+process.exit(code: Int) -> never ![io]
 
 struct ProcessResult {
-    stdout -> string;
-    stderr -> string;
-    exit_code -> int;
+    stdout -> String;
+    stderr -> String;
+    exit_code -> Int;
 }
 ```
 
@@ -741,7 +741,7 @@ Structured concurrency primitives to complement the `routine`/`scope` keywords.
 
 ```sfn
 // Planned — not yet implemented
-channel<T>(capacity: int = 0) -> Channel<T> ![io]
+channel<T>(capacity: Int = 0) -> Channel<T> ![io]
 Channel<T>.send(value: T) -> void ![io]
 Channel<T>.recv() -> T ![io]
 Channel<T>.close() -> void ![io]
@@ -761,7 +761,7 @@ model MyModel {
     max_tokens: 1024;
 }
 
-fn classify(text: string) -> string ![model] {
+fn classify(text: String) -> String ![model] {
     prompt MyModel {
         user: "Classify the following: " + text;
     }
