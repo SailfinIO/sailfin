@@ -109,13 +109,13 @@ test: test-unit test-integration test-e2e
 # Install a released seed compiler into the workspace.
 # Requires a GitHub token in GITHUB_TOKEN.
 SEED_REPO ?= SailfinIO/sailfin
-SEED_VERSION ?= 0.5.0-alpha.22
+SEED_VERSION ?= 0.5.0-alpha.24
 SEED_EXCLUDE_TAG ?=
 SEED_INSTALL_BASE ?= build/seed/versions
 SEED_GLOBAL_BIN_DIR ?= build/seed/bin
 
 # Default seed compiler used for self-hosting.
-# Points to the fetched seed binary (0.5.0-alpha.22+).
+# Points to the fetched seed binary (0.5.0-alpha.24+).
 SEED ?= build/seed/bin/sailfin
 
 FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
@@ -328,7 +328,7 @@ check:
 				h2=$$(sha256sum "$$f" | awk '{print $$1}'); \
 				h3=$$(sha256sum "$$s3f" | awk '{print $$1}'); \
 				if [ "$$h2" != "$$h3" ]; then \
-					echo "[check][WARN]   $$base (stage2=$${h2:0:12}... stage3=$${h3:0:12}...)"; \
+					echo "[check][WARN]   $$base (stage2=$$(printf '%.12s' "$$h2")... stage3=$$(printf '%.12s' "$$h3")...)"; \
 				fi; \
 			else \
 				echo "[check][WARN]   $$base (missing in stage3)"; \
