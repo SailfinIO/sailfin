@@ -333,14 +333,6 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
 
 fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
     let mut args -> string[] = ["clang", "-O0", "-o", out_path, ll_path];
-    // WORKAROUND: macOS clang 16+ defaults to opaque pointers, but the current
-    // seed (0.5.0-alpha.22) emits typed pointer IR (e.g. `bitcast i8* %self to %T*`).
-    // Pass -Xclang -no-opaque-pointers to allow typed pointer IR on macOS.
-    // TODO: Remove this once the compiler emits opaque pointer IR natively.
-    if fs.exists("/Library") {
-        args.push("-Xclang");
-        args.push("-no-opaque-pointers");
-    }
     if runtime_root.length > 0 {
         let src_dir = runtime_root + "/native/src";
         let include_dir = runtime_root + "/native/include";
