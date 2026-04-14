@@ -38,6 +38,7 @@ import {
 
 import {
     _parse_int_from_string,
+    _read_ipc_int_min,
     extend_mutations,
 } from "./instructions_helpers";
 
@@ -300,8 +301,11 @@ fn dispatch_expression_instruction(
         _write_bindings_to_files(bindings);
         _write_locals_to_files(result_locals);
         let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, bindings, result_locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context, active_label);
-        // Read scalar results from files
-        let _expr_temp = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_temp_index"));
+        // Read scalar results from files. Use floor-protected reader so that
+        // a missing/empty/stale temp-index file cannot cause the SSA counter
+        // to reset below `temp_index`, which would produce duplicate %tN
+        // definitions in the same function (see _read_ipc_int_min doc).
+        let _expr_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", temp_index);
         let _expr_region = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_next_region_id"));
         fs.writeFile("build/sailfin/.dispatch_temp", number_to_string(_expr_temp));
         fs.writeFile("build/sailfin/.dispatch_next_region", number_to_string(_expr_region));
@@ -368,8 +372,8 @@ fn dispatch_return_instruction(
     _write_bindings_to_files(bindings);
     _write_locals_to_files(locals);
     let lowered = lower_return_instruction(function, instruction, llvm_return, bindings, locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context);
-    // Read scalar results
-    let _ret_temp = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_temp_index"));
+    // Read scalar results. Floor-protected: see _read_ipc_int_min.
+    let _ret_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", temp_index);
     let _ret_region = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_next_region_id"));
     fs.writeFile("build/sailfin/.dispatch_temp", number_to_string(_ret_temp));
     fs.writeFile("build/sailfin/.dispatch_next_region", number_to_string(_ret_region));

@@ -48,19 +48,6 @@ import { emit_llvm_function } from "./emission";
 
 import { prepare_parameters_from_files } from "./emission";
 
-fn _write_async_lowered_function_files(lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) ![io] {
-    fs.writeLines("build/sailfin/.lowered_fn_lines", lines);
-    fs.writeLines("build/sailfin/.lowered_fn_diagnostics", diagnostics);
-    let mut sc_lines -> string[] = [];
-    let mut sci -> number = 0;
-    loop {
-        if sci >= string_constants.length { break; }
-        sc_lines.push(string_constants[sci].name + "\t" + string_constants[sci].content + "\t" + number_to_string(string_constants[sci].byte_count));
-        sci += 1;
-    }
-    fs.writeLines("build/sailfin/.lowered_fn_string_constants", sc_lines);
-}
-
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.
 fn emit_async_function(
     fn_name -> string,
@@ -87,8 +74,6 @@ fn emit_async_function(
     if _if205 {
         diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
         let empty_constants = empty_string_constant_set();
-        let _empty_lines -> string[] = [];
-        _write_async_lowered_function_files(_empty_lines, diagnostics, empty_constants);
         return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
@@ -136,9 +121,7 @@ fn emit_async_function(
         if spawn_symbol.length == 0 {
             diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
             let empty_constants = empty_string_constant_set();
-            let _empty_lines -> string[] = [];
-            _write_async_lowered_function_files(_empty_lines, diagnostics, empty_constants);
-            return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+                    return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
         }
         wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
         wrapper_lines.push("block.entry:");
@@ -151,9 +134,7 @@ fn emit_async_function(
         if spawn_symbol.length == 0 {
             diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
             let empty_constants = empty_string_constant_set();
-            let _empty_lines -> string[] = [];
-            _write_async_lowered_function_files(_empty_lines, diagnostics, empty_constants);
-            return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+                    return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
         }
 
         let ctx_type = "%SailfinAsyncCtx." + wrapper_symbol;
@@ -249,7 +230,6 @@ fn emit_async_function(
         merged_lines = extend_string_array(with_spacer, wrapper_lines);
     }
     let merged_constants = merge_string_constants(impl_lowered.string_constants, empty_string_constant_set());
-    _write_async_lowered_function_files(merged_lines, diagnostics, merged_constants);
     return LoweredLLVMFunction {
         lines: merged_lines,
         diagnostics: diagnostics,

@@ -263,13 +263,9 @@ fn lower_all_functions(
             module_init_symbol,
             module_globals_needs_init_call
         );
-        // Read results from file-based IPC
-        let _lfn_lines_raw = fs.readFile("build/sailfin/.lowered_fn_lines");
-        let _lfn_lines = split_lines_local(_lfn_lines_raw);
-        let _lfn_diags_raw = fs.readFile("build/sailfin/.lowered_fn_diagnostics");
-        let _lfn_diags = split_lines_local(_lfn_diags_raw);
-        let _lfn_sc_raw = fs.readFile("build/sailfin/.lowered_fn_string_constants");
-        let _lfn_string_constants = _parse_lowered_fn_string_constants(_lfn_sc_raw);
+        let _lfn_lines = lowered.lines;
+        let _lfn_diags = lowered.diagnostics;
+        let _lfn_string_constants = lowered.string_constants;
         if debug_lowering {
             print.err("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
         }
@@ -341,13 +337,6 @@ fn lower_all_functions(
         print.err("emit-llvm: phase=functions_done");
     }
 
-    // Write function_effects and has_add_function to files for orchestrator
-    let mut _has_add_flag -> string = "0";
-    if has_add_function {
-        _has_add_flag = "1";
-    }
-    fs.writeFile("build/sailfin/.phase_functions_has_add", _has_add_flag);
-
     // Append the add helper if not defined
     if !has_add_function {
         lines.push("");
@@ -385,14 +374,8 @@ fn lower_all_functions(
         print.err("emit-llvm: phase=intrinsics");
     }
 
-    // Write diagnostics and function_effects count to files
+    // Write diagnostics to file for lowering_core.sfn to read
     fs.writeLines("build/sailfin/.phase_functions_diagnostics", diagnostics);
-
-    // Write function effects count
-    fs.writeFile("build/sailfin/.phase_functions_effects_count", number_to_string(function_effects.length));
-
-    // Write all_string_constants count for orchestrator
-    fs.writeFile("build/sailfin/.phase_functions_string_constants_count", number_to_string(all_string_constants.length));
 
     return lines;
 }

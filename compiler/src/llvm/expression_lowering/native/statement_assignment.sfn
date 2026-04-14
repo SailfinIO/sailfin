@@ -132,28 +132,7 @@ fn _write_assign_result_files(
     // (struct field mutations like state.index += 1) leave a stale counter and
     // the next statement reuses the same %tN temporaries.
     fs.writeFile("build/sailfin/.expr_stmt_temp_index", number_to_string(temp_index));
-    fs.writeFile("build/sailfin/.expr_stmt_mutation_count", number_to_string(mutations.length));
-    let mut mi -> number = 0;
-    loop {
-        if mi >= mutations.length { break; }
-        let prefix = "build/sailfin/.expr_stmt_mutation_" + number_to_string(mi);
-        fs.writeFile(prefix + "_name", mutations[mi].name);
-        fs.writeFile(prefix + "_llvm_type", mutations[mi].llvm_type);
-        fs.writeFile(prefix + "_value_name", mutations[mi].value_name);
-        fs.writeFile(prefix + "_originating_label", mutations[mi].originating_label);
-        mi += 1;
-    }
     fs.writeFile("build/sailfin/.expr_stmt_next_region_id", number_to_string(next_region_id));
-    // Write string constants count
-    fs.writeFile("build/sailfin/.expr_stmt_string_constants_count", number_to_string(string_constants.length));
-    let mut sci -> number = 0;
-    loop {
-        if sci >= string_constants.length { break; }
-        let sc_prefix = "build/sailfin/.expr_stmt_string_constant_" + number_to_string(sci);
-        fs.writeFile(sc_prefix + "_name", string_constants[sci].name);
-        fs.writeFile(sc_prefix + "_value", string_constants[sci].value);
-        sci += 1;
-    }
 }
 
 // Handles deref (*ptr = value), member access (obj.field = value), and

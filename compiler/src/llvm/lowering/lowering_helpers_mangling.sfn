@@ -514,17 +514,36 @@ fn _join_llvm_lines_linear(lines -> string[]) -> string {
     if lines.length == 0 {
         return "";
     }
-    let mut out -> string = "";
-    let mut index -> number = 0;
+    if lines.length == 1 {
+        return lines[0];
+    }
+    // Pair-wise merge: each pass halves the working array. O(N log N) memory
+    // total instead of the O(N^2) accumulation of `out = out + line` in a
+    // loop. For emit_native.sfn this is the difference between blowing the
+    // 12GB seedcheck cap and finishing with hundreds of MB to spare.
+    //
+    // Bonus: each `current[i] + "\n" + current[i+1]` is a left-associative
+    // chain whose second concat sees a fresh-concat LHS, so the compiler's
+    // string_append peephole (b3b6dad) reuses the buffer in place.
+    let mut current = lines;
     loop {
-        if index >= lines.length {
+        if current.length <= 1 {
             break;
         }
-        if index > 0 {
-            out = out + "\n";
+        let mut next -> string[] = [];
+        let mut i -> number = 0;
+        loop {
+            if i >= current.length {
+                break;
+            }
+            if i + 1 < current.length {
+                next.push(current[i] + "\n" + current[i + 1]);
+            } else {
+                next.push(current[i]);
+            }
+            i += 2;
         }
-        out = out + lines[index];
-        index += 1;
+        current = next;
     }
-    return out;
+    return current[0];
 }

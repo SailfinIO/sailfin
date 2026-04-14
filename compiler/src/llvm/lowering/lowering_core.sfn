@@ -614,6 +614,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     runtime_helpers = append_unique_effect(runtime_helpers, "substring");
     runtime_helpers = append_unique_effect(runtime_helpers, "substring_unchecked");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
+    runtime_helpers = append_unique_effect(runtime_helpers, "string.append");
     runtime_helpers = append_unique_effect(runtime_helpers, "string.to_number");
     runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at");
     runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
@@ -786,7 +787,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         trace,
         debug_lowering
     );
-    lines = append_string_lines(lines, function_lines);
+    lines = extend_string_lines(lines, function_lines);
 
     // Read function phase diagnostics
     let _fn_diags_raw = fs.readFile("build/sailfin/.phase_functions_diagnostics");

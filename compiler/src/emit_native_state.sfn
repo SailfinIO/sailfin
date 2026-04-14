@@ -281,16 +281,53 @@ fn number_to_string(value -> number) -> string {
 }
 
 fn quote_string(value -> string) -> string {
-    let mut result -> string = "\"";
+    // Chunked: collect runs of unchanged text + escape sequences, then
+    // assemble. The previous implementation did `result = result + ch` per
+    // character, O(N^2) memory under the zero-GC runtime. emit_native.sfn
+    // calls this on every string literal in the .sfn-asm output, so a few
+    // long literals would blow the seedcheck memory cap.
+    let mut chunks -> string[] = ["\""];
+    let mut chunk_start -> number = 0;
     let mut index -> number = 0;
     loop {
         if index >= value.length {
             break;
         }
-        result = result + escape_string_char(value[index]);
+        let ch = substring(value, index, index + 1);
+        let mut esc -> string = "";
+        if ch == "\"" {
+            esc = "\\\"";
+        } else if ch == "\\" {
+            esc = "\\\\";
+        } else if ch == "\n" {
+            esc = "\\n";
+        } else if ch == "\r" {
+            esc = "\\r";
+        } else if ch == "\t" {
+            esc = "\\t";
+        }
+        if esc.length > 0 {
+            if index > chunk_start {
+                chunks.push(substring(value, chunk_start, index));
+            }
+            chunks.push(esc);
+            chunk_start = index + 1;
+        }
         index += 1;
     }
-    result = result + "\"";
+    if chunk_start < value.length {
+        chunks.push(substring(value, chunk_start, value.length));
+    }
+    chunks.push("\"");
+    let mut result -> string = chunks[0];
+    let mut i -> number = 1;
+    loop {
+        if i >= chunks.length {
+            break;
+        }
+        result = result + chunks[i];
+        i += 1;
+    }
     return result;
 }
 

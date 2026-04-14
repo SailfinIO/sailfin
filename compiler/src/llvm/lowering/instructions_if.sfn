@@ -81,9 +81,7 @@ import {
     extend_lifetime_regions,
     extend_mutations,
     insert_lines_before_index,
-    _write_block_result_files,
     _parse_int_from_string,
-    _read_ipc_int_min,
 } from "./instructions_helpers";
 
 import {
@@ -258,7 +256,6 @@ fn lower_if_instruction(
         } else {
             diagnostics.push("llvm lowering: unable to lower if condition in `" + function.name + "` for `" + rendered_condition + "`");
         }
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -347,14 +344,6 @@ fn lower_if_instruction(
         scope_depth + 1,
         then_label
     );
-    // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-    // Use _read_ipc_int_min to prevent the counter from going backwards
-    // (stale/empty IPC files can cause duplicate SSA names).
-    let _br_then_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-    let _br_then_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-    let _br_then_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-    let _br_then_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-    let _br_then_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
     let mut _ci14 -> number = 0;
     loop {
         if _ci14 >= then_result.diagnostics.length { break; }
@@ -364,17 +353,17 @@ fn lower_if_instruction(
     lifetime_regions = extend_lifetime_regions(lifetime_regions, then_result.lifetime_regions);
     current_allocas = then_result.allocas;
     current_locals = then_result.locals;
-    current_temp = _br_then_temp;
-    current_block_counter = _br_then_blkctr;
-    current_next_local = _br_then_nextloc;
+    current_temp = then_result.temp_index;
+    current_block_counter = then_result.block_counter;
+    current_next_local = then_result.next_local_id;
     then_bindings = then_result.bindings;
-    current_next_region = _br_then_nextreg;
+    current_next_region = then_result.next_lifetime_region_id;
     current_lines = extend_string_array(current_lines, then_result.lines);
     let then_exit_label = find_last_label(current_lines, then_label);
     let mut then_mutations = retarget_recent_mutations(then_result.mutations, 0, then_exit_label);
     collected_mutations = extend_mutations(collected_mutations, then_mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, then_result.string_constants);
-    let then_terminated = _br_then_term;
+    let then_terminated = then_result.terminated;
     let mut then_merge_insert_index -> number = -1;
     if !then_terminated {
         let merge_branch_index = current_lines.length;
@@ -409,12 +398,6 @@ fn lower_if_instruction(
             scope_depth + 1,
             else_label
         );
-        // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-        let _br_else_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-        let _br_else_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-        let _br_else_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-        let _br_else_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-        let _br_else_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
         let mut _ci15 -> number = 0;
         loop {
             if _ci15 >= else_result.diagnostics.length { break; }
@@ -424,13 +407,13 @@ fn lower_if_instruction(
         lifetime_regions = extend_lifetime_regions(lifetime_regions, else_result.lifetime_regions);
         current_allocas = else_result.allocas;
         current_locals = else_result.locals;
-        current_temp = _br_else_temp;
-        current_block_counter = _br_else_blkctr;
-        current_next_local = _br_else_nextloc;
+        current_temp = else_result.temp_index;
+        current_block_counter = else_result.block_counter;
+        current_next_local = else_result.next_local_id;
         else_bindings = else_result.bindings;
-        current_next_region = _br_else_nextreg;
+        current_next_region = else_result.next_lifetime_region_id;
         current_lines = extend_string_array(current_lines, else_result.lines);
-        else_terminated = _br_else_term;
+        else_terminated = else_result.terminated;
         let exit_label = find_last_label(current_lines, else_label);
         else_exit_label = exit_label;
         let mut branch_mutations = retarget_recent_mutations(else_result.mutations, 0, exit_label);
@@ -755,7 +738,6 @@ fn lower_if_instruction(
         merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
     }
 
-    _write_block_result_files(merged_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
     return BlockLoweringResult {
         lines: merged_lines,
         allocas: current_allocas,

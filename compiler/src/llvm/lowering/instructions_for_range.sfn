@@ -22,7 +22,7 @@ import { parse_range_iterable } from "../expression_lowering/native/core_parse";
 import { make_child_scope_id } from "../lifetime";
 import { collect_mutation_names, find_mutation_for_name } from "./phi";
 import { lower_instruction_range } from "./instructions";
-import { extend_lifetime_regions, extend_mutations, _write_block_result_files, _parse_int_from_string } from "./instructions_helpers";
+import { extend_lifetime_regions, extend_mutations, _parse_int_from_string } from "./instructions_helpers";
 import { allocate_block_label } from "./instructions_condition";
 import { append_loop_context } from "./instructions_loops";
 
@@ -86,7 +86,6 @@ fn lower_for_range(
 
     if start_result.operand == null {
         diagnostics.push("llvm lowering: unable to lower `.for` range start in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -116,7 +115,6 @@ fn lower_for_range(
 
     if end_result.operand == null {
         diagnostics.push("llvm lowering: unable to lower `.for` range end in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -145,7 +143,6 @@ fn lower_for_range(
     current_temp = start_coerced.temp_index;
     if start_coerced.operand == null {
         diagnostics.push("llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -175,7 +172,6 @@ fn lower_for_range(
     current_temp = end_coerced.temp_index;
     if end_coerced.operand == null {
         diagnostics.push("llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -209,7 +205,6 @@ fn lower_for_range(
 
         if stride_result.operand == null {
             diagnostics.push("llvm lowering: `.for` stride expression did not produce a value in `" + function.name + "`");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -238,7 +233,6 @@ fn lower_for_range(
         current_temp = stride_coerced.temp_index;
         if stride_coerced.operand == null {
             diagnostics.push("llvm lowering: `.for` stride expression must evaluate to `number` in `" + function.name + "`");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -309,7 +303,6 @@ fn lower_for_range(
         diagnostics.push("llvm lowering: internal error loading `.for` iteration value in `" + function.name + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -353,7 +346,6 @@ fn lower_for_range(
         diagnostics.push("llvm lowering: unable to compare `.for` range bounds in `" + function.name + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -385,7 +377,6 @@ fn lower_for_range(
         diagnostics.push("llvm lowering: unable to compare descending `.for` range bounds in `" + function.name + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -442,13 +433,6 @@ fn lower_for_range(
         scope_depth + 1,
         loop_body_label
     );
-    // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-    let _br_fo_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
-    let _br_fo_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
-    let _br_fo_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
-    let _br_fo_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-    let _br_fo_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-
     let mut _ci19 -> number = 0;
     loop {
         if _ci19 >= body_result.diagnostics.length { break; }
@@ -458,15 +442,15 @@ fn lower_for_range(
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_lines = extend_string_array(current_lines, body_result.lines);
     current_allocas = body_result.allocas;
-    current_temp = _br_fo_temp;
-    current_block_counter = _br_fo_blkctr;
-    current_next_local = _br_fo_nextloc;
+    current_temp = body_result.temp_index;
+    current_block_counter = body_result.block_counter;
+    current_next_local = body_result.next_local_id;
     current_bindings = body_result.bindings;
-    current_next_region = _br_fo_nextreg;
+    current_next_region = body_result.next_lifetime_region_id;
     collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
-    if !_br_fo_term {
+    if !body_result.terminated {
         current_lines.push("  br label %" + loop_increment_label);
     }
 
@@ -505,7 +489,6 @@ fn lower_for_range(
 
     current_locals = locals;
 
-    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,

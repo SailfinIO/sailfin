@@ -87,7 +87,6 @@ import {
 import {
     extend_lifetime_regions,
     extend_mutations,
-    _write_block_result_files,
     _parse_int_from_string,
 } from "./instructions_helpers";
 
@@ -244,13 +243,6 @@ fn lower_for_array(
         scope_depth + 1,
         loop_body_label
     );
-    // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-    let _br_el_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
-    let _br_el_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
-    let _br_el_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
-    let _br_el_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-    let _br_el_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-
     let mut _ci24 -> number = 0;
     loop {
         if _ci24 >= body_result.diagnostics.length { break; }
@@ -260,15 +252,15 @@ fn lower_for_array(
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_lines = extend_string_array(current_lines, body_result.lines);
     current_allocas = body_result.allocas;
-    current_temp = _br_el_temp;
-    current_block_counter = _br_el_blkctr;
-    current_next_local = _br_el_nextloc;
+    current_temp = body_result.temp_index;
+    current_block_counter = body_result.block_counter;
+    current_next_local = body_result.next_local_id;
     current_bindings = body_result.bindings;
-    current_next_region = _br_el_nextreg;
+    current_next_region = body_result.next_lifetime_region_id;
     collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
-    if !_br_el_term {
+    if !body_result.terminated {
         current_lines.push("  br label %" + loop_increment_label);
     }
 
@@ -293,7 +285,6 @@ fn lower_for_array(
 
         current_locals = locals;
 
-    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
@@ -363,7 +354,6 @@ fn lower_for_instruction(
     raw_target = strip_mut_prefix(raw_target);
     if raw_target.length == 0 {
         diagnostics.push("llvm lowering: `.for` loop missing iteration binding in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -383,7 +373,6 @@ fn lower_for_instruction(
 
     if !is_simple_identifier(raw_target) {
         diagnostics.push("llvm lowering: `.for` loop target `" + raw_target + "` is not a simple identifier in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -403,7 +392,6 @@ fn lower_for_instruction(
 
     if find_local_binding(current_locals, raw_target) != null {
         diagnostics.push("llvm lowering: `.for` loop target `" + raw_target + "` shadows existing local in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -453,7 +441,6 @@ fn lower_for_instruction(
             _ci22 += 1;
         }
         diagnostics.push("llvm lowering: unable to lower `.for` iterable in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -481,7 +468,6 @@ fn lower_for_instruction(
             _ci23 += 1;
         }
         diagnostics.push("llvm lowering: `.for` iterable must resolve to an array value in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,

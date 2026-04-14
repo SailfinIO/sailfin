@@ -60,24 +60,23 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-# Build driver selection: "py" (default, uses selfhost_native.py with fixups)
-# or "sh" (scripts/build.sh, no fixups — requires a seed that doesn't need them).
-# The current 0.1.1 seed needs the Python fixups, so py is the default.
-# Once we have a clean seed, flip this to sh and remove the Python driver.
-BUILD_DRIVER ?= py
+# Build driver selection: "sh" (default, uses scripts/build.sh — no fixups)
+# or "py" (scripts/selfhost_native.py with fixups — legacy, for 0.1.1 seed only).
+# The 0.5.0-alpha.22 seed produces clean LLVM IR, so sh is now the default.
+BUILD_DRIVER ?= sh
 
 # Python executable for the build driver. selfhost_native.py uses only stdlib,
 # so any Python 3 works — no Conda or virtualenv required.
 PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
 
-.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean
+.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean bench
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-native ci-package-installer
 
-.PHONY: rebuild rebuild-sh rebuild-py rebuild-asan smoke smoke-sh smoke-py
+.PHONY: rebuild rebuild-sh rebuild-py rebuild-asan
 
 # Back-compat aliases (deprecated; will be removed).
-.PHONY: selfhost-native selfhost-native-asan selfhost-smoke-native
+.PHONY: selfhost-native selfhost-native-asan
 
 ifeq ($(origin CONDA_EXE), undefined)
 # `conda` is often a shell function (e.g. in zsh/bash init). We need the actual
@@ -113,14 +112,14 @@ help:
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e       # Run Sailfin-native end-to-end tests"
-	@echo "  make smoke          # Rebuild + run smoke tests"
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
+	@echo "  make bench          # Benchmark per-module compile time and memory"
 	@echo "  make rebuild-asan   # Rebuild with AddressSanitizer (requires Python 3)"
 	@echo "  make env            # Create/update Conda env (CI/release only)"
 	@echo "  make clean          # Remove packaged artifacts (dist/)"
 	@echo ""
-	@echo "Build driver: BUILD_DRIVER=$(BUILD_DRIVER) (py=with fixups [default], sh=no fixups)"
+	@echo "Build driver: BUILD_DRIVER=$(BUILD_DRIVER) (sh=no fixups [default], py=with fixups [legacy])"
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
@@ -158,14 +157,14 @@ test: test-unit test-integration test-e2e
 # Install a released seed compiler into the workspace.
 # Requires a GitHub token in GITHUB_TOKEN.
 SEED_REPO ?= SailfinIO/sailfin
-SEED_VERSION ?= latest
+SEED_VERSION ?= 0.5.0-alpha.22
 SEED_EXCLUDE_TAG ?=
 SEED_INSTALL_BASE ?= build/seed/versions
 SEED_GLOBAL_BIN_DIR ?= build/seed/bin
 
-# Default seed compiler used for self-hosting (can be a command on PATH).
-# Override with a full path if needed, e.g. SEED=build/seed/bin/sailfin.
-SEED ?= sfn
+# Default seed compiler used for self-hosting.
+# Points to the fetched seed binary (0.5.0-alpha.22+).
+SEED ?= build/seed/bin/sailfin
 
 FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
 
@@ -187,54 +186,119 @@ test-unit:
 		echo "[test-unit] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@set -e; \
+	@pass=0; fail=0; failed_files=""; \
 	files=$$(find compiler/tests/unit -name '*_test.sfn' -print | sort); \
 	if [ -z "$$files" ]; then \
 		echo "[test-unit] no *_test.sfn files found under compiler/tests/unit"; \
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
-	done
+		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
+	done; \
+	total=$$((pass + fail)); \
+	echo ""; \
+	echo "═══ unit: $$pass/$$total passed, $$fail failed ═══"; \
+	if [ $$fail -gt 0 ]; then \
+		echo ""; \
+		printf "$$failed_files"; \
+		exit 1; \
+	fi
 
 test-integration:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-integration] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@set -e; \
+	@pass=0; fail=0; failed_files=""; \
 	files=$$(find compiler/tests/integration -name '*_test.sfn' -print | sort); \
 	if [ -z "$$files" ]; then \
 		echo "[test-integration] no *_test.sfn files found under compiler/tests/integration"; \
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
-	done
+		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
+	done; \
+	total=$$((pass + fail)); \
+	echo ""; \
+	echo "═══ integration: $$pass/$$total passed, $$fail failed ═══"; \
+	if [ $$fail -gt 0 ]; then \
+		echo ""; \
+		printf "$$failed_files"; \
+		exit 1; \
+	fi
 
 test-e2e:
 	@if [ ! -x $(NATIVE_BIN) ]; then \
 		echo "[test-e2e] missing $(NATIVE_BIN); running make compile"; \
 		$(MAKE) compile; \
 	fi
-	@set -e; \
+	@pass=0; fail=0; failed_files=""; \
 	files=$$(find compiler/tests/e2e -name '*_test.sfn' -print | sort); \
 	if [ -z "$$files" ]; then \
 		echo "[test-e2e] no *_test.sfn files found under compiler/tests/e2e"; \
 		exit 1; \
 	fi; \
 	for f in $$files; do \
-		bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; \
+		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
 	done; \
 	for f in $$(find compiler/tests/e2e -name 'test_*.sh' -print | sort); do \
-		bash "$$f" $(NATIVE_BIN); \
-	done
+		if bash "$$f" $(NATIVE_BIN); then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
+	done; \
+	total=$$((pass + fail)); \
+	echo ""; \
+	echo "═══ e2e: $$pass/$$total passed, $$fail failed ═══"; \
+	if [ $$fail -gt 0 ]; then \
+		echo ""; \
+		printf "$$failed_files"; \
+		exit 1; \
+	fi
 
 # Run the full Sailfin-native test suite using the *self-hosted* compiler.
 # This ensures tests cover the same binary we intend to ship for 1.0.
 .PHONY: test-selfhost
 test-selfhost:
 	@$(MAKE) test
+
+# Benchmark per-module compile time and peak memory.
+# Usage:
+#   make bench                           # all modules
+#   make bench BENCH_ARGS="--top 10"     # top 10 slowest
+#   make bench BENCH_ARGS="--csv build/bench.csv"
+#   make bench BENCH_ARGS="--budget-time 60 --budget-mem 512000"
+BENCH_ARGS ?=
+bench:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[bench] missing $(NATIVE_BIN); run 'make compile' first"; \
+		exit 1; \
+	fi
+	@if [ ! -d build/native/import-context ]; then \
+		echo "[bench] missing import-context; run 'make compile' first"; \
+		exit 1; \
+	fi
+	@bash scripts/bench_compile.sh \
+		--seed "$(NATIVE_BIN)" \
+		--import-context build/native/import-context \
+		$(BENCH_ARGS)
 
 clean:
 	rm -rf dist
@@ -256,7 +320,7 @@ clean-build:
 clean-all: clean clean-build
 
 compile:
-	@if [ -x "$(NATIVE_BIN)" ] && \
+	@if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
 		[ -z "$$(find compiler/src runtime -type f \( -name '*.sfn' -o -name '*.py' \) -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
 	else \
@@ -274,8 +338,9 @@ check:
 	@echo "[check] running test suite on first-pass binary (early gate)..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin
 	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
-	@echo "[check] verifying seed selfhost..."
-	@SEED="build/native/sailfin" OUT="build/native/sailfin-seedcheck" OPT="-O0" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
+	@echo "[check] verifying seed selfhost (stage2)..."
+	@SEED="build/native/sailfin" OUT="build/native/sailfin-seedcheck" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
+		WORK_DIR="build/selfhost/native-seedcheck" \
 		bash scripts/build.sh
 	@echo "[check] validating seedcheck binary can run programs..."
 	@sc="build/native/sailfin-seedcheck"; \
@@ -289,6 +354,49 @@ check:
 	echo "[check] seedcheck binary runs hello-world.sfn OK"
 	@echo "[check] running test suite with seedcheck binary (no fallbacks)..."
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
+	@echo ""
+	@echo "[check] stage2 tests passed — building stage3 for fixed-point comparison..."
+	@SEED="build/native/sailfin-seedcheck" OUT="build/native/sailfin-stage3" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
+		WORK_DIR="build/selfhost/native-stage3" \
+		bash scripts/build.sh
+	@echo "[check] comparing stage2 vs stage3 LLVM IR (fixed-point check)..."
+	@s2="build/selfhost/native-seedcheck/raw"; \
+	s3="build/selfhost/native-stage3/raw"; \
+	s2_hashes=$$(find "$$s2" -name '*.ll' -exec sha256sum {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | sha256sum | awk '{print $$1}'); \
+	s3_hashes=$$(find "$$s3" -name '*.ll' -exec sha256sum {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | sha256sum | awk '{print $$1}'); \
+	if [ "$$s2_hashes" = "$$s3_hashes" ]; then \
+		echo "[check] stage2 == stage3: compiler is a fixed point ✓"; \
+	else \
+		echo "[check][WARN] stage2 != stage3: compiler output is not yet a fixed point"; \
+		echo "[check][WARN] differing modules:"; \
+		for f in $$s2/*.ll; do \
+			base=$$(basename "$$f"); \
+			s3f="$$s3/$$base"; \
+			if [ -f "$$s3f" ]; then \
+				h2=$$(sha256sum "$$f" | awk '{print $$1}'); \
+				h3=$$(sha256sum "$$s3f" | awk '{print $$1}'); \
+				if [ "$$h2" != "$$h3" ]; then \
+					echo "[check][WARN]   $$base (stage2=$${h2:0:12}... stage3=$${h3:0:12}...)"; \
+				fi; \
+			else \
+				echo "[check][WARN]   $$base (missing in stage3)"; \
+			fi; \
+		done; \
+		echo "[check][WARN] this may indicate intermittent IR corruption — rerun or investigate"; \
+	fi
+
+# Pre-release determinism gate. Runs the emit harness at parallel load to
+# detect intermittent IR corruption. Use before cutting a seed release.
+# Override iteration count via CHECK_DET_ITERS (default 10).
+CHECK_DET_ITERS ?= 10
+CHECK_DET_JOBS ?= 4
+check-determinism:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[check-determinism] missing $(NATIVE_BIN) (run: make compile)"; \
+		exit 1; \
+	fi
+	@echo "[check-determinism] running determinism sweep (jobs=$(CHECK_DET_JOBS) iters=$(CHECK_DET_ITERS))..."
+	@bash scripts/diag_determinism_sweep.sh --seed "$(NATIVE_BIN)" --jobs $(CHECK_DET_JOBS) --iters $(CHECK_DET_ITERS)
 
 # =============================================================================
 # Packaging (release artifacts)
@@ -429,7 +537,7 @@ rebuild-sh:
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
 	echo "[rebuild-sh] running shell build (seed=$$seed)..."; \
-	SEED="$$seed" OUT="$(NATIVE_OUT)" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" \
+	SEED="$$seed" OUT="$(NATIVE_OUT)" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" SEED_TIMEOUT=600 MAX_TOTAL=7200 \
 		bash scripts/build.sh
 	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
 	if [ -d "$$SRC" ]; then \
@@ -491,78 +599,6 @@ rebuild-py:
 	fi
 	@mkdir -p build/native
 	@echo "[rebuild-py] built $(NATIVE_OUT)"
-
-# Smoke: selfhost native and run hello-world + emit-llvm-file.
-# Usage:
-#   make smoke
-#   make smoke SEED_NATIVE=path/to/sailfin
-#   make smoke SMOKE_ARGS="--keep-work-dir"
-SMOKE_OUT ?= $(NATIVE_OUT)
-SMOKE_ARGS ?=
-smoke:
-ifeq ($(BUILD_DRIVER),sh)
-	@$(MAKE) smoke-sh
-else
-	@$(MAKE) smoke-py
-endif
-
-# Shell-based smoke test (no Python, no Conda required).
-smoke-sh:
-	@seed="$${SEED_NATIVE:-$(SEED)}"; \
-	resolved_seed="$$seed"; \
-	if command -v "$$seed" >/dev/null 2>&1; then \
-		resolved_seed="$$(command -v "$$seed")"; \
-	fi; \
-	seed="$$resolved_seed"; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[smoke-sh] missing seed compiler: $$seed"; \
-		echo "[smoke-sh] fetching seed with: make fetch-seed"; \
-		$(MAKE) fetch-seed; \
-		seed="$(FETCHED_SEED)"; \
-	fi; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[smoke-sh] missing seed compiler: $$seed"; \
-		exit 1; \
-	fi; \
-	echo "[smoke-sh] running smoke harness..."; \
-	SEED="$$seed" OUT="$(SMOKE_OUT)" bash scripts/smoke.sh
-	@echo "[smoke-sh] OK"
-
-# Python-based smoke test (only needs Python 3 stdlib).
-smoke-py:
-	@if [ -z "$(PYTHON)" ]; then \
-		echo "[smoke-py][error] python3 not found on PATH" >&2; \
-		exit 1; \
-	fi
-	@seed="$${SEED_NATIVE:-$(SEED)}"; \
-	resolved_seed="$$seed"; \
-	if command -v "$$seed" >/dev/null 2>&1; then \
-		resolved_seed="$$(command -v "$$seed")"; \
-	fi; \
-	seed="$$resolved_seed"; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[smoke-py] missing seed compiler: $$seed"; \
-		echo "[smoke-py] fetching seed with: make fetch-seed"; \
-		$(MAKE) fetch-seed; \
-		seed="$(FETCHED_SEED)"; \
-	fi; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[smoke-py] missing seed compiler: $$seed"; \
-		exit 1; \
-	fi; \
-	if ! "$$seed" emit native compiler/src/version.sfn >/dev/null 2>&1; then \
-		echo "[smoke-py][error] seed compiler does not support 'emit native'" >&2; \
-		echo "[smoke-py][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
-		exit 1; \
-	fi; \
-	echo "[smoke-py] running smoke harness..."; \
-	$(PYTHON) -u scripts/selfhost_smoke_native.py \
-		--seed "$$seed" \
-		--out $(SMOKE_OUT) \
-		--jobs $(BUILD_JOBS) \
-		--import-context-jobs 1 \
-		$(SMOKE_ARGS)
-	@echo "[smoke-py] OK"
 
 rebuild-asan:
 	@if [ -z "$(PYTHON)" ]; then \
@@ -707,5 +743,4 @@ ci-cross-windows:
 
 # Deprecated aliases.
 selfhost-native: rebuild
-selfhost-smoke-native: smoke
 selfhost-native-asan: rebuild-asan

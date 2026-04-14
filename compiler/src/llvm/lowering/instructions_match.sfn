@@ -86,9 +86,7 @@ import {
     clone_local_bindings,
     extend_lifetime_regions,
     extend_mutations,
-    _write_block_result_files,
     _parse_int_from_string,
-    _read_ipc_int_min,
 } from "./instructions_helpers";
 
 import {
@@ -272,7 +270,6 @@ fn lower_match_instruction(
 
     if subject_result.operand == null {
         diagnostics.push("llvm lowering: unable to lower match subject in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -304,7 +301,6 @@ fn lower_match_instruction(
         current_block_counter = merge_alloc.next_counter;
         current_lines.push("  br label %" + merge_label);
         current_lines.push(merge_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -681,13 +677,6 @@ fn lower_match_instruction(
             scope_depth + 1,
             body_labels[index]
         );
-        // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-        let _br_body_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-        let _br_body_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-        let _br_body_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-        let _br_body_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-        let _br_body_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-
         let mut _ci3 -> number = 0;
         loop {
             if _ci3 >= body_result.diagnostics.length { break; }
@@ -698,10 +687,10 @@ fn lower_match_instruction(
         current_lines = extend_string_array(current_lines, body_result.lines);
         current_allocas = body_result.allocas;
         current_locals = base_locals;
-        current_temp = _br_body_temp;
-        current_block_counter = _br_body_blkctr;
-        current_next_local = _br_body_nextloc;
-        current_next_region = _br_body_nextreg;
+        current_temp = body_result.temp_index;
+        current_block_counter = body_result.block_counter;
+        current_next_local = body_result.next_local_id;
+        current_next_region = body_result.next_lifetime_region_id;
         collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
         collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
@@ -711,11 +700,11 @@ fn lower_match_instruction(
             MatchArmMutations {
                 mutations: body_result.mutations,
                 label: body_labels[index],
-                terminated: _br_body_term,
+                terminated: body_result.terminated,
             }
         );
 
-        if !_br_body_term {
+        if !body_result.terminated {
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
             current_lines.push("  br label %" + merge_label);
             all_terminated = false;
@@ -786,7 +775,6 @@ fn lower_match_instruction(
         merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
     }
 
-    _write_block_result_files(merged_lines, current_allocas, terminated, diagnostics, result_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
     return BlockLoweringResult {
         lines: merged_lines,
         allocas: current_allocas,
