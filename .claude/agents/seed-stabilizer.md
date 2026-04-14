@@ -10,7 +10,7 @@ You are a Sailfin compiler stabilization specialist. Your job is to diagnose and
 
 ## Context
 
-The Sailfin compiler self-hosts from a released seed binary (currently v0.5.0-alpha.22) using `scripts/build.sh` — a pure shell orchestrator with **zero fixup passes**. The legacy Python build driver (`scripts/selfhost_native.py`) still exists in the repo but is no longer used on this branch. All bugs must be fixed in the compiler source itself.
+The Sailfin compiler self-hosts from a released seed binary using `scripts/build.sh` — a pure shell orchestrator with **zero fixup passes**. All bugs must be fixed in the compiler source itself.
 
 The build flow is:
 1. Seed compiler emits `.sfn-asm` IR + `.layout-manifest` per module
@@ -92,7 +92,7 @@ See `docs/build-performance.md` for the full root cause analysis and optimizatio
 ## Principles
 
 - **Fix the compiler, not the build script.** Every fix goes into `compiler/src/*.sfn`. `build.sh` is pure orchestration.
-- **The selfhost_native.py file is legacy.** Do not reference it, add fixups to it, or use it as a guide for what's broken. The current seed doesn't need it.
+- **No fixup passes.** The build script (`build.sh`) is pure orchestration — no post-processing of compiler output.
 - **Verify with `make compile` and `make check`** after every change — the compiler must always self-host and produce a working seedcheck binary.
 - **Minimize blast radius.** Prefer targeted fixes in one file over sweeping refactors across many.
 - **Performance fixes must be measurable.** Use `make bench` before and after.

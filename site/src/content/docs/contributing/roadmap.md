@@ -17,9 +17,9 @@ Status icons: `✅` Done, `🔄` In Progress, `📋` Planned
 
 ### 1. Compiler Stabilization (Build Pipeline)
 
-- 📋 Eliminate the Python fixup script (`scripts/selfhost_native.py`) — every fixup must become a compiler fix in `compiler/src/*.sfn`
-- 📋 Make `scripts/build.sh` the sole clean build path with no post-processing
-- 📋 Pass `make check` using the shell driver with no Python fallbacks
+- ✅ Eliminate the Python fixup script — removed after v0.5.0-alpha.22 reached clean LLVM IR
+- ✅ Make `scripts/build.sh` the sole clean build path with no post-processing
+- 📋 Pass `make check` with no fallbacks
 - 📋 Stabilize control-flow LLVM lowering (`.loop` / `.if` / `.break` headers currently produce broken loop headers that unconditionally enter the body with no exit condition)
 
 ### 2. Language Feature Completeness

@@ -1,9 +1,0 @@
-# pyproject.toml
-#
-# Semantic-release configuration has been removed.  Releases are now handled
-# by .github/workflows/release.yml (manually triggered, pure bash).
-#
-# This file is kept as a placeholder while the Conda environment
-# (environment.yml) is still used by CI.  Once the seed promotion lands and
-# the Python build driver is retired, this file and environment.yml can be
-# deleted together.

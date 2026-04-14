@@ -60,10 +60,9 @@ or C runtime**. All items below are hard requirements, not stretch goals.
    for each item. Track each as a separate PR so progress is visible.
 
 1. **Compiler stabilization (build pipeline)**
-   - [ ] Eliminate the Python fixup script (`scripts/selfhost_native.py`) as a
-         build requirement. Every fixup it applies must become a compiler fix in
-         `compiler/src/*.sfn`.
-   - [ ] Make `scripts/build.sh` the sole clean build path (no post-processing).
+   - [x] Eliminate the Python fixup script (`scripts/selfhost_native.py`) as a
+         build requirement. Removed after v0.5.0-alpha.22 reached clean LLVM IR.
+   - [x] Make `scripts/build.sh` the sole clean build path (no post-processing).
    - [ ] Pass `make check` using the shell driver: seedcheck binary compiles
          `examples/basics/hello-world.sfn` and passes the full test suite with no
          Python fallbacks.

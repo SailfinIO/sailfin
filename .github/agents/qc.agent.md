@@ -45,7 +45,7 @@ make check            # Full compile + test validation
 ### 4. Code Quality
 - [ ] Effects declared explicitly and minimally on all functions
 - [ ] `CamelCase` for types/models/capsules, `snake_case` for functions/locals
-- [ ] No new fixup passes added to `scripts/selfhost_native.py`
+- [ ] No fixup passes added to build scripts
 - [ ] No Python bootstrap (Stage0) usage
 - [ ] Commits use Conventional Commit prefixes
 

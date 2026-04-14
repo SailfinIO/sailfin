@@ -20,17 +20,12 @@ The language features effect types (`![io, net, model, gpu, rand, clock]`), owne
 
 ### Environment Setup
 
-```bash
-make env              # Create/update Conda environment (CI/release only — local builds just need python3)
-```
-
 ### Development Workflow
 
 ```bash
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
 make install          # Install the built compiler into PREFIX/bin (default: ~/.local/bin)
 make rebuild          # Force a rebuild from a released seed
-make rebuild-asan     # Rebuild with ASAN (diagnostic)
 make check            # Compile (if needed) then run the full test suite
 make test             # Run full suite
 make test-unit        # Run Sailfin-native unit tests
@@ -99,7 +94,7 @@ Sailfin uses move-by-default semantics with explicit borrows:
 
 ### Runtime Bridges
 
-The runtime currently ships as C under `runtime/native/`. Higher-level integration helpers (e.g., runners) still live in Python under `runtime/`.
+The runtime currently ships as C under `runtime/native/`.
 
 ### Testing Philosophy
 
@@ -321,12 +316,8 @@ The compiler self-hosts from a released seed binary using `scripts/build.sh` (pu
 ### Build Driver Configuration
 
 ```bash
-# Default: shell driver (no fixups, uses current seed)
-make compile                    # BUILD_DRIVER=sh by default
-
-# Explicit driver selection
-make rebuild BUILD_DRIVER=sh    # Shell, no fixups (default)
-make rebuild BUILD_DRIVER=py    # Python with fixups (legacy, for 0.1.1 seed only)
+make compile                    # Build from seed (uses scripts/build.sh)
+make rebuild                    # Force rebuild from seed
 ```
 
 ### Development Principles
@@ -334,7 +325,7 @@ make rebuild BUILD_DRIVER=py    # Python with fixups (legacy, for 0.1.1 seed onl
 - **Fix the compiler, not the build script.** All compiler improvements go into `compiler/src/*.sfn`. The build script (`scripts/build.sh`) is pure orchestration — no fixups, no post-processing.
 - **The seedcheck binary must be a fully functional standalone compiler.** `make check` validates that it can run `hello-world.sfn` and pass the test suite directly.
 - **Build must be fast and deterministic.** Current: ~13 min. Target: under 5 minutes. See `docs/build-performance.md` for the optimization plan.
-- **Reduce complexity, don't add it.** The Python build driver (`scripts/selfhost_native.py`) is legacy and will be removed once the new seed is fully validated.
+- **Reduce complexity, don't add it.** The build uses `scripts/build.sh` (pure shell, no fixups).
 
 ### `make check` Validation
 

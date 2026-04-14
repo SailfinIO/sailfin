@@ -13,11 +13,7 @@ repository.
 - Check `docs/roadmap.md` for current tasks and sequencing.
 - Familiarise yourself with `docs/style-guide.md` for Sailfin module layout,
   file naming, and doc/test mirroring conventions.
-- Ensure you have the `sailfin` Conda environment:
-
-  ```bash
-  make env
-  ```
+- Ensure you have `clang` and `bash` available (no Conda or Python required).
 
 ## 2. Coding Workflow
 

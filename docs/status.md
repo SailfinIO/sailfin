@@ -8,15 +8,11 @@ feature availability.
 
 ## Build Pipeline (Current)
 
-- CI pins to `v0.1.1` as the seed compiler. Releases past that version are built
-  with the Python stabilization script (`scripts/selfhost_native.py`) and are
-  pre-stabilization artifacts with known issues.
-- `scripts/selfhost_native.py` (~13,000 lines) applies post-processing fixups to
-  generated LLVM IR to work around current compiler bugs. This is build debt.
-- `scripts/build.sh` is the clean target — no fixups. It does not yet succeed;
-  eliminating the Python script is a hard 1.0 requirement.
-- `make compile` (default `BUILD_DRIVER=py`) uses the Python script. `make check`
+- `scripts/build.sh` is the sole build driver — pure shell, no fixups.
+- `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
+- The legacy Python fixup script (`selfhost_native.py`) was removed after the
+  compiler reached clean LLVM IR output (v0.5.0-alpha.22+).
 
 ## Compiler Pipeline (Current)
 

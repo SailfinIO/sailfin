@@ -60,52 +60,17 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-# Build driver selection: "sh" (default, uses scripts/build.sh — no fixups)
-# or "py" (scripts/selfhost_native.py with fixups — legacy, for 0.1.1 seed only).
-# The 0.5.0-alpha.22 seed produces clean LLVM IR, so sh is now the default.
-BUILD_DRIVER ?= sh
+.PHONY: help install fetch-seed test test-unit test-integration test-e2e compile check package clean bench
 
-# Python executable for the build driver. selfhost_native.py uses only stdlib,
-# so any Python 3 works — no Conda or virtualenv required.
-PYTHON ?= $(shell command -v python3 2>/dev/null || command -v python 2>/dev/null)
+.PHONY: ci-prepare-test-artifacts ci-package ci-package-installer
 
-.PHONY: help env install fetch-seed test test-unit test-integration test-e2e compile check package clean bench
-
-.PHONY: ci-prepare-test-artifacts ci-package ci-package-native ci-package-installer
-
-.PHONY: rebuild rebuild-sh rebuild-py rebuild-asan
-
-# Back-compat aliases (deprecated; will be removed).
-.PHONY: selfhost-native selfhost-native-asan
-
-ifeq ($(origin CONDA_EXE), undefined)
-# `conda` is often a shell function (e.g. in zsh/bash init). We need the actual
-# executable path for Makefile recipes.
-CONDA_EXE := $(shell { type -P conda 2>/dev/null || /usr/bin/which conda 2>/dev/null; } | head -n 1)
-endif
-ifneq ($(strip $(CONDA_EXE)),)
-# Some environments export CONDA as the *install prefix* (a directory), not the
-# conda executable. If CONDA is unset or not executable, prefer the detected
-# executable path.
-ifeq ($(strip $(CONDA)),)
-CONDA := $(CONDA_EXE)
-else
-CONDA_IS_EXEC := $(shell [ -x "$(CONDA)" ] && echo yes || echo no)
-ifeq ($(CONDA_IS_EXEC),no)
-CONDA := $(CONDA_EXE)
-endif
-endif
-endif
-CONDA_ENV ?= sailfin
-CONDA_ENV_FILE ?= environment.yml
+.PHONY: rebuild
 
 help:
 	@echo "Common Sailfin tasks"
 	@echo ""
 	@echo "  make compile        # Build the compiler from a released seed"
-	@echo "  make rebuild        # Force rebuild (uses BUILD_DRIVER: sh or py)"
-	@echo "  make rebuild-sh     # Force rebuild using shell driver (no Python)"
-	@echo "  make rebuild-py     # Force rebuild using Python driver (default, has fixups)"
+	@echo "  make rebuild        # Force rebuild from seed (uses scripts/build.sh)"
 	@echo "  make install        # Install the built compiler binary into PREFIX/bin"
 	@echo "  make check          # Compile (if needed) then run the full test suite"
 	@echo "  make test           # Run Sailfin-native unit + integration + e2e tests"
@@ -115,25 +80,12 @@ help:
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
 	@echo "  make bench          # Benchmark per-module compile time and memory"
-	@echo "  make rebuild-asan   # Rebuild with AddressSanitizer (requires Python 3)"
-	@echo "  make env            # Create/update Conda env (CI/release only)"
 	@echo "  make clean          # Remove packaged artifacts (dist/)"
 	@echo ""
-	@echo "Build driver: BUILD_DRIVER=$(BUILD_DRIVER) (sh=no fixups [default], py=with fixups [legacy])"
 
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_NAME ?= sfn
-
-.PHONY: check-conda env install
-check-conda:
-	@if [ -z "$(CONDA)" ] || [ ! -x "$(CONDA)" ]; then \
-		echo "[conda] conda executable not found (CONDA='$(CONDA)'). Export CONDA_EXE or ensure conda is on PATH."; \
-		exit 1; \
-	fi
-
-env: check-conda
-	$(CONDA) env update --file $(CONDA_ENV_FILE) --name $(CONDA_ENV)
 
 install:
 	@if [ ! -x "$(NATIVE_BIN)" ] && [ ! -f "$(NATIVE_BIN)" ]; then \
@@ -321,7 +273,7 @@ clean-all: clean clean-build
 
 compile:
 	@if [ "$${FORCE:-0}" = "0" ] && [ -x "$(NATIVE_BIN)" ] && \
-		[ -z "$$(find compiler/src runtime -type f \( -name '*.sfn' -o -name '*.py' \) -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
+		[ -z "$$(find compiler/src runtime -type f -name '*.sfn' -newer "$(NATIVE_BIN)" -print -quit 2>/dev/null)" ]; then \
 		echo "[compile] $(NATIVE_BIN) up-to-date"; \
 	else \
 		$(MAKE) rebuild; \
@@ -403,16 +355,8 @@ check-determinism:
 # =============================================================================
 
 package:
-ifeq ($(BUILD_DRIVER),sh)
 	@echo "[package] building + packaging native artifacts into dist/"
 	COMPILER_BIN="$(NATIVE_BIN)" OUT_DIR=dist bash tools/package.sh
-else
-	@$(MAKE) check-conda
-	@echo "[package] building + packaging native artifacts into dist/"
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u tools/package_native.py \
-		--out dist \
-		--compiler-bin "$(NATIVE_BIN)"
-endif
 
 # =============================================================================
 # CI helpers (used by .github/workflows/ci.yml)
@@ -420,7 +364,7 @@ endif
 
 # Prepare build artifacts in the locations expected by the Sailfin-native test
 # runner (import context + runtime prelude object). CI builds via
-# scripts/selfhost_native.py, which stages outputs under build/selfhost/native/.
+# scripts/build.sh, which stages outputs under build/selfhost/native/.
 ci-prepare-test-artifacts:
 	@set -eu; \
 	SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
@@ -453,20 +397,6 @@ ci-package:
 	TARGET="$(TARGET)" COMPILER_BIN="$(NATIVE_BIN)" OUT_DIR=dist \
 		bash tools/package.sh --skip-build
 
-# Legacy Python-based packaging (kept until seed is promoted and Python removed).
-# Usage:
-#   make ci-package-native TARGET=linux-x86_64
-ci-package-native: check-conda
-	@if [ -z "$(TARGET)" ]; then \
-		echo "[ci-package-native][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
-		exit 1; \
-	fi
-	$(CONDA) run --no-capture-output -n $(CONDA_ENV) python -u tools/package_native.py \
-		--skip-build \
-		--target "$(TARGET)" \
-		--out dist \
-		--native-out build/native/import-context
-
 # Create an installer payload (compiler + runtime bits) for a given target label.
 # Produces: dist/installer-$(TARGET).tar.gz
 ci-package-installer:
@@ -498,20 +428,9 @@ ci-package-installer:
 #   build/native/sailfin
 #
 # Notes:
-# - Defaults to a non-ASAN seed for speed.
-# - Use `make rebuild-asan` for a slower-but-more-diagnostic ASAN build.
-# - Always runs the orchestrator script via the Conda env Python.
 # - Pass extra flags via BUILD_ARGS (e.g. BUILD_ARGS="--seed-timeout 300").
 # - Parallelize module building via BUILD_JOBS (e.g. BUILD_JOBS=2).
 rebuild:
-ifeq ($(BUILD_DRIVER),sh)
-	@$(MAKE) rebuild-sh
-else
-	@$(MAKE) rebuild-py
-endif
-
-# Shell-based build (no Python, no Conda required).
-rebuild-sh:
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -519,24 +438,24 @@ rebuild-sh:
 	fi; \
 	seed="$$resolved_seed"; \
 	if [ ! -x "$$seed" ]; then \
-		echo "[rebuild-sh] missing seed compiler: $$seed"; \
-		echo "[rebuild-sh] fetching seed with: make fetch-seed"; \
+		echo "[rebuild] missing seed compiler: $$seed"; \
+		echo "[rebuild] fetching seed with: make fetch-seed"; \
 		$(MAKE) fetch-seed; \
 		seed="$(FETCHED_SEED)"; \
 	fi; \
 	if [ ! -x "$$seed" ]; then \
-		echo "[rebuild-sh] missing seed compiler: $$seed"; \
+		echo "[rebuild] missing seed compiler: $$seed"; \
 		exit 1; \
 	fi; \
 	if ! "$$seed" emit native compiler/src/version.sfn >/dev/null 2>&1; then \
-		echo "[rebuild-sh][error] seed compiler does not support 'emit native'" >&2; \
-		echo "[rebuild-sh][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
+		echo "[rebuild][error] seed compiler does not support 'emit native'" >&2; \
+		echo "[rebuild][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
 		exit 1; \
 	fi; \
 	if [ -d build/native/import-context ]; then \
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
-	echo "[rebuild-sh] running shell build (seed=$$seed)..."; \
+	echo "[rebuild] running build (seed=$$seed)..."; \
 	SEED="$$seed" OUT="$(NATIVE_OUT)" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" SEED_TIMEOUT=600 MAX_TOTAL=7200 \
 		bash scripts/build.sh
 	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
@@ -550,80 +469,7 @@ rebuild-sh:
 		cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
 	fi
 	@mkdir -p build/native
-	@echo "[rebuild-sh] built $(NATIVE_OUT)"
-
-# Python-based build (uses selfhost_native.py with fixups; only needs Python 3 stdlib).
-rebuild-py:
-	@if [ -z "$(PYTHON)" ]; then \
-		echo "[rebuild-py][error] python3 not found on PATH" >&2; \
-		exit 1; \
-	fi
-	@seed="$${SEED_NATIVE:-$(SEED)}"; \
-	resolved_seed="$$seed"; \
-	if command -v "$$seed" >/dev/null 2>&1; then \
-		resolved_seed="$$(command -v "$$seed")"; \
-	fi; \
-	seed="$$resolved_seed"; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[rebuild-py] missing seed compiler: $$seed"; \
-		echo "[rebuild-py] fetching seed with: make fetch-seed"; \
-		$(MAKE) fetch-seed; \
-		seed="$(FETCHED_SEED)"; \
-	fi; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[rebuild-py] missing seed compiler: $$seed"; \
-		exit 1; \
-	fi; \
-	if ! "$$seed" emit native compiler/src/version.sfn >/dev/null 2>&1; then \
-		echo "[rebuild-py][error] seed compiler does not support 'emit native'" >&2; \
-		echo "[rebuild-py][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
-		exit 1; \
-	fi; \
-	if [ -d build/native/import-context ]; then \
-		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
-	fi; \
-	echo "[rebuild-py] running Python build script (seed=$$seed)..."; \
-	$(PYTHON) -u scripts/selfhost_native.py --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out $(NATIVE_OUT)
-	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
-	if [ ! -d "$$SRC" ]; then \
-		echo "[rebuild-py][error] missing import-context output at $$SRC" >&2; \
-		echo "[rebuild-py][error] ensure you're using a modern seed (or run: make fetch-seed)" >&2; \
-		exit 1; \
-	fi; \
-	rm -rf build/native/import-context; \
-	mkdir -p build/native/import-context; \
-	cp -a "$$SRC/." build/native/import-context/
-	@if [ -f build/selfhost/native/obj/runtime/prelude.o ]; then \
-		mkdir -p build/native/obj/runtime; \
-		cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
-	fi
-	@mkdir -p build/native
-	@echo "[rebuild-py] built $(NATIVE_OUT)"
-
-rebuild-asan:
-	@if [ -z "$(PYTHON)" ]; then \
-		echo "[rebuild-asan][error] python3 not found on PATH" >&2; \
-		exit 1; \
-	fi
-	@seed="$${SEED_NATIVE:-$(SEED)}"; \
-	resolved_seed="$$seed"; \
-	if command -v "$$seed" >/dev/null 2>&1; then \
-		resolved_seed="$$(command -v "$$seed")"; \
-	fi; \
-	seed="$$resolved_seed"; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[rebuild-asan] missing seed compiler: $$seed"; \
-		echo "[rebuild-asan] fetching seed with: make fetch-seed"; \
-		$(MAKE) fetch-seed; \
-		seed="$(FETCHED_SEED)"; \
-	fi; \
-	if [ ! -x "$$seed" ]; then \
-		echo "[rebuild-asan] missing seed compiler: $$seed"; \
-		exit 1; \
-	fi; \
-	echo "[rebuild-asan] running build script (ASAN output; seed=$$seed)..."; \
-	$(PYTHON) -u scripts/selfhost_native.py --asan --seed "$$seed" --no-prefer-asan-seed --no-use-emit-llvm-file --jobs $(BUILD_JOBS) $(BUILD_ARGS) --out build/native/sailfin-selfhost
-	@echo "[rebuild-asan] built build/native/sailfin-selfhost"
+	@echo "[rebuild] built $(NATIVE_OUT)"
 
 # =============================================================================
 # Cross-compile for Windows (from Linux, using MinGW-w64)
@@ -740,7 +586,3 @@ ci-cross-windows:
 	fi; \
 	tar -czf "dist/installer-$(MINGW_TARGET).tar.gz" -C "$$INSTALLER_DIR" .; \
 	echo "[cross-windows] done: dist/installer-$(MINGW_TARGET).tar.gz"
-
-# Deprecated aliases.
-selfhost-native: rebuild
-selfhost-native-asan: rebuild-asan

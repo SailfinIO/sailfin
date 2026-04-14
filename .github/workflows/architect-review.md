@@ -48,9 +48,9 @@ lexer -> parser -> AST -> type check -> effect check -> emit (.sfn-asm) -> LLVM 
 
 ### Design Principles
 
-1. **Fix the compiler, not the build script.** All improvements target `compiler/src/*.sfn`, not external workarounds or fixup passes in `scripts/selfhost_native.py`.
-2. **Reduce complexity, don't add it.** The fixup pass count (~30 today) should decrease.
-3. **The seedcheck binary must be a fully functional standalone compiler.** No Python fallbacks.
+1. **Fix the compiler, not the build script.** All improvements target `compiler/src/*.sfn`, not external workarounds.
+2. **Reduce complexity, don't add it.**
+3. **The seedcheck binary must be a fully functional standalone compiler.**
 4. **Build must be fast and deterministic.** Target: under 5 minutes, zero retries.
 
 ### Key References

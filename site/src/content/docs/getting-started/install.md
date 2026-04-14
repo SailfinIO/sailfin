@@ -270,10 +270,8 @@ You can also run the binary directly without installing:
 build/native/sailfin --version
 ```
 
-> **Note:** `make compile` uses the shell build driver by default
-> (`BUILD_DRIVER=sh`), which runs `scripts/build.sh`. To match CI's Python
-> self-host path (`scripts/selfhost_native.py`), set `BUILD_DRIVER=py`, for
-> example: `BUILD_DRIVER=py make compile`.
+> **Note:** `make compile` runs `scripts/build.sh` (pure shell, no Python
+> or Conda required). Only `clang` and `bash` are needed.
 
 ---
 

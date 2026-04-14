@@ -24,7 +24,7 @@ runs:
   using: "composite"
   steps:
     - name: Fetch released seed compiler
-      shell: bash -l {0}
+      shell: bash {0}
       run: |
         set -euo pipefail
         seed_version="${{ inputs.seed_version }}"
@@ -32,8 +32,7 @@ runs:
         if [ -z "$seed_version" ]; then
           seed_version="latest"
         fi
-        CONDA=$(which conda) \
-          make fetch-seed \
+        make fetch-seed \
             SEED_REPO="${{ inputs.seed_repo }}" \
             SEED_VERSION="$seed_version" \
             SEED_EXCLUDE_TAG="$seed_exclude_tag"
@@ -41,7 +40,7 @@ runs:
         build/seed/bin/sailfin version
 
     - name: Build native compiler (selfhost from released seed)
-      shell: bash -l {0}
+      shell: bash {0}
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
