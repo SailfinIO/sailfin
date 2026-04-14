@@ -50,10 +50,11 @@ if grep -qiE "pass|ok|success" <<< "$output"; then
 fi
 
 # If there's output but no pass indicator, check for explicit failures.
-# Use identifier-safe boundary matching to avoid false positives from
-# identifiers like "runtime_raise_value_error_fn" in debug trace output.
-# Avoids grep -P (PCRE) since BSD grep on macOS doesn't support it.
-if grep -qiE '(^|[^[:alnum:]_])(fail(ed|ure)?|error|panic|abort)([^[:alnum:]_]|$)' <<< "$output"; then
+# First, strip [info] and [warn] lines — they often contain file paths
+# (e.g., error_handling_test.sfn) or debug context with error keywords
+# that would cause false positives. Genuine errors use [error] or no prefix.
+filtered_output=$(grep -viE '^\[(info|warn(ing)?)\]' <<< "$output" || true)
+if [ -n "$filtered_output" ] && grep -qiE '(^|[^[:alnum:]_])(fail(ed|ure)?|error|panic|abort)([^[:alnum:]_]|$)' <<< "$filtered_output"; then
     echo "[test] FAIL: $BASENAME"
     echo "$output" | tail -5
     exit 1
