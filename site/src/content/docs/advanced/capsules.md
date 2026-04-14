@@ -374,7 +374,7 @@ fn process_order(order_id: Int) ![io] {
 
 | Function | Output stream | Intended use |
 |---|---|---|
-| `log.debug(msg)` | stderr | Detailed developer-facing trace |
+| `log.debug(msg)` | stdout | Detailed developer-facing trace |
 | `log.info(msg)` | stdout | Normal operational events |
 | `log.warn(msg)` | stderr | Recoverable anomalies |
 | `log.error(msg)` | stderr | Failures and errors |

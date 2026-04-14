@@ -184,7 +184,7 @@ type Matrix = Vec<Vec<Float>>;
 
 ```sfn
 model Summarizer : Model<Text, Summary> {
-    engine     = "gpt-foo@2.3.1";
+    engine     = "openai:gpt-4o@2025-06";
     schema     = Summary;
     max_tok    = 2000;
     cost_cap   = 0.05;           // USD

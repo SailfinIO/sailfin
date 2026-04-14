@@ -32,7 +32,7 @@ Check out the [roadmap](/docs/contributing/roadmap) to see what's planned.
 
 ## Get Involved
 
-- Browse the source on [GitHub](https://github.com/sailfin)
+- Browse the source on [GitHub](https://github.com/SailfinIO/sailfin)
 - Read the [contributor guide](/docs/contributing/guide)
 - Try it out: `curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash`
 
