@@ -16,12 +16,12 @@ Sailfin is designed for structured, effect-safe concurrency. The design goal is 
 The `async` keyword on function declarations is parsed and recorded by the compiler. You can declare async functions today:
 
 ```sfn
-async fn fetch_data(url: String) -> String ![net] {
+async fn fetch_data(url: string) -> string ![net] {
     // await is not yet implemented — call synchronously for now
     return http.get(url);
 }
 
-async fn read_config(path: String) -> String ![io] {
+async fn read_config(path: string) -> string ![io] {
     return fs.read(path);
 }
 ```
@@ -34,7 +34,7 @@ Async functions follow the same effect rules as synchronous ones:
 
 ```sfn
 // async functions must declare their effects just like sync functions
-async fn send_notification(msg: String) -> Bool ![net, io] {
+async fn send_notification(msg: string) -> boolean ![net, io] {
     print("Sending: " + msg);
     return http.post("https://notify.example.com", msg);
 }
@@ -111,7 +111,7 @@ For operations that must complete within a time bound:
 
 ```sfn
 // PLANNED — not yet available
-fn fetch_with_deadline(urls: Array<String>) ![net, clock] {
+fn fetch_with_deadline(urls: Array<string>) ![net, clock] {
     scope.with_timeout(5000) {
         for url in urls {
             routine {
@@ -165,7 +165,7 @@ Channels are typed. The type is inferred from the first sent value or can be dec
 
 ```sfn
 // PLANNED — not yet available
-let results: Channel<Int> = channel(capacity: 8);
+let results: Channel<number> = channel(capacity: 8);
 
 routine {
     results.send(compute_heavy_thing());
@@ -198,7 +198,7 @@ Once `await` is implemented, async functions will be able to suspend execution a
 
 ```sfn
 // PLANNED — not yet available
-async fn fetch_and_parse(url: String) -> Document ![net] {
+async fn fetch_and_parse(url: string) -> Document ![net] {
     let body = await http.get(url);
     return parse_html(body);
 }
@@ -265,8 +265,8 @@ fn process_all(items: Vec<Item>) ![io] {
 The prelude provides `map`, `filter`, and `reduce` for collection transformations:
 
 ```sfn
-fn score_all(texts: Array<String>) -> Array<Float> {
-    return texts.map(fn(t: String) -> Float {
+fn score_all(texts: Array<string>) -> Array<number> {
+    return texts.map(fn(t: string) -> number {
         return score(t);
     });
 }
@@ -277,10 +277,10 @@ fn score_all(texts: Array<String>) -> Array<Float> {
 Without the `|>` operator (planned for 1.0), chain operations with intermediate bindings:
 
 ```sfn
-fn index_corpus(docs: Array<String>) ![io] {
+fn index_corpus(docs: Array<string>) ![io] {
     let chunks   = chunk(docs);
     let embedded = embed(chunks);
-    let filtered = embedded.filter(fn(v: Vec) -> Bool { return v.norm > 0.1; });
+    let filtered = embedded.filter(fn(v: Vec) -> boolean { return v.norm > 0.1; });
     upsert(filtered, "docs_idx");
 }
 ```
