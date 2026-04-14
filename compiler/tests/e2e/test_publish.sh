@@ -10,13 +10,17 @@
 
 set -euo pipefail
 
-BINARY="$(realpath "${1:?usage: test_publish.sh <compiler-binary>}")"
+BINARY="$(cd "$(dirname "${1:?usage: test_publish.sh <compiler-binary>}")" && pwd)/$(basename "$1")"
 PASS=0
 FAIL=0
 
 # Prevent the real SFN_TOKEN from leaking into tests — each test that needs
 # a token provides one explicitly via credentials file or env override.
 unset SFN_TOKEN 2>/dev/null || true
+
+# Portable sha256 and base64 helpers (GNU vs macOS)
+_sha256() { sha256sum "$@" 2>/dev/null || shasum -a 256 "$@"; }
+_b64decode() { base64 -d 2>/dev/null || base64 -D; }
 
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
@@ -162,15 +166,15 @@ $(cat "$workdir/capsule.toml")
 $(cat "$workdir/src/mod.sfn")
 "
     local expected_hex
-    expected_hex="$(printf '%s' "$payload_content" | sha256sum | cut -d' ' -f1)"
+    expected_hex="$(printf '%s' "$payload_content" | _sha256 | cut -d' ' -f1)"
     local expected_digest="sha256:$expected_hex"
 
     # Now verify the format by checking what the binary would produce.
-    # Write the same payload to a temp file and confirm sha256sum output.
+    # Write the same payload to a temp file and confirm sha256 output.
     local verify_tmp="$tmpdir/t7_verify"
     printf '%s' "$payload_content" > "$verify_tmp"
     local actual_hex
-    actual_hex="$(sha256sum "$verify_tmp" | cut -d' ' -f1)"
+    actual_hex="$(_sha256 "$verify_tmp" | cut -d' ' -f1)"
     [ "$actual_hex" = "$expected_hex" ] \
         || { echo "digest hex mismatch: expected $expected_hex, got $actual_hex"; return 1; }
     # The key assertion: the code prepends "sha256:" — we can verify this by
@@ -250,7 +254,7 @@ SHIM
     content_b64="$(grep -o '"content_b64":"[^"]*"' "$captured_body" \
         | sed 's/"content_b64":"//;s/"$//')"
     local decoded
-    decoded="$(echo "$content_b64" | base64 -d)"
+    decoded="$(echo "$content_b64" | _b64decode)"
     # Should contain "--- path: src/mod.sfn", not the absolute/prefixed path
     echo "$decoded" | grep -q "^--- path: src/mod.sfn" \
         || { echo "expected relative path 'src/mod.sfn' in SFNPKG, got:"; echo "$decoded" | grep "^--- path:"; return 1; }
@@ -271,25 +275,24 @@ test_publish_surfaces_http_error() {
 
     local shim_dir="$tmpdir/t9_shim"
     mkdir -p "$shim_dir"
-    # Create a curl shim that writes a 400 response with an error body
+    # Create a curl shim that writes a 400 response body and header
     cat > "$shim_dir/curl" <<'SHIM'
 #!/usr/bin/env bash
-# Parse -o and -w flags to write response and status
+# Parse -o and -D flags to write response body and headers
 out_file=""
-status_redir=""
+hdr_file=""
 prev=""
 for arg in "$@"; do
-    if [ "$prev" = "-o" ]; then
-        out_file="$arg"
-    fi
+    if [ "$prev" = "-o" ]; then out_file="$arg"; fi
+    if [ "$prev" = "-D" ]; then hdr_file="$arg"; fi
     prev="$arg"
 done
-# Write error JSON to the -o file
 if [ -n "$out_file" ]; then
     echo '{"error":"Digest mismatch: expected sha256:abc, got sha256:def"}' > "$out_file"
 fi
-# -w '%{http_code}' output goes to stdout (which the caller redirects)
-printf '400'
+if [ -n "$hdr_file" ]; then
+    printf 'HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n' > "$hdr_file"
+fi
 exit 0
 SHIM
     chmod +x "$shim_dir/curl"

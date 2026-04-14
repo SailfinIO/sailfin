@@ -550,7 +550,11 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
         fi += 1;
     }
 
-    let payload_tmp = "/tmp/.sfn_payload_tmp";
+    let payload_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    if payload_tmp.length == 0 {
+        print("failed to create temp file");
+        return 1;
+    }
     fs.writeFile(payload_tmp, payload);
     let raw_digest = _sha256_of_file_cmd(payload_tmp);
     if raw_digest.length == 0 {
@@ -560,7 +564,12 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     }
     let digest = "sha256:" + raw_digest;
 
-    let body_tmp = "/tmp/.sfn_publish_body_tmp";
+    let body_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    if body_tmp.length == 0 {
+        print("failed to create temp file");
+        process.run(["rm", "-f", payload_tmp]);
+        return 1;
+    }
     let build_json_rc = process.run(["sh", "-c",
             "printf '{\"type\":\"capsule\",\"capsule\":\"" + pkg_name
             + "\",\"version\":\"" + pkg_version
@@ -572,22 +581,22 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     if build_json_rc != 0 {
         print("failed to build publish payload");
         process.run(["rm", "-f", payload_tmp]);
+        process.run(["rm", "-f", body_tmp]);
         return 1;
     }
 
     let auth_header = "Bearer " + token;
     let registry_url = "https://registry.sailfin.dev/api/publish";
     print("publishing to " + registry_url + "...");
-    let response_tmp = "/tmp/.sfn_publish_response_tmp";
-    let status_tmp = "/tmp/.sfn_publish_status_tmp";
-    let curl_rc = process.run(["sh", "-c",
-        "curl -sS -X POST"
-        + " -H 'Content-Type: application/json'"
-        + " -H 'Authorization: " + auth_header + "'"
-        + " -d @" + body_tmp
-        + " -o " + response_tmp
-        + " -w '%{http_code}' " + registry_url
-        + " > " + status_tmp
+    let response_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let header_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let curl_rc = process.run(["curl", "-sS", "-X", "POST",
+        "-H", "Content-Type: application/json",
+        "-H", "Authorization: " + auth_header,
+        "-d", "@" + body_tmp,
+        "-o", response_tmp,
+        "-D", header_tmp,
+        registry_url
     ]);
     process.run(["rm", "-f", payload_tmp]);
     process.run(["rm", "-f", body_tmp]);
@@ -597,9 +606,15 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
         process.run(["rm", "-f", response_tmp]);
     }
     let mut status -> string = "";
-    if fs.exists(status_tmp) {
-        status = _toml_trim_cmd(fs.readFile(status_tmp));
-        process.run(["rm", "-f", status_tmp]);
+    if fs.exists(header_tmp) {
+        let headers = fs.readFile(header_tmp);
+        process.run(["rm", "-f", header_tmp]);
+        let sp = find_char(headers, " ", 0);
+        if sp >= 0 {
+            if headers.length >= sp + 4 {
+                status = substring(headers, sp + 1, sp + 4);
+            }
+        }
     }
     if curl_rc != 0 {
         print("publish failed — could not reach registry");
