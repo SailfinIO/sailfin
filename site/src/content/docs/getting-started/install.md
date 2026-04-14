@@ -107,9 +107,8 @@ If the command is not found, see [Troubleshooting](#troubleshooting) below.
 ## Pinning a Version
 
 The pinned stable version for Sailfin development is **`v0.1.1-alpha.135`**.
-Releases past this point are pre-stabilization builds produced by the Python
-fixup script and may have known issues. Unless you have a specific reason to use
-a newer build, pin to the stable version.
+Releases past this point are pre-stabilization builds and may have known issues.
+Unless you have a specific reason to use a newer build, pin to the stable version.
 
 ### Linux and macOS
 
@@ -378,8 +377,8 @@ If LLVM is installed but not detected, set the path explicitly:
 LLVM_PREFIX=/usr/lib/llvm-17 make compile
 ```
 
-Pre-built release binaries bundle their own LLVM runtime and do not require you
-to install LLVM separately.
+Pre-built release binaries require LLVM 17+ to be installed on your system
+(see [LLVM](#llvm) above).
 
 ### GitHub API rate limiting during install
 

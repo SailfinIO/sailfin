@@ -17,7 +17,7 @@ A `model` block declares a named model binding with its engine, schema, and oper
 
 ```sfn
 model Summarizer : Model<Text, Summary> {
-    engine     = "gpt-foo@2.3.1";
+    engine     = "openai:gpt-4o@2025-06";
     schema     = Summary;
     max_tok    = 2000;
     cost_cap   = 0.05;  // USD
@@ -218,7 +218,7 @@ The tool dispatcher — the mechanism by which a model call can invoke a declare
 Every model call will produce a _generation card_: a signed provenance record attached to the return value. Generation cards will contain:
 
 - Input hash (for deduplication and caching)
-- Engine name and version (e.g. `gpt-foo@2.3.1`)
+- Engine name and version (e.g. `openai:gpt-4o@2025-06`)
 - Parameters used (temperature, seed, max tokens)
 - Latency in milliseconds
 - Estimated cost in USD
@@ -242,7 +242,7 @@ struct Summary {
 }
 
 model Summarizer : Model<Text, Summary> {
-    engine = "gpt-foo@2.3.1";
+    engine = "openai:gpt-4o@2025-06";
     schema = Summary;
     max_tok = 1500;
 }
