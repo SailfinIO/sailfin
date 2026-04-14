@@ -478,15 +478,30 @@ fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io]
 }
 
 fn handle_publish_command(args -> string[]) -> number ![io] {
-    if args.length != 1 {
-        print("usage: sfn publish");
+    if args.length > 2 {
+        print("usage: sfn publish [path]");
         return 2;
     }
-    if !fs.exists("capsule.toml") {
+    let mut capsule_dir -> string = "";
+    if args.length == 2 {
+        capsule_dir = args[1];
+        if capsule_dir.length > 0 {
+            if substring(capsule_dir, capsule_dir.length - 1, capsule_dir.length) == "/" {
+                capsule_dir = substring(capsule_dir, 0, capsule_dir.length - 1);
+            }
+        }
+    }
+    let mut toml_path -> string = "capsule.toml";
+    let mut src_dir -> string = "src";
+    if capsule_dir.length > 0 {
+        toml_path = capsule_dir + "/capsule.toml";
+        src_dir = capsule_dir + "/src";
+    }
+    if !fs.exists(toml_path) {
         print("no capsule.toml found — run `sfn init` first");
         return 1;
     }
-    let toml_text = fs.readFile("capsule.toml");
+    let toml_text = fs.readFile(toml_path);
     let pkg_name = toml_get_name(toml_text);
     let pkg_version = toml_get_version(toml_text);
     if pkg_name.length == 0 {
@@ -521,24 +536,29 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     let mut payload -> string = "SFNPKG/1\n";
     payload = payload + "--- path: capsule.toml\n" + toml_text + "\n";
 
-    let src_files = _collect_sfn_files_cmd("src", 10);
+    let src_files = _collect_sfn_files_cmd(src_dir, 10);
     let mut fi -> number = 0;
     loop {
         if fi >= src_files.length { break; }
         let file_path = src_files[fi];
         let content = fs.readFile(file_path);
-        payload = payload + "--- path: " + file_path + "\n" + content + "\n";
+        let mut rel_path -> string = file_path;
+        if capsule_dir.length > 0 {
+            rel_path = substring(file_path, capsule_dir.length + 1, file_path.length);
+        }
+        payload = payload + "--- path: " + rel_path + "\n" + content + "\n";
         fi += 1;
     }
 
     let payload_tmp = "/tmp/.sfn_payload_tmp";
     fs.writeFile(payload_tmp, payload);
-    let digest = _sha256_of_file_cmd(payload_tmp);
-    if digest.length == 0 {
+    let raw_digest = _sha256_of_file_cmd(payload_tmp);
+    if raw_digest.length == 0 {
         print("failed to compute digest");
         process.run(["rm", "-f", payload_tmp]);
         return 1;
     }
+    let digest = "sha256:" + raw_digest;
 
     let body_tmp = "/tmp/.sfn_publish_body_tmp";
     let build_json_rc = process.run(["sh", "-c",
@@ -558,12 +578,40 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     let auth_header = "Bearer " + token;
     let registry_url = "https://registry.sailfin.dev/api/publish";
     print("publishing to " + registry_url + "...");
-    let response = _curl_post_json_cmd(registry_url, body_tmp, auth_header);
+    let response_tmp = "/tmp/.sfn_publish_response_tmp";
+    let status_tmp = "/tmp/.sfn_publish_status_tmp";
+    let curl_rc = process.run(["sh", "-c",
+        "curl -sS -X POST"
+        + " -H 'Content-Type: application/json'"
+        + " -H 'Authorization: " + auth_header + "'"
+        + " -d @" + body_tmp
+        + " -o " + response_tmp
+        + " -w '%{http_code}' " + registry_url
+        + " > " + status_tmp
+    ]);
     process.run(["rm", "-f", payload_tmp]);
     process.run(["rm", "-f", body_tmp]);
-    if response.length == 0 {
-        print("publish failed — check your token and network connection");
+    let mut response -> string = "";
+    if fs.exists(response_tmp) {
+        response = _toml_trim_cmd(fs.readFile(response_tmp));
+        process.run(["rm", "-f", response_tmp]);
+    }
+    let mut status -> string = "";
+    if fs.exists(status_tmp) {
+        status = _toml_trim_cmd(fs.readFile(status_tmp));
+        process.run(["rm", "-f", status_tmp]);
+    }
+    if curl_rc != 0 {
+        print("publish failed — could not reach registry");
+        if response.length > 0 { print("server: " + response); }
         return 1;
+    }
+    if status.length >= 1 {
+        if substring(status, 0, 1) != "2" {
+            print("publish failed (HTTP " + status + ")");
+            if response.length > 0 { print("server: " + response); }
+            return 1;
+        }
     }
     print(response);
     return 0;

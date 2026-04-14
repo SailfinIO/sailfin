@@ -32,7 +32,7 @@ fn _usage() -> string {
     "  sfn run <exe>\n" +
     "  sfn test [path]\n" +
     "  sfn init\n" +
-    "  sfn publish\n" +
+    "  sfn publish [path]\n" +
     "  sfn add [--dev] <capsule>\n" +
     "  sfn login [token]\n" +
     "\n" +
@@ -44,7 +44,7 @@ fn _usage() -> string {
     "  sfn run build/native/examples/hello\n" +
     "  sfn test .\n" +
     "  sfn init\n" +
-    "  sfn publish\n" +
+    "  sfn publish [path]\n" +
     "  sfn add http\n" +
     "  sfn add --dev test\n" +
     "  sfn add acme/router\n" +
