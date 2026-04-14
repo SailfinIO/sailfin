@@ -43,8 +43,15 @@ if [ -z "$output" ]; then
     exit 1
 fi
 
-# Check for test pass indicators
-if grep -qiE "pass|ok|success" <<< "$output"; then
+# Strip [info] and [warn] diagnostic lines before keyword matching.
+# These lines contain file paths (e.g. error_handling_test.sfn) and internal
+# identifiers that trigger false positives.  See issue #55.
+filtered_output=$(grep -vE '^\[info\]|^\[warn\]' <<< "$output" || true)
+
+# Check for test pass indicators.
+# Word-boundary matching avoids false positives from identifiers that contain
+# "ok" (token, book), "pass" (bypass, password), etc.
+if grep -qiE '(^|[^[:alnum:]_])(pass(ed)?|ok|success)([^[:alnum:]_]|$)' <<< "$filtered_output"; then
     echo "[test] PASS: $BASENAME"
     exit 0
 fi
@@ -53,7 +60,7 @@ fi
 # Use identifier-safe boundary matching to avoid false positives from
 # identifiers like "runtime_raise_value_error_fn" in debug trace output.
 # Avoids grep -P (PCRE) since BSD grep on macOS doesn't support it.
-if grep -qiE '(^|[^[:alnum:]_])(fail(ed|ure)?|error|panic|abort)([^[:alnum:]_]|$)' <<< "$output"; then
+if grep -qiE '(^|[^[:alnum:]_])(fail(ed|ure)?|error|panic|abort)([^[:alnum:]_]|$)' <<< "$filtered_output"; then
     echo "[test] FAIL: $BASENAME"
     echo "$output" | tail -5
     exit 1
