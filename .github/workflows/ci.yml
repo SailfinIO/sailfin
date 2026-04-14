@@ -2,8 +2,8 @@ name: CI (PR)
 
 env:
   # Pinned seed used for self-host bootstrap in CI.
-  # 0.5.0-alpha.22: first seed that produces clean LLVM IR (no Python fixups needed).
-  SEED_VERSION: 0.5.0-alpha.22
+  # 0.5.0-alpha.24: ring-buffer corruption fix, consistent -O2, diagnostic scripts.
+  SEED_VERSION: 0.5.0-alpha.24
 
 permissions:
   contents: read
