@@ -14,7 +14,7 @@ The primary compiler is the self-hosted native compiler (legacy name: stage2). T
 
 To get started with the Sailfin project, please refer to the [README.md](README.md) for a project overview and the [docs/README.md](docs/README.md) for the documentation navigation map.
 
-Prerequisites: `clang` and `bash` (no Conda or Python required).
+Prerequisites: `clang`, `bash`, and LLVM tools required by the native build scripts (notably `llvm-link`). `jq` is also useful for `make fetch-seed`. No Conda or Python is required.
 
 ## Development Workflow
 

@@ -13,7 +13,8 @@ repository.
 - Check `docs/roadmap.md` for current tasks and sequencing.
 - Familiarise yourself with `docs/style-guide.md` for Sailfin module layout,
   file naming, and doc/test mirroring conventions.
-- Ensure you have `clang` and `bash` available (no Conda or Python required).
+- Ensure you have `bash` and the LLVM toolchain available, including `clang`
+  and `llvm-link` (no Conda or Python required).
 
 ## 2. Coding Workflow
 

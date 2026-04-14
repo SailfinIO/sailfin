@@ -271,7 +271,8 @@ build/native/sailfin --version
 ```
 
 > **Note:** `make compile` runs `scripts/build.sh` (pure shell, no Python
-> or Conda required). Only `clang` and `bash` are needed.
+> or Conda required) and requires `bash`, `clang`, and LLVM tools including
+> `llvm-link`. `make fetch-seed` also requires `jq`.
 
 ---
 
