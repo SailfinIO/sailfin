@@ -339,7 +339,7 @@ check:
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin
 	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
 	@echo "[check] verifying seed selfhost (stage2)..."
-	@SEED="build/native/sailfin" OUT="build/native/sailfin-seedcheck" OPT="-O0" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
+	@SEED="build/native/sailfin" OUT="build/native/sailfin-seedcheck" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
 		WORK_DIR="build/selfhost/native-seedcheck" \
 		bash scripts/build.sh
 	@echo "[check] validating seedcheck binary can run programs..."
@@ -356,7 +356,7 @@ check:
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
 	@echo ""
 	@echo "[check] stage2 tests passed — building stage3 for fixed-point comparison..."
-	@SEED="build/native/sailfin-seedcheck" OUT="build/native/sailfin-stage3" OPT="-O0" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
+	@SEED="build/native/sailfin-seedcheck" OUT="build/native/sailfin-stage3" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
 		WORK_DIR="build/selfhost/native-stage3" \
 		bash scripts/build.sh
 	@echo "[check] comparing stage2 vs stage3 LLVM IR (fixed-point check)..."
