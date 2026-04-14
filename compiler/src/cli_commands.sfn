@@ -575,7 +575,7 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
             + "\",\"version\":\"" + pkg_version
             + "\",\"digest\":\"" + digest
             + "\",\"content_b64\":\"' > " + body_tmp
-            + " && base64 -w0 '" + payload_tmp + "' >> " + body_tmp
+            + " && base64 < '" + payload_tmp + "' | tr -d '\\n' >> " + body_tmp
             + " && printf '\",\"meta\":{}}' >> " + body_tmp
     ]);
     if build_json_rc != 0 {
