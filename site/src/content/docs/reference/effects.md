@@ -30,23 +30,23 @@ Effect annotations appear after the parameter list and optional return type, bef
 
 ```sfn
 // No effects declared — guaranteed pure
-fn pure_fn(x: int) -> int {
+fn pure_fn(x: Int) -> Int {
     x * 2
 }
 
 // Single effect
-fn log_value(x: int) ![io] {
+fn log_value(x: Int) ![io] {
     print(x);
 }
 
 // Multiple effects
-fn fetch_and_log(url: string) ![io, net] {
+fn fetch_and_log(url: String) ![io, net] {
     let body = http.get(url);
     print(body);
 }
 
 // Full signature with return type and multiple effects
-fn fetch_order(url: string) -> string ![io, net, model] {
+fn fetch_order(url: String) -> String ![io, net, model] {
     // ...
 }
 ```
@@ -109,7 +109,7 @@ Required for any function containing a `prompt` block. Model execution via `.cal
 | `model.call()` | Planned — parses today, does not execute |
 
 ```sfn
-fn summarize(text: string) -> string ![model] {
+fn summarize(text: String) -> String ![model] {
     prompt user {
         "Summarize the following: {{ text }}"
     }
@@ -178,11 +178,11 @@ Declare the narrowest set of effects possible. Functions that mix pure computati
 
 ```sfn
 // Preferred: pure logic separated from IO
-fn compute_total(items: List<Item>) -> Float {
+fn compute_total(items: Array<Item>) -> Float {
     items.map(fn(i) -> Float { i.price }).sum()
 }
 
-fn print_total(items: List<Item>) ![io] {
+fn print_total(items: Array<Item>) ![io] {
     let total = compute_total(items);
     print(total);
 }

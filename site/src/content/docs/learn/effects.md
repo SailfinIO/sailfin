@@ -16,7 +16,7 @@ This is Sailfin's effect system: a lightweight, compile-time capability mechanis
 An effect is a named capability — a category of operation that reaches outside the pure computational model. In Sailfin, effects are declared on function signatures with the `![...]` annotation:
 
 ```sfn
-fn read_config(path: string) -> string ![io] {
+fn read_config(path: String) -> String ![io] {
     return fs.read(path);
 }
 ```
@@ -68,7 +68,7 @@ Effects are declared with `![...]` syntax. By default, place them after the retu
 ### Single effect
 
 ```sfn
-fn write_log(message: string) ![io] {
+fn write_log(message: String) ![io] {
     fs.append("app.log", message);
 }
 ```
@@ -78,7 +78,7 @@ fn write_log(message: string) ![io] {
 List them comma-separated inside `![]`:
 
 ```sfn
-fn fetch_and_log(url: string) -> string ![io, net] {
+fn fetch_and_log(url: String) -> String ![io, net] {
     let body = http.get(url);
     print("Fetched {{body.length}} bytes from {{url}}");
     return body;
@@ -90,7 +90,7 @@ fn fetch_and_log(url: string) -> string ![io, net] {
 By default, the effect annotation goes after the return type: `fn f(...) -> T ![effects] { ... }`. The parser also accepts effects before `->`. The conventional style is effects after the return type:
 
 ```sfn
-fn load_user(id: int) -> User ![io, net] {
+fn load_user(id: Int) -> User ![io, net] {
     let row = db.query("SELECT * FROM users WHERE id = {{id}}");
     return User.from_row(row);
 }
@@ -99,7 +99,7 @@ fn load_user(id: int) -> User ![io, net] {
 ### All six effects together (unusual but valid)
 
 ```sfn
-fn full_pipeline(input: string) -> Report ![io, net, model, clock, gpu, rand] {
+fn full_pipeline(input: String) -> Report ![io, net, model, clock, gpu, rand] {
     // hypothetical function that legitimately uses every capability
 }
 ```
@@ -112,7 +112,7 @@ A function with no `![]` annotation is **pure**. The compiler enforces this: cal
 
 ```sfn
 // Pure — no effects declared, no effects allowed
-fn add(a: int, b: int) -> int {
+fn add(a: Int, b: Int) -> Int {
     return a + b;
 }
 
@@ -122,7 +122,7 @@ fn clamp(value: Float, low: Float, high: Float) -> Float {
     return value;
 }
 
-fn format_currency(amount: Float) -> string {
+fn format_currency(amount: Float) -> String {
     return "${{amount}}";
 }
 ```
@@ -144,12 +144,12 @@ Effects are designed to propagate through the call graph. If function `A` calls 
 ### Example: missing effect (future behavior)
 
 ```sfn
-fn fetch_data(url: string) -> string ![net] {
+fn fetch_data(url: String) -> String ![net] {
     return http.get(url);
 }
 
 // Planned: fetch_data requires ![net], but process only declares ![io]
-fn process(url: string) -> string ![io] {
+fn process(url: String) -> String ![io] {
     let raw = fetch_data(url);   // will be a compile error once transitive checking is enforced
     return raw.trim();
 }
@@ -167,7 +167,7 @@ error[effects.missing]: function `process` uses `![net]` operation but does not 
 ### Example: the fix
 
 ```sfn
-fn process(url: string) -> string ![io, net] {
+fn process(url: String) -> String ![io, net] {
     let raw = fetch_data(url);
     print("Processing response...");
     return raw.trim();
@@ -179,16 +179,16 @@ fn process(url: string) -> string ![io, net] {
 Effects propagate across as many call levels as needed:
 
 ```sfn
-fn read_file(path: string) -> string ![io] {
+fn read_file(path: String) -> String ![io] {
     return fs.read(path);
 }
 
-fn parse_config(path: string) -> Config ![io] {
+fn parse_config(path: String) -> Config ![io] {
     let text = read_file(path);         // OK: both declare ![io]
     return Config.parse(text);
 }
 
-fn init_app(config_path: string) -> App ![io] {
+fn init_app(config_path: String) -> App ![io] {
     let config = parse_config(config_path);  // OK: both declare ![io]
     return App.new(config);
 }
@@ -237,7 +237,7 @@ The effect requirement on tests is intentional: it makes it visible at a glance 
 A `pipeline` declaration aggregates the effects of all its steps. Each step declares its own effects; the pipeline itself declares the union:
 
 ```sfn
-pipeline analyze_feedback(path: string) ![io, model] {
+pipeline analyze_feedback(path: String) ![io, model] {
     let text = fs.read(path);
     let result = prompt gpt4o {
         system "Classify this feedback as: positive, negative, or neutral."
@@ -252,7 +252,7 @@ pipeline analyze_feedback(path: string) ![io, model] {
 Tool declarations expose typed functions to model invocation. A `tool` block looks like a function declaration with the `tool` keyword:
 
 ```sfn
-tool lookup_order(id: string) -> Order ![io] {
+tool lookup_order(id: String) -> Order ![io] {
     return db.find_order(id);
 }
 ```
@@ -266,9 +266,9 @@ A function that invokes a tool with a `prompt` block must declare `![model]`; an
 Closures capture the effect context of their enclosing scope. A lambda used inside an `![io]` function may call I/O operations; a lambda used inside a pure function may not.
 
 ```sfn
-fn process_files(paths: Array<string>) ![io] {
+fn process_files(paths: Array<String>) ![io] {
     // This lambda is used in an ![io] context — it can call fs.read
-    let contents = paths.map(fn(path) -> string { fs.read(path) });
+    let contents = paths.map(fn(path) -> String { fs.read(path) });
     for content in contents {
         print(content);
     }
@@ -290,7 +290,7 @@ The effect checker produces diagnostics when a required effect is missing. Diagn
 ```
 effects.missing: function `save_report` calls `fs.write` which requires ![io],
                  but `save_report` declares no effects
-  = help: add `io` to the function signature: `fn save_report(content: string) ![io]`
+  = help: add `io` to the function signature: `fn save_report(content: String) ![io]`
 ```
 
 ### Missing effect from a callee
@@ -306,7 +306,7 @@ effects.missing: function `run_query` calls `http.post` which requires ![net],
 ```
 effects.missing: `prompt` block requires the `model` effect,
                  but `summarize` declares no effects
-  = help: add `model` to the function signature: `fn summarize(text: string) -> string ![model]`
+  = help: add `model` to the function signature: `fn summarize(text: String) -> String ![model]`
 ```
 
 ### How to read the diagnostic
@@ -324,7 +324,7 @@ The most important pattern the effect system enables is **separating pure logic 
 
 ```sfn
 // Hard to test — requires a real database and HTTP connection
-fn process_order(order_id: string) -> boolean ![io, net] {
+fn process_order(order_id: String) -> Bool ![io, net] {
     let raw = http.get("https://api.example.com/orders/{{order_id}}");
     let order = Order.parse(raw);
     if order.total > 1000.0 {
@@ -346,16 +346,16 @@ fn calculate_discount(order: Order) -> Float {
     return order.total * 0.1;
 }
 
-fn is_high_value(order: Order) -> boolean {
+fn is_high_value(order: Order) -> Bool {
     return order.total > 1000.0;
 }
 
-fn format_log_entry(order_id: string, order: Order) -> string {
+fn format_log_entry(order_id: String, order: Order) -> String {
     return "{{order_id}}: ${{order.total}}";
 }
 
 // Thin effectful shell — tested via integration tests
-fn process_order(order_id: string) -> boolean ![io, net] {
+fn process_order(order_id: String) -> Bool ![io, net] {
     let raw = http.get("https://api.example.com/orders/{{order_id}}");
     let order = Order.parse(raw);
 
@@ -390,21 +390,21 @@ test "high value threshold" {
 
 ```sfn
 // Pure validator — no effects
-fn validate_email(email: string) -> boolean {
+fn validate_email(email: String) -> Bool {
     return email.contains("@") && email.contains(".");
 }
 
-fn validate_username(username: string) -> boolean {
+fn validate_username(username: String) -> Bool {
     return username.length >= 3 && username.length <= 32;
 }
 
 struct ValidationResult {
-    valid -> boolean;
-    errors -> Array<string>;
+    valid -> Bool;
+    errors -> Array<String>;
 }
 
-fn validate_registration(username: string, email: string) -> ValidationResult {
-    let mut errors: Array<string> = [];
+fn validate_registration(username: String, email: String) -> ValidationResult {
+    let mut errors: Array<String> = [];
     if !validate_username(username) {
         errors.push("Username must be 3–32 characters");
     }
@@ -415,7 +415,7 @@ fn validate_registration(username: string, email: string) -> ValidationResult {
 }
 
 // Effectful boundary: calls the pure validator, then writes to DB
-fn register_user(username: string, email: string) -> boolean ![io, net] {
+fn register_user(username: String, email: String) -> Bool ![io, net] {
     let result = validate_registration(username, email);
     if !result.valid {
         for error in result.errors {
@@ -440,11 +440,11 @@ The current system uses flat effect names: `io`, `net`, `model`, etc. A future r
 
 ```sfn
 // Planned syntax — not active today
-fn read_only_op(path: string) -> string ![io.fs.read] {
+fn read_only_op(path: String) -> String ![io.fs.read] {
     return fs.read(path);
 }
 
-fn http_only(url: string) -> string ![net.http] {
+fn http_only(url: String) -> String ![net.http] {
     return http.get(url);
 }
 ```
@@ -455,7 +455,7 @@ Until hierarchical effects ship, use comments and code organisation to document 
 
 ```sfn
 // Uses only fs.read — write capability not needed despite declaring ![io]
-fn load_template(path: string) -> string ![io] {
+fn load_template(path: String) -> String ![io] {
     return fs.read(path);
 }
 ```
@@ -466,7 +466,7 @@ fn load_template(path: string) -> string ![io] {
 
 ```sfn
 // No effect — pure function
-fn pure_fn(x: int) -> int { ... }
+fn pure_fn(x: Int) -> Int { ... }
 
 // Single effect
 fn io_fn() ![io] { ... }
@@ -475,20 +475,20 @@ fn io_fn() ![io] { ... }
 fn network_fn() ![io, net] { ... }
 
 // With return type
-fn fetch_fn(url: string) -> string ![net] { ... }
+fn fetch_fn(url: String) -> String ![net] { ... }
 
 // Test with effects
 test "my test" ![io] { ... }
 
 // Pipeline step
 pipeline my_pipeline ![io, model] {
-    step fetch(url: string) -> string ![net] { ... }
-    step process(text: string) -> Result ![model] { ... }
+    step fetch(url: String) -> String ![net] { ... }
+    step process(text: String) -> Result ![model] { ... }
 }
 
 // Tool
 tool my_tool {
-    fn execute(id: string) -> Data ![io] { ... }
+    fn execute(id: String) -> Data ![io] { ... }
 }
 ```
 
