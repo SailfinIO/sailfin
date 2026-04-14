@@ -139,6 +139,40 @@ case "$OPAQUE_POINTERS_MODE" in
 esac
 
 # ---------------------------------------------------------------------------
+# Sanitizer flags (diagnostic builds)
+# ---------------------------------------------------------------------------
+# Comma-separated list of sanitizers to apply to the compiled first-pass binary.
+# Default (unset/empty) = no sanitizers; behavior is bit-identical to prior builds.
+#
+#   SANITIZE=asan            -fsanitize=address
+#   SANITIZE=ubsan           -fsanitize=undefined
+#   SANITIZE=asan,ubsan      both (recommended for this investigation)
+#   SANITIZE=msan            -fsanitize=memory + origin tracking (separate run)
+#
+# Sanitized builds always add -fno-omit-frame-pointer -g so ASan/UBSan traces
+# are readable. Applied to all CLANG invocations that compile .ll/.bc/.c inputs
+# and to the final link (so the sanitizer runtime gets pulled in).
+SANITIZE_FLAGS=""
+if [[ -n "${SANITIZE:-}" ]]; then
+    IFS=',' read -ra _san_list <<< "$SANITIZE"
+    for _san in "${_san_list[@]}"; do
+        case "$_san" in
+            asan)   SANITIZE_FLAGS="$SANITIZE_FLAGS -fsanitize=address" ;;
+            ubsan)  SANITIZE_FLAGS="$SANITIZE_FLAGS -fsanitize=undefined" ;;
+            msan)   SANITIZE_FLAGS="$SANITIZE_FLAGS -fsanitize=memory -fsanitize-memory-track-origins=2" ;;
+            "")     ;;
+            *)
+                echo "[build][error] unknown SANITIZE token: '$_san' (want asan, ubsan, msan)" >&2
+                exit 1
+                ;;
+        esac
+    done
+    SANITIZE_FLAGS="$SANITIZE_FLAGS -fno-omit-frame-pointer -g"
+    echo "[build] sanitizer build: SANITIZE=$SANITIZE flags=$SANITIZE_FLAGS"
+    CLANG_FLAGS="$CLANG_FLAGS$SANITIZE_FLAGS"
+fi
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 log() { echo "[build] $*"; }
@@ -172,10 +206,20 @@ fi
 
 SEED_MEM_LIMIT="${SEED_MEM_LIMIT:-12582912}"  # 12 GB virtual address space cap (kbytes)
 
+# ASan reserves ~14 TB of shadow memory; any RLIMIT_AS cap breaks it.
+# When SANITIZE includes asan or msan, skip the ulimit entirely. Shadow memory
+# is overcommitted virtual space, not physical — no host-crash risk.
+_SEED_SKIP_VLIMIT=0
+case ",${SANITIZE:-}," in
+    *,asan,*|*,msan,*) _SEED_SKIP_VLIMIT=1 ;;
+esac
+
 seed_run() {
     # Run in a subshell so ulimit only affects this invocation
     (
-        ulimit -v "$SEED_MEM_LIMIT" 2>/dev/null || true
+        if [[ "$_SEED_SKIP_VLIMIT" -eq 0 ]]; then
+            ulimit -v "$SEED_MEM_LIMIT" 2>/dev/null || true
+        fi
         if [[ -n "$TIMEOUT_CMD" ]]; then
             "$TIMEOUT_CMD" "$SEED_TIMEOUT" "$@"
         else

@@ -720,6 +720,29 @@ static bool _recent_array_contains(const void *data)
     return false;
 }
 
+// Scrub a stale data pointer from the ring buffer. Called before realloc
+// frees the old backing so that future _recent_array_contains() calls
+// cannot match against the freed address (which may be reused by malloc
+// for a non-array allocation, causing array_push_slot to read a bogus
+// header at old_ptr - 32 and corrupt output).
+static void _recent_array_remove(const void *data)
+{
+    if (!data)
+    {
+        return;
+    }
+    pthread_mutex_lock(&_sailfin_recent_array_lock);
+    const size_t cap = sizeof(_sailfin_recent_arrays) / sizeof(_sailfin_recent_arrays[0]);
+    for (size_t i = 0; i < cap; i++)
+    {
+        if (_sailfin_recent_arrays[i] == data)
+        {
+            _sailfin_recent_arrays[i] = NULL;
+        }
+    }
+    pthread_mutex_unlock(&_sailfin_recent_array_lock);
+}
+
 static void _recent_string_record(const char *base, size_t len)
 {
     if (!base || len == 0)
@@ -3046,14 +3069,13 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
         return;
     }
 
-    // Skip canary validation for arrays not allocated by `_alloc_array`.
-    // Stage2 frequently passes stack-allocated array literals into runtime
-    // helpers; those buffers are not padded with canaries.
+    // Use the ring buffer to gate the header read — direct magic reads on
+    // stack-allocated arrays can segfault. Ring + eviction (see array_push)
+    // prevents most stale-entry false positives.
     if (!_recent_array_contains((const void *)arr->data))
     {
         return;
     }
-    // Arrays allocated by `_alloc_array` include a small header at data[-2..-1].
     const uintptr_t canary_value = (uintptr_t)0x5341494c46494e43ull;
     uintptr_t magic = (uintptr_t)arr->data[-2];
     if (magic != canary_value)
@@ -3688,6 +3710,9 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
     size_t capacity = 0;
     const uintptr_t header_magic = (uintptr_t)0x5341494c46494e43ull;
     bool has_header = false;
+    // Use ring buffer to gate header read — stack-allocated arrays don't have
+    // headers and reading data[-2] on them can segfault. Ring + eviction
+    // (see realloc path below) prevents most stale-entry false positives.
     if (array->data && _recent_array_contains((const void *)array->data))
     {
         if ((uintptr_t)array->data[-2] == header_magic)
@@ -3753,9 +3778,13 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         const size_t header_slots = 2u;
         const size_t canary_slots = 4u;
         char **raw = array->data - header_slots;
+        // Evict stale data pointer before realloc frees the old backing.
+        _recent_array_remove((const void *)array->data);
         char **grown = (char **)realloc(raw, (header_slots + new_capacity + canary_slots) * sizeof(char *));
         if (!grown)
         {
+            // realloc failed — re-record since old buffer is still valid.
+            _recent_array_record((const void *)array->data);
             return NULL;
         }
 
@@ -4035,6 +4064,10 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
     size_t capacity = 0;
     bool has_header = false;
 
+    // Use ring buffer to gate header read — stack/unknown arrays don't have
+    // headers and reading data[-header_bytes] on them can segfault. Ring +
+    // eviction (see realloc path below) prevents most stale-entry false
+    // positives.
     if (data && _recent_array_contains((const void *)data))
     {
         uint64_t *hdr = (uint64_t *)(data - header_bytes);
@@ -4138,9 +4171,16 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
         size_t old_payload = capacity * (size_t)elem_size;
         size_t new_payload = new_capacity * (size_t)elem_size;
         uint8_t *raw = data - header_bytes;
+        // Evict the old data pointer from the ring BEFORE realloc frees it.
+        // Without this, a future push_slot call could match the stale address
+        // in the ring, read a bogus header from freed/reused memory, and
+        // corrupt the array contents.
+        _recent_array_remove((const void *)data);
         uint8_t *grown = (uint8_t *)realloc(raw, header_bytes + new_payload + canary_bytes);
         if (!grown)
         {
+            // realloc failed — re-record the old pointer since it's still valid.
+            _recent_array_record((const void *)data);
             return NULL;
         }
         uint64_t *hdr = (uint64_t *)grown;
