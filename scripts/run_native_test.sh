@@ -53,7 +53,12 @@ fi
 # First, strip [info] and [warn] lines — they often contain file paths
 # (e.g., error_handling_test.sfn) or debug context with error keywords
 # that would cause false positives. Genuine errors use [error] or no prefix.
-filtered_output=$(grep -viE '^\[(info|warn(ing)?)\]' <<< "$output" || true)
+grep_rc=0
+filtered_output=$(grep -viE '^\[(info|warn(ing)?)\]' <<< "$output") || grep_rc=$?
+if [ "$grep_rc" -gt 1 ]; then
+    echo "[test] FAIL: $BASENAME (failed to filter test output)"
+    exit "$grep_rc"
+fi
 if [ -n "$filtered_output" ] && grep -qiE '(^|[^[:alnum:]_])(fail(ed|ure)?|error|panic|abort)([^[:alnum:]_]|$)' <<< "$filtered_output"; then
     echo "[test] FAIL: $BASENAME"
     echo "$output" | tail -5
