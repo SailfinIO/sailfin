@@ -20,7 +20,7 @@ import {
     handle_login_command,
     handle_guillermo_command,
 } from "./cli_commands";
-import { sailfin_version } from "./version";
+import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
     return "usage:\n" +
@@ -411,7 +411,7 @@ fn sailfin_cli_main(argv -> string[]) -> number ![io] {
 
             return 2;
         }
-        print("sfn " + sailfin_version());
+        print("sfn " + resolve_compiler_version());
         return 0;
     }
 

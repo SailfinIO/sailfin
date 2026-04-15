@@ -440,7 +440,8 @@ The compiler must always compile itself. Breaking changes require:
 
 - **Semantic versioning:** `v0.5.0-alpha.22` format — `MAJOR.MINOR.PATCH[-channel.N]`
 - **Version source of truth:** `compiler/capsule.toml` (`[capsule] version`)
-- **Version mirror:** `compiler/src/version.sfn:__version__` (read by the compiler binary; kept in sync by the release workflow — TODO: read from capsule.toml at build time)
+- **Version resolution:** `compiler/src/version.sfn:resolve_compiler_version()` reads `capsule.toml` at runtime; falls back to `__version_fallback__` for installed binaries where `capsule.toml` is not on disk
+- **Dev build stamps:** `build.sh` writes `build/native/.build-stamp` with `<version>+dev.<hash>` — the resolver reads this first for local dev builds
 - **Release automation:** `.github/workflows/release.yml` — manually triggered via `workflow_dispatch`, pure bash, no Python dependencies
 - **Release notes:** `.github/workflows/release-notes.md` — agentic workflow that posts structured, categorized changelog comments on published releases (supplements the auto-generated notes from `gh release create`)
 - **Artifacts:** `dist/` is used for packaged artifacts; `release-tag.yml` builds and uploads platform binaries

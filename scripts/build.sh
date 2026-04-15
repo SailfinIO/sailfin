@@ -817,6 +817,37 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Write build stamp (version + git hash for dev builds)
+# ---------------------------------------------------------------------------
+CAPSULE_TOML="$REPO_ROOT/compiler/capsule.toml"
+BUILD_STAMP_PATH="$(dirname "$OUT")/.build-stamp"
+if [[ -f "$CAPSULE_TOML" ]]; then
+    CAPSULE_VERSION="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' "$CAPSULE_TOML")"
+    # Check if HEAD is an exact tagged release (e.g. v0.5.1).
+    GIT_TAG="$(cd "$REPO_ROOT" && git describe --exact-match --tags HEAD 2>/dev/null || echo "")"
+    if [[ -n "$GIT_TAG" ]]; then
+        # Tagged release — clean version, no dev suffix.
+        BUILD_VERSION="$CAPSULE_VERSION"
+    else
+        # Dev build — append +dev.<hash>[.dirty].
+        GIT_HASH="$(cd "$REPO_ROOT" && git rev-parse --short HEAD 2>/dev/null || echo "")"
+        GIT_DIRTY=""
+        if [[ -n "$GIT_HASH" ]]; then
+            if ! (cd "$REPO_ROOT" && git diff --quiet HEAD -- 2>/dev/null); then
+                GIT_DIRTY=".dirty"
+            fi
+            BUILD_VERSION="${CAPSULE_VERSION}+dev.${GIT_HASH}${GIT_DIRTY}"
+        else
+            BUILD_VERSION="${CAPSULE_VERSION}+dev"
+        fi
+    fi
+    echo "$BUILD_VERSION" > "$BUILD_STAMP_PATH"
+    log "build stamp: $BUILD_VERSION → $BUILD_STAMP_PATH"
+else
+    warn "capsule.toml not found; skipping build stamp"
+fi
+
+# ---------------------------------------------------------------------------
 # Build metrics
 # ---------------------------------------------------------------------------
 BINARY_SIZE="$(du -h "$OUT" | cut -f1)"

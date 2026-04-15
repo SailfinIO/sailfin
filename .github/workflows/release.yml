@@ -208,19 +208,22 @@ jobs:
           fi
           sed -i "s/^version *= *\"[^\"]*\"/version = \"${NEXT}\"/" compiler/capsule.toml
 
-          # Update version.sfn (whitespace-tolerant around = and quotes)
-          sfn_matches=$(grep -c 'let __version__ *=' compiler/src/version.sfn || true)
+          # Update version.sfn fallback (whitespace-tolerant around = and quotes).
+          # The compiler reads its version from capsule.toml at runtime, but
+          # installed binaries fall back to __version_fallback__ when capsule.toml
+          # is not on disk.
+          sfn_matches=$(grep -c 'let __version_fallback__ *=' compiler/src/version.sfn || true)
           if [ "$sfn_matches" -ne 1 ]; then
-            echo "::error::Expected exactly 1 '__version__' assignment in version.sfn, found $sfn_matches"
+            echo "::error::Expected exactly 1 '__version_fallback__' assignment in version.sfn, found $sfn_matches"
             exit 1
           fi
-          sed -i "s/let __version__ *= *\"[^\"]*\"/let __version__ = \"${NEXT}\"/" compiler/src/version.sfn
+          sed -i "s/let __version_fallback__ *= *\"[^\"]*\"/let __version_fallback__ = \"${NEXT}\"/" compiler/src/version.sfn
 
           # Verify the replacements took effect
           echo "--- compiler/capsule.toml ---"
           grep '^version' compiler/capsule.toml
           echo "--- compiler/src/version.sfn ---"
-          grep '__version__' compiler/src/version.sfn
+          grep '__version_fallback__' compiler/src/version.sfn
 
           # Final sanity check: the new version must appear in both files
           if ! grep -q "\"${NEXT}\"" compiler/capsule.toml; then
