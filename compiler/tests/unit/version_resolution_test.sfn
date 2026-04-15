@@ -83,12 +83,13 @@ test "version: version_from_capsule_toml returns fallback for empty input" {
     assert _contains(v, ".");
 }
 
-test "version: version_from_capsule_toml returns fallback for missing version" {
+test "version: version_from_capsule_toml returns fallback for missing version key" {
     let toml = "[capsule]\nname = \"test\"\n";
     let v = version_from_capsule_toml(toml);
-    // toml_get_version returns "0.1.0" default when version key is missing,
-    // which is non-empty, so version_from_capsule_toml returns it.
-    assert v.length > 0;
+    // No explicit version key → strict extractor returns "", so we get
+    // the baked-in fallback (which is sailfin_version()).
+    let fallback = sailfin_version();
+    assert strings_equal(v, fallback);
 }
 
 test "version: version_from_capsule_toml handles extra fields" {
@@ -109,13 +110,18 @@ test "version: resolve_compiler_version returns non-empty string" ![io] {
 }
 
 test "version: resolve_compiler_version matches capsule.toml when available" ![io] {
-    // When running from the repo root, compiler/capsule.toml should exist
-    // and the resolved version should contain the capsule version.
+    // When running from the repo root, compiler/capsule.toml should exist.
+    // Read it directly and verify the resolved version starts with the
+    // capsule version (it may have a +dev.<hash> suffix from the build stamp).
+    let toml_path = "compiler/capsule.toml";
+    assert fs.exists(toml_path);
+    let toml_text = fs.readFile(toml_path);
+    let capsule_ver = version_from_capsule_toml(toml_text);
+
     let v = resolve_compiler_version();
-    // The version should be semver-ish (MAJOR.MINOR.PATCH with optional suffix)
-    assert _contains(v, ".");
-    assert _starts_with_digit(v);
-    // It should not be empty or "unknown"
-    assert !strings_equal(v, "");
-    assert !strings_equal(v, "unknown");
+    // The resolved version must start with the capsule version.
+    // It may be exactly the capsule version, or <capsule_ver>+dev.<hash>.
+    assert v.length >= capsule_ver.length;
+    let prefix = substring(v, 0, capsule_ver.length);
+    assert strings_equal(prefix, capsule_ver);
 }

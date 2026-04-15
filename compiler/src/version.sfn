@@ -22,12 +22,69 @@ fn sailfin_version() -> string {
 }
 
 // Read a version string from a raw capsule.toml text blob.
+// Returns the fallback if the TOML text doesn't contain an explicit
+// version key under [capsule] (toml_get_version defaults to "0.1.0"
+// for missing keys, which we must not treat as a real version).
 fn version_from_capsule_toml(toml_text -> string) -> string {
-    let ver = toml_get_version(toml_text);
+    let ver = _strict_capsule_version(toml_text);
     if ver.length > 0 {
         return ver;
     }
     return __version_fallback__;
+}
+
+// Extract version only when the key is explicitly present in a
+// [capsule] section.  Returns "" if the key is missing or the
+// TOML text is empty/malformed.
+fn _strict_capsule_version(toml_text -> string) -> string {
+    if toml_text.length == 0 {
+        return "";
+    }
+    // Quick check: the text must contain a 'version' key line.
+    // This avoids returning the parser's "0.1.0" default.
+    let mut has_version_key -> boolean = false;
+    let mut i -> number = 0;
+    loop {
+        if i >= toml_text.length { break; }
+        if toml_text[i] == "v" {
+            // Check if this could be "version"
+            let remaining = toml_text.length - i;
+            if remaining >= 7 {
+                if substring(toml_text, i, i + 7) == "version" {
+                    has_version_key = true;
+                    break;
+                }
+            }
+        }
+        i += 1;
+    }
+    if !has_version_key {
+        return "";
+    }
+    let ver = toml_get_version(toml_text);
+    // Reject the parser's default "0.1.0" if that's not what the file says.
+    if strings_equal(ver, "0.1.0") {
+        // Double-check: does the file actually say version = "0.1.0"?
+        let mut j -> number = 0;
+        let mut found_literal -> boolean = false;
+        loop {
+            if j >= toml_text.length { break; }
+            if toml_text[j] == "0" {
+                let rem = toml_text.length - j;
+                if rem >= 5 {
+                    if substring(toml_text, j, j + 5) == "0.1.0" {
+                        found_literal = true;
+                        break;
+                    }
+                }
+            }
+            j += 1;
+        }
+        if !found_literal {
+            return "";
+        }
+    }
+    return ver;
 }
 
 // Try to read the first non-empty line from a file.
@@ -52,13 +109,15 @@ fn _read_stamp(path -> string) -> string ![io] {
 }
 
 // Try to read capsule.toml from a list of candidate paths.
+// Uses the strict extractor so a file without an explicit version key
+// doesn't shadow the fallback with the parser's "0.1.0" default.
 fn _read_capsule_version(paths -> string[]) -> string ![io] {
     let mut i -> number = 0;
     loop {
         if i >= paths.length { break; }
         if fs.exists(paths[i]) {
             let text = fs.readFile(paths[i]);
-            let ver = toml_get_version(text);
+            let ver = _strict_capsule_version(text);
             if ver.length > 0 {
                 return ver;
             }
