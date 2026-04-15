@@ -466,7 +466,7 @@ fn _infer_field_constants_from_lines(lines: string[], start_offset: number) -> S
         // Quick scan for the marker
         let mut pos: number = 0;
         loop {
-            if pos + marker_len >= line.length { break; }
+            if pos + marker_len > line.length { break; }
             let mut matches: boolean = true;
             let mut ci: number = 0;
             loop {
