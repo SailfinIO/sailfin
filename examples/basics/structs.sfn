@@ -1,8 +1,8 @@
 // examples/basics/structs.sfn
 
 struct User {
-    id -> number;
-    name -> string;
+    id: number;
+    name: string;
 
     fn greet(self) -> string {
         return "Hello, {{self.name}}!";
@@ -10,6 +10,6 @@ struct User {
 }
 
 fn main() ![io] {
-    let user -> User = User { id: 1, name: "Alice" };
+    let user: User = User { id: 1, name: "Alice" };
     print(user.greet());
 }

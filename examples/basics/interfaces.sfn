@@ -5,8 +5,8 @@ interface Greeter {
 }
 
 struct User implements Greeter {
-  id -> number;
-  name -> string;
+  id: number;
+  name: string;
 
   fn greet(self) -> string {
     return "Hello, {{self.name}}!";
@@ -14,6 +14,6 @@ struct User implements Greeter {
 }
 
 fn main() ![io] {
-  let greeter -> Greeter = User { id: 1, name: "Alice" };
+  let greeter: Greeter = User { id: 1, name: "Alice" };
   print(greeter.greet());
 }

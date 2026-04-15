@@ -1,11 +1,11 @@
-fn _quicksort(arr -> number[]) -> number[] {
+fn _quicksort(arr: number[]) -> number[] {
     if arr.length <= 1 {
         return arr;
     }
     let pivot = arr[0];
-    let mut less    -> number[] = [];
-    let mut equal   -> number[] = [];
-    let mut greater -> number[] = [];
+    let mut less: number[] = [];
+    let mut equal: number[] = [];
+    let mut greater: number[] = [];
     for x in arr {
         if x < pivot {
             less.push(x);
@@ -17,15 +17,15 @@ fn _quicksort(arr -> number[]) -> number[] {
     }
     let sorted_less    = _quicksort(less);
     let sorted_greater = _quicksort(greater);
-    let mut result -> number[] = [];
+    let mut result: number[] = [];
     for n in sorted_less    { result.push(n); }
     for n in equal          { result.push(n); }
     for n in sorted_greater { result.push(n); }
     return result;
 }
 
-fn _is_sorted(arr -> number[]) -> boolean {
-    let mut i -> number = 0;
+fn _is_sorted(arr: number[]) -> boolean {
+    let mut i: number = 0;
     loop {
         if i + 1 >= arr.length {
             break;
@@ -39,7 +39,7 @@ fn _is_sorted(arr -> number[]) -> boolean {
 }
 
 test "recursion: quicksort empty array" {
-    let mut empty -> number[] = [];
+    let mut empty: number[] = [];
     let sorted = _quicksort(empty);
     assert sorted.length == 0;
 }

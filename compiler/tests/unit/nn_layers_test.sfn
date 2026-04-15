@@ -1,19 +1,25 @@
 // Regression tests for sfn/layers capsule functions.
+//
+// NOTE: Renamed from layers_test.sfn during the colon-annotation migration.
+// The compiler crashes (SIGSEGV) when a test file `<name>_test.sfn` and a
+// capsule `sfn/<name>` both define same-named structs with all-colon field
+// annotations. Filing this as a separate compiler bug; this rename is the
+// minimal workaround that unblocks the syntax migration.
 
 // -- Types and helpers copied from sfn/layers --
 
 struct Linear {
-    weights -> number[];
-    biases -> number[];
-    in_features -> number;
-    out_features -> number;
+    weights: number[];
+    biases: number[];
+    in_features: number;
+    out_features: number;
 }
 
-fn _linear(in_features -> number, out_features -> number) -> Linear {
+fn _linear(in_features: number, out_features: number) -> Linear {
     let weight_count = in_features * out_features;
-    let mut weights -> number[] = [];
-    let mut biases -> number[] = [];
-    let mut i -> number = 0;
+    let mut weights: number[] = [];
+    let mut biases: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= weight_count { break; }
         weights.push(0);
@@ -31,13 +37,13 @@ fn _linear(in_features -> number, out_features -> number) -> Linear {
     };
 }
 
-fn _forward_linear(layer -> Linear, input -> number[]) -> number[] {
-    let mut output -> number[] = [];
-    let mut o -> number = 0;
+fn _forward_linear(layer: Linear, input: number[]) -> number[] {
+    let mut output: number[] = [];
+    let mut o: number = 0;
     loop {
         if o >= layer.out_features { break; }
-        let mut val -> number = layer.biases[o];
-        let mut j -> number = 0;
+        let mut val: number = layer.biases[o];
+        let mut j: number = 0;
         loop {
             if j >= layer.in_features { break; }
             val = val + input[j] * layer.weights[o * layer.in_features + j];
@@ -49,9 +55,9 @@ fn _forward_linear(layer -> Linear, input -> number[]) -> number[] {
     return output;
 }
 
-fn _forward_relu(input -> number[]) -> number[] {
-    let mut output -> number[] = [];
-    let mut i -> number = 0;
+fn _forward_relu(input: number[]) -> number[] {
+    let mut output: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= input.length { break; }
         if input[i] > 0 {
@@ -64,7 +70,7 @@ fn _forward_relu(input -> number[]) -> number[] {
     return output;
 }
 
-fn _parameter_count(layer -> Linear) -> number {
+fn _parameter_count(layer: Linear) -> number {
     return layer.in_features * layer.out_features + layer.out_features;
 }
 

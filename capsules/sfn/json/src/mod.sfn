@@ -4,30 +4,30 @@
 // No effects required — pure data transformation.
 
 struct JsonValue {
-    kind -> string;       // "string", "number", "boolean", "null", "array", "object"
-    string_value -> string;
-    number_value -> number;
-    bool_value -> boolean;
-    items -> JsonValue[];  // for arrays
-    keys -> string[];      // for objects
-    values -> JsonValue[]; // for objects (parallel with keys)
+    kind: string;       // "string", "number", "boolean", "null", "array", "object"
+    string_value: string;
+    number_value: number;
+    bool_value: boolean;
+    items: JsonValue[];  // for arrays
+    keys: string[];      // for objects
+    values: JsonValue[]; // for objects (parallel with keys)
 }
 
-fn string_val(value -> string) -> JsonValue {
+fn string_val(value: string) -> JsonValue {
     return JsonValue {
         kind: "string", string_value: value, number_value: 0,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn number_val(value -> number) -> JsonValue {
+fn number_val(value: number) -> JsonValue {
     return JsonValue {
         kind: "number", string_value: "", number_value: value,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn bool_val(value -> boolean) -> JsonValue {
+fn bool_val(value: boolean) -> JsonValue {
     return JsonValue {
         kind: "boolean", string_value: "", number_value: 0,
         bool_value: value, items: [], keys: [], values: [],
@@ -41,14 +41,14 @@ fn null_val() -> JsonValue {
     };
 }
 
-fn array_val(items -> JsonValue[]) -> JsonValue {
+fn array_val(items: JsonValue[]) -> JsonValue {
     return JsonValue {
         kind: "array", string_value: "", number_value: 0,
         bool_value: false, items: items, keys: [], values: [],
     };
 }
 
-fn object_val(keys -> string[], values -> JsonValue[]) -> JsonValue {
+fn object_val(keys: string[], values: JsonValue[]) -> JsonValue {
     return JsonValue {
         kind: "object", string_value: "", number_value: 0,
         bool_value: false, items: [], keys: keys, values: values,
@@ -57,9 +57,9 @@ fn object_val(keys -> string[], values -> JsonValue[]) -> JsonValue {
 
 // ---- Serialization ----
 
-fn _escape_json_string(s -> string) -> string {
-    let mut out -> string = "";
-    let mut i -> number = 0;
+fn _escape_json_string(s: string) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
     loop {
         if i >= s.length { break; }
         let ch = s[i];
@@ -81,7 +81,7 @@ fn _escape_json_string(s -> string) -> string {
     return out;
 }
 
-fn stringify(value -> JsonValue) -> string {
+fn stringify(value: JsonValue) -> string {
     // Serialize a JsonValue to a JSON string.
     if strings_equal(value.kind, "string") {
         return "\"" + _escape_json_string(value.string_value) + "\"";
@@ -99,8 +99,8 @@ fn stringify(value -> JsonValue) -> string {
         return "null";
     }
     if strings_equal(value.kind, "array") {
-        let mut out -> string = "[";
-        let mut i -> number = 0;
+        let mut out: string = "[";
+        let mut i: number = 0;
         loop {
             if i >= value.items.length { break; }
             if i > 0 { out = out + ","; }
@@ -110,8 +110,8 @@ fn stringify(value -> JsonValue) -> string {
         return out + "]";
     }
     if strings_equal(value.kind, "object") {
-        let mut out -> string = "{";
-        let mut i -> number = 0;
+        let mut out: string = "{";
+        let mut i: number = 0;
         loop {
             if i >= value.keys.length { break; }
             if i > 0 { out = out + ","; }
@@ -126,8 +126,8 @@ fn stringify(value -> JsonValue) -> string {
 // ---- Parsing ----
 // Minimal recursive-descent JSON parser.
 
-fn _skip_whitespace(text -> string, pos -> number) -> number {
-    let mut p -> number = pos;
+fn _skip_whitespace(text: string, pos: number) -> number {
+    let mut p: number = pos;
     loop {
         if p >= text.length { break; }
         let ch = text[p];
@@ -140,7 +140,7 @@ fn _skip_whitespace(text -> string, pos -> number) -> number {
     return p;
 }
 
-fn parse(text -> string) -> JsonValue {
+fn parse(text: string) -> JsonValue {
     // Parse a JSON string into a JsonValue tree.
     // Returns null_val() on parse error.
     let result = _parse_value(text, 0);
@@ -148,15 +148,15 @@ fn parse(text -> string) -> JsonValue {
 }
 
 struct _ParseResult {
-    value -> JsonValue;
-    pos -> number;
+    value: JsonValue;
+    pos: number;
 }
 
-fn _parse_result(value -> JsonValue, pos -> number) -> _ParseResult {
+fn _parse_result(value: JsonValue, pos: number) -> _ParseResult {
     return _ParseResult { value: value, pos: pos };
 }
 
-fn _parse_value(text -> string, start -> number) -> _ParseResult {
+fn _parse_value(text: string, start: number) -> _ParseResult {
     let pos = _skip_whitespace(text, start);
     if pos >= text.length {
         return _parse_result(null_val(), pos);
@@ -181,10 +181,10 @@ fn _parse_value(text -> string, start -> number) -> _ParseResult {
     return _parse_number(text, pos);
 }
 
-fn _parse_string(text -> string, start -> number) -> _ParseResult {
+fn _parse_string(text: string, start: number) -> _ParseResult {
     // start points at opening "
-    let mut p -> number = start + 1;
-    let mut out -> string = "";
+    let mut p: number = start + 1;
+    let mut out: string = "";
     loop {
         if p >= text.length { break; }
         let ch = text[p];
@@ -210,8 +210,8 @@ fn _parse_string(text -> string, start -> number) -> _ParseResult {
     return _parse_result(string_val(out), p);
 }
 
-fn _parse_number(text -> string, start -> number) -> _ParseResult {
-    let mut p -> number = start;
+fn _parse_number(text: string, start: number) -> _ParseResult {
+    let mut p: number = start;
     loop {
         if p >= text.length { break; }
         let ch = text[p];
@@ -223,10 +223,10 @@ fn _parse_number(text -> string, start -> number) -> _ParseResult {
     let num_str = substring(text, start, p);
     // Use a simple string-to-number conversion
     // Full implementation will use a runtime intrinsic
-    let mut value -> number = 0;
-    let mut i -> number = 0;
-    let mut negative -> boolean = false;
-    let mut decimal_place -> number = 0;
+    let mut value: number = 0;
+    let mut i: number = 0;
+    let mut negative: boolean = false;
+    let mut decimal_place: number = 0;
     if num_str.length > 0 && num_str[0] == "-" {
         negative = true;
         i = 1;
@@ -239,8 +239,8 @@ fn _parse_number(text -> string, start -> number) -> _ParseResult {
         } else {
             let digit = char_code(ch) - 48;
             if decimal_place > 0 {
-                let mut divisor -> number = 1;
-                let mut d -> number = 0;
+                let mut divisor: number = 1;
+                let mut d: number = 0;
                 loop {
                     if d >= decimal_place { break; }
                     divisor = divisor * 10;
@@ -258,16 +258,16 @@ fn _parse_number(text -> string, start -> number) -> _ParseResult {
     return _parse_result(number_val(value), p);
 }
 
-fn _parse_bool(text -> string, start -> number) -> _ParseResult {
+fn _parse_bool(text: string, start: number) -> _ParseResult {
     if text[start] == "t" {
         return _parse_result(bool_val(true), start + 4);
     }
     return _parse_result(bool_val(false), start + 5);
 }
 
-fn _parse_array(text -> string, start -> number) -> _ParseResult {
-    let mut p -> number = start + 1; // skip [
-    let mut items -> JsonValue[] = [];
+fn _parse_array(text: string, start: number) -> _ParseResult {
+    let mut p: number = start + 1; // skip [
+    let mut items: JsonValue[] = [];
     p = _skip_whitespace(text, p);
     if p < text.length && text[p] == "]" {
         return _parse_result(array_val(items), p + 1);
@@ -288,10 +288,10 @@ fn _parse_array(text -> string, start -> number) -> _ParseResult {
     return _parse_result(array_val(items), p);
 }
 
-fn _parse_object(text -> string, start -> number) -> _ParseResult {
-    let mut p -> number = start + 1; // skip {
-    let mut keys -> string[] = [];
-    let mut values -> JsonValue[] = [];
+fn _parse_object(text: string, start: number) -> _ParseResult {
+    let mut p: number = start + 1; // skip {
+    let mut keys: string[] = [];
+    let mut values: JsonValue[] = [];
     p = _skip_whitespace(text, p);
     if p < text.length && text[p] == "}" {
         return _parse_result(object_val(keys, values), p + 1);
@@ -321,10 +321,10 @@ fn _parse_object(text -> string, start -> number) -> _ParseResult {
 
 // ---- Convenience accessors ----
 
-fn get_string(obj -> JsonValue, key -> string) -> string {
+fn get_string(obj: JsonValue, key: string) -> string {
     // Get a string value from a JSON object by key.
     if !strings_equal(obj.kind, "object") { return ""; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) {
@@ -335,9 +335,9 @@ fn get_string(obj -> JsonValue, key -> string) -> string {
     return "";
 }
 
-fn get_number(obj -> JsonValue, key -> string) -> number {
+fn get_number(obj: JsonValue, key: string) -> number {
     if !strings_equal(obj.kind, "object") { return 0; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) {
@@ -348,9 +348,9 @@ fn get_number(obj -> JsonValue, key -> string) -> number {
     return 0;
 }
 
-fn get_object(obj -> JsonValue, key -> string) -> JsonValue {
+fn get_object(obj: JsonValue, key: string) -> JsonValue {
     if !strings_equal(obj.kind, "object") { return null_val(); }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) {
@@ -361,9 +361,9 @@ fn get_object(obj -> JsonValue, key -> string) -> JsonValue {
     return null_val();
 }
 
-fn get_array(obj -> JsonValue, key -> string) -> JsonValue[] {
+fn get_array(obj: JsonValue, key: string) -> JsonValue[] {
     if !strings_equal(obj.kind, "object") { return []; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) {
@@ -374,10 +374,10 @@ fn get_array(obj -> JsonValue, key -> string) -> JsonValue[] {
     return [];
 }
 
-fn get_bool(obj -> JsonValue, key -> string) -> boolean {
+fn get_bool(obj: JsonValue, key: string) -> boolean {
     // Get a boolean value from a JSON object by key. Returns false if not found.
     if !strings_equal(obj.kind, "object") { return false; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) {
@@ -388,10 +388,10 @@ fn get_bool(obj -> JsonValue, key -> string) -> boolean {
     return false;
 }
 
-fn get_value(obj -> JsonValue, key -> string) -> JsonValue {
+fn get_value(obj: JsonValue, key: string) -> JsonValue {
     // Get any value from a JSON object by key. Returns null_val() if not found.
     if !strings_equal(obj.kind, "object") { return null_val(); }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) {
@@ -402,10 +402,10 @@ fn get_value(obj -> JsonValue, key -> string) -> JsonValue {
     return null_val();
 }
 
-fn has_key(obj -> JsonValue, key -> string) -> boolean {
+fn has_key(obj: JsonValue, key: string) -> boolean {
     // Returns true if the JSON object contains the given key.
     if !strings_equal(obj.kind, "object") { return false; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) { return true; }
@@ -414,27 +414,27 @@ fn has_key(obj -> JsonValue, key -> string) -> boolean {
     return false;
 }
 
-fn array_length(value -> JsonValue) -> number {
+fn array_length(value: JsonValue) -> number {
     // Returns the number of items in a JSON array, or 0 if not an array.
     if !strings_equal(value.kind, "array") { return 0; }
     return value.items.length;
 }
 
-fn array_at(value -> JsonValue, index -> number) -> JsonValue {
+fn array_at(value: JsonValue, index: number) -> JsonValue {
     // Get an item from a JSON array by index. Returns null_val() if out of bounds.
     if !strings_equal(value.kind, "array") { return null_val(); }
     if index < 0 || index >= value.items.length { return null_val(); }
     return value.items[index];
 }
 
-fn stringify_pretty(value -> JsonValue, indent -> number = 2) -> string {
+fn stringify_pretty(value: JsonValue, indent: number = 2) -> string {
     // Serialize a JsonValue to a pretty-printed JSON string.
     return _stringify_indented(value, 0, indent);
 }
 
-fn _make_indent(level -> number, size -> number) -> string {
-    let mut out -> string = "";
-    let mut i -> number = 0;
+fn _make_indent(level: number, size: number) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
     let total = level * size;
     loop {
         if i >= total { break; }
@@ -444,7 +444,7 @@ fn _make_indent(level -> number, size -> number) -> string {
     return out;
 }
 
-fn _stringify_indented(value -> JsonValue, level -> number, size -> number) -> string {
+fn _stringify_indented(value: JsonValue, level: number, size: number) -> string {
     if strings_equal(value.kind, "string") {
         return "\"" + _escape_json_string(value.string_value) + "\"";
     }
@@ -463,8 +463,8 @@ fn _stringify_indented(value -> JsonValue, level -> number, size -> number) -> s
         let inner = level + 1;
         let pad = _make_indent(inner, size);
         let close_pad = _make_indent(level, size);
-        let mut out -> string = "[\n";
-        let mut i -> number = 0;
+        let mut out: string = "[\n";
+        let mut i: number = 0;
         loop {
             if i >= value.items.length { break; }
             if i > 0 { out = out + ",\n"; }
@@ -478,8 +478,8 @@ fn _stringify_indented(value -> JsonValue, level -> number, size -> number) -> s
         let inner = level + 1;
         let pad = _make_indent(inner, size);
         let close_pad = _make_indent(level, size);
-        let mut out -> string = "{\n";
-        let mut i -> number = 0;
+        let mut out: string = "{\n";
+        let mut i: number = 0;
         loop {
             if i >= value.keys.length { break; }
             if i > 0 { out = out + ",\n"; }

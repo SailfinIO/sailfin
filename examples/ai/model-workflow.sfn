@@ -6,19 +6,19 @@ model Summarizer : Model<Text, Summary> {
     max_tok = 2000;
 }
 
-fn seed(value -> number) -> void {
+fn seed(value: number) -> void {
     // placeholder deterministic scope helper
 }
 
-fn temperature(value -> number) -> void {
+fn temperature(value: number) -> void {
     // placeholder temperature helper
 }
 
-fn call_model(name -> string, input -> string) -> string ![model] {
+fn call_model(name: string, input: string) -> string ![model] {
     return "{{name}}::{{input}}";
 }
 
-fn summarize(doc -> string) -> string ![model] {
+fn summarize(doc: string) -> string ![model] {
     prompt system {
         "Summarize the document precisely.";
     }
@@ -28,11 +28,11 @@ fn summarize(doc -> string) -> string ![model] {
     return call_model("summarizer", doc);
 }
 
-tool FetchTitle(id -> string) -> string ![net] {
+tool FetchTitle(id: string) -> string ![net] {
     return "title:" + id;
 }
 
-pipeline summarize_all(docs -> Array<string>) -> void ![model, io] {
+pipeline summarize_all(docs: Array<string>) -> void ![model, io] {
     for doc in docs {
         summarize(doc);
     }
@@ -40,7 +40,7 @@ pipeline summarize_all(docs -> Array<string>) -> void ![model, io] {
 
 fn main() -> void ![model, io] {
     with seed(42), temperature(0.2) {
-        let result -> string = summarize("Design doc");
+        let result: string = summarize("Design doc");
         print(result);
     }
 }

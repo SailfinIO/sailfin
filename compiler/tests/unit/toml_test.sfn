@@ -4,44 +4,44 @@
 // accessor, and tree traversal logic.
 
 struct TomlValue {
-    kind -> string;
-    string_value -> string;
-    number_value -> number;
-    bool_value -> boolean;
-    items -> TomlValue[];
-    keys -> string[];
-    values -> TomlValue[];
+    kind: string;
+    string_value: string;
+    number_value: number;
+    bool_value: boolean;
+    items: TomlValue[];
+    keys: string[];
+    values: TomlValue[];
 }
 
-fn _string_val(value -> string) -> TomlValue {
+fn _string_val(value: string) -> TomlValue {
     return TomlValue {
         kind: "string", string_value: value, number_value: 0,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn _integer_val(value -> number) -> TomlValue {
+fn _integer_val(value: number) -> TomlValue {
     return TomlValue {
         kind: "integer", string_value: "", number_value: value,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn _bool_val(value -> boolean) -> TomlValue {
+fn _bool_val(value: boolean) -> TomlValue {
     return TomlValue {
         kind: "boolean", string_value: "", number_value: 0,
         bool_value: value, items: [], keys: [], values: [],
     };
 }
 
-fn _array_val(items -> TomlValue[]) -> TomlValue {
+fn _array_val(items: TomlValue[]) -> TomlValue {
     return TomlValue {
         kind: "array", string_value: "", number_value: 0,
         bool_value: false, items: items, keys: [], values: [],
     };
 }
 
-fn _table_val(keys -> string[], values -> TomlValue[]) -> TomlValue {
+fn _table_val(keys: string[], values: TomlValue[]) -> TomlValue {
     return TomlValue {
         kind: "table", string_value: "", number_value: 0,
         bool_value: false, items: [], keys: keys, values: values,
@@ -57,14 +57,14 @@ fn _empty_val() -> TomlValue {
 
 // -- Accessors (copied from capsule) --
 
-fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
+fn _resolve_path(root: TomlValue, path: string) -> TomlValue {
     if !strings_equal(root.kind, "table") {
         return _empty_val();
     }
     // Split path on "."
-    let mut segments -> string[] = [];
-    let mut start -> number = 0;
-    let mut i -> number = 0;
+    let mut segments: string[] = [];
+    let mut start: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= path.length { break; }
         if path[i] == "." {
@@ -75,13 +75,13 @@ fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
     }
     segments.push(substring(path, start, path.length));
 
-    let mut current -> TomlValue = root;
-    let mut si -> number = 0;
+    let mut current: TomlValue = root;
+    let mut si: number = 0;
     loop {
         if si >= segments.length { break; }
         let seg = segments[si];
-        let mut found -> boolean = false;
-        let mut ki -> number = 0;
+        let mut found: boolean = false;
+        let mut ki: number = 0;
         loop {
             if ki >= current.keys.length { break; }
             if strings_equal(current.keys[ki], seg) {
@@ -99,22 +99,22 @@ fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
     return current;
 }
 
-fn _get_string(root -> TomlValue, key -> string) -> string {
+fn _get_string(root: TomlValue, key: string) -> string {
     let val = _resolve_path(root, key);
     return val.string_value;
 }
 
-fn _get_number(root -> TomlValue, key -> string) -> number {
+fn _get_number(root: TomlValue, key: string) -> number {
     let val = _resolve_path(root, key);
     return val.number_value;
 }
 
-fn _get_bool(root -> TomlValue, key -> string) -> boolean {
+fn _get_bool(root: TomlValue, key: string) -> boolean {
     let val = _resolve_path(root, key);
     return val.bool_value;
 }
 
-fn _has_key(root -> TomlValue, key -> string) -> boolean {
+fn _has_key(root: TomlValue, key: string) -> boolean {
     let val = _resolve_path(root, key);
     return !strings_equal(val.kind, "");
 }

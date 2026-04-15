@@ -7,7 +7,7 @@ enum Color {
 }
 
 fn main() ![io] {
-    let favorite -> Color = Color.Red;
+    let favorite: Color = Color.Red;
 
     if favorite == Color.Red {
         print("Your favorite color is red!");

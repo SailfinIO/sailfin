@@ -1,10 +1,10 @@
 // examples/functional/higher-order-functions.sfn
 
-fn apply(value -> number, transformer -> (number) -> number) -> number {
+fn apply(value: number, transformer: (number) -> number) -> number {
     return transformer(value);
 }
 
-fn double(x -> number) -> number {
+fn double(x: number) -> number {
     return x * 2;
 }
 

@@ -10,20 +10,20 @@
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-fn _number_to_string(value -> number) -> string {
+fn _number_to_string(value: number) -> string {
     if value == 0 { return "0"; }
-    let mut is_negative -> boolean = false;
-    let mut remaining -> number = value;
+    let mut is_negative: boolean = false;
+    let mut remaining: number = value;
     if value < 0 {
         is_negative = true;
         remaining = 0 - value;
     }
-    let mut output -> string = "";
+    let mut output: string = "";
     let digits = "0123456789";
     loop {
         if remaining <= 0 { break; }
-        let mut temp -> number = remaining;
-        let mut quotient -> number = 0;
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -39,12 +39,12 @@ fn _number_to_string(value -> number) -> string {
     return output;
 }
 
-fn _bool_to_string(value -> boolean) -> string {
+fn _bool_to_string(value: boolean) -> string {
     if value { return "true"; }
     return "false";
 }
 
-fn _abs(x -> number) -> number {
+fn _abs(x: number) -> number {
     if x < 0 { return 0 - x; }
     return x;
 }
@@ -53,7 +53,7 @@ fn _abs(x -> number) -> number {
 // Equality assertions
 // ---------------------------------------------------------------------------
 
-fn assert_eq(actual -> number, expected -> number, label -> string) ![io] {
+fn assert_eq(actual: number, expected: number, label: string) ![io] {
     if actual == expected { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: " + _number_to_string(expected));
@@ -61,7 +61,7 @@ fn assert_eq(actual -> number, expected -> number, label -> string) ![io] {
     assert false;
 }
 
-fn assert_ne(actual -> number, expected -> number, label -> string) ![io] {
+fn assert_ne(actual: number, expected: number, label: string) ![io] {
     if actual != expected { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected not: " + _number_to_string(expected));
@@ -69,7 +69,7 @@ fn assert_ne(actual -> number, expected -> number, label -> string) ![io] {
     assert false;
 }
 
-fn assert_str_eq(actual -> string, expected -> string, label -> string) ![io] {
+fn assert_str_eq(actual: string, expected: string, label: string) ![io] {
     if actual == expected { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: \"" + expected + "\"");
@@ -77,7 +77,7 @@ fn assert_str_eq(actual -> string, expected -> string, label -> string) ![io] {
     assert false;
 }
 
-fn assert_str_ne(actual -> string, expected -> string, label -> string) ![io] {
+fn assert_str_ne(actual: string, expected: string, label: string) ![io] {
     if actual != expected { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected not: \"" + expected + "\"");
@@ -85,7 +85,7 @@ fn assert_str_ne(actual -> string, expected -> string, label -> string) ![io] {
     assert false;
 }
 
-fn assert_bool_eq(actual -> boolean, expected -> boolean, label -> string) ![io] {
+fn assert_bool_eq(actual: boolean, expected: boolean, label: string) ![io] {
     if actual == expected { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: " + _bool_to_string(expected));
@@ -97,7 +97,7 @@ fn assert_bool_eq(actual -> boolean, expected -> boolean, label -> string) ![io]
 // Comparison assertions
 // ---------------------------------------------------------------------------
 
-fn assert_gt(actual -> number, threshold -> number, label -> string) ![io] {
+fn assert_gt(actual: number, threshold: number, label: string) ![io] {
     if actual > threshold { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: > " + _number_to_string(threshold));
@@ -105,7 +105,7 @@ fn assert_gt(actual -> number, threshold -> number, label -> string) ![io] {
     assert false;
 }
 
-fn assert_gte(actual -> number, threshold -> number, label -> string) ![io] {
+fn assert_gte(actual: number, threshold: number, label: string) ![io] {
     if actual >= threshold { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: >= " + _number_to_string(threshold));
@@ -113,7 +113,7 @@ fn assert_gte(actual -> number, threshold -> number, label -> string) ![io] {
     assert false;
 }
 
-fn assert_lt(actual -> number, threshold -> number, label -> string) ![io] {
+fn assert_lt(actual: number, threshold: number, label: string) ![io] {
     if actual < threshold { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: < " + _number_to_string(threshold));
@@ -121,7 +121,7 @@ fn assert_lt(actual -> number, threshold -> number, label -> string) ![io] {
     assert false;
 }
 
-fn assert_lte(actual -> number, threshold -> number, label -> string) ![io] {
+fn assert_lte(actual: number, threshold: number, label: string) ![io] {
     if actual <= threshold { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: <= " + _number_to_string(threshold));
@@ -133,10 +133,10 @@ fn assert_lte(actual -> number, threshold -> number, label -> string) ![io] {
 // String content assertions
 // ---------------------------------------------------------------------------
 
-fn _find_in_string(haystack -> string, needle -> string) -> number {
+fn _find_in_string(haystack: string, needle: string) -> number {
     if needle.length == 0 { return 0; }
     if needle.length > haystack.length { return -1; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     let limit = haystack.length - needle.length;
     loop {
         if i > limit { return -1; }
@@ -147,7 +147,7 @@ fn _find_in_string(haystack -> string, needle -> string) -> number {
     return -1;
 }
 
-fn assert_contains(haystack -> string, needle -> string, label -> string) ![io] {
+fn assert_contains(haystack: string, needle: string, label: string) ![io] {
     if _find_in_string(haystack, needle) >= 0 { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected to contain: \"" + needle + "\"");
@@ -155,7 +155,7 @@ fn assert_contains(haystack -> string, needle -> string, label -> string) ![io] 
     assert false;
 }
 
-fn assert_not_contains(haystack -> string, needle -> string, label -> string) ![io] {
+fn assert_not_contains(haystack: string, needle: string, label: string) ![io] {
     if _find_in_string(haystack, needle) < 0 { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected not to contain: \"" + needle + "\"");
@@ -163,7 +163,7 @@ fn assert_not_contains(haystack -> string, needle -> string, label -> string) ![
     assert false;
 }
 
-fn assert_starts_with(text -> string, prefix -> string, label -> string) ![io] {
+fn assert_starts_with(text: string, prefix: string, label: string) ![io] {
     if prefix.length <= text.length {
         if substring(text, 0, prefix.length) == prefix { return; }
     }
@@ -173,7 +173,7 @@ fn assert_starts_with(text -> string, prefix -> string, label -> string) ![io] {
     assert false;
 }
 
-fn assert_ends_with(text -> string, suffix -> string, label -> string) ![io] {
+fn assert_ends_with(text: string, suffix: string, label: string) ![io] {
     if suffix.length <= text.length {
         let start = text.length - suffix.length;
         if substring(text, start, text.length) == suffix { return; }
@@ -188,7 +188,7 @@ fn assert_ends_with(text -> string, suffix -> string, label -> string) ![io] {
 // Approximate equality (for floating-point / tolerance comparisons)
 // ---------------------------------------------------------------------------
 
-fn assert_approx(actual -> number, expected -> number, tolerance -> number, label -> string) ![io] {
+fn assert_approx(actual: number, expected: number, tolerance: number, label: string) ![io] {
     let diff = _abs(actual - expected);
     if diff <= tolerance { return; }
     print.err("ASSERTION FAILED: " + label);
@@ -201,7 +201,7 @@ fn assert_approx(actual -> number, expected -> number, tolerance -> number, labe
 // Array length assertions
 // ---------------------------------------------------------------------------
 
-fn assert_length(actual_length -> number, expected_length -> number, label -> string) ![io] {
+fn assert_length(actual_length: number, expected_length: number, label: string) ![io] {
     if actual_length == expected_length { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected length: " + _number_to_string(expected_length));
@@ -209,7 +209,7 @@ fn assert_length(actual_length -> number, expected_length -> number, label -> st
     assert false;
 }
 
-fn assert_empty(actual_length -> number, label -> string) ![io] {
+fn assert_empty(actual_length: number, label: string) ![io] {
     if actual_length == 0 { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected empty (length 0)");
@@ -217,7 +217,7 @@ fn assert_empty(actual_length -> number, label -> string) ![io] {
     assert false;
 }
 
-fn assert_not_empty(actual_length -> number, label -> string) ![io] {
+fn assert_not_empty(actual_length: number, label: string) ![io] {
     if actual_length > 0 { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected non-empty (length > 0)");
@@ -229,7 +229,7 @@ fn assert_not_empty(actual_length -> number, label -> string) ![io] {
 // Boolean assertions
 // ---------------------------------------------------------------------------
 
-fn assert_true(value -> boolean, label -> string) ![io] {
+fn assert_true(value: boolean, label: string) ![io] {
     if value { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: true");
@@ -237,7 +237,7 @@ fn assert_true(value -> boolean, label -> string) ![io] {
     assert false;
 }
 
-fn assert_false(value -> boolean, label -> string) ![io] {
+fn assert_false(value: boolean, label: string) ![io] {
     if !value { return; }
     print.err("ASSERTION FAILED: " + label);
     print.err("  expected: false");

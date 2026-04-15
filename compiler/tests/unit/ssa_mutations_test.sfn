@@ -6,8 +6,8 @@
 // Mutable variable modified in both branches, used after merge
 // ---------------------------------------------------------------------------
 
-fn _branch_merge_value(x -> number) -> number {
-    let mut result -> number = 0;
+fn _branch_merge_value(x: number) -> number {
+    let mut result: number = 0;
     if x > 10 {
         result = x * 2;
     } else {
@@ -29,9 +29,9 @@ test "ssa_mut: branch merge else-path" {
 // Multiple mutable variables modified in same if/else
 // ---------------------------------------------------------------------------
 
-fn _multi_var_branch(a -> number, b -> number) -> number {
-    let mut x -> number = a;
-    let mut y -> number = b;
+fn _multi_var_branch(a: number, b: number) -> number {
+    let mut x: number = a;
+    let mut y: number = b;
     if a > b {
         x = x + 10;
         y = y - 10;
@@ -56,9 +56,9 @@ test "ssa_mut: multi var branch else" {
 // Mutable variable modified in loop then used in branch
 // ---------------------------------------------------------------------------
 
-fn _loop_then_branch(n -> number) -> string {
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+fn _loop_then_branch(n: number) -> string {
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         total += i;
@@ -88,9 +88,9 @@ test "ssa_mut: loop then branch low" {
 // Swap pattern (classic phi stress test)
 // ---------------------------------------------------------------------------
 
-fn _swap_if_needed(a -> number, b -> number) -> number {
-    let mut x -> number = a;
-    let mut y -> number = b;
+fn _swap_if_needed(a: number, b: number) -> number {
+    let mut x: number = a;
+    let mut y: number = b;
     if x > y {
         let tmp = x;
         x = y;
@@ -112,9 +112,9 @@ test "ssa_mut: no swap when already ordered" {
 // Accumulator modified inside nested if within loop
 // ---------------------------------------------------------------------------
 
-fn _weighted_sum(values -> number[], weights -> number[]) -> number {
-    let mut sum -> number = 0;
-    let mut i -> number = 0;
+fn _weighted_sum(values: number[], weights: number[]) -> number {
+    let mut sum: number = 0;
+    let mut i: number = 0;
     let limit = values.length;
     loop {
         if i >= limit { break; }
@@ -146,10 +146,10 @@ test "ssa_mut: weighted sum with partial weights" {
 // Boolean flag toggled across iterations
 // ---------------------------------------------------------------------------
 
-fn _alternating_sum(arr -> number[]) -> number {
-    let mut total -> number = 0;
-    let mut add_flag -> boolean = true;
-    let mut i -> number = 0;
+fn _alternating_sum(arr: number[]) -> number {
+    let mut total: number = 0;
+    let mut add_flag: boolean = true;
+    let mut i: number = 0;
     loop {
         if i >= arr.length { break; }
         if add_flag {
@@ -178,9 +178,9 @@ test "ssa_mut: alternating sum single element" {
 // String built incrementally with conditional append
 // ---------------------------------------------------------------------------
 
-fn _build_csv(values -> number[]) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _build_csv(values: number[]) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= values.length { break; }
         if i > 0 {
@@ -207,7 +207,7 @@ test "ssa_mut: build csv single element" {
 }
 
 test "ssa_mut: build csv empty" {
-    let mut vals -> number[] = [];
+    let mut vals: number[] = [];
     assert _build_csv(vals) == "";
 }
 
@@ -215,8 +215,8 @@ test "ssa_mut: build csv empty" {
 // Variable assigned in one branch only (tests phi with entry value)
 // ---------------------------------------------------------------------------
 
-fn _optional_update(x -> number) -> number {
-    let mut result -> number = x;
+fn _optional_update(x: number) -> number {
+    let mut result: number = x;
     if x > 50 {
         result = result - 50;
     }

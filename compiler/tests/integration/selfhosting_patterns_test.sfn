@@ -7,20 +7,20 @@
 // String-indexed dispatch (pattern used in instruction lowering)
 // ---------------------------------------------------------------------------
 
-fn _starts_with(s -> string, prefix -> string) -> boolean {
+fn _starts_with(s: string, prefix: string) -> boolean {
     if prefix.length > s.length { return false; }
     let sub = substring(s, 0, prefix.length);
     return sub == prefix;
 }
 
-fn _ends_with(s -> string, suffix -> string) -> boolean {
+fn _ends_with(s: string, suffix: string) -> boolean {
     if suffix.length > s.length { return false; }
     let start = s.length - suffix.length;
     let sub = substring(s, start, s.length);
     return sub == suffix;
 }
 
-fn _dispatch_instruction(text -> string) -> string {
+fn _dispatch_instruction(text: string) -> string {
     if _starts_with(text, "let ") { return "variable_binding"; }
     if _starts_with(text, "return ") { return "return_statement"; }
     if _starts_with(text, "if ") { return "conditional"; }
@@ -69,10 +69,10 @@ test "selfhost: ends_with" {
 // Line-by-line text processing (pattern used in recovery parser)
 // ---------------------------------------------------------------------------
 
-fn _count_lines(text -> string) -> number {
+fn _count_lines(text: string) -> number {
     if text.length == 0 { return 0; }
-    let mut count -> number = 1;
-    let mut i -> number = 0;
+    let mut count: number = 1;
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         let ch = substring(text, i, i + 1);
@@ -84,8 +84,8 @@ fn _count_lines(text -> string) -> number {
     return count;
 }
 
-fn _find_char(text -> string, target -> string) -> number {
-    let mut i -> number = 0;
+fn _find_char(text: string, target: string) -> number {
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         let ch = substring(text, i, i + 1);
@@ -95,13 +95,13 @@ fn _find_char(text -> string, target -> string) -> number {
     return -1;
 }
 
-fn _extract_before(text -> string, delimiter -> string) -> string {
+fn _extract_before(text: string, delimiter: string) -> string {
     let pos = _find_char(text, delimiter);
     if pos < 0 { return text; }
     return substring(text, 0, pos);
 }
 
-fn _extract_after(text -> string, delimiter -> string) -> string {
+fn _extract_after(text: string, delimiter: string) -> string {
     let pos = _find_char(text, delimiter);
     if pos < 0 { return ""; }
     if pos + 1 >= text.length { return ""; }
@@ -145,26 +145,26 @@ test "selfhost: extract before no delimiter" {
 // ---------------------------------------------------------------------------
 
 struct SymbolTable {
-    names -> string[];
-    values -> number[];
-    count -> number;
+    names: string[];
+    values: number[];
+    count: number;
 }
 
 fn _make_table() -> SymbolTable {
-    let mut names -> string[] = [];
-    let mut values -> number[] = [];
+    let mut names: string[] = [];
+    let mut values: number[] = [];
     return SymbolTable { names: names, values: values, count: 0 };
 }
 
-fn _table_set(table -> SymbolTable, name -> string, value -> number) -> SymbolTable {
+fn _table_set(table: SymbolTable, name: string, value: number) -> SymbolTable {
     // Check if name exists
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= table.count { break; }
         if table.names[i] == name {
             // Update existing — create new arrays with updated value
-            let mut new_values -> number[] = [];
-            let mut j -> number = 0;
+            let mut new_values: number[] = [];
+            let mut j: number = 0;
             loop {
                 if j >= table.count { break; }
                 if j == i {
@@ -179,9 +179,9 @@ fn _table_set(table -> SymbolTable, name -> string, value -> number) -> SymbolTa
         i += 1;
     }
     // Add new entry
-    let mut new_names -> string[] = [];
-    let mut new_values -> number[] = [];
-    let mut k -> number = 0;
+    let mut new_names: string[] = [];
+    let mut new_values: number[] = [];
+    let mut k: number = 0;
     loop {
         if k >= table.count { break; }
         new_names.push(table.names[k]);
@@ -193,8 +193,8 @@ fn _table_set(table -> SymbolTable, name -> string, value -> number) -> SymbolTa
     return SymbolTable { names: new_names, values: new_values, count: table.count + 1 };
 }
 
-fn _table_get(table -> SymbolTable, name -> string) -> number {
-    let mut i -> number = 0;
+fn _table_get(table: SymbolTable, name: string) -> number {
+    let mut i: number = 0;
     loop {
         if i >= table.count { break; }
         if table.names[i] == name {
@@ -205,8 +205,8 @@ fn _table_get(table -> SymbolTable, name -> string) -> number {
     return -1;
 }
 
-fn _table_has(table -> SymbolTable, name -> string) -> boolean {
-    let mut i -> number = 0;
+fn _table_has(table: SymbolTable, name: string) -> boolean {
+    let mut i: number = 0;
     loop {
         if i >= table.count { break; }
         if table.names[i] == name { return true; }
@@ -255,19 +255,19 @@ test "selfhost: symbol table multiple entries" {
 // LLVM IR string generation (pattern used in rendering.sfn)
 // ---------------------------------------------------------------------------
 
-fn _emit_alloca(name -> string, type_str -> string) -> string {
+fn _emit_alloca(name: string, type_str: string) -> string {
     return "  %" + name + " = alloca " + type_str;
 }
 
-fn _emit_store(type_str -> string, value -> string, ptr -> string) -> string {
+fn _emit_store(type_str: string, value: string, ptr: string) -> string {
     return "  store " + type_str + " " + value + ", " + type_str + "* " + ptr;
 }
 
-fn _emit_load(dest -> string, type_str -> string, ptr -> string) -> string {
+fn _emit_load(dest: string, type_str: string, ptr: string) -> string {
     return "  %" + dest + " = load " + type_str + ", " + type_str + "* " + ptr;
 }
 
-fn _emit_function_header(name -> string, ret_type -> string, params -> string) -> string {
+fn _emit_function_header(name: string, ret_type: string, params: string) -> string {
     return "define " + ret_type + " @" + name + "(" + params + ")";
 }
 
@@ -292,7 +292,7 @@ test "selfhost: emit function header" {
 // Complex conditional string building (pattern in type mapping)
 // ---------------------------------------------------------------------------
 
-fn _map_type(sfn_type -> string) -> string {
+fn _map_type(sfn_type: string) -> string {
     if sfn_type == "number" { return "double"; }
     if sfn_type == "string" { return "i8*"; }
     if sfn_type == "boolean" { return "i1"; }
@@ -328,9 +328,9 @@ test "selfhost: type mapping struct" {
 // Indentation tracking (pattern used in emission)
 // ---------------------------------------------------------------------------
 
-fn _indent(level -> number) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _indent(level: number) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= level { break; }
         result = result + "  ";
@@ -339,10 +339,10 @@ fn _indent(level -> number) -> string {
     return result;
 }
 
-fn _emit_block(lines -> string[], indent_level -> number) -> string {
-    let mut result -> string = "";
+fn _emit_block(lines: string[], indent_level: number) -> string {
+    let mut result: string = "";
     let prefix = _indent(indent_level);
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= lines.length { break; }
         result = result + prefix + lines[i] + "\n";
@@ -359,7 +359,7 @@ test "selfhost: indentation" {
 }
 
 test "selfhost: emit block" {
-    let mut lines -> string[] = [];
+    let mut lines: string[] = [];
     lines.push("a = 1");
     lines.push("b = 2");
     let result = _emit_block(lines, 1);

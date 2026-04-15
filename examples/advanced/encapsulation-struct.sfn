@@ -1,10 +1,10 @@
 // examples/advanced/encapsulation-struct.sfn
 
 struct BankAccount {
-    mut balance -> number; // Mutable field
+    mut balance: number; // Mutable field
 
     // Constructor
-    fn new(initialBalance -> number) -> BankAccount {
+    fn new(initialBalance: number) -> BankAccount {
         if initialBalance < 0 {
             throw "Initial balance cannot be negative.";
         }
@@ -12,7 +12,7 @@ struct BankAccount {
     }
 
     // Instance method: Deposit money
-    fn deposit(self, amount -> number) -> void {
+    fn deposit(self, amount: number) -> void {
         if amount <= 0 {
             throw "Deposit amount must be positive.";
         }
@@ -20,7 +20,7 @@ struct BankAccount {
     }
 
     // Instance method: Withdraw money
-    fn withdraw(self, amount -> number) -> void {
+    fn withdraw(self, amount: number) -> void {
         if amount <= 0 {
             throw "Withdrawal amount must be positive.";
         }
@@ -38,7 +38,7 @@ struct BankAccount {
 
 fn main() ![io] {
     // Create a new bank account
-    let mut account -> BankAccount = BankAccount.new(100);
+    let mut account: BankAccount = BankAccount.new(100);
 
     // Deposit money
     account.deposit(50);
