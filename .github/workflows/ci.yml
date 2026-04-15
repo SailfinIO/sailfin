@@ -2,8 +2,10 @@ name: CI (PR)
 
 env:
   # Pinned seed used for self-host bootstrap in CI.
-  # 0.5.0-alpha.24: ring-buffer corruption fix, consistent -O2, diagnostic scripts.
-  SEED_VERSION: 0.5.0-alpha.24
+  # 0.5.2-alpha.1: Phase 1 accumulator sweep (in-place extend_string_lines,
+  # .concat([x]) → push([x])); includes 220c8b7 aliasing revert for
+  # concat_native_functions / append_local_binding.
+  SEED_VERSION: 0.5.2-alpha.1
 
 permissions:
   contents: read
