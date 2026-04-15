@@ -17,18 +17,27 @@ The same utility functions are copy-pasted across 4-8 files each:
 
 | Function | Duplicated in |
 |---|---|
-| `trim_text()` | emit_native_state, emitter_sailfin_utils, native_ir_utils_text, typecheck_types |
+| `trim_text()` | emit_native_state, emitter_sailfin_utils, native_ir_utils_text, typecheck_types, llvm/utils, parser/utils |
 | `ends_with()` | cli_main, cli_commands_utils, emit_native_state |
 | `starts_with()` | native_ir_utils_text, typecheck_types |
 | `contains_string()` | emit_native_state, typecheck_types |
 | `contains_effect()` | decorator_semantics, effect_checker |
-| `index_of()` | native_ir_utils_text, string_utils (already exists but underused) |
+| `index_of()` | native_ir_utils_text, string_utils, llvm/utils |
 | `number_to_string()` | main, emit_native_state, llvm/utils |
+| `is_symbol_char()` / `sanitize_symbol()` | string_utils, llvm/utils |
+| `string_array_contains()` | llvm/utils, parser/utils |
 
 `compiler/src/string_utils.sfn` already exists (153 lines) but is barely used.
 Consolidate the canonical implementations there, then replace duplicates in
 other files with imports. Work one function at a time — don't do all of them in
 a single commit if it touches too many files.
+
+**Known gotcha:** `llvm/utils.sfn` has a comment saying functions were
+"duplicated from string_utils to avoid cross-module function call issues in
+Stage2." This was a historical compiler bug. Test whether importing from
+string_utils works now by making the change, running `make compile`, and
+verifying the resulting binary works (`build/native/sailfin version`). If it
+still breaks, leave that file alone and consolidate the others first.
 
 ### 2. Deduplicate TextBuilder
 
@@ -58,7 +67,18 @@ Move to `compiler/src/emit_native/` with a `mod.sfn`.
 `cli_main.sfn` + `cli_commands.sfn` + `cli_commands_utils.sfn` (1,937 lines) —
 move to `compiler/src/cli/` with a `mod.sfn`.
 
-### 7. Deduplicate path helpers (_dirname, _path_join)
+### 7. Consolidate tiny files in llvm/expression_lowering/native/
+
+Several `core_*.sfn` files are under 60 lines and could be merged into related
+larger files:
+- `core_match_helpers.sfn` (12 lines) — merge into `core.sfn` or `core_parse.sfn`
+- `core_bindings.sfn` (33 lines) — merge into `core.sfn`
+- `core_borrow_lowering.sfn` (53 lines) — merge into `core_ownership.sfn`
+- `core_addressing.sfn` (57 lines) — merge into `core.sfn`
+
+Each merge reduces the module count that build.sh must compile (currently 121).
+
+### 8. Deduplicate path helpers (_dirname, _path_join)
 
 `_dirname()` and `_path_join()` are implemented identically in `cli_main.sfn`
 and `cli_commands_utils.sfn` (with `_cmd` suffix). Extract into a shared path
