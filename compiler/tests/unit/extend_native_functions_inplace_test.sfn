@@ -30,7 +30,7 @@
 // lowering_core.sfn:565-578 for the full rationale.
 
 test "runtime contract: mut binding shares storage with input (no copy)" {
-    let original -> number[] = [1, 2, 3];
+    let original: number[] = [1, 2, 3];
     let mut alias_view = original;
     alias_view.push(4);
     // Read through alias_view so the unused-binding check sees it.
@@ -49,9 +49,9 @@ test "runtime contract: push on array extends in place (amortized)" {
     // regressed to allocate-and-copy, extend_native_functions_inplace
     // would lose its optimization (and its contract — the returned array
     // would no longer alias dst).
-    let arr -> number[] = [];
+    let arr: number[] = [];
     let mut view = arr;
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= 10 {
             break;
@@ -74,10 +74,10 @@ test "runtime contract: appending through returned alias is visible through inpu
     // (not just the returned reference) contains the extended data. That is
     // the critical invariant at lowering_core.sfn:568 where `safe_functions`
     // must alias `local_functions` post-call.
-    let dst -> string[] = ["a", "b"];
-    let src -> string[] = ["c", "d"];
+    let dst: string[] = ["a", "b"];
+    let src: string[] = ["c", "d"];
     let mut out = dst;
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= src.length {
             break;
@@ -96,10 +96,10 @@ test "runtime contract: appending through returned alias is visible through inpu
 }
 
 test "runtime contract: empty src leaves dst unchanged" {
-    let dst -> number[] = [42];
-    let src -> number[] = [];
+    let dst: number[] = [42];
+    let src: number[] = [];
     let mut out = dst;
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= src.length {
             break;

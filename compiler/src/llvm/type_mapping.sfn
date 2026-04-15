@@ -17,12 +17,12 @@ import {
 // Character Classification
 // =============================================================================
 
-fn is_ascii_uppercase(ch -> string) -> boolean {
+fn is_ascii_uppercase(ch: string) -> boolean {
     if ch.length == 0 {
         return false;
     }
     let code = char_code(ch);
-    let mut _ret302 -> boolean = false;
+    let mut _ret302: boolean = false;
     if code >= char_code("A") {
         if code <= char_code("Z") {
             _ret302 = true;
@@ -35,14 +35,14 @@ fn is_ascii_uppercase(ch -> string) -> boolean {
 // Pointer Operations
 // =============================================================================
 
-fn ends_with_pointer_suffix(value -> string) -> boolean {
+fn ends_with_pointer_suffix(value: string) -> boolean {
     let trimmed = trim_text(value);
     if trimmed.length == 0 {
         return false;
     }
     // Fast-path: well-known primitives that are never pointers.
     // Avoids character-level indexing which is miscompiled by older seeds.
-    let mut _if303 -> boolean = false;
+    let mut _if303: boolean = false;
     if trimmed == "double" { _if303 = true; }
     if trimmed == "i1" { _if303 = true; }
     if trimmed == "i8" { _if303 = true; }
@@ -55,7 +55,7 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
         return false;
     }
     // Fast-path: well-known pointer types.
-    let mut _if304 -> boolean = false;
+    let mut _if304: boolean = false;
     if trimmed == "i8*" { _if304 = true; }
     if trimmed == "i8**" { _if304 = true; }
     if trimmed == "i32*" { _if304 = true; }
@@ -67,7 +67,7 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
     }
     // Fast-path: aggregate pointer types starting with { or % and ending with *.
     // Use starts_with (safe) instead of character indexing.
-    let mut _if305 -> boolean = false;
+    let mut _if305: boolean = false;
     if starts_with(trimmed, "{") { _if305 = true; }
     if starts_with(trimmed, "%") { _if305 = true; }
     if _if305 {
@@ -83,7 +83,7 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
     return substring(trimmed, trimmed.length - 1, trimmed.length) == "*";
 }
 
-fn strip_pointer_suffix(value -> string) -> string {
+fn strip_pointer_suffix(value: string) -> string {
     let trimmed = trim_text(value);
     if trimmed.length == 0 {
         return trimmed;
@@ -99,12 +99,12 @@ fn strip_pointer_suffix(value -> string) -> string {
 // Ownership Wrapper Unwrapping
 // =============================================================================
 
-fn unwrap_move_wrapper(annotation -> string) -> string {
+fn unwrap_move_wrapper(annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return trimmed;
     }
-    let mut _if306 -> boolean = false;
+    let mut _if306: boolean = false;
     if starts_with(trimmed, "Affine<") { _if306 = true; }
     if starts_with(trimmed, "Linear<") { _if306 = true; }
     if _if306 {
@@ -123,7 +123,7 @@ fn unwrap_move_wrapper(annotation -> string) -> string {
 // Type Classification
 // =============================================================================
 
-fn looks_like_user_type(annotation -> string) -> boolean {
+fn looks_like_user_type(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return false;
@@ -141,7 +141,7 @@ fn looks_like_user_type(annotation -> string) -> boolean {
             }
         }
     }
-    let mut index -> number = 1;
+    let mut index: number = 1;
     loop {
         if index >= trimmed.length {
             break;
@@ -171,7 +171,7 @@ fn looks_like_user_type(annotation -> string) -> boolean {
     return false;
 }
 
-fn annotation_is_array(annotation -> string) -> boolean {
+fn annotation_is_array(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
     if trimmed.length < 3 {
         return false;
@@ -180,15 +180,15 @@ fn annotation_is_array(annotation -> string) -> boolean {
     return suffix == "[]";
 }
 
-fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
+fn is_copy_type(type_annotation: string, llvm_type: string) -> boolean {
     let trimmed = trim_text(type_annotation);
-    let mut _if307 -> boolean = false;
+    let mut _if307: boolean = false;
     if starts_with(trimmed, "Affine<") { _if307 = true; }
     if starts_with(trimmed, "Linear<") { _if307 = true; }
     if _if307 {
         return false;
     }
-    let mut _if308 -> boolean = false;
+    let mut _if308: boolean = false;
     if trimmed == "Affine" { _if308 = true; }
     if trimmed == "Linear" { _if308 = true; }
     if _if308 {
@@ -222,7 +222,7 @@ fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
 // Layout Annotation Helpers
 // =============================================================================
 
-fn layout_annotation_requires_pointer(annotation -> string) -> boolean {
+fn layout_annotation_requires_pointer(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return false;
@@ -259,7 +259,7 @@ fn layout_annotation_requires_pointer(annotation -> string) -> boolean {
     return false;
 }
 
-fn layout_annotation_base_type(annotation -> string) -> string {
+fn layout_annotation_base_type(annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -296,7 +296,7 @@ fn layout_annotation_base_type(annotation -> string) -> string {
     return normalized;
 }
 
-fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
+fn layout_annotation_represents_user_value(annotation: string) -> boolean {
     if layout_annotation_requires_pointer(annotation) {
         return false;
     }
@@ -307,7 +307,7 @@ fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
     if base == "number" {
         return false;
     }
-    let mut _if309 -> boolean = false;
+    let mut _if309: boolean = false;
     if base == "boolean" { _if309 = true; }
     if base == "bool" { _if309 = true; }
     if _if309 {
@@ -322,7 +322,7 @@ fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
     if base == "any" {
         return false;
     }
-    let mut _if310 -> boolean = false;
+    let mut _if310: boolean = false;
     if base == "i64" { _if310 = true; }
     if base == "i32" { _if310 = true; }
     if base == "i1" { _if310 = true; }
@@ -341,11 +341,11 @@ fn layout_annotation_represents_user_value(annotation -> string) -> boolean {
 // Array Type Helpers
 // =============================================================================
 
-fn array_struct_type_for_element(element_type -> string) -> string {
+fn array_struct_type_for_element(element_type: string) -> string {
     return "{ " + element_type + "*, i64 }";
 }
 
-fn array_pointer_type_for_element(element_type -> string) -> string {
+fn array_pointer_type_for_element(element_type: string) -> string {
     return "{ " + element_type + "*, i64 }*";
 }
 
@@ -353,7 +353,7 @@ fn array_pointer_type_for_element(element_type -> string) -> string {
 // Core Type Mapping
 // =============================================================================
 
-fn map_type_annotation(annotation -> string) -> string {
+fn map_type_annotation(annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "void";
@@ -376,7 +376,7 @@ fn map_type_annotation(annotation -> string) -> string {
             return "i8*";
         }
         let inner = map_type_annotation(remainder);
-        let mut _if311 -> boolean = false;
+        let mut _if311: boolean = false;
         if inner.length == 0 { _if311 = true; }
         if inner == "void" { _if311 = true; }
         if _if311 {
@@ -396,7 +396,7 @@ fn map_type_annotation(annotation -> string) -> string {
                 return "i8*";
             }
             let inner_type = map_type_annotation(inner_annotation);
-            let mut _if312 -> boolean = false;
+            let mut _if312: boolean = false;
             if inner_type.length == 0 { _if312 = true; }
             if inner_type == "void" { _if312 = true; }
             if _if312 {
@@ -413,7 +413,7 @@ fn map_type_annotation(annotation -> string) -> string {
     if normalized == "number" {
         return "double";
     }
-    let mut _if313 -> boolean = false;
+    let mut _if313: boolean = false;
     if normalized == "boolean" { _if313 = true; }
     if normalized == "bool" { _if313 = true; }
     if _if313 {
@@ -422,7 +422,7 @@ fn map_type_annotation(annotation -> string) -> string {
     if normalized == "usize" {
         return "i64";
     }
-    let mut _if314 -> boolean = false;
+    let mut _if314: boolean = false;
     if normalized == "int" { _if314 = true; }
     if normalized == "i64" { _if314 = true; }
     if _if314 {
@@ -468,7 +468,7 @@ fn map_type_annotation(annotation -> string) -> string {
     return "i8*";
 }
 
-fn map_struct_field_annotation(annotation -> string) -> string {
+fn map_struct_field_annotation(annotation: string) -> string {
     let result = map_type_annotation(annotation);
     if result == "void" {
         return "";
@@ -476,7 +476,7 @@ fn map_struct_field_annotation(annotation -> string) -> string {
     return result;
 }
 
-fn map_struct_type_annotation(annotation -> string) -> string {
+fn map_struct_type_annotation(annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -495,7 +495,7 @@ fn map_struct_type_annotation(annotation -> string) -> string {
     return mapped;
 }
 
-fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> string {
+fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
     // Parameters should use the same context-aware mapping rules as returns.
     // Otherwise user-defined value types (like enums) can incorrectly become pointers,
     // causing ABI mismatches and memory corruption.
@@ -506,7 +506,7 @@ fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> strin
     return mapped;
 }
 
-fn map_local_type(context -> TypeContext, annotation -> string) -> string {
+fn map_local_type(context: TypeContext, annotation: string) -> string {
     // Locals should mirror the context-aware mapping used for returns.
     let mapped = map_return_type(context, annotation);
     if mapped == "void" {
@@ -519,9 +519,9 @@ fn map_local_type(context -> TypeContext, annotation -> string) -> string {
 // Return Type Mapping
 // =============================================================================
 
-fn map_return_type(context -> TypeContext, return_type -> string) -> string {
+fn map_return_type(context: TypeContext, return_type: string) -> string {
     let trimmed = trim_text(return_type);
-    let mut _if315 -> boolean = false;
+    let mut _if315: boolean = false;
     if trimmed.length == 0 { _if315 = true; }
     if trimmed == "void" { _if315 = true; }
     if _if315 {
@@ -535,7 +535,7 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
         if starts_with(remainder, "mut") {
             remainder = trim_text(substring(remainder, 3, remainder.length));
         }
-        let mut _if316 -> boolean = false;
+        let mut _if316: boolean = false;
         if remainder == "opaque" { _if316 = true; }
         if remainder.length == 0 { _if316 = true; }
         if _if316 {
@@ -545,7 +545,7 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
         if ends_with_pointer_suffix(inner) {
             return inner;
         }
-        let mut _if317 -> boolean = false;
+        let mut _if317: boolean = false;
         if inner.length == 0 { _if317 = true; }
         if inner == "void" { _if317 = true; }
         if _if317 {
@@ -580,7 +580,7 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
     // when the type exists in the current type context.
     // Otherwise, keep boxing as `i8*` to avoid emitting undefined LLVM named types.
     if looks_like_user_type(normalized) {
-        let mut i -> number = 0;
+        let mut i: number = 0;
         loop {
             if i >= context.structs.length {
                 break;
@@ -624,31 +624,31 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
 // Specialized Type Mapping
 // =============================================================================
 
-fn map_union_type(context -> TypeContext, annotation -> string) -> string {
+fn map_union_type(context: TypeContext, annotation: string) -> string {
     // Union types: `A | B | C` => tagged struct { i32, <A_llvm>, <B_llvm>, ... }
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
     }
     // Split on top-level `|` separators (skip nested generics)
-    let mut parts -> string[] = [];
-    let mut start -> number = 0;
-    let mut index -> number = 0;
-    let mut depth -> number = 0;
-    let mut found_pipe -> boolean = false;
+    let mut parts: string[] = [];
+    let mut start: number = 0;
+    let mut index: number = 0;
+    let mut depth: number = 0;
+    let mut found_pipe: boolean = false;
     loop {
         if index >= trimmed.length {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        let mut _is_open -> boolean = false;
+        let mut _is_open: boolean = false;
         if ch == "<" { _is_open = true; }
         if ch == "(" { _is_open = true; }
         if ch == "[" { _is_open = true; }
         if _is_open {
             depth += 1;
         }
-        let mut _is_close -> boolean = false;
+        let mut _is_close: boolean = false;
         if ch == ">" { _is_close = true; }
         if ch == ")" { _is_close = true; }
         if ch == "]" { _is_close = true; }
@@ -681,14 +681,14 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
         return "";
     }
     // Map each variant type and build the tagged struct
-    let mut result -> string = "{ i32";
-    let mut pi -> number = 0;
+    let mut result: string = "{ i32";
+    let mut pi: number = 0;
     loop {
         if pi >= parts.length {
             break;
         }
         let mapped = map_type_annotation(parts[pi]);
-        let mut _bad -> boolean = false;
+        let mut _bad: boolean = false;
         if mapped.length == 0 { _bad = true; }
         if mapped == "void" { _bad = true; }
         if _bad {
@@ -701,7 +701,7 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
     return result;
 }
 
-fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
+fn map_optional_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -714,7 +714,7 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
         return "i8*";
     }
     let inner_type = map_type_annotation(inner);
-    let mut _if319 -> boolean = false;
+    let mut _if319: boolean = false;
     if inner_type.length == 0 { _if319 = true; }
     if inner_type == "void" { _if319 = true; }
     if _if319 {
@@ -726,7 +726,7 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
     return inner_type + "*";
 }
 
-fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
+fn map_reference_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -742,7 +742,7 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
         return "i8*";
     }
     let inner_type = map_type_annotation(remainder);
-    let mut _if320 -> boolean = false;
+    let mut _if320: boolean = false;
     if inner_type.length == 0 { _if320 = true; }
     if inner_type == "void" { _if320 = true; }
     if _if320 {
@@ -754,7 +754,7 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
     return inner_type + "*";
 }
 
-fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> string {
+fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length < 3 {
         return "";
@@ -777,12 +777,12 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
     return array_pointer_type_for_element(element_type);
 }
 
-fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
+fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed == "number" {
         return "double";
     }
-    let mut _if321 -> boolean = false;
+    let mut _if321: boolean = false;
     if trimmed == "boolean" { _if321 = true; }
     if trimmed == "bool" { _if321 = true; }
     if _if321 {
@@ -797,7 +797,7 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if trimmed == "any" {
         return "i8*";
     }
-    let mut _if322 -> boolean = false;
+    let mut _if322: boolean = false;
     if trimmed == "int" { _if322 = true; }
     if trimmed == "i64" { _if322 = true; }
     if _if322 {
@@ -809,7 +809,7 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if trimmed == "usize" {
         return "i64";
     }
-    let mut _if323 -> boolean = false;
+    let mut _if323: boolean = false;
     if trimmed == "u8" { _if323 = true; }
     if trimmed == "i8" { _if323 = true; }
     if _if323 {
@@ -822,9 +822,9 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
 // Future/Async Type Mapping
 // =============================================================================
 
-fn future_pointer_type_for_return_type(return_type -> string) -> string {
+fn future_pointer_type_for_return_type(return_type: string) -> string {
     let trimmed = trim_text(return_type);
-    let mut _if324 -> boolean = false;
+    let mut _if324: boolean = false;
     if trimmed.length == 0 { _if324 = true; }
     if trimmed == "void" { _if324 = true; }
     if _if324 {
@@ -834,7 +834,7 @@ fn future_pointer_type_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "%SailfinFutureNumber*";
     }
-    let mut _if325 -> boolean = false;
+    let mut _if325: boolean = false;
     if normalized == "boolean" { _if325 = true; }
     if normalized == "bool" { _if325 = true; }
     if _if325 {
@@ -847,9 +847,9 @@ fn future_pointer_type_for_return_type(return_type -> string) -> string {
     return "%SailfinFuturePtr*";
 }
 
-fn spawn_symbol_for_return_type(return_type -> string) -> string {
+fn spawn_symbol_for_return_type(return_type: string) -> string {
     let trimmed = trim_text(return_type);
-    let mut _if326 -> boolean = false;
+    let mut _if326: boolean = false;
     if trimmed.length == 0 { _if326 = true; }
     if trimmed == "void" { _if326 = true; }
     if _if326 {
@@ -859,7 +859,7 @@ fn spawn_symbol_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number";
     }
-    let mut _if327 -> boolean = false;
+    let mut _if327: boolean = false;
     if normalized == "boolean" { _if327 = true; }
     if normalized == "bool" { _if327 = true; }
     if _if327 {
@@ -871,9 +871,9 @@ fn spawn_symbol_for_return_type(return_type -> string) -> string {
     return "sailfin_runtime_spawn_ptr";
 }
 
-fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
+fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
     let trimmed = trim_text(return_type);
-    let mut _if328 -> boolean = false;
+    let mut _if328: boolean = false;
     if trimmed.length == 0 { _if328 = true; }
     if trimmed == "void" { _if328 = true; }
     if _if328 {
@@ -883,7 +883,7 @@ fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number_ctx";
     }
-    let mut _if329 -> boolean = false;
+    let mut _if329: boolean = false;
     if normalized == "boolean" { _if329 = true; }
     if normalized == "bool" { _if329 = true; }
     if _if329 {
@@ -899,12 +899,12 @@ fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
 // Default Value Helpers
 // =============================================================================
 
-fn default_value_for_llvm_type(llvm_type -> string) -> string {
+fn default_value_for_llvm_type(llvm_type: string) -> string {
     let trimmed = trim_text(llvm_type);
     if trimmed == "double" {
         return "0.0";
     }
-    let mut _if330 -> boolean = false;
+    let mut _if330: boolean = false;
     if trimmed == "i64" { _if330 = true; }
     if trimmed == "i32" { _if330 = true; }
     if trimmed == "i1" { _if330 = true; }

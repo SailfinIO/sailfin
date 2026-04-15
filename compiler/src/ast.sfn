@@ -7,160 +7,160 @@
 import { Token } from "./token";
 
 struct Program {
-    statements -> Statement[];
+    statements: Statement[];
 }
 
 struct TypeAnnotation {
-    text -> string;
+    text: string;
 }
 
 struct TypeParameter {
-    name -> string;
-    bound -> TypeAnnotation?;
-    span -> SourceSpan?;
+    name: string;
+    bound: TypeAnnotation?;
+    span: SourceSpan?;
 }
 
 struct Block {
-    tokens -> Token[];
-    text -> string;
-    statements -> Statement[];
+    tokens: Token[];
+    text: string;
+    statements: Statement[];
 }
 
 struct SourceSpan {
-    start_line -> number;
-    start_column -> number;
-    end_line -> number;
-    end_column -> number;
+    start_line: number;
+    start_column: number;
+    end_line: number;
+    end_column: number;
 }
 
 enum Expression {
-    Identifier { name -> string },
-    NumberLiteral { value -> string },
-    StringLiteral { value -> string },
-    BooleanLiteral { value -> string },
+    Identifier { name: string },
+    NumberLiteral { value: string },
+    StringLiteral { value: string },
+    BooleanLiteral { value: string },
     NullLiteral,
-    Unary { operator -> string, operand -> Expression },
-    Binary { operator -> string, left -> Expression, right -> Expression },
-    Member { object -> Expression, member -> string },
-    Call { callee -> Expression, arguments -> Expression[] },
-    Index { sequence -> Expression, index -> Expression },
-    Array { elements -> Expression[] },
-    Object { fields -> ObjectField[] },
-    Struct { type_name -> string[], fields -> ObjectField[] },
-    Lambda { parameters -> Parameter[], body -> Block, return_type -> TypeAnnotation? },
-    Range { start -> Expression, end -> Expression },
-    Raw { text -> string },
+    Unary { operator: string, operand: Expression },
+    Binary { operator: string, left: Expression, right: Expression },
+    Member { object: Expression, member: string },
+    Call { callee: Expression, arguments: Expression[] },
+    Index { sequence: Expression, index: Expression },
+    Array { elements: Expression[] },
+    Object { fields: ObjectField[] },
+    Struct { type_name: string[], fields: ObjectField[] },
+    Lambda { parameters: Parameter[], body: Block, return_type: TypeAnnotation? },
+    Range { start: Expression, end: Expression },
+    Raw { text: string },
 }
 
 struct Parameter {
-    name -> string;
-    type_annotation -> TypeAnnotation?;
-    default_value -> Expression?;
-    mutable -> boolean;
-    span -> SourceSpan?;
+    name: string;
+    type_annotation: TypeAnnotation?;
+    default_value: Expression?;
+    mutable: boolean;
+    span: SourceSpan?;
 }
 
 struct WithClause {
-    expression -> Expression;
+    expression: Expression;
 }
 
 struct ObjectField {
-    name -> string;
-    value -> Expression;
+    name: string;
+    value: Expression;
 }
 
 struct ElseBranch {
-    statement -> Statement?;
-    body -> Block?;
+    statement: Statement?;
+    body: Block?;
 }
 
 struct ForClause {
-    target -> Expression;
-    iterable -> Expression;
-    tokens -> Token[];
+    target: Expression;
+    iterable: Expression;
+    tokens: Token[];
 }
 
 struct MatchCase {
-    pattern -> Expression;
-    guard -> Expression?;
-    body -> Block;
+    pattern: Expression;
+    guard: Expression?;
+    body: Block;
 }
 
 struct ModelProperty {
-    name -> string;
-    value -> Expression;
-    span -> SourceSpan?;
+    name: string;
+    value: Expression;
+    span: SourceSpan?;
 }
 
 struct FieldDeclaration {
-    name -> string;
-    type_annotation -> TypeAnnotation;
-    mutable -> boolean;
-    name_span -> SourceSpan?;
+    name: string;
+    type_annotation: TypeAnnotation;
+    mutable: boolean;
+    name_span: SourceSpan?;
 }
 
 struct MethodDeclaration {
-    signature -> FunctionSignature;
-    body -> Block;
-    decorators -> Decorator[];
+    signature: FunctionSignature;
+    body: Block;
+    decorators: Decorator[];
 }
 
 struct EnumVariant {
-    name -> string;
-    fields -> FieldDeclaration[];
-    name_span -> SourceSpan?;
+    name: string;
+    fields: FieldDeclaration[];
+    name_span: SourceSpan?;
 }
 
 struct FunctionSignature {
-    name -> string;
-    is_async -> boolean;
-    parameters -> Parameter[];
-    return_type -> TypeAnnotation?;
-    effects -> string[];
-    type_parameters -> TypeParameter[];
-    name_span -> SourceSpan?;
+    name: string;
+    is_async: boolean;
+    parameters: Parameter[];
+    return_type: TypeAnnotation?;
+    effects: string[];
+    type_parameters: TypeParameter[];
+    name_span: SourceSpan?;
 }
 
 struct PipelineDeclaration {
-    signature -> FunctionSignature;
-    body -> Block;
-    decorators -> Decorator[];
+    signature: FunctionSignature;
+    body: Block;
+    decorators: Decorator[];
 }
 
 struct ToolDeclaration {
-    signature -> FunctionSignature;
-    body -> Block;
-    decorators -> Decorator[];
+    signature: FunctionSignature;
+    body: Block;
+    decorators: Decorator[];
 }
 
 struct TestDeclaration {
-    name -> string;
-    body -> Block;
-    effects -> string[];
-    decorators -> Decorator[];
+    name: string;
+    body: Block;
+    effects: string[];
+    decorators: Decorator[];
 }
 
 struct ModelDeclaration {
-    name -> string;
-    model_type -> TypeAnnotation;
-    properties -> ModelProperty[];
-    effects -> string[];
-    decorators -> Decorator[];
+    name: string;
+    model_type: TypeAnnotation;
+    properties: ModelProperty[];
+    effects: string[];
+    decorators: Decorator[];
 }
 
 struct Decorator {
-    name -> string;
-    arguments -> DecoratorArgument[];
+    name: string;
+    arguments: DecoratorArgument[];
 }
 
 struct DecoratorArgument {
-    name -> string?;
-    expression -> Expression;
+    name: string?;
+    expression: Expression;
 }
 
-fn decorator_names(decorators -> Decorator[]) -> string[] {
-    let mut names -> string[] = [];
-    let mut index -> number = 0;
+fn decorator_names(decorators: Decorator[]) -> string[] {
+    let mut names: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= decorators.length {
             break;
@@ -172,155 +172,155 @@ fn decorator_names(decorators -> Decorator[]) -> string[] {
 }
 
 struct ImportSpecifier {
-    name -> string;
-    alias -> string?;
+    name: string;
+    alias: string?;
 }
 
 struct ExportSpecifier {
-    name -> string;
-    alias -> string?;
+    name: string;
+    alias: string?;
 }
 
 enum Statement {
     ImportDeclaration {
-        import_specifiers -> ImportSpecifier[];
-        source -> string;
+        import_specifiers: ImportSpecifier[];
+        source: string;
     },
     ExportDeclaration {
-        export_specifiers -> ExportSpecifier[];
-        source -> string;
+        export_specifiers: ExportSpecifier[];
+        source: string;
     },
     VariableDeclaration {
-        name -> string;
-        mutable -> boolean;
-        type_annotation -> TypeAnnotation?;
-        initializer -> Expression?;
-        span -> SourceSpan?;
-        initializer_span -> SourceSpan?;
+        name: string;
+        mutable: boolean;
+        type_annotation: TypeAnnotation?;
+        initializer: Expression?;
+        span: SourceSpan?;
+        initializer_span: SourceSpan?;
     },
     ModelDeclaration {
-        name -> string;
-        name_span -> SourceSpan?;
-        model_type -> TypeAnnotation;
-        properties -> ModelProperty[];
-        effects -> string[];
-        decorators -> Decorator[];
+        name: string;
+        name_span: SourceSpan?;
+        model_type: TypeAnnotation;
+        properties: ModelProperty[];
+        effects: string[];
+        decorators: Decorator[];
     },
     PipelineDeclaration {
-        signature -> FunctionSignature;
-        body -> Block;
-        decorators -> Decorator[];
+        signature: FunctionSignature;
+        body: Block;
+        decorators: Decorator[];
     },
     ToolDeclaration {
-        signature -> FunctionSignature;
-        body -> Block;
-        decorators -> Decorator[];
+        signature: FunctionSignature;
+        body: Block;
+        decorators: Decorator[];
     },
     TestDeclaration {
-        name -> string;
-        name_span -> SourceSpan?;
-        body -> Block;
-        effects -> string[];
-        decorators -> Decorator[];
+        name: string;
+        name_span: SourceSpan?;
+        body: Block;
+        effects: string[];
+        decorators: Decorator[];
     },
     FunctionDeclaration {
-        signature -> FunctionSignature;
-        body -> Block;
-        decorators -> Decorator[];
+        signature: FunctionSignature;
+        body: Block;
+        decorators: Decorator[];
     },
     ExternFunctionDeclaration {
-        signature -> FunctionSignature;
-        unsafe -> boolean;
-        decorators -> Decorator[];
+        signature: FunctionSignature;
+        unsafe: boolean;
+        decorators: Decorator[];
     },
     StructDeclaration {
-        name -> string;
-        name_span -> SourceSpan?;
-        type_parameters -> TypeParameter[];
-        implements_types -> TypeAnnotation[];
-        fields -> FieldDeclaration[];
-        methods -> MethodDeclaration[];
-        decorators -> Decorator[];
+        name: string;
+        name_span: SourceSpan?;
+        type_parameters: TypeParameter[];
+        implements_types: TypeAnnotation[];
+        fields: FieldDeclaration[];
+        methods: MethodDeclaration[];
+        decorators: Decorator[];
     },
     TypeAliasDeclaration {
-        name -> string;
-        name_span -> SourceSpan?;
-        type_parameters -> TypeParameter[];
-        aliased_type -> TypeAnnotation;
-        decorators -> Decorator[];
+        name: string;
+        name_span: SourceSpan?;
+        type_parameters: TypeParameter[];
+        aliased_type: TypeAnnotation;
+        decorators: Decorator[];
     },
     InterfaceDeclaration {
-        name -> string;
-        name_span -> SourceSpan?;
-        type_parameters -> TypeParameter[];
-        members -> FunctionSignature[];
-        decorators -> Decorator[];
+        name: string;
+        name_span: SourceSpan?;
+        type_parameters: TypeParameter[];
+        members: FunctionSignature[];
+        decorators: Decorator[];
     },
     EnumDeclaration {
-        name -> string;
-        name_span -> SourceSpan?;
-        type_parameters -> TypeParameter[];
-        variants -> EnumVariant[];
-        decorators -> Decorator[];
+        name: string;
+        name_span: SourceSpan?;
+        type_parameters: TypeParameter[];
+        variants: EnumVariant[];
+        decorators: Decorator[];
     },
     PromptStatement {
-        channel -> string;
-        keyword_token -> Token;
-        channel_token -> Token;
-        body -> Block;
-        decorators -> Decorator[];
+        channel: string;
+        keyword_token: Token;
+        channel_token: Token;
+        body: Block;
+        decorators: Decorator[];
     },
     WithStatement {
-        clauses -> WithClause[];
-        body -> Block;
-        decorators -> Decorator[];
+        clauses: WithClause[];
+        body: Block;
+        decorators: Decorator[];
     },
     ForStatement {
-        clause -> ForClause;
-        body -> Block;
-        decorators -> Decorator[];
+        clause: ForClause;
+        body: Block;
+        decorators: Decorator[];
     },
     LoopStatement {
-        body -> Block;
-        decorators -> Decorator[];
+        body: Block;
+        decorators: Decorator[];
     },
     BreakStatement,
     ContinueStatement,
     MatchStatement {
-        expression -> Expression;
-        cases -> MatchCase[];
-        decorators -> Decorator[];
+        expression: Expression;
+        cases: MatchCase[];
+        decorators: Decorator[];
     },
     IfStatement {
-        condition -> Expression;
-        then_block -> Block;
-        else_branch -> ElseBranch?;
-        decorators -> Decorator[];
+        condition: Expression;
+        then_block: Block;
+        else_branch: ElseBranch?;
+        decorators: Decorator[];
     },
     BlockStatement {
-        body -> Block;
+        body: Block;
     },
     ReturnStatement {
-        expression -> Expression?;
-        span -> SourceSpan?;
+        expression: Expression?;
+        span: SourceSpan?;
     },
     ThrowStatement {
-        expression -> Expression;
-        span -> SourceSpan?;
+        expression: Expression;
+        span: SourceSpan?;
     },
     TryStatement {
-        try_block -> Block;
-        catch_name -> string?;
-        catch_name_token -> Token?;
-        catch_block -> Block?;
-        finally_block -> Block?;
+        try_block: Block;
+        catch_name: string?;
+        catch_name_token: Token?;
+        catch_block: Block?;
+        finally_block: Block?;
     },
     ExpressionStatement {
-        expression -> Expression;
-        span -> SourceSpan?;
+        expression: Expression;
+        span: SourceSpan?;
     },
     Unknown {
-        tokens -> Token[];
-        text -> string;
+        tokens: Token[];
+        text: string;
     },
 }

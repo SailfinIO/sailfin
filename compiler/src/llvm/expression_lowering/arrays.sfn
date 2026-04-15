@@ -31,10 +31,10 @@ import {
     array_struct_type_for_element,
 } from "../type_mapping";
 
-fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_type -> string, lines -> string[], temp_index -> number) -> ExpressionResult {
+fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: number) -> ExpressionResult {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if element_type.length == 0 {
         diagnostics.push("llvm lowering: concat requires a concrete element type");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
@@ -147,10 +147,10 @@ fn lower_struct_array_concat(lhs -> LLVMOperand, rhs -> LLVMOperand, element_typ
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
 }
 
-fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element_type -> string, lines -> string[], temp_index -> number) -> ExpressionResult {
+fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_type: string, lines: string[], temp_index: number) -> ExpressionResult {
     let mut current_lines = lines;
     let mut current_temp = temp_index;
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if element_type.length == 0 {
         diagnostics.push("llvm lowering: push requires a concrete element type");
         return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
@@ -230,9 +230,9 @@ fn lower_array_push_in_place(array -> LLVMOperand, value -> LLVMOperand, element
 // Find the top-level comma in an LLVM type string, respecting nested braces.
 // This is needed for parsing array struct types like { { %T*, i64 }*, i64 }
 // where the element type itself contains commas.
-fn find_top_level_comma_in_llvm_type(text -> string) -> number {
-    let mut brace_depth -> number = 0;
-    let mut index -> number = 0;
+fn find_top_level_comma_in_llvm_type(text: string) -> number {
+    let mut brace_depth: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= text.length {
             break;
@@ -260,7 +260,7 @@ fn find_top_level_comma_in_llvm_type(text -> string) -> number {
     return -1;
 }
 
-fn array_pointer_element_type(llvm_type -> string) -> string {
+fn array_pointer_element_type(llvm_type: string) -> string {
     let trimmed = trim_text(llvm_type);
     if trimmed.length == 0 {
         return "";

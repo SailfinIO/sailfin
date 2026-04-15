@@ -8,7 +8,7 @@ enum Direction {
 // NOTE: match on enum variants causes a compiler segfault during LLVM
 // lowering (globals phase). Using if/else chains as a workaround.
 // See: https://github.com/SailfinIO/sailfin/issues/50
-fn _direction_name(d -> Direction) -> string {
+fn _direction_name(d: Direction) -> string {
     if d == Direction.North {
         return "north";
     } else if d == Direction.South {
@@ -21,7 +21,7 @@ fn _direction_name(d -> Direction) -> string {
     return "unknown";
 }
 
-fn _is_horizontal(d -> Direction) -> boolean {
+fn _is_horizontal(d: Direction) -> boolean {
     if d == Direction.East || d == Direction.West {
         return true;
     }
@@ -34,12 +34,12 @@ fn _is_horizontal(d -> Direction) -> boolean {
 // See: https://github.com/SailfinIO/sailfin/issues/50
 
 test "enums: basic enum equality" {
-    let d -> Direction = Direction.North;
+    let d: Direction = Direction.North;
     assert d == Direction.North;
 }
 
 test "enums: basic enum inequality" {
-    let d -> Direction = Direction.South;
+    let d: Direction = Direction.South;
     assert d != Direction.North;
 }
 

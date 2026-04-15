@@ -15,16 +15,16 @@ import { trim_text, starts_with, ends_with } from "./utils";
 // Expression Parsing Helpers
 // =============================================================================
 
-fn parse_member_access(expression -> string) -> MemberAccessParse {
+fn parse_member_access(expression: string) -> MemberAccessParse {
     let trimmed = trim_text(expression);
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut in_double -> boolean = false;
-    let mut in_single -> boolean = false;
-    let mut escape_next -> boolean = false;
-    let mut last_dot -> number = -1;
-    let mut index -> number = 0;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut last_dot: number = -1;
+    let mut index: number = 0;
     loop {
         if index >= trimmed.length {
             break;
@@ -137,7 +137,7 @@ fn parse_member_access(expression -> string) -> MemberAccessParse {
     return MemberAccessParse { success: true, base: base, field: field };
 }
 
-fn parse_index_expression(expression -> string) -> IndexExpressionParse {
+fn parse_index_expression(expression: string) -> IndexExpressionParse {
     let trimmed = trim_text(expression);
     if trimmed.length < 3 {
         return IndexExpressionParse { success: false, base: "", index: "" };
@@ -145,14 +145,14 @@ fn parse_index_expression(expression -> string) -> IndexExpressionParse {
     if substring(trimmed, trimmed.length - 1, trimmed.length) != "]" {
         return IndexExpressionParse { success: false, base: "", index: "" };
     }
-    let mut bracket_depth -> number = 0;
-    let mut paren_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut in_double -> boolean = false;
-    let mut in_single -> boolean = false;
-    let mut escape_next -> boolean = false;
-    let mut open_bracket -> number = -1;
-    let mut index -> number = trimmed.length - 1;
+    let mut bracket_depth: number = 0;
+    let mut paren_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut open_bracket: number = -1;
+    let mut index: number = trimmed.length - 1;
     loop {
         if index < 0 {
             break;
@@ -260,16 +260,16 @@ fn parse_index_expression(expression -> string) -> IndexExpressionParse {
 // Assignment and Inline Let Parsing
 // =============================================================================
 
-fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
+fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut in_double -> boolean = false;
-    let mut in_single -> boolean = false;
-    let mut escape_next -> boolean = false;
-    let mut equals_index -> number = -1;
-    let mut index -> number = 0;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut equals_index: number = -1;
+    let mut index: number = 0;
     loop {
         if index >= trimmed.length {
             break;
@@ -362,7 +362,7 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
                         // Check for ==, !=, <=, >=
                         if index > 0 {
                             let prev = char_at(trimmed, index - 1);
-                            let mut _if187 -> boolean = false;
+                            let mut _if187: boolean = false;
                             if prev == "=" { _if187 = true; }
                             if prev == "!" { _if187 = true; }
                             if prev == "<" { _if187 = true; }
@@ -396,16 +396,16 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
     return AssignmentParseResult { success: true, target: target, value: value, operator: "" };
 }
 
-fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
+fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let trimmed = trim_text(expression);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
 
     if !starts_with(trimmed, "let ") {
         return InlineLetParseResult { success: false, name: "", mutable: false, type_annotation: "", initializer: "", diagnostics: diagnostics };
     }
 
     let remainder = trim_text(substring(trimmed, 4, trimmed.length));
-    let mut is_mutable -> boolean = false;
+    let mut is_mutable: boolean = false;
     let mut after_mut = remainder;
     if starts_with(remainder, "mut ") {
         is_mutable = true;
@@ -423,8 +423,8 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
     let initializer = trim_text(assignment.value);
 
     // Parse name and optional type annotation from lhs
-    let mut name -> string = "";
-    let mut type_annotation -> string = "";
+    let mut name: string = "";
+    let mut type_annotation: string = "";
 
     let arrow_index = index_of(lhs, "->");
     if arrow_index >= 0 {
@@ -446,8 +446,8 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
 // Ternary Expression Parsing
 // =============================================================================
 
-fn parse_ternary_expression(text -> string) -> TernaryParseResult {
-    let mut diagnostics -> string[] = [];
+fn parse_ternary_expression(text: string) -> TernaryParseResult {
+    let mut diagnostics: string[] = [];
     let trimmed = trim_text(text);
 
     if trimmed.length == 0 {
@@ -455,13 +455,13 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
     }
 
     // Find '?' and ':' at the same nesting level (depth 0)
-    let mut depth -> number = 0;
-    let mut question_index -> number = -1;
-    let mut colon_index -> number = -1;
-    let mut index -> number = 0;
-    let mut in_double -> boolean = false;
-    let mut in_single -> boolean = false;
-    let mut escape_next -> boolean = false;
+    let mut depth: number = 0;
+    let mut question_index: number = -1;
+    let mut colon_index: number = -1;
+    let mut index: number = 0;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
 
     loop {
         if index >= trimmed.length {
@@ -512,7 +512,7 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
             index += 1;
             continue;
         }
-        let mut _if182 -> boolean = false;
+        let mut _if182: boolean = false;
         if ch == "(" { _if182 = true; }
         if ch == "[" { _if182 = true; }
         if ch == "{" { _if182 = true; }
@@ -521,7 +521,7 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
             index += 1;
             continue;
         }
-        let mut _if183 -> boolean = false;
+        let mut _if183: boolean = false;
         if ch == ")" { _if183 = true; }
         if ch == "]" { _if183 = true; }
         if ch == "}" { _if183 = true; }
@@ -533,7 +533,7 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
             continue;
         }
         if depth == 0 {
-            let mut _if184 -> boolean = false;
+            let mut _if184: boolean = false;
             if ch == "?" {
                 if question_index < 0 {
                     _if184 = true;
@@ -542,7 +542,7 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
             if _if184 {
                 question_index = index;
             } else {
-                let mut _elif188 -> boolean = false;
+                let mut _elif188: boolean = false;
                 if ch == ":" {
                     if question_index >= 0 {
                         if colon_index < 0 {
@@ -559,7 +559,7 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
         index += 1;
     }
 
-    let mut _if185 -> boolean = false;
+    let mut _if185: boolean = false;
     if question_index < 0 { _if185 = true; }
     if colon_index < 0 { _if185 = true; }
     if _if185 {
@@ -577,40 +577,40 @@ fn parse_ternary_expression(text -> string) -> TernaryParseResult {
 // Cast and Raw Address Parsing
 // =============================================================================
 
-fn parse_raw_address_expression(text -> string) -> RawAddressParseResult {
+fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
     let trimmed = trim_text(text);
     if !starts_with(trimmed, "raw_address(") {
         return RawAddressParseResult { recognized: false, success: false, target: "", diagnostics: [] };
     }
     if !ends_with(trimmed, ")") {
-        let diagnostics -> string[] = ["llvm lowering: raw_address expression missing closing `)`"];
+        let diagnostics: string[] = ["llvm lowering: raw_address expression missing closing `)`"];
         return RawAddressParseResult { recognized: true, success: false, target: "", diagnostics: diagnostics };
     }
     let inner = trim_text(substring(trimmed, 12, trimmed.length - 1));
     if inner.length == 0 {
-        let diagnostics -> string[] = ["llvm lowering: raw_address expression missing target"];
+        let diagnostics: string[] = ["llvm lowering: raw_address expression missing target"];
         return RawAddressParseResult { recognized: true, success: false, target: "", diagnostics: diagnostics };
     }
     return RawAddressParseResult { recognized: true, success: true, target: inner, diagnostics: [] };
 }
 
-fn parse_cast_expression(text -> string) -> CastParseResult {
+fn parse_cast_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
         return CastParseResult { recognized: false, success: false, value: "", type_annotation: "", diagnostics: diagnostics };
     }
 
     // Scan for a top-level ` as ` outside of brackets/strings.
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut angle_depth -> number = 0;
-    let mut in_double -> boolean = false;
-    let mut in_single -> boolean = false;
-    let mut escape_next -> boolean = false;
-    let mut match_index -> number = -1;
-    let mut index -> number = 0;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut angle_depth: number = 0;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut match_index: number = -1;
+    let mut index: number = 0;
 
     loop {
         if index >= trimmed.length {
@@ -734,7 +734,7 @@ fn parse_cast_expression(text -> string) -> CastParseResult {
 
     let value = trim_text(substring(trimmed, 0, match_index));
     let annotation = trim_text(substring(trimmed, match_index + 4, trimmed.length));
-    let mut _if186 -> boolean = false;
+    let mut _if186: boolean = false;
     if value.length == 0 { _if186 = true; }
     if annotation.length == 0 { _if186 = true; }
     if _if186 {

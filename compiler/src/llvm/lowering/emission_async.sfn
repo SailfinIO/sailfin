@@ -50,25 +50,25 @@ import { prepare_parameters_from_files } from "./emission";
 
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.
 fn emit_async_function(
-    fn_name -> string,
-    fn_return_type -> string,
-    fn_param_count -> number,
-    function_name_hint -> string,
-    functions -> NativeFunction[],
-    effects -> string[],
-    context -> TypeContext,
-    module_name -> string,
-    entry_points -> string[],
-    exported_symbols -> string[],
-    imported_functions -> NativeFunction[],
-    module_globals -> LocalBinding[],
-    module_init_symbol -> string,
-    needs_module_init_call -> boolean
+    fn_name: string,
+    fn_return_type: string,
+    fn_param_count: number,
+    function_name_hint: string,
+    functions: NativeFunction[],
+    effects: string[],
+    context: TypeContext,
+    module_name: string,
+    entry_points: string[],
+    exported_symbols: string[],
+    imported_functions: NativeFunction[],
+    module_globals: LocalBinding[],
+    module_init_symbol: string,
+    needs_module_init_call: boolean
 ) -> LoweredLLVMFunction ![io] {
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     let future_return = future_pointer_type_for_return_type(fn_return_type);
     let mut impl_return = map_return_type(context, fn_return_type);
-    let mut _if205 -> boolean = false;
+    let mut _if205: boolean = false;
     if future_return.length == 0 { _if205 = true; }
     if impl_return.length == 0 { _if205 = true; }
     if _if205 {
@@ -77,7 +77,7 @@ fn emit_async_function(
         return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
-    let mut impl_return_type_annotation -> string = fn_return_type;
+    let mut impl_return_type_annotation: string = fn_return_type;
     if future_return == "%SailfinFuturePtr*" {
         impl_return = "i8*";
         impl_return_type_annotation = "any";
@@ -106,12 +106,12 @@ fn emit_async_function(
     let preparation = prepare_parameters_from_files(fn_name, fn_param_count, context);
     diagnostics = extend_string_array(diagnostics, preparation.diagnostics);
 
-    let mut wrapper_lines -> string[] = [];
-    let mut linkage -> string = "";
+    let mut wrapper_lines: string[] = [];
+    let mut linkage: string = "";
 
     let wrapper_symbol = sanitize_symbol(fn_name);
     let impl_symbol = sanitize_symbol(impl_name);
-    let mut signature -> string = join_with_separator(preparation.signature, ", ");
+    let mut signature: string = join_with_separator(preparation.signature, ", ");
     if signature.length == 0 {
         signature = "";
     }
@@ -141,8 +141,8 @@ fn emit_async_function(
         let ctx_ptr_type = ctx_type + "*";
         let trampoline_symbol = wrapper_symbol + "__async_trampoline";
 
-        let mut param_llvm_types -> string[] = [];
-        let mut param_index -> number = 0;
+        let mut param_llvm_types: string[] = [];
+        let mut param_index: number = 0;
         loop {
             if param_index >= preparation.bindings.length { break; }
             param_llvm_types.push(preparation.bindings[param_index].llvm_type);
@@ -154,13 +154,13 @@ fn emit_async_function(
         wrapper_lines.push("define internal " + impl_return + " @" + trampoline_symbol + "(i8* %ctx_raw) {");
         wrapper_lines.push("block.entry:");
 
-        let mut tramp_temp -> number = 0;
+        let mut tramp_temp: number = 0;
         let tramp_ctx = format_temp_name(tramp_temp);
         tramp_temp += 1;
         wrapper_lines.push("  " + tramp_ctx + " = bitcast i8* %ctx_raw to " + ctx_ptr_type);
 
-        let mut arg_texts -> string[] = [];
-        let mut load_index -> number = 0;
+        let mut arg_texts: string[] = [];
+        let mut load_index: number = 0;
         loop {
             if load_index >= preparation.bindings.length { break; }
             let binding = preparation.bindings[load_index];
@@ -191,7 +191,7 @@ fn emit_async_function(
 
         wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
         wrapper_lines.push("block.entry:");
-        let mut wrap_temp -> number = 0;
+        let mut wrap_temp: number = 0;
         let size_ptr = format_temp_name(wrap_temp);
         wrap_temp += 1;
         wrapper_lines.push("  " + size_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " null, i32 1");
@@ -205,7 +205,7 @@ fn emit_async_function(
         wrap_temp += 1;
         wrapper_lines.push("  " + ctx_typed + " = bitcast i8* " + ctx_raw + " to " + ctx_ptr_type);
 
-        let mut store_index -> number = 0;
+        let mut store_index: number = 0;
         loop {
             if store_index >= preparation.bindings.length { break; }
             let binding = preparation.bindings[store_index];
@@ -223,7 +223,7 @@ fn emit_async_function(
         wrapper_lines.push("}");
     }
 
-    let mut merged_lines -> string[] = wrapper_lines;
+    let mut merged_lines: string[] = wrapper_lines;
     if impl_lowered.lines.length > 0 {
         let mut with_spacer = impl_lowered.lines;
         with_spacer.push("");

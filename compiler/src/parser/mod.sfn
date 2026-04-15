@@ -39,14 +39,14 @@ import {
 // Main Entry Points
 // ============================================================================
 
-fn parse_program(source -> string) -> Program {
+fn parse_program(source: string) -> Program {
     let tokens = lex(source);
     return parse_tokens(tokens);
 }
 
-fn parse_tokens(tokens -> Token[]) -> Program {
-    let mut parser -> Parser = Parser { tokens: tokens, index: 0 };
-    let mut statements -> Statement[] = [];
+fn parse_tokens(tokens: Token[]) -> Program {
+    let mut parser: Parser = Parser { tokens: tokens, index: 0 };
+    let mut statements: Statement[] = [];
     parser = skip_trivia(parser);
 
     loop {
@@ -73,8 +73,8 @@ fn parse_tokens(tokens -> Token[]) -> Program {
 // Top-Level Statement Dispatch
 // ============================================================================
 
-fn parse_statement(initial_parser -> Parser) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_statement(initial_parser: Parser) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
 
@@ -169,7 +169,7 @@ fn parse_statement(initial_parser -> Parser) -> StatementParseResult {
 // Append Helper
 // ============================================================================
 
-fn append_statement(statements -> Statement[], statement -> Statement) -> Statement[] {
+fn append_statement(statements: Statement[], statement: Statement) -> Statement[] {
     statements.push(statement);
     return statements;
 }

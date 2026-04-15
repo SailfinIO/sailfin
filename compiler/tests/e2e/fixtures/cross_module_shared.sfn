@@ -1,8 +1,8 @@
-fn shared_add(a -> number, b -> number) -> number {
+fn shared_add(a: number, b: number) -> number {
     return a + b;
 }
 
-fn shared_greet(name -> string) -> string {
+fn shared_greet(name: string) -> string {
     return "hello, " + name;
 }
 

@@ -11,7 +11,7 @@ import { runtime_helper_descriptors } from "./runtime_helpers";
 import { map_return_type, map_parameter_type } from "./type_mapping";
 import { render_interface_signature, collect_parameter_types, extract_struct_type_from_llvm } from "./rendering_helpers";
 
-fn clamp_collection_length(value -> number, max -> number) -> number {
+fn clamp_collection_length(value: number, max: number) -> number {
     if value != value {
         return 0;
     }
@@ -28,21 +28,21 @@ fn clamp_collection_length(value -> number, max -> number) -> number {
 // Trait Metadata Comments
 // =============================================================================
 
-fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
-    let mut interface_lines -> string[] = [];
-    let mut index -> number = 0;
+fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
+    let mut interface_lines: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= metadata.interfaces.length {
             break;
         }
         let interface = metadata.interfaces[index];
-        let mut header -> string = "; interface " + interface.name;
+        let mut header: string = "; interface " + interface.name;
         if interface.type_parameters.length > 0 {
             header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">";
         }
         interface_lines.push(header);
 
-        let mut signature_index -> number = 0;
+        let mut signature_index: number = 0;
         loop {
             if signature_index >= interface.signatures.length {
                 break;
@@ -58,14 +58,14 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
         index += 1;
     }
 
-    let mut struct_lines -> string[] = [];
+    let mut struct_lines: string[] = [];
     index = 0;
     loop {
         if index >= metadata.implementations.length {
             break;
         }
         let implementation = metadata.implementations[index];
-        let mut line -> string = "; struct " + implementation.struct_name + " implements " + join_with_separator(implementation.interfaces, ", ");
+        let mut line: string = "; struct " + implementation.struct_name + " implements " + join_with_separator(implementation.interfaces, ", ");
         struct_lines.push(line);
         index += 1;
     }
@@ -76,9 +76,9 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
         }
     }
 
-    let mut lines -> string[] = [];
+    let mut lines: string[] = [];
     lines.push("; -- Trait Metadata --------------------------------");
-    let mut _ci0 -> number = 0;
+    let mut _ci0: number = 0;
     loop {
         if _ci0 >= interface_lines.length { break; }
         lines.push(interface_lines[_ci0]);
@@ -89,7 +89,7 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
             lines.push(";");
         }
     }
-    let mut _ci1 -> number = 0;
+    let mut _ci1: number = 0;
     loop {
         if _ci1 >= struct_lines.length { break; }
         lines.push(struct_lines[_ci1]);
@@ -103,13 +103,13 @@ fn render_trait_metadata_comments(metadata -> TraitMetadata) -> string[] {
 // Runtime Helper Declarations
 // =============================================================================
 
-fn render_runtime_helper_declarations(used_targets -> string[], local_functions -> NativeFunction[]) -> string[] {
+fn render_runtime_helper_declarations(used_targets: string[], local_functions: NativeFunction[]) -> string[] {
     if used_targets.length == 0 {
         return [];
     }
     // Build list of local function symbols to avoid declaring helpers that are defined locally
-    let mut local_symbols -> string[] = [];
-    let mut local_index -> number = 0;
+    let mut local_symbols: string[] = [];
+    let mut local_index: number = 0;
     loop {
         if local_index >= local_functions.length {
             break;
@@ -118,10 +118,10 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
         local_index += 1;
     }
 
-    let mut lines -> string[] = [];
-    let mut declared_symbols -> string[] = [];
+    let mut lines: string[] = [];
+    let mut declared_symbols: string[] = [];
     let descriptors = runtime_helper_descriptors();
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= descriptors.length {
             break;
@@ -144,7 +144,7 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
                 let effects_text = join_with_separator(descriptor.effects, ", ");
                 lines.push("; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]");
             }
-            let mut parameter_text -> string = "";
+            let mut parameter_text: string = "";
             if descriptor.parameter_types.length > 0 {
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ");
             }
@@ -176,14 +176,14 @@ fn render_runtime_helper_declarations(used_targets -> string[], local_functions 
 // Imported Function Declarations
 // =============================================================================
 
-fn render_imported_function_declarations(imported_functions -> NativeFunction[], local_functions -> NativeFunction[], context -> TypeContext) -> string[] {
+fn render_imported_function_declarations(imported_functions: NativeFunction[], local_functions: NativeFunction[], context: TypeContext) -> string[] {
     if imported_functions.length == 0 {
         return [];
     }
     // Get all runtime helper symbols to avoid duplicates
     let helper_descriptors = runtime_helper_descriptors();
-    let mut helper_symbols -> string[] = [];
-    let mut helper_index -> number = 0;
+    let mut helper_symbols: string[] = [];
+    let mut helper_index: number = 0;
     loop {
         if helper_index >= helper_descriptors.length {
             break;
@@ -197,8 +197,8 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
     }
 
     // Get all local function symbols to avoid redefinitions
-    let mut local_symbols -> string[] = [];
-    let mut local_index -> number = 0;
+    let mut local_symbols: string[] = [];
+    let mut local_index: number = 0;
     loop {
         if local_index >= local_functions.length {
             break;
@@ -207,9 +207,9 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
         local_index += 1;
     }
 
-    let mut lines -> string[] = [];
-    let mut emitted_declarations -> string[] = [];
-    let mut index -> number = 0;
+    let mut lines: string[] = [];
+    let mut emitted_declarations: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= imported_functions.length {
             break;
@@ -217,7 +217,7 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
         let function = imported_functions[index];
         let sanitized_name = sanitize_symbol(function.name);
         // Skip if this function is already declared as a runtime helper or defined locally
-        let mut _if285 -> boolean = false;
+        let mut _if285: boolean = false;
         if string_array_contains(helper_symbols, sanitized_name) { _if285 = true; }
         if string_array_contains(local_symbols, sanitized_name) { _if285 = true; }
         if _if285 {
@@ -247,14 +247,14 @@ fn render_imported_function_declarations(imported_functions -> NativeFunction[],
 // Struct Type Definitions
 // =============================================================================
 
-fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFunction[]) -> string[] {
-    let mut _if286 -> boolean = false;
+fn render_struct_type_definitions(context: TypeContext, functions: NativeFunction[]) -> string[] {
+    let mut _if286: boolean = false;
     if context.structs == null { _if286 = true; }
     if context.enums == null { _if286 = true; }
     if _if286 {
         return [];
     }
-    let mut _if287 -> boolean = false;
+    let mut _if287: boolean = false;
     if context.structs.length > 10000 { _if287 = true; }
     if context.enums.length > 10000 { _if287 = true; }
     if _if287 {
@@ -266,19 +266,19 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
     if functions.length > 20000 {
         return [];
     }
-    let mut lines -> string[] = [];
+    let mut lines: string[] = [];
 
 
     // First pass: collect all referenced struct types
-    let mut referenced_types -> string[] = [];
-    let mut struct_index -> number = 0;
+    let mut referenced_types: string[] = [];
+    let mut struct_index: number = 0;
     let struct_count = clamp_collection_length(context.structs.length, 10000);
     loop {
         if struct_index >= struct_count {
             break;
         }
         let info = context.structs[struct_index];
-        let mut field_index -> number = 0;
+        let mut field_index: number = 0;
         let field_count = clamp_collection_length(info.fields.length, 10000);
         loop {
             if field_index >= field_count {
@@ -297,14 +297,14 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
     }
 
     // Check enums too
-    let mut enum_index -> number = 0;
+    let mut enum_index: number = 0;
     let enum_count = clamp_collection_length(context.enums.length, 10000);
     loop {
         if enum_index >= enum_count {
             break;
         }
         let enum_info = context.enums[enum_index];
-        let mut variant_index -> number = 0;
+        let mut variant_index: number = 0;
         let variant_count = clamp_collection_length(enum_info.variants.length, 10000);
         loop {
             if variant_index >= variant_count {
@@ -312,7 +312,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             }
             let variant = enum_info.variants[variant_index];
             // Check each field in the variant for struct references
-            let mut variant_field_index -> number = 0;
+            let mut variant_field_index: number = 0;
             let variant_field_count = clamp_collection_length(variant.fields.length, 10000);
             loop {
                 if variant_field_index >= variant_field_count {
@@ -333,7 +333,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
     }
 
     // Check function signatures too (return types and parameters)
-    let mut func_index -> number = 0;
+    let mut func_index: number = 0;
     let function_count = clamp_collection_length(functions.length, 20000);
     loop {
         if func_index >= function_count {
@@ -361,7 +361,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             }
         }
         // Check each parameter type
-        let mut param_index -> number = 0;
+        let mut param_index: number = 0;
         loop {
             if param_index >= safe_param_count {
                 break;
@@ -379,7 +379,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
     }
 
     // Emit opaque forward declarations for referenced but undefined types
-    let mut ref_index -> number = 0;
+    let mut ref_index: number = 0;
     let referenced_count = clamp_collection_length(referenced_types.length, 20000);
     loop {
         if ref_index >= referenced_count {
@@ -387,8 +387,8 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
         }
         let ref_type = referenced_types[ref_index];
         // Check if this type is defined in our context (structs or enums)
-        let mut is_defined -> boolean = false;
-        let mut check_index -> number = 0;
+        let mut is_defined: boolean = false;
+        let mut check_index: number = 0;
         loop {
             if check_index >= struct_count {
                 break;
@@ -422,8 +422,8 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
     }
 
     // Second pass: emit actual struct definitions (deduplicated)
-    let mut index -> number = 0;
-    let mut emitted_types -> string[] = [];
+    let mut index: number = 0;
+    let mut emitted_types: string[] = [];
     loop {
         if index >= struct_count {
             break;
@@ -436,8 +436,8 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
         }
         emitted_types.push(info.llvm_name);
 
-        let mut field_types -> string[] = [];
-        let mut field_index -> number = 0;
+        let mut field_types: string[] = [];
+        let mut field_index: number = 0;
         let safe_field_count = clamp_collection_length(info.fields.length, 10000);
         loop {
             if field_index >= safe_field_count {
@@ -446,7 +446,7 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
             field_types.push(info.fields[field_index].llvm_type);
             field_index += 1;
         }
-        let mut body -> string = "";
+        let mut body: string = "";
         if field_types.length == 0 {
             body = "{}";
         } else {
@@ -462,10 +462,10 @@ fn render_struct_type_definitions(context -> TypeContext, functions -> NativeFun
 // Enum Type Definitions
 // =============================================================================
 
-fn render_enum_type_definitions(context -> TypeContext) -> string[] {
-    let mut lines -> string[] = [];
-    let mut emitted_types -> string[] = [];
-    let mut index -> number = 0;
+fn render_enum_type_definitions(context: TypeContext) -> string[] {
+    let mut lines: string[] = [];
+    let mut emitted_types: string[] = [];
+    let mut index: number = 0;
     let enum_count = clamp_collection_length(context.enums.length, 10000);
     loop {
         if index >= enum_count {
@@ -482,7 +482,7 @@ fn render_enum_type_definitions(context -> TypeContext) -> string[] {
         emitted_types.push(enum_llvm_name);
 
         // Map tag type to LLVM type
-        let mut llvm_tag_type -> string = "i32";
+        let mut llvm_tag_type: string = "i32";
         if enum_info.tag_type == "i8" {
             llvm_tag_type = "i8";
         }
@@ -497,8 +497,8 @@ fn render_enum_type_definitions(context -> TypeContext) -> string[] {
         }
 
         // Calculate the maximum payload size across all variants
-        let mut max_payload_size -> number = 0;
-        let mut variant_idx -> number = 0;
+        let mut max_payload_size: number = 0;
+        let mut variant_idx: number = 0;
         let variant_count = clamp_collection_length(enum_info.variants.length, 10000);
         loop {
             if variant_idx >= variant_count {
@@ -520,8 +520,8 @@ fn render_enum_type_definitions(context -> TypeContext) -> string[] {
         // - If the enum's ABI alignment is larger than the tag, insert explicit
         //   padding bytes so payload begins at an aligned offset.
         //   This must match `.layout variant offset=...` produced by layout inference.
-        let mut pad_repr -> string = "";
-        let mut payload_repr -> string = "";
+        let mut pad_repr: string = "";
+        let mut payload_repr: string = "";
         if max_payload_size > 0 {
             let mut enum_align = enum_info.align;
             if enum_align <= 0 {
@@ -543,8 +543,8 @@ fn render_enum_type_definitions(context -> TypeContext) -> string[] {
 
             // Store payload in an aligned element array so the enum type itself has
             // `enum_align` alignment.
-            let mut elem_type -> string = "i8";
-            let mut elem_size -> number = 1;
+            let mut elem_type: string = "i8";
+            let mut elem_size: number = 1;
             if enum_align >= 16 {
                 elem_type = "i128";
                 elem_size = 16;

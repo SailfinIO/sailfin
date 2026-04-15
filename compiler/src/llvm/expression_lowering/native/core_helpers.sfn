@@ -8,9 +8,9 @@ import { substring, find_last_index_of_char } from "../../../string_utils";
 import { append_string } from "../../utils";
 import { map_parameter_type, map_struct_type_annotation_ctx } from "./core_type_mapping";
 
-fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[], function_name -> string) -> string[] {
-    let mut types -> string[] = [];
-    let mut index -> number = 0;
+fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], function_name: string) -> string[] {
+    let mut types: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= parameters.length {
             break;
@@ -38,7 +38,7 @@ fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter
     return types;
 }
 
-fn operation_name_for_symbol(symbol -> string, llvm_type -> string) -> string {
+fn operation_name_for_symbol(symbol: string, llvm_type: string) -> string {
     if llvm_type == "double" {
         if symbol == "+" {
             return "fadd";

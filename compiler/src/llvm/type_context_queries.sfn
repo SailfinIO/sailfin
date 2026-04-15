@@ -13,12 +13,12 @@ import { map_type_annotation, ends_with_pointer_suffix, strip_pointer_suffix } f
 // Interface Implementation Helpers
 // =============================================================================
 
-fn struct_declares_interface(struct_def -> NativeStruct, interface_name -> string) -> boolean {
+fn struct_declares_interface(struct_def: NativeStruct, interface_name: string) -> boolean {
     let mut implements = struct_def.implements;
     if implements == null {
         implements = [];
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= implements.length {
             break;
@@ -31,12 +31,12 @@ fn struct_declares_interface(struct_def -> NativeStruct, interface_name -> strin
     return false;
 }
 
-fn find_struct_method(struct_def -> NativeStruct, method_name -> string) -> NativeFunction? {
+fn find_struct_method(struct_def: NativeStruct, method_name: string) -> NativeFunction? {
     let mut methods = struct_def.methods;
     if methods == null {
         return null;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= methods.length {
             break;
@@ -50,8 +50,8 @@ fn find_struct_method(struct_def -> NativeStruct, method_name -> string) -> Nati
     return null;
 }
 
-fn struct_satisfies_interface_structurally(struct_def -> NativeStruct, interface_def -> NativeInterface) -> boolean {
-    let mut sig_index -> number = 0;
+fn struct_satisfies_interface_structurally(struct_def: NativeStruct, interface_def: NativeInterface) -> boolean {
+    let mut sig_index: number = 0;
     loop {
         if sig_index >= interface_def.signatures.length {
             break;
@@ -72,7 +72,7 @@ fn struct_satisfies_interface_structurally(struct_def -> NativeStruct, interface
         }
 
         // Skip the first parameter (`self`) which is always passed as `i8*` in trait calls.
-        let mut param_index -> number = 1;
+        let mut param_index: number = 1;
         loop {
             if param_index >= signature.parameters.length {
                 break;
@@ -95,8 +95,8 @@ fn struct_satisfies_interface_structurally(struct_def -> NativeStruct, interface
 // TypeContext Lookup Functions
 // =============================================================================
 
-fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTypeInfo? {
-    let mut index -> number = 0;
+fn find_struct_info_by_name(context: TypeContext, name: string) -> StructTypeInfo? {
+    let mut index: number = 0;
     loop {
         if index >= context.structs.length {
             break;
@@ -110,13 +110,13 @@ fn find_struct_info_by_name(context -> TypeContext, name -> string) -> StructTyp
     return null;
 }
 
-fn find_struct_info_by_llvm_name(context -> TypeContext, llvm_name -> string) -> StructTypeInfo? {
+fn find_struct_info_by_llvm_name(context: TypeContext, llvm_name: string) -> StructTypeInfo? {
     // Back-compat: older callers refer to the LLVM type name as "llvm_name".
     return find_struct_info_by_llvm_type(context, llvm_name);
 }
 
-fn find_interface_info_by_name(context -> TypeContext, name -> string) -> InterfaceTypeInfo? {
-    let mut index -> number = 0;
+fn find_interface_info_by_name(context: TypeContext, name: string) -> InterfaceTypeInfo? {
+    let mut index: number = 0;
     loop {
         if index >= context.interfaces.length {
             break;
@@ -130,8 +130,8 @@ fn find_interface_info_by_name(context -> TypeContext, name -> string) -> Interf
     return null;
 }
 
-fn find_vtable_for_struct_interface(context -> TypeContext, struct_name -> string, interface_name -> string) -> VTableInfo? {
-    let mut index -> number = 0;
+fn find_vtable_for_struct_interface(context: TypeContext, struct_name: string, interface_name: string) -> VTableInfo? {
+    let mut index: number = 0;
     loop {
         if index >= context.vtables.length {
             break;
@@ -147,9 +147,9 @@ fn find_vtable_for_struct_interface(context -> TypeContext, struct_name -> strin
     return null;
 }
 
-fn find_struct_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
+fn find_struct_info_by_llvm_type(context: TypeContext, llvm_type: string) -> StructTypeInfo? {
     let trimmed = trim_text(llvm_type);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= context.structs.length {
             break;
@@ -163,8 +163,8 @@ fn find_struct_info_by_llvm_type(context -> TypeContext, llvm_type -> string) ->
     return null;
 }
 
-fn find_struct_field_index(struct_info -> StructTypeInfo, field_name -> string) -> number {
-    let mut index -> number = 0;
+fn find_struct_field_index(struct_info: StructTypeInfo, field_name: string) -> number {
+    let mut index: number = 0;
     loop {
         if index >= struct_info.fields.length {
             break;
@@ -178,9 +178,9 @@ fn find_struct_field_index(struct_info -> StructTypeInfo, field_name -> string) 
     return -1;
 }
 
-fn find_enum_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> EnumTypeInfo? {
+fn find_enum_info_by_llvm_type(context: TypeContext, llvm_type: string) -> EnumTypeInfo? {
     let trimmed = trim_text(llvm_type);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= context.enums.length {
             break;
@@ -194,7 +194,7 @@ fn find_enum_info_by_llvm_type(context -> TypeContext, llvm_type -> string) -> E
     return null;
 }
 
-fn resolve_struct_info_from_llvm_type(context -> TypeContext, llvm_type -> string) -> StructTypeInfo? {
+fn resolve_struct_info_from_llvm_type(context: TypeContext, llvm_type: string) -> StructTypeInfo? {
     let mut candidate = trim_text(llvm_type);
     if candidate.length == 0 {
         return null;
@@ -205,7 +205,7 @@ fn resolve_struct_info_from_llvm_type(context -> TypeContext, llvm_type -> strin
     return find_struct_info_by_llvm_type(context, candidate);
 }
 
-fn lookup_allocation_info(context -> TypeContext, llvm_type -> string) -> TypeAllocationInfo? {
+fn lookup_allocation_info(context: TypeContext, llvm_type: string) -> TypeAllocationInfo? {
     let trimmed = trim_text(llvm_type);
     if trimmed.length == 0 {
         return null;
@@ -216,7 +216,7 @@ fn lookup_allocation_info(context -> TypeContext, llvm_type -> string) -> TypeAl
     if trimmed == "double" {
         return TypeAllocationInfo { llvm_type: trimmed, size: 8, align: 8 };
     }
-    let mut _if301 -> boolean = false;
+    let mut _if301: boolean = false;
     if trimmed == "i64" { _if301 = true; }
     if trimmed == "int" { _if301 = true; }
     if _if301 {
@@ -254,7 +254,7 @@ fn lookup_allocation_info(context -> TypeContext, llvm_type -> string) -> TypeAl
 // Method Target Resolution
 // =============================================================================
 
-fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> StructTypeInfo? ![io] {
+fn resolve_struct_info_for_method_target(base: string, bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> StructTypeInfo? ![io] {
     let trimmed = trim_text(base);
     if trimmed.length == 0 {
         return null;
@@ -306,11 +306,11 @@ fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBi
     if fs.exists("build/sailfin/.condition_locals") {
         let _cl_raw = fs.readFile("build/sailfin/.condition_locals");
         if _cl_raw.length > 0 {
-            let mut _cl_pos -> number = 0;
+            let mut _cl_pos: number = 0;
             loop {
                 if _cl_pos >= _cl_raw.length { break; }
                 let _cl_nl = index_of(substring(_cl_raw, _cl_pos, _cl_raw.length), "\n");
-                let mut _cl_line -> string = "";
+                let mut _cl_line: string = "";
                 if _cl_nl < 0 {
                     _cl_line = substring(_cl_raw, _cl_pos, _cl_raw.length);
                     _cl_pos = _cl_raw.length;
@@ -340,7 +340,7 @@ fn resolve_struct_info_for_method_target(base -> string, bindings -> ParameterBi
     return null;
 }
 
-fn resolve_interface_info_for_method_target(base -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], context -> TypeContext) -> InterfaceTypeInfo? {
+fn resolve_interface_info_for_method_target(base: string, bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> InterfaceTypeInfo? {
     let trimmed = trim_text(base);
     if trimmed.length == 0 {
         return null;
@@ -384,8 +384,8 @@ fn resolve_interface_info_for_method_target(base -> string, bindings -> Paramete
 // Field Info Lookup
 // =============================================================================
 
-fn find_struct_field_info(info -> StructTypeInfo, field_name -> string) -> StructFieldInfo? {
-    let mut index -> number = 0;
+fn find_struct_field_info(info: StructTypeInfo, field_name: string) -> StructFieldInfo? {
+    let mut index: number = 0;
     loop {
         if index >= info.fields.length {
             break;
@@ -399,8 +399,8 @@ fn find_struct_field_info(info -> StructTypeInfo, field_name -> string) -> Struc
     return null;
 }
 
-fn find_variant_field_info(variant -> EnumVariantInfo, field_name -> string) -> StructFieldInfo? {
-    let mut index -> number = 0;
+fn find_variant_field_info(variant: EnumVariantInfo, field_name: string) -> StructFieldInfo? {
+    let mut index: number = 0;
     loop {
         if index >= variant.fields.length {
             break;
@@ -418,13 +418,13 @@ fn find_variant_field_info(variant -> EnumVariantInfo, field_name -> string) -> 
 // Literal Resolution
 // =============================================================================
 
-fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) -> StructTypeInfo? {
+fn resolve_struct_info_for_literal(context: TypeContext, type_name: string) -> StructTypeInfo? {
     let trimmed = trim_text(type_name);
     if trimmed.length == 0 {
         return null;
     }
 
-    let mut candidates -> string[] = [trimmed];
+    let mut candidates: string[] = [trimmed];
     let generic_index = index_of(trimmed, "<");
     if generic_index >= 0 {
         let base = trim_text(substring(trimmed, 0, generic_index));
@@ -454,7 +454,7 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
         }
     }
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= candidates.length {
             break;
@@ -470,13 +470,13 @@ fn resolve_struct_info_for_literal(context -> TypeContext, type_name -> string) 
     return null;
 }
 
-fn resolve_enum_info_for_literal(context -> TypeContext, enum_name -> string) -> EnumTypeInfo? {
+fn resolve_enum_info_for_literal(context: TypeContext, enum_name: string) -> EnumTypeInfo? {
     let trimmed = trim_text(enum_name);
     if trimmed.length == 0 {
         return null;
     }
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= context.enums.length {
             break;
@@ -491,13 +491,13 @@ fn resolve_enum_info_for_literal(context -> TypeContext, enum_name -> string) ->
     return null;
 }
 
-fn resolve_enum_variant_info(enum_info -> EnumTypeInfo, variant_name -> string) -> EnumVariantInfo? {
+fn resolve_enum_variant_info(enum_info: EnumTypeInfo, variant_name: string) -> EnumVariantInfo? {
     let trimmed = trim_text(variant_name);
     if trimmed.length == 0 {
         return null;
     }
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= enum_info.variants.length {
             break;
@@ -516,8 +516,8 @@ fn resolve_enum_variant_info(enum_info -> EnumTypeInfo, variant_name -> string) 
 // Binding Lookup Helpers (needed for method resolution)
 // =============================================================================
 
-fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
-    let mut index -> number = 0;
+fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
+    let mut index: number = 0;
     loop {
         if index >= bindings.length {
             break;
@@ -530,8 +530,8 @@ fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> Par
     return null;
 }
 
-fn find_local_binding(locals -> LocalBinding[], name -> string) -> LocalBinding? {
-    let mut index -> number = 0;
+fn find_local_binding(locals: LocalBinding[], name: string) -> LocalBinding? {
+    let mut index: number = 0;
     loop {
         if index >= locals.length {
             break;
@@ -548,20 +548,20 @@ fn find_local_binding(locals -> LocalBinding[], name -> string) -> LocalBinding?
 // String Join Helper (needed for vtable construction)
 // =============================================================================
 
-fn join_with_separator(values -> string[], separator -> string) -> string {
+fn join_with_separator(values: string[], separator: string) -> string {
     if values.length == 0 {
         return "";
     }
     if values.length == 1 {
         return values[0];
     }
-    let mut parts -> string[] = values;
+    let mut parts: string[] = values;
     loop {
         if parts.length <= 1 {
             break;
         }
-        let mut next -> string[] = [];
-        let mut index -> number = 0;
+        let mut next: string[] = [];
+        let mut index: number = 0;
         loop {
             if index >= parts.length {
                 break;

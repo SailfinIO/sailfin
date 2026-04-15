@@ -1,6 +1,6 @@
 // examples/advanced/unions.sfn
 
-fn printValue(value -> string | number) ![io] {
+fn printValue(value: string | number) ![io] {
     if value is string {
         print("It's a string: {{value}}");
     } else {
@@ -9,11 +9,11 @@ fn printValue(value -> string | number) ![io] {
 }
 
 interface Admin {
-    isAdmin -> boolean;
+    isAdmin: boolean;
 }
 
 interface User {
-    name -> string;
+    name: string;
 }
 
 type AdminUser = Admin & User;
@@ -22,6 +22,6 @@ fn main() ![io] {
     printValue("Sailfin");
     printValue(42);
 
-    let admin -> AdminUser = { name: "Alice", isAdmin: true };
+    let admin: AdminUser = { name: "Alice", isAdmin: true };
     print("Admin: {{admin.name}}");
 }

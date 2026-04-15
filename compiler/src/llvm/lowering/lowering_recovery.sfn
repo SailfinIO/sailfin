@@ -87,7 +87,7 @@ import {
 // an array (works through double→pointer shim), then we assemble locally.
 // Safe replacement for parse_native_artifact that avoids struct-return ABI bug.
 // Calls individual field extractors and assembles the result locally.
-fn parse_native_artifact_safe(text -> string) -> ParseNativeResult {
+fn parse_native_artifact_safe(text: string) -> ParseNativeResult {
     let functions = parse_native_functions_from_text(text);
     let imports = parse_native_imports_from_text(text);
     let structs = parse_native_structs_from_text(text);
@@ -111,22 +111,22 @@ fn parse_native_artifact_safe(text -> string) -> ParseNativeResult {
 
 // ── Light function recovery ──────────────────────────────────────────
 
-fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
+fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
     // FLAT: no nested ifs, no else-if chains.
     // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
     // Every condition check must be a top-level if in the loop body.
     let lines = split_lines_local(native_text);
-    let mut functions -> NativeFunction[] = [];
-    let mut current -> NativeFunction? = null;
-    let mut current_struct_name -> string = "";
-    let mut index -> number = 0;
-    let mut fn_count -> number = 0;
+    let mut functions: NativeFunction[] = [];
+    let mut current: NativeFunction? = null;
+    let mut current_struct_name: string = "";
+    let mut index: number = 0;
+    let mut fn_count: number = 0;
     loop {
         if index >= lines.length {
             break;
         }
         let line = trim_text_local(lines[index]);
-        let mut _if237 -> boolean = false;
+        let mut _if237: boolean = false;
         if line.length == 0 { _if237 = true; }
         if starts_with_local(line, ";") { _if237 = true; }
         if starts_with_local(line, ".module ") { _if237 = true; }
@@ -140,7 +140,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let is_method_start = starts_with_local(line, ".method ");
         let is_method_end = starts_with_local(line, ".endmethod");
         let is_fn_start = starts_with_local(line, ".fn ");
-        let mut _let238 -> boolean = false;
+        let mut _let238: boolean = false;
         if starts_with_local(line, ".endfn") { _let238 = true; }
         if starts_with_local(line, ".endtest") { _let238 = true; }
         let is_fn_end = _let238;
@@ -148,7 +148,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let is_meta_effects = starts_with_local(line, ".meta effects ");
         let is_meta_other = starts_with_local(line, ".meta ");
         let is_param = starts_with_local(line, ".param ");
-        let mut _let239 -> boolean = false;
+        let mut _let239: boolean = false;
         if starts_with_local(line, ".span ") { _let239 = true; }
         if starts_with_local(line, ".init-span ") { _let239 = true; }
         let is_span = _let239;
@@ -179,7 +179,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let method_ret_from_arrow = trim_text_local(substring(method_header, method_arrow_idx + 4, method_header.length));
         // Check whether the method has a `self` parameter.  Static methods
         // (e.g. `fn new(w, h)`) must NOT get self injected.
-        let mut method_has_self -> boolean = false;
+        let mut method_has_self: boolean = false;
         if method_paren_idx >= 0 {
             let _close_paren = index_of(method_header, ")");
             if _close_paren > method_paren_idx {
@@ -209,7 +209,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         let inline_pattern_raw = trim_text_local(substring(line, 0, inline_arrow_idx));
         let inline_body_full = trim_text_local(substring(line, inline_arrow_idx + 4, line.length));
         // Strip trailing comma from inline body
-        let mut inline_body_raw -> string = inline_body_full;
+        let mut inline_body_raw: string = inline_body_full;
         if inline_body_full.length > 0 {
             let last_char = substring(inline_body_full, inline_body_full.length - 1, inline_body_full.length);
             if last_char == "," {
@@ -349,7 +349,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         if is_meta_effects {
             if effects_text_raw != "none" {
                 if effects_text_raw.length > 0 {
-                    let mut parsed_effects -> string[] = [];
+                    let mut parsed_effects: string[] = [];
                     parsed_effects.push(effects_text_raw);
                     current = update_function_effects(current, parsed_effects);
                     index += 1;
@@ -389,7 +389,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
 
         // --- Instruction parsing ---
-        let mut next_instruction -> NativeInstruction = make_instruction_text(21, line);
+        let mut next_instruction: NativeInstruction = make_instruction_text(21, line);
         if is_eval {
             next_instruction = make_instruction_text(1, trim_text_local(substring(line, 5, line.length)));
         }
@@ -401,25 +401,25 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         // the seed degenerate-if bug drops all nested/else-if branches.
         // We use a score (need 3 of 3) instead of nested AND conditions.
         let _ml_net_depth = net_unquoted_brace_depth(line);
-        let mut _gather_score -> number = 0;
+        let mut _gather_score: number = 0;
         if is_eval { _gather_score += 1; }
         if _ml_net_depth > 0 { _gather_score += 1; }
         // Only gather when there is a positive unquoted brace depth
         // (i.e. unmatched '{' outside string literals on this line).
         if _ml_net_depth > 0 { _gather_score += 1; }
-        let mut _eval_gathered -> string = "";
+        let mut _eval_gathered: string = "";
         if is_eval {
             _eval_gathered = trim_text_local(substring(line, 5, line.length));
         }
-        let mut _eval_brace_depth -> number = 1;
-        let mut _gi -> number = index + 1;
+        let mut _eval_brace_depth: number = 1;
+        let mut _gi: number = index + 1;
         loop {
             if _gather_score < 3 { break; }
             if _gi >= lines.length { break; }
             if _eval_brace_depth <= 0 { break; }
             let _cont = lines[_gi];
             let _cont_trimmed = trim_text_local(_cont);
-            let mut _is_stop_directive -> boolean = false;
+            let mut _is_stop_directive: boolean = false;
             if starts_with_local(_cont_trimmed, ".") { _is_stop_directive = true; }
             if starts_with_local(_cont_trimmed, ".span") { _is_stop_directive = false; }
             if _is_stop_directive { break; }
@@ -481,7 +481,7 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
         }
         // Inline match case: `pattern => body,` — emit Case + body instructions.
         // Must NOT fire on `.case` or `.match` lines that happen to contain ` => `.
-        let mut _inline_score -> number = 0;
+        let mut _inline_score: number = 0;
         if is_inline_case { _inline_score += 1; }
         if !is_match_kw { _inline_score += 1; }
         if !is_case_kw { _inline_score += 1; }
@@ -510,10 +510,10 @@ fn recover_native_functions_light(native_text -> string) -> NativeFunction[] {
 
 // ── Light import recovery ────────────────────────────────────────────
 
-fn recover_native_imports_light(native_text -> string) -> NativeImport[] {
+fn recover_native_imports_light(native_text: string) -> NativeImport[] {
     let lines = split_lines_local(native_text);
-    let mut imports -> NativeImport[] = [];
-    let mut index -> number = 0;
+    let mut imports: NativeImport[] = [];
+    let mut index: number = 0;
     loop {
         if index >= lines.length {
             break;
@@ -540,25 +540,25 @@ fn recover_native_imports_light(native_text -> string) -> NativeImport[] {
 
 // ── Light struct recovery ────────────────────────────────────────────
 
-fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
+fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
     let lines = split_lines_local(native_text);
-    let mut structs -> NativeStruct[] = [];
-    let mut in_struct -> boolean = false;
-    let mut struct_name -> string = "";
-    let mut struct_fields -> NativeStructField[] = [];
-    let mut struct_methods -> NativeFunction[] = [];
-    let mut struct_layout -> NativeStructLayout? = null;
-    let mut layout_fields -> NativeStructLayoutField[] = [];
-    let mut layout_size -> number = 0;
-    let mut layout_align -> number = 0;
+    let mut structs: NativeStruct[] = [];
+    let mut in_struct: boolean = false;
+    let mut struct_name: string = "";
+    let mut struct_fields: NativeStructField[] = [];
+    let mut struct_methods: NativeFunction[] = [];
+    let mut struct_layout: NativeStructLayout? = null;
+    let mut layout_fields: NativeStructLayoutField[] = [];
+    let mut layout_size: number = 0;
+    let mut layout_align: number = 0;
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= lines.length {
             break;
         }
         let line = trim_text_local(lines[index]);
-        let mut _if240 -> boolean = false;
+        let mut _if240: boolean = false;
         if line.length == 0 { _if240 = true; }
         if starts_with_local(line, ";") { _if240 = true; }
         if _if240 {
@@ -570,7 +570,7 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
         let is_field = starts_with_local(line, ".field ");
         let is_layout_struct = starts_with_local(line, ".layout struct ");
         let is_layout_field = starts_with_local(line, ".layout field ");
-        let mut _let241 -> boolean = false;
+        let mut _let241: boolean = false;
         if starts_with_local(line, ".method ") { _let241 = true; }
         if starts_with_local(line, ".endmethod") { _let241 = true; }
         let is_method_line = _let241;
@@ -607,10 +607,10 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
             continue;
         }
 
-        let mut _if242 -> boolean = false;
+        let mut _if242: boolean = false;
         if is_struct_end {
             if in_struct {
-                let mut _if259 -> boolean = false;
+                let mut _if259: boolean = false;
                 if layout_size > 0 { _if259 = true; }
                 if layout_fields.length > 0 { _if259 = true; }
                 if _if259 {
@@ -689,9 +689,9 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
         }
         index += 1;
     }
-    let mut _if243 -> boolean = false;
+    let mut _if243: boolean = false;
     if in_struct {
-        let mut _if260 -> boolean = false;
+        let mut _if260: boolean = false;
         if layout_size > 0 { _if260 = true; }
         if layout_fields.length > 0 { _if260 = true; }
         if _if260 {
@@ -714,7 +714,7 @@ fn recover_native_structs_light(native_text -> string) -> NativeStruct[] {
 
 // ── Higher-level recovery ────────────────────────────────────────────
 
-fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_text_override_path -> string, artifact_text -> string, debug_lowering -> boolean) -> NativeFunction[] ![io] {
+fn recover_functions_for_lowering(current_functions: NativeFunction[], native_text_override_path: string, artifact_text: string, debug_lowering: boolean) -> NativeFunction[] ![io] {
     let mut safe_functions = current_functions;
     if safe_functions == null {
         safe_functions = [];
@@ -749,7 +749,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
                 }
 
                 let mut has_body_instructions = false;
-                let mut body_index -> number = 0;
+                let mut body_index: number = 0;
                 loop {
                     if body_index >= initial_function_count {
                         break;
@@ -769,9 +769,9 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
                     use_expected = true;
                 }
 
-                let mut index -> number = 0;
+                let mut index: number = 0;
                 loop {
-                    let mut _if245 -> boolean = false;
+                    let mut _if245: boolean = false;
                     if index >= initial_function_count { _if245 = true; }
                     if index >= expected_count { _if245 = true; }
                     if _if245 {
@@ -779,7 +779,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
                     }
                     let safe_name = trim_text_local(safe_functions[index].name);
                     let expected_name = trim_text_local(expected_functions[index].name);
-                    let mut _if246 -> boolean = false;
+                    let mut _if246: boolean = false;
                     if safe_name.length == 0 { _if246 = true; }
                     if safe_name == "_" { _if246 = true; }
                     if _if246 {
@@ -802,7 +802,7 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
                     let light_functions = recover_native_functions_light(expected_source_text);
                     let light_count = sanitize_collection_length(light_functions.length, 200000);
                     let mut light_has_body = false;
-                    let mut light_index -> number = 0;
+                    let mut light_index: number = 0;
                     loop {
                         if light_index >= light_count {
                             break;
@@ -898,36 +898,36 @@ fn recover_functions_for_lowering(current_functions -> NativeFunction[], native_
 // recover_native_structs_light.  Avoids the cross-module ABI corruption
 // that makes parse_native_enums_for_import return empty arrays.
 
-fn recover_native_enums_light(native_text -> string) -> NativeEnum[] {
+fn recover_native_enums_light(native_text: string) -> NativeEnum[] {
     let lines = split_lines_local(native_text);
-    let mut enums -> NativeEnum[] = [];
-    let mut in_enum -> boolean = false;
-    let mut enum_name -> string = "";
-    let mut variants -> NativeEnumVariant[] = [];
-    let mut variant_layouts -> NativeEnumVariantLayout[] = [];
-    let mut layout_size -> number = 0;
-    let mut layout_align -> number = 0;
-    let mut layout_tag_type -> string = "i32";
-    let mut layout_tag_size -> number = 4;
-    let mut layout_tag_align -> number = 4;
-    let mut has_layout -> boolean = false;
+    let mut enums: NativeEnum[] = [];
+    let mut in_enum: boolean = false;
+    let mut enum_name: string = "";
+    let mut variants: NativeEnumVariant[] = [];
+    let mut variant_layouts: NativeEnumVariantLayout[] = [];
+    let mut layout_size: number = 0;
+    let mut layout_align: number = 0;
+    let mut layout_tag_type: string = "i32";
+    let mut layout_tag_size: number = 4;
+    let mut layout_tag_align: number = 4;
+    let mut has_layout: boolean = false;
 
     // Deferred variant layout — accumulate payload fields before flushing.
-    let mut pending_vl_name -> string = "";
-    let mut pending_vl_tag -> number = 0;
-    let mut pending_vl_offset -> number = 0;
-    let mut pending_vl_size -> number = 0;
-    let mut pending_vl_align -> number = 0;
-    let mut pending_vl_fields -> NativeStructLayoutField[] = [];
-    let mut has_pending_vl -> boolean = false;
+    let mut pending_vl_name: string = "";
+    let mut pending_vl_tag: number = 0;
+    let mut pending_vl_offset: number = 0;
+    let mut pending_vl_size: number = 0;
+    let mut pending_vl_align: number = 0;
+    let mut pending_vl_fields: NativeStructLayoutField[] = [];
+    let mut has_pending_vl: boolean = false;
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= lines.length {
             break;
         }
         let line = trim_text_local(lines[index]);
-        let mut _skip -> boolean = false;
+        let mut _skip: boolean = false;
         if line.length == 0 { _skip = true; }
         if starts_with_local(line, ";") { _skip = true; }
         if _skip {
@@ -1027,7 +1027,7 @@ fn recover_native_enums_light(native_text -> string) -> NativeEnum[] {
             let lp_qualified = substring(lp_text, 0, lp_name_end);
             // Extract field name after the dot: "Circle.radius" -> "radius"
             let lp_dot = index_of(lp_qualified, ".");
-            let mut lp_field_name -> string = lp_qualified;
+            let mut lp_field_name: string = lp_qualified;
             if lp_dot >= 0 {
                 lp_field_name = substring(lp_qualified, lp_dot + 1, lp_qualified.length);
             }
@@ -1045,7 +1045,7 @@ fn recover_native_enums_light(native_text -> string) -> NativeEnum[] {
         if is_variant {
             let var_raw = trim_text_local(substring(line, 9, line.length));
             let var_brace = index_of(var_raw, " {");
-            let mut var_name -> string = var_raw;
+            let mut var_name: string = var_raw;
             if var_brace > 0 {
                 var_name = trim_text_local(substring(var_raw, 0, var_brace));
             }

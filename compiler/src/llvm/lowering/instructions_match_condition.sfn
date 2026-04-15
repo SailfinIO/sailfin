@@ -23,33 +23,33 @@ import { is_union_llvm_type, parse_union_payload_types } from "../expression_low
 import { lower_condition_to_i1 } from "./instructions_condition";
 
 fn lower_match_case_condition(
-    function_name -> string,
-    subject_operand -> LLVMOperand,
-    case -> MatchCaseStructure,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    temp_index -> number,
-    lines -> string[],
-    functions -> NativeFunction[],
-    context -> TypeContext
+    function_name: string,
+    subject_operand: LLVMOperand,
+    case: MatchCaseStructure,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    temp_index: number,
+    lines: string[],
+    functions: NativeFunction[],
+    context: TypeContext
 ) -> MatchCaseCondition {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
-    let mut current_temp -> number = temp_index;
-    let mut condition_operand -> LLVMOperand? = null;
-    let mut field_bindings -> MatchFieldBinding[] = [];
-    let mut matched_enum_info -> EnumTypeInfo? = null;
-    let mut matched_variant_info -> EnumVariantInfo? = null;
-    let mut union_variant_index -> number = -1;
-    let mut union_struct_info -> StructTypeInfo? = null;
-    let mut union_struct_bindings -> MatchStructFieldBinding[] = [];
-    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_temp: number = temp_index;
+    let mut condition_operand: LLVMOperand? = null;
+    let mut field_bindings: MatchFieldBinding[] = [];
+    let mut matched_enum_info: EnumTypeInfo? = null;
+    let mut matched_variant_info: EnumVariantInfo? = null;
+    let mut union_variant_index: number = -1;
+    let mut union_struct_info: StructTypeInfo? = null;
+    let mut union_struct_bindings: MatchStructFieldBinding[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     if !case.is_default {
         // Try to parse the pattern as an enum literal pattern
         let enum_parse = parse_enum_literal(case.pattern);
 
-        let mut _if225 -> boolean = false;
+        let mut _if225: boolean = false;
         if enum_parse.recognized {
             if enum_parse.success {
                 _if225 = true;
@@ -66,7 +66,7 @@ fn lower_match_case_condition(
                     diagnostics.push("llvm lowering: enum `" + enum_parse.enum_name + "` has no variant `" + enum_parse.variant_name + "`");
                 } else {
                     // Map tag type to LLVM integer type
-                    let mut tag_llvm_type -> string = "i32";
+                    let mut tag_llvm_type: string = "i32";
                     if enum_info.tag_type == "i8" {
                         tag_llvm_type = "i8";
                     }
@@ -90,7 +90,7 @@ fn lower_match_case_condition(
                     let variant_tag_operand = LLVMOperand { llvm_type: tag_llvm_type, value: number_to_string(variant_info.tag) };
 
                     let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines);
-                    let mut _ci4 -> number = 0;
+                    let mut _ci4: number = 0;
                     loop {
                         if _ci4 >= comparison.diagnostics.length { break; }
                         diagnostics.push(comparison.diagnostics[_ci4]);
@@ -102,14 +102,14 @@ fn lower_match_case_condition(
 
                     // For variants with payload fields, collect binding information
                     if variant_info.fields.length > 0 {
-                        let mut field_idx -> number = 0;
+                        let mut field_idx: number = 0;
                         loop {
                             if field_idx >= enum_parse.fields.length {
                                 break;
                             }
                             let pattern_field = enum_parse.fields[field_idx];
-                            let mut variant_field_idx -> number = 0;
-                            let mut found_field -> StructFieldInfo? = null;
+                            let mut variant_field_idx: number = 0;
+                            let mut found_field: StructFieldInfo? = null;
                             loop {
                                 if variant_field_idx >= variant_info.fields.length {
                                     break;
@@ -122,7 +122,7 @@ fn lower_match_case_condition(
                             }
 
                             if found_field != null {
-                                let mut llvm_field_type -> string = found_field.llvm_type;
+                                let mut llvm_field_type: string = found_field.llvm_type;
                                 if llvm_field_type.length == 0 {
                                     llvm_field_type = map_struct_field_annotation(found_field.type_annotation);
                                     if llvm_field_type.length == 0 {
@@ -167,14 +167,14 @@ fn lower_match_case_condition(
                         let info = find_struct_info_by_name(context, struct_parse.type_name);
                         if info != null {
                             // Find which union variant corresponds to this struct.
-                            let mut idx -> number = 0;
-                            let mut found_index -> number = -1;
+                            let mut idx: number = 0;
+                            let mut found_index: number = -1;
                             loop {
                                 if idx >= union_parts.length {
                                     break;
                                 }
                                 let part = union_parts[idx];
-                                let mut _if234 -> boolean = false;
+                                let mut _if234: boolean = false;
                                 if part == info.llvm_name + "*" { _if234 = true; }
                                 if part == info.llvm_name { _if234 = true; }
                                 if _if234 {
@@ -191,7 +191,7 @@ fn lower_match_case_condition(
                                 let tag_operand = LLVMOperand { llvm_type: "i32", value: tag_temp };
                                 let expected_tag = LLVMOperand { llvm_type: "i32", value: number_to_string(found_index) };
                                 let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
-                                let mut _ci5 -> number = 0;
+                                let mut _ci5: number = 0;
                                 loop {
                                     if _ci5 >= comparison.diagnostics.length { break; }
                                     diagnostics.push(comparison.diagnostics[_ci5]);
@@ -202,15 +202,15 @@ fn lower_match_case_condition(
                                 condition_operand = comparison.operand;
 
                                 // Collect binding info for any `{ field }` bindings.
-                                let mut fidx -> number = 0;
+                                let mut fidx: number = 0;
                                 loop {
                                     if fidx >= struct_parse.fields.length {
                                         break;
                                     }
                                     let pattern_field = struct_parse.fields[fidx];
                                     if pattern_field.value.length == 0 {
-                                        let mut sfi -> number = 0;
-                                        let mut field_info -> StructFieldInfo? = null;
+                                        let mut sfi: number = 0;
+                                        let mut field_info: StructFieldInfo? = null;
                                         loop {
                                             if sfi >= info.fields.length {
                                                 break;
@@ -253,7 +253,7 @@ fn lower_match_case_condition(
             if condition_operand == null {
                 // Fallback to existing expression-based pattern matching
                 let pattern_result = lower_expression(case.pattern, bindings, locals, current_temp, current_lines, functions, context, "");
-                let mut _ci6 -> number = 0;
+                let mut _ci6: number = 0;
                 loop {
                     if _ci6 >= pattern_result.diagnostics.length { break; }
                     diagnostics.push(pattern_result.diagnostics[_ci6]);
@@ -264,13 +264,13 @@ fn lower_match_case_condition(
                 collected_string_constants = merge_string_constants(collected_string_constants, pattern_result.string_constants);
                 if pattern_result.operand != null {
                     let harmonised = harmonise_operands(subject_operand, pattern_result.operand, current_temp, current_lines);
-                    let mut _ci7 -> number = 0;
+                    let mut _ci7: number = 0;
                     loop {
                         if _ci7 >= harmonised.diagnostics.length { break; }
                         diagnostics.push(harmonised.diagnostics[_ci7]);
                         _ci7 += 1;
                     }
-                    let mut _if231 -> boolean = false;
+                    let mut _if231: boolean = false;
                     if harmonised.left != null {
                         if harmonised.right != null {
                             _if231 = true;
@@ -280,7 +280,7 @@ fn lower_match_case_condition(
                         current_lines = harmonised.lines;
                         current_temp = harmonised.temp_index;
                         let comparison = emit_comparison_instruction("==", harmonised.left, harmonised.right, current_temp, current_lines);
-                        let mut _ci8 -> number = 0;
+                        let mut _ci8: number = 0;
                         loop {
                             if _ci8 >= comparison.diagnostics.length { break; }
                             diagnostics.push(comparison.diagnostics[_ci8]);
@@ -304,7 +304,7 @@ fn lower_match_case_condition(
         let guard_text = trim_text(case.guard);
         if guard_text.length > 0 {
             let guard_condition = lower_condition_to_i1(function_name, guard_text, bindings, locals, current_temp, current_lines, functions, context);
-            let mut _ci9 -> number = 0;
+            let mut _ci9: number = 0;
             loop {
                 if _ci9 >= guard_condition.diagnostics.length { break; }
                 diagnostics.push(guard_condition.diagnostics[_ci9]);
@@ -318,7 +318,7 @@ fn lower_match_case_condition(
                     condition_operand = guard_condition.operand;
                 } else {
                     let merged = emit_boolean_and(condition_operand, guard_condition.operand, current_temp, current_lines);
-                    let mut _ci10 -> number = 0;
+                    let mut _ci10: number = 0;
                     loop {
                         if _ci10 >= merged.diagnostics.length { break; }
                         diagnostics.push(merged.diagnostics[_ci10]);
@@ -334,7 +334,7 @@ fn lower_match_case_condition(
         }
     }
 
-    let mut is_unconditional_default -> boolean = false;
+    let mut is_unconditional_default: boolean = false;
     if case.is_default {
         if case.guard == null {
             is_unconditional_default = true;

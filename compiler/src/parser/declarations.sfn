@@ -85,9 +85,9 @@ import { parse_block } from "./statements";
 // Type Separator
 // ============================================================================
 
-fn consume_type_separator(parser -> Parser) -> TypeSeparatorParseResult {
+fn consume_type_separator(parser: Parser) -> TypeSeparatorParseResult {
     let token = parser_peek_raw(parser);
-    let mut _if394 -> boolean = false;
+    let mut _if394: boolean = false;
     if symbol_matches(token, ":") { _if394 = true; }
     if symbol_matches(token, "->") { _if394 = true; }
     if _if394 {
@@ -109,9 +109,9 @@ fn consume_type_separator(parser -> Parser) -> TypeSeparatorParseResult {
 // Decorator Parsing
 // ============================================================================
 
-fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
+fn parse_decorators(parser: Parser) -> DecoratorParseResult {
     let mut current = parser;
-    let mut decorators -> Decorator[] = [];
+    let mut decorators: Decorator[] = [];
 
     loop {
         current = skip_trivia(current);
@@ -134,18 +134,18 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
         current = parser_advance_raw(current);
         current = skip_trivia(current);
 
-        let mut decorator_arguments -> DecoratorArgument[] = [];
+        let mut decorator_arguments: DecoratorArgument[] = [];
         let after = parser_peek_raw(current);
         if symbol_matches(after, "(") {
             let paren_result = collect_parenthesized(current);
             if paren_result.success {
-                let mut segment_tokens -> Token[] = [];
-                let mut angle -> number = 0;
-                let mut paren -> number = 0;
-                let mut brace -> number = 0;
-                let mut bracket -> number = 0;
+                let mut segment_tokens: Token[] = [];
+                let mut angle: number = 0;
+                let mut paren: number = 0;
+                let mut brace: number = 0;
+                let mut bracket: number = 0;
 
-                let mut index -> number = 0;
+                let mut index: number = 0;
                 loop {
                     if index >= paren_result.tokens.length {
                         break;
@@ -179,7 +179,7 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
                             }
                         }
 
-                        let mut _let397 -> boolean = false;
+                        let mut _let397: boolean = false;
                         if angle == 0 {
                             if paren == 0 {
                                 if brace == 0 {
@@ -225,7 +225,7 @@ fn parse_decorators(parser -> Parser) -> DecoratorParseResult {
     return DecoratorParseResult { parser: current, decorators: decorators };
 }
 
-fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument? {
+fn parse_decorator_argument(tokens: Token[]) -> DecoratorArgument? {
     if tokens.length == 0 {
         return null;
     }
@@ -255,7 +255,7 @@ fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument? {
     let mut expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens));
     if expr.variant == "Raw" {
         let raw_text = trim_text(tokens_to_text(value_tokens));
-        let mut _if398 -> boolean = false;
+        let mut _if398: boolean = false;
         if raw_text.length >= 2 {
             if char_at(raw_text, 0) == "\"" {
                 if char_at(raw_text, raw_text.length - 1) == "\"" {
@@ -281,8 +281,8 @@ fn parse_decorator_argument(tokens -> Token[]) -> DecoratorArgument? {
 // Effect List Parsing
 // ============================================================================
 
-fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_effect_list(initial_parser: Parser) -> EffectParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
     if !symbol_matches(token, "!") {
@@ -293,7 +293,7 @@ fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
     parser = skip_trivia(parser);
     parser = consume_symbol(parser, "[");
 
-    let mut effects -> string[] = [];
+    let mut effects: string[] = [];
     parser = skip_trivia(parser);
     loop {
         let current = parser_peek_raw(parser);
@@ -325,7 +325,7 @@ fn parse_effect_list(initial_parser -> Parser) -> EffectParseResult {
 // Type Parameter Clause
 // ============================================================================
 
-fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
+fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
     let mut current = skip_trivia(parser);
     let token = parser_peek_raw(current);
     if !symbol_matches(token, "<") {
@@ -333,8 +333,8 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
     }
 
     current = parser_advance_raw(current);
-    let mut collected -> Token[] = [];
-    let mut depth -> number = 1;
+    let mut collected: Token[] = [];
+    let mut depth: number = 1;
 
     loop {
         let tok = parser_peek_raw(current);
@@ -358,8 +358,8 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
     }
 
     let slices = split_token_slices_by_comma(collected);
-    let mut parameters -> TypeParameter[] = [];
-    let mut index -> number = 0;
+    let mut parameters: TypeParameter[] = [];
+    let mut index: number = 0;
     loop {
         if index >= slices.length {
             break;
@@ -368,7 +368,7 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
         if slice_tokens.length > 0 {
             let colon_index = find_top_level_symbol(slice_tokens, ":");
             let mut name_tokens = slice_tokens;
-            let mut bound_tokens -> Token[] = [];
+            let mut bound_tokens: Token[] = [];
             if colon_index != -1 {
                 name_tokens = token_slice(slice_tokens, 0, colon_index);
                 bound_tokens = token_slice(slice_tokens, colon_index + 1, slice_tokens.length);
@@ -376,7 +376,7 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
 
             let name_text = trim_text(tokens_to_text(name_tokens));
             if name_text.length > 0 {
-                let mut bound -> TypeAnnotation? = null;
+                let mut bound: TypeAnnotation? = null;
                 let bound_text = trim_text(tokens_to_text(bound_tokens));
                 if bound_tokens.length > 0 {
                     if bound_text.length > 0 {
@@ -398,7 +398,7 @@ fn parse_type_parameter_clause(parser -> Parser) -> TypeParameterParseResult {
 // Implements Clause
 // ============================================================================
 
-fn parse_implements_clause(parser -> Parser) -> ImplementsParseResult {
+fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "implements") {
         return ImplementsParseResult { parser: parser, types: [], found: false };
@@ -410,9 +410,9 @@ fn parse_implements_clause(parser -> Parser) -> ImplementsParseResult {
     let capture = collect_until(current, ["{"]);
     current = capture.parser;
 
-    let mut implements_types -> TypeAnnotation[] = [];
+    let mut implements_types: TypeAnnotation[] = [];
     let entries = split_tokens_by_comma(capture.tokens);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= entries.length {
             break;
@@ -435,10 +435,10 @@ fn parse_implements_clause(parser -> Parser) -> ImplementsParseResult {
 // Parameter Parsing
 // ============================================================================
 
-fn parse_parameter_list(initial_parser -> Parser) -> ParameterListParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
-    let mut parameters -> Parameter[] = [];
+    let mut parameters: Parameter[] = [];
 
     let token = parser_peek_raw(parser);
     if symbol_matches(token, ")") {
@@ -469,8 +469,8 @@ fn parse_parameter_list(initial_parser -> Parser) -> ParameterListParseResult {
     return ParameterListParseResult { parser: parser, parameters: parameters };
 }
 
-fn parse_single_parameter(initial_parser -> Parser) -> ParameterParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let tokens_ref = parser.tokens;
     let start_index = parser.index;
@@ -487,7 +487,7 @@ fn parse_single_parameter(initial_parser -> Parser) -> ParameterParseResult {
     let name = identifier_text(name_token);
     parser = parser_advance_raw(parser);
 
-    let mut type_annotation -> TypeAnnotation? = null;
+    let mut type_annotation: TypeAnnotation? = null;
     parser = skip_trivia(parser);
     let separator_result = consume_type_separator(parser);
     if separator_result.found {
@@ -500,7 +500,7 @@ fn parse_single_parameter(initial_parser -> Parser) -> ParameterParseResult {
         }
     }
 
-    let mut default_value -> Expression? = null;
+    let mut default_value: Expression? = null;
     parser = skip_trivia(parser);
     let assign = parser_peek_raw(parser);
     if symbol_matches(assign, "=") {
@@ -528,8 +528,8 @@ fn parse_single_parameter(initial_parser -> Parser) -> ParameterParseResult {
 // Import/Export Parsing
 // ============================================================================
 
-fn parse_import(initial_parser -> Parser) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_import(initial_parser: Parser) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "import");
     let specifier_result = parse_specifier_list(parser);
@@ -543,7 +543,7 @@ fn parse_import(initial_parser -> Parser) -> StatementParseResult {
     let mut source = "";
     let token = parser_peek_raw(parser);
     let text = token.lexeme;
-    let mut _if399 -> boolean = false;
+    let mut _if399: boolean = false;
     if text.length > 0 {
         if strings_equal(char_at(text, 0), "\"") {
             _if399 = true;
@@ -572,8 +572,8 @@ fn parse_import(initial_parser -> Parser) -> StatementParseResult {
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_export(initial_parser -> Parser) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_export(initial_parser: Parser) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "export");
     let specifier_result = parse_specifier_list(parser);
@@ -587,7 +587,7 @@ fn parse_export(initial_parser -> Parser) -> StatementParseResult {
     let mut source = "";
     let token = parser_peek_raw(parser);
     let text = token.lexeme;
-    let mut _if400 -> boolean = false;
+    let mut _if400: boolean = false;
     if text.length > 0 {
         if strings_equal(char_at(text, 0), "\"") {
             _if400 = true;
@@ -616,14 +616,14 @@ fn parse_export(initial_parser -> Parser) -> StatementParseResult {
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_symbol(parser, "{");
 
-    let mut spec_count -> number = 0;
-    let mut spec_names -> string[] = [];
-    let mut spec_aliases -> string[] = [];
+    let mut spec_count: number = 0;
+    let mut spec_names: string[] = [];
+    let mut spec_aliases: string[] = [];
     parser = skip_trivia(parser);
     loop {
         let current = parser_peek_raw(parser);
@@ -639,7 +639,7 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
         parser = parser_advance_raw(parser);
         parser = skip_trivia(parser);
 
-        let mut alias -> string? = null;
+        let mut alias: string? = null;
         let potential_alias = parser_peek_raw(parser);
         if identifier_matches(potential_alias, "as") {
             parser = consume_keyword(parser, "as");
@@ -670,11 +670,11 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
 
     // Build NamedSpecifier array from parallel string arrays
     // (avoids struct .push() which the first-pass binary can't lower)
-    let mut specifiers -> NamedSpecifier[] = [];
-    let mut _si -> number = 0;
+    let mut specifiers: NamedSpecifier[] = [];
+    let mut _si: number = 0;
     loop {
         if _si >= spec_count { break; }
-        let mut _a -> string? = null;
+        let mut _a: string? = null;
         if spec_aliases[_si].length > 0 {
             _a = spec_aliases[_si];
         }
@@ -690,9 +690,9 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
     return SpecifierListParseResult { parser: parser, specifiers: specifiers };
 }
 
-fn build_import_specifiers(values -> NamedSpecifier[]) -> ImportSpecifier[] {
-    let mut result -> ImportSpecifier[] = [];
-    let mut index -> number = 0;
+fn build_import_specifiers(values: NamedSpecifier[]) -> ImportSpecifier[] {
+    let mut result: ImportSpecifier[] = [];
+    let mut index: number = 0;
     loop {
         if index >= values.length {
             break;
@@ -704,9 +704,9 @@ fn build_import_specifiers(values -> NamedSpecifier[]) -> ImportSpecifier[] {
     return result;
 }
 
-fn build_export_specifiers(values -> NamedSpecifier[]) -> ExportSpecifier[] {
-    let mut result -> ExportSpecifier[] = [];
-    let mut index -> number = 0;
+fn build_export_specifiers(values: NamedSpecifier[]) -> ExportSpecifier[] {
+    let mut result: ExportSpecifier[] = [];
+    let mut index: number = 0;
     loop {
         if index >= values.length {
             break;
@@ -722,10 +722,10 @@ fn build_export_specifiers(values -> NamedSpecifier[]) -> ExportSpecifier[] {
 // Variable Declaration
 // ============================================================================
 
-fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_variable(initial_parser: Parser) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
-    let mut statement_tokens -> Token[] = [];
+    let mut statement_tokens: Token[] = [];
     let let_token = parser_peek_raw(parser);
     statement_tokens = append_token(statement_tokens, let_token);
     parser = consume_keyword(parser, "let");
@@ -745,7 +745,7 @@ fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
     let name = identifier_text(name_token);
     parser = parser_advance_raw(parser);
 
-    let mut type_annotation -> TypeAnnotation? = null;
+    let mut type_annotation: TypeAnnotation? = null;
     parser = skip_trivia(parser);
     let separator_token = parser_peek_raw(parser);
     let separator_result = consume_type_separator(parser);
@@ -753,7 +753,7 @@ fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
         statement_tokens = append_token(statement_tokens, separator_token);
         parser = separator_result.parser;
         let capture = collect_until(skip_trivia(parser), ["=", ";"]);
-        let mut index -> number = 0;
+        let mut index: number = 0;
         loop {
             if index >= capture.tokens.length {
                 break;
@@ -768,15 +768,15 @@ fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
         }
     }
 
-    let mut initializer -> Expression? = null;
-    let mut initializer_span -> SourceSpan? = null;
+    let mut initializer: Expression? = null;
+    let mut initializer_span: SourceSpan? = null;
     parser = skip_trivia(parser);
     let assign = parser_peek_raw(parser);
     if symbol_matches(assign, "=") {
         statement_tokens = append_token(statement_tokens, assign);
         parser = parser_advance_raw(parser);
         let capture = collect_until(skip_trivia(parser), [";"]);
-        let mut index -> number = 0;
+        let mut index: number = 0;
         loop {
             if index >= capture.tokens.length {
                 break;
@@ -815,8 +815,8 @@ fn parse_variable(initial_parser -> Parser) -> StatementParseResult {
 // Function Declaration
 // ============================================================================
 
-fn parse_function(initial_parser -> Parser, starts_with_async -> boolean, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut is_async = false;
     if starts_with_async {
@@ -855,7 +855,7 @@ fn parse_function(initial_parser -> Parser, starts_with_async -> boolean, decora
     let parameters = parameter_result.parameters;
 
     parser = skip_trivia(parser);
-    let mut return_type -> TypeAnnotation? = null;
+    let mut return_type: TypeAnnotation? = null;
     let sep_result = consume_type_separator(parser);
     if sep_result.found {
         parser = sep_result.parser;
@@ -909,8 +909,8 @@ fn parse_function(initial_parser -> Parser, starts_with_async -> boolean, decora
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_extern_function(initial_parser -> Parser, starts_with_unsafe -> boolean, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let mut is_unsafe = false;
     if starts_with_unsafe {
@@ -941,7 +941,7 @@ fn parse_extern_function(initial_parser -> Parser, starts_with_unsafe -> boolean
     let parameters = parameter_result.parameters;
 
     parser = skip_trivia(parser);
-    let mut return_type -> TypeAnnotation? = null;
+    let mut return_type: TypeAnnotation? = null;
     let sep_result = consume_type_separator(parser);
     if sep_result.found {
         parser = sep_result.parser;
@@ -998,8 +998,8 @@ fn parse_extern_function(initial_parser -> Parser, starts_with_unsafe -> boolean
 // Struct Declaration
 // ============================================================================
 
-fn parse_struct(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_struct(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "struct");
 
@@ -1021,8 +1021,8 @@ fn parse_struct(initial_parser -> Parser, decorators -> Decorator[]) -> Statemen
     parser = advance_to_symbol(parser, "{");
     parser = consume_symbol(parser, "{");
 
-    let mut fields -> FieldDeclaration[] = [];
-    let mut methods -> MethodDeclaration[] = [];
+    let mut fields: FieldDeclaration[] = [];
+    let mut methods: MethodDeclaration[] = [];
 
     loop {
         parser = skip_trivia(parser);
@@ -1077,7 +1077,7 @@ fn parse_struct(initial_parser -> Parser, decorators -> Decorator[]) -> Statemen
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
+fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
     let mut current = skip_trivia(parser);
 
     let mut is_mutable = false;
@@ -1133,7 +1133,7 @@ fn parse_struct_field(parser -> Parser) -> StructFieldParseResult {
     };
 }
 
-fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodParseResult {
+fn parse_struct_method(parser: Parser, decorators: Decorator[]) -> MethodParseResult {
     let mut current = skip_trivia(parser);
 
     let mut is_async = false;
@@ -1172,7 +1172,7 @@ fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodPar
     let parameters = parameter_result.parameters;
 
     current = skip_trivia(current);
-    let mut return_type -> TypeAnnotation? = null;
+    let mut return_type: TypeAnnotation? = null;
     let sep_result = consume_type_separator(current);
     if sep_result.found {
         current = sep_result.parser;
@@ -1220,8 +1220,8 @@ fn parse_struct_method(parser -> Parser, decorators -> Decorator[]) -> MethodPar
 // Enum Declaration
 // ============================================================================
 
-fn parse_enum(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_enum(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "enum");
@@ -1243,7 +1243,7 @@ fn parse_enum(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
     parser = advance_to_symbol(parser, "{");
     parser = consume_symbol(parser, "{");
 
-    let mut variants -> EnumVariant[] = [];
+    let mut variants: EnumVariant[] = [];
     loop {
         parser = skip_trivia(parser);
         let token = parser_peek_raw(parser);
@@ -1278,7 +1278,7 @@ fn parse_enum(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
+fn parse_enum_variant(parser: Parser) -> EnumVariantParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     let name_token = parser_peek_raw(current);
@@ -1289,7 +1289,7 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
     let name_span = source_span_from_tokens([name_token]);
     current = parser_advance_raw(current);
 
-    let mut fields -> FieldDeclaration[] = [];
+    let mut fields: FieldDeclaration[] = [];
     current = skip_trivia(current);
     let next = parser_peek_raw(current);
     if symbol_matches(next, "{") {
@@ -1339,10 +1339,10 @@ fn parse_enum_variant(parser -> Parser) -> EnumVariantParseResult {
     };
 }
 
-fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
+fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
     let mut current = skip_trivia(parser);
 
-    let mut is_mutable -> boolean = false;
+    let mut is_mutable: boolean = false;
     let token = parser_peek_raw(current);
     let mut token_to_use = token;
     if identifier_matches(token_to_use, "mut") {
@@ -1416,8 +1416,8 @@ fn parse_enum_variant_field(parser -> Parser) -> StructFieldParseResult {
 // Interface Declaration
 // ============================================================================
 
-fn parse_interface(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_interface(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "interface");
@@ -1439,7 +1439,7 @@ fn parse_interface(initial_parser -> Parser, decorators -> Decorator[]) -> State
     parser = advance_to_symbol(parser, "{");
     parser = consume_symbol(parser, "{");
 
-    let mut members -> FunctionSignature[] = [];
+    let mut members: FunctionSignature[] = [];
     loop {
         parser = skip_trivia(parser);
         let token = parser_peek_raw(parser);
@@ -1479,7 +1479,7 @@ fn parse_interface(initial_parser -> Parser, decorators -> Decorator[]) -> State
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> InterfaceMemberParseResult {
+fn parse_interface_member(parser: Parser, decorators: Decorator[]) -> InterfaceMemberParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
 
@@ -1519,7 +1519,7 @@ fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> Interf
     let parameters = parameter_result.parameters;
 
     current = skip_trivia(current);
-    let mut return_type -> TypeAnnotation? = null;
+    let mut return_type: TypeAnnotation? = null;
     let separator_result = consume_type_separator(current);
     if separator_result.found {
         current = separator_result.parser;
@@ -1565,8 +1565,8 @@ fn parse_interface_member(parser -> Parser, decorators -> Decorator[]) -> Interf
 // Type Alias Declaration
 // ============================================================================
 
-fn parse_type_alias(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_type_alias(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "type");
@@ -1619,8 +1619,8 @@ fn parse_type_alias(initial_parser -> Parser, decorators -> Decorator[]) -> Stat
 // Model Declaration
 // ============================================================================
 
-fn parse_model(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_model(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "model");
@@ -1651,7 +1651,7 @@ fn parse_model(initial_parser -> Parser, decorators -> Decorator[]) -> Statement
     parser = advance_to_symbol(parser, "{");
     parser = consume_symbol(parser, "{");
 
-    let mut properties -> ModelProperty[] = [];
+    let mut properties: ModelProperty[] = [];
     loop {
         parser = skip_trivia(parser);
         let token = parser_peek_raw(parser);
@@ -1696,7 +1696,7 @@ fn parse_model(initial_parser -> Parser, decorators -> Decorator[]) -> Statement
     return StatementParseResult { parser: parser, statement: statement };
 }
 
-fn parse_model_property(parser -> Parser) -> ModelPropertyParseResult {
+fn parse_model_property(parser: Parser) -> ModelPropertyParseResult {
     let mut current = skip_trivia(parser);
     let name_token = parser_peek_raw(current);
     if name_token.kind.variant != "Identifier" {
@@ -1736,8 +1736,8 @@ fn parse_model_property(parser -> Parser) -> ModelPropertyParseResult {
 // Pipeline Declaration
 // ============================================================================
 
-fn parse_pipeline(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_pipeline(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "pipeline");
 
@@ -1758,7 +1758,7 @@ fn parse_pipeline(initial_parser -> Parser, decorators -> Decorator[]) -> Statem
     let parameters = parameter_result.parameters;
 
     parser = skip_trivia(parser);
-    let mut return_type -> TypeAnnotation? = null;
+    let mut return_type: TypeAnnotation? = null;
     let sep_result = consume_type_separator(parser);
     if sep_result.found {
         parser = sep_result.parser;
@@ -1816,8 +1816,8 @@ fn parse_pipeline(initial_parser -> Parser, decorators -> Decorator[]) -> Statem
 // Tool Declaration
 // ============================================================================
 
-fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_tool(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "tool");
 
@@ -1834,7 +1834,7 @@ fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
     let parameters = parameter_result.parameters;
 
     parser = skip_trivia(parser);
-    let mut return_type -> TypeAnnotation? = null;
+    let mut return_type: TypeAnnotation? = null;
     let sep_result = consume_type_separator(parser);
     if sep_result.found {
         parser = sep_result.parser;
@@ -1892,8 +1892,8 @@ fn parse_tool(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
 // Test Declaration
 // ============================================================================
 
-fn parse_test(initial_parser -> Parser, decorators -> Decorator[]) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     let original = parser;
     parser = skip_trivia(parser);
     parser = consume_keyword(parser, "test");
@@ -1930,15 +1930,15 @@ fn parse_test(initial_parser -> Parser, decorators -> Decorator[]) -> StatementP
 // Unknown Statement (fallback)
 // ============================================================================
 
-fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
-    let mut tokens -> Token[] = [];
+    let mut tokens: Token[] = [];
     let mut current = parser;
-    let mut depth -> number = 0;
-    let iteration_limit -> number = 16384;
-    let mut iteration_count -> number = 0;
-    let mut truncated -> boolean = false;
+    let mut depth: number = 0;
+    let iteration_limit: number = 16384;
+    let mut iteration_count: number = 0;
+    let mut truncated: boolean = false;
 
     loop {
         if iteration_count >= iteration_limit {
@@ -1961,7 +1961,7 @@ fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
                 break;
             }
         } else {
-            let mut _elif401 -> boolean = false;
+            let mut _elif401: boolean = false;
             if depth == 0 {
                 if symbol_matches(tok, ";") {
                     _elif401 = true;
@@ -1981,7 +1981,7 @@ fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
         current = parser_advance_raw(current);
     }
 
-    let mut text -> string = tokens_to_text(tokens);
+    let mut text: string = tokens_to_text(tokens);
     if truncated {
         text = text + " /* parse_unknown truncated */";
     }
@@ -1994,52 +1994,52 @@ fn parse_unknown(initial_parser -> Parser) -> StatementParseResult {
 // Append Helpers
 // ============================================================================
 
-fn append_string(values -> string[], value -> string) -> string[] {
+fn append_string(values: string[], value: string) -> string[] {
     values.push(value);
     return values;
 }
 
-fn append_parameter(parameters -> Parameter[], parameter -> Parameter) -> Parameter[] {
+fn append_parameter(parameters: Parameter[], parameter: Parameter) -> Parameter[] {
     parameters.push(parameter);
     return parameters;
 }
 
-fn append_field(fields -> FieldDeclaration[], field -> FieldDeclaration) -> FieldDeclaration[] {
+fn append_field(fields: FieldDeclaration[], field: FieldDeclaration) -> FieldDeclaration[] {
     fields.push(field);
     return fields;
 }
 
-fn append_method(methods -> MethodDeclaration[], method -> MethodDeclaration) -> MethodDeclaration[] {
+fn append_method(methods: MethodDeclaration[], method: MethodDeclaration) -> MethodDeclaration[] {
     methods.push(method);
     return methods;
 }
 
-fn append_signature(signatures -> FunctionSignature[], signature -> FunctionSignature) -> FunctionSignature[] {
+fn append_signature(signatures: FunctionSignature[], signature: FunctionSignature) -> FunctionSignature[] {
     signatures.push(signature);
     return signatures;
 }
 
-fn append_enum_variant(variants -> EnumVariant[], variant -> EnumVariant) -> EnumVariant[] {
+fn append_enum_variant(variants: EnumVariant[], variant: EnumVariant) -> EnumVariant[] {
     variants.push(variant);
     return variants;
 }
 
-fn append_type_annotation(types -> TypeAnnotation[], item -> TypeAnnotation) -> TypeAnnotation[] {
+fn append_type_annotation(types: TypeAnnotation[], item: TypeAnnotation) -> TypeAnnotation[] {
     types.push(item);
     return types;
 }
 
-fn append_model_property(properties -> ModelProperty[], property -> ModelProperty) -> ModelProperty[] {
+fn append_model_property(properties: ModelProperty[], property: ModelProperty) -> ModelProperty[] {
     properties.push(property);
     return properties;
 }
 
-fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
+fn append_decorator(decorators: Decorator[], decorator: Decorator) -> Decorator[] {
     decorators.push(decorator);
     return decorators;
 }
 
-fn append_decorator_argument(arguments -> DecoratorArgument[], argument -> DecoratorArgument) -> DecoratorArgument[] {
+fn append_decorator_argument(arguments: DecoratorArgument[], argument: DecoratorArgument) -> DecoratorArgument[] {
     arguments.push(argument);
     return arguments;
 }

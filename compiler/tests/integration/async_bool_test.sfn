@@ -1,4 +1,4 @@
-async fn flip(x -> boolean) -> boolean {
+async fn flip(x: boolean) -> boolean {
     return !x;
 }
 

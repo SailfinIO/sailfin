@@ -9,11 +9,11 @@ import { trim_text } from "./utils";
 // Case-Insensitive Matching
 // =============================================================================
 
-fn matches_case_insensitive(text -> string, target -> string) -> boolean {
+fn matches_case_insensitive(text: string, target: string) -> boolean {
     if text.length != target.length {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= text.length {
             break;
@@ -44,7 +44,7 @@ fn matches_case_insensitive(text -> string, target -> string) -> boolean {
 // Literal Detection
 // =============================================================================
 
-fn is_boolean_literal(text -> string) -> boolean {
+fn is_boolean_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
     if matches_case_insensitive(trimmed, "true") {
         return true;
@@ -55,7 +55,7 @@ fn is_boolean_literal(text -> string) -> boolean {
     return false;
 }
 
-fn is_null_literal(text -> string) -> boolean {
+fn is_null_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
     if matches_case_insensitive(trimmed, "null") {
         return true;
@@ -63,11 +63,11 @@ fn is_null_literal(text -> string) -> boolean {
     return false;
 }
 
-fn is_digit_char(ch -> string) -> boolean {
+fn is_digit_char(ch: string) -> boolean {
     let code = char_code(ch);
     let zero = char_code("0");
     let nine = char_code("9");
-    let mut _ret167 -> boolean = false;
+    let mut _ret167: boolean = false;
     if code >= zero {
         if code <= nine {
             _ret167 = true;
@@ -76,29 +76,29 @@ fn is_digit_char(ch -> string) -> boolean {
     return _ret167;
 }
 
-fn char_code_at_text(text -> string, index -> number) -> number {
+fn char_code_at_text(text: string, index: number) -> number {
     return char_code(char_at(text, index));
 }
 
-fn is_integer_literal(text -> string) -> boolean {
+fn is_integer_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 {
             return false;
         }
         index = 1;
     }
-    let mut has_digit -> boolean = false;
+    let mut has_digit: boolean = false;
     loop {
         if index >= trimmed.length {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        let mut _if168 -> boolean = false;
+        let mut _if168: boolean = false;
         if ch == "0" { _if168 = true; }
         if ch == "1" { _if168 = true; }
         if ch == "2" { _if168 = true; }
@@ -119,10 +119,10 @@ fn is_integer_literal(text -> string) -> boolean {
     return has_digit;
 }
 
-fn is_number_literal(text -> string) -> boolean {
-    let mut index -> number = 0;
-    let mut has_digit -> boolean = false;
-    let mut has_decimal -> boolean = false;
+fn is_number_literal(text: string) -> boolean {
+    let mut index: number = 0;
+    let mut has_digit: boolean = false;
+    let mut has_decimal: boolean = false;
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return false;
@@ -138,7 +138,7 @@ fn is_number_literal(text -> string) -> boolean {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        let mut _if169 -> boolean = false;
+        let mut _if169: boolean = false;
         if ch == "0" { _if169 = true; }
         if ch == "1" { _if169 = true; }
         if ch == "2" { _if169 = true; }
@@ -167,7 +167,7 @@ fn is_number_literal(text -> string) -> boolean {
     return has_digit;
 }
 
-fn normalise_number_literal(text -> string) -> string {
+fn normalise_number_literal(text: string) -> string {
     let trimmed = trim_text(text);
     if index_of(trimmed, ".") >= 0 {
         return trimmed;
@@ -175,7 +175,7 @@ fn normalise_number_literal(text -> string) -> string {
     return trimmed + ".0";
 }
 
-fn is_string_literal(text -> string) -> boolean {
+fn is_string_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
     if trimmed.length < 2 {
         return false;
@@ -189,8 +189,8 @@ fn is_string_literal(text -> string) -> boolean {
 
     // Avoid treating concatenation expressions like `"a" + "b"` as a single
     // string literal. Require all interior quotes to be escaped.
-    let mut escape -> boolean = false;
-    let mut index -> number = 1;
+    let mut escape: boolean = false;
+    let mut index: number = 1;
     loop {
         if index >= trimmed.length - 1 {
             break;
@@ -217,12 +217,12 @@ fn is_string_literal(text -> string) -> boolean {
     return true;
 }
 
-fn is_character_literal(text -> string) -> boolean {
+fn is_character_literal(text: string) -> boolean {
     // Check if this is a single-character string literal like "a", "t", "\n"
     if text.length < 2 {
         return false;
     }
-    let mut _if170 -> boolean = false;
+    let mut _if170: boolean = false;
     if substring(text, 0, 1) != "\"" { _if170 = true; }
     if substring(text, text.length - 1, text.length) != "\"" { _if170 = true; }
     if _if170 {
@@ -239,7 +239,7 @@ fn is_character_literal(text -> string) -> boolean {
     return inner.length == 1;
 }
 
-fn get_character_literal_value(text -> string) -> number {
+fn get_character_literal_value(text: string) -> number {
     let inner = substring(text, 1, text.length - 1);
     if inner.length == 0 {
         return 0;

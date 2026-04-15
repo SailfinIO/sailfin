@@ -1,6 +1,6 @@
-fn _sum_to(n -> number) -> number {
-    let mut total -> number = 0;
-    let mut i -> number = 1;
+fn _sum_to(n: number) -> number {
+    let mut total: number = 0;
+    let mut i: number = 1;
     loop {
         if i > n {
             break;
@@ -11,9 +11,9 @@ fn _sum_to(n -> number) -> number {
     return total;
 }
 
-fn _count_evens_up_to(n -> number) -> number {
-    let mut count -> number = 0;
-    let mut i -> number = 0;
+fn _count_evens_up_to(n: number) -> number {
+    let mut count: number = 0;
+    let mut i: number = 0;
     loop {
         if i > n {
             break;
@@ -26,8 +26,8 @@ fn _count_evens_up_to(n -> number) -> number {
     return count;
 }
 
-fn _first_multiple_of_seven(limit -> number) -> number {
-    let mut i -> number = 1;
+fn _first_multiple_of_seven(limit: number) -> number {
+    let mut i: number = 1;
     loop {
         if i > limit {
             return -1;
@@ -40,16 +40,16 @@ fn _first_multiple_of_seven(limit -> number) -> number {
     return -1;
 }
 
-fn _sum_array(arr -> number[]) -> number {
-    let mut total -> number = 0;
+fn _sum_array(arr: number[]) -> number {
+    let mut total: number = 0;
     for n in arr {
         total += n;
     }
     return total;
 }
 
-fn _count_positive(arr -> number[]) -> number {
-    let mut count -> number = 0;
+fn _count_positive(arr: number[]) -> number {
+    let mut count: number = 0;
     for n in arr {
         if n > 0 {
             count += 1;
@@ -82,7 +82,7 @@ test "loops: for-in sums array elements" {
 }
 
 test "loops: for-in with empty array" {
-    let mut empty -> number[] = [];
+    let mut empty: number[] = [];
     assert _sum_array(empty) == 0;
 }
 
@@ -92,8 +92,8 @@ test "loops: for-in counts positive elements" {
 }
 
 test "loops: continue skips iteration body" {
-    let mut evens -> number = 0;
-    let mut i -> number = 0;
+    let mut evens: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= 10 {
             break;
@@ -108,13 +108,13 @@ test "loops: continue skips iteration body" {
 }
 
 test "loops: nested loops accumulate correctly" {
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= 3 {
             break;
         }
-        let mut j -> number = 0;
+        let mut j: number = 0;
         loop {
             if j >= 3 {
                 break;

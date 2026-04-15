@@ -31,7 +31,7 @@ import {
     coerce_operand_to_type,
 } from "./core_operands";
 
-fn lower_string_literal(literal -> string, temp_index -> number, lines -> string[]) -> ExpressionResult {
+fn lower_string_literal(literal: string, temp_index: number, lines: string[]) -> ExpressionResult {
     // Stage2-native note:
     // The original lowering model used global string constants (@.str.len...).
     // Stage2's struct-return plumbing can drop the collected constant table,
@@ -43,7 +43,7 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
     let array_length = content.length + 1;
     let array_type = "[" + number_to_string(array_length) + " x i8]";
 
-    let mut current_lines -> string[] = lines;
+    let mut current_lines: string[] = lines;
     let malloc_temp = format_temp_name(temp_index);
     current_lines.push("  " + malloc_temp + " = call i8* @calloc(i64 1, i64 " + number_to_string(array_length) + ")");
     let cast_temp = format_temp_name(temp_index + 1);
@@ -61,30 +61,30 @@ fn lower_string_literal(literal -> string, temp_index -> number, lines -> string
     };
 }
 
-fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> number, lines -> string[]) -> ExpressionResult {
+fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: number, lines: string[]) -> ExpressionResult {
     let harmonised = harmonise_operands(left, right, temp_index, lines);
-    let mut _if121 -> boolean = false;
+    let mut _if121: boolean = false;
     if harmonised.left == null { _if121 = true; }
     if harmonised.right == null { _if121 = true; }
     if _if121 {
         return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: harmonised.diagnostics, string_constants: empty_string_constant_set() };
     }
     let left_aligned = coerce_operand_to_type(harmonised.left, "i8*", harmonised.temp_index, harmonised.lines);
-    let mut diagnostics -> string[] = harmonised.diagnostics;
-    let mut _ci0 -> number = 0;
+    let mut diagnostics: string[] = harmonised.diagnostics;
+    let mut _ci0: number = 0;
     loop {
         if _ci0 >= left_aligned.diagnostics.length { break; }
         diagnostics.push(left_aligned.diagnostics[_ci0]);
         _ci0 += 1;
     }
     let right_aligned = coerce_operand_to_type(harmonised.right, "i8*", left_aligned.temp_index, left_aligned.lines);
-    let mut _ci1 -> number = 0;
+    let mut _ci1: number = 0;
     loop {
         if _ci1 >= right_aligned.diagnostics.length { break; }
         diagnostics.push(right_aligned.diagnostics[_ci1]);
         _ci1 += 1;
     }
-    let mut _if122 -> boolean = false;
+    let mut _if122: boolean = false;
     if left_aligned.operand == null { _if122 = true; }
     if right_aligned.operand == null { _if122 = true; }
     if _if122 {
@@ -102,7 +102,7 @@ fn emit_string_concat(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
     return ExpressionResult { lines: out_lines, temp_index: right_aligned.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: empty_string_constant_set() };
 }
 
-fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ExpressionResult {
+fn coerce_operand_to_string(operand: LLVMOperand, temp_index: number, lines: string[]) -> ExpressionResult {
     let empty_constants = empty_string_constant_set();
     if operand.llvm_type == "i8*" {
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: [], string_constants: empty_constants };
@@ -159,6 +159,6 @@ fn coerce_operand_to_string(operand -> LLVMOperand, temp_index -> number, lines 
         return ExpressionResult { lines: out_lines, temp_index: false_lit.temp_index + 1, operand: out_operand, diagnostics: [], string_constants: empty_constants };
     }
 
-    let diagnostics -> string[] = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"];
+    let diagnostics: string[] = ["llvm lowering: unable to convert `" + operand.llvm_type + "` to string"];
     return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
 }

@@ -10,9 +10,9 @@ import { ParameterBinding } from "./types";
 // String manipulation
 // =============================================================================
 
-fn trim_text(value -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = value.length;
+fn trim_text(value: string) -> string {
+    let mut start: number = 0;
+    let mut end: number = value.length;
     loop {
         if start >= end {
             break;
@@ -44,16 +44,16 @@ fn trim_text(value -> string) -> string {
 }
 
 // Local char_at using substring (avoids import alias which the seed can't resolve).
-fn char_at(value -> string, index -> number) -> string {
+fn char_at(value: string, index: number) -> string {
     if value.length == 0 { return ""; }
     if index < 0 { return ""; }
     if index >= value.length { return ""; }
     return substring(value, index, index + 1);
 }
 
-fn is_trim_char(ch -> string) -> boolean {
+fn is_trim_char(ch: string) -> boolean {
     let code = char_code(ch);
-    let mut _ret333 -> boolean = false;
+    let mut _ret333: boolean = false;
     if code == char_code(" ") { _ret333 = true; }
     if code == char_code("\n") { _ret333 = true; }
     if code == char_code("\r") { _ret333 = true; }
@@ -61,7 +61,7 @@ fn is_trim_char(ch -> string) -> boolean {
     return _ret333;
 }
 
-fn starts_with(value -> string, prefix -> string) -> boolean {
+fn starts_with(value: string, prefix: string) -> boolean {
     if prefix.length == 0 {
         return true;
     }
@@ -72,7 +72,7 @@ fn starts_with(value -> string, prefix -> string) -> boolean {
     return head == prefix;
 }
 
-fn ends_with(value -> string, suffix -> string) -> boolean {
+fn ends_with(value: string, suffix: string) -> boolean {
     if suffix.length == 0 {
         return true;
     }
@@ -84,7 +84,7 @@ fn ends_with(value -> string, suffix -> string) -> boolean {
     return tail == suffix;
 }
 
-fn contains_text(haystack -> string, needle -> string) -> boolean {
+fn contains_text(haystack: string, needle: string) -> boolean {
     if needle.length == 0 {
         return true;
     }
@@ -92,7 +92,7 @@ fn contains_text(haystack -> string, needle -> string) -> boolean {
         return false;
     }
     let _search_limit = haystack.length - needle.length;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index > _search_limit {
             break;
@@ -106,7 +106,7 @@ fn contains_text(haystack -> string, needle -> string) -> boolean {
     return false;
 }
 
-fn index_of(value -> string, target -> string) -> number {
+fn index_of(value: string, target: string) -> number {
     if target.length == 0 {
         return 0;
     }
@@ -114,7 +114,7 @@ fn index_of(value -> string, target -> string) -> number {
     // char_code_at_text is miscompiled by older seeds, but substring
     // (backed by the C runtime grapheme_at) and == both work correctly.
     let _search_limit = value.length - target.length;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index > _search_limit {
             break;
@@ -128,12 +128,12 @@ fn index_of(value -> string, target -> string) -> number {
     return -1;
 }
 
-fn find_last_index_of_char(value -> string, target -> string) -> number {
+fn find_last_index_of_char(value: string, target: string) -> number {
     if target.length != 1 {
         return -1;
     }
     // Use substring + == instead of char_code_at_text.
-    let mut index -> number = value.length;
+    let mut index: number = value.length;
     loop {
         if index <= 0 {
             break;
@@ -147,11 +147,11 @@ fn find_last_index_of_char(value -> string, target -> string) -> number {
     return -1;
 }
 
-fn char_code_at_text(text -> string, index -> number) -> number {
+fn char_code_at_text(text: string, index: number) -> number {
     return char_code(char_at(text, index));
 }
 
-fn strip_mut_prefix(value -> string) -> string {
+fn strip_mut_prefix(value: string) -> string {
     let trimmed = trim_text(value);
     if trimmed.length < 4 {
         return trimmed;
@@ -167,12 +167,12 @@ fn strip_mut_prefix(value -> string) -> string {
 // Number utilities
 // =============================================================================
 
-fn number_to_string(value -> number) -> string {
+fn number_to_string(value: number) -> string {
     if value == 0 {
         return "0";
     }
     let digits = "0123456789";
-    let powers -> number[] = [
+    let powers: number[] = [
         1000000000000000,
         100000000000000,
         10000000000000,
@@ -190,21 +190,21 @@ fn number_to_string(value -> number) -> string {
         10,
         1
     ];
-    let mut remaining -> number = value;
-    let mut is_negative -> boolean = false;
+    let mut remaining: number = value;
+    let mut is_negative: boolean = false;
     if remaining < 0 {
         is_negative = true;
         remaining = 0 - remaining;
     }
-    let mut output -> string = "";
-    let mut index -> number = 0;
-    let mut started -> boolean = false;
+    let mut output: string = "";
+    let mut index: number = 0;
+    let mut started: boolean = false;
     loop {
         if index >= powers.length {
             break;
         }
         let power = powers[index];
-        let mut count -> number = 0;
+        let mut count: number = 0;
         loop {
             if remaining < power {
                 break;
@@ -212,7 +212,7 @@ fn number_to_string(value -> number) -> string {
             remaining -= power;
             count += 1;
         }
-        let mut _if334 -> boolean = false;
+        let mut _if334: boolean = false;
         if started { _if334 = true; }
         if count > 0 { _if334 = true; }
         if _if334 {
@@ -231,7 +231,7 @@ fn number_to_string(value -> number) -> string {
     return output;
 }
 
-fn lower_char_code(code -> number) -> number {
+fn lower_char_code(code: number) -> number {
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
     if code >= upper_a {
@@ -243,11 +243,11 @@ fn lower_char_code(code -> number) -> number {
     return code;
 }
 
-fn matches_case_insensitive(value -> string, expected -> string) -> boolean {
+fn matches_case_insensitive(value: string, expected: string) -> boolean {
     if value.length != expected.length {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= value.length {
             break;
@@ -268,7 +268,7 @@ fn matches_case_insensitive(value -> string, expected -> string) -> boolean {
 // Literal detection
 // =============================================================================
 
-fn is_boolean_literal(text -> string) -> boolean {
+fn is_boolean_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
     if matches_case_insensitive(trimmed, "true") {
         return true;
@@ -279,25 +279,25 @@ fn is_boolean_literal(text -> string) -> boolean {
     return false;
 }
 
-fn is_integer_literal(text -> string) -> boolean {
+fn is_integer_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     if substring(trimmed, 0, 1) == "-" {
         if trimmed.length == 1 {
             return false;
         }
         index = 1;
     }
-    let mut has_digit -> boolean = false;
+    let mut has_digit: boolean = false;
     loop {
         if index >= trimmed.length {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        let mut _if335 -> boolean = false;
+        let mut _if335: boolean = false;
         if ch == "0" { _if335 = true; }
         if ch == "1" { _if335 = true; }
         if ch == "2" { _if335 = true; }
@@ -318,10 +318,10 @@ fn is_integer_literal(text -> string) -> boolean {
     return has_digit;
 }
 
-fn is_number_literal(text -> string) -> boolean {
-    let mut index -> number = 0;
-    let mut has_digit -> boolean = false;
-    let mut has_decimal -> boolean = false;
+fn is_number_literal(text: string) -> boolean {
+    let mut index: number = 0;
+    let mut has_digit: boolean = false;
+    let mut has_decimal: boolean = false;
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return false;
@@ -337,7 +337,7 @@ fn is_number_literal(text -> string) -> boolean {
             break;
         }
         let ch = substring(trimmed, index, index + 1);
-        let mut _if336 -> boolean = false;
+        let mut _if336: boolean = false;
         if ch == "0" { _if336 = true; }
         if ch == "1" { _if336 = true; }
         if ch == "2" { _if336 = true; }
@@ -366,11 +366,11 @@ fn is_number_literal(text -> string) -> boolean {
     return has_digit;
 }
 
-fn is_digit_char(ch -> string) -> boolean {
+fn is_digit_char(ch: string) -> boolean {
     let code = char_code(ch);
     let zero = char_code("0");
     let nine = char_code("9");
-    let mut _ret337 -> boolean = false;
+    let mut _ret337: boolean = false;
     if code >= zero {
         if code <= nine {
             _ret337 = true;
@@ -379,7 +379,7 @@ fn is_digit_char(ch -> string) -> boolean {
     return _ret337;
 }
 
-fn is_simple_identifier(value -> string) -> boolean {
+fn is_simple_identifier(value: string) -> boolean {
     let trimmed = trim_text(value);
     if trimmed.length == 0 {
         return false;
@@ -401,7 +401,7 @@ fn is_simple_identifier(value -> string) -> boolean {
 // Identifier and keyword helpers
 // =============================================================================
 
-fn is_identifier_start_char(ch -> string) -> boolean {
+fn is_identifier_start_char(ch: string) -> boolean {
     if ch == "_" {
         return true;
     }
@@ -414,7 +414,7 @@ fn is_identifier_start_char(ch -> string) -> boolean {
     return false;
 }
 
-fn is_identifier_part_char(ch -> string) -> boolean {
+fn is_identifier_part_char(ch: string) -> boolean {
     if is_identifier_start_char(ch) {
         return true;
     }
@@ -424,7 +424,7 @@ fn is_identifier_part_char(ch -> string) -> boolean {
     return false;
 }
 
-fn matches_keyword(value -> string, start_index -> number, keyword -> string) -> boolean {
+fn matches_keyword(value: string, start_index: number, keyword: string) -> boolean {
     let remaining = value.length - start_index;
     if remaining < keyword.length {
         return false;
@@ -444,11 +444,11 @@ fn matches_keyword(value -> string, start_index -> number, keyword -> string) ->
     return true;
 }
 
-fn is_effect_prefix_char(ch -> string) -> boolean {
+fn is_effect_prefix_char(ch: string) -> boolean {
     if is_trim_char(ch) {
         return true;
     }
-    let mut _ret338 -> boolean = false;
+    let mut _ret338: boolean = false;
     if ch == "(" { _ret338 = true; }
     if ch == "," { _ret338 = true; }
     if ch == ";" { _ret338 = true; }
@@ -458,11 +458,11 @@ fn is_effect_prefix_char(ch -> string) -> boolean {
     return _ret338;
 }
 
-fn is_effect_delimiter(ch -> string) -> boolean {
+fn is_effect_delimiter(ch: string) -> boolean {
     if is_trim_char(ch) {
         return true;
     }
-    let mut _ret339 -> boolean = false;
+    let mut _ret339: boolean = false;
     if ch == "(" { _ret339 = true; }
     if ch == ")" { _ret339 = true; }
     if ch == "," { _ret339 = true; }
@@ -478,7 +478,7 @@ fn is_effect_delimiter(ch -> string) -> boolean {
 // =============================================================================
 
 // Duplicated from string_utils to avoid cross-module function call issues in Stage2
-fn is_symbol_char(ch -> string) -> boolean {
+fn is_symbol_char(ch: string) -> boolean {
     if ch.length == 0 {
         return false;
     }
@@ -510,12 +510,12 @@ fn is_symbol_char(ch -> string) -> boolean {
     return false;
 }
 
-fn sanitize_symbol(name -> string) -> string {
+fn sanitize_symbol(name: string) -> string {
     if name.length == 0 {
         return "_";
     }
-    let mut result -> string = "";
-    let mut index -> number = 0;
+    let mut result: string = "";
+    let mut index: number = 0;
     loop {
         if index >= name.length {
             break;
@@ -545,7 +545,7 @@ fn sanitize_symbol(name -> string) -> string {
 // Array utilities
 // =============================================================================
 
-fn append_string(values -> string[], value -> string) -> string[] {
+fn append_string(values: string[], value: string) -> string[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -554,7 +554,7 @@ fn append_string(values -> string[], value -> string) -> string[] {
     return out;
 }
 
-fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
+fn extend_string_array(values: string[], additions: string[]) -> string[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -563,7 +563,7 @@ fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
     if safe_additions == null {
         safe_additions = [];
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= safe_additions.length {
             break;
@@ -574,13 +574,13 @@ fn extend_string_array(values -> string[], additions -> string[]) -> string[] {
     return out;
 }
 
-fn copy_string_array(values -> string[]) -> string[] {
-    let mut result -> string[] = [];
+fn copy_string_array(values: string[]) -> string[] {
+    let mut result: string[] = [];
     let mut safe_values = values;
     if safe_values == null {
         safe_values = [];
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= safe_values.length {
             break;
@@ -591,12 +591,12 @@ fn copy_string_array(values -> string[]) -> string[] {
     return result;
 }
 
-fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
-    let mut _if340 -> boolean = false;
+fn string_arrays_equal(first: string[], second: string[]) -> boolean {
+    let mut _if340: boolean = false;
     if first == null { _if340 = true; }
     if second == null { _if340 = true; }
     if _if340 {
-        let mut _ret342 -> boolean = false;
+        let mut _ret342: boolean = false;
         if first == null {
             if second == null {
                 _ret342 = true;
@@ -607,7 +607,7 @@ fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
     if first.length != second.length {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= first.length {
             break;
@@ -620,11 +620,11 @@ fn string_arrays_equal(first -> string[], second -> string[]) -> boolean {
     return true;
 }
 
-fn string_array_contains(values -> string[], target -> string) -> boolean {
+fn string_array_contains(values: string[], target: string) -> boolean {
     if values == null {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= values.length {
             break;
@@ -637,7 +637,7 @@ fn string_array_contains(values -> string[], target -> string) -> boolean {
     return false;
 }
 
-fn join_with_separator(values -> string[], separator -> string) -> string {
+fn join_with_separator(values: string[], separator: string) -> string {
     if values == null {
         return "";
     }
@@ -651,14 +651,14 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
     // Balanced join to avoid repeatedly concatenating an ever-growing prefix.
     // This keeps intermediate strings smaller and prevents runtime corruption
     // observed in large LLVM IR modules (notably the test harness build).
-    let mut parts -> string[] = values;
+    let mut parts: string[] = values;
     loop {
         if parts.length <= 1 {
             break;
         }
 
-        let mut next -> string[] = [];
-        let mut index -> number = 0;
+        let mut next: string[] = [];
+        let mut index: number = 0;
         loop {
             if index >= parts.length {
                 break;
@@ -683,8 +683,8 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
 // Parameter binding helpers
 // =============================================================================
 
-fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
-    let mut index -> number = 0;
+fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
+    let mut index: number = 0;
     loop {
         if index >= bindings.length {
             break;
@@ -697,7 +697,7 @@ fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> Par
     return null;
 }
 
-fn append_parameter_binding(bindings -> ParameterBinding[], binding -> ParameterBinding) -> ParameterBinding[] {
+fn append_parameter_binding(bindings: ParameterBinding[], binding: ParameterBinding) -> ParameterBinding[] {
     let mut out = bindings;
     out = out.push(binding);
     return out;
@@ -707,7 +707,7 @@ fn append_parameter_binding(bindings -> ParameterBinding[], binding -> Parameter
 // Kept as a separate function so the loop in merge_parameter_bindings never has an
 // inline struct literal at the top level — the v0.1.1 seed misidentifies `identifier {`
 // as a loop-body closer, causing premature `.endloop` emission.
-fn _merge_copy_parameter_binding(primary -> ParameterBinding, consumed_flag -> boolean) -> ParameterBinding {
+fn _merge_copy_parameter_binding(primary: ParameterBinding, consumed_flag: boolean) -> ParameterBinding {
     return ParameterBinding {
         name: primary.name,
         llvm_name: primary.llvm_name,
@@ -718,18 +718,18 @@ fn _merge_copy_parameter_binding(primary -> ParameterBinding, consumed_flag -> b
     };
 }
 
-fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBinding[]) -> ParameterBinding[] {
-    let mut result -> ParameterBinding[] = [];
-    let mut index -> number = 0;
+fn merge_parameter_bindings(first: ParameterBinding[], second: ParameterBinding[]) -> ParameterBinding[] {
+    let mut result: ParameterBinding[] = [];
+    let mut index: number = 0;
     loop {
         if index >= first.length {
             break;
         }
         let primary = first[index];
-        let mut consumed_flag -> boolean = primary.consumed;
+        let mut consumed_flag: boolean = primary.consumed;
         let counterpart = find_parameter_binding(second, primary.name);
         if counterpart != null {
-            let mut _asgn341 -> boolean = false;
+            let mut _asgn341: boolean = false;
             if consumed_flag { _asgn341 = true; }
             if counterpart.consumed { _asgn341 = true; }
             consumed_flag = _asgn341;
@@ -744,9 +744,9 @@ fn merge_parameter_bindings(first -> ParameterBinding[], second -> ParameterBind
 // Parsing helpers
 // =============================================================================
 
-fn skip_string_literal(text -> string, start_index -> number) -> number {
-    let mut index -> number = start_index;
-    let mut escaped -> boolean = false;
+fn skip_string_literal(text: string, start_index: number) -> number {
+    let mut index: number = start_index;
+    let mut escaped: boolean = false;
     loop {
         if index >= text.length {
             break;

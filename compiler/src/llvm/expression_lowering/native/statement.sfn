@@ -62,23 +62,23 @@ import {
     split_lines_local,
 } from "../../lowering/lowering_text_utils";
 
-fn find_parameter_binding(bindings -> ParameterBinding[], name -> string) -> ParameterBinding? {
+fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);
 }
 
-fn mark_parameter_consumed(bindings -> ParameterBinding[], name -> string) -> ParameterBinding[] {
+fn mark_parameter_consumed(bindings: ParameterBinding[], name: string) -> ParameterBinding[] {
     return bindings_mark_parameter_consumed(bindings, name);
 }
 
-fn mark_local_consumed(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+fn mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
     return bindings_mark_local_consumed(locals, name);
 }
 
-fn reset_local_consumption(locals -> LocalBinding[], name -> string) -> LocalBinding[] {
+fn reset_local_consumption(locals: LocalBinding[], name: string) -> LocalBinding[] {
     return bindings_reset_local_consumption(locals, name);
 }
 
-fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership -> OwnershipInfo?) -> LocalBinding[] {
+fn update_local_ownership(locals: LocalBinding[], name: string, ownership: OwnershipInfo?) -> LocalBinding[] {
     return bindings_update_local_ownership(locals, name, ownership);
 }
 
@@ -91,16 +91,16 @@ fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership ->
 // when returned from cross-module calls (e.g. lower_expression,
 // coerce_operand_to_type). Scan emitted lines for the highest %tN
 // definition and use max(found+1, floor) as the recovered counter.
-fn _recover_temp_from_lines(lines -> string[], floor -> number) -> number {
-    let mut result -> number = floor;
-    let mut ri -> number = 0;
+fn _recover_temp_from_lines(lines: string[], floor: number) -> number {
+    let mut result: number = floor;
+    let mut ri: number = 0;
     loop {
         if ri >= lines.length { break; }
         let rl = lines[ri];
         if starts_with(rl, "  %t") {
-            let mut rn -> number = 0;
-            let mut rj -> number = 4;
-            let mut rvalid -> boolean = false;
+            let mut rn: number = 0;
+            let mut rj: number = 4;
+            let mut rvalid: boolean = false;
             loop {
                 if rj >= rl.length { break; }
                 let rc = char_code(char_at(rl, rj));
@@ -129,11 +129,11 @@ fn _recover_temp_from_lines(lines -> string[], floor -> number) -> number {
 // callers can read them even when struct return ABI is broken (v0.1.1 seed
 // compiles ExpressionStatementResult as i8* null for cross-module returns).
 fn _write_expr_stmt_result_files(
-    input_lines_len -> number,
-    current_lines -> string[],
-    current_temp -> number,
-    mutations -> LocalMutation[],
-    current_next_region -> number
+    input_lines_len: number,
+    current_lines: string[],
+    current_temp: number,
+    mutations: LocalMutation[],
+    current_next_region: number
 ) ![io] {
     fs.writeFile("build/sailfin/.expr_stmt_temp_index", number_to_string(current_temp));
     fs.writeFile("build/sailfin/.expr_stmt_next_region_id", number_to_string(current_next_region));
@@ -147,7 +147,7 @@ fn _write_expr_stmt_result_files(
         fs.writeFile(prefix + "_name", m.name);
         fs.writeFile(prefix + "_type", m.llvm_type);
         fs.writeFile(prefix + "_value", m.value_name);
-        let mut label_val -> string = "";
+        let mut label_val: string = "";
         if m.originating_label != null {
             label_val = m.originating_label;
         }
@@ -158,17 +158,17 @@ fn _write_expr_stmt_result_files(
 
 // Variant that also serializes string constants to a file.
 fn _write_expr_stmt_result_files_with_constants(
-    input_lines_len -> number,
-    current_lines -> string[],
-    current_temp -> number,
-    mutations -> LocalMutation[],
-    current_next_region -> number,
-    string_constants -> StringConstant[]
+    input_lines_len: number,
+    current_lines: string[],
+    current_temp: number,
+    mutations: LocalMutation[],
+    current_next_region: number,
+    string_constants: StringConstant[]
 ) ![io] {
     _write_expr_stmt_result_files(input_lines_len, current_lines, current_temp, mutations, current_next_region);
     // Write string constants as tab-separated lines: name\tcontent\tbyte_count
-    let mut sc_lines -> string[] = [];
-    let mut si -> number = 0;
+    let mut sc_lines: string[] = [];
+    let mut si: number = 0;
     loop {
         if si >= string_constants.length { break; }
         sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count));
@@ -177,11 +177,11 @@ fn _write_expr_stmt_result_files_with_constants(
     fs.writeLines("build/sailfin/.expr_stmt_string_constants", sc_lines);
 }
 
-fn _parse_int_local(text -> string) -> number {
+fn _parse_int_local(text: string) -> number {
     let len = text.length;
     if len == 0 { return 0; }
-    let mut result -> number = 0;
-    let mut i -> number = 0;
+    let mut result: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= len { break; }
         let ch = char_at(text, i);
@@ -200,7 +200,7 @@ fn _parse_int_local(text -> string) -> number {
 // Kept as separate functions so the loops never have inline struct literals `{ ... }`
 // at the loop body's top level — the v0.1.1 seed misidentifies such `{...}` as
 // loop-body closers, causing premature `.endloop` emission in the .sfn-asm output.
-fn _ipc_make_parameter_binding(name -> string, llvm_name -> string, llvm_type -> string, type_annotation -> string) -> ParameterBinding {
+fn _ipc_make_parameter_binding(name: string, llvm_name: string, llvm_type: string, type_annotation: string) -> ParameterBinding {
     return ParameterBinding {
         name: name,
         llvm_name: llvm_name,
@@ -211,7 +211,7 @@ fn _ipc_make_parameter_binding(name -> string, llvm_name -> string, llvm_type ->
     };
 }
 
-fn _ipc_make_local_binding(name -> string, pointer -> string, llvm_type -> string, type_annotation -> string, scope_id -> string, scope_depth -> number) -> LocalBinding {
+fn _ipc_make_local_binding(name: string, pointer: string, llvm_type: string, type_annotation: string, scope_id: string, scope_depth: number) -> LocalBinding {
     return LocalBinding {
         name: name,
         pointer: pointer,
@@ -230,19 +230,19 @@ fn _ipc_make_local_binding(name -> string, pointer -> string, llvm_type -> strin
 // ---------------------------------------------------------------------------
 
 fn lower_expression_statement(
-    function_name -> string,
-    instruction -> NativeInstruction,
-    expression -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    temp_index -> number,
-    lines -> string[],
-    next_region_id -> number,
-    scope_id -> string,
-    scope_depth -> number,
-    functions -> NativeFunction[],
-    context -> TypeContext,
-    current_label -> string
+    function_name: string,
+    instruction: NativeInstruction,
+    expression: string,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    temp_index: number,
+    lines: string[],
+    next_region_id: number,
+    scope_id: string,
+    scope_depth: number,
+    functions: NativeFunction[],
+    context: TypeContext,
+    current_label: string
 ) -> ExpressionStatementResult ![io] {
     // The v0.1.1 seed compiles instruction as i8*, making field access via
     // sailfin_runtime_get_field return garbage. Skip span extraction (only
@@ -259,20 +259,20 @@ fn lower_expression_statement(
     if debug_lowering {
         print.err("emit-llvm: lower_expression_statement start fn=" + function_name + " expr=" + expression + " locals=" + number_to_string(current_locals.length) + " bindings=" + number_to_string(current_bindings.length));
     }
-    let mut diagnostics -> string[] = detect_suspension_conflicts(expression, current_locals, current_bindings, function_name, null);
-    let mut current_lines -> string[] = lines;
-    let mut current_temp -> number = temp_index;
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
-    let mut current_next_region -> number = next_region_id;
-    let mut mutations -> LocalMutation[] = [];
-    let mut string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut diagnostics: string[] = detect_suspension_conflicts(expression, current_locals, current_bindings, function_name, null);
+    let mut current_lines: string[] = lines;
+    let mut current_temp: number = temp_index;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut lifetime_releases: LifetimeReleaseEvent[] = [];
+    let mut current_next_region: number = next_region_id;
+    let mut mutations: LocalMutation[] = [];
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
 
     let parsed_assignment = parse_assignment_expression(expression);
     if parsed_assignment.success {
         // Check if this is a complex lvalue assignment (deref, member, array index)
         let trimmed_target = trim_text(parsed_assignment.target);
-        let mut is_lvalue -> boolean = false;
+        let mut is_lvalue: boolean = false;
         if starts_with(trimmed_target, "*") { is_lvalue = true; }
         if !is_lvalue {
             let member_check = parse_member_access(parsed_assignment.target);
@@ -302,14 +302,14 @@ fn lower_expression_statement(
             diagnostics.push("llvm lowering: assignment to unknown local `" + trimmed_assign_target + "`");
         } else {
             // Desugar compound assignments: "x += y" becomes "x = x + y"
-            let mut effective_value -> string = trimmed_assign_value;
+            let mut effective_value: string = trimmed_assign_value;
             if parsed_assignment.operator.length > 0 {
                 effective_value = trimmed_assign_target + " " + parsed_assignment.operator + " " + trimmed_assign_value;
             }
 
-            let previous_ownership -> OwnershipInfo? = binding.ownership;
+            let previous_ownership: OwnershipInfo? = binding.ownership;
             let ownership_analysis = analyze_value_ownership(effective_value, null, current_locals, current_bindings);
-            let mut _ci11 -> number = 0;
+            let mut _ci11: number = 0;
             loop {
                 if _ci11 >= ownership_analysis.diagnostics.length { break; }
                 diagnostics.push(ownership_analysis.diagnostics[_ci11]);
@@ -317,10 +317,10 @@ fn lower_expression_statement(
             }
             let mut assignment_ownership = ownership_analysis.ownership;
             let consumption = ownership_analysis.consumption;
-            let mut stored_value -> string = default_return_literal(binding.llvm_type);
+            let mut stored_value: string = default_return_literal(binding.llvm_type);
 
             let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, binding.llvm_type);
-            let mut _ci12 -> number = 0;
+            let mut _ci12: number = 0;
             loop {
                 if _ci12 >= lowered.diagnostics.length { break; }
                 diagnostics.push(lowered.diagnostics[_ci12]);
@@ -334,7 +334,7 @@ fn lower_expression_statement(
                 diagnostics.push("llvm lowering: failed to lower assignment expression for `" + trimmed_assign_target + "`");
             } else {
                 let coerced = coerce_operand_to_type(lowered.operand, binding.llvm_type, current_temp, current_lines);
-                let mut _ci13 -> number = 0;
+                let mut _ci13: number = 0;
                 loop {
                     if _ci13 >= coerced.diagnostics.length { break; }
                     diagnostics.push(coerced.diagnostics[_ci13]);
@@ -417,7 +417,7 @@ fn lower_expression_statement(
     }
 
     let ownership_analysis = analyze_value_ownership(expression, null, current_locals, current_bindings);
-    let mut _ci14 -> number = 0;
+    let mut _ci14: number = 0;
     loop {
         if _ci14 >= ownership_analysis.diagnostics.length { break; }
         diagnostics.push(ownership_analysis.diagnostics[_ci14]);
@@ -447,7 +447,7 @@ fn lower_expression_statement(
     }
     if fs.exists("build/sailfin/.call_result_lines_count") {
         let _cr_lines_raw = fs.readFile("build/sailfin/.call_result_lines");
-        let mut _new_lines -> string[] = [];
+        let mut _new_lines: string[] = [];
         if _cr_lines_raw.length > 0 {
             _new_lines = split_lines_local(_cr_lines_raw);
         }
@@ -494,27 +494,27 @@ fn lower_expression_statement(
 
 
 fn lower_return_instruction(
-    function -> NativeFunction,
-    instruction -> NativeInstruction,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    temp_index -> number,
-    lines -> string[],
-    next_region_id -> number,
-    scope_id -> string,
-    scope_depth -> number,
-    functions -> NativeFunction[],
-    context -> TypeContext
+    function: NativeFunction,
+    instruction: NativeInstruction,
+    llvm_return: string,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    temp_index: number,
+    lines: string[],
+    next_region_id: number,
+    scope_id: string,
+    scope_depth: number,
+    functions: NativeFunction[],
+    context: TypeContext
 ) -> ExpressionStatementResult ![io] {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
-    let mut current_temp -> number = temp_index;
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
-    let mut current_next_region -> number = next_region_id;
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_temp: number = temp_index;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut lifetime_releases: LifetimeReleaseEvent[] = [];
+    let mut current_next_region: number = next_region_id;
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
-    let mut _let147 -> boolean = false;
+    let mut _let147: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
         if fs.exists("build/sailfin/.test_runner_active") {
             _let147 = true;
@@ -534,7 +534,7 @@ fn lower_return_instruction(
     let instr_expression = instruction.expression;
 
     if trace {
-        let mut expr_len -> number = 0;
+        let mut expr_len: number = 0;
         if instr_expression != null {
             expr_len = instr_expression.length;
         }
@@ -548,7 +548,7 @@ fn lower_return_instruction(
         );
     }
 
-    let mut _if148 -> boolean = false;
+    let mut _if148: boolean = false;
     if instr_expression == null { _if148 = true; }
     if instr_expression.length == 0 { _if148 = true; }
     if _if148 {
@@ -577,7 +577,7 @@ fn lower_return_instruction(
     if debug_lowering {
         print.err("emit-llvm: lower_return post_suspension fn=" + fn_name);
     }
-    let mut _ci16 -> number = 0;
+    let mut _ci16: number = 0;
     loop {
         if _ci16 >= suspension_diagnostics.length { break; }
         diagnostics.push(suspension_diagnostics[_ci16]);
@@ -591,7 +591,7 @@ fn lower_return_instruction(
     if debug_lowering {
         print.err("emit-llvm: lower_return post_ownership fn=" + fn_name);
     }
-    let mut _ci17 -> number = 0;
+    let mut _ci17: number = 0;
     loop {
         if _ci17 >= ownership_analysis.diagnostics.length { break; }
         diagnostics.push(ownership_analysis.diagnostics[_ci17]);
@@ -602,7 +602,7 @@ fn lower_return_instruction(
     if debug_lowering {
         print.err("emit-llvm: lower_return pre_lower_expr fn=" + fn_name + " expr=" + instr_expression);
         print.err("emit-llvm: lower_return bindings_len=" + number_to_string(current_bindings.length));
-        let mut bind_i -> number = 0;
+        let mut bind_i: number = 0;
         loop {
             if bind_i >= current_bindings.length {
                 break;
@@ -613,7 +613,7 @@ fn lower_return_instruction(
     }
     // Pre-process self.field patterns via helper (extracted to stay under 500 instr)
     preprocess_self_field_access(instr_expression, current_temp, current_lines);
-    let mut _ret_expr -> string = instr_expression;
+    let mut _ret_expr: string = instr_expression;
     if fs.exists("build/sailfin/.self_field_expr") {
         _ret_expr = fs.readFile("build/sailfin/.self_field_expr");
         let _sf_temp_str = fs.readFile("build/sailfin/.self_field_temp");
@@ -623,7 +623,7 @@ fn lower_return_instruction(
         let _sf_lc = _parse_int_local(_sf_lc_str);
         if _sf_lc > current_lines.length {
             let _sf_lines_raw = fs.readFile("build/sailfin/.self_field_lines");
-            let mut _sf_new_lines -> string[] = [];
+            let mut _sf_new_lines: string[] = [];
             if _sf_lines_raw.length > 0 {
                 _sf_new_lines = split_lines_local(_sf_lines_raw);
             }
@@ -635,7 +635,7 @@ fn lower_return_instruction(
     if debug_lowering {
         print.err("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
     }
-    let mut _ci18 -> number = 0;
+    let mut _ci18: number = 0;
     loop {
         if _ci18 >= lowered.diagnostics.length { break; }
         diagnostics.push(lowered.diagnostics[_ci18]);
@@ -681,7 +681,7 @@ fn lower_return_instruction(
     if debug_lowering {
         print.err("emit-llvm: lower_return post_coerce fn=" + fn_name);
     }
-    let mut _ci19 -> number = 0;
+    let mut _ci19: number = 0;
     loop {
         if _ci19 >= coerced.diagnostics.length { break; }
         diagnostics.push(coerced.diagnostics[_ci19]);
@@ -725,19 +725,19 @@ fn lower_return_instruction(
 }
 
 
-fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> ParameterPreparation {
-    let mut signature -> string[] = [];
-    let mut bindings -> ParameterBinding[] = [];
-    let mut diagnostics -> string[] = [];
-    let mut seen_names -> string[] = [];
-    let mut index -> number = 0;
+fn prepare_parameters(function: NativeFunction, context: TypeContext) -> ParameterPreparation {
+    let mut signature: string[] = [];
+    let mut bindings: ParameterBinding[] = [];
+    let mut diagnostics: string[] = [];
+    let mut seen_names: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= function.parameters.length {
             break;
         }
         let parameter = function.parameters[index];
         let mut llvm_type = map_parameter_type(context, parameter.type_annotation);
-        let mut inferred_self_type -> boolean = false;
+        let mut inferred_self_type: boolean = false;
         // Method receiver type inference: the self parameter type is set by
         // flatten_struct_methods in lowering_helpers_mangling.sfn. Fused method
         // names (e.g. Counteris_zero) cannot be split back into struct + method.
@@ -761,7 +761,7 @@ fn prepare_parameters(function -> NativeFunction, context -> TypeContext) -> Par
         // Deduplicate parameter names: if this name was already used,
         // append a numeric suffix to make it unique (LLVM requires unique param names).
         let mut llvm_name = "%" + sanitized;
-        let mut dedup_count -> number = 1;
+        let mut dedup_count: number = 1;
         loop {
             if !string_array_contains(seen_names, llvm_name) {
                 break;

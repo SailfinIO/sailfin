@@ -17,14 +17,14 @@
 // ---- Layer types ----
 
 struct Linear {
-    weights -> number[];   // flat [out_features, in_features] row-major
-    biases -> number[];    // [out_features]
-    in_features -> number;
-    out_features -> number;
+    weights: number[];   // flat [out_features, in_features] row-major
+    biases: number[];    // [out_features]
+    in_features: number;
+    out_features: number;
 }
 
 struct ReLULayer {
-    size -> number;        // expected input size (for documentation)
+    size: number;        // expected input size (for documentation)
 }
 
 struct SequentialLayer {
@@ -32,20 +32,20 @@ struct SequentialLayer {
     // For now, stores linear layers only. Generic layer types
     // will be supported once Sailfin's type system supports
     // trait-based dispatch (interface Layer { fn forward(...) }).
-    linears -> Linear[];
-    relu_after -> boolean[];  // whether to apply ReLU after each linear
+    linears: Linear[];
+    relu_after: boolean[];  // whether to apply ReLU after each linear
 }
 
 // ---- Constructors ----
 
-fn linear(in_features -> number, out_features -> number) -> Linear {
+fn linear(in_features: number, out_features: number) -> Linear {
     // Create a linear (fully connected) layer with zero-initialized parameters.
     // In practice, weights should be initialized with small random values.
     // Random initialization will use the `rand` effect once available.
     let weight_count = in_features * out_features;
-    let mut weights -> number[] = [];
-    let mut biases -> number[] = [];
-    let mut i -> number = 0;
+    let mut weights: number[] = [];
+    let mut biases: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= weight_count { break; }
         weights.push(0);
@@ -63,25 +63,25 @@ fn linear(in_features -> number, out_features -> number) -> Linear {
     };
 }
 
-fn relu_layer(size -> number) -> ReLULayer {
+fn relu_layer(size: number) -> ReLULayer {
     return ReLULayer { size: size };
 }
 
-fn sequential(linears -> Linear[], relu_after -> boolean[]) -> SequentialLayer {
+fn sequential(linears: Linear[], relu_after: boolean[]) -> SequentialLayer {
     return SequentialLayer { linears: linears, relu_after: relu_after };
 }
 
 // ---- Forward pass ----
 
-fn forward_linear(layer -> Linear, input -> number[]) -> number[] {
+fn forward_linear(layer: Linear, input: number[]) -> number[] {
     // Forward pass for a linear layer: output = input * W^T + bias
     // input: [in_features], output: [out_features]
-    let mut output -> number[] = [];
-    let mut o -> number = 0;
+    let mut output: number[] = [];
+    let mut o: number = 0;
     loop {
         if o >= layer.out_features { break; }
-        let mut val -> number = layer.biases[o];
-        let mut j -> number = 0;
+        let mut val: number = layer.biases[o];
+        let mut j: number = 0;
         loop {
             if j >= layer.in_features { break; }
             val = val + input[j] * layer.weights[o * layer.in_features + j];
@@ -93,10 +93,10 @@ fn forward_linear(layer -> Linear, input -> number[]) -> number[] {
     return output;
 }
 
-fn forward_relu(input -> number[]) -> number[] {
+fn forward_relu(input: number[]) -> number[] {
     // Apply ReLU activation: max(0, x) for each element.
-    let mut output -> number[] = [];
-    let mut i -> number = 0;
+    let mut output: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= input.length { break; }
         if input[i] > 0 {
@@ -109,11 +109,11 @@ fn forward_relu(input -> number[]) -> number[] {
     return output;
 }
 
-fn forward_sequential(model -> SequentialLayer, input -> number[]) -> number[] {
+fn forward_sequential(model: SequentialLayer, input: number[]) -> number[] {
     // Forward pass through a sequential model.
     // relu_after must have the same length as linears.
-    let mut current -> number[] = input;
-    let mut i -> number = 0;
+    let mut current: number[] = input;
+    let mut i: number = 0;
     let n = model.linears.length;
     loop {
         if i >= n { break; }
@@ -128,7 +128,7 @@ fn forward_sequential(model -> SequentialLayer, input -> number[]) -> number[] {
 
 // ---- Parameter access ----
 
-fn parameter_count(layer -> Linear) -> number {
+fn parameter_count(layer: Linear) -> number {
     // Total trainable parameters (weights + biases).
     return layer.in_features * layer.out_features + layer.out_features;
 }

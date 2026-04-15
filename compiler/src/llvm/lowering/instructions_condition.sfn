@@ -49,27 +49,27 @@ import {
     _parse_int_from_string,
 } from "./instructions_helpers";
 
-fn allocate_block_label(prefix -> string, counter -> number) -> BlockLabelResult {
+fn allocate_block_label(prefix: string, counter: number) -> BlockLabelResult {
     return BlockLabelResult { label: prefix + number_to_string(counter), next_counter: counter + 1 };
 }
 
 fn lower_condition_to_i1(
-    function_name -> string,
-    expression -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    temp_index -> number,
-    lines -> string[],
-    functions -> NativeFunction[],
-    context -> TypeContext
+    function_name: string,
+    expression: string,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    temp_index: number,
+    lines: string[],
+    functions: NativeFunction[],
+    context: TypeContext
 ) -> ConditionConversion {
-    let mut diagnostics -> string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
+    let mut diagnostics: string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
     // Write local type annotations to a file so the cross-module expression
     // lowering can resolve struct types for method calls.  The v0.1.1 seed
     // corrupts the locals array when passed across module boundaries, so
     // resolve_struct_info_for_method_target can't inspect local.type_annotation.
-    let mut _lta_lines -> string[] = [];
-    let mut _lta_i -> number = 0;
+    let mut _lta_lines: string[] = [];
+    let mut _lta_i: number = 0;
     loop {
         if _lta_i >= locals.length { break; }
         let mut _lta_name = locals[_lta_i].name;
@@ -85,18 +85,18 @@ fn lower_condition_to_i1(
     }
     fs.writeLines("build/sailfin/.condition_locals", _lta_lines);
     let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
-    let mut _ci11 -> number = 0;
+    let mut _ci11: number = 0;
     loop {
         if _ci11 >= lowered.diagnostics.length { break; }
         diagnostics.push(lowered.diagnostics[_ci11]);
         _ci11 += 1;
     }
-    let mut current_lines -> string[] = lowered.lines;
-    let mut current_temp -> number = lowered.temp_index;
+    let mut current_lines: string[] = lowered.lines;
+    let mut current_temp: number = lowered.temp_index;
     // Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0.
     // Scan lines for the highest %tN assignment and use that to recover current_temp.
     {
-        let mut _scan_i -> number = 0;
+        let mut _scan_i: number = 0;
         loop {
             if _scan_i >= current_lines.length { break; }
             let _scan_line = current_lines[_scan_i];
@@ -139,7 +139,7 @@ fn lower_condition_to_i1(
         return ConditionConversion { lines: current_lines, temp_index: current_temp + 1, operand: converted, diagnostics: diagnostics, string_constants: string_constants };
     }
 
-    let mut _if226 -> boolean = false;
+    let mut _if226: boolean = false;
     if operand.llvm_type == "i32" { _if226 = true; }
     if operand.llvm_type == "i64" { _if226 = true; }
     if _if226 {
@@ -153,7 +153,7 @@ fn lower_condition_to_i1(
     return ConditionConversion { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
 }
 
-fn sanitize_if_condition_text(condition -> string) -> string {
+fn sanitize_if_condition_text(condition: string) -> string {
     let trimmed = trim_text(condition);
     if trimmed.length == 0 {
         return trimmed;
@@ -167,12 +167,12 @@ fn sanitize_if_condition_text(condition -> string) -> string {
 
     // Scan for a top-level `{` that appears after some expression content; treat it as the
     // start of the if body and truncate.
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut in_string -> boolean = false;
-    let mut escape_next -> boolean = false;
-    let mut index -> number = 0;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut in_string: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut index: number = 0;
 
     loop {
         if index >= trimmed.length {

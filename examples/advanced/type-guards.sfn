@@ -1,8 +1,8 @@
 // examples/advanced/type-guards.sfn
 
 struct User {
-    name -> string;
-    age -> number;
+    name: string;
+    age: number;
 }
 
 fn process(input: string | number) ![io] {

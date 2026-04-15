@@ -15,12 +15,12 @@ fn empty_string_constant_set() -> StringConstant[] {
     return [];
 }
 
-fn string_constant_singleton(constant -> StringConstant) -> StringConstant[] {
+fn string_constant_singleton(constant: StringConstant) -> StringConstant[] {
     return [constant];
 }
 
 
-fn append_string_constant(set -> StringConstant[], constant -> StringConstant) -> StringConstant[] {
+fn append_string_constant(set: StringConstant[], constant: StringConstant) -> StringConstant[] {
     let mut out = set;
     if out == null {
         out = [];
@@ -32,7 +32,7 @@ fn append_string_constant(set -> StringConstant[], constant -> StringConstant) -
     return out;
 }
 
-fn merge_string_constants(existing -> StringConstant[], new_constants -> StringConstant[]) -> StringConstant[] {
+fn merge_string_constants(existing: StringConstant[], new_constants: StringConstant[]) -> StringConstant[] {
     let mut safe_existing = existing;
     if safe_existing == null {
         safe_existing = [];
@@ -50,13 +50,13 @@ fn merge_string_constants(existing -> StringConstant[], new_constants -> StringC
 
     // Append new constants directly onto the existing array (in-place via push)
     // to avoid cloning the entire set on every merge.
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= safe_new_constants.length {
             break;
         }
         let candidate = safe_new_constants[index];
-        let mut _if298 -> boolean = false;
+        let mut _if298: boolean = false;
         if candidate == null { _if298 = true; }
         if candidate.name == null { _if298 = true; }
         if _if298 {
@@ -76,11 +76,11 @@ fn merge_string_constants(existing -> StringConstant[], new_constants -> StringC
 // String Constant Lookup
 // =============================================================================
 
-fn find_string_constant(constants -> StringConstant[], content -> string) -> StringConstant? {
+fn find_string_constant(constants: StringConstant[], content: string) -> StringConstant? {
     if constants == null {
         return null;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= constants.length {
             break;
@@ -96,11 +96,11 @@ fn find_string_constant(constants -> StringConstant[], content -> string) -> Str
     return null;
 }
 
-fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -> StringConstant? {
+fn find_string_constant_by_name(constants: StringConstant[], name: string) -> StringConstant? {
     if constants == null {
         return null;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= constants.length {
             break;
@@ -120,12 +120,12 @@ fn find_string_constant_by_name(constants -> StringConstant[], name -> string) -
 // LLVM IR Rendering
 // =============================================================================
 
-fn render_string_constants(constants -> StringConstant[]) -> string[] {
+fn render_string_constants(constants: StringConstant[]) -> string[] {
     if constants == null {
         return [];
     }
-    let mut lines -> string[] = [];
-    let mut index -> number = 0;
+    let mut lines: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= constants.length {
             break;
@@ -146,7 +146,7 @@ fn render_string_constants(constants -> StringConstant[]) -> string[] {
     return lines;
 }
 
-fn escape_string_for_llvm(content -> string) -> string {
+fn escape_string_for_llvm(content: string) -> string {
     if content == null {
         return "";
     }
@@ -156,15 +156,15 @@ fn escape_string_for_llvm(content -> string) -> string {
     // the zero-GC runtime — every intermediate `result` survives forever.
     // Chunking reduces concats from N to ~(2 * number-of-escape-chars + 1),
     // which is small for typical LLVM string constants.
-    let mut chunks -> string[] = [];
-    let mut chunk_start -> number = 0;
-    let mut index -> number = 0;
+    let mut chunks: string[] = [];
+    let mut chunk_start: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= content.length {
             break;
         }
         let ch = substring(content, index, index + 1);
-        let mut esc -> string = "";
+        let mut esc: string = "";
         if ch == "\n" {
             esc = "\\0A";
         } else if ch == "\r" {
@@ -194,8 +194,8 @@ fn escape_string_for_llvm(content -> string) -> string {
     if chunks.length == 1 {
         return chunks[0];
     }
-    let mut result -> string = chunks[0];
-    let mut i -> number = 1;
+    let mut result: string = chunks[0];
+    let mut i: number = 1;
     loop {
         if i >= chunks.length {
             break;

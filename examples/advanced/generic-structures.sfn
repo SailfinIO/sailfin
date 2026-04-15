@@ -1,17 +1,17 @@
 // examples/advanced/generic-structures.sfn
 
 struct List<T> {
-    items -> T[];
+    items: T[];
 
     fn new() -> List<T> {
         return List<T> { items: [] };
     }
 
-    fn add(self, item -> T) -> void {
+    fn add(self, item: T) -> void {
         self.items.append(item);
     }
 
-    fn get(self, index -> number) -> T | null {
+    fn get(self, index: number) -> T | null {
         if index < 0 || index >= self.items.length {
             return null;
         }
@@ -20,7 +20,7 @@ struct List<T> {
 }
 
 fn main() ![io] {
-    let numbers -> List<number> = List.new();
+    let numbers: List<number> = List.new();
     numbers.add(1);
     numbers.add(2);
     print("{{numbers.get(0)}}");

@@ -1,4 +1,4 @@
-fn _sign(n -> number) -> string {
+fn _sign(n: number) -> string {
     if n > 0 {
         return "positive";
     } else if n < 0 {
@@ -11,7 +11,7 @@ fn _sign(n -> number) -> string {
 // NOTE: match on number literals causes a compiler segfault during LLVM
 // lowering (globals phase). Using if/else-if chain as a workaround.
 // See: https://github.com/SailfinIO/sailfin/issues/50
-fn _classify_day(day -> number) -> string {
+fn _classify_day(day: number) -> string {
     if day == 1 {
         return "Monday";
     } else if day == 2 {
@@ -30,14 +30,14 @@ fn _classify_day(day -> number) -> string {
     return "unknown";
 }
 
-fn _max(a -> number, b -> number) -> number {
+fn _max(a: number, b: number) -> number {
     if a >= b {
         return a;
     }
     return b;
 }
 
-fn _min(a -> number, b -> number) -> number {
+fn _min(a: number, b: number) -> number {
     if a <= b {
         return a;
     }
@@ -85,9 +85,9 @@ test "control_flow: min returns smaller value" {
 }
 
 test "control_flow: nested if evaluates inner condition" {
-    let a -> number = 10;
-    let b -> number = 5;
-    let mut result -> string = "none";
+    let a: number = 10;
+    let b: number = 5;
+    let mut result: string = "none";
     if a > 0 {
         if b > 0 {
             result = "both positive";
@@ -97,7 +97,7 @@ test "control_flow: nested if evaluates inner condition" {
 }
 
 test "control_flow: boolean short-circuit with &&" {
-    let mut side_effect -> number = 0;
+    let mut side_effect: number = 0;
     if false && (side_effect == 0) {
         side_effect = 1;
     }
