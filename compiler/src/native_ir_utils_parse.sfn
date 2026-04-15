@@ -593,11 +593,24 @@ fn parse_enum_variant_field(text: string) -> NativeEnumVariantField? {
         is_mutable = true;
         trimmed = trim_text(strip_prefix(trimmed, "mut "));
     }
-    let mut arrow_index: number = index_of(trimmed, ":");
-    let mut sep_len: number = 1;
-    if arrow_index < 0 {
-        arrow_index = index_of(trimmed, "->");
+    let colon_idx = index_of(trimmed, ": ");
+    let legacy_arrow_idx = index_of(trimmed, " -> ");
+    let mut arrow_index: number = -1;
+    let mut sep_len: number = 2;
+    if colon_idx >= 0 {
+        arrow_index = colon_idx;
         sep_len = 2;
+    }
+    if legacy_arrow_idx >= 0 {
+        let mut use_arrow: boolean = false;
+        if arrow_index < 0 { use_arrow = true; }
+        if arrow_index >= 0 {
+            if legacy_arrow_idx < arrow_index { use_arrow = true; }
+        }
+        if use_arrow {
+            arrow_index = legacy_arrow_idx;
+            sep_len = 4;
+        }
     }
     if arrow_index < 0 {
         return null;
@@ -620,11 +633,24 @@ fn parse_struct_field_line(text: string) -> NativeStructField? {
         is_mutable = true;
         trimmed = trim_text(strip_prefix(trimmed, "mut "));
     }
-    let mut arrow_index: number = index_of(trimmed, ":");
-    let mut sep_len: number = 1;
-    if arrow_index < 0 {
-        arrow_index = index_of(trimmed, "->");
+    let colon_idx = index_of(trimmed, ": ");
+    let legacy_arrow_idx = index_of(trimmed, " -> ");
+    let mut arrow_index: number = -1;
+    let mut sep_len: number = 2;
+    if colon_idx >= 0 {
+        arrow_index = colon_idx;
         sep_len = 2;
+    }
+    if legacy_arrow_idx >= 0 {
+        let mut use_arrow: boolean = false;
+        if arrow_index < 0 { use_arrow = true; }
+        if arrow_index >= 0 {
+            if legacy_arrow_idx < arrow_index { use_arrow = true; }
+        }
+        if use_arrow {
+            arrow_index = legacy_arrow_idx;
+            sep_len = 4;
+        }
     }
     if arrow_index < 0 {
         return null;
