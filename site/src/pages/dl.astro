@@ -1,21 +1,118 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
 
-const stableVersion = "0.5.1";
-const stableTag = `v${stableVersion}`;
-const ghBase = `https://github.com/SailfinIO/sailfin/releases/download/${stableTag}`;
+// ---------------------------------------------------------------------------
+// Fetch release data from GitHub API at build time.
+// The site is output: "static", so this runs once during `astro build` and
+// the result is baked into the HTML. Cloudflare Pages rebuilds on every push
+// to main — including the version-bump commit the release workflow creates —
+// so the downloads page stays current automatically.
+// ---------------------------------------------------------------------------
 
-const featured = [
-  { os: "Linux", arch: "x86_64", icon: "linux", file: `sailfin_${stableVersion}_linux_x86_64.tar.gz`, size: "1.8 MB" },
-  { os: "macOS", arch: "Apple Silicon", icon: "apple", file: `sailfin_${stableVersion}_macos_arm64.tar.gz`, size: "1.7 MB" },
-  { os: "Windows", arch: "x86_64", icon: "windows", file: `sailfin_${stableVersion}_windows_x86_64.tar.gz`, size: "1.7 MB" },
-];
+interface GHAsset {
+  name: string;
+  size: number;
+  browser_download_url: string;
+  digest?: string;
+}
 
-const allAssets = [
-  { file: `sailfin_${stableVersion}_linux_x86_64.tar.gz`, kind: "Archive", os: "Linux", arch: "x86_64", size: "1.8 MB", sha256: "87cdd8544ea44f9d1e920ba4fc9473cd0c00e830adbf13f42febb229d694fce3" },
-  { file: `sailfin_${stableVersion}_macos_arm64.tar.gz`, kind: "Archive", os: "macOS", arch: "ARM64", size: "1.7 MB", sha256: "2ee476b4f310d26747f453cd88357eba2e559e7d64c48312b3e5afdbf5765ac4" },
-  { file: `sailfin_${stableVersion}_windows_x86_64.tar.gz`, kind: "Archive", os: "Windows", arch: "x86_64", size: "1.7 MB", sha256: "83ae2ffa8dcc81765dd6f9edf4f4c67ffc76a1188e05e9976cb7b66f0aacc68f" },
-];
+interface GHRelease {
+  tag_name: string;
+  prerelease: boolean;
+  draft: boolean;
+  assets: GHAsset[];
+}
+
+interface ParsedAsset {
+  file: string;
+  url: string;
+  os: string;
+  arch: string;
+  friendlyArch: string;
+  icon: string;
+  size: string;
+  sha256: string;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function parseAsset(asset: GHAsset): ParsedAsset | null {
+  const match = asset.name.match(/^sailfin_([\d.]+[^_]*)_(.+)_(.+)\.tar\.gz$/);
+  if (!match) return null;
+
+  const osRaw = match[2];
+  const archRaw = match[3];
+
+  const osLabels: Record<string, string> = { linux: "Linux", macos: "macOS", darwin: "macOS", windows: "Windows" };
+  const os = osLabels[osRaw] ?? osRaw;
+  const arch = archRaw === "arm64" ? "ARM64" : archRaw;
+  const friendlyArch = osRaw === "macos" && archRaw === "arm64" ? "Apple Silicon"
+                     : osRaw === "darwin" && archRaw === "arm64" ? "Apple Silicon"
+                     : arch;
+  const icons: Record<string, string> = { linux: "linux", macos: "apple", darwin: "apple", windows: "windows" };
+  const icon = icons[osRaw] ?? "linux";
+
+  return {
+    file: asset.name,
+    url: asset.browser_download_url,
+    os,
+    arch,
+    friendlyArch,
+    icon,
+    size: formatBytes(asset.size),
+    sha256: asset.digest?.replace(/^sha256:/, "") ?? "",
+  };
+}
+
+// Fetch releases — tolerate API failures gracefully
+let stableVersion = "0.5.1";
+let stableTag = `v${stableVersion}`;
+let allAssets: ParsedAsset[] = [];
+
+try {
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+  const token = import.meta.env.GITHUB_TOKEN;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch("https://api.github.com/repos/SailfinIO/sailfin/releases?per_page=30", { headers });
+  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+
+  const releases: GHRelease[] = await res.json();
+  const stable = releases.find((r) => !r.prerelease && !r.draft);
+
+  if (stable) {
+    stableTag = stable.tag_name;
+    stableVersion = stableTag.replace(/^v/, "");
+
+    // Filter to installer tarballs (sailfin_VERSION_OS_ARCH.tar.gz), skip .sha256 / .manifest.json / native build assets
+    const installerAssets = stable.assets.filter((a) =>
+      /^sailfin_[\d.]/.test(a.name) &&
+      a.name.endsWith(".tar.gz") &&
+      !a.name.endsWith(".sha256") &&
+      !a.name.includes("-native-")
+    );
+
+    allAssets = installerAssets.map(parseAsset).filter((a): a is ParsedAsset => a !== null);
+  }
+} catch (e) {
+  console.warn(`[dl] Failed to fetch releases from GitHub, using fallback: ${e}`);
+}
+
+// Fallback if API returned nothing
+if (allAssets.length === 0) {
+  const ghBase = `https://github.com/SailfinIO/sailfin/releases/download/${stableTag}`;
+  allAssets = [
+    { file: `sailfin_${stableVersion}_linux_x86_64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_linux_x86_64.tar.gz`, os: "Linux", arch: "x86_64", friendlyArch: "x86_64", icon: "linux", size: "", sha256: "" },
+    { file: `sailfin_${stableVersion}_macos_arm64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_macos_arm64.tar.gz`, os: "macOS", arch: "ARM64", friendlyArch: "Apple Silicon", icon: "apple", size: "", sha256: "" },
+    { file: `sailfin_${stableVersion}_windows_x86_64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_windows_x86_64.tar.gz`, os: "Windows", arch: "x86_64", friendlyArch: "x86_64", icon: "windows", size: "", sha256: "" },
+  ];
+}
+
+const featured = allAssets;
 ---
 
 <BaseLayout title="Downloads" description="Download the Sailfin compiler for your platform.">
@@ -54,12 +151,12 @@ const allAssets = [
       <p class="section-desc">Pre-built binaries for supported platforms. Download, extract, and add to your PATH.</p>
       <div class="featured-grid">
         {featured.map((d) => (
-          <a href={`${ghBase}/${d.file}`} class="featured-card">
+          <a href={d.url} class="featured-card">
             <div class="featured-icon" aria-hidden="true">{d.icon === "linux" ? "\u{1F427}" : d.icon === "apple" ? "\u{1F34E}" : "\u{1FA9F}"}</div>
             <div class="featured-info">
               <strong>{d.os}</strong>
-              <span class="featured-arch">{d.arch}</span>
-              <span class="featured-size">{d.size}</span>
+              <span class="featured-arch">{d.friendlyArch}</span>
+              {d.size && <span class="featured-size">{d.size}</span>}
             </div>
             <span class="featured-file">{d.file}</span>
           </a>
@@ -86,11 +183,11 @@ const allAssets = [
           <tbody>
             {allAssets.map((a) => (
               <tr>
-                <td><a href={`${ghBase}/${a.file}`}>{a.file}</a></td>
+                <td><a href={a.url}>{a.file}</a></td>
                 <td>{a.os}</td>
                 <td>{a.arch}</td>
-                <td>{a.size}</td>
-                <td class="sha-cell"><code>{a.sha256}</code></td>
+                <td>{a.size || "—"}</td>
+                <td class="sha-cell">{a.sha256 ? <code>{a.sha256}</code> : "—"}</td>
               </tr>
             ))}
           </tbody>
