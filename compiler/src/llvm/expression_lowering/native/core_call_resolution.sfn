@@ -681,10 +681,10 @@ fn _find_function_from_files_res(target -> string) -> NativeFunction? ![io] {
                 let pp = prefix + "_param_" + number_to_string(j);
                 let pname = fs.readFile(pp + "_name");
                 let ptype = fs.readFile(pp + "_type");
-                params = params.concat([NativeParameter {
+                params.push(NativeParameter {
                             name: pname, type_annotation: ptype,
                             mutable: false, default_value: null, span: null,
-                }]);
+                });
                 j += 1;
             }
             return NativeFunction {
@@ -709,10 +709,10 @@ fn _find_function_from_files_res(target -> string) -> NativeFunction? ![io] {
                     let pp = prefix + "_param_" + number_to_string(j);
                     let pname = fs.readFile(pp + "_name");
                     let ptype = fs.readFile(pp + "_type");
-                    params = params.concat([NativeParameter {
+                    params.push(NativeParameter {
                                 name: pname, type_annotation: ptype,
                                 mutable: false, default_value: null, span: null,
-                    }]);
+                    });
                     j += 1;
                 }
                 suffix_match = NativeFunction {
@@ -855,7 +855,7 @@ fn resolve_call_signature(
                             if _fl_j >= _fl_pc { break; }
                             let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
                             let _fl_mapped = map_parameter_type(context, _fl_ptype);
-                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
+                            _file_fn_param_types.push(_fl_mapped);
                             _fl_j += 1;
                         }
                         _file_fn_found = true;
@@ -881,7 +881,7 @@ fn resolve_call_signature(
                             if _fl_j >= _fl_pc { break; }
                             let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
                             let _fl_mapped = map_parameter_type(context, _fl_ptype);
-                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
+                            _file_fn_param_types.push(_fl_mapped);
                             _fl_j += 1;
                         }
                         _file_fn_found = true;

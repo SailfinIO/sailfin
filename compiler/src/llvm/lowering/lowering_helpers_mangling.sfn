@@ -387,13 +387,12 @@ fn append_native_function(values -> NativeFunction[], value -> NativeFunction) -
 }
 
 fn concat_native_functions(first -> NativeFunction[], second -> NativeFunction[]) -> NativeFunction[] {
-    let mut result -> NativeFunction[] = [];
-    let mut safe_first = first;
-    if safe_first == null {
-        safe_first = [];
+    let mut result = first;
+    if result == null {
+        result = [];
     }
-    if safe_first.length > 200000 {
-        return result;
+    if result.length > 200000 {
+        return [];
     }
     let mut safe_second = second;
     if safe_second == null {
@@ -403,14 +402,6 @@ fn concat_native_functions(first -> NativeFunction[], second -> NativeFunction[]
         return result;
     }
     let mut index -> number = 0;
-    loop {
-        if index >= safe_first.length {
-            break;
-        }
-        result = append_native_function(result, safe_first[index]);
-        index += 1;
-    }
-    index = 0;
     loop {
         if index >= safe_second.length {
             break;

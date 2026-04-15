@@ -693,7 +693,7 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
                 if angle_depth == 0 {
                     let part = trim_text(substring(params_text, start_index, scan));
                     if part.length > 0 {
-                        parts = parts.concat([part]);
+                        parts.push(part);
                     }
                     start_index = scan + 1;
                 }
@@ -703,7 +703,7 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
     }
     let final_part = trim_text(substring(params_text, start_index, params_text.length));
     if final_part.length > 0 {
-        parts = parts.concat([final_part]);
+        parts.push(final_part);
     }
     // Strip parameter names from define-style params (e.g. "i8* %text" → "i8*").
     // Only strip the trailing `%name` when it appears at the top level (curly
@@ -903,14 +903,14 @@ fn render_function_shim(export_symbol -> string, target_symbol -> string, signat
         }
         let ty = trim_text(signature.param_types[idx]);
         if ty == "..." {
-            param_decls = param_decls.concat(["..."]);
+            param_decls.push("...");
             // Varargs shims are not supported; omit forwarding.
             idx += 1;
             continue;
         }
         let name = "%a" + number_to_string(idx);
-        param_decls = param_decls.concat([ty + " " + name]);
-        call_args = call_args.concat([ty + " " + name]);
+        param_decls.push(ty + " " + name);
+        call_args.push(ty + " " + name);
         idx += 1;
     }
 
@@ -965,11 +965,11 @@ fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[
                 if j >= inserted.length {
                     break;
                 }
-                out = out.concat([inserted[j]]);
+                out.push(inserted[j]);
                 j += 1;
             }
         }
-        out = out.concat([lines[i]]);
+        out.push(lines[i]);
         i += 1;
     }
     if footer_index == lines.length {
@@ -978,7 +978,7 @@ fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[
             if j >= inserted.length {
                 break;
             }
-            out = out.concat([inserted[j]]);
+            out.push(inserted[j]);
             j += 1;
         }
     }
