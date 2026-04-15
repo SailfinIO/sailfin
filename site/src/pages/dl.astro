@@ -41,7 +41,7 @@ function formatBytes(bytes: number): string {
 }
 
 function parseAsset(asset: GHAsset): ParsedAsset | null {
-  const match = asset.name.match(/^sailfin_([\d.]+[^_]*)_(.+)_(.+)\.tar\.gz$/);
+  const match = asset.name.match(/^sailfin_([\d.]+[^_]*)_([a-z]+)_(.+)\.tar\.gz$/);
   if (!match) return null;
 
   const osRaw = match[2];
