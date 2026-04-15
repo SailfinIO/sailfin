@@ -593,7 +593,25 @@ fn parse_enum_variant_field(text: string) -> NativeEnumVariantField? {
         is_mutable = true;
         trimmed = trim_text(strip_prefix(trimmed, "mut "));
     }
-    let arrow_index = index_of(trimmed, "->");
+    let colon_idx = index_of(trimmed, ": ");
+    let legacy_arrow_idx = index_of(trimmed, " -> ");
+    let mut arrow_index: number = -1;
+    let mut sep_len: number = 2;
+    if colon_idx >= 0 {
+        arrow_index = colon_idx;
+        sep_len = 2;
+    }
+    if legacy_arrow_idx >= 0 {
+        let mut use_arrow: boolean = false;
+        if arrow_index < 0 { use_arrow = true; }
+        if arrow_index >= 0 {
+            if legacy_arrow_idx < arrow_index { use_arrow = true; }
+        }
+        if use_arrow {
+            arrow_index = legacy_arrow_idx;
+            sep_len = 4;
+        }
+    }
     if arrow_index < 0 {
         return null;
     }
@@ -601,7 +619,7 @@ fn parse_enum_variant_field(text: string) -> NativeEnumVariantField? {
     if name.length == 0 {
         return null;
     }
-    let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length));
+    let type_text = trim_text(substring(trimmed, arrow_index + sep_len, trimmed.length));
     return NativeEnumVariantField { name: name, type_annotation: type_text, mutable: is_mutable };
 }
 
@@ -615,7 +633,25 @@ fn parse_struct_field_line(text: string) -> NativeStructField? {
         is_mutable = true;
         trimmed = trim_text(strip_prefix(trimmed, "mut "));
     }
-    let arrow_index = index_of(trimmed, "->");
+    let colon_idx = index_of(trimmed, ": ");
+    let legacy_arrow_idx = index_of(trimmed, " -> ");
+    let mut arrow_index: number = -1;
+    let mut sep_len: number = 2;
+    if colon_idx >= 0 {
+        arrow_index = colon_idx;
+        sep_len = 2;
+    }
+    if legacy_arrow_idx >= 0 {
+        let mut use_arrow: boolean = false;
+        if arrow_index < 0 { use_arrow = true; }
+        if arrow_index >= 0 {
+            if legacy_arrow_idx < arrow_index { use_arrow = true; }
+        }
+        if use_arrow {
+            arrow_index = legacy_arrow_idx;
+            sep_len = 4;
+        }
+    }
     if arrow_index < 0 {
         return null;
     }
@@ -623,7 +659,7 @@ fn parse_struct_field_line(text: string) -> NativeStructField? {
     if name.length == 0 {
         return null;
     }
-    let type_text = trim_text(substring(trimmed, arrow_index + 2, trimmed.length));
+    let type_text = trim_text(substring(trimmed, arrow_index + sep_len, trimmed.length));
     return NativeStructField { name: name, type_annotation: type_text, mutable: is_mutable };
 }
 
@@ -744,6 +780,7 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
         if ch == " " { _if381 = true; }
         if ch == "-" { _if381 = true; }
         if ch == "=" { _if381 = true; }
+        if ch == ":" { _if381 = true; }
         if _if381 {
             break;
         }
@@ -758,7 +795,19 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
     let mut default_value: string? = null;
     let mut remainder = trim_text(substring(trimmed, index, trimmed.length));
     if remainder.length > 0 {
-        if starts_with(remainder, "->") {
+        if starts_with(remainder, ":") {
+            remainder = trim_text(strip_prefix(remainder, ":"));
+            let assign_index = index_of(remainder, "=");
+            if assign_index >= 0 {
+                type_annotation = trim_text(substring(remainder, 0, assign_index));
+                let default_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
+                if default_text.length > 0 {
+                    default_value = default_text;
+                }
+            } else {
+                type_annotation = trim_text(remainder);
+            }
+        } else if starts_with(remainder, "->") {
             remainder = trim_text(strip_prefix(remainder, "->"));
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
@@ -798,8 +847,20 @@ fn line_looks_like_parameter_entry(text: string) -> boolean {
         return false;
     }
     let arrow_index = index_of(trimmed, "->");
+    let colon_index = index_of(trimmed, ":");
+    let mut sep_index: number = -1;
+    if colon_index >= 0 {
+        sep_index = colon_index;
+    }
     if arrow_index >= 0 {
-        let mut head = trim_text(substring(trimmed, 0, arrow_index));
+        if sep_index < 0 {
+            sep_index = arrow_index;
+        } else if arrow_index < sep_index {
+            sep_index = arrow_index;
+        }
+    }
+    if sep_index >= 0 {
+        let mut head = trim_text(substring(trimmed, 0, sep_index));
         if head.length == 0 {
             return false;
         }

@@ -418,11 +418,11 @@ fn emit_block_body(builder: TextBuilder, block: Block) -> TextBuilder {
 
 fn emit_block_statement(builder: TextBuilder, statement: Statement) -> TextBuilder {
     if statement.variant == "ReturnStatement" {
-            let rendered = format_optional_expression(statement.expression);
-            if rendered.length == 0 {
-                return builder_emit_line(builder, "return;");
-            }
-            return builder_emit_line(builder, "return " + rendered + ";");
+        let rendered = format_optional_expression(statement.expression);
+        if rendered.length == 0 {
+            return builder_emit_line(builder, "return;");
+        }
+        return builder_emit_line(builder, "return " + rendered + ";");
     }
     if statement.variant == "LoopStatement" {
         let mut current = emit_decorators(builder, statement.decorators);
@@ -679,7 +679,7 @@ fn format_field(field: FieldDeclaration) -> string {
         line = line + "mut ";
     }
     line = line + field.name;
-    line = line + " -> " + field.type_annotation.text;
+    line = line + ": " + field.type_annotation.text;
     return line;
 }
 
@@ -723,7 +723,7 @@ fn format_parameter(parameter: Parameter) -> string {
         line = parameter.name;
     }
     if parameter.type_annotation != null {
-        line = line + " -> " + parameter.type_annotation.text;
+        line = line + ": " + parameter.type_annotation.text;
     }
     if parameter.default_value != null {
         line = line + " = " + format_optional_expression(parameter.default_value);

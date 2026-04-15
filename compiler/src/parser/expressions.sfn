@@ -842,7 +842,7 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
 
     let mut return_type: TypeAnnotation? = null;
     if !expression_tokens_is_at_end(current) {
-        let sep_result = expression_tokens_consume_type_separator(current, true, true);
+        let sep_result = expression_tokens_consume_type_separator(current, false, true);
         if sep_result.found {
             current = sep_result.state;
             let capture = expression_tokens_collect_until(current, ["{"]);
@@ -869,10 +869,10 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
 
     let mut block_tokens = block_result.tokens;
     block_tokens = append_token(block_tokens, Token {
-        kind: TokenKind.EndOfFile(),
-        lexeme: "",
-        line: 0,
-        column: 0,
+            kind: TokenKind.EndOfFile(),
+            lexeme: "",
+            line: 0,
+            column: 0,
     });
     let block_parser = Parser { tokens: block_tokens, index: 0 };
     let parsed_block = parse_block_for_lambda(block_parser);
@@ -917,7 +917,7 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
 
     let mut type_annotation: TypeAnnotation? = null;
     if !expression_tokens_is_at_end(current) {
-        let sep_result = expression_tokens_consume_type_separator(current, true, true);
+        let sep_result = expression_tokens_consume_type_separator(current, true, false);
         if sep_result.found {
             current = sep_result.state;
             let capture = expression_tokens_collect_until(current, ["=", ",", ")"]);

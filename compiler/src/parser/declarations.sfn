@@ -85,12 +85,17 @@ import { parse_block } from "./statements";
 // Type Separator
 // ============================================================================
 
-fn consume_type_separator(parser: Parser) -> TypeSeparatorParseResult {
+fn consume_annotation_separator(parser: Parser) -> TypeSeparatorParseResult {
     let token = parser_peek_raw(parser);
-    let mut _if394: boolean = false;
-    if symbol_matches(token, ":") { _if394 = true; }
-    if symbol_matches(token, "->") { _if394 = true; }
-    if _if394 {
+    if symbol_matches(token, ":") {
+        return TypeSeparatorParseResult { parser: parser_advance_raw(parser), found: true };
+    }
+    return TypeSeparatorParseResult { parser: parser, found: false };
+}
+
+fn consume_return_type_separator(parser: Parser) -> TypeSeparatorParseResult {
+    let token = parser_peek_raw(parser);
+    if symbol_matches(token, "->") {
         return TypeSeparatorParseResult { parser: parser_advance_raw(parser), found: true };
     }
     // Tolerate a lexer/runtime bug where `->` is split into `-` and `>`.
@@ -489,7 +494,7 @@ fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
 
     let mut type_annotation: TypeAnnotation? = null;
     parser = skip_trivia(parser);
-    let separator_result = consume_type_separator(parser);
+    let separator_result = consume_annotation_separator(parser);
     if separator_result.found {
         parser = separator_result.parser;
         let capture = collect_until(skip_trivia(parser), ["=", ",", ")"]);
@@ -748,7 +753,7 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
     let mut type_annotation: TypeAnnotation? = null;
     parser = skip_trivia(parser);
     let separator_token = parser_peek_raw(parser);
-    let separator_result = consume_type_separator(parser);
+    let separator_result = consume_annotation_separator(parser);
     if separator_result.found {
         statement_tokens = append_token(statement_tokens, separator_token);
         parser = separator_result.parser;
@@ -856,7 +861,7 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
 
     parser = skip_trivia(parser);
     let mut return_type: TypeAnnotation? = null;
-    let sep_result = consume_type_separator(parser);
+    let sep_result = consume_return_type_separator(parser);
     if sep_result.found {
         parser = sep_result.parser;
         let capture = collect_until(skip_trivia(parser), ["!", "{"]);
@@ -875,7 +880,7 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
     // Allow `fn foo() ![effects] -> T {}` ordering.
     if return_type == null {
         parser = skip_trivia(parser);
-        let late_sep = consume_type_separator(parser);
+        let late_sep = consume_return_type_separator(parser);
         if late_sep.found {
             parser = late_sep.parser;
             let capture = collect_until(skip_trivia(parser), ["{"]);
@@ -942,7 +947,7 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
 
     parser = skip_trivia(parser);
     let mut return_type: TypeAnnotation? = null;
-    let sep_result = consume_type_separator(parser);
+    let sep_result = consume_return_type_separator(parser);
     if sep_result.found {
         parser = sep_result.parser;
         let capture = collect_until(skip_trivia(parser), ["!", ";"]);
@@ -961,7 +966,7 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
     // Allow `extern fn foo() ![effects] -> T;` ordering.
     if return_type == null {
         parser = skip_trivia(parser);
-        let late_sep = consume_type_separator(parser);
+        let late_sep = consume_return_type_separator(parser);
         if late_sep.found {
             parser = late_sep.parser;
             let capture = collect_until(skip_trivia(parser), [";"]);
@@ -1099,7 +1104,7 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
     current = parser_advance_raw(current);
 
     current = skip_trivia(current);
-    let separator_result = consume_type_separator(current);
+    let separator_result = consume_annotation_separator(current);
     current = separator_result.parser;
     if !separator_result.found {
         return StructFieldParseResult { parser: parser, field: null, success: false };
@@ -1173,7 +1178,7 @@ fn parse_struct_method(parser: Parser, decorators: Decorator[]) -> MethodParseRe
 
     current = skip_trivia(current);
     let mut return_type: TypeAnnotation? = null;
-    let sep_result = consume_type_separator(current);
+    let sep_result = consume_return_type_separator(current);
     if sep_result.found {
         current = sep_result.parser;
         let capture = collect_until(skip_trivia(current), ["!", "{"]);
@@ -1361,7 +1366,7 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
     current = parser_advance_raw(current);
 
     current = skip_trivia(current);
-    let sep_result = consume_type_separator(current);
+    let sep_result = consume_annotation_separator(current);
     if !sep_result.found {
         return StructFieldParseResult { parser: parser, field: null, success: false };
     }
@@ -1520,7 +1525,7 @@ fn parse_interface_member(parser: Parser, decorators: Decorator[]) -> InterfaceM
 
     current = skip_trivia(current);
     let mut return_type: TypeAnnotation? = null;
-    let separator_result = consume_type_separator(current);
+    let separator_result = consume_return_type_separator(current);
     if separator_result.found {
         current = separator_result.parser;
         let capture = collect_until(skip_trivia(current), ["!", ";", "{" ]);
@@ -1759,7 +1764,7 @@ fn parse_pipeline(initial_parser: Parser, decorators: Decorator[]) -> StatementP
 
     parser = skip_trivia(parser);
     let mut return_type: TypeAnnotation? = null;
-    let sep_result = consume_type_separator(parser);
+    let sep_result = consume_return_type_separator(parser);
     if sep_result.found {
         parser = sep_result.parser;
         let capture = collect_until(skip_trivia(parser), ["!", "{"]);
@@ -1778,7 +1783,7 @@ fn parse_pipeline(initial_parser: Parser, decorators: Decorator[]) -> StatementP
     // Allow `pipeline foo() ![effects] -> T {}` ordering.
     if return_type == null {
         parser = skip_trivia(parser);
-        let late_sep = consume_type_separator(parser);
+        let late_sep = consume_return_type_separator(parser);
         if late_sep.found {
             parser = late_sep.parser;
             let capture = collect_until(skip_trivia(parser), ["{"]);
@@ -1835,7 +1840,7 @@ fn parse_tool(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
 
     parser = skip_trivia(parser);
     let mut return_type: TypeAnnotation? = null;
-    let sep_result = consume_type_separator(parser);
+    let sep_result = consume_return_type_separator(parser);
     if sep_result.found {
         parser = sep_result.parser;
         let capture = collect_until(skip_trivia(parser), ["!", "{"]);
@@ -1854,7 +1859,7 @@ fn parse_tool(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
     // Allow `tool foo() ![effects] -> T {}` ordering.
     if return_type == null {
         parser = skip_trivia(parser);
-        let late_sep = consume_type_separator(parser);
+        let late_sep = consume_return_type_separator(parser);
         if late_sep.found {
             parser = late_sep.parser;
             let capture = collect_until(skip_trivia(parser), ["{"]);

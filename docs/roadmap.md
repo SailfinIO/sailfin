@@ -28,7 +28,8 @@ or C runtime**. All items below are hard requirements, not stretch goals.
          syntax is the single most likely reason a new user bounces.
          Source migration complete (compiler, runtime, capsules, tests,
          examples, docs). Emitter update (Phase 5) and parser split
-         (Phase 6) are tracked separately; see
+         (Phase 6) complete — the parser now enforces `:` for annotations
+         and `->` for return types. See
          `docs/proposals/colon-type-annotations.md`.
    - [ ] **String interpolation delimiters** — replace `{{ expr }}` with
          `${ expr }`.

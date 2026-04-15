@@ -92,10 +92,8 @@ let name: string = "Sailfin";
 let mut counter: number = 0;
 ```
 
-Type annotations use `:`; function return types use `->`. The parser still
-accepts `->` in annotation positions for backward compatibility, but new code
-should use `:`. The grammar will split `TypeSep` into separate `AnnotationSep`
-and `ReturnSep` rules before 1.0; see `docs/roadmap.md` §0.
+Type annotations use `:`; function return types use `->`. The parser enforces
+`:` in annotation positions and `->` in return-type positions.
 
 Type annotations are optional; the current compiler performs limited
 inference. Initialisers may be omitted; the compiler emits `null` when a

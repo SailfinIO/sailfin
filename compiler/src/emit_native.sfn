@@ -796,7 +796,7 @@ fn emit_parameter_metadata(state: NativeState, parameters: Parameter[]) -> Nativ
         }
         line = line + parameter.name;
         if parameter.type_annotation != null {
-            line = line + " -> " + parameter.type_annotation.text;
+            line = line + ": " + parameter.type_annotation.text;
         }
         if parameter.default_value != null {
             line = line + " = " + format_optional_expression(parameter.default_value);

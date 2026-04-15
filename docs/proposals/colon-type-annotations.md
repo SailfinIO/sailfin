@@ -1,7 +1,6 @@
 # Colon Type Annotations Migration Plan
 
-**Status:** Phases 1–4 implemented (source-level migration complete).
-Phases 5 (emitter update) and 6 (parser split) deferred to follow-up branches.
+**Status:** Phases 1–6 implemented (migration complete).
 **Roadmap ref:** `docs/roadmap.md` Section 0 — Syntax reform (breaking, do first)
 **Date:** 2026-04-15
 
@@ -45,17 +44,19 @@ struct Point {
 
 ## Current State
 
-### Parser already accepts both forms
+### Parser enforces separator roles
 
-`consume_type_separator()` in `compiler/src/parser/declarations.sfn:88` and
-`expression_tokens_consume_type_separator()` in
-`compiler/src/parser/expressions.sfn:78` both accept `:` and `->` interchangeably
-via the shared `TypeSep = "->" | ":"` rule.
+`consume_annotation_separator()` in `compiler/src/parser/declarations.sfn`
+accepts only `:` for parameter, variable, and field annotations.
+`consume_return_type_separator()` in the same file accepts only `->` for
+function return types. `expression_tokens_consume_type_separator()` in
+`compiler/src/parser/expressions.sfn` uses boolean flags `accept_colon` and
+`accept_arrow` to select the correct separator per context.
 
 The AST does not store which separator was parsed — it is discarded at parse
-time. This means both forms produce identical ASTs and the rest of the pipeline
-(type checker, effect checker, emitter, LLVM lowering) is agnostic to the
-separator.
+time. Both annotation and return-type positions produce identical ASTs and
+the rest of the pipeline (type checker, effect checker, emitter, LLVM
+lowering) is agnostic to the separator.
 
 ### Three files already migrated
 
@@ -144,63 +145,44 @@ fn foo() ![io] -> Type  # after effect annotation
    c. If it matches `) -> <Type>` or `] -> <Type>` or effect list `-> <Type>` — keep as `->`
 4. Report a summary of changes per file
 
-## Emitter Updates (Phase 5 — Deferred to Follow-up Branch)
+## Emitter Updates (Phase 5 — Complete)
 
-After all source files are migrated, update the emitters to output `:` for
-annotation positions. The actual surface is larger than the original three call
-sites and must be changed atomically with the IR parser to preserve
-self-hosting:
+All emitters now output `:` for annotation positions. The IR parsers accept
+both `:` (preferred) and `->` (fallback) for backward compatibility with any
+cached IR. The earliest valid separator is selected to handle function types
+containing `:` in cached `->` IR (e.g., `handler -> fn(req: Request) -> Response`).
 
-**Sailfin source emitter** (`fn`/struct rendering for diagnostics, formatter, etc.):
+**Sailfin source emitter:**
 
-- `compiler/src/emitter_sailfin_expr.sfn:25` — `format_type_annotation()`. Used
-  for both annotations (params/vars) and return types; needs to be split into
-  `format_type_annotation` (`:`) and `format_return_type_annotation` (`->`),
-  with the lambda return-type call site (line 149) updated.
-- `compiler/src/emitter_sailfin.sfn:682,726` — field and parameter rendering.
-  Line 667 is a return type and stays as `->`.
+- `compiler/src/emitter_sailfin_expr.sfn` — `format_type_annotation()` returns
+  `": " + text`; `format_return_type_annotation()` returns `" -> " + text`.
+- `compiler/src/emitter_sailfin.sfn` — field and parameter rendering uses `": "`.
 
-**Native IR emitter** (`.sfn-asm` text format):
+**Native IR emitter:**
 
-- `compiler/src/emit_native_format.sfn:279,318` — parameter and field
-  declarations in the IR. Line 253 is a return type and stays as `->`.
-- `compiler/src/emit_native.sfn:799` — parameter declaration in the alternate
-  IR emitter.
-- `compiler/src/llvm/rendering_helpers.sfn:265` — parameter rendering used
-  during LLVM lowering. Line 237 is a return type and stays as `->`.
+- `compiler/src/emit_native_format.sfn` — parameter and field in `.sfn-asm`.
+- `compiler/src/emit_native.sfn` — `.param` metadata.
+- `compiler/src/llvm/rendering_helpers.sfn` — interface parameter rendering.
 
-**Native IR parsers** (must accept the new `:` form, ideally tolerating `->`
-for any cached IR):
+**Native IR parsers** (accept both, earliest wins):
 
-- `compiler/src/native_ir_utils_parse.sfn:761` — main `.sfn-asm` parameter
-  parser.
-- `compiler/src/llvm/lowering/lowering_recovery.sfn:178,195,579` — recovery
-  parser used when the structured parser bails out. Method/parameter/field
-  arrow lookups must accept both separators.
+- `compiler/src/native_ir_utils_parse.sfn` — `parse_struct_field_line`,
+  `parse_enum_variant_field`, `parse_parameter_entry`.
+- `compiler/src/llvm/lowering/lowering_recovery.sfn` — recovery parser for
+  `.param` and `.field` lines.
 
-**Test fixtures and assertions** that currently embed the IR text format:
+## Parser Finalization (Phase 6 — Complete)
 
-- `compiler/tests/unit/data/stage2/metadata.sfn-asm` — golden IR fixture.
-- `compiler/tests/unit/emit_native_format_test.sfn:147,154` — hardcoded
-  `"x -> number"` and `"mut x -> number"` assertions.
+The shared `consume_type_separator()` was split into:
 
-Self-hosting validation: emitter and parser changes must be in the same
-commit, validated by `make clean-build && make check`. Because the IR is
-regenerated from source on each build (not persisted across builds), the
-new emitter/parser pair only needs to be self-consistent — there is no
-on-disk legacy IR to migrate.
+- `consume_annotation_separator()` — accepts only `:` (parameters, variables,
+  struct/enum fields)
+- `consume_return_type_separator()` — accepts only `->` (function, pipeline,
+  tool return types)
 
-## Parser Finalization (Optional, Separate PR)
-
-After migration is complete and all source uses `:`, split the shared
-`TypeSep` rule:
-
-- `AnnotationSep = ":"` — for parameters, variables, fields
-- `ReturnSep = "->"` — for function return types
-- Make `->` a parse error in annotation position
-- Make `:` a parse error in return-type position
-
-This is a cleanup step, not a prerequisite for migration.
+All 14 call sites in `declarations.sfn` and 2 in `expressions.sfn` were
+updated. `->` is now a parse error in annotation position and `:` is a parse
+error in return-type position.
 
 ## Execution Plan
 

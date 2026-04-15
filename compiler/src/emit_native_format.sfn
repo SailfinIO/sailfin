@@ -276,7 +276,7 @@ fn format_parameters(parameters: Parameter[]) -> string {
             entry = parameter.name;
         }
         if parameter.type_annotation != null {
-            entry = entry + " -> " + parameter.type_annotation.text;
+            entry = entry + ": " + parameter.type_annotation.text;
         }
         if parameter.default_value != null {
             entry = entry + " = " + format_optional_expression(parameter.default_value);
@@ -315,7 +315,7 @@ fn format_field(field: FieldDeclaration) -> string {
     if field.mutable {
         line = line + "mut ";
     }
-    line = line + field.name + " -> " + field.type_annotation.text;
+    line = line + field.name + ": " + field.type_annotation.text;
     return line;
 }
 
@@ -364,12 +364,12 @@ fn format_decorator(decorator: Decorator) -> string {
 
 fn format_span(span: SourceSpan) -> string {
     return number_to_string(span.start_line)
-        + " "
-        + number_to_string(span.start_column)
-        + " "
-        + number_to_string(span.end_line)
-        + " "
-        + number_to_string(span.end_column);
+    + " "
+    + number_to_string(span.start_column)
+    + " "
+    + number_to_string(span.end_line)
+    + " "
+    + number_to_string(span.end_column);
 }
 
 // ── Specifier formatting ─────────────────────────────────────────────

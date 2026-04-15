@@ -395,8 +395,9 @@ export {
 
 // Re-export declaration parsing functions
 export {
-    // Type separator
-    consume_type_separator,
+    // Type separators
+    consume_annotation_separator,
+    consume_return_type_separator,
 
     // Decorator parsing
     parse_decorators,

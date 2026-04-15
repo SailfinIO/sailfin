@@ -192,9 +192,27 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         let ret_type_raw = trim_text_local(substring(line, 13, line.length));
         let effects_text_raw = trim_text_local(substring(line, 14, line.length));
         let param_text_raw = trim_text_local(substring(line, 7, line.length));
-        let param_arrow_idx = index_of(param_text_raw, " -> ");
+        let param_colon_idx = index_of(param_text_raw, ": ");
+        let param_legacy_arrow_idx = index_of(param_text_raw, " -> ");
+        let mut param_arrow_idx: number = -1;
+        let mut param_sep_len: number = 2;
+        if param_colon_idx >= 0 {
+            param_arrow_idx = param_colon_idx;
+            param_sep_len = 2;
+        }
+        if param_legacy_arrow_idx >= 0 {
+            let mut _use_param_arrow: boolean = false;
+            if param_arrow_idx < 0 { _use_param_arrow = true; }
+            if param_arrow_idx >= 0 {
+                if param_legacy_arrow_idx < param_arrow_idx { _use_param_arrow = true; }
+            }
+            if _use_param_arrow {
+                param_arrow_idx = param_legacy_arrow_idx;
+                param_sep_len = 4;
+            }
+        }
         let param_name_raw = trim_text_local(substring(param_text_raw, 0, param_arrow_idx));
-        let param_type_raw = trim_text_local(substring(param_text_raw, param_arrow_idx + 4, param_text_raw.length));
+        let param_type_raw = trim_text_local(substring(param_text_raw, param_arrow_idx + param_sep_len, param_text_raw.length));
 
         // Pre-compute .for target/iterable extraction.
         let for_body_raw = trim_text_local(substring(line, 5, line.length));
@@ -576,9 +594,27 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         let is_method_line = _let241;
 
         let field_text = trim_text_local(substring(line, 7, line.length));
-        let field_arrow_idx = index_of(field_text, " -> ");
+        let field_colon_idx = index_of(field_text, ": ");
+        let field_legacy_arrow_idx = index_of(field_text, " -> ");
+        let mut field_arrow_idx: number = -1;
+        let mut field_sep_len: number = 2;
+        if field_colon_idx >= 0 {
+            field_arrow_idx = field_colon_idx;
+            field_sep_len = 2;
+        }
+        if field_legacy_arrow_idx >= 0 {
+            let mut _use_field_arrow: boolean = false;
+            if field_arrow_idx < 0 { _use_field_arrow = true; }
+            if field_arrow_idx >= 0 {
+                if field_legacy_arrow_idx < field_arrow_idx { _use_field_arrow = true; }
+            }
+            if _use_field_arrow {
+                field_arrow_idx = field_legacy_arrow_idx;
+                field_sep_len = 4;
+            }
+        }
         let f_name = trim_text_local(substring(field_text, 0, field_arrow_idx));
-        let f_type = trim_text_local(substring(field_text, field_arrow_idx + 4, field_text.length));
+        let f_type = trim_text_local(substring(field_text, field_arrow_idx + field_sep_len, field_text.length));
 
         let ls_text = trim_text_local(substring(line, 15, line.length));
         let ls_size_idx = index_of(ls_text, "size=");
