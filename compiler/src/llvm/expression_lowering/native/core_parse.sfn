@@ -35,12 +35,12 @@ import {
 
 
 
-fn find_matching_closing_brace(text -> string, open_index -> number) -> number {
-    let mut depth -> number = 0;
-    let mut index -> number = open_index;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
+fn find_matching_closing_brace(text: string, open_index: number) -> number {
+    let mut depth: number = 0;
+    let mut index: number = open_index;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
     loop {
         if index >= text.length {
             break;
@@ -93,15 +93,15 @@ fn find_matching_closing_brace(text -> string, open_index -> number) -> number {
     return -1;
 }
 
-fn find_top_level_colon(text -> string) -> number {
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut angle_depth -> number = 0;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
-    let mut index -> number = 0;
+fn find_top_level_colon(text: string) -> number {
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut angle_depth: number = 0;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
+    let mut index: number = 0;
     loop {
         if index >= text.length {
             break;
@@ -203,9 +203,9 @@ fn find_top_level_colon(text -> string) -> number {
     return -1;
 }
 
-fn parse_struct_literal(text -> string) -> StructLiteralParse {
+fn parse_struct_literal(text: string) -> StructLiteralParse {
     let trimmed = trim_text(text);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
         return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
     }
@@ -215,14 +215,14 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
         return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
     }
 
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut angle_depth -> number = 0;
-    let mut index -> number = 0;
-    let mut open_index -> number = -1;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut angle_depth: number = 0;
+    let mut index: number = 0;
+    let mut open_index: number = -1;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
     loop {
         if index >= trimmed.length {
             break;
@@ -295,11 +295,11 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
         return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
     }
 
-    let mut fatal -> boolean = false;
+    let mut fatal: boolean = false;
     let close_index = find_matching_closing_brace(trimmed, open_index);
     if close_index < 0 {
         diagnostics.push("llvm lowering: struct literal missing closing `}`");
-        let mut snippet -> string = trimmed;
+        let mut snippet: string = trimmed;
         if snippet.length > 120 {
             snippet = substring(snippet, 0, 117) + "...";
         }
@@ -307,19 +307,19 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
         fatal = true;
     }
 
-    let mut type_name -> string = trim_text(substring(trimmed, 0, open_index));
+    let mut type_name: string = trim_text(substring(trimmed, 0, open_index));
     if type_name.length == 0 {
         diagnostics.push("llvm lowering: struct literal missing type name");
         fatal = true;
     }
 
-    let mut fields -> StructLiteralField[] = [];
+    let mut fields: StructLiteralField[] = [];
     if !fatal {
         if close_index >= 0 {
             let body = substring(trimmed, open_index + 1, close_index);
             let entries = split_array_elements(body);
-            let mut seen -> string[] = [];
-            let mut entry_index -> number = 0;
+            let mut seen: string[] = [];
+            let mut entry_index: number = 0;
             loop {
                 if entry_index >= entries.length {
                     break;
@@ -371,9 +371,9 @@ fn parse_struct_literal(text -> string) -> StructLiteralParse {
     return StructLiteralParse { recognized: true, success: !fatal, type_name: type_name, fields: fields, diagnostics: diagnostics };
 }
 
-fn parse_struct_pattern(text -> string) -> StructLiteralParse {
+fn parse_struct_pattern(text: string) -> StructLiteralParse {
     let trimmed = trim_text(text);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
         return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
     }
@@ -383,14 +383,14 @@ fn parse_struct_pattern(text -> string) -> StructLiteralParse {
         return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
     }
 
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut angle_depth -> number = 0;
-    let mut index -> number = 0;
-    let mut open_index -> number = -1;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut angle_depth: number = 0;
+    let mut index: number = 0;
+    let mut open_index: number = -1;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
     loop {
         if index >= trimmed.length {
             break;
@@ -463,24 +463,24 @@ fn parse_struct_pattern(text -> string) -> StructLiteralParse {
         return StructLiteralParse { recognized: false, success: false, type_name: "", fields: [], diagnostics: diagnostics };
     }
 
-    let mut fatal -> boolean = false;
+    let mut fatal: boolean = false;
     let close_index = find_matching_closing_brace(trimmed, open_index);
     if close_index < 0 {
         fatal = true;
     }
 
-    let mut type_name -> string = trim_text(substring(trimmed, 0, open_index));
+    let mut type_name: string = trim_text(substring(trimmed, 0, open_index));
     if type_name.length == 0 {
         fatal = true;
     }
 
-    let mut fields -> StructLiteralField[] = [];
+    let mut fields: StructLiteralField[] = [];
     if !fatal {
         if close_index >= 0 {
             let body = substring(trimmed, open_index + 1, close_index);
             let entries = split_array_elements(body);
-            let mut seen -> string[] = [];
-            let mut entry_index -> number = 0;
+            let mut seen: string[] = [];
+            let mut entry_index: number = 0;
             loop {
                 if entry_index >= entries.length {
                     break;
@@ -528,9 +528,9 @@ fn parse_struct_pattern(text -> string) -> StructLiteralParse {
     return StructLiteralParse { recognized: true, success: !fatal, type_name: type_name, fields: fields, diagnostics: diagnostics };
 }
 
-fn parse_enum_literal(text -> string) -> EnumLiteralParse {
+fn parse_enum_literal(text: string) -> EnumLiteralParse {
     let trimmed = trim_text(text);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
         return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
     }
@@ -551,14 +551,14 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
         return EnumLiteralParse { recognized: false, success: false, enum_name: "", variant_name: "", fields: [], diagnostics: diagnostics };
     }
 
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut angle_depth -> number = 0;
-    let mut index -> number = dot_index + 1;
-    let mut open_index -> number = -1;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut angle_depth: number = 0;
+    let mut index: number = dot_index + 1;
+    let mut open_index: number = -1;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
     loop {
         if index >= trimmed.length {
             break;
@@ -637,14 +637,14 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
 
         // Reject member-access chains like Enum.Variant().field so they can be
         // handled by parse_member_access instead of being mis-parsed here.
-        let mut paren_depth -> number = 0;
-        let mut bracket_depth -> number = 0;
-        let mut angle_depth -> number = 0;
-        let mut in_single -> boolean = false;
-        let mut in_double -> boolean = false;
-        let mut escape -> boolean = false;
-        let mut dot_seen -> boolean = false;
-        let mut scan_index -> number = 0;
+        let mut paren_depth: number = 0;
+        let mut bracket_depth: number = 0;
+        let mut angle_depth: number = 0;
+        let mut in_single: boolean = false;
+        let mut in_double: boolean = false;
+        let mut escape: boolean = false;
+        let mut dot_seen: boolean = false;
+        let mut scan_index: number = 0;
         loop {
             if scan_index >= variant_name_part.length {
                 break;
@@ -734,7 +734,7 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
         return EnumLiteralParse { recognized: true, success: true, enum_name: enum_name_part, variant_name: variant_name_part, fields: [], diagnostics: diagnostics };
     }
 
-    let mut fatal -> boolean = false;
+    let mut fatal: boolean = false;
     let close_index = find_matching_closing_brace(trimmed, open_index);
     if close_index < 0 {
         diagnostics.push("llvm lowering: enum literal missing closing `}`");
@@ -747,13 +747,13 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
         fatal = true;
     }
 
-    let mut fields -> StructLiteralField[] = [];
+    let mut fields: StructLiteralField[] = [];
     if !fatal {
         if close_index >= 0 {
             let body = substring(trimmed, open_index + 1, close_index);
             let entries = split_array_elements(body);
-            let mut seen -> string[] = [];
-            let mut entry_index -> number = 0;
+            let mut seen: string[] = [];
+            let mut entry_index: number = 0;
             loop {
                 if entry_index >= entries.length {
                     break;
@@ -818,11 +818,11 @@ fn parse_enum_literal(text -> string) -> EnumLiteralParse {
     return EnumLiteralParse { recognized: true, success: !fatal, enum_name: enum_name_part, variant_name: variant_name_part, fields: fields, diagnostics: diagnostics };
 }
 
-fn find_top_level_range_separator(value -> string) -> number {
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut index -> number = 0;
+fn find_top_level_range_separator(value: string) -> number {
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= value.length {
             break;
@@ -884,11 +884,11 @@ fn find_top_level_range_separator(value -> string) -> number {
     return -1;
 }
 
-fn find_top_level_range_separator_from(value -> string, start_index -> number) -> number {
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut index -> number = 0;
+fn find_top_level_range_separator_from(value: string, start_index: number) -> number {
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= value.length {
             break;
@@ -936,15 +936,15 @@ fn find_top_level_range_separator_from(value -> string, start_index -> number) -
     return -1;
 }
 
-fn find_member_access_separator(value -> string) -> number {
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
-    let mut index -> number = 0;
-    let mut last_index -> number = -1;
+fn find_member_access_separator(value: string) -> number {
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
+    let mut index: number = 0;
+    let mut last_index: number = -1;
     loop {
         if index >= value.length {
             break;
@@ -1057,7 +1057,7 @@ fn find_member_access_separator(value -> string) -> number {
     return last_index;
 }
 
-fn parse_member_access(expression -> string) -> MemberAccessParse {
+fn parse_member_access(expression: string) -> MemberAccessParse {
     let trimmed = trim_text(expression);
     if trimmed.length == 0 {
         return MemberAccessParse { success: false, base: "", field: "" };
@@ -1068,7 +1068,7 @@ fn parse_member_access(expression -> string) -> MemberAccessParse {
     }
     let base = trim_text(substring(trimmed, 0, separator));
     let field = trim_text(substring(trimmed, separator + 1, trimmed.length));
-    let mut _if112 -> boolean = false;
+    let mut _if112: boolean = false;
     if base.length == 0 { _if112 = true; }
     if field.length == 0 { _if112 = true; }
     if _if112 {
@@ -1080,16 +1080,16 @@ fn parse_member_access(expression -> string) -> MemberAccessParse {
     return MemberAccessParse { success: true, base: base, field: field };
 }
 
-fn parse_index_expression(expression -> string) -> IndexExpressionParse {
+fn parse_index_expression(expression: string) -> IndexExpressionParse {
     let trimmed = trim_text(expression);
     if trimmed.length == 0 {
         return IndexExpressionParse { success: false, base: "", index: "" };
     }
     
     // Look for the last '[' that is not inside nested brackets
-    let mut bracket_depth -> number = 0;
-    let mut index_position -> number = -1;
-    let mut i -> number = trimmed.length - 1;
+    let mut bracket_depth: number = 0;
+    let mut index_position: number = -1;
+    let mut i: number = trimmed.length - 1;
     
     // Start from the end to find the outermost closing bracket
     if substring(trimmed, trimmed.length - 1, trimmed.length) != "]" {
@@ -1124,7 +1124,7 @@ fn parse_index_expression(expression -> string) -> IndexExpressionParse {
     let base = trim_text(substring(trimmed, 0, index_position));
     let index = trim_text(substring(trimmed, index_position + 1, trimmed.length - 1));
     
-    let mut _if113 -> boolean = false;
+    let mut _if113: boolean = false;
     if base.length == 0 { _if113 = true; }
     if index.length == 0 { _if113 = true; }
     if _if113 {
@@ -1134,16 +1134,16 @@ fn parse_index_expression(expression -> string) -> IndexExpressionParse {
     return IndexExpressionParse { success: true, base: base, index: index };
 }
 
-fn parse_range_iterable(iterable -> string) -> RangeIterableParse {
+fn parse_range_iterable(iterable: string) -> RangeIterableParse {
     let trimmed = trim_text(iterable);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
         diagnostics.push("llvm lowering: `.for` iterable expression is empty");
         return RangeIterableParse { success: false, start: "", end: "", stride: "", diagnostics: diagnostics };
     }
     let first_separator = find_top_level_range_separator(trimmed);
-    let mut has_stride -> boolean = false;
-    let mut stride_text -> string = "";
+    let mut has_stride: boolean = false;
+    let mut stride_text: string = "";
     if first_separator < 0 {
         diagnostics.push("llvm lowering: `.for` iterable must use `start..end` range syntax");
         return RangeIterableParse { success: false, start: "", end: "", stride: "", diagnostics: diagnostics };
@@ -1167,10 +1167,10 @@ fn parse_range_iterable(iterable -> string) -> RangeIterableParse {
             diagnostics.push("llvm lowering: `.for` range missing stride expression");
         }
     }
-    let mut _let114 -> boolean = false;
+    let mut _let114: boolean = false;
     if start_text.length > 0 {
         if end_text.length > 0 {
-            let mut _if115 -> boolean = false;
+            let mut _if115: boolean = false;
             if !has_stride { _if115 = true; }
             if stride_text.length > 0 { _if115 = true; }
             if _if115 {

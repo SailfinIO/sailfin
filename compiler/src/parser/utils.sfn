@@ -9,9 +9,9 @@ import { substring, char_code, char_at, strings_equal } from "../string_utils";
 // String Utilities
 // ============================================================================
 
-fn trim_text(value -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = value.length;
+fn trim_text(value: string) -> string {
+    let mut start: number = 0;
+    let mut end: number = value.length;
 
     loop {
         if start >= end {
@@ -40,7 +40,7 @@ fn trim_text(value -> string) -> string {
     return substring(value, start, end);
 }
 
-fn is_trim_whitespace(ch -> string) -> boolean {
+fn is_trim_whitespace(ch: string) -> boolean {
     let code = char_code(ch);
     if code == 32 { return true; }
     if code == 10 { return true; }
@@ -49,7 +49,7 @@ fn is_trim_whitespace(ch -> string) -> boolean {
     return false;
 }
 
-fn strip_surrounding_quotes(text -> string) -> string {
+fn strip_surrounding_quotes(text: string) -> string {
     if text.length < 2 {
         return text;
     }
@@ -63,12 +63,12 @@ fn strip_surrounding_quotes(text -> string) -> string {
     return text;
 }
 
-fn strip_loose_quotes(text -> string) -> string {
+fn strip_loose_quotes(text: string) -> string {
     if text.length == 0 {
         return text;
     }
-    let mut start -> number = 0;
-    let mut end -> number = text.length;
+    let mut start: number = 0;
+    let mut end: number = text.length;
     loop {
         if start >= end {
             break;
@@ -99,12 +99,12 @@ fn strip_loose_quotes(text -> string) -> string {
     return substring(text, start, end);
 }
 
-fn decode_string_literal_escapes(text -> string) -> string {
+fn decode_string_literal_escapes(text: string) -> string {
     if text.length == 0 {
         return "";
     }
-    let mut decoded -> string = "";
-    let mut index -> number = 0;
+    let mut decoded: string = "";
+    let mut index: number = 0;
     loop {
         if index >= text.length {
             break;
@@ -140,7 +140,7 @@ fn decode_string_literal_escapes(text -> string) -> string {
     return decoded;
 }
 
-fn normalize_test_name(text -> string) -> string {
+fn normalize_test_name(text: string) -> string {
     let trimmed = trim_text(text);
     if trimmed.length >= 2 {
         let first = char_code(char_at(trimmed, 0));
@@ -158,12 +158,12 @@ fn normalize_test_name(text -> string) -> string {
 // Number Detection
 // ============================================================================
 
-fn looks_like_number(text -> string) -> boolean {
+fn looks_like_number(text: string) -> boolean {
     if text.length == 0 {
         return false;
     }
-    let mut has_decimal -> boolean = false;
-    let mut index -> number = 0;
+    let mut has_decimal: boolean = false;
+    let mut index: number = 0;
     if char_at(text, 0) == "-" {
         if text.length == 1 {
             return false;
@@ -191,8 +191,8 @@ fn looks_like_number(text -> string) -> boolean {
     return true;
 }
 
-fn is_decimal_digit(ch -> string) -> boolean {
-    let mut _ret433 -> boolean = false;
+fn is_decimal_digit(ch: string) -> boolean {
+    let mut _ret433: boolean = false;
     if ch == "0" { _ret433 = true; }
     if ch == "1" { _ret433 = true; }
     if ch == "2" { _ret433 = true; }
@@ -210,8 +210,8 @@ fn is_decimal_digit(ch -> string) -> boolean {
 // Array Utilities
 // ============================================================================
 
-fn string_array_contains(values -> string[], target -> string) -> boolean {
-    let mut index -> number = 0;
+fn string_array_contains(values: string[], target: string) -> boolean {
+    let mut index: number = 0;
     loop {
         if index >= values.length {
             break;
@@ -224,7 +224,7 @@ fn string_array_contains(values -> string[], target -> string) -> boolean {
     return false;
 }
 
-fn append_string(values -> string[], value -> string) -> string[] {
+fn append_string(values: string[], value: string) -> string[] {
     values.push(value);
     return values;
 }

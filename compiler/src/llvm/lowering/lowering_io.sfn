@@ -18,7 +18,7 @@ import {
 
 // ── String array operations ──────────────────────────────────────────
 
-fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
+fn extend_string_lines(values: string[], extras: string[]) -> string[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -27,7 +27,7 @@ fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
     if safe_extras == null {
         safe_extras = [];
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= safe_extras.length {
             break;
@@ -38,7 +38,7 @@ fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
     return out;
 }
 
-fn append_string_lines(values -> string[], extras -> string[]) -> string[] {
+fn append_string_lines(values: string[], extras: string[]) -> string[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -47,7 +47,7 @@ fn append_string_lines(values -> string[], extras -> string[]) -> string[] {
     if safe_extras == null {
         safe_extras = [];
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= safe_extras.length {
             break;
@@ -58,7 +58,7 @@ fn append_string_lines(values -> string[], extras -> string[]) -> string[] {
     return out;
 }
 
-fn extend_string_lines_checked(values -> string[], extras -> string[], label -> string) -> string[] {
+fn extend_string_lines_checked(values: string[], extras: string[], label: string) -> string[] {
     let mut safe_values = values;
     if safe_values == null {
         safe_values = [];
@@ -78,7 +78,7 @@ fn extend_string_lines_checked(values -> string[], extras -> string[], label -> 
     return extend_string_lines(safe_values, safe_extras);
 }
 
-fn extend_lifetime_regions_checked(values -> LifetimeRegionMetadata[], extras -> LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
+fn extend_lifetime_regions_checked(values: LifetimeRegionMetadata[], extras: LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
     if extras.length == 0 {
         return values;
     }
@@ -86,7 +86,7 @@ fn extend_lifetime_regions_checked(values -> LifetimeRegionMetadata[], extras ->
         return values;
     }
     let mut out = values;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= extras.length {
             break;
@@ -97,9 +97,9 @@ fn extend_lifetime_regions_checked(values -> LifetimeRegionMetadata[], extras ->
     return out;
 }
 
-fn insert_string_at(values -> string[], insert_index -> number, value -> string) -> string[] {
-    let mut out -> string[] = [];
-    let mut index -> number = 0;
+fn insert_string_at(values: string[], insert_index: number, value: string) -> string[] {
+    let mut out: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= values.length {
             break;
@@ -118,8 +118,8 @@ fn insert_string_at(values -> string[], insert_index -> number, value -> string)
 
 // ── File I/O helpers ─────────────────────────────────────────────────
 
-fn write_llvm_lines_chunked(path -> string, lines -> string[]) -> boolean ![io] {
-    let mut _if257 -> boolean = false;
+fn write_llvm_lines_chunked(path: string, lines: string[]) -> boolean ![io] {
+    let mut _if257: boolean = false;
     if lines == null { _if257 = true; }
     if lines.length == 0 { _if257 = true; }
     if _if257 {
@@ -133,8 +133,8 @@ fn write_llvm_lines_chunked(path -> string, lines -> string[]) -> boolean ![io] 
     return fs.exists(path);
 }
 
-fn _write_llvm_lines_chunked_unused(path -> string, lines -> string[]) -> boolean ![io] {
-    let mut _if257 -> boolean = false;
+fn _write_llvm_lines_chunked_unused(path: string, lines: string[]) -> boolean ![io] {
+    let mut _if257: boolean = false;
     if lines == null { _if257 = true; }
     if lines.length == 0 { _if257 = true; }
     if _if257 {
@@ -143,11 +143,11 @@ fn _write_llvm_lines_chunked_unused(path -> string, lines -> string[]) -> boolea
     }
 
     let chunk_limit = 100000000;
-    let mut buffer -> string = "";
-    let mut buffered -> number = 0;
-    let mut wrote -> boolean = false;
+    let mut buffer: string = "";
+    let mut buffered: number = 0;
+    let mut wrote: boolean = false;
 
-    let mut index2 -> number = 0;
+    let mut index2: number = 0;
     loop {
         if index2 >= lines.length {
             break;
@@ -183,7 +183,7 @@ fn _write_llvm_lines_chunked_unused(path -> string, lines -> string[]) -> boolea
 
 // ── Module helpers ───────────────────────────────────────────────────
 
-fn module_source_filename(module_name -> string) -> string {
+fn module_source_filename(module_name: string) -> string {
     if module_name.length == 0 {
         return "sailfin";
     }
@@ -196,10 +196,10 @@ fn module_source_filename(module_name -> string) -> string {
     return module_name + ".sfn";
 }
 
-fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
-    let mut uses_round -> boolean = false;
-    let mut has_round_decl -> boolean = false;
-    let mut index -> number = 0;
+fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
+    let mut uses_round: boolean = false;
+    let mut has_round_decl: boolean = false;
+    let mut index: number = 0;
     loop {
         if index >= lines.length {
             break;
@@ -215,7 +215,7 @@ fn ensure_intrinsic_declarations(lines -> string[]) -> string[] {
         index += 1;
     }
 
-    let mut _if258 -> boolean = false;
+    let mut _if258: boolean = false;
     if !uses_round { _if258 = true; }
     if has_round_decl { _if258 = true; }
     if _if258 {

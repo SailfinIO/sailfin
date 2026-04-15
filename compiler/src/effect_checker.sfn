@@ -19,19 +19,19 @@ import {
 import { substring } from "./string_utils";
 
 struct EffectRequirement {
-    effect -> string;
-    description -> string;
+    effect: string;
+    description: string;
 }
 
 struct EffectViolation {
-    routine_name -> string;
-    missing_effects -> string[];
-    requirements -> EffectRequirement[];
+    routine_name: string;
+    missing_effects: string[];
+    requirements: EffectRequirement[];
 }
 
-fn validate_effects(program -> Program) -> EffectViolation[] {
-    let mut violations -> EffectViolation[] = [];
-    let mut index -> number = 0;
+fn validate_effects(program: Program) -> EffectViolation[] {
+    let mut violations: EffectViolation[] = [];
+    let mut index: number = 0;
     loop {
         if index >= program.statements.length {
             break;
@@ -42,7 +42,7 @@ fn validate_effects(program -> Program) -> EffectViolation[] {
     return violations;
 }
 
-fn analyze_statement(statement -> Statement) -> EffectViolation[] {
+fn analyze_statement(statement: Statement) -> EffectViolation[] {
     if statement.variant == "FunctionDeclaration" {
         return analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name);
     }
@@ -70,8 +70,8 @@ fn analyze_statement(statement -> Statement) -> EffectViolation[] {
         return analyze_routine(signature, statement.body, statement.decorators, qualified);
     }
     if statement.variant == "StructDeclaration" {
-        let mut issues -> EffectViolation[] = [];
-        let mut index -> number = 0;
+        let mut issues: EffectViolation[] = [];
+        let mut index: number = 0;
         loop {
             if index >= statement.methods.length {
                 break;
@@ -90,14 +90,14 @@ fn analyze_statement(statement -> Statement) -> EffectViolation[] {
 }
 
 fn analyze_routine(
-    signature -> FunctionSignature,
-    body -> Block,
-    decorators -> Decorator[],
-    name -> string
+    signature: FunctionSignature,
+    body: Block,
+    decorators: Decorator[],
+    name: string
 ) -> EffectViolation[] {
     let names = decorator_names(decorators);
-    let mut declared -> string[] = [];
-    let mut declared_index -> number = 0;
+    let mut declared: string[] = [];
+    let mut declared_index: number = 0;
     loop {
         if declared_index >= signature.effects.length {
             break;
@@ -105,14 +105,14 @@ fn analyze_routine(
         declared = append_unique_effect(declared, signature.effects[declared_index]);
         declared_index += 1;
     }
-    let mut requires_io_from_decorators -> boolean = false;
-    let mut decorator_index -> number = 0;
+    let mut requires_io_from_decorators: boolean = false;
+    let mut decorator_index: number = 0;
     loop {
         if decorator_index >= names.length {
             break;
         }
         let decorator_name = names[decorator_index];
-        let mut _if15 -> boolean = false;
+        let mut _if15: boolean = false;
         if decorator_name == "trace" { _if15 = true; }
         if decorator_name == "logExecution" { _if15 = true; }
         if decorator_name == "logexecution" { _if15 = true; }
@@ -126,9 +126,9 @@ fn analyze_routine(
         declared = append_unique_effect(declared, "io");
     }
     let required = required_effects(body);
-    let mut missing -> string[] = [];
-    let mut missing_requirements -> EffectRequirement[] = [];
-    let mut index -> number = 0;
+    let mut missing: string[] = [];
+    let mut missing_requirements: EffectRequirement[] = [];
+    let mut index: number = 0;
     loop {
         if index >= required.length {
             break;
@@ -154,7 +154,7 @@ fn analyze_routine(
     if missing.length == 0 {
         return [];
     }
-    let mut result -> EffectViolation[] = [];
+    let mut result: EffectViolation[] = [];
     result = append_violation(
         result,
         EffectViolation {
@@ -166,13 +166,13 @@ fn analyze_routine(
     return result;
 }
 
-fn required_effects(body -> Block) -> EffectRequirement[] {
+fn required_effects(body: Block) -> EffectRequirement[] {
     return collect_effects_from_block(body);
 }
 
-fn collect_effects_from_block(block -> Block) -> EffectRequirement[] {
-    let mut required -> EffectRequirement[] = [];
-    let mut index -> number = 0;
+fn collect_effects_from_block(block: Block) -> EffectRequirement[] {
+    let mut required: EffectRequirement[] = [];
+    let mut index: number = 0;
     loop {
         if index >= block.statements.length {
             break;
@@ -183,21 +183,21 @@ fn collect_effects_from_block(block -> Block) -> EffectRequirement[] {
     return required;
 }
 
-fn collect_effects_from_optional_block(block -> Block?) -> EffectRequirement[] {
+fn collect_effects_from_optional_block(block: Block?) -> EffectRequirement[] {
     if block == null {
         return [];
     }
     return collect_effects_from_block(block);
 }
 
-fn collect_effects_from_optional_statement(statement -> Statement?) -> EffectRequirement[] {
+fn collect_effects_from_optional_statement(statement: Statement?) -> EffectRequirement[] {
     if statement == null {
         return [];
     }
     return collect_effects_from_statement(statement);
 }
 
-fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[] {
+fn collect_effects_from_statement(statement: Statement) -> EffectRequirement[] {
     if statement.variant == "PromptStatement" {
         let mut required = collect_effects_from_block(statement.body);
         required = append_requirement(
@@ -211,7 +211,7 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
     }
     if statement.variant == "WithStatement" {
         let mut required = collect_effects_from_block(statement.body);
-        let mut clause_index -> number = 0;
+        let mut clause_index: number = 0;
         loop {
             if clause_index >= statement.clauses.length {
                 break;
@@ -233,7 +233,7 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
     }
     if statement.variant == "MatchStatement" {
         let mut required = collect_effects_from_expression(statement.expression);
-        let mut case_index -> number = 0;
+        let mut case_index: number = 0;
         loop {
             if case_index >= statement.cases.length {
                 break;
@@ -275,8 +275,8 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
         return collect_effects_from_block(statement.body);
     }
     if statement.variant == "StructDeclaration" {
-        let mut required -> EffectRequirement[] = [];
-        let mut method_index -> number = 0;
+        let mut required: EffectRequirement[] = [];
+        let mut method_index: number = 0;
         loop {
             if method_index >= statement.methods.length {
                 break;
@@ -287,8 +287,8 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
         return required;
     }
     if statement.variant == "ModelDeclaration" {
-        let mut required -> EffectRequirement[] = [];
-        let mut property_index -> number = 0;
+        let mut required: EffectRequirement[] = [];
+        let mut property_index: number = 0;
         loop {
             if property_index >= statement.properties.length {
                 break;
@@ -304,21 +304,21 @@ fn collect_effects_from_statement(statement -> Statement) -> EffectRequirement[]
     return [];
 }
 
-fn collect_effects_from_else_branch(branch -> ElseBranch) -> EffectRequirement[] {
-    let mut required -> EffectRequirement[] = [];
+fn collect_effects_from_else_branch(branch: ElseBranch) -> EffectRequirement[] {
+    let mut required: EffectRequirement[] = [];
     required = merge_requirements(required, collect_effects_from_optional_block(branch.body));
     required = merge_requirements(required, collect_effects_from_optional_statement(branch.statement));
     return required;
 }
 
-fn collect_effects_from_match_case(case -> MatchCase) -> EffectRequirement[] {
+fn collect_effects_from_match_case(case: MatchCase) -> EffectRequirement[] {
     let mut required = collect_effects_from_expression(case.pattern);
     required = merge_requirements(required, collect_effects_from_expression(case.guard));
     required = merge_requirements(required, collect_effects_from_block(case.body));
     return required;
 }
 
-fn collect_effects_from_expression(expression -> Expression?) -> EffectRequirement[] {
+fn collect_effects_from_expression(expression: Expression?) -> EffectRequirement[] {
     if expression == null {
         return [];
     }
@@ -343,7 +343,7 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
             required = merge_requirements(required, collect_effects_from_expression(expression.callee));
         }
 
-        let mut argument_index -> number = 0;
+        let mut argument_index: number = 0;
         loop {
             if argument_index >= expression.arguments.length {
                 break;
@@ -360,13 +360,13 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
             if root == "fs" {
                 required = append_requirement(required, EffectRequirement { effect: "io", description: "filesystem helper usage" });
             }
-            let mut _if16 -> boolean = false;
+            let mut _if16: boolean = false;
             if root == "print" { _if16 = true; }
             if root == "console" { _if16 = true; }
             if _if16 {
                 required = append_requirement(required, EffectRequirement { effect: "io", description: "print/console helper usage" });
             }
-            let mut _if17 -> boolean = false;
+            let mut _if17: boolean = false;
             if root == "http" { _if17 = true; }
             if root == "websocket" { _if17 = true; }
             if _if17 {
@@ -384,8 +384,8 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
         return required;
     }
     if expression.variant == "Array" {
-        let mut required -> EffectRequirement[] = [];
-        let mut element_index -> number = 0;
+        let mut required: EffectRequirement[] = [];
+        let mut element_index: number = 0;
         loop {
             if element_index >= expression.elements.length {
                 break;
@@ -396,8 +396,8 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
         return required;
     }
     if expression.variant == "Object" {
-        let mut required -> EffectRequirement[] = [];
-        let mut field_index -> number = 0;
+        let mut required: EffectRequirement[] = [];
+        let mut field_index: number = 0;
         loop {
             if field_index >= expression.fields.length {
                 break;
@@ -408,8 +408,8 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
         return required;
     }
     if expression.variant == "Struct" {
-        let mut required -> EffectRequirement[] = [];
-        let mut field_index -> number = 0;
+        let mut required: EffectRequirement[] = [];
+        let mut field_index: number = 0;
         loop {
             if field_index >= expression.fields.length {
                 break;
@@ -438,8 +438,8 @@ fn collect_effects_from_expression(expression -> Expression?) -> EffectRequireme
     return [];
 }
 
-fn collect_effects_from_text(text -> string) -> EffectRequirement[] {
-    let mut required -> EffectRequirement[] = [];
+fn collect_effects_from_text(text: string) -> EffectRequirement[] {
+    let mut required: EffectRequirement[] = [];
 
     // Keep this conservative: false positives are worse than missing a hint.
     // This checker exists to produce friendly diagnostics, not enforce soundness.
@@ -449,7 +449,7 @@ fn collect_effects_from_text(text -> string) -> EffectRequirement[] {
             EffectRequirement { effect: "io", description: "filesystem helper usage" }
         );
     }
-    let mut _if18 -> boolean = false;
+    let mut _if18: boolean = false;
     if contains_code(text, "print(") { _if18 = true; }
     if contains_code(text, "print.") { _if18 = true; }
     if _if18 {
@@ -498,7 +498,7 @@ fn collect_effects_from_text(text -> string) -> EffectRequirement[] {
     return required;
 }
 
-fn contains_code(text -> string, needle -> string) -> boolean {
+fn contains_code(text: string, needle: string) -> boolean {
     if needle.length == 0 {
         return true;
     }
@@ -506,11 +506,11 @@ fn contains_code(text -> string, needle -> string) -> boolean {
         return false;
     }
 
-    let mut index -> number = 0;
-    let mut in_line_comment -> boolean = false;
-    let mut in_block_comment -> boolean = false;
-    let mut in_string_quote -> string = "";
-    let mut escaped -> boolean = false;
+    let mut index: number = 0;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    let mut in_string_quote: string = "";
+    let mut escaped: boolean = false;
 
     loop {
         if index >= text.length {
@@ -519,7 +519,7 @@ fn contains_code(text -> string, needle -> string) -> boolean {
 
         let _ec_next = index + 1;
         let ch = substring(text, index, _ec_next);
-        let mut two -> string = "";
+        let mut two: string = "";
         if _ec_next < text.length {
             let _ec_next2 = index + 2;
             two = substring(text, index, _ec_next2);
@@ -573,7 +573,7 @@ fn contains_code(text -> string, needle -> string) -> boolean {
             index += 2;
             continue;
         }
-        let mut _if19 -> boolean = false;
+        let mut _if19: boolean = false;
         if ch == "\"" { _if19 = true; }
         if ch == "'" { _if19 = true; }
         if _if19 {
@@ -595,9 +595,9 @@ fn contains_code(text -> string, needle -> string) -> boolean {
     return false;
 }
 
-fn append_violations(violations -> EffectViolation[], new_violations -> EffectViolation[]) -> EffectViolation[] {
+fn append_violations(violations: EffectViolation[], new_violations: EffectViolation[]) -> EffectViolation[] {
     let mut result = violations;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= new_violations.length {
             break;
@@ -608,12 +608,12 @@ fn append_violations(violations -> EffectViolation[], new_violations -> EffectVi
     return result;
 }
 
-fn append_violation(collection -> EffectViolation[], item -> EffectViolation) -> EffectViolation[] {
+fn append_violation(collection: EffectViolation[], item: EffectViolation) -> EffectViolation[] {
     collection.push(item);
     return collection;
 }
 
-fn append_unique_effect(effects -> string[], effect -> string) -> string[] {
+fn append_unique_effect(effects: string[], effect: string) -> string[] {
     if contains_effect(effects, effect) {
         return effects;
     }
@@ -621,8 +621,8 @@ fn append_unique_effect(effects -> string[], effect -> string) -> string[] {
     return effects;
 }
 
-fn contains_effect(effects -> string[], effect -> string) -> boolean {
-    let mut index -> number = 0;
+fn contains_effect(effects: string[], effect: string) -> boolean {
+    let mut index: number = 0;
     loop {
         if index >= effects.length {
             break;
@@ -635,14 +635,14 @@ fn contains_effect(effects -> string[], effect -> string) -> boolean {
     return false;
 }
 
-fn append_requirement(collection -> EffectRequirement[], item -> EffectRequirement) -> EffectRequirement[] {
+fn append_requirement(collection: EffectRequirement[], item: EffectRequirement) -> EffectRequirement[] {
     collection.push(item);
     return collection;
 }
 
-fn merge_requirements(base -> EffectRequirement[], additions -> EffectRequirement[]) -> EffectRequirement[] {
+fn merge_requirements(base: EffectRequirement[], additions: EffectRequirement[]) -> EffectRequirement[] {
     let mut result = base;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= additions.length {
             break;
@@ -653,8 +653,8 @@ fn merge_requirements(base -> EffectRequirement[], additions -> EffectRequiremen
     return result;
 }
 
-fn contains_requirement_for_effect(requirements -> EffectRequirement[], effect -> string) -> boolean {
-    let mut index -> number = 0;
+fn contains_requirement_for_effect(requirements: EffectRequirement[], effect: string) -> boolean {
+    let mut index: number = 0;
     loop {
         if index >= requirements.length {
             break;

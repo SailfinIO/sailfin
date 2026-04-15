@@ -74,40 +74,40 @@ import {
 } from "../lifetime";
 
 fn lower_let_instruction(
-    function -> NativeFunction,
-    instruction -> NativeInstruction,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    allocas -> string[],
-    lines -> string[],
-    temp_index -> number,
-    next_local_id -> number,
-    next_region_id -> number,
-    functions -> NativeFunction[],
-    context -> TypeContext,
-    scope_id -> string,
-    scope_depth -> number,
-    current_label -> string
+    function: NativeFunction,
+    instruction: NativeInstruction,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    allocas: string[],
+    lines: string[],
+    temp_index: number,
+    next_local_id: number,
+    next_region_id: number,
+    functions: NativeFunction[],
+    context: TypeContext,
+    scope_id: string,
+    scope_depth: number,
+    current_label: string
 ) -> LetLoweringResult ![io] {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
-    let mut current_allocas -> string[] = allocas;
-    let mut current_locals -> LocalBinding[] = locals;
-    let mut current_temp -> number = temp_index;
-    let mut current_bindings -> ParameterBinding[] = bindings;
-    let mut ownership -> OwnershipInfo? = null;
-    let mut consumption -> OwnershipConsumption? = null;
-    let mut initializer_span -> NativeSourceSpan? = instruction.value_span;
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
-    let mut current_next_region -> number = next_region_id;
-    let mut mutations -> LocalMutation[] = [];
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_temp: number = temp_index;
+    let mut current_bindings: ParameterBinding[] = bindings;
+    let mut ownership: OwnershipInfo? = null;
+    let mut consumption: OwnershipConsumption? = null;
+    let mut initializer_span: NativeSourceSpan? = instruction.value_span;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut lifetime_releases: LifetimeReleaseEvent[] = [];
+    let mut current_next_region: number = next_region_id;
+    let mut mutations: LocalMutation[] = [];
     if initializer_span == null {
         initializer_span = instruction.span;
     }
 
     let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span);
-    let mut _ci16 -> number = 0;
+    let mut _ci16: number = 0;
     loop {
         if _ci16 >= suspension_diagnostics.length { break; }
         diagnostics.push(suspension_diagnostics[_ci16]);
@@ -129,7 +129,7 @@ fn lower_let_instruction(
     }
 
     let trimmed_annotation = trim_text(instruction.type_annotation);
-    let mut llvm_type -> string = "";
+    let mut llvm_type: string = "";
     if trimmed_annotation.length > 0 {
         llvm_type = map_local_type(context, instruction.type_annotation);
         if llvm_type.length == 0 {
@@ -137,9 +137,9 @@ fn lower_let_instruction(
         }
     }
 
-    let mut operand -> LLVMOperand? = null;
+    let mut operand: LLVMOperand? = null;
     let ownership_analysis = analyze_value_ownership(instruction.value, initializer_span, current_locals, current_bindings);
-    let mut _ci17 -> number = 0;
+    let mut _ci17: number = 0;
     loop {
         if _ci17 >= ownership_analysis.diagnostics.length { break; }
         diagnostics.push(ownership_analysis.diagnostics[_ci17]);
@@ -149,7 +149,7 @@ fn lower_let_instruction(
     consumption = ownership_analysis.consumption;
     if ownership != null {
         let conflict_diagnostics = detect_borrow_conflicts(ownership, current_locals, instruction.name, function.name);
-        let mut _ci18 -> number = 0;
+        let mut _ci18: number = 0;
         loop {
             if _ci18 >= conflict_diagnostics.length { break; }
             diagnostics.push(conflict_diagnostics[_ci18]);
@@ -187,8 +187,8 @@ fn lower_let_instruction(
         }
     }
 
-    let mut string_constants -> StringConstant[] = empty_string_constant_set();
-    let mut _if230 -> boolean = false;
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
+    let mut _if230: boolean = false;
     if instruction.value == null { _if230 = true; }
     if instruction.value.length == 0 { _if230 = true; }
     if _if230 {
@@ -219,7 +219,7 @@ fn lower_let_instruction(
         if fs.exists("build/sailfin/.trace_lowering") {
             print.err("let-lowering: accessing lowered.diagnostics");
         }
-        let mut _ci19 -> number = 0;
+        let mut _ci19: number = 0;
         loop {
             if _ci19 >= lowered.diagnostics.length { break; }
             diagnostics.push(lowered.diagnostics[_ci19]);
@@ -329,14 +329,14 @@ fn lower_let_instruction(
     let pointer = format_local_pointer_name(next_local_id);
     current_allocas.push("  " + pointer + " = alloca " + llvm_type);
 
-    let mut stored_value -> string = default_return_literal(llvm_type);
+    let mut stored_value: string = default_return_literal(llvm_type);
     // Fix operand if its llvm_type was corrupted crossing module boundaries.
     // Only use file-based reconstruction when the operand's type is clearly
     // wrong (empty or mismatch). When the operand type matches the expected
     // llvm_type, the operand is correct and the IPC file may contain stale
     // intermediate values (e.g., from number_to_string inside a string concat chain).
     if operand != null {
-        let mut _use_ipc_override -> boolean = false;
+        let mut _use_ipc_override: boolean = false;
         let _op_type = trim_text(operand.llvm_type);
         if _op_type.length == 0 { _use_ipc_override = true; }
         if _op_type != llvm_type {
@@ -348,7 +348,7 @@ fn lower_let_instruction(
             if fs.exists("build/sailfin/.call_result_type") {
                 let _fixup_type = fs.readFile("build/sailfin/.call_result_type");
                 if _fixup_type.length > 0 {
-                    let mut _fixup_value -> string = "";
+                    let mut _fixup_value: string = "";
                     if fs.exists("build/sailfin/.call_result_value") {
                         _fixup_value = fs.readFile("build/sailfin/.call_result_value");
                     }
@@ -387,7 +387,7 @@ fn lower_let_instruction(
                 fs.deleteFile("build/sailfin/.coerce_result_type");
             } else {
                 // Fallback: try struct fields (may crash if corrupted)
-                let mut _ci20 -> number = 0;
+                let mut _ci20: number = 0;
                 loop {
                     if _ci20 >= coerced.diagnostics.length { break; }
                     diagnostics.push(coerced.diagnostics[_ci20]);
@@ -411,7 +411,7 @@ fn lower_let_instruction(
 
     // For locals that hold async futures, store the underlying return type
     // as type_annotation so the await handler can unbox structs.
-    let mut local_type_annotation -> string = instruction.type_annotation;
+    let mut local_type_annotation: string = instruction.type_annotation;
     if llvm_type == "%SailfinFuturePtr*" {
         if fs.exists("build/sailfin/.async_inner_return_type") {
             let async_inner = fs.readFile("build/sailfin/.async_inner_return_type");
@@ -453,22 +453,22 @@ fn lower_let_instruction(
 
 // Scan emitted lines starting at `start_offset` for @.runtime.field.X
 // references and infer the string constants that need to be declared.
-fn _infer_field_constants_from_lines(lines -> string[], start_offset -> number) -> StringConstant[] {
-    let mut result -> StringConstant[] = [];
+fn _infer_field_constants_from_lines(lines: string[], start_offset: number) -> StringConstant[] {
+    let mut result: StringConstant[] = [];
     // Build in two parts to avoid a single "@.runtime.field." literal that
     // triggers a bogus global constant in the selfhost IR.
     let marker = "@.runtime" + ".field.";
     let marker_len = marker.length;
-    let mut i -> number = start_offset;
+    let mut i: number = start_offset;
     loop {
         if i >= lines.length { break; }
         let line = lines[i];
         // Quick scan for the marker
-        let mut pos -> number = 0;
+        let mut pos: number = 0;
         loop {
             if pos + marker_len >= line.length { break; }
-            let mut matches -> boolean = true;
-            let mut ci -> number = 0;
+            let mut matches: boolean = true;
+            let mut ci: number = 0;
             loop {
                 if ci >= marker_len { break; }
                 if substring(line, pos + ci, pos + ci + 1) != substring(marker, ci, ci + 1) {
@@ -481,7 +481,7 @@ fn _infer_field_constants_from_lines(lines -> string[], start_offset -> number) 
                 // Extract field name: runs until comma or space
                 let name_start = pos;
                 let field_start = pos + marker_len;
-                let mut field_end -> number = field_start;
+                let mut field_end: number = field_start;
                 loop {
                     if field_end >= line.length { break; }
                     let ch = substring(line, field_end, field_end + 1);
@@ -492,8 +492,8 @@ fn _infer_field_constants_from_lines(lines -> string[], start_offset -> number) 
                 let full_name = substring(line, name_start, field_end);
                 let field_name = substring(line, field_start, field_end);
                 // Deduplicate
-                let mut already -> boolean = false;
-                let mut ri -> number = 0;
+                let mut already: boolean = false;
+                let mut ri: number = 0;
                 loop {
                     if ri >= result.length { break; }
                     if result[ri].name == full_name { already = true; break; }

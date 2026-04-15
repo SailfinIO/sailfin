@@ -38,7 +38,7 @@ import {
     parse_borrow_expression,
 } from "./core_parsing";
 
-fn analyze_value_ownership_impl(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
+fn analyze_value_ownership_impl(initializer: string?, span: NativeSourceSpan?, locals: LocalBinding[], bindings: ParameterBinding[]) -> OwnershipAnalysis {
     if initializer == null {
         return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: [] };
     }
@@ -48,7 +48,7 @@ fn analyze_value_ownership_impl(initializer -> string?, span -> NativeSourceSpan
     }
 
     let parse = parse_borrow_expression(trimmed);
-    let mut diagnostics -> string[] = parse.diagnostics;
+    let mut diagnostics: string[] = parse.diagnostics;
     if parse.recognized {
         if !parse.success {
             return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
@@ -94,28 +94,28 @@ fn analyze_value_ownership_impl(initializer -> string?, span -> NativeSourceSpan
     return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
 }
 
-fn format_use_after_move_message(name -> string, span -> NativeSourceSpan?) -> string {
+fn format_use_after_move_message(name: string, span: NativeSourceSpan?) -> string {
     if span == null {
         return "llvm lowering: use-after-move of `" + name + "`";
     }
     return "llvm lowering: use-after-move of `" + name + "` at " + format_span_location(span);
 }
 
-fn format_span_location(span -> NativeSourceSpan) -> string {
+fn format_span_location(span: NativeSourceSpan) -> string {
     let start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column);
     let end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column);
     return start + "-" + end;
 }
 
-fn format_suspension_location_impl(keyword -> string, borrow_span -> NativeSourceSpan?, suspension_span -> NativeSourceSpan?) -> string {
-    let mut has_segment -> boolean = false;
-    let mut combined -> string = "";
+fn format_suspension_location_impl(keyword: string, borrow_span: NativeSourceSpan?, suspension_span: NativeSourceSpan?) -> string {
+    let mut has_segment: boolean = false;
+    let mut combined: string = "";
     if borrow_span != null {
         combined = "borrow at " + format_span_location(borrow_span);
         has_segment = true;
     }
     if suspension_span != null {
-        let mut label -> string = keyword;
+        let mut label: string = keyword;
         if label.length == 0 {
             label = "suspend";
         }
@@ -133,8 +133,8 @@ fn format_suspension_location_impl(keyword -> string, borrow_span -> NativeSourc
     return " (" + combined + ")";
 }
 
-fn detect_borrow_conflicts_impl(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {
-    let mut diagnostics -> string[] = [];
+fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> string[] {
+    let mut diagnostics: string[] = [];
     if ownership == null {
         return diagnostics;
     }
@@ -142,7 +142,7 @@ fn detect_borrow_conflicts_impl(ownership -> OwnershipInfo?, locals -> LocalBind
         return diagnostics;
     }
     let base = trim_text(ownership.base);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= locals.length {
             break;
@@ -172,11 +172,11 @@ fn detect_borrow_conflicts_impl(ownership -> OwnershipInfo?, locals -> LocalBind
     return diagnostics;
 }
 
-fn resolve_borrow_base_impl(target -> string, locals -> LocalBinding[]) -> string {
+fn resolve_borrow_base_impl(target: string, locals: LocalBinding[]) -> string {
     return resolve_borrow_base_inner(trim_text(target), locals, 0);
 }
 
-fn resolve_borrow_base_inner(target -> string, locals -> LocalBinding[], depth -> number) -> string {
+fn resolve_borrow_base_inner(target: string, locals: LocalBinding[], depth: number) -> string {
     let trimmed = trim_text(target);
     if trimmed.length == 0 {
         return trimmed;

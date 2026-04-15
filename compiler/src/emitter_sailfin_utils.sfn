@@ -27,13 +27,13 @@ import { Token } from "./token";
 import { substring, char_at } from "./string_utils";
 
 struct TextBuilder {
-    lines -> string[];
-    indent -> number;
+    lines: string[];
+    indent: number;
 }
 
-fn quote_string(value -> string) -> string {
-    let mut result -> string = "\"";
-    let mut index -> number = 0;
+fn quote_string(value: string) -> string {
+    let mut result: string = "\"";
+    let mut index: number = 0;
     loop {
         if index >= value.length {
             break;
@@ -45,7 +45,7 @@ fn quote_string(value -> string) -> string {
     return result;
 }
 
-fn escape_string_char(ch -> string) -> string {
+fn escape_string_char(ch: string) -> string {
     if ch == "\"" {
         return "\\\"";
     }
@@ -64,11 +64,11 @@ fn escape_string_char(ch -> string) -> string {
     return ch;
 }
 
-fn format_test_name(name -> string) -> string {
+fn format_test_name(name: string) -> string {
     return quote_string(name);
 }
 
-fn trim_block_body(text -> string) -> string {
+fn trim_block_body(text: string) -> string {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return trimmed;
@@ -81,16 +81,16 @@ fn trim_block_body(text -> string) -> string {
     return trimmed;
 }
 
-fn collapse_whitespace(value -> string) -> string {
-    let mut result -> string = "";
-    let mut index -> number = 0;
-    let mut last_space -> boolean = false;
+fn collapse_whitespace(value: string) -> string {
+    let mut result: string = "";
+    let mut index: number = 0;
+    let mut last_space: boolean = false;
     loop {
         if index >= value.length {
             break;
         }
         let ch = char_at(value, index);
-        let mut _let32 -> boolean = false;
+        let mut _let32: boolean = false;
         if ch == " " { _let32 = true; }
         if ch == "\n" { _let32 = true; }
         if ch == "\r" { _let32 = true; }
@@ -110,12 +110,12 @@ fn collapse_whitespace(value -> string) -> string {
     return trim_text(result);
 }
 
-fn tokens_to_source(tokens -> Token[]) -> string {
+fn tokens_to_source(tokens: Token[]) -> string {
     if tokens.length == 0 {
         return "";
     }
-    let mut parts -> string[] = [];
-    let mut index -> number = 0;
+    let mut parts: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= tokens.length {
             break;
@@ -130,9 +130,9 @@ fn builder_new() -> TextBuilder {
     return TextBuilder { lines: [], indent: 0 };
 }
 
-fn builder_emit_line(builder -> TextBuilder, line -> string) -> TextBuilder {
-    let mut prefix -> string = "";
-    let mut count -> number = 0;
+fn builder_emit_line(builder: TextBuilder, line: string) -> TextBuilder {
+    let mut prefix: string = "";
+    let mut count: number = 0;
     loop {
         if count >= builder.indent {
             break;
@@ -146,17 +146,17 @@ fn builder_emit_line(builder -> TextBuilder, line -> string) -> TextBuilder {
     return current;
 }
 
-fn builder_emit_blank(builder -> TextBuilder) -> TextBuilder {
+fn builder_emit_blank(builder: TextBuilder) -> TextBuilder {
     let mut current = builder;
     current.lines.push("");
     return current;
 }
 
-fn builder_push_indent(builder -> TextBuilder) -> TextBuilder {
+fn builder_push_indent(builder: TextBuilder) -> TextBuilder {
     return TextBuilder { lines: builder.lines, indent: builder.indent + 1 };
 }
 
-fn builder_pop_indent(builder -> TextBuilder) -> TextBuilder {
+fn builder_pop_indent(builder: TextBuilder) -> TextBuilder {
     let mut indent = builder.indent;
     if indent > 0 {
         indent -= 1;
@@ -164,7 +164,7 @@ fn builder_pop_indent(builder -> TextBuilder) -> TextBuilder {
     return TextBuilder { lines: builder.lines, indent: indent };
 }
 
-fn builder_to_string(builder -> TextBuilder) -> string {
+fn builder_to_string(builder: TextBuilder) -> string {
     let content = join_with_separator(builder.lines, "\n");
     if content.length == 0 {
         return "";
@@ -172,14 +172,14 @@ fn builder_to_string(builder -> TextBuilder) -> string {
     return content + "\n";
 }
 
-fn trim_right(value -> string) -> string {
-    let mut end -> number = value.length;
+fn trim_right(value: string) -> string {
+    let mut end: number = value.length;
     loop {
         if end <= 0 {
             break;
         }
         let ch = char_at(value, end - 1);
-        let mut _if33 -> boolean = false;
+        let mut _if33: boolean = false;
         if ch == " " { _if33 = true; }
         if ch == "\t" { _if33 = true; }
         if _if33 {
@@ -194,12 +194,12 @@ fn trim_right(value -> string) -> string {
     return substring(value, 0, end);
 }
 
-fn join_with_separator(values -> string[], separator -> string) -> string {
+fn join_with_separator(values: string[], separator: string) -> string {
     if values.length == 0 {
         return "";
     }
-    let mut result -> string = values[0];
-    let mut index -> number = 1;
+    let mut result: string = values[0];
+    let mut index: number = 1;
     loop {
         if index >= values.length {
             break;
@@ -210,9 +210,9 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
     return result;
 }
 
-fn trim_text(value -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = value.length;
+fn trim_text(value: string) -> string {
+    let mut start: number = 0;
+    let mut end: number = value.length;
     loop {
         if start >= end {
             break;
@@ -243,8 +243,8 @@ fn trim_text(value -> string) -> string {
     return substring(value, start, end);
 }
 
-fn is_trim_char(ch -> string) -> boolean {
-    let mut _ret34 -> boolean = false;
+fn is_trim_char(ch: string) -> boolean {
+    let mut _ret34: boolean = false;
     if ch == " " { _ret34 = true; }
     if ch == "\n" { _ret34 = true; }
     if ch == "\r" { _ret34 = true; }

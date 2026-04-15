@@ -167,9 +167,9 @@ import {
     extend_lifetime_regions_checked,
 } from "./lowering_io";
 
-fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
+fn lower_to_llvm(native_module: NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
-    let mut _if206 -> boolean = false;
+    let mut _if206: boolean = false;
     if artifact == null { _if206 = true; }
     if artifact.contents.length == 0 { _if206 = true; }
     if _if206 {
@@ -186,9 +186,9 @@ fn lower_to_llvm(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
     );
 }
 
-fn lower_to_llvm_lines(native_module -> NativeModule) -> LoweredLLVMLinesResult ![io] {
+fn lower_to_llvm_lines(native_module: NativeModule) -> LoweredLLVMLinesResult ![io] {
     let ir = lower_to_llvm_ir(native_module);
-    let mut _if207 -> boolean = false;
+    let mut _if207: boolean = false;
     if ir == null { _if207 = true; }
     if ir.length == 0 { _if207 = true; }
     if _if207 {
@@ -206,9 +206,9 @@ fn lower_to_llvm_lines(native_module -> NativeModule) -> LoweredLLVMLinesResult 
     };
 }
 
-fn lower_to_llvm_lines_only(native_module -> NativeModule) -> string[] ![io] {
+fn lower_to_llvm_lines_only(native_module: NativeModule) -> string[] ![io] {
     let ir = lower_to_llvm_ir(native_module);
-    let mut _if208 -> boolean = false;
+    let mut _if208: boolean = false;
     if ir == null { _if208 = true; }
     if ir.length == 0 { _if208 = true; }
     if _if208 {
@@ -221,9 +221,9 @@ fn lower_to_llvm_lines_only(native_module -> NativeModule) -> string[] ![io] {
 // LLVM text. Returning a plain string avoids carrying the full `LoweredLLVMResult`
 // struct across compilation boundaries (stage1 Python + stage2 native), which
 // has historically caused layout/ABI mismatches and nondeterministic output.
-fn lower_to_llvm_ir(native_module -> NativeModule) -> string ![io] {
+fn lower_to_llvm_ir(native_module: NativeModule) -> string ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
-    let mut _if209 -> boolean = false;
+    let mut _if209: boolean = false;
     if artifact == null { _if209 = true; }
     if artifact.contents.length == 0 { _if209 = true; }
     if _if209 {
@@ -244,7 +244,7 @@ fn lower_to_llvm_ir(native_module -> NativeModule) -> string ![io] {
 }
 
 // Build LLVM IR from raw native text (non-test path), avoiding NativeModule ABI issues.
-fn lower_to_llvm_ir_from_text(native_text -> string, module_name -> string) -> string ![io] {
+fn lower_to_llvm_ir_from_text(native_text: string, module_name: string) -> string ![io] {
     if native_text.length == 0 {
         return "";
     }
@@ -265,7 +265,7 @@ fn lower_to_llvm_ir_from_text(native_text -> string, module_name -> string) -> s
         true,
         native_text
     );
-    let mut _if219 -> boolean = false;
+    let mut _if219: boolean = false;
     if lowered_lines.lines == null { _if219 = true; }
     if lowered_lines.lines.length == 0 { _if219 = true; }
     if _if219 {
@@ -287,7 +287,7 @@ fn lower_to_llvm_ir_from_text(native_text -> string, module_name -> string) -> s
 
 // Build and write LLVM IR with module symbol mangling for non-test usage.
 // Avoids returning large structs/arrays across boundaries.
-fn write_llvm_ir(native_module -> NativeModule, out_path -> string) -> boolean ![io] {
+fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
         return false;
@@ -325,20 +325,20 @@ fn write_llvm_ir(native_module -> NativeModule, out_path -> string) -> boolean !
 }
 
 // Build and write LLVM IR from a native text file, avoiding large string returns.
-fn write_llvm_ir_from_native_text_file(native_text_path -> string, module_name -> string, out_path -> string) -> boolean ![io] {
+fn write_llvm_ir_from_native_text_file(native_text_path: string, module_name: string, out_path: string) -> boolean ![io] {
     // Delegate to lowering_core where all calls are intra-module (avoiding
     // cross-module ABI bugs and struct literal drops in the seed).
     return compile_native_text_to_llvm_file(native_text_path, module_name, out_path);
 }
 
-fn lower_to_llvm_with_manifests(native_module -> NativeModule, imported_manifests -> LayoutManifest[]) -> LoweredLLVMResult {
+fn lower_to_llvm_with_manifests(native_module: NativeModule, imported_manifests: LayoutManifest[]) -> LoweredLLVMResult {
     return lower_to_llvm_with_context(native_module, imported_manifests, [], []);
 }
 
 
-fn lower_to_llvm_with_parsed_context(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMResult {
     let _art = select_text_artifact(native_module.artifacts);
-    let mut _native_text -> string = "";
+    let mut _native_text: string = "";
     if _art != null {
         _native_text = _art.contents;
     }
@@ -355,7 +355,7 @@ fn lower_to_llvm_with_parsed_context(native_module -> NativeModule, parse -> Par
         };
     }
     let ir = _join_llvm_lines_linear(lowered.lines);
-    let mut output -> string = ir;
+    let mut output: string = ir;
     if output.length > 0 {
         output = output + "\n";
     }
@@ -372,10 +372,10 @@ fn lower_to_llvm_with_parsed_context(native_module -> NativeModule, parse -> Par
 
 
 
-fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMResult {
+fn lower_to_llvm_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMResult {
     let lowered = lower_to_llvm_lines_with_context(native_module, imported_manifests, imported_native_texts, imported_diagnostics);
     let ir = _join_llvm_lines_linear(lowered.lines);
-    let mut output -> string = ir;
+    let mut output: string = ir;
     if output.length > 0 {
         output = output + "\n";
     }
@@ -391,10 +391,10 @@ fn lower_to_llvm_with_context(native_module -> NativeModule, imported_manifests 
 }
 
 
-fn lower_to_llvm_lines_with_context(native_module -> NativeModule, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMLinesResult {
-    let mut diagnostics -> string[] = [];
+fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
+    let mut diagnostics: string[] = [];
     if imported_diagnostics.length > 0 {
-        let mut _ci0 -> number = 0;
+        let mut _ci0: number = 0;
         loop {
             if _ci0 >= imported_diagnostics.length { break; }
             diagnostics.push(imported_diagnostics[_ci0]);

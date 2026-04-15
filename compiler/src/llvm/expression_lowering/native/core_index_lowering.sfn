@@ -34,21 +34,21 @@ import { coerce_operand_to_type } from "./core_operands";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
 
-fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
-    let mut diagnostics -> string[] = base_result.diagnostics;
-    let mut collected_string_constants -> StringConstant[] = base_result.string_constants;
+    let mut diagnostics: string[] = base_result.diagnostics;
+    let mut collected_string_constants: StringConstant[] = base_result.string_constants;
 
     if base_result.operand == null {
         return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
-    let mut current_lines -> string[] = base_result.lines;
-    let mut current_temp -> number = base_result.temp_index;
+    let mut current_lines: string[] = base_result.lines;
+    let mut current_temp: number = base_result.temp_index;
     let base_operand = base_result.operand;
 
     let index_result = lower_expression(parse.index, bindings, locals, current_temp, current_lines, functions, context, "");
-    let mut _ci0 -> number = 0;
+    let mut _ci0: number = 0;
     loop {
         if _ci0 >= index_result.diagnostics.length { break; }
         diagnostics.push(index_result.diagnostics[_ci0]);
@@ -66,7 +66,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     let index_operand = index_result.operand;
 
     let index_coercion = coerce_operand_to_type(index_operand, "i64", current_temp, current_lines);
-    let mut _ci1 -> number = 0;
+    let mut _ci1: number = 0;
     loop {
         if _ci1 >= index_coercion.diagnostics.length { break; }
         diagnostics.push(index_coercion.diagnostics[_ci1]);
@@ -81,9 +81,9 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     let coerced_index = index_coercion.operand;
 
     let array_type = base_operand.llvm_type;
-    let mut element_type -> string = "";
-    let mut is_heap_array -> boolean = false;
-    let mut is_string -> boolean = false;
+    let mut element_type: string = "";
+    let mut is_heap_array: boolean = false;
+    let mut is_string: boolean = false;
 
     if array_type == "i8*" {
         element_type = "i8";
@@ -96,12 +96,12 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
                 if substring(inner_type, inner_type.length - 1, inner_type.length) == "}" {
                     let struct_inner = trim_text(substring(inner_type, 1, inner_type.length - 1));
         
-                    let mut comma_pos -> number = -1;
-                    let mut brace_depth -> number = 0;
-                    let mut bracket_depth -> number = 0;
-                    let mut paren_depth -> number = 0;
-                    let mut angle_depth -> number = 0;
-                    let mut i -> number = 0;
+                    let mut comma_pos: number = -1;
+                    let mut brace_depth: number = 0;
+                    let mut bracket_depth: number = 0;
+                    let mut paren_depth: number = 0;
+                    let mut angle_depth: number = 0;
+                    let mut i: number = 0;
                     loop {
                         if i >= struct_inner.length {
                             break;
@@ -165,7 +165,7 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
 
     if is_string {
         let index_as_double = coerce_operand_to_type(index_operand, "double", current_temp, current_lines);
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= index_as_double.diagnostics.length { break; }
             diagnostics.push(index_as_double.diagnostics[_ci2]);
@@ -189,8 +189,8 @@ fn lower_index_expression(parse -> IndexExpressionParse, bindings -> ParameterBi
     }
 
     if is_heap_array {
-        let mut data_ptr -> string = "";
-        let mut length_value -> string = "";
+        let mut data_ptr: string = "";
+        let mut length_value: string = "";
 
         let array_struct_type = strip_pointer_suffix(array_type);
         let loaded_array = format_temp_name(current_temp);

@@ -10,46 +10,46 @@ import { substring } from "./string_utils";
 // ── Data structures ──────────────────────────────────────────────────
 
 struct TextBuilder {
-    lines -> string[];
-    indent -> number;
+    lines: string[];
+    indent: number;
 }
 
 struct NativeState {
-    builder -> TextBuilder;
-    diagnostics -> string[];
-    layout_context -> LayoutContext;
+    builder: TextBuilder;
+    diagnostics: string[];
+    layout_context: LayoutContext;
 }
 
 struct StatementDispatchResult {
-    state -> NativeState;
-    handled -> boolean;
+    state: NativeState;
+    handled: boolean;
 }
 
 // Forward-declared layout context type — the full definition lives in
 // emit_native_layout.sfn but NativeState needs to carry a reference.
 struct LayoutContext {
-    structs -> LayoutStructDefinition[];
-    enums -> LayoutEnumDefinition[];
+    structs: LayoutStructDefinition[];
+    enums: LayoutEnumDefinition[];
 }
 
 struct LayoutStructDefinition {
-    name -> string;
-    fields -> LayoutFieldInput[];
+    name: string;
+    fields: LayoutFieldInput[];
 }
 
 struct LayoutFieldInput {
-    name -> string;
-    type_annotation -> string;
+    name: string;
+    type_annotation: string;
 }
 
 struct LayoutEnumVariantDefinition {
-    name -> string;
-    fields -> LayoutFieldInput[];
+    name: string;
+    fields: LayoutFieldInput[];
 }
 
 struct LayoutEnumDefinition {
-    name -> string;
-    variants -> LayoutEnumVariantDefinition[];
+    name: string;
+    variants: LayoutEnumVariantDefinition[];
 }
 
 // ── Builder functions ────────────────────────────────────────────────
@@ -58,9 +58,9 @@ fn builder_new() -> TextBuilder {
     return TextBuilder { lines: [], indent: 0 };
 }
 
-fn builder_emit_line(builder -> TextBuilder, line -> string) -> TextBuilder {
-    let mut prefix -> string = "";
-    let mut count -> number = 0;
+fn builder_emit_line(builder: TextBuilder, line: string) -> TextBuilder {
+    let mut prefix: string = "";
+    let mut count: number = 0;
     loop {
         if count >= builder.indent {
             break;
@@ -73,16 +73,16 @@ fn builder_emit_line(builder -> TextBuilder, line -> string) -> TextBuilder {
     return TextBuilder { lines: lines, indent: builder.indent };
 }
 
-fn builder_emit_blank(builder -> TextBuilder) -> TextBuilder {
+fn builder_emit_blank(builder: TextBuilder) -> TextBuilder {
     let lines = append_string(builder.lines, "");
     return TextBuilder { lines: lines, indent: builder.indent };
 }
 
-fn builder_push_indent(builder -> TextBuilder) -> TextBuilder {
+fn builder_push_indent(builder: TextBuilder) -> TextBuilder {
     return TextBuilder { lines: builder.lines, indent: builder.indent + 1 };
 }
 
-fn builder_pop_indent(builder -> TextBuilder) -> TextBuilder {
+fn builder_pop_indent(builder: TextBuilder) -> TextBuilder {
     let mut indent = builder.indent;
     if indent > 0 {
         indent -= 1;
@@ -90,7 +90,7 @@ fn builder_pop_indent(builder -> TextBuilder) -> TextBuilder {
     return TextBuilder { lines: builder.lines, indent: indent };
 }
 
-fn builder_to_string(builder -> TextBuilder) -> string {
+fn builder_to_string(builder: TextBuilder) -> string {
     if builder.lines == null {
         return "";
     }
@@ -103,11 +103,11 @@ fn builder_to_string(builder -> TextBuilder) -> string {
 
 // ── State functions ──────────────────────────────────────────────────
 
-fn state_new(context -> LayoutContext) -> NativeState {
+fn state_new(context: LayoutContext) -> NativeState {
     return NativeState { builder: builder_new(), diagnostics: [], layout_context: context };
 }
 
-fn state_emit_line(state -> NativeState, line -> string) -> NativeState {
+fn state_emit_line(state: NativeState, line: string) -> NativeState {
     return NativeState {
         builder: builder_emit_line(state.builder, line),
         diagnostics: state.diagnostics,
@@ -115,7 +115,7 @@ fn state_emit_line(state -> NativeState, line -> string) -> NativeState {
     };
 }
 
-fn state_emit_blank(state -> NativeState) -> NativeState {
+fn state_emit_blank(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_emit_blank(state.builder),
         diagnostics: state.diagnostics,
@@ -123,7 +123,7 @@ fn state_emit_blank(state -> NativeState) -> NativeState {
     };
 }
 
-fn state_push_indent(state -> NativeState) -> NativeState {
+fn state_push_indent(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_push_indent(state.builder),
         diagnostics: state.diagnostics,
@@ -131,7 +131,7 @@ fn state_push_indent(state -> NativeState) -> NativeState {
     };
 }
 
-fn state_pop_indent(state -> NativeState) -> NativeState {
+fn state_pop_indent(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_pop_indent(state.builder),
         diagnostics: state.diagnostics,
@@ -139,7 +139,7 @@ fn state_pop_indent(state -> NativeState) -> NativeState {
     };
 }
 
-fn state_add_diagnostic(state -> NativeState, message -> string) -> NativeState {
+fn state_add_diagnostic(state: NativeState, message: string) -> NativeState {
     let diagnostics = append_string(state.diagnostics, message);
     return NativeState {
         builder: builder_emit_line(state.builder, "; " + message),
@@ -148,12 +148,12 @@ fn state_add_diagnostic(state -> NativeState, message -> string) -> NativeState 
     };
 }
 
-fn state_merge_diagnostics(state -> NativeState, entries -> string[]) -> NativeState {
+fn state_merge_diagnostics(state: NativeState, entries: string[]) -> NativeState {
     if entries.length == 0 {
         return state;
     }
-    let mut combined -> string[] = state.diagnostics;
-    let mut index -> number = 0;
+    let mut combined: string[] = state.diagnostics;
+    let mut index: number = 0;
     loop {
         if index >= entries.length {
             break;
@@ -166,9 +166,9 @@ fn state_merge_diagnostics(state -> NativeState, entries -> string[]) -> NativeS
 
 // ── String / array utility functions ─────────────────────────────────
 
-fn trim_text(value -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = value.length;
+fn trim_text(value: string) -> string {
+    let mut start: number = 0;
+    let mut end: number = value.length;
     loop {
         if start >= end {
             break;
@@ -199,8 +199,8 @@ fn trim_text(value -> string) -> string {
         return substring(value, start, end);
 }
 
-fn is_trim_char(ch -> string) -> boolean {
-    let mut _ret23 -> boolean = false;
+fn is_trim_char(ch: string) -> boolean {
+    let mut _ret23: boolean = false;
     if ch == " " { _ret23 = true; }
     if ch == "\n" { _ret23 = true; }
     if ch == "\r" { _ret23 = true; }
@@ -208,14 +208,14 @@ fn is_trim_char(ch -> string) -> boolean {
     return _ret23;
 }
 
-fn trim_right(value -> string) -> string {
-    let mut end -> number = value.length;
+fn trim_right(value: string) -> string {
+    let mut end: number = value.length;
     loop {
         if end <= 0 {
             break;
         }
         let ch = value[end - 1];
-        let mut _if25 -> boolean = false;
+        let mut _if25: boolean = false;
         if ch == " " { _if25 = true; }
         if ch == "\t" { _if25 = true; }
         if _if25 {
@@ -230,7 +230,7 @@ fn trim_right(value -> string) -> string {
     return substring(value, 0, end);
 }
 
-fn ends_with(value -> string, suffix -> string) -> boolean {
+fn ends_with(value: string, suffix: string) -> boolean {
     if suffix.length == 0 {
         return true;
     }
@@ -238,7 +238,7 @@ fn ends_with(value -> string, suffix -> string) -> boolean {
         return false;
     }
     let start = value.length - suffix.length;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= suffix.length {
             break;
@@ -252,19 +252,19 @@ fn ends_with(value -> string, suffix -> string) -> boolean {
     return true;
 }
 
-fn number_to_string(value -> number) -> string {
+fn number_to_string(value: number) -> string {
     if value == 0 {
         return "0";
     }
-    let mut remaining -> number = value;
-    let mut output -> string = "";
+    let mut remaining: number = value;
+    let mut output: string = "";
     let digits = "0123456789";
     loop {
         if remaining <= 0 {
             break;
         }
-        let mut temp -> number = remaining;
-        let mut quotient -> number = 0;
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
         loop {
             if temp < 10 {
                 break;
@@ -280,21 +280,21 @@ fn number_to_string(value -> number) -> string {
     return output;
 }
 
-fn quote_string(value -> string) -> string {
+fn quote_string(value: string) -> string {
     // Chunked: collect runs of unchanged text + escape sequences, then
     // assemble. The previous implementation did `result = result + ch` per
     // character, O(N^2) memory under the zero-GC runtime. emit_native.sfn
     // calls this on every string literal in the .sfn-asm output, so a few
     // long literals would blow the seedcheck memory cap.
-    let mut chunks -> string[] = ["\""];
-    let mut chunk_start -> number = 0;
-    let mut index -> number = 0;
+    let mut chunks: string[] = ["\""];
+    let mut chunk_start: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= value.length {
             break;
         }
         let ch = substring(value, index, index + 1);
-        let mut esc -> string = "";
+        let mut esc: string = "";
         if ch == "\"" {
             esc = "\\\"";
         } else if ch == "\\" {
@@ -319,8 +319,8 @@ fn quote_string(value -> string) -> string {
         chunks.push(substring(value, chunk_start, value.length));
     }
     chunks.push("\"");
-    let mut result -> string = chunks[0];
-    let mut i -> number = 1;
+    let mut result: string = chunks[0];
+    let mut i: number = 1;
     loop {
         if i >= chunks.length {
             break;
@@ -331,7 +331,7 @@ fn quote_string(value -> string) -> string {
     return result;
 }
 
-fn escape_string_char(ch -> string) -> string {
+fn escape_string_char(ch: string) -> string {
     if ch == "\"" {
         return "\\\"";
     }
@@ -350,7 +350,7 @@ fn escape_string_char(ch -> string) -> string {
     return ch;
 }
 
-fn append_string(values -> string[], value -> string) -> string[] {
+fn append_string(values: string[], value: string) -> string[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -359,15 +359,15 @@ fn append_string(values -> string[], value -> string) -> string[] {
     return out;
 }
 
-fn join_with_separator(values -> string[], separator -> string) -> string {
+fn join_with_separator(values: string[], separator: string) -> string {
     if values == null {
         return "";
     }
     if values.length == 0 {
         return "";
     }
-    let mut result -> string = values[0];
-    let mut index -> number = 1;
+    let mut result: string = values[0];
+    let mut index: number = 1;
     loop {
         if index >= values.length {
             break;
@@ -378,12 +378,12 @@ fn join_with_separator(values -> string[], separator -> string) -> string {
     return result;
 }
 
-fn join_type_annotations(values -> TypeAnnotation[]) -> string {
+fn join_type_annotations(values: TypeAnnotation[]) -> string {
     if values.length == 0 {
         return "";
     }
-    let mut parts -> string[] = [];
-    let mut index -> number = 0;
+    let mut parts: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= values.length {
             break;
@@ -394,8 +394,8 @@ fn join_type_annotations(values -> TypeAnnotation[]) -> string {
     return join_with_separator(parts, ", ");
 }
 
-fn contains_string(values -> string[], target -> string) -> boolean {
-    let mut index -> number = 0;
+fn contains_string(values: string[], target: string) -> boolean {
+    let mut index: number = 0;
     loop {
         if index >= values.length {
             break;
@@ -408,22 +408,22 @@ fn contains_string(values -> string[], target -> string) -> boolean {
     return false;
 }
 
-fn append_unique(values -> string[], value -> string) -> string[] {
+fn append_unique(values: string[], value: string) -> string[] {
     if contains_string(values, value) {
         return values;
     }
     return append_string(values, value);
 }
 
-fn is_array_type(type_annotation -> string) -> boolean {
+fn is_array_type(type_annotation: string) -> boolean {
     return ends_with(type_annotation, "[]");
 }
 
-fn is_optional_annotation(type_annotation -> string) -> boolean {
+fn is_optional_annotation(type_annotation: string) -> boolean {
     return ends_with(type_annotation, "?");
 }
 
-fn strip_optional_suffix(type_annotation -> string) -> string {
+fn strip_optional_suffix(type_annotation: string) -> string {
     if type_annotation.length == 0 {
         return type_annotation;
     }

@@ -13,17 +13,17 @@ import { trim_text, append_string, string_array_contains, number_to_string, star
 // Import Context Collection
 // =============================================================================
 
-fn load_imported_layout_manifests(imports -> NativeImport[]) -> LayoutManifest[] ![io] {
+fn load_imported_layout_manifests(imports: NativeImport[]) -> LayoutManifest[] ![io] {
     let context = collect_imported_module_context(imports);
     return context.manifests;
 }
 
-fn collect_imported_module_context(imports -> NativeImport[]) -> ImportedModuleContext ![io] {
+fn collect_imported_module_context(imports: NativeImport[]) -> ImportedModuleContext ![io] {
     return collect_imported_module_context_for_module(imports, "");
 }
 
-fn collect_imported_module_context_for_module(imports -> NativeImport[], current_module_slug -> string) -> ImportedModuleContext ![io] {
-    let mut _let189 -> boolean = false;
+fn collect_imported_module_context_for_module(imports: NativeImport[], current_module_slug: string) -> ImportedModuleContext ![io] {
+    let mut _let189: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
         if fs.exists("build/sailfin/.test_runner_active") {
             _let189 = true;
@@ -33,20 +33,20 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
     if trace {
         print.err("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
     }
-    let mut manifests -> LayoutManifest[] = [];
-    let mut native_texts -> string[] = [];
-    let mut diagnostics -> string[] = [];
-    let mut seen -> string[] = [];
+    let mut manifests: LayoutManifest[] = [];
+    let mut native_texts: string[] = [];
+    let mut diagnostics: string[] = [];
+    let mut seen: string[] = [];
 
     // Queue: parallel arrays for (module_path, parent_slug, depth).
     // Only direct imports (depth 0) load full native texts.  Depth-1
     // imports load layout manifests only to keep struct/enum info
     // available without the memory cost of parsing function bodies.
-    let mut queue_paths -> string[] = [];
-    let mut queue_parent_slugs -> string[] = [];
-    let mut queue_depths -> number[] = [];
+    let mut queue_paths: string[] = [];
+    let mut queue_parent_slugs: string[] = [];
+    let mut queue_depths: number[] = [];
 
-    let mut init_index -> number = 0;
+    let mut init_index: number = 0;
     loop {
         if init_index >= imports.length {
             break;
@@ -57,9 +57,9 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         init_index += 1;
     }
 
-    let max_transitive_depth -> number = 3;
+    let max_transitive_depth: number = 3;
 
-    let mut queue_index -> number = 0;
+    let mut queue_index: number = 0;
     loop {
         if queue_index >= queue_paths.length {
             break;
@@ -90,8 +90,8 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         let manifest_path = _resolve_layout_manifest_path_for_slug(slug);
         let native_text_path = _resolve_native_text_path_for_slug(slug);
 
-        let mut manifest_structs -> NativeStruct[] = [];
-        let mut manifest_enums -> NativeEnum[] = [];
+        let mut manifest_structs: NativeStruct[] = [];
+        let mut manifest_enums: NativeEnum[] = [];
         if fs.exists(manifest_path) {
             let manifest_contents = fs.readFile(manifest_path);
             let parsed_manifest = parse_layout_manifest(manifest_contents);
@@ -107,8 +107,8 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         // native text to discover *their* imports, but we store "" in the
         // returned native_texts array to avoid the expensive downstream
         // function/instruction parsing.
-        let mut native_text -> string = "";
-        let mut native_text_for_discovery -> string = "";
+        let mut native_text: string = "";
+        let mut native_text_for_discovery: string = "";
         if fs.exists(native_text_path) {
             let file_contents = fs.readFile(native_text_path);
             if depth == 0 {
@@ -140,7 +140,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         // for full LLVM lowering.
         if native_text_for_discovery.length > 0 {
             let transitive_imports = parse_native_imports_for_import(native_text_for_discovery);
-            let mut ti -> number = 0;
+            let mut ti: number = 0;
             let next_depth = depth + 1;
             loop {
                 if ti >= transitive_imports.length {
@@ -164,7 +164,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
     return ImportedModuleContext { manifests: manifests, native_texts: native_texts, diagnostics: diagnostics };
 }
 
-fn resolve_import_artifact_slug(slug -> string) -> string ![io] {
+fn resolve_import_artifact_slug(slug: string) -> string ![io] {
     if slug.length == 0 {
         return slug;
     }
@@ -190,13 +190,13 @@ fn resolve_import_artifact_slug(slug -> string) -> string ![io] {
 // Module Path Resolution
 // =============================================================================
 
-fn resolve_import_module_slug(module -> string) -> string {
+fn resolve_import_module_slug(module: string) -> string {
     return resolve_import_module_slug_for_module(module, "");
 }
 
-fn dirname_for_module_slug(slug -> string) -> string {
-    let mut last_slash -> number = -1;
-    let mut index -> number = 0;
+fn dirname_for_module_slug(slug: string) -> string {
+    let mut last_slash: number = -1;
+    let mut index: number = 0;
     loop {
         if index >= slug.length {
             break;
@@ -213,7 +213,7 @@ fn dirname_for_module_slug(slug -> string) -> string {
     return substring(slug, 0, last_slash);
 }
 
-fn resolve_import_module_slug_for_module(module -> string, current_module_slug -> string) -> string {
+fn resolve_import_module_slug_for_module(module: string, current_module_slug: string) -> string {
     let trimmed = trim_text(module);
     if trimmed.length == 0 {
         return "";
@@ -233,8 +233,8 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
         }
         if index_of(current_slug, "/") < 0 {
             if index_of(current_slug, "__") >= 0 {
-                let mut rebuilt -> string = "";
-                let mut idx -> number = 0;
+                let mut rebuilt: string = "";
+                let mut idx: number = 0;
                 loop {
                     if idx >= current_slug.length {
                         break;
@@ -262,7 +262,7 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
     // Resolve relative imports against the importing module's directory.
     // This is required now that we preserve directory structure for modules
     // (e.g. `parser/mod` importing `./token_utils`).
-    let mut _if190 -> boolean = false;
+    let mut _if190: boolean = false;
     if starts_with(normalized, "./") { _if190 = true; }
     if starts_with(normalized, "../") { _if190 = true; }
     if _if190 {
@@ -277,9 +277,9 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
     // Examples:
     // - "./llvm/type_context" -> "llvm/type_context"
     // - "../native_ir" -> "native_ir"
-    let mut parts -> string[] = [];
-    let mut segment -> string = "";
-    let mut index -> number = 0;
+    let mut parts: string[] = [];
+    let mut segment: string = "";
+    let mut index: number = 0;
     loop {
         if index >= normalized.length {
             break;
@@ -299,14 +299,14 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
         parts.push(segment);
     }
 
-    let mut resolved -> string[] = [];
+    let mut resolved: string[] = [];
     index = 0;
     loop {
         if index >= parts.length {
             break;
         }
         let part = parts[index];
-        let mut _if191 -> boolean = false;
+        let mut _if191: boolean = false;
         if part.length == 0 { _if191 = true; }
         if part == "." { _if191 = true; }
         if _if191 {
@@ -315,8 +315,8 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
         }
         if part == ".." {
             if resolved.length > 0 {
-                let mut shortened -> string[] = [];
-                let mut drop_index -> number = 0;
+                let mut shortened: string[] = [];
+                let mut drop_index: number = 0;
                 let limit = resolved.length - 1;
                 loop {
                     if drop_index >= limit {
@@ -349,23 +349,23 @@ fn resolve_import_module_slug_for_module(module -> string, current_module_slug -
     return slug;
 }
 
-fn layout_manifest_path_for_slug(slug -> string) -> string {
+fn layout_manifest_path_for_slug(slug: string) -> string {
     return "build/native/import-context/" + slug + ".layout-manifest";
 }
 
-fn native_text_path_for_slug(slug -> string) -> string {
+fn native_text_path_for_slug(slug: string) -> string {
     return "build/native/import-context/" + slug + ".sfn-asm";
 }
 
-fn _selfhost_layout_manifest_path_for_slug(slug -> string) -> string {
+fn _selfhost_layout_manifest_path_for_slug(slug: string) -> string {
     return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug + ".layout-manifest";
 }
 
-fn _selfhost_native_text_path_for_slug(slug -> string) -> string {
+fn _selfhost_native_text_path_for_slug(slug: string) -> string {
     return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug + ".sfn-asm";
 }
 
-fn _resolve_layout_manifest_path_for_slug(slug -> string) -> string ![io] {
+fn _resolve_layout_manifest_path_for_slug(slug: string) -> string ![io] {
     let primary = layout_manifest_path_for_slug(slug);
     if fs.exists(primary) {
         return primary;
@@ -377,7 +377,7 @@ fn _resolve_layout_manifest_path_for_slug(slug -> string) -> string ![io] {
     return primary;
 }
 
-fn _resolve_native_text_path_for_slug(slug -> string) -> string ![io] {
+fn _resolve_native_text_path_for_slug(slug: string) -> string ![io] {
     let primary = native_text_path_for_slug(slug);
     if fs.exists(primary) {
         return primary;
@@ -389,9 +389,9 @@ fn _resolve_native_text_path_for_slug(slug -> string) -> string ![io] {
     return primary;
 }
 
-fn normalize_import_module_path(value -> string) -> string {
-    let mut result -> string = "";
-    let mut index -> number = 0;
+fn normalize_import_module_path(value: string) -> string {
+    let mut result: string = "";
+    let mut index: number = 0;
     loop {
         if index >= value.length {
             break;
@@ -411,18 +411,18 @@ fn normalize_import_module_path(value -> string) -> string {
 // Layout Manifest Application
 // =============================================================================
 
-fn apply_layout_manifest_to_module(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest?) -> LayoutManifestApplication {
+fn apply_layout_manifest_to_module(structs: NativeStruct[], enums: NativeEnum[], manifest: LayoutManifest?) -> LayoutManifestApplication {
     if manifest == null {
         return LayoutManifestApplication { structs: structs, enums: enums, diagnostics: [] };
     }
     return apply_layout_manifest_entries(structs, enums, manifest);
 }
 
-fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[], manifest -> LayoutManifest) -> LayoutManifestApplication {
-    let mut diagnostics -> string[] = [];
+fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], manifest: LayoutManifest) -> LayoutManifestApplication {
+    let mut diagnostics: string[] = [];
 
-    let mut updated_structs -> NativeStruct[] = structs;
-    let mut struct_index -> number = 0;
+    let mut updated_structs: NativeStruct[] = structs;
+    let mut struct_index: number = 0;
     loop {
         if struct_index >= manifest.structs.length {
             break;
@@ -445,8 +445,8 @@ fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[
         struct_index += 1;
     }
 
-    let mut updated_enums -> NativeEnum[] = enums;
-    let mut enum_index -> number = 0;
+    let mut updated_enums: NativeEnum[] = enums;
+    let mut enum_index: number = 0;
     loop {
         if enum_index >= manifest.enums.length {
             break;
@@ -478,8 +478,8 @@ fn apply_layout_manifest_entries(structs -> NativeStruct[], enums -> NativeEnum[
 // Helper Functions
 // =============================================================================
 
-fn find_struct_index(structs -> NativeStruct[], name -> string) -> number {
-    let mut index -> number = 0;
+fn find_struct_index(structs: NativeStruct[], name: string) -> number {
+    let mut index: number = 0;
     loop {
         if index >= structs.length {
             break;
@@ -492,8 +492,8 @@ fn find_struct_index(structs -> NativeStruct[], name -> string) -> number {
     return -1;
 }
 
-fn find_enum_index(enums -> NativeEnum[], name -> string) -> number {
-    let mut index -> number = 0;
+fn find_enum_index(enums: NativeEnum[], name: string) -> number {
+    let mut index: number = 0;
     loop {
         if index >= enums.length {
             break;
@@ -506,9 +506,9 @@ fn find_enum_index(enums -> NativeEnum[], name -> string) -> number {
     return -1;
 }
 
-fn replace_native_struct(structs -> NativeStruct[], index -> number, replacement -> NativeStruct) -> NativeStruct[] {
-    let mut result -> NativeStruct[] = [];
-    let mut i -> number = 0;
+fn replace_native_struct(structs: NativeStruct[], index: number, replacement: NativeStruct) -> NativeStruct[] {
+    let mut result: NativeStruct[] = [];
+    let mut i: number = 0;
     loop {
         if i >= structs.length {
             break;
@@ -523,9 +523,9 @@ fn replace_native_struct(structs -> NativeStruct[], index -> number, replacement
     return result;
 }
 
-fn replace_native_enum(enums -> NativeEnum[], index -> number, replacement -> NativeEnum) -> NativeEnum[] {
-    let mut result -> NativeEnum[] = [];
-    let mut i -> number = 0;
+fn replace_native_enum(enums: NativeEnum[], index: number, replacement: NativeEnum) -> NativeEnum[] {
+    let mut result: NativeEnum[] = [];
+    let mut i: number = 0;
     loop {
         if i >= enums.length {
             break;

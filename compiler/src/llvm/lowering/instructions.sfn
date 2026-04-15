@@ -98,49 +98,49 @@ import {
 } from "./lowering_native_helpers";
 
 fn lower_instruction_range(
-    function -> NativeFunction,
-    start_index -> number,
-    end -> number,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    allocas -> string[],
-    lines -> string[],
-    temp_index -> number,
-    block_counter -> number,
-    next_local_id -> number,
-    next_region_id -> number,
-    functions -> NativeFunction[],
-    loop_stack -> LoopContext[],
-    context -> TypeContext,
-    scope_id -> string,
-    scope_depth -> number,
-    current_label -> string
+    function: NativeFunction,
+    start_index: number,
+    end: number,
+    llvm_return: string,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    allocas: string[],
+    lines: string[],
+    temp_index: number,
+    block_counter: number,
+    next_local_id: number,
+    next_region_id: number,
+    functions: NativeFunction[],
+    loop_stack: LoopContext[],
+    context: TypeContext,
+    scope_id: string,
+    scope_depth: number,
+    current_label: string
 ) -> BlockLoweringResult ![io] {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
-    let mut current_allocas -> string[] = allocas;
-    let mut current_locals -> LocalBinding[] = locals;
-    let mut current_bindings -> ParameterBinding[] = bindings;
-    let mut current_temp -> number = temp_index;
-    let mut current_block_counter -> number = block_counter;
-    let mut current_next_local -> number = next_local_id;
-    let mut current_next_region -> number = next_region_id;
-    let mut terminated -> boolean = false;
-    let mut current_loop_stack -> LoopContext[] = loop_stack;
-    let mut index -> number = start_index;
-    let mut collected_lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut current_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
-    let mut active_label -> string = current_label;
-    let mut guard -> number = 0;
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_bindings: ParameterBinding[] = bindings;
+    let mut current_temp: number = temp_index;
+    let mut current_block_counter: number = block_counter;
+    let mut current_next_local: number = next_local_id;
+    let mut current_next_region: number = next_region_id;
+    let mut terminated: boolean = false;
+    let mut current_loop_stack: LoopContext[] = loop_stack;
+    let mut index: number = start_index;
+    let mut collected_lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut current_mutations: LocalMutation[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
+    let mut active_label: string = current_label;
+    let mut guard: number = 0;
     let max_guard = (end - start_index) * 16 + 1024;
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
         print.err("emit-llvm: lower_instruction_range name=" + function.name + " start=" + number_to_string(start_index) + " end=" + number_to_string(end) + " depth=" + number_to_string(scope_depth));
         print.err("emit-llvm: lower_instruction_range bindings_len=" + number_to_string(bindings.length) + " current_bindings_len=" + number_to_string(current_bindings.length));
     }
-    let mut _let220 -> boolean = false;
+    let mut _let220: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
         if fs.exists("build/sailfin/.test_runner_active") {
             _let220 = true;
@@ -156,8 +156,8 @@ fn lower_instruction_range(
                     + " end="
                     + number_to_string(end)
                 );
-                let mut preview_index -> number = start_index;
-                let mut preview_limit -> number = start_index + 5;
+                let mut preview_index: number = start_index;
+                let mut preview_limit: number = start_index + 5;
                 if preview_limit > end {
                     preview_limit = end;
                 }
@@ -253,7 +253,7 @@ fn lower_instruction_range(
         //   For=6, EndFor=7, Loop=8, EndLoop=9, Break=10, Continue=11,
         //   Match=12, Case=13, EndMatch=14, Try=15, Catch=16, Finally=17,
         //   EndTry=18, Throw=19, Noop=20, Unknown=21
-        let mut _tag_handled -> boolean = false;
+        let mut _tag_handled: boolean = false;
         if _instr_tag == 2 {
             let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
             diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
@@ -276,7 +276,7 @@ fn lower_instruction_range(
             if _instr_tag == 1 {
                 let _raw_expr = get_instruction_text(function.instructions, index);
                 let trimmed_expression = trim_text(_raw_expr);
-                let mut handled_inline_let -> boolean = false;
+                let mut handled_inline_let: boolean = false;
                 if trimmed_expression.length >= 4 {
                     let prefix = substring(trimmed_expression, 0, 4);
                     if prefix == "let " {
@@ -334,7 +334,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 3 {
                 let lowered = lower_if_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let mut _ci0 -> number = 0;
+                let mut _ci0: number = 0;
                 loop {
                     if _ci0 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci0]);
@@ -360,7 +360,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 8 {
                 let lowered = lower_loop_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let mut _ci1 -> number = 0;
+                let mut _ci1: number = 0;
                 loop {
                     if _ci1 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci1]);
@@ -386,7 +386,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 12 {
                 let lowered = lower_match_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let mut _ci2 -> number = 0;
+                let mut _ci2: number = 0;
                 loop {
                     if _ci2 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci2]);
@@ -412,7 +412,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 15 {
                 let lowered = lower_try_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let mut _ci3 -> number = 0;
+                let mut _ci3: number = 0;
                 loop {
                     if _ci3 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci3]);
@@ -438,7 +438,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 19 {
                 let lowered = lower_throw_instruction(function.name, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions, context);
-                let mut _ci4 -> number = 0;
+                let mut _ci4: number = 0;
                 loop {
                     if _ci4 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci4]);
@@ -456,7 +456,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 6 {
                 let lowered = lower_for_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let mut _ci5 -> number = 0;
+                let mut _ci5: number = 0;
                 loop {
                     if _ci5 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci5]);
@@ -507,7 +507,7 @@ fn lower_instruction_range(
         }
         // Else/EndIf, EndLoop, EndMatch, EndFor are block terminators — break out.
         if !_tag_handled {
-            let mut _is_terminator -> boolean = false;
+            let mut _is_terminator: boolean = false;
             if _instr_tag == 4 { _is_terminator = true; }
             if _instr_tag == 5 { _is_terminator = true; }
             if _instr_tag == 7 { _is_terminator = true; }
@@ -544,13 +544,13 @@ fn lower_instruction_range(
                 let _raw_expr_21 = get_instruction_text(function.instructions, index);
                 let trimmed_21 = trim_text(_raw_expr_21);
                 // Detect return instructions that the tag couldn't distinguish
-                let mut _is_ret_21 -> boolean = false;
+                let mut _is_ret_21: boolean = false;
                 if trimmed_21.length >= 4 {
                     if substring(trimmed_21, 0, 4) == "ret " { _is_ret_21 = true; }
                 }
                 if trimmed_21 == "ret" { _is_ret_21 = true; }
                 if _is_ret_21 {
-                    let mut _ret_val_21 -> string = "";
+                    let mut _ret_val_21: string = "";
                     if trimmed_21.length > 4 {
                         _ret_val_21 = trim_text(substring(trimmed_21, 4, trimmed_21.length));
                     }
@@ -565,7 +565,7 @@ fn lower_instruction_range(
                 // Otherwise treat as expression (handles eval + eval let)
                 if !_tag_handled {
                     if trimmed_21.length > 0 {
-                        let mut handled_inline_let_21 -> boolean = false;
+                        let mut handled_inline_let_21: boolean = false;
                         if trimmed_21.length >= 4 {
                             let prefix_21 = substring(trimmed_21, 0, 4);
                             if prefix_21 == "let " {
@@ -647,7 +647,7 @@ fn lower_instruction_range(
     if trace {
         if start_index == 0 {
             if scope_depth == 0 {
-                let mut term_label -> string = "false";
+                let mut term_label: string = "false";
                 if terminated {
                     term_label = "true";
                 }

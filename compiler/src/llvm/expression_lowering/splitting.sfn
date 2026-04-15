@@ -13,20 +13,20 @@ import {
     append_string,
 } from "../utils";
 
-fn split_array_elements(text -> string) -> string[] {
+fn split_array_elements(text: string) -> string[] {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return [];
     }
-    let mut entries -> string[] = [];
-    let mut current -> string = "";
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut index -> number = 0;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
+    let mut entries: string[] = [];
+    let mut current: string = "";
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut index: number = 0;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
     loop {
         if index >= text.length {
             break;
@@ -88,7 +88,7 @@ fn split_array_elements(text -> string) -> string[] {
             }
         }
 
-        let mut _if166 -> boolean = false;
+        let mut _if166: boolean = false;
         if ch == "," {
             if paren_depth == 0 {
                 if bracket_depth == 0 {
@@ -111,7 +111,7 @@ fn split_array_elements(text -> string) -> string[] {
         entries.push(trim_text(current));
     }
 
-    let mut filtered -> string[] = [];
+    let mut filtered: string[] = [];
     index = 0;
     loop {
         if index >= entries.length {

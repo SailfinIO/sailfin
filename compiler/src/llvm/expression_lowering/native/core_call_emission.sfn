@@ -57,35 +57,35 @@ import { sanitize_symbol } from "./core_text";
 
 import { coerce_operand_to_type } from "./core_operands";
 
-fn _write_emission_result_lines(result_lines -> string[], result_temp -> number) -> void ![io] {
+fn _write_emission_result_lines(result_lines: string[], result_temp: number) -> void ![io] {
     // Dead IPC files removed — .call_result_line_count and .call_result_temp_index have no reader.
 }
 
 // Coerce operands to expected types and emit the final call instruction.
 // Handles array concat/push, trait dispatch, and normal function calls.
 fn coerce_and_emit_call(
-    trimmed_target -> string,
-    operands -> LLVMOperand[],
-    expected_params -> string[],
-    llvm_return -> string,
-    is_trait_dispatch -> boolean,
-    is_array_concat -> boolean,
-    array_concat_element_type -> string,
-    is_array_push -> boolean,
-    array_push_element_type -> string,
-    method_operand -> LLVMOperand?,
-    helper_descriptor -> RuntimeHelperDescriptor?,
-    function_entry -> NativeFunction?,
-    current_temp -> number,
-    current_lines -> string[],
-    diagnostics -> string[],
-    collected_string_constants -> StringConstant[],
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    context -> TypeContext
+    trimmed_target: string,
+    operands: LLVMOperand[],
+    expected_params: string[],
+    llvm_return: string,
+    is_trait_dispatch: boolean,
+    is_array_concat: boolean,
+    array_concat_element_type: string,
+    is_array_push: boolean,
+    array_push_element_type: string,
+    method_operand: LLVMOperand?,
+    helper_descriptor: RuntimeHelperDescriptor?,
+    function_entry: NativeFunction?,
+    current_temp: number,
+    current_lines: string[],
+    diagnostics: string[],
+    collected_string_constants: StringConstant[],
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    context: TypeContext
 ) -> ExpressionResult ![io] {
     let mut result_lines = current_lines;
-    let mut result_temp -> number = current_temp;
+    let mut result_temp: number = current_temp;
     let mut result_diagnostics = diagnostics;
     let _trace_ccl = fs.exists("build/sailfin/.trace_lowering");
 
@@ -93,8 +93,8 @@ fn coerce_and_emit_call(
     if _trace_ccl {
         print.err("call_lowering: pre-coerce operands=" + number_to_string(operands.length) + " expected_params=" + number_to_string(expected_params.length) + " llvm_return=" + llvm_return);
     }
-    let mut coerced_operands -> LLVMOperand[] = [];
-    let mut index -> number = 0;
+    let mut coerced_operands: LLVMOperand[] = [];
+    let mut index: number = 0;
     loop {
         if index >= operands.length {
             break;
@@ -103,11 +103,11 @@ fn coerce_and_emit_call(
         if _trace_ccl {
             print.err("call_lowering: coerce-loop idx=" + number_to_string(index) + " operand_type=" + operand.llvm_type + " operand_value=" + operand.value);
         }
-        let mut target_type -> string = "";
+        let mut target_type: string = "";
         if expected_params.length > index {
             target_type = expected_params[index];
         }
-        let mut _if55 -> boolean = false;
+        let mut _if55: boolean = false;
         if is_trait_dispatch {
             if index == 0 {
                 _if55 = true;
@@ -146,7 +146,7 @@ fn coerce_and_emit_call(
             if !ends_with_pointer_suffix(array_concat_element_type) {
                 if final_operands.length >= 2 {
                     let concat_result = lower_struct_array_concat(final_operands[0], final_operands[1], array_concat_element_type, result_lines, result_temp);
-                    let mut _ci7 -> number = 0;
+                    let mut _ci7: number = 0;
                     loop {
                         if _ci7 >= concat_result.diagnostics.length { break; }
                         result_diagnostics.push(concat_result.diagnostics[_ci7]);
@@ -177,7 +177,7 @@ fn coerce_and_emit_call(
         if array_push_element_type.length > 0 {
             if final_operands.length >= 2 {
                 let push_result = lower_array_push_in_place(final_operands[0], final_operands[1], array_push_element_type, result_lines, result_temp);
-                let mut _ci8 -> number = 0;
+                let mut _ci8: number = 0;
                 loop {
                     if _ci8 >= push_result.diagnostics.length { break; }
                     result_diagnostics.push(push_result.diagnostics[_ci8]);
@@ -215,7 +215,7 @@ fn coerce_and_emit_call(
     if _trace_ccl {
         print.err("call_lowering: checkpoint-B fn_entry_null=" + number_to_string(0));
     }
-    let mut _if56 -> boolean = false;
+    let mut _if56: boolean = false;
     if function_entry != null { _if56 = true; }
     if helper_descriptor != null { _if56 = true; }
     if _trace_ccl {
@@ -230,7 +230,7 @@ fn coerce_and_emit_call(
     if _trace_ccl {
         print.err("call_lowering: checkpoint-D rendering args");
     }
-    let mut rendered_args -> string[] = [];
+    let mut rendered_args: string[] = [];
     index = 0;
     loop {
         if index >= final_operands.length {
@@ -251,8 +251,8 @@ fn coerce_and_emit_call(
     if substring(trimmed_target, 0, 16) == "trait_dispatch__" {
         let after_prefix = substring(trimmed_target, 16, trimmed_target.length);
         // Find the last "__" separator to split interface name from method name
-        let mut _td_split -> number = -1;
-        let mut _td_i -> number = 0;
+        let mut _td_split: number = -1;
+        let mut _td_i: number = 0;
         loop {
             if _td_i >= after_prefix.length { break; }
             if substring(after_prefix, _td_i, _td_i + 2) == "__" {
@@ -277,8 +277,8 @@ fn coerce_and_emit_call(
 
                 let interface_info3 = find_interface_info_by_name(context, interface_name);
                 if interface_info3 != null {
-                    let mut method_index -> number = -1;
-                    let mut sig_idx -> number = 0;
+                    let mut method_index: number = -1;
+                    let mut sig_idx: number = 0;
                     loop {
                         if sig_idx >= interface_info3.signatures.length {
                             break;
@@ -291,8 +291,8 @@ fn coerce_and_emit_call(
                     }
 
                     if method_index >= 0 {
-                        let mut fp_param_types -> string[] = ["i8*"];
-                        let mut arg_idx -> number = 1;
+                        let mut fp_param_types: string[] = ["i8*"];
+                        let mut arg_idx: number = 1;
                         loop {
                             if arg_idx >= final_operands.length {
                                 break;
@@ -319,7 +319,7 @@ fn coerce_and_emit_call(
                         result_temp += 1;
                         result_lines.push("  " + method_ptr_temp + " = bitcast i8* " + raw_ptr_temp + " to " + function_type);
 
-                        let mut call_args -> string[] = ["i8* " + data_ptr_temp];
+                        let mut call_args: string[] = ["i8* " + data_ptr_temp];
                         arg_idx = 1;
                         loop {
                             if arg_idx >= rendered_args.length {

@@ -159,7 +159,7 @@ import {
 // Consolidated: parse all structure from native text using light recovery.
 // Kept in lowering_core to preserve cross-module symbol mangling compatibility
 // with the v0.1.1 seed's shim expectations.
-fn build_parse_result_from_text(native_text -> string) -> ParseNativeResult {
+fn build_parse_result_from_text(native_text: string) -> ParseNativeResult {
     let recovered_functions = recover_native_functions_light(native_text);
     let recovered_structs = recover_native_structs_light(native_text);
     let recovered_imports = recover_native_imports_light(native_text);
@@ -175,16 +175,16 @@ fn build_parse_result_from_text(native_text -> string) -> ParseNativeResult {
     };
 }
 
-fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModule, parse -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], imported_diagnostics -> string[]) -> LoweredLLVMLinesResult {
+fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
     let base = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, false, "");
     if base.lines.length == 0 {
         return base;
     }
 
-    let mut test_count -> number = 0;
-    let mut has_main -> boolean = false;
+    let mut test_count: number = 0;
+    let mut has_main: boolean = false;
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= parse.functions.length {
             break;
@@ -214,10 +214,10 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
     // (avoids struct .push() and struct .concat() which produce unresolvable symbols)
     // Emits RUN/PASS messages via stderr so failures identify the failing test
     // even when abort() kills the process before stdout flushes.
-    let mut harness_globals -> string[] = [];
-    let mut harness -> string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
-    let mut ti -> number = 0;
-    let mut test_idx -> number = 0;
+    let mut harness_globals: string[] = [];
+    let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
+    let mut ti: number = 0;
+    let mut test_idx: number = 0;
     loop {
         if ti >= parse.functions.length { break; }
         if parse.functions[ti].name.length >= 5 {
@@ -264,7 +264,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module -> NativeModu
     return updated;
 }
 
-fn make_native_module_for_emit(module_name -> string, native_text -> string) -> NativeModule {
+fn make_native_module_for_emit(module_name: string, native_text: string) -> NativeModule {
     return NativeModule {
         module_name: module_name,
         artifacts: [NativeArtifact { name: module_name, format: "sailfin-native-text", contents: native_text }],
@@ -273,7 +273,7 @@ fn make_native_module_for_emit(module_name -> string, native_text -> string) -> 
     };
 }
 
-fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> string, out_path -> string) -> boolean ![io] {
+fn compile_native_text_to_llvm_file(native_text_path: string, module_name: string, out_path: string) -> boolean ![io] {
     if !fs.exists(native_text_path) {
         print.err("emit-llvm: native text file missing at " + native_text_path);
         return false;
@@ -309,7 +309,7 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
         }
     }
     let lines = lowered_lines.lines;
-    let mut _if247 -> boolean = false;
+    let mut _if247: boolean = false;
     if lines == null { _if247 = true; }
     if lines.length == 0 { _if247 = true; }
     if _if247 {
@@ -322,13 +322,13 @@ fn compile_native_text_to_llvm_file(native_text_path -> string, module_name -> s
     return write_llvm_lines_chunked(out_path, lines);
 }
 
-fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_in -> ParseNativeResult, imported_manifests -> LayoutManifest[], imported_native_texts -> string[], diagnostics_in -> string[], mangle_symbols -> boolean, native_text_override_path -> string) -> LoweredLLVMLinesResult ![io] {
+fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path: string) -> LoweredLLVMLinesResult ![io] {
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
         print.err("emit-llvm: phase=start");
     }
     if debug_lowering {
-        let mut artifact_count -> number = 0;
+        let mut artifact_count: number = 0;
         if native_module.artifacts != null {
             artifact_count = native_module.artifacts.length;
         }
@@ -405,7 +405,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
 
     // ── Trace/timing setup ──────────────────────────────────────────
-    let mut _let250 -> boolean = false;
+    let mut _let250: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
         if fs.exists("build/sailfin/.test_runner_active") {
             _let250 = true;
@@ -428,7 +428,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     let mut module_structs = safe_structs;
     let mut module_enums = safe_enums;
     if !is_test_module {
-        let mut module_manifest -> LayoutManifest? = null;
+        let mut module_manifest: LayoutManifest? = null;
         let manifest_application = apply_layout_manifest_to_module(safe_structs, safe_enums, module_manifest);
         diagnostics = extend_string_lines_checked(diagnostics, manifest_application.diagnostics, "layout application");
         module_structs = manifest_application.structs;
@@ -447,20 +447,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print.err("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
-    let mut imported_structs -> NativeStruct[] = [];
-    let mut imported_enums -> NativeEnum[] = [];
-    let mut imported_interfaces -> NativeInterface[] = [];
-    let mut imported_functions -> NativeFunction[] = [];
-    let mut imported_struct_methods -> NativeFunction[] = [];
+    let mut imported_structs: NativeStruct[] = [];
+    let mut imported_enums: NativeEnum[] = [];
+    let mut imported_interfaces: NativeInterface[] = [];
+    let mut imported_functions: NativeFunction[] = [];
+    let mut imported_struct_methods: NativeFunction[] = [];
 
     let manifest_count = safe_imported_manifests.length;
-    let mut text_index -> number = 0;
+    let mut text_index: number = 0;
     loop {
         if text_index >= safe_imported_native_texts.length {
             break;
         }
         let native_text = safe_imported_native_texts[text_index];
-        let mut manifest_for_module -> LayoutManifest? = null;
+        let mut manifest_for_module: LayoutManifest? = null;
         if text_index < manifest_count {
             manifest_for_module = safe_imported_manifests[text_index];
         }
@@ -497,7 +497,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
 
     if safe_imported_native_texts.length < manifest_count {
-        let mut manifest_index -> number = safe_imported_native_texts.length;
+        let mut manifest_index: number = safe_imported_native_texts.length;
         loop {
             if manifest_index >= manifest_count {
                 break;
@@ -585,8 +585,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
 
     // ── Effect analysis ─────────────────────────────────────────────
     let skip_effects = true;
-    let mut runtime_helpers -> string[] = [];
-    let mut _if255 -> boolean = false;
+    let mut runtime_helpers: string[] = [];
+    let mut _if255: boolean = false;
     if !is_test_module {
         if !skip_effects {
             _if255 = true;
@@ -683,8 +683,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     runtime_helpers = append_unique_effect(runtime_helpers, "string_starts_with");
     runtime_helpers = append_unique_effect(runtime_helpers, "process.run");
     runtime_helpers = append_unique_effect(runtime_helpers, "is_decimal_digit");
-    let mut direct_effects -> FunctionEffectEntry[] = [];
-    let mut aggregated_effects -> FunctionEffectEntry[] = [];
+    let mut direct_effects: FunctionEffectEntry[] = [];
+    let mut aggregated_effects: FunctionEffectEntry[] = [];
     if !skip_effects {
         if debug_lowering {
             print.err("emit-llvm: phase=direct_effects");
@@ -725,12 +725,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
         print.err("emit-llvm: phase=module_globals");
         print.err("emit-llvm: module bindings count=" + number_to_string(safe_bindings.length));
     }
-    let mut module_globals_needs_init_call -> boolean = false;
-    let mut module_global_locals -> LocalBinding[] = [];
-    let mut module_preamble_lines -> string[] = [];
-    let mut module_init_lines -> string[] = [];
-    let mut module_init_symbol -> string = "";
-    let mut module_string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut module_globals_needs_init_call: boolean = false;
+    let mut module_global_locals: LocalBinding[] = [];
+    let mut module_preamble_lines: string[] = [];
+    let mut module_init_lines: string[] = [];
+    let mut module_init_symbol: string = "";
+    let mut module_string_constants: StringConstant[] = empty_string_constant_set();
     if safe_bindings.length == 0 {
         if debug_lowering {
             print.err("emit-llvm: module bindings empty; skipping module globals");
@@ -818,7 +818,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     }
     if effective_mangle_symbols {
         let mangled = apply_module_symbol_mangling(lines, safe_imports, native_module.module_name, safe_imported_native_texts, native_text_override_path);
-        let mut _ci0 -> number = 0;
+        let mut _ci0: number = 0;
         loop {
             if _ci0 >= mangled.diagnostics.length { break; }
             diagnostics.push(mangled.diagnostics[_ci0]);
@@ -838,14 +838,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
 
     // ── Final result ────────────────────────────────────────────────
     let manifest = empty_capability_manifest();
-    let mut function_effects -> FunctionEffectEntry[] = [];
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let mut function_effects: FunctionEffectEntry[] = [];
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
     let all_string_constants = empty_string_constant_set();
 
     if trace {
-        let mut nonempty -> number = 0;
-        let mut first_len -> number = 0;
-        let mut i -> number = 0;
+        let mut nonempty: number = 0;
+        let mut first_len: number = 0;
+        let mut i: number = 0;
         loop {
             if i >= lines.length {
                 break;
@@ -864,7 +864,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
             + " first_len=" + number_to_string(first_len)
             + " diagnostics=" + number_to_string(diagnostics.length)
         );
-        let mut diag_index -> number = 0;
+        let mut diag_index: number = 0;
         loop {
             if diag_index >= diagnostics.length {
                 break;

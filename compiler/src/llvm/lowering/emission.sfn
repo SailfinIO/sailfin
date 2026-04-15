@@ -92,12 +92,12 @@ import {
     module_user_main_symbol,
 } from "./module_globals";
 
-fn _split_by_newline(content -> string) -> string[] {
-    let mut result -> string[] = [];
+fn _split_by_newline(content: string) -> string[] {
+    let mut result: string[] = [];
     if content.length == 0 {
         return result;
     }
-    let mut start -> number = 0;
+    let mut start: number = 0;
     loop {
         if start >= content.length { break; }
         let next = find_char(content, "\n", start);
@@ -111,12 +111,12 @@ fn _split_by_newline(content -> string) -> string[] {
     return result;
 }
 
-fn is_safe_llvm_type_text(value -> string) -> boolean {
+fn is_safe_llvm_type_text(value: string) -> boolean {
     if value == null {
         return false;
     }
     let trimmed = trim_text(value);
-    let mut _if194 -> boolean = false;
+    let mut _if194: boolean = false;
     if trimmed.length == 0 { _if194 = true; }
     if trimmed.length > 256 { _if194 = true; }
     if _if194 {
@@ -126,7 +126,7 @@ fn is_safe_llvm_type_text(value -> string) -> boolean {
     // The character-level check below relies on single-char indexing + index_of
     // which can be miscompiled by older seeds. These explicit checks bypass the
     // loop entirely for the types that matter most.
-    let mut _if195 -> boolean = false;
+    let mut _if195: boolean = false;
     if trimmed == "double" { _if195 = true; }
     if trimmed == "i1" { _if195 = true; }
     if trimmed == "i8*" { _if195 = true; }
@@ -141,14 +141,14 @@ fn is_safe_llvm_type_text(value -> string) -> boolean {
     }
     // Also accept pointer-to-named-struct patterns (%Foo*) and common aggregate
     // syntax so that complex return types are not rejected.
-    let mut _if196 -> boolean = false;
+    let mut _if196: boolean = false;
     if starts_with(trimmed, "%") { _if196 = true; }
     if starts_with(trimmed, "{") { _if196 = true; }
     if _if196 {
         return true;
     }
     let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_%*{}[],(). x-";
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= trimmed.length {
             break;
@@ -162,15 +162,15 @@ fn is_safe_llvm_type_text(value -> string) -> boolean {
     return true;
 }
 
-fn parse_simple_integer(text -> string) -> number {
-    let mut result -> number = 0;
-    let mut i -> number = 0;
+fn parse_simple_integer(text: string) -> number {
+    let mut result: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= text.length {
             break;
         }
         let ch = substring(text, i, i + 1);
-        let mut digit -> number = -1;
+        let mut digit: number = -1;
         if ch == "0" { digit = 0; }
         if ch == "1" { digit = 1; }
         if ch == "2" { digit = 2; }
@@ -191,12 +191,12 @@ fn parse_simple_integer(text -> string) -> number {
 
 // Reorder lines within each basic block so that phi nodes come first.
 // LLVM requires phi nodes to appear contiguously at the start of a block (after the label).
-fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
-    let mut out -> string[] = [];
-    let mut block_phi_lines -> string[] = [];
-    let mut block_other_lines -> string[] = [];
-    let mut in_block -> boolean = false;
-    let mut i -> number = 0;
+fn _reorder_phis_to_block_start(lines: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut block_phi_lines: string[] = [];
+    let mut block_other_lines: string[] = [];
+    let mut in_block: boolean = false;
+    let mut i: number = 0;
     loop {
         if i >= lines.length {
             break;
@@ -204,7 +204,7 @@ fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
         let line = lines[i];
         let trimmed = trim_text(line);
         // Detect block label: non-empty, ends with ":", not indented (not a store/instruction).
-        let mut is_label -> boolean = false;
+        let mut is_label: boolean = false;
         if trimmed.length > 1 {
             let last_ch = substring(trimmed, trimmed.length - 1, trimmed.length);
             if last_ch == ":" {
@@ -220,13 +220,13 @@ fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
         if is_label {
             // Flush previous block: phis first, then other lines.
             if in_block {
-                let mut _pi -> number = 0;
+                let mut _pi: number = 0;
                 loop {
                     if _pi >= block_phi_lines.length { break; }
                     out = out.push(block_phi_lines[_pi]);
                     _pi += 1;
                 }
-                let mut _oi -> number = 0;
+                let mut _oi: number = 0;
                 loop {
                     if _oi >= block_other_lines.length { break; }
                     out = out.push(block_other_lines[_oi]);
@@ -243,7 +243,7 @@ fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
         } else {
             if in_block {
                 // Check if this is a phi instruction.
-                let mut is_phi -> boolean = false;
+                let mut is_phi: boolean = false;
                 if starts_with(trimmed, "%") {
                     // Pattern: %tN = phi ...
                     let eq_pos = index_of(trimmed, "= phi ");
@@ -264,13 +264,13 @@ fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
     }
     // Flush final block.
     if in_block {
-        let mut _pi2 -> number = 0;
+        let mut _pi2: number = 0;
         loop {
             if _pi2 >= block_phi_lines.length { break; }
             out = out.push(block_phi_lines[_pi2]);
             _pi2 += 1;
         }
-        let mut _oi2 -> number = 0;
+        let mut _oi2: number = 0;
         loop {
             if _oi2 >= block_other_lines.length { break; }
             out = out.push(block_other_lines[_oi2]);
@@ -283,7 +283,7 @@ fn _reorder_phis_to_block_start(lines -> string[]) -> string[] {
 // Helper: build a ParameterBinding for the file-IPC loop in prepare_parameters_from_files.
 // Kept as a separate function so the loop never has an inline struct literal at the top level
 // of the loop body — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
-fn _emit_make_parameter_binding(name -> string, llvm_name -> string, llvm_type -> string, type_annotation -> string) -> ParameterBinding {
+fn _emit_make_parameter_binding(name: string, llvm_name: string, llvm_type: string, type_annotation: string) -> ParameterBinding {
     return ParameterBinding {
         name: name,
         llvm_name: llvm_name,
@@ -298,12 +298,12 @@ fn _emit_make_parameter_binding(name -> string, llvm_name -> string, llvm_type -
 // This bypasses calling prepare_parameters in the statement module which
 // the v0.1.1 seed compiles with i8* for NativeFunction, preventing
 // struct field access.
-fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, context -> TypeContext) -> ParameterPreparation {
-    let mut signature -> string[] = [];
-    let mut bindings -> ParameterBinding[] = [];
-    let mut diagnostics -> string[] = [];
-    let mut seen_names -> string[] = [];
-    let mut index -> number = 0;
+fn prepare_parameters_from_files(fn_name: string, fn_param_count: number, context: TypeContext) -> ParameterPreparation {
+    let mut signature: string[] = [];
+    let mut bindings: ParameterBinding[] = [];
+    let mut diagnostics: string[] = [];
+    let mut seen_names: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= fn_param_count {
             break;
@@ -314,7 +314,7 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
         // The native IR emitter includes default values in .param annotations;
         // map_return_type cannot parse "number = 0" and falls back to i8*,
         // causing ABI mismatches between caller (double) and callee (i8*).
-        let mut param_type -> string = raw_param_type;
+        let mut param_type: string = raw_param_type;
         let eq_idx = index_of(raw_param_type, "=");
         if eq_idx > 0 {
             param_type = trim_text(substring(raw_param_type, 0, eq_idx));
@@ -335,7 +335,7 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
         // Deduplicate parameter names: if this name was already used,
         // append a numeric suffix to make it unique (LLVM requires unique param names).
         let mut llvm_name = "%" + sanitized;
-        let mut dedup_count -> number = 1;
+        let mut dedup_count: number = 1;
         loop {
             if !string_array_contains(seen_names, llvm_name) {
                 break;
@@ -352,19 +352,19 @@ fn prepare_parameters_from_files(fn_name -> string, fn_param_count -> number, co
 }
 
 fn emit_llvm_function(
-    function_name_hint -> string,
-    functions -> NativeFunction[],
-    effects -> string[],
-    context -> TypeContext,
-    module_name -> string,
-    entry_points -> string[],
-    exported_symbols -> string[],
-    imported_functions -> NativeFunction[],
-    module_globals -> LocalBinding[],
-    module_init_symbol -> string,
-    needs_module_init_call -> boolean
+    function_name_hint: string,
+    functions: NativeFunction[],
+    effects: string[],
+    context: TypeContext,
+    module_name: string,
+    entry_points: string[],
+    exported_symbols: string[],
+    imported_functions: NativeFunction[],
+    module_globals: LocalBinding[],
+    module_init_symbol: string,
+    needs_module_init_call: boolean
 ) -> LoweredLLVMFunction ![io] {
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
 
     // The v0.1.1 seed passes NativeFunction as i8* in emission.sfn's compiled
@@ -400,7 +400,7 @@ fn emit_llvm_function(
     }
 
     let mut sanitized = sanitize_symbol(fn_name);
-    let mut emit_main_wrapper -> boolean = false;
+    let mut emit_main_wrapper: boolean = false;
     let mut llvm_return = map_return_type(context, fn_return_type);
     if debug_lowering {
         print.err("emit-llvm: emit_fn phase=ret_type name=" + fn_name + " llvm_return=" + llvm_return);
@@ -408,7 +408,7 @@ fn emit_llvm_function(
     // Override return type for specific parse_native functions that return
     // opaque types the LLVM backend cannot resolve. Use == instead of
     // index_of which is miscompiled by older seeds.
-    let mut _if197 -> boolean = false;
+    let mut _if197: boolean = false;
     if sanitized == "parse_native_artifact" { _if197 = true; }
     if sanitized == "parse_native_functions_from_text" { _if197 = true; }
     if _if197 {
@@ -453,16 +453,16 @@ fn emit_llvm_function(
     }
 
     if fn_is_extern {
-        let mut signature -> string = join_with_separator(preparation.signature, ", ");
+        let mut signature: string = join_with_separator(preparation.signature, ", ");
         if signature.length == 0 {
             signature = "";
         }
         let empty_constants = empty_string_constant_set();
-        let lines -> string[] = ["declare " + llvm_return + " @" + sanitized + "(" + signature + ")"];
+        let lines: string[] = ["declare " + llvm_return + " @" + sanitized + "(" + signature + ")"];
         return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
     }
 
-    let mut _let198 -> boolean = false;
+    let mut _let198: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
         if fs.exists("build/sailfin/.test_runner_active") {
             _let198 = true;
@@ -478,18 +478,18 @@ fn emit_llvm_function(
         );
     }
 
-    let mut lines -> string[] = [];
+    let mut lines: string[] = [];
     if effects.length > 0 {
         let effects_comment = "; fn " + fn_name + " effects: ![" + join_with_separator(effects, ", ") + "]";
         lines = append_string(lines, effects_comment);
     }
-    let mut signature -> string = join_with_separator(preparation.signature, ", ");
+    let mut signature: string = join_with_separator(preparation.signature, ", ");
     if signature.length == 0 {
         signature = "";
     }
 
-    let entry_label -> string = "block.entry";
-    let mut linkage -> string = "";
+    let entry_label: string = "block.entry";
+    let mut linkage: string = "";
     let internalize = should_internalize_function(function, entry_points, exported_symbols, imported_functions);
     if internalize {
         linkage = "internal ";
@@ -502,9 +502,9 @@ fn emit_llvm_function(
         print.err("emit-llvm: emit_fn phase=internalize_check name=" + fn_name + " internal=" + internalize_text);
         print.err("emit-llvm: emit_fn phase=define_header name=" + fn_name);
     }
-    let define_header -> string = build_define_header_line(linkage, llvm_return, sanitized, signature);
+    let define_header: string = build_define_header_line(linkage, llvm_return, sanitized, signature);
     lines = append_string(lines, define_header);
-    let entry_line -> string = entry_label + ":";
+    let entry_line: string = entry_label + ":";
     lines = append_string(lines, entry_line);
 
     if needs_module_init_call {
@@ -514,17 +514,17 @@ fn emit_llvm_function(
 
     // Apply minimal decorator semantics at entry.
     // For now, `@logExecution` / `@trace` calls into the runtime hook with the function name.
-    let mut decorator_string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut decorator_string_constants: StringConstant[] = empty_string_constant_set();
     if debug_lowering {
         print.err("emit-llvm: emit_fn phase=decorators name=" + fn_name + " count=" + number_to_string(fn_decorator_count));
     }
-    let mut decorator_index -> number = 0;
+    let mut decorator_index: number = 0;
     loop {
         if decorator_index >= fn_decorator_count {
             break;
         }
         let decorator_name = fs.readFile("build/sailfin/.fn_decorator_" + number_to_string(decorator_index));
-        let mut _if199 -> boolean = false;
+        let mut _if199: boolean = false;
         if matches_case_insensitive(decorator_name, "logExecution") { _if199 = true; }
         if matches_case_insensitive(decorator_name, "logexecution") { _if199 = true; }
         if matches_case_insensitive(decorator_name, "trace") { _if199 = true; }
@@ -546,7 +546,7 @@ fn emit_llvm_function(
     }
 
     // Read .fn_index with fallback: the first-pass binary may fail to write it.
-    let mut _eb_fn_index -> number = 0;
+    let mut _eb_fn_index: number = 0;
     if fs.exists("build/sailfin/.fn_index") {
         let _eb_fn_index_text = fs.readFile("build/sailfin/.fn_index");
         _eb_fn_index = parse_simple_integer(_eb_fn_index_text);
@@ -555,7 +555,7 @@ fn emit_llvm_function(
         _eb_fn_index = parse_simple_integer(_eb_fn_index_text);
     } else {
         // Fallback: find by name
-        let mut _fi -> number = 0;
+        let mut _fi: number = 0;
         loop {
             if _fi >= functions.length { break; }
             if functions[_fi].name == fn_name {
@@ -576,7 +576,7 @@ fn emit_llvm_function(
         lines = append_string(lines, ret_fallback);
         lines = append_string(lines, "}");
         let empty_constants = empty_string_constant_set();
-        let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
+        let _empty_lifetime_regions: LifetimeRegionMetadata[] = [];
         return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: empty_constants };
     }
     let _eb_function = functions[_eb_fn_index];
@@ -610,20 +610,20 @@ fn emit_llvm_function(
         print.err("emit-llvm: emit_fn phase=body_done name=" + fn_name + " body_lines=" + number_to_string(_eb_body_lines.length) + " allocas=" + number_to_string(_eb_allocas.length));
     }
 
-    let mut _eb_body -> string[] = [];
+    let mut _eb_body: string[] = [];
     _eb_body = extend_string_array(_eb_body, _eb_allocas);
     _eb_body = extend_string_array(_eb_body, _eb_body_lines);
     lines = extend_string_array(lines, _eb_body);
     diagnostics = extend_string_array(diagnostics, _eb_body_diagnostics);
 
-    let mut _eb_has_terminator -> boolean = false;
+    let mut _eb_has_terminator: boolean = false;
     if _eb_terminated {
         // Check if the body actually has a terminator instruction
-        let mut _eb_ti -> number = 0;
+        let mut _eb_ti: number = 0;
         loop {
             if _eb_ti >= _eb_body.length { break; }
             let _eb_tl = trim_text(_eb_body[_eb_ti]);
-            let mut _if200 -> boolean = false;
+            let mut _if200: boolean = false;
             if starts_with(_eb_tl, "ret ") { _if200 = true; }
             if _eb_tl == "ret void" { _if200 = true; }
             if starts_with(_eb_tl, "br ") { _if200 = true; }
@@ -637,7 +637,7 @@ fn emit_llvm_function(
         }
     }
 
-    let mut _if201 -> boolean = false;
+    let mut _if201: boolean = false;
     if !_eb_terminated { _if201 = true; }
     if !_eb_has_terminator { _if201 = true; }
     if _if201 {
@@ -671,26 +671,26 @@ fn emit_llvm_function(
     }
 
     let merged_constants = merge_string_constants(_eb_string_constants, decorator_string_constants);
-    let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let _empty_lifetime_regions: LifetimeRegionMetadata[] = [];
     return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: merged_constants };
 }
 
 fn emit_body(
-    function_unused -> string,
-    fn_name -> string,
-    fn_instr_count -> number,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    module_globals -> LocalBinding[],
-    functions -> NativeFunction[],
-    context -> TypeContext,
-    entry_label -> string
+    function_unused: string,
+    fn_name: string,
+    fn_instr_count: number,
+    llvm_return: string,
+    bindings: ParameterBinding[],
+    module_globals: LocalBinding[],
+    functions: NativeFunction[],
+    context: TypeContext,
+    entry_label: string
 ) -> BodyResult ![io] {
     let debug_body = fs.exists("build/sailfin/.trace_lowering");
     if debug_body {
         print.err("emit-llvm: emit_body start fn=" + fn_name + " llvm_return=" + llvm_return + " bindings_len=" + number_to_string(bindings.length));
     }
-    let mut _let202 -> boolean = false;
+    let mut _let202: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
         if fs.exists("build/sailfin/.test_runner_active") {
             _let202 = true;
@@ -736,7 +736,7 @@ fn emit_body(
     let _blk_allocas = lowered.allocas;
     let _blk_terminated = lowered.terminated;
     if trace {
-        let mut term_label -> string = "false";
+        let mut term_label: string = "false";
         if _blk_terminated {
             term_label = "true";
         }
@@ -751,19 +751,19 @@ fn emit_body(
             + term_label
         );
     }
-    let mut diagnostics -> string[] = lowered.diagnostics;
-    let mut lines -> string[] = [];
+    let mut diagnostics: string[] = lowered.diagnostics;
+    let mut lines: string[] = [];
     lines = extend_string_array(lines, _blk_allocas);
     lines = extend_string_array(lines, _blk_body_lines);
 
-    let mut has_terminator -> boolean = false;
-    let mut terminator_index -> number = 0;
+    let mut has_terminator: boolean = false;
+    let mut terminator_index: number = 0;
     loop {
         if terminator_index >= lines.length {
             break;
         }
         let trimmed_line = trim_text(lines[terminator_index]);
-        let mut _if203 -> boolean = false;
+        let mut _if203: boolean = false;
         if starts_with(trimmed_line, "ret ") { _if203 = true; }
         if trimmed_line == "ret void" { _if203 = true; }
         if starts_with(trimmed_line, "br ") { _if203 = true; }
@@ -776,7 +776,7 @@ fn emit_body(
         terminator_index += 1;
     }
 
-    let mut _if204 -> boolean = false;
+    let mut _if204: boolean = false;
     if !_blk_terminated { _if204 = true; }
     if !has_terminator { _if204 = true; }
     if _if204 {
@@ -790,17 +790,17 @@ fn emit_body(
         }
     }
 
-    let _empty_lifetime_regions -> LifetimeRegionMetadata[] = [];
+    let _empty_lifetime_regions: LifetimeRegionMetadata[] = [];
     return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: lowered.string_constants };
 }
 
 
 // Parse serialized string constants from the file written by _write_block_result_files.
 // Format: one constant per line as "name\tcontent\tbyte_count".
-fn _parse_string_constants_from_file(raw -> string) -> StringConstant[] {
-    let mut result -> StringConstant[] = [];
+fn _parse_string_constants_from_file(raw: string) -> StringConstant[] {
+    let mut result: StringConstant[] = [];
     let lines = _split_by_newline(raw);
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= lines.length {
             break;

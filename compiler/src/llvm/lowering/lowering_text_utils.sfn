@@ -10,9 +10,9 @@ import { StringConstant, LocalBinding } from "../types";
 
 // ── Character / string utilities ─────────────────────────────────────
 
-fn is_trim_char_local(ch -> string) -> boolean {
+fn is_trim_char_local(ch: string) -> boolean {
     let code = char_code(ch);
-    let mut _ret236 -> boolean = false;
+    let mut _ret236: boolean = false;
     if code == char_code(" ") { _ret236 = true; }
     if code == char_code("\n") { _ret236 = true; }
     if code == char_code("\r") { _ret236 = true; }
@@ -20,11 +20,11 @@ fn is_trim_char_local(ch -> string) -> boolean {
     return _ret236;
 }
 
-fn trim_text_local(value -> string) -> string {
+fn trim_text_local(value: string) -> string {
     if value.length == 0 {
         return "";
     }
-    let mut start -> number = 0;
+    let mut start: number = 0;
     let mut end = value.length;
     loop {
         if start >= end {
@@ -50,14 +50,14 @@ fn trim_text_local(value -> string) -> string {
     return substring(value, start, end);
 }
 
-fn starts_with_local(value -> string, prefix -> string) -> boolean {
+fn starts_with_local(value: string, prefix: string) -> boolean {
     if prefix.length == 0 {
         return true;
     }
     if value.length < prefix.length {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= prefix.length {
             break;
@@ -70,11 +70,11 @@ fn starts_with_local(value -> string, prefix -> string) -> boolean {
     return true;
 }
 
-fn index_of_char_local(value -> string, needle -> string) -> number {
+fn index_of_char_local(value: string, needle: string) -> number {
     if needle.length == 0 {
         return 0;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= value.length {
             break;
@@ -87,11 +87,11 @@ fn index_of_char_local(value -> string, needle -> string) -> number {
     return -1;
 }
 
-fn split_lines_local(value -> string) -> string[] {
+fn split_lines_local(value: string) -> string[] {
     let value_len = value.length;
-    let mut lines -> string[] = [];
-    let mut start -> number = 0;
-    let mut index -> number = 0;
+    let mut lines: string[] = [];
+    let mut start: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= value_len {
             break;
@@ -109,13 +109,13 @@ fn split_lines_local(value -> string) -> string[] {
 
 // ── Number / key-value parsing ───────────────────────────────────────
 
-fn parse_number_local(text -> string) -> number {
+fn parse_number_local(text: string) -> number {
     let trimmed = trim_text_local(text);
     if trimmed.length == 0 {
         return 0;
     }
-    let mut result -> number = 0;
-    let mut i -> number = 0;
+    let mut result: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= trimmed.length {
             break;
@@ -123,7 +123,7 @@ fn parse_number_local(text -> string) -> number {
         let ch = trimmed[i];
         let code = char_code(ch);
         let digit = code - char_code("0");
-        let mut _if244 -> boolean = false;
+        let mut _if244: boolean = false;
         if digit < 0 { _if244 = true; }
         if digit > 9 { _if244 = true; }
         if _if244 {
@@ -137,7 +137,7 @@ fn parse_number_local(text -> string) -> number {
 
 // Extract a numeric value from "key=value" pattern in text.
 // key_prefix is e.g. "size=", prefix_len is its length (e.g. 5).
-fn extract_kv_number(text -> string, key_prefix -> string, prefix_len -> number) -> number {
+fn extract_kv_number(text: string, key_prefix: string, prefix_len: number) -> number {
     let key_idx = index_of(text, key_prefix);
     if key_idx < 0 {
         return 0;
@@ -154,7 +154,7 @@ fn extract_kv_number(text -> string, key_prefix -> string, prefix_len -> number)
 }
 
 // Extract a string value from "key=value" pattern in text.
-fn extract_kv_string(text -> string, key_prefix -> string, prefix_len -> number) -> string {
+fn extract_kv_string(text: string, key_prefix: string, prefix_len: number) -> string {
     let key_idx = index_of(text, key_prefix);
     if key_idx < 0 {
         return "";
@@ -172,13 +172,13 @@ fn extract_kv_string(text -> string, key_prefix -> string, prefix_len -> number)
 
 // Parse the tab-separated string constants file written by _write_lowered_function_files.
 // Format: one constant per line as "name\tcontent\tbyte_count".
-fn _parse_lowered_fn_string_constants(raw -> string) -> StringConstant[] {
-    let mut result -> StringConstant[] = [];
+fn _parse_lowered_fn_string_constants(raw: string) -> StringConstant[] {
+    let mut result: StringConstant[] = [];
     if raw.length == 0 {
         return result;
     }
     let file_lines = split_lines_local(raw);
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= file_lines.length {
             break;
@@ -211,13 +211,13 @@ fn _parse_lowered_fn_string_constants(raw -> string) -> StringConstant[] {
 
 // Parse the tab-separated locals file written by _write_module_globals_files.
 // Format: name\tpointer\tllvm_type\ttype_annotation\tscope_id
-fn _parse_module_globals_locals(raw -> string) -> LocalBinding[] {
-    let mut result -> LocalBinding[] = [];
+fn _parse_module_globals_locals(raw: string) -> LocalBinding[] {
+    let mut result: LocalBinding[] = [];
     if raw.length == 0 {
         return result;
     }
     let file_lines = split_lines_local(raw);
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= file_lines.length {
             break;
@@ -272,11 +272,11 @@ fn _parse_module_globals_locals(raw -> string) -> LocalBinding[] {
 // appear outside of double-quoted string literals.  For example:
 //   `collect_until(p, ["!", "{"])` → 0  (the `{` is inside quotes)
 //   `Statement.TestDeclaration {`  → 1
-fn net_unquoted_brace_depth(text -> string) -> number {
-    let mut depth -> number = 0;
-    let mut in_quote -> boolean = false;
-    let mut escape -> boolean = false;
-    let mut i -> number = 0;
+fn net_unquoted_brace_depth(text: string) -> number {
+    let mut depth: number = 0;
+    let mut in_quote: boolean = false;
+    let mut escape: boolean = false;
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         let ch = text[i];
@@ -303,7 +303,7 @@ fn net_unquoted_brace_depth(text -> string) -> number {
 
 // ── Header recovery helpers ──────────────────────────────────────────
 
-fn recover_function_name_from_header(line -> string) -> string {
+fn recover_function_name_from_header(line: string) -> string {
     if !starts_with_local(line, ".fn ") {
         return "";
     }
@@ -318,7 +318,7 @@ fn recover_function_name_from_header(line -> string) -> string {
     return trim_text_local(substring(header, 0, open_paren));
 }
 
-fn recover_function_is_async_from_header(line -> string) -> boolean {
+fn recover_function_is_async_from_header(line: string) -> boolean {
     if !starts_with_local(line, ".fn ") {
         return false;
     }

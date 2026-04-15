@@ -51,21 +51,21 @@ import {
 } from "./cli_commands_utils";
 
 struct _RelativeImportSpanCmd {
-    start -> number;
-    end -> number;
-    spec -> string;
+    start: number;
+    end: number;
+    spec: string;
 }
 
-fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCmd[] {
-    let mut spans -> _RelativeImportSpanCmd[] = [];
+fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[] {
+    let mut spans: _RelativeImportSpanCmd[] = [];
     let source_len = source.length;
-    let mut steps -> number = 0;
+    let mut steps: number = 0;
     let max_steps = source_len * 6 + 1000;
-    let mut i -> number = 0;
-    let mut in_string -> boolean = false;
-    let mut escaping -> boolean = false;
-    let mut in_line_comment -> boolean = false;
-    let mut in_block_comment -> boolean = false;
+    let mut i: number = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
 
     loop {
         if i >= source_len { break; }
@@ -109,13 +109,13 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
 
         if _word_matches_cmd(source, i, "import") {
             let stmt_start = i;
-            let mut j -> number = i;
-            let mut s_in_string -> boolean = false;
-            let mut s_escaping -> boolean = false;
-            let mut s_in_line_comment -> boolean = false;
-            let mut s_in_block_comment -> boolean = false;
-            let mut spec -> string = "";
-            let mut stmt_end -> number = -1;
+            let mut j: number = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: number = -1;
 
             loop {
                 if j >= source_len { break; }
@@ -157,7 +157,7 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
                         loop {
                             if k >= source_len { break; }
                             let wk = _byte_at_cmd(source, k);
-                            let mut ws -> boolean = false;
+                            let mut ws: boolean = false;
                             if wk == " " { ws = true; }
                             if wk == "\t" { ws = true; }
                             if wk == "\n" { ws = true; }
@@ -169,7 +169,7 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
                             if _byte_at_cmd(source, k) == "\"" {
                                 k += 1;
                                 let start = k;
-                                let mut esc -> boolean = false;
+                                let mut esc: boolean = false;
                                 loop {
                                     if k >= source_len { break; }
                                     let sk = _byte_at_cmd(source, k);
@@ -190,14 +190,14 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
             }
             if stmt_end > 0 {
                 if spec.length > 0 {
-                    let mut is_relative -> boolean = false;
+                    let mut is_relative: boolean = false;
                     if _has_prefix_cmd(spec, "./") { is_relative = true; }
                     if _has_prefix_cmd(spec, "../") { is_relative = true; }
                     if is_relative {
                         spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
                     } else {
                         // Check for capsule imports: bare name ("test") or scoped ("sfn/test")
-                        let mut is_capsule -> boolean = false;
+                        let mut is_capsule: boolean = false;
                         if _is_stdlib_capsule_cmd(spec) { is_capsule = true; }
                         if !is_capsule {
                             if _has_prefix_cmd(spec, "sfn/") {
@@ -218,7 +218,7 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
     return spans;
 }
 
-fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string {
+fn _resolve_import_path_cmd(base_dir: string, spec: string) -> string {
     let mut current_base = base_dir;
     let mut remainder = spec;
     loop {
@@ -238,12 +238,12 @@ fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string {
     return path + ".sfn";
 }
 
-fn _strip_relative_import_lines_cmd(source -> string) -> string {
+fn _strip_relative_import_lines_cmd(source: string) -> string {
     let spans = _collect_relative_import_spans_cmd(source);
     if spans.length == 0 { return source; }
-    let mut out -> string = "";
-    let mut keep_start -> number = 0;
-    let mut index -> number = 0;
+    let mut out: string = "";
+    let mut keep_start: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= spans.length { break; }
         let span = spans[index];
@@ -259,22 +259,22 @@ fn _strip_relative_import_lines_cmd(source -> string) -> string {
     return out;
 }
 
-fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> number, visited -> string[]) -> string ![io] {
+fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number, visited: string[]) -> string ![io] {
     if depth <= 0 {
         return _strip_relative_import_lines_cmd(source);
     }
     let spans = _collect_relative_import_spans_cmd(source);
-    let mut combined -> string = "";
+    let mut combined: string = "";
     let mut next_visited = visited;
-    let mut remove -> _RelativeImportSpanCmd[] = [];
-    let mut index -> number = 0;
+    let mut remove: _RelativeImportSpanCmd[] = [];
+    let mut index: number = 0;
     loop {
         if index >= spans.length { break; }
         let spec = spans[index].spec;
 
         // Resolve capsule imports to filesystem paths
-        let mut dep_path -> string = "";
-        let mut is_capsule_import -> boolean = false;
+        let mut dep_path: string = "";
+        let mut is_capsule_import: boolean = false;
         if _is_stdlib_capsule_cmd(spec) {
             let resolved_name = _resolve_capsule_name_cmd(spec);
             dep_path = "capsules/" + resolved_name + "/src/mod.sfn";
@@ -316,8 +316,8 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
     }
     let mut stripped = source;
     if remove.length > 0 {
-        let mut out -> string = "";
-        let mut keep_start -> number = 0;
+        let mut out: string = "";
+        let mut keep_start: number = 0;
         index = 0;
         loop {
             if index >= remove.length { break; }
@@ -337,8 +337,8 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
     return combined;
 }
 
-fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
-    let mut args -> string[] = ["clang", "-O0", "-o", out_path, ll_path];
+fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string) -> number ![io] {
+    let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
     if runtime_root.length > 0 {
         let src_dir = runtime_root + "/native/src";
         let include_dir = runtime_root + "/native/include";
@@ -347,7 +347,7 @@ fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> s
                 args.push("-I" + include_dir);
             }
             let entries = fs.listDirectory(src_dir);
-            let mut i -> number = 0;
+            let mut i: number = 0;
             loop {
                 if i >= entries.length { break; }
                 if _ends_with_cmd(entries[i], ".c") {
@@ -364,14 +364,14 @@ fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> s
             args.push(globals_ll);
         }
         // Link prelude object — check known locations
-        let prelude_paths -> string[] = [
+        let prelude_paths: string[] = [
             "build/selfhost/native/obj/runtime/prelude.o",
             "build/native/obj/runtime/prelude.o",
             "build/native/obj/prelude.o",
             runtime_root + "/native/obj/runtime/prelude.o",
             runtime_root + "/native/obj/prelude.o",
         ];
-        let mut pi -> number = 0;
+        let mut pi: number = 0;
         loop {
             if pi >= prelude_paths.length { break; }
             if fs.exists(prelude_paths[pi]) {
@@ -402,8 +402,8 @@ fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> s
 
 // ---- Exported command handlers ----
 
-fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io] {
-    let mut root -> string = ".";
+fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
+    let mut root: string = ".";
     if args.length == 2 {
         root = args[1];
     } else if args.length != 1 {
@@ -431,7 +431,7 @@ fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io]
     let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
     let skip_inlining = fs.exists("build/sailfin/.skip_test_inlining");
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= test_files.length { break; }
         let path = test_files[index];
@@ -483,12 +483,12 @@ fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io]
     return 0;
 }
 
-fn handle_publish_command(args -> string[]) -> number ![io] {
+fn handle_publish_command(args: string[]) -> number ![io] {
     if args.length > 2 {
         print("usage: sfn publish [path]");
         return 2;
     }
-    let mut capsule_dir -> string = "";
+    let mut capsule_dir: string = "";
     if args.length == 2 {
         capsule_dir = args[1];
         if capsule_dir.length > 0 {
@@ -497,8 +497,8 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
             }
         }
     }
-    let mut toml_path -> string = "capsule.toml";
-    let mut src_dir -> string = "src";
+    let mut toml_path: string = "capsule.toml";
+    let mut src_dir: string = "src";
     if capsule_dir.length > 0 {
         toml_path = capsule_dir + "/capsule.toml";
         src_dir = capsule_dir + "/src";
@@ -519,7 +519,7 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
         return 1;
     }
 
-    let mut token -> string = "";
+    let mut token: string = "";
     let env_token = _get_env_cmd("SFN_TOKEN");
     if env_token.length > 0 {
         token = env_token;
@@ -539,16 +539,16 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     }
 
     print("packaging " + pkg_name + "@" + pkg_version + "...");
-    let mut payload -> string = "SFNPKG/1\n";
+    let mut payload: string = "SFNPKG/1\n";
     payload = payload + "--- path: capsule.toml\n" + toml_text + "\n";
 
     let src_files = _collect_sfn_files_cmd(src_dir, 10);
-    let mut fi -> number = 0;
+    let mut fi: number = 0;
     loop {
         if fi >= src_files.length { break; }
         let file_path = src_files[fi];
         let content = fs.readFile(file_path);
-        let mut rel_path -> string = file_path;
+        let mut rel_path: string = file_path;
         if capsule_dir.length > 0 {
             rel_path = substring(file_path, capsule_dir.length + 1, file_path.length);
         }
@@ -606,12 +606,12 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     ]);
     process.run(["rm", "-f", payload_tmp]);
     process.run(["rm", "-f", body_tmp]);
-    let mut response -> string = "";
+    let mut response: string = "";
     if fs.exists(response_tmp) {
         response = _toml_trim_cmd(fs.readFile(response_tmp));
         process.run(["rm", "-f", response_tmp]);
     }
-    let mut status -> string = "";
+    let mut status: string = "";
     if fs.exists(header_tmp) {
         let headers = fs.readFile(header_tmp);
         process.run(["rm", "-f", header_tmp]);
@@ -638,9 +638,9 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     return 0;
 }
 
-fn handle_add_command(args -> string[]) -> number ![io] {
-    let mut is_dev -> boolean = false;
-    let mut capsule_arg -> string = "";
+fn handle_add_command(args: string[]) -> number ![io] {
+    let mut is_dev: boolean = false;
+    let mut capsule_arg: string = "";
     if args.length == 2 {
         capsule_arg = args[1];
     } else if args.length == 3 {
@@ -708,7 +708,7 @@ fn handle_add_command(args -> string[]) -> number ![io] {
     _extract_sfnpkg_cmd(pkg_content, cache_base);
 
     let toml_text = fs.readFile("capsule.toml");
-    let mut updated_toml -> string = "";
+    let mut updated_toml: string = "";
     if is_dev {
         updated_toml = toml_add_dev_dependency(toml_text, display_name, latest_version);
     } else {
@@ -723,7 +723,7 @@ fn handle_add_command(args -> string[]) -> number ![io] {
     return 0;
 }
 
-fn handle_init_command(args -> string[]) -> number ![io] {
+fn handle_init_command(args: string[]) -> number ![io] {
     if args.length != 1 {
         print("usage: sfn init");
         return 2;
@@ -733,10 +733,10 @@ fn handle_init_command(args -> string[]) -> number ![io] {
         return 1;
     }
     let cwd = _get_env_cmd("PWD");
-    let mut pkg_name -> string = "my-capsule";
+    let mut pkg_name: string = "my-capsule";
     if cwd.length > 0 {
-        let mut last_slash -> number = -1;
-        let mut si -> number = 0;
+        let mut last_slash: number = -1;
+        let mut si: number = 0;
         loop {
             if si >= cwd.length { break; }
             if substring(cwd, si, si + 1) == "/" {
@@ -762,13 +762,13 @@ fn handle_init_command(args -> string[]) -> number ![io] {
     return 0;
 }
 
-fn handle_login_command(args -> string[]) -> number ![io] {
+fn handle_login_command(args: string[]) -> number ![io] {
     if args.length > 2 {
         print("usage: sfn login [token]");
         return 2;
     }
 
-    let mut token -> string = "";
+    let mut token: string = "";
     if args.length == 2 {
         token = _toml_trim_cmd(args[1]);
     } else {

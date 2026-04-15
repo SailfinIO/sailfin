@@ -4,7 +4,7 @@
 
 import { MatchArmMutations } from "../../types";
 
-fn append_match_arm_mutations(list -> MatchArmMutations[], arm -> MatchArmMutations) -> MatchArmMutations[] {
+fn append_match_arm_mutations(list: MatchArmMutations[], arm: MatchArmMutations) -> MatchArmMutations[] {
     list.push(arm);
     return list;
 }

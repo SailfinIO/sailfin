@@ -5,7 +5,7 @@
 
 import { clamp, substring, find_char, grapheme_count, grapheme_at, char_code, strings_equal } from "runtime/prelude";
 
-fn char_at(value -> string, index -> number) -> string {
+fn char_at(value: string, index: number) -> string {
 	let value_len = value.length;
 	if value_len == 0 {
 		return "";
@@ -20,7 +20,7 @@ fn char_at(value -> string, index -> number) -> string {
 	return grapheme_at(value, index);
 }
 
-fn is_symbol_char(ch -> string) -> boolean {
+fn is_symbol_char(ch: string) -> boolean {
 	if ch.length == 0 {
 		return false;
 	}
@@ -52,13 +52,13 @@ fn is_symbol_char(ch -> string) -> boolean {
 	return false;
 }
 
-fn sanitize_symbol(name -> string) -> string {
+fn sanitize_symbol(name: string) -> string {
 	let name_len = name.length;
 	if name_len == 0 {
 		return "_";
 	}
-	let mut result -> string = "";
-	let mut index -> number = 0;
+	let mut result: string = "";
+	let mut index: number = 0;
 	loop {
 		if index >= name_len {
 			break;
@@ -85,22 +85,22 @@ fn sanitize_symbol(name -> string) -> string {
 	return result;
 }
 
-fn char_code_at_text(text -> string, index -> number) -> number {
+fn char_code_at_text(text: string, index: number) -> number {
 	return char_code(char_at(text, index));
 }
 
-fn index_of(value -> string, target -> string) -> number {
+fn index_of(value: string, target: string) -> number {
 	if target.length == 0 {
 		return 0;
 	}
 	let _search_limit = value.length - target.length;
-	let mut index -> number = 0;
+	let mut index: number = 0;
 	loop {
 		if index > _search_limit {
 			break;
 		}
-		let mut match_index -> number = 0;
-		let mut matches -> boolean = true;
+		let mut match_index: number = 0;
+		let mut matches: boolean = true;
 		loop {
 			if match_index >= target.length {
 				break;
@@ -120,12 +120,12 @@ fn index_of(value -> string, target -> string) -> number {
 	return -1;
 }
 
-fn find_last_index_of_char(value -> string, target -> string) -> number {
+fn find_last_index_of_char(value: string, target: string) -> number {
 	if target.length != 1 {
 		return -1;
 	}
 	let target_code = char_code_at_text(target, 0);
-	let mut index -> number = value.length;
+	let mut index: number = value.length;
 	loop {
 		if index <= 0 {
 			break;
