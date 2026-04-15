@@ -130,10 +130,12 @@ sfn --version
 **Example output:**
 
 ```
-sfn 0.4.0
+sfn 0.5.1
 ```
 
-The version string follows semantic versioning: `<major>.<minor>.<patch>` for stable releases, `<major>.<minor>.<patch>-alpha.<n>` for pre-releases.
+The version string follows semantic versioning: `<major>.<minor>.<patch>` for stable releases, `<major>.<minor>.<patch>-alpha.<n>` for pre-releases. Local dev builds include a git hash suffix: `<version>+dev.<hash>` (e.g. `sfn 0.5.1+dev.abc1234`).
+
+The version is read from `compiler/capsule.toml` at runtime. For installed binaries where that file is not available, a baked-in fallback is used.
 
 ---
 

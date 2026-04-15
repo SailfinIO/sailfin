@@ -1,14 +1,153 @@
 // compiler/src/version.sfn
 //
-// Native compiler CLI/compiler version string.
+// Compiler version resolution.
 //
-// The canonical version lives in compiler/capsule.toml.  Release tooling
-// (`.github/workflows/release.yml`) bumps both files in lockstep.
+// The canonical version lives in compiler/capsule.toml.  At runtime the
+// compiler tries to read that file (or a build stamp written by build.sh)
+// so that the reported version always matches the capsule manifest.
 //
-// TODO: Read version from capsule.toml at build time so this file can be
-// removed.  See the comment in compiler/capsule.toml.
-let __version__ = "0.5.1";
+// For installed binaries where capsule.toml isn't on disk, the hardcoded
+// __version_fallback__ is returned instead.  Release CI keeps it in sync.
 
+import { toml_get_version } from "./toml_parser";
+
+// Hardcoded fallback for installed binaries where capsule.toml is not
+// available on disk.  Release CI updates this alongside capsule.toml.
+let __version_fallback__ = "0.5.1";
+
+// Pure version accessor — returns the baked-in fallback.  Use this when
+// IO is unavailable or when you just need "some version string".
 fn sailfin_version() -> string {
-    return __version__;
+    return __version_fallback__;
+}
+
+// Read a version string from a raw capsule.toml text blob.
+// Returns the fallback if the TOML text doesn't contain an explicit
+// version key under [capsule] (toml_get_version defaults to "0.1.0"
+// for missing keys, which we must not treat as a real version).
+fn version_from_capsule_toml(toml_text -> string) -> string {
+    let ver = _strict_capsule_version(toml_text);
+    if ver.length > 0 {
+        return ver;
+    }
+    return __version_fallback__;
+}
+
+// Extract version only when the key is explicitly present in a
+// [capsule] section.  Returns "" if the key is missing or the
+// TOML text is empty/malformed.
+fn _strict_capsule_version(toml_text -> string) -> string {
+    if toml_text.length == 0 {
+        return "";
+    }
+    // Quick check: the text must contain a 'version' key line.
+    // This avoids returning the parser's "0.1.0" default.
+    let mut has_version_key -> boolean = false;
+    let mut i -> number = 0;
+    loop {
+        if i >= toml_text.length { break; }
+        if toml_text[i] == "v" {
+            // Check if this could be "version"
+            let remaining = toml_text.length - i;
+            if remaining >= 7 {
+                if substring(toml_text, i, i + 7) == "version" {
+                    has_version_key = true;
+                    break;
+                }
+            }
+        }
+        i += 1;
+    }
+    if !has_version_key {
+        return "";
+    }
+    let ver = toml_get_version(toml_text);
+    // Reject the parser's default "0.1.0" if that's not what the file says.
+    if strings_equal(ver, "0.1.0") {
+        // Double-check: does the file actually say version = "0.1.0"?
+        let mut j -> number = 0;
+        let mut found_literal -> boolean = false;
+        loop {
+            if j >= toml_text.length { break; }
+            if toml_text[j] == "0" {
+                let rem = toml_text.length - j;
+                if rem >= 5 {
+                    if substring(toml_text, j, j + 5) == "0.1.0" {
+                        found_literal = true;
+                        break;
+                    }
+                }
+            }
+            j += 1;
+        }
+        if !found_literal {
+            return "";
+        }
+    }
+    return ver;
+}
+
+// Try to read the first non-empty line from a file.
+fn _read_stamp(path -> string) -> string ![io] {
+    if fs.exists(path) {
+        let content = fs.readFile(path);
+        if content.length > 0 {
+            // Return the first line (strip trailing newline if present).
+            let mut end -> number = 0;
+            loop {
+                if end >= content.length { break; }
+                if content[end] == "\n" { break; }
+                if content[end] == "\r" { break; }
+                end += 1;
+            }
+            if end > 0 {
+                return substring(content, 0, end);
+            }
+        }
+    }
+    return "";
+}
+
+// Try to read capsule.toml from a list of candidate paths.
+// Uses the strict extractor so a file without an explicit version key
+// doesn't shadow the fallback with the parser's "0.1.0" default.
+fn _read_capsule_version(paths -> string[]) -> string ![io] {
+    let mut i -> number = 0;
+    loop {
+        if i >= paths.length { break; }
+        if fs.exists(paths[i]) {
+            let text = fs.readFile(paths[i]);
+            let ver = _strict_capsule_version(text);
+            if ver.length > 0 {
+                return ver;
+            }
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// Resolve the compiler version using the best available source:
+//
+//   1. build/native/.build-stamp  — written by build.sh, includes +dev.<hash>
+//   2. compiler/capsule.toml      — canonical version (dev builds from repo root)
+//   3. capsule.toml               — when CWD is inside compiler/
+//   4. __version_fallback__       — baked-in default for installed binaries
+//
+fn resolve_compiler_version() -> string ![io] {
+    // 1. Build stamp takes priority (includes git hash for dev builds).
+    let stamp = _read_stamp("build/native/.build-stamp");
+    if stamp.length > 0 {
+        return stamp;
+    }
+
+    // 2. Try capsule.toml at known relative paths.
+    let capsule_paths -> string[] = ["compiler/capsule.toml", "capsule.toml"];
+    let capsule_ver = _read_capsule_version(capsule_paths);
+    if capsule_ver.length > 0 {
+        return capsule_ver;
+    }
+
+    // 3. Fallback to the baked-in version.
+    return __version_fallback__;
 }
