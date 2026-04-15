@@ -12,6 +12,7 @@ import {
 import {
     toml_get_name,
     toml_get_version,
+    toml_get_dependencies,
     toml_generate,
     toml_add_dependency,
     toml_add_dev_dependency,
@@ -207,6 +208,12 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                         }
                         if is_capsule {
                             spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                        } else {
+                            // Non-stdlib scoped import (e.g. "sfn/cli", "acme/router") —
+                            // may be a cached capsule dependency declared in capsule.toml.
+                            if _has_slash_cmd(spec) {
+                                spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                            }
                         }
                     }
                 }
@@ -259,6 +266,64 @@ fn _strip_relative_import_lines_cmd(source: string) -> string {
     return out;
 }
 
+// Look up a dependency version from the deps string returned by
+// toml_get_dependencies(). The deps string has the format
+// "name=version\nname=version\n...". Returns the version string
+// if found, or "" if not.
+fn _lookup_dep_version_cmd(deps: string, name: string) -> string {
+    if deps.length == 0 { return ""; }
+    if name.length == 0 { return ""; }
+    let mut start: number = 0;
+    let len = deps.length;
+    loop {
+        if start >= len { break; }
+        // Find end of current line
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if deps[end] == "\n" { break; }
+            end += 1;
+        }
+        // Parse "capsule=version" from this line
+        let mut eq_pos: number = -1;
+        let mut ei: number = start;
+        loop {
+            if ei >= end { break; }
+            if deps[ei] == "=" {
+                eq_pos = ei;
+                break;
+            }
+            ei += 1;
+        }
+        if eq_pos > start {
+            let dep_name = substring(deps, start, eq_pos);
+            if strings_equal(dep_name, name) {
+                return substring(deps, eq_pos + 1, end);
+            }
+        }
+        start = end + 1;
+    }
+    return "";
+}
+
+// Resolve a capsule import spec (e.g. "sfn/cli") to the cached source path
+// using the dependency version from capsule.toml. Returns "" if not found.
+fn _resolve_cached_capsule_path_cmd(spec: string, deps: string) -> string ![io] {
+    if deps.length == 0 { return ""; }
+    // Convert spec to the display name used in capsule.toml
+    let display_name = _display_capsule_name_cmd(spec);
+    let version = _lookup_dep_version_cmd(deps, display_name);
+    if version.length == 0 { return ""; }
+    // Build cache path: ~/.sfn/cache/capsules/{scope}/{name}/{version}/src/mod.sfn
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    let slash_pos = find_char(spec, "/", 0);
+    if slash_pos < 0 { return ""; }
+    let scope = substring(spec, 0, slash_pos);
+    let name = substring(spec, slash_pos + 1, spec.length);
+    return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
+}
+
 fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number, visited: string[]) -> string ![io] {
     if depth <= 0 {
         return _strip_relative_import_lines_cmd(source);
@@ -267,6 +332,14 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
     let mut combined: string = "";
     let mut next_visited = visited;
     let mut remove: _RelativeImportSpanCmd[] = [];
+
+    // Read project dependencies once for cached capsule resolution
+    let mut project_deps: string = "";
+    if fs.exists("capsule.toml") {
+        let toml_text = fs.readFile("capsule.toml");
+        project_deps = toml_get_dependencies(toml_text);
+    }
+
     let mut index: number = 0;
     loop {
         if index >= spans.length { break; }
@@ -286,7 +359,26 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
                 is_capsule_import = true;
             }
         }
+        // Check cached capsule dependencies from capsule.toml
         if !is_capsule_import {
+            if _has_slash_cmd(spec) {
+                let cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
+                if cached_path.length > 0 {
+                    dep_path = cached_path;
+                    is_capsule_import = true;
+                }
+            }
+        }
+        if !is_capsule_import {
+            // Scoped import not found in capsule.toml — hard error
+            if _has_slash_cmd(spec) {
+                if !_has_prefix_cmd(spec, "./") {
+                    if !_has_prefix_cmd(spec, "../") {
+                        print.err("error: dependency \"" + spec + "\" is not declared in capsule.toml — run `sfn add " + spec + "` first");
+                        return "";
+                    }
+                }
+            }
             dep_path = _resolve_import_path_cmd(base_dir, spec);
         }
 
@@ -299,7 +391,11 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
                     if fs.exists(mod_fallback) {
                         dep_path = mod_fallback;
                     } else {
-                        print("test import inlining: missing dependency: " + dep_path);
+                        if is_capsule_import {
+                            print.err("error: cached capsule not found: " + dep_path + " — run `sfn add " + spec + "` to download it");
+                        } else {
+                            print.err("import inlining: missing dependency: " + dep_path);
+                        }
                         index += 1;
                         continue;
                     }
@@ -884,4 +980,11 @@ fn handle_guillermo_command() -> number ![io] {
     return 0;
 }
 
-export { handle_test_command, handle_publish_command, handle_add_command, handle_init_command, handle_login_command, handle_guillermo_command };
+// Inline all imports (relative, stdlib, and cached capsule deps) for a
+// source file.  Exposed so `sfn run` can resolve capsule deps before
+// compilation.
+fn inline_imports_for_source(source: string, base_dir: string) -> string ![io] {
+    return _inline_relative_imports_cmd(source, base_dir, 10, []);
+}
+
+export { handle_test_command, handle_publish_command, handle_add_command, handle_init_command, handle_login_command, handle_guillermo_command, inline_imports_for_source };
