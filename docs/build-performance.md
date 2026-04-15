@@ -1,8 +1,8 @@
 # Build Performance: Root Cause Analysis & Fix Plan
 
-**Date:** 2026-04-15 (revised)
-**Previous revision:** 2026-04-11
-**Context:** Self-hosting the compiler from the 0.5.0-alpha.24 seed via `build.sh` takes ~13-16 minutes for 121 modules single-threaded. Down from 60-90 minutes at the April 11 baseline thanks to partial IPC removal, string concat optimization, and module splitting — but still far from the <5 minute target. Further IPC removal is blocked by a memory management crisis: file serialization was acting as accidental garbage collection.
+**Date:** 2026-04-15 (revised, post-d2d0bf1/220c8b7)
+**Previous revision:** 2026-04-15 (morning), 2026-04-11
+**Context:** Self-hosting the compiler from the 0.5.2-alpha.1 seed via `build.sh` takes ~13-16 minutes for 121 modules single-threaded. Down from 60-90 minutes at the April 11 baseline thanks to partial IPC removal, string concat optimization, module splitting, and the Phase 1 accumulator sweep (`d2d0bf1`). Still far from the <5 minute target. Further IPC removal is blocked by a memory management crisis: file serialization was acting as accidental garbage collection. The two residual O(n²) copy sites (`concat_native_functions`, `append_local_binding`) were reverted in `220c8b7` because callers rely on input-array immutability — they are now aliasing-blocked until either the callers explicitly clone or the arena allocator lands.
 
 ---
 
@@ -31,6 +31,7 @@ Significant work went into IPC removal and memory reduction. Key commits:
 4. **Module splitting:** Decomposed oversized files (expressions, statement, entrypoints, lower_to_llvm_lines) to reduce per-module memory (`efeb588`, `24194fa`, `93ccf48`, `372ae0f`, `9f350eb`)
 5. **Memory limit increase:** Raised SEED_MEM_LIMIT to 12 GB to accommodate remaining leaks (`bcedaad`)
 6. **Stale IPC guard:** Fixed seedcheck duplicate `%tN` corruption from stale call_result IPC state (`7f9bc12`)
+7. **Phase 1 accumulator sweep (partial):** Converted `extend_string_lines` to in-place push and replaced ~50 `.concat([x])` loop sites with `.push(x)` (`d2d0bf1`). In-place conversions of `concat_native_functions` and `append_local_binding` were reverted in `220c8b7` — nested-scope locals restoration and `lower_all_functions` both rely on the original array staying pristine after the call; in-place mutation leaked bindings across scopes and corrupted local_functions. Those two remain copy-based pending aliasing audit or arena.
 
 **Net result:** Build time dropped ~75-80%, but the work hit a wall. See "The IPC-as-GC Problem" below.
 
@@ -104,37 +105,34 @@ The compiler still uses the filesystem as an inter-function communication channe
 
 ---
 
-## Root Cause 2: O(n²) Array Accumulation (Worse Than Previously Documented)
+## Root Cause 2: O(n²) Array Accumulation (Mostly Resolved; Residuals Are Aliasing-Blocked)
 
-Multiple array concatenation functions allocate a fresh array and copy both inputs on every call. The problem is larger than previously documented.
+The broad copy-then-append sweep landed in `d2d0bf1`. Current state:
 
-### `extend_string_lines` — primary offender
+### Resolved in `d2d0bf1`
 
-Defined in `lowering_io.sfn:21-48`. Allocates a new `string[]` and copies both inputs every call.
+- `extend_string_lines` at `lowering_io.sfn:21-39` is now **in-place `push()`** and functionally equivalent to `append_string_lines` (both are identical loops today). The runtime's `sailfin_runtime_array_push` uses amortized doubling up to 1024 then +25% ([sailfin_runtime.c:3749-3767](../runtime/native/src/sailfin_runtime.c#L3749-L3767)), so `push()` in loops is amortized O(1).
+- `.concat([x])` in loop accumulators: only **1 remaining occurrence** across `compiler/src/` (in `parser/declarations.sfn`), down from ~30. Sweep effectively done.
 
-| File | Direct calls | Via `_checked` | Total |
-|------|-------------|----------------|-------|
-| `lowering_core.sfn` | 13 | 5 | 18 |
-| `lowering_phase_render.sfn` | 10 | 0 | 10 |
-| `lowering_helpers.sfn` | 6 | 0 | 6 |
-| `lowering_phase_functions.sfn` | 1 | 1 | 2 |
-| **Total** | **30** | **6** | **36** |
+### Residual O(n²) sites — aliasing-blocked (reverted in `220c8b7`)
 
-The efficient `append_string_lines` (in-place mutation, O(n)) exists at `lowering_io.sfn:50-68` but has only **2 call sites** vs 36 for the copying variant.
+Both of these still allocate a fresh array and copy the input before appending. They are the two places where a trivial in-place conversion was **tried and reverted** because callers depend on the input staying pristine.
 
-For comparison, `extend_string_array` in `llvm/utils.sfn` (also in-place, O(n)) has **96 call sites** across 18 files — the expression lowering subsystem adopted it widely, but the instruction lowering layer did not.
+| Function | Location | Call sites | Aliasing constraint |
+|----------|----------|-----------:|---------------------|
+| `concat_native_functions` | `lowering/lowering_helpers_mangling.sfn:389` | 3 | `lowering_core.sfn` passes `local_functions` into `concat_native_functions` *and* into `lower_all_functions`/`collect_runtime_helper_targets` afterwards. In-place mutation corrupts the second pass. |
+| `append_local_binding` | `expression_lowering/native/core_scopes.sfn:174-186` | 6 | Nested scopes (for bodies, try/catch) build a temporary locals array via append, then restore the original for the outer scope. In-place mutation leaks bindings across scopes. |
 
-### Other O(n²) patterns
+Options for resolving these:
 
-| Pattern | Location | Call sites |
-|---------|----------|------------|
-| `concat_native_functions` | `lowering_helpers_mangling.sfn:389` | 5 |
-| `append_local_binding` (copies array) | `core_scopes.sfn:174` | 6 |
-| `.concat([single_element])` in loops | scattered (6 files) | ~30 in-loop |
+1. **Caller-side clone audit.** For each call site, determine whether the caller still needs the pristine input; if yes, clone explicitly at the caller; if no, switch that caller to in-place `push()`. Keeps the copies only where they're actually required.
+2. **Wait for the arena allocator (Phase 0).** Under an arena, the copy becomes cheap (bump alloc) and doesn't leak — the aliasing problem becomes a non-issue because both views remain live and freed in bulk at module exit.
 
-### Impact estimate
+Option 2 is simpler but requires Phase 0 to land first. Option 1 can proceed now but requires careful call-site analysis (lowering_core invariants around `local_functions` and nested-scope locals restoration are subtle).
 
-For a module that accumulates 10,000 LLVM IR lines across 36 extend calls: ~180,000 total line copies, hundreds of MB of garbage array memory that is never freed (see "IPC-as-GC Problem" above).
+### Other O(n²) patterns to audit
+
+Other copying functions may exist but weren't catalogued in the `d2d0bf1` sweep — worth a fresh grep for `let mut out -> T[] = []` followed by a copy loop, especially in the instruction-lowering layer where the `extend_string_array` pattern wasn't adopted historically.
 
 ---
 
@@ -155,7 +153,7 @@ No memoization table, hash map, or shared artifact store exists.
 
 `recover_native_functions_light` in `lowering_recovery.sfn:114+` still exists and is actively called from `lowering_core.sfn:286`. It re-scans every line of `.sfn-asm` text with 20+ `starts_with` checks per line. The structured `parse_native_artifact_safe` (same file, line 90) is a workaround that assembles results from per-field extraction calls rather than one structured call.
 
-Both exist because the v0.1.1 seed couldn't handle typed instruction variants. The 0.5.0-alpha.24 seed may support these, but the migration hasn't been attempted.
+Both exist because the v0.1.1 seed couldn't handle typed instruction variants. The 0.5.2-alpha.1 seed may support these, but the migration hasn't been attempted.
 
 ---
 
@@ -195,7 +193,7 @@ This means the import-context copy alone (121 × full directory copy) adds signi
 
 The original plan ordered IPC removal first. That is no longer viable because removing IPC without memory management causes OOM. The revised plan addresses memory first.
 
-### Phase 0: Arena Allocator for Compilation (NEW)
+### Phase 0: Arena Allocator for Compilation (≡ M0.5 in [runtime_architecture.md §4.4](runtime_architecture.md#44-m05--arena-in-c-temporary-unblocker))
 
 **Priority:** Critical — **Prerequisite for all other phases**
 **Expected:** Unblocks IPC removal; 30-50% memory reduction standalone
@@ -217,21 +215,37 @@ Add a per-compilation arena allocator to the C runtime. During a single module c
 
 **Risk:** The `string_append` realloc optimization assumes `realloc` returns the same or a new pointer. Arena allocators typically don't support `realloc`. Either (a) fall back to concat for arena mode, or (b) implement arena-aware realloc (grow in place if at arena tip, else copy).
 
-### Phase 1: Fix O(n²) Array Accumulation
+### Phase 1: Fix O(n²) Array Accumulation (Mostly Shipped)
 
-**Priority:** Highest non-blocked — **Expected:** 15-25% time, 40-60% memory reduction
-**No dependency on Phase 0** — can proceed immediately
+**Status:** Broad sweep landed in `d2d0bf1`. Two residuals reverted in `220c8b7` (aliasing).
+**Remaining expected impact:** Small — the high-frequency offenders are already fixed. The two residual functions fire at most a few hundred times per module, not per-line, so their asymptotic wastage is bounded.
 
-Replace all copying array concatenation with in-place mutation:
+**What shipped (`d2d0bf1`):**
 
-| Target | Call sites | Replacement |
-|--------|-----------|-------------|
-| `extend_string_lines` | 36 | `append_string_lines` |
-| `concat_native_functions` | 5 | `append_native_function` (exists) |
-| `append_local_binding` | 6 | In-place push |
-| `.concat([x])` in loops | ~30 | `.push(x)` |
+| Target | Call sites | Status |
+|--------|-----------:|--------|
+| `extend_string_lines` | ~36 | ✅ In-place `push()` |
+| `.concat([x])` in loops | ~50 | ✅ Replaced with `.push(x)` (1 residual in `parser/declarations.sfn`) |
 
-Verify no call site depends on the original array being unmodified before switching. The expression lowering layer already uses `extend_string_array` (96 sites) successfully — this is proven safe.
+**What shipped next (Phase 1b partial, post-baseline):**
+
+Per-site aliasing audit (see [runtime_architecture.md §4.4](runtime_architecture.md#44-m05--arena-in-c-temporary-unblocker) M0.5 fast-fail criteria and the matching audit performed here) identified that only 2 of the 3 `concat_native_functions` sites in `lowering_core.sfn` are aliasing-safe without an arena. Those 2 sites (lines 568 and 576) now use a new in-place helper `extend_native_functions_inplace`. The third site at line 573 stays copying because downstream passes (`collect_runtime_helper_targets`, `render_llvm_preamble`, `lower_all_functions`) read the pristine `local_functions`.
+
+| Target | Call sites | Status |
+|--------|-----------:|--------|
+| `concat_native_functions` sites 1, 3 (lowering_core.sfn) | 2 | ✅ In-place `extend_native_functions_inplace` |
+| `concat_native_functions` site 2 (lowering_core.sfn) | 1 | Copying — caller needs pristine `local_functions` |
+| `append_local_binding` all 6 sites | 6 | Still copying — aliasing audit revealed deeper caller-side structural dependencies than initial audit indicated; deferred to post-M0.5 |
+
+**Measured impact (lowering_core only — the hottest module):**
+
+| Metric | Baseline (post-d2d0bf1) | Phase 1b partial | Delta |
+|--------|------------------------:|-----------------:|------:|
+| Compile time | 61.69s | 58.02s | −6.0% |
+| Peak memory | 7.23 GB | 7.23 GB | ±0 |
+| Aggregate build | 641.33s | 639.51s | −0.3% (noise) |
+
+The win is concentrated on the target module; aggregate is within bench variance. `append_local_binding` conversions become cheap automatically under the M0.5 arena, so Phase 1b is complete as a pre-arena intervention.
 
 ### Phase 2: Eliminate IPC Files (Resumed)
 
@@ -266,7 +280,7 @@ Add a file-level cache to `collect_imported_module_context_for_module`:
 ### Phase 4: Eliminate Light Recovery Parser
 
 **Priority:** Low — **Expected:** 5-10% time
-**Depends on:** Verifying the 0.5.0-alpha.24 seed handles typed instruction variants
+**Depends on:** Verifying the 0.5.2-alpha.1 seed handles typed instruction variants
 
 Replace `recover_native_functions_light` (line-by-line scanning with 20+ `starts_with` checks) and `parse_native_artifact_safe` (per-field extraction workaround) with direct structured `parse_native_artifact` calls.
 
@@ -297,6 +311,10 @@ This requires the compiler to support a "compile module" entry point that takes 
 ### Module Splitting (April 11-13)
 
 **Status: Implemented.** Decomposed oversized files (expressions.sfn → 5 modules, statement.sfn → 4 modules, entrypoints.sfn → 3 modules, lower_to_llvm_lines → phase modules) to reduce per-module compile memory.
+
+### Phase 1 Array Accumulator Sweep (April 15, `d2d0bf1` + `220c8b7`)
+
+**Status: Partially implemented.** Converted `extend_string_lines` to in-place `push()` and replaced ~50 `.concat([x])` loop-accumulator sites. Two functions (`concat_native_functions`, `append_local_binding`) were reverted in `220c8b7` because callers depend on the input array staying pristine; those remain copy-based and are now tracked as Phase 1b.
 
 ---
 

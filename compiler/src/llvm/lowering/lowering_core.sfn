@@ -93,6 +93,7 @@ import {
     apply_module_symbol_mangling,
     build_trait_metadata,
     concat_native_functions,
+    extend_native_functions_inplace,
     flatten_struct_methods,
     empty_capability_manifest,
 } from "./lowering_helpers_mangling";
@@ -562,12 +563,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module -> NativeModule, parse_
     if debug_lowering {
         print.err("emit-llvm: phase=struct_methods_done");
     }
-    let local_functions = concat_native_functions(safe_functions, module_struct_methods);
+    // Site 1 — safe in-place extend: safe_functions is not read after this
+    // line; local_functions aliases safe_functions and is read downstream.
+    let local_functions = extend_native_functions_inplace(safe_functions, module_struct_methods);
     if debug_lowering {
         print.err("emit-llvm: phase=local_functions");
     }
+    // Site 2 — must stay copying: local_functions is reused by
+    // collect_runtime_helper_targets, render_llvm_preamble, and
+    // lower_all_functions below, so context_functions must be a distinct
+    // array so imported_functions don't contaminate local_functions.
     let mut context_functions = concat_native_functions(local_functions, imported_functions);
-    context_functions = concat_native_functions(context_functions, imported_struct_methods);
+    // Site 3 — safe in-place extend: context_functions is a fresh array from
+    // site 2, no prior snapshot is aliased.
+    context_functions = extend_native_functions_inplace(context_functions, imported_struct_methods);
     if debug_lowering {
         print.err("emit-llvm: phase=context_functions");
     }

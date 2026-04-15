@@ -60,7 +60,7 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help install fetch-seed test test-unit test-integration test-e2e compile check package clean bench
+.PHONY: help install fetch-seed test test-unit test-integration test-e2e compile check package clean bench test-arena
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-installer
 
@@ -109,13 +109,13 @@ test: test-unit test-integration test-e2e
 # Install a released seed compiler into the workspace.
 # Requires a GitHub token in GITHUB_TOKEN.
 SEED_REPO ?= SailfinIO/sailfin
-SEED_VERSION ?= 0.5.0-alpha.24
+SEED_VERSION ?= 0.5.2-alpha.1
 SEED_EXCLUDE_TAG ?=
 SEED_INSTALL_BASE ?= build/seed/versions
 SEED_GLOBAL_BIN_DIR ?= build/seed/bin
 
 # Default seed compiler used for self-hosting.
-# Points to the fetched seed binary (0.5.0-alpha.24+).
+# Points to the fetched seed binary (0.5.2-alpha.1+).
 SEED ?= build/seed/bin/sailfin
 
 FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
@@ -251,6 +251,33 @@ bench:
 		--seed "$(NATIVE_BIN)" \
 		--import-context build/native/import-context \
 		$(BENCH_ARGS)
+
+# =============================================================================
+# Arena correctness gate (Phase 0 / M0.5 prerequisite)
+# =============================================================================
+# Compiles a module twice (with and without SAILFIN_USE_ARENA=1) and diffs
+# the emitted LLVM IR. Until the arena allocator lands, the env var is a
+# no-op and the diff is trivially identical — the harness still validates.
+# Once M0.5 lands (see docs/runtime_architecture.md §4.4), this becomes the
+# correctness gate: any divergence means the arena is corrupting output.
+#
+# Usage:
+#   make test-arena                         # default: examples/basics/hello-world.sfn
+#   make test-arena ARENA_ARGS="--all"      # all examples/basics/*.sfn
+#   make test-arena ARENA_ARGS="examples/basics/functions.sfn"
+ARENA_ARGS ?=
+test-arena:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[test-arena] missing $(NATIVE_BIN); run 'make compile' first"; \
+		exit 1; \
+	fi
+	@if [ ! -d build/native/import-context ]; then \
+		echo "[test-arena] missing import-context; run 'make compile' first"; \
+		exit 1; \
+	fi
+	@SEED="$(NATIVE_BIN)" \
+		IMPORT_CONTEXT=build/native/import-context \
+		bash scripts/test_arena.sh $(ARENA_ARGS)
 
 clean:
 	rm -rf dist
