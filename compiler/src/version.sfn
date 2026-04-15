@@ -13,7 +13,7 @@ import { toml_get_version } from "./toml_parser";
 
 // Hardcoded fallback for installed binaries where capsule.toml is not
 // available on disk.  Release CI updates this alongside capsule.toml.
-let __version_fallback__ = "0.5.1";
+let __version_fallback__ = "0.5.2-alpha.1";
 
 // Pure version accessor — returns the baked-in fallback.  Use this when
 // IO is unavailable or when you just need "some version string".
