@@ -421,6 +421,35 @@ fn concat_native_functions(first -> NativeFunction[], second -> NativeFunction[]
     return result;
 }
 
+// extend_native_functions_inplace: append `src` onto `dst` in-place.
+//
+// UNSAFE if another reference to `dst` expects the pre-call contents —
+// use `concat_native_functions` instead when the caller needs a pristine
+// snapshot of `dst`. Audited safe call sites as of Phase 1b: only two
+// sites in lowering_core.sfn (build-performance.md Phase 1b).
+fn extend_native_functions_inplace(dst -> NativeFunction[], src -> NativeFunction[]) -> NativeFunction[] {
+    let mut out = dst;
+    if out == null {
+        out = [];
+    }
+    let mut safe_src = src;
+    if safe_src == null {
+        safe_src = [];
+    }
+    if safe_src.length > 200000 {
+        return out;
+    }
+    let mut index -> number = 0;
+    loop {
+        if index >= safe_src.length {
+            break;
+        }
+        out = append_native_function(out, safe_src[index]);
+        index += 1;
+    }
+    return out;
+}
+
 fn flatten_struct_methods(structs -> NativeStruct[]) -> NativeFunction[] {
     if structs.length > 100000 {
         return [];
