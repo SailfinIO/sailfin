@@ -76,8 +76,9 @@ feature availability.
 | `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn doc` (doc generator) | Planned | 1.0; see `docs/proposals/tooling.md` |
+| `sfn fix` (auto-rewriter) | Planned | 1.0; see `docs/proposals/tooling.md` |
 | Notebook support | Not started | Post-1.0 |
-| Package registry (`sfn add/publish`) | Not started | Post-1.0 |
+| Package registry (`sfn init/add/publish`) | Shipped | CLI commands implemented; registry at `registry.sailfin.dev` |
 
 ## Print API (Current)
 

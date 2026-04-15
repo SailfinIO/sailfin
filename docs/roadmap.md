@@ -114,8 +114,9 @@ or C runtime**. All items below are hard requirements, not stretch goals.
    - [x] Remove Python runtime shims (`runtime/runtime_support.py`,
          `runtime/native_runner*.py`).
    - [ ] Remove Python-generated compiler artifacts from the 1.0 toolchain.
-   - [ ] Enhance `Diagnostic` struct with severity, secondary spans, and fix-it
-         suggestions (unblocks tooling and LSP).
+   - [ ] Build tooling features on top of the richer diagnostics work tracked in
+         **2. Language feature completeness** (multi-span snippets, severity,
+         suggested fixes).
    - [ ] Implement `sfn fmt` — canonical token-stream formatter, no configuration.
          Format compiler source and add CI enforcement.
    - [ ] Implement `sfn check` — fast typecheck + effect check without codegen.

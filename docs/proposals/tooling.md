@@ -34,8 +34,10 @@ to the 1.0 roadmap.
 | `sfn lsp` | Language Server Protocol | P1 | Pre-1.0 (basic), 1.0 (full) |
 | `sfn bench` | Benchmarking framework | P3 | Post-1.0 |
 
-Existing commands (`sfn test`, `sfn build`, `sfn run`, `sfn init`, `sfn add`,
-`sfn publish`) are already implemented and are not covered here.
+Existing commands (`sfn test`, `sfn build`, `sfn run`) are shipped and stable.
+Package-management commands (`sfn init`, `sfn add`, `sfn publish`, `sfn login`)
+are implemented and functional against `registry.sailfin.dev`. None of these
+are covered here.
 
 
 ## Architectural Decision: Where Does Tooling Live?
@@ -103,8 +105,10 @@ effect checker modules — no new dependencies.
 
 ### 1. `sfn fmt` — Canonical Formatter
 
-**What it does:** Reads `.sfn` source, parses it to AST, and reprints it in
-canonical style. Like `gofmt` — one true style, no configuration.
+**What it does:** Reads `.sfn` source, lexes it into a token stream, and
+reprints it in canonical style while preserving comments. A parse step may
+run for validation, but formatting operates on the token stream, not the AST.
+Like `gofmt` — one true style, no configuration.
 
 **Why it's high priority:**
 - Eliminates style debates in code review
@@ -247,7 +251,7 @@ sfn vet [--rules rule1,rule2] [path...]
 | `empty-block` | `if`, `for`, `match` with empty body |
 | `shadowed-builtin` | Variable shadows a builtin name (`print`, `assert`) |
 | `redundant-mut` | `let mut` where binding is never reassigned |
-| `string-compare-identity` | Comparing strings with `==` that should use `.equals()` |
+| `unreachable-match-arm` | Match arm shadowed by a previous wildcard or identical pattern |
 | `infinite-loop` | `loop { }` with no `break` or `return` |
 
 **Extended rule set (P2 — ship at 1.0):**
