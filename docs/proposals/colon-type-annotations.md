@@ -1,7 +1,6 @@
 # Colon Type Annotations Migration Plan
 
-**Status:** Phases 1–5 implemented (source-level migration and emitter update complete).
-Phase 6 (parser split) deferred to follow-up branch.
+**Status:** Phases 1–6 implemented (migration complete).
 **Roadmap ref:** `docs/roadmap.md` Section 0 — Syntax reform (breaking, do first)
 **Date:** 2026-04-15
 

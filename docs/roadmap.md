@@ -27,9 +27,9 @@ or C runtime**. All items below are hard requirements, not stretch goals.
          Python, Kotlin, Swift, Zig) uses `:` for annotations. The current
          syntax is the single most likely reason a new user bounces.
          Source migration complete (compiler, runtime, capsules, tests,
-         examples, docs). Emitter update (Phase 5) complete — all emitters
-         and IR parsers now use `:` for annotation positions. Parser split
-         (Phase 6) tracked separately; see
+         examples, docs). Emitter update (Phase 5) and parser split
+         (Phase 6) complete — the parser now enforces `:` for annotations
+         and `->` for return types. See
          `docs/proposals/colon-type-annotations.md`.
    - [ ] **String interpolation delimiters** — replace `{{ expr }}` with
          `${ expr }`.

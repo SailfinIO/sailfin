@@ -158,10 +158,8 @@ let name: string = "Sailfin";
 struct User { id: number; name: string; }
 ```
 
-**Remaining work**:
-- Parser still accepts both `->` and `:` via the shared `TypeSep` rule;
-  splitting into `AnnotationSep = ":"` and `ReturnSep = "->"` is tracked as
-  Phase 6 of the same epic.
+**Remaining work**: None — migration complete. The parser now enforces
+`:` in annotation positions and `->` in return-type positions.
 
 ### String interpolation (`{{ }}` vs `${ }`)
 
