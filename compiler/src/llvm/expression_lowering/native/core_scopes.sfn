@@ -172,7 +172,15 @@ fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
 }
 
 fn append_local_binding(values -> LocalBinding[], value -> LocalBinding) -> LocalBinding[] {
-    let mut out = values;
+    let mut out -> LocalBinding[] = [];
+    let mut index -> number = 0;
+    loop {
+        if index >= values.length {
+            break;
+        }
+        out.push(values[index]);
+        index += 1;
+    }
     out.push(value);
     return out;
 }
