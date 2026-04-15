@@ -218,7 +218,7 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
     return spans;
 }
 
-fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string {
+fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string ![io] {
     let mut current_base = base_dir;
     let mut remainder = spec;
     loop {
@@ -235,7 +235,11 @@ fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string {
     }
     let path = _path_join_cmd(current_base, remainder);
     if _ends_with_cmd(path, ".sfn") { return path; }
-    return path + ".sfn";
+    let direct = path + ".sfn";
+    if fs.exists(direct) { return direct; }
+    let mod_path = path + "/mod.sfn";
+    if fs.exists(mod_path) { return mod_path; }
+    return direct;
 }
 
 fn _strip_relative_import_lines_cmd(source -> string) -> string {

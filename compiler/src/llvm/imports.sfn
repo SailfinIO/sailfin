@@ -57,7 +57,7 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         init_index += 1;
     }
 
-    let max_transitive_depth -> number = 1;
+    let max_transitive_depth -> number = 3;
 
     let mut queue_index -> number = 0;
     loop {
