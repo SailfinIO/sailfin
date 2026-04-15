@@ -60,6 +60,25 @@ mkdir -p "$WORK_DIR"
 # Compile one module twice (no-arena, with-arena) and diff
 # ---------------------------------------------------------------------------
 
+# Produce a directory-safe slug for a module source path so siblings with
+# the same basename (e.g. `foo/main.sfn` and `bar/main.sfn`) don't collide
+# in $WORK_DIR. Mirrors the slug strategy in scripts/bench_compile.sh.
+module_slug_from_path() {
+    local src="$1"
+    printf '%s' "$src" | sed -e 's#^\./##' -e 's#\.sfn$##' -e 's#/#__#g' -e 's#[^A-Za-z0-9._-]#_#g'
+}
+
+# Resolve a path (absolute or relative to REPO_ROOT) into an absolute path.
+# The parent directory must already exist.
+resolve_abs_path() {
+    local p="$1"
+    if [[ "$p" = /* ]]; then
+        printf '%s' "$p"
+    else
+        printf '%s' "$(cd "$REPO_ROOT/$(dirname "$p")" && pwd)/$(basename "$p")"
+    fi
+}
+
 compile_once() {
     local src="$1"
     local mode="$2"          # "no_arena" or "with_arena"
@@ -74,19 +93,26 @@ compile_once() {
     local abs_src
     abs_src="$(cd "$REPO_ROOT" && realpath "$src")"
 
+    # Resolve output paths to absolute BEFORE the cd — otherwise relative
+    # paths would be interpreted against $module_cwd and the compiler
+    # would write into a nested location the caller never checks.
+    local abs_out_ll abs_stderr
+    abs_out_ll="$(resolve_abs_path "$out_ll")"
+    abs_stderr="$(resolve_abs_path "$stderr_log")"
+
     if [[ "$mode" == "with_arena" ]]; then
-        (cd "$module_cwd" && SAILFIN_USE_ARENA=1 "$ABS_SEED" emit -o "$out_ll" llvm "$abs_src") 2>"$stderr_log"
+        (cd "$module_cwd" && SAILFIN_USE_ARENA=1 "$ABS_SEED" emit -o "$abs_out_ll" llvm "$abs_src") 2>"$abs_stderr"
     else
-        (cd "$module_cwd" && "$ABS_SEED" emit -o "$out_ll" llvm "$abs_src") 2>"$stderr_log"
+        (cd "$module_cwd" && "$ABS_SEED" emit -o "$abs_out_ll" llvm "$abs_src") 2>"$abs_stderr"
     fi
 }
 
 check_module() {
     local src="$1"
-    local name
-    name="$(basename "${src%.sfn}")"
+    local module_slug
+    module_slug="$(module_slug_from_path "$src")"
 
-    local base="$WORK_DIR/$name"
+    local base="$WORK_DIR/$module_slug"
     rm -rf "$base"
     mkdir -p "$base/no_arena" "$base/with_arena"
 
