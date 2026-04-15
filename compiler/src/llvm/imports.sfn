@@ -101,14 +101,24 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
             diagnostics.push("layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")");
         }
 
-        // Only load the full native text for direct imports (depth 0).
-        // Transitive imports provide layout manifests for struct/enum
-        // sizing but skip the expensive function/instruction parsing.
+        // Load the full native text for direct imports (depth 0) so the
+        // downstream LLVM lowering can parse function signatures/bodies.
+        // For transitive imports (depth > 0) we still need to read the
+        // native text to discover *their* imports, but we store "" in the
+        // returned native_texts array to avoid the expensive downstream
+        // function/instruction parsing.
         let mut native_text -> string = "";
-        if depth == 0 {
-            if fs.exists(native_text_path) {
-                native_text = fs.readFile(native_text_path);
-            } else {
+        let mut native_text_for_discovery -> string = "";
+        if fs.exists(native_text_path) {
+            let file_contents = fs.readFile(native_text_path);
+            if depth == 0 {
+                native_text = file_contents;
+            }
+            if depth < max_transitive_depth {
+                native_text_for_discovery = file_contents;
+            }
+        } else {
+            if depth == 0 {
                 diagnostics.push("native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")");
             }
         }
@@ -125,24 +135,24 @@ fn collect_imported_module_context_for_module(imports -> NativeImport[], current
         native_texts = updated_texts;
 
         // Enqueue transitive imports up to max_transitive_depth.
-        // Depth-1 entries only load layout manifests (no native text).
-        if depth < max_transitive_depth {
-            if native_text.length > 0 {
-                let transitive_imports = parse_native_imports_for_import(native_text);
-                let mut ti -> number = 0;
-                let next_depth = depth + 1;
-                loop {
-                    if ti >= transitive_imports.length {
-                        break;
-                    }
-                    let ti_entry = transitive_imports[ti];
-                    if ti_entry.kind == "import" {
-                        queue_paths.push(ti_entry.module);
-                        queue_parent_slugs.push(slug);
-                        queue_depths.push(next_depth);
-                    }
-                    ti += 1;
+        // We read the native text at all traversal depths so we can
+        // discover deeper imports, but only depth-0 texts are returned
+        // for full LLVM lowering.
+        if native_text_for_discovery.length > 0 {
+            let transitive_imports = parse_native_imports_for_import(native_text_for_discovery);
+            let mut ti -> number = 0;
+            let next_depth = depth + 1;
+            loop {
+                if ti >= transitive_imports.length {
+                    break;
                 }
+                let ti_entry = transitive_imports[ti];
+                if ti_entry.kind == "import" {
+                    queue_paths.push(ti_entry.module);
+                    queue_parent_slugs.push(slug);
+                    queue_depths.push(next_depth);
+                }
+                ti += 1;
             }
         }
     }

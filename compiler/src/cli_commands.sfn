@@ -218,7 +218,7 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
     return spans;
 }
 
-fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string ![io] {
+fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string {
     let mut current_base = base_dir;
     let mut remainder = spec;
     loop {
@@ -235,11 +235,7 @@ fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string ![io] 
     }
     let path = _path_join_cmd(current_base, remainder);
     if _ends_with_cmd(path, ".sfn") { return path; }
-    let direct = path + ".sfn";
-    if fs.exists(direct) { return direct; }
-    let mod_path = path + "/mod.sfn";
-    if fs.exists(mod_path) { return mod_path; }
-    return direct;
+    return path + ".sfn";
 }
 
 fn _strip_relative_import_lines_cmd(source -> string) -> string {
@@ -298,9 +294,15 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
         if !is_prebuilt {
             if !_string_list_contains_cmd(next_visited, dep_path) {
                 if !fs.exists(dep_path) {
-                    print("test import inlining: missing dependency: " + dep_path);
-                    index += 1;
-                    continue;
+                    // Directory import fallback: ./dir -> dir/mod.sfn
+                    let mod_fallback = substring(dep_path, 0, dep_path.length - 4) + "/mod.sfn";
+                    if fs.exists(mod_fallback) {
+                        dep_path = mod_fallback;
+                    } else {
+                        print("test import inlining: missing dependency: " + dep_path);
+                        index += 1;
+                        continue;
+                    }
                 }
                 let dep_source = fs.readFile(dep_path);
                 next_visited.push(dep_path);
