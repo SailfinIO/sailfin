@@ -5,6 +5,10 @@ section: getting-started
 order: 1
 ---
 
+> **Just want the binary?** Head to the [Downloads](/dl) page for pre-built
+> binaries for every supported platform, or keep reading for the recommended
+> install script.
+
 ## Requirements
 
 Sailfin runs on the following platforms:
@@ -182,11 +186,13 @@ Get-Command sfn
 ## Manual Installation
 
 If you cannot run the install script (e.g., in an air-gapped environment), you
-can download and place the binary manually.
+can download and place the binary manually. The [Downloads](/dl) page lists
+every platform binary with direct download links.
 
 ### Step 1: Find the release asset
 
-Go to [github.com/SailfinIO/sailfin/releases](https://github.com/SailfinIO/sailfin/releases)
+Go to the [Downloads](/dl) page or directly to
+[github.com/SailfinIO/sailfin/releases](https://github.com/SailfinIO/sailfin/releases)
 and locate the release for `v0.1.1-alpha.135`. Release assets follow this naming
 convention:
 
@@ -407,6 +413,7 @@ This change only affects the current PowerShell session and does not persist.
 
 ## Next Steps
 
+- [Downloads](/dl) — Pre-built binaries for every platform
 - [Editor Setup](/docs/getting-started/editor-setup) — Install the Sailfin VS Code extension for syntax highlighting and snippets
 - [Hello, World!](/docs/getting-started/hello-world) — Write and run your first Sailfin program
 - [Tour of Sailfin](/docs/getting-started/tour) — A guided introduction to the language

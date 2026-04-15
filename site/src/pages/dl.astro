@@ -1,0 +1,269 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+const stableVersion = "0.1.1-alpha.135";
+const stableTag = `v${stableVersion}`;
+const ghBase = `https://github.com/SailfinIO/sailfin/releases/download/${stableTag}`;
+
+const featured = [
+  { os: "Linux", arch: "x86_64", icon: "linux", file: `sailfin_${stableVersion}_linux_x86_64.tar.gz` },
+  { os: "Linux", arch: "ARM64", icon: "linux", file: `sailfin_${stableVersion}_linux_arm64.tar.gz` },
+  { os: "macOS", arch: "Apple Silicon", icon: "apple", file: `sailfin_${stableVersion}_darwin_arm64.tar.gz` },
+  { os: "macOS", arch: "Intel", icon: "apple", file: `sailfin_${stableVersion}_darwin_x86_64.tar.gz` },
+  { os: "Windows", arch: "x86_64", icon: "windows", file: `sailfin_${stableVersion}_windows_x86_64.tar.gz` },
+];
+
+const allAssets = [
+  { file: `sailfin_${stableVersion}_linux_x86_64.tar.gz`, kind: "Archive", os: "Linux", arch: "x86_64" },
+  { file: `sailfin_${stableVersion}_linux_arm64.tar.gz`, kind: "Archive", os: "Linux", arch: "ARM64" },
+  { file: `sailfin_${stableVersion}_darwin_x86_64.tar.gz`, kind: "Archive", os: "macOS", arch: "x86_64" },
+  { file: `sailfin_${stableVersion}_darwin_arm64.tar.gz`, kind: "Archive", os: "macOS", arch: "ARM64" },
+  { file: `sailfin_${stableVersion}_windows_x86_64.tar.gz`, kind: "Archive", os: "Windows", arch: "x86_64" },
+];
+---
+
+<BaseLayout title="Downloads" description="Download the Sailfin compiler for your platform.">
+  <section class="dl-hero">
+    <div class="container">
+      <h1>Download Sailfin</h1>
+      <p class="dl-subtitle">Get the Sailfin compiler and toolchain for your platform.</p>
+      <span class="version-badge">Stable: {stableTag}</span>
+    </div>
+  </section>
+
+  <section class="dl-quick">
+    <div class="container">
+      <h2>Quick Install</h2>
+      <p class="section-desc">The fastest way to get started. Detects your platform and installs automatically.</p>
+      <div class="quick-grid">
+        <div class="quick-card">
+          <h3>Linux &amp; macOS</h3>
+          <div class="code-block">
+            <code>curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash</code>
+          </div>
+        </div>
+        <div class="quick-card">
+          <h3>Windows (PowerShell)</h3>
+          <div class="code-block">
+            <code>irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dl-featured">
+    <div class="container">
+      <h2>Featured Downloads</h2>
+      <p class="section-desc">Pre-built binaries for supported platforms. Download, extract, and add to your PATH.</p>
+      <div class="featured-grid">
+        {featured.map((d) => (
+          <a href={`${ghBase}/${d.file}`} class="featured-card" download>
+            <div class="featured-icon">{d.icon === "linux" ? "\u{1F427}" : d.icon === "apple" ? "\u{1F34E}" : "\u{1FA9F}"}</div>
+            <div class="featured-info">
+              <strong>{d.os}</strong>
+              <span class="featured-arch">{d.arch}</span>
+            </div>
+            <span class="featured-file">{d.file}</span>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="dl-table-section">
+    <div class="container">
+      <h2>All Downloads — {stableTag}</h2>
+      <p class="section-desc">Every asset for the current stable release.</p>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>Kind</th>
+              <th>OS</th>
+              <th>Arch</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allAssets.map((a) => (
+              <tr>
+                <td><a href={`${ghBase}/${a.file}`}>{a.file}</a></td>
+                <td>{a.kind}</td>
+                <td>{a.os}</td>
+                <td>{a.arch}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="gh-link">
+        Looking for older releases or checksums? See <a href="https://github.com/SailfinIO/sailfin/releases">all releases on GitHub</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="dl-source">
+    <div class="container">
+      <h2>Build from Source</h2>
+      <p class="section-desc">Clone the repository and build the self-hosted compiler via LLVM. Requires LLVM 17+, clang, and make.</p>
+      <div class="code-block source-block">
+        <code>git clone https://github.com/SailfinIO/sailfin.git && cd sailfin && make compile && make install</code>
+      </div>
+      <p class="source-detail">See the <a href="/docs/getting-started/install#building-from-source">full build instructions</a> for prerequisites and troubleshooting.</p>
+    </div>
+  </section>
+
+  <section class="dl-next">
+    <div class="container">
+      <h2>Next Steps</h2>
+      <div class="next-grid">
+        <a href="/docs/getting-started/install" class="next-card">
+          <strong>Installation Guide</strong>
+          <p>Detailed install instructions, version pinning, and troubleshooting.</p>
+        </a>
+        <a href="/docs/getting-started/editor-setup" class="next-card">
+          <strong>Editor Setup</strong>
+          <p>Get syntax highlighting and snippets in VS Code.</p>
+        </a>
+        <a href="/docs/getting-started/hello-world" class="next-card">
+          <strong>Hello, World!</strong>
+          <p>Write and run your first Sailfin program.</p>
+        </a>
+        <a href="/docs/getting-started/tour" class="next-card">
+          <strong>Take the Tour</strong>
+          <p>A guided walkthrough of every major language feature.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .dl-hero {
+    background: linear-gradient(180deg, var(--sfn-blue-light) 0%, var(--color-bg) 100%);
+    padding: 4rem 0 3rem;
+    text-align: center;
+  }
+  .dl-hero h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  .dl-subtitle { color: var(--color-text-secondary); font-size: 1.1rem; margin-bottom: 1.25rem; }
+  .version-badge {
+    display: inline-block;
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.35rem 1rem;
+    border-radius: 20px;
+  }
+
+  .section-desc { color: var(--color-text-secondary); margin-bottom: 1.5rem; }
+
+  /* Quick Install */
+  .dl-quick { padding: 3rem 0; }
+  .dl-quick h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .quick-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.25rem; }
+  .quick-card {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 1.5rem;
+  }
+  .quick-card h3 { font-size: 1rem; margin-bottom: 0.75rem; }
+  .code-block {
+    background: var(--gray-900);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+  }
+  .code-block code {
+    color: var(--gray-300);
+    font-size: 0.825rem;
+    background: none;
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  /* Featured Downloads */
+  .dl-featured { padding: 3rem 0; background: var(--color-bg-alt); }
+  .dl-featured h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .featured-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+  .featured-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 1.5rem 1rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .featured-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 12px rgba(0, 114, 206, 0.08);
+    text-decoration: none;
+  }
+  .featured-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .featured-info strong { display: block; font-size: 1rem; }
+  .featured-arch { font-size: 0.85rem; color: var(--color-text-secondary); }
+  .featured-file {
+    display: block;
+    margin-top: 0.75rem;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    color: var(--color-text-tertiary);
+    word-break: break-all;
+  }
+
+  /* Table */
+  .dl-table-section { padding: 3rem 0; }
+  .dl-table-section h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .table-wrapper { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 0.75rem 1rem; border: 1px solid var(--color-border); text-align: left; font-size: 0.9rem; }
+  th { background: var(--color-bg-alt); font-weight: 600; }
+  td a { font-family: var(--font-mono); font-size: 0.825rem; }
+  .gh-link { margin-top: 1.25rem; font-size: 0.9rem; color: var(--color-text-secondary); }
+
+  /* Source */
+  .dl-source { padding: 3rem 0; background: var(--color-bg-alt); }
+  .dl-source h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .source-block { margin-bottom: 1rem; }
+  .source-detail { font-size: 0.9rem; color: var(--color-text-secondary); }
+
+  /* Next Steps */
+  .dl-next { padding: 3rem 0 4rem; }
+  .dl-next h2 { font-size: 1.5rem; margin-bottom: 1.5rem; text-align: center; }
+  .next-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+  .next-card {
+    padding: 1.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .next-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 12px rgba(0, 114, 206, 0.08);
+    text-decoration: none;
+  }
+  .next-card strong { display: block; margin-bottom: 0.25rem; color: var(--color-primary); }
+  .next-card p { font-size: 0.85rem; color: var(--color-text-secondary); line-height: 1.5; }
+
+  @media (max-width: 768px) {
+    .quick-grid { grid-template-columns: 1fr; }
+    .featured-grid { grid-template-columns: repeat(2, 1fr); }
+    .next-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (max-width: 480px) {
+    .featured-grid { grid-template-columns: 1fr; }
+    .next-grid { grid-template-columns: 1fr; }
+  }
+</style>
