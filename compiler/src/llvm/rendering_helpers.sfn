@@ -262,7 +262,7 @@ fn render_interface_parameters(parameters: NativeParameter[]) -> string {
             entry = "mut " + entry;
         }
         if parameter.type_annotation.length > 0 {
-            entry = entry + " -> " + parameter.type_annotation;
+            entry = entry + ": " + parameter.type_annotation;
         }
         if parameter.default_value != null {
             entry = entry + " = " + parameter.default_value;

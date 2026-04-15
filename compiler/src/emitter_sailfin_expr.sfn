@@ -22,6 +22,13 @@ fn format_type_annotation(annotation: TypeAnnotation?) -> string {
     if annotation == null {
         return "";
     }
+    return ": " + annotation.text;
+}
+
+fn format_return_type_annotation(annotation: TypeAnnotation?) -> string {
+    if annotation == null {
+        return "";
+    }
     return " -> " + annotation.text;
 }
 
@@ -146,7 +153,7 @@ fn format_expression(expression: Expression) -> string {
 fn format_lambda_expression(expression: Expression) -> string {
     let params = format_lambda_parameters(expression.parameters);
     let mut header: string = "fn " + params;
-    header = header + format_type_annotation(expression.return_type);
+    header = header + format_return_type_annotation(expression.return_type);
 
     let body = format_lambda_body(expression.body);
     return header + " " + body;

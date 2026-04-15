@@ -159,8 +159,6 @@ struct User { id: number; name: string; }
 ```
 
 **Remaining work**:
-- Emitters still output `->` in annotation positions (tracked under roadmap §0
-  Phase 5); will be updated to `:` so generated/printed code matches source.
 - Parser still accepts both `->` and `:` via the shared `TypeSep` rule;
   splitting into `AnnotationSep = ":"` and `ReturnSep = "->"` is tracked as
   Phase 6 of the same epic.

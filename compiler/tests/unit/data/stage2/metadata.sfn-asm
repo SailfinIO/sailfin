@@ -2,18 +2,18 @@
 .module main
 
 .interface Meter
-    .sig total(self -> Meter) -> number
+    .sig total(self: Meter) -> number
 .endinterface
 
 .struct Person implements Meter
     .layout struct name=Person size=8 align=8
     .layout field years type=number offset=0 size=8 align=8
-    .field years -> number
-    .method total(self -> Person) -> number
+    .field years: number
+    .method total(self: Person) -> number
     .meta return number
     .meta effects none
         .span 8 14 8 28
-        .param self -> Person
+        .param self: Person
         .span 9 9 9 27
         ret self.years
     .endmethod
@@ -26,13 +26,13 @@
     ret [#element:Person, Person { years: 36 }, Person { years: 42 }]
 .endfn
 
-.fn total_years(values -> Person[]) -> number
+.fn total_years(values: Person[]) -> number
 .meta return number
 .meta effects none
     .span 17 16 17 34
-    .param values -> Person[]
+    .param values: Person[]
     .span 18 5 18 33
-    eval let mut total -> number = 0
+    eval let mut total: number = 0
     .for person in values
         .span 20 9 20 38
         eval total = total + person.years
