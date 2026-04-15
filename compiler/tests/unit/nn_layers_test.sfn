@@ -1,10 +1,13 @@
 // Regression tests for sfn/layers capsule functions.
 //
 // NOTE: Renamed from layers_test.sfn during the colon-annotation migration.
-// The compiler crashes (SIGSEGV) when a test file `<name>_test.sfn` and a
-// capsule `sfn/<name>` both define same-named structs with all-colon field
-// annotations. Filing this as a separate compiler bug; this rename is the
-// minimal workaround that unblocks the syntax migration.
+// When a test file `<name>_test.sfn` shares its base name with capsule
+// `sfn/<name>` and both define same-named structs with all-colon field
+// annotations, the compiler segfaults during compilation of the test file.
+// This rename is a temporary workaround that unblocks the syntax migration.
+// The underlying bug and the long-term plan to move capsule-flavored unit
+// tests into their respective capsules are documented in
+// `docs/proposals/colon-type-annotations.md` (Lessons Learned).
 
 // -- Types and helpers copied from sfn/layers --
 

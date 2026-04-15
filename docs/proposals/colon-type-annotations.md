@@ -1,6 +1,7 @@
 # Colon Type Annotations Migration Plan
 
-**Status:** Proposed
+**Status:** Phases 1–4 implemented (source-level migration complete).
+Phases 5 (emitter update) and 6 (parser split) deferred to follow-up branches.
 **Roadmap ref:** `docs/roadmap.md` Section 0 — Syntax reform (breaking, do first)
 **Date:** 2026-04-15
 
@@ -143,21 +144,51 @@ fn foo() ![io] -> Type  # after effect annotation
    c. If it matches `) -> <Type>` or `] -> <Type>` or effect list `-> <Type>` — keep as `->`
 4. Report a summary of changes per file
 
-## Emitter Updates (Post-Migration)
+## Emitter Updates (Phase 5 — Deferred to Follow-up Branch)
 
 After all source files are migrated, update the emitters to output `:` for
-annotation positions:
+annotation positions. The actual surface is larger than the original three call
+sites and must be changed atomically with the IR parser to preserve
+self-hosting:
 
-1. **`compiler/src/emitter_sailfin_expr.sfn:25`** — `format_type_annotation()`
-   currently hardcodes `" -> "`. Change to `": "` for parameter/variable/field
-   annotations.
+**Sailfin source emitter** (`fn`/struct rendering for diagnostics, formatter, etc.):
 
-2. **`compiler/src/emit_native_format.sfn:279`** — IR emitter writes `" -> "` for
-   parameters. Update to `": "`.
+- `compiler/src/emitter_sailfin_expr.sfn:25` — `format_type_annotation()`. Used
+  for both annotations (params/vars) and return types; needs to be split into
+  `format_type_annotation` (`:`) and `format_return_type_annotation` (`->`),
+  with the lambda return-type call site (line 149) updated.
+- `compiler/src/emitter_sailfin.sfn:682,726` — field and parameter rendering.
+  Line 667 is a return type and stays as `->`.
 
-3. **`compiler/src/native_ir_utils_parse.sfn:761`** — IR parser only recognizes
-   `"->"`. Update to accept both, then prefer `":"`. These two changes (emitter +
-   parser) must land atomically.
+**Native IR emitter** (`.sfn-asm` text format):
+
+- `compiler/src/emit_native_format.sfn:279,318` — parameter and field
+  declarations in the IR. Line 253 is a return type and stays as `->`.
+- `compiler/src/emit_native.sfn:799` — parameter declaration in the alternate
+  IR emitter.
+- `compiler/src/llvm/rendering_helpers.sfn:265` — parameter rendering used
+  during LLVM lowering. Line 237 is a return type and stays as `->`.
+
+**Native IR parsers** (must accept the new `:` form, ideally tolerating `->`
+for any cached IR):
+
+- `compiler/src/native_ir_utils_parse.sfn:761` — main `.sfn-asm` parameter
+  parser.
+- `compiler/src/llvm/lowering/lowering_recovery.sfn:178,195,579` — recovery
+  parser used when the structured parser bails out. Method/parameter/field
+  arrow lookups must accept both separators.
+
+**Test fixtures and assertions** that currently embed the IR text format:
+
+- `compiler/tests/unit/data/stage2/metadata.sfn-asm` — golden IR fixture.
+- `compiler/tests/unit/emit_native_format_test.sfn:147,154` — hardcoded
+  `"x -> number"` and `"mut x -> number"` assertions.
+
+Self-hosting validation: emitter and parser changes must be in the same
+commit, validated by `make clean-build && make check`. Because the IR is
+regenerated from source on each build (not persisted across builds), the
+new emitter/parser pair only needs to be self-consistent — there is no
+on-disk legacy IR to migrate.
 
 ## Parser Finalization (Optional, Separate PR)
 
@@ -229,3 +260,56 @@ manually before running on the full codebase.
 | Emitter updates | 30 min |
 | Parser split (optional) | 1 hour |
 | **Total** | **4-6 hours** |
+
+## Lessons Learned (Phases 1–4)
+
+Captured during execution to inform the deferred follow-ups.
+
+### Capsule directory was missing from the original migration scope
+
+The proposal table listed `compiler/src`, `compiler/tests`, `examples`, and
+`runtime`, but omitted `capsules/` (18 files, 702 annotations). Always include
+`capsules/` in any tree-wide refactor; it is a first-class part of the code
+under self-hosting.
+
+### Same-named struct + capsule resolution = SIGSEGV
+
+Renamed `compiler/tests/unit/layers_test.sfn` →
+`compiler/tests/unit/nn_layers_test.sfn` to work around a compiler crash. The
+test file shares its base name with the capsule `sfn/layers`, and both define
+a `Linear` struct. Bisection findings:
+
+- All-colon test struct + all-colon capsule struct → SIGSEGV during
+  compilation of the test file (compiler dies, never reaches user-code
+  execution).
+- Reverting **any single field** in the test's struct from `:` to `->` makes
+  it pass.
+- Renaming the test file (identical content) makes it pass — even with both
+  files using all colons.
+- Issue does **not** reproduce in a minimal `/tmp/` test with the same struct
+  shape.
+
+The compiler appears to auto-resolve `compiler/tests/unit/<name>_test.sfn`
+against capsule `sfn/<name>` when the names align, and the resulting
+duplicate-symbol path crashes instead of producing a clean diagnostic. The
+crash predates this migration but was not exercised because pre-migration
+both definitions used arrows.
+
+### Capsule-flavored unit tests should move to their capsules
+
+`compiler/tests/unit/{layers,nn,tensor,losses}_test.sfn` and similar are
+exercising capsule functionality, not language features per se. The
+long-term home for these is alongside the capsule (`capsules/sfn/layers/tests/`,
+etc.), reached by per-capsule test infrastructure that does not yet exist.
+The rename above is a temporary workaround. Do not move these tests until
+the capsule-test infra exists, or coverage will silently drop. When moves
+happen, draft new compiler-focused regression tests that re-cover whichever
+language behavior the moved tests were incidentally validating (e.g., the
+duplicate-name segfault case above).
+
+### Migration script is one-way and was deleted
+
+`scripts/migrate_colon_annotations.py` was used once on each path and is not
+needed again. It was deleted in this PR. If a future tree-wide refactor
+needs a similar tool, write a fresh one — keeping single-use scripts in tree
+just creates rot.
