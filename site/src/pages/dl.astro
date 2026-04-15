@@ -58,8 +58,8 @@ const allAssets = [
       <p class="section-desc">Pre-built binaries for supported platforms. Download, extract, and add to your PATH.</p>
       <div class="featured-grid">
         {featured.map((d) => (
-          <a href={`${ghBase}/${d.file}`} class="featured-card" download>
-            <div class="featured-icon">{d.icon === "linux" ? "\u{1F427}" : d.icon === "apple" ? "\u{1F34E}" : "\u{1FA9F}"}</div>
+          <a href={`${ghBase}/${d.file}`} class="featured-card">
+            <div class="featured-icon" aria-hidden="true">{d.icon === "linux" ? "\u{1F427}" : d.icon === "apple" ? "\u{1F34E}" : "\u{1FA9F}"}</div>
             <div class="featured-info">
               <strong>{d.os}</strong>
               <span class="featured-arch">{d.arch}</span>
