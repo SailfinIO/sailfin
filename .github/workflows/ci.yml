@@ -12,6 +12,11 @@ permissions:
 
 on:
   pull_request:
+    paths-ignore:
+      - 'site/**'
+      - CHANGELOG.md
+      - 'docs/**'
+      - '*.md'
   workflow_dispatch:
     inputs: {}
 
