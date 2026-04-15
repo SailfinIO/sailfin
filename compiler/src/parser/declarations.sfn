@@ -652,11 +652,11 @@ fn parse_specifier_list(initial_parser -> Parser) -> SpecifierListParseResult {
             }
         }
 
-        spec_names = spec_names.concat([name]);
+        spec_names.push(name);
         if alias != null {
-            spec_aliases = spec_aliases.concat([alias]);
+            spec_aliases.push(alias);
         } else {
-            spec_aliases = spec_aliases.concat([""]);
+            spec_aliases.push("");
         }
         spec_count += 1;
 

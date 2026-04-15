@@ -19,24 +19,15 @@ import {
 // ── String array operations ──────────────────────────────────────────
 
 fn extend_string_lines(values -> string[], extras -> string[]) -> string[] {
-    let mut out -> string[] = [];
-    let mut safe_values = values;
-    if safe_values == null {
-        safe_values = [];
+    let mut out = values;
+    if out == null {
+        out = [];
     }
     let mut safe_extras = extras;
     if safe_extras == null {
         safe_extras = [];
     }
     let mut index -> number = 0;
-    loop {
-        if index >= safe_values.length {
-            break;
-        }
-        out.push(safe_values[index]);
-        index += 1;
-    }
-    index = 0;
     loop {
         if index >= safe_extras.length {
             break;

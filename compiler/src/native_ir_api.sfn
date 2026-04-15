@@ -285,7 +285,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
             let mut _ci -> number = 0;
             loop {
                 if _ci >= header_result.diagnostics.length { break; }
-                diagnostics = diagnostics.concat([header_result.diagnostics[_ci]]);
+                diagnostics.push(header_result.diagnostics[_ci]);
                 _ci += 1;
             }
 
@@ -336,12 +336,12 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                     let mut _ci -> number = 0;
                     loop {
                         if _ci >= field_result.diagnostics.length { break; }
-                        diagnostics = diagnostics.concat([field_result.diagnostics[_ci]]);
+                        diagnostics.push(field_result.diagnostics[_ci]);
                         _ci += 1;
                     }
 
                     if field_result.success {
-                        fields = fields.concat([field_result.field]);
+                        fields.push(field_result.field);
                     }
                     index += 1;
                 }
@@ -357,7 +357,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         fields: fields,
                     },
                 };
-                structs = structs.concat([struct_def]);
+                structs.push(struct_def);
             }
             continue;
         }
@@ -369,7 +369,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
             let mut _ci -> number = 0;
             loop {
                 if _ci >= header_result.diagnostics.length { break; }
-                diagnostics = diagnostics.concat([header_result.diagnostics[_ci]]);
+                diagnostics.push(header_result.diagnostics[_ci]);
                 _ci += 1;
             }
 
@@ -404,12 +404,12 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         let mut _ci -> number = 0;
                         loop {
                             if _ci >= variant_result.diagnostics.length { break; }
-                            diagnostics = diagnostics.concat([variant_result.diagnostics[_ci]]);
+                            diagnostics.push(variant_result.diagnostics[_ci]);
                             _ci += 1;
                         }
 
                         if variant_result.success {
-                            variants = variants.concat([variant_result.variant]);
+                            variants.push(variant_result.variant);
                         }
                     } else if starts_with(variant_line, ".layout payload ") {
                         let body = strip_prefix(variant_line, ".layout ");
@@ -418,7 +418,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         let mut _ci -> number = 0;
                         loop {
                             if _ci >= payload_result.diagnostics.length { break; }
-                            diagnostics = diagnostics.concat([payload_result.diagnostics[_ci]]);
+                            diagnostics.push(payload_result.diagnostics[_ci]);
                             _ci += 1;
                         }
 
@@ -427,7 +427,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                                 let last_index = variants.length - 1;
                                 let last_variant = variants[last_index];
                                 let mut updated_fields -> NativeStructLayoutField[] = last_variant.fields;
-                                updated_fields = updated_fields.concat([payload_result.field]);
+                                updated_fields.push(payload_result.field);
                                 variants[last_index] = NativeEnumVariantLayout {
                                     name: last_variant.name,
                                     tag: last_variant.tag,
@@ -454,7 +454,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         variants: variants,
                     },
                 };
-                enums = enums.concat([enum_def]);
+                enums.push(enum_def);
             } else {
                 index += 1;
             }

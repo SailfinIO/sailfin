@@ -37,7 +37,7 @@ fn check_struct_implements_interfaces(statement -> Statement, interfaces -> Stat
     let mut _mi -> number = 0;
     loop {
         if _mi >= statement.methods.length { break; }
-        method_names = method_names.concat([statement.methods[_mi].signature.name]);
+        method_names.push(statement.methods[_mi].signature.name);
         _mi += 1;
     }
 
@@ -57,7 +57,7 @@ fn check_struct_implements_interfaces(statement -> Statement, interfaces -> Stat
             if _ci >= _via_diags.length {
                 break;
             }
-            diagnostics = diagnostics.concat([_via_diags[_ci]]);
+            diagnostics.push(_via_diags[_ci]);
             _ci += 1;
         }
         let mut _mbi -> number = 0;
@@ -65,7 +65,7 @@ fn check_struct_implements_interfaces(statement -> Statement, interfaces -> Stat
             if _mbi >= interface_definition.members.length { break; }
             let member = interface_definition.members[_mbi];
             if !contains_string(method_names, member.name) {
-                diagnostics = diagnostics.concat([make_missing_interface_member_diagnostic(statement.name, interface_name, member.name)]);
+                diagnostics.push(make_missing_interface_member_diagnostic(statement.name, interface_name, member.name));
             }
             _mbi += 1;
         }
@@ -104,9 +104,9 @@ fn check_struct_fields(fields -> FieldDeclaration[]) -> Diagnostic[] {
         let field = fields[_fi];
         let name = field.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span))]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
         _fi += 1;
     }
@@ -158,7 +158,7 @@ fn format_interface_signature(interface_definition -> Statement) -> string {
     let mut _pi -> number = 0;
     loop {
         if _pi >= interface_definition.type_parameters.length { break; }
-        names = names.concat([interface_definition.type_parameters[_pi].name]);
+        names.push(interface_definition.type_parameters[_pi].name);
         _pi += 1;
     }
     if names.length == 0 {
@@ -335,14 +335,14 @@ fn check_struct_methods(methods -> MethodDeclaration[]) -> Diagnostic[] {
             if _ci >= _sig_diags.length {
                 break;
             }
-            diagnostics = diagnostics.concat([_sig_diags[_ci]]);
+            diagnostics.push(_sig_diags[_ci]);
             _ci += 1;
         }
         let name = method.signature.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "method", token_from_name(name, method.signature.name_span))]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "method", token_from_name(name, method.signature.name_span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
         _mi += 1;
     }
@@ -360,9 +360,9 @@ fn check_enum_variants(variants -> EnumVariant[]) -> Diagnostic[] {
         let variant = variants[_vi];
         let name = variant.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "enum variant", token_from_name(name, variant.name_span))]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "enum variant", token_from_name(name, variant.name_span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
         _vi += 1;
     }
@@ -384,14 +384,14 @@ fn check_interface_members(members -> FunctionSignature[]) -> Diagnostic[] {
             if _ci >= _sig_diags.length {
                 break;
             }
-            diagnostics = diagnostics.concat([_sig_diags[_ci]]);
+            diagnostics.push(_sig_diags[_ci]);
             _ci += 1;
         }
         let name = member.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "interface member", token_from_name(name, member.name_span))]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "interface member", token_from_name(name, member.name_span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
         _mbi += 1;
     }
@@ -409,9 +409,9 @@ fn check_model_properties(properties -> ModelProperty[]) -> Diagnostic[] {
         let property = properties[_pi];
         let name = property.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "model property", token_from_name(name, property.span))]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "model property", token_from_name(name, property.span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
         _pi += 1;
     }
@@ -433,9 +433,9 @@ fn check_type_parameters(type_parameters -> TypeParameter[]) -> Diagnostic[] {
         let type_parameter = type_parameters[_tpi];
         let name = type_parameter.name;
         if contains_string(seen, name) {
-            diagnostics = diagnostics.concat([make_duplicate_symbol_diagnostic(name, "type parameter", token_from_name(name, type_parameter.span))]);
+            diagnostics.push(make_duplicate_symbol_diagnostic(name, "type parameter", token_from_name(name, type_parameter.span)));
         } else {
-            seen = seen.concat([name]);
+            seen.push(name);
         }
         _tpi += 1;
     }
@@ -486,7 +486,7 @@ fn register_symbol(name -> string, kind -> string, span -> SourceSpan?, existing
 
 fn append_symbol(symbols -> SymbolEntry[], name -> string, kind -> string, span -> SourceSpan?) -> SymbolEntry[] {
     let mut updated -> SymbolEntry[] = clone_bindings(symbols);
-    updated = updated.concat([SymbolEntry { name: name, kind: kind, span: span }]);
+    updated.push(SymbolEntry { name: name, kind: kind, span: span });
     return updated;
 }
 
@@ -495,7 +495,7 @@ fn clone_bindings(source -> SymbolEntry[]) -> SymbolEntry[] {
     let mut _ci -> number = 0;
     loop {
         if _ci >= source.length { break; }
-        copy = copy.concat([source[_ci]]);
+        copy.push(source[_ci]);
         _ci += 1;
     }
     return copy;
