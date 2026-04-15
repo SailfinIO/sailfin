@@ -56,7 +56,7 @@ Example output:
 
 ```
 Detected: linux/x86_64
-Downloading sailfin v0.1.1-alpha.135...
+Downloading sfn 0.5.1...
 Installed sailfin -> /home/you/.local/bin/sailfin
 Installed sfn    -> /home/you/.local/bin/sfn
 Done. Run 'sfn --version' to verify.
@@ -78,7 +78,7 @@ Example output:
 
 ```
 Detected: windows/x86_64
-Downloading sailfin v0.1.1-alpha.135...
+Downloading sfn 0.5.1...
 Installed sailfin.exe -> C:\Users\you\AppData\Local\sailfin\bin\sailfin.exe
 Installed sfn.exe     -> C:\Users\you\AppData\Local\sailfin\bin\sfn.exe
 Added C:\Users\you\AppData\Local\sailfin\bin to user PATH.
@@ -101,7 +101,7 @@ sfn --version
 Expected output:
 
 ```
-sailfin v0.1.1-alpha.135
+sfn 0.5.1
 ```
 
 If the command is not found, see [Troubleshooting](#troubleshooting) below.
@@ -110,14 +110,14 @@ If the command is not found, see [Troubleshooting](#troubleshooting) below.
 
 ## Pinning a Version
 
-The pinned stable version for Sailfin development is **`v0.1.1-alpha.135`**.
+The pinned stable version for Sailfin development is **`v0.5.1`**.
 Releases past this point are pre-stabilization builds and may have known issues.
 Unless you have a specific reason to use a newer build, pin to the stable version.
 
 ### Linux and macOS
 
 ```bash
-VERSION=0.1.1-alpha.135 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
+VERSION=0.5.1 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
 Note the placement of `VERSION=...` before `curl`. This passes the variable into
@@ -126,7 +126,7 @@ the curl subprocess's environment, which the install script reads.
 ### Windows (PowerShell)
 
 ```powershell
-$env:VERSION = "0.1.1-alpha.135"
+$env:VERSION = "0.5.1"
 irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex
 ```
 
@@ -134,7 +134,7 @@ Set `$env:VERSION` before invoking `iex` so the script reads it.
 
 > **Why pin?** The Sailfin project is marching toward a 1.0 release. Intermediate
 > alpha builds may include regressions as large parts of the compiler are rewritten.
-> `v0.1.1-alpha.135` is the version CI uses as its seed compiler and is the most
+> `v0.5.1` is the version CI uses as its seed compiler and is the most
 > thoroughly validated build available.
 
 ---
@@ -170,7 +170,7 @@ which sfn
 # /home/you/.local/bin/sfn
 
 sfn --version
-# sailfin v0.1.1-alpha.135
+# sfn 0.5.1
 ```
 
 On Windows:
@@ -193,7 +193,7 @@ every platform binary with direct download links.
 
 Go to the [Downloads](/dl) page or directly to
 [github.com/SailfinIO/sailfin/releases](https://github.com/SailfinIO/sailfin/releases)
-and locate the release for `v0.1.1-alpha.135`. Release assets follow this naming
+and locate the release for `v0.5.1`. Release assets follow this naming
 convention:
 
 ```
@@ -204,20 +204,18 @@ Examples:
 
 | Asset name | Platform |
 |---|---|
-| `sailfin_0.1.1-alpha.135_linux_x86_64.tar.gz` | Linux x86_64 |
-| `sailfin_0.1.1-alpha.135_linux_arm64.tar.gz` | Linux arm64 |
-| `sailfin_0.1.1-alpha.135_darwin_x86_64.tar.gz` | macOS Intel |
-| `sailfin_0.1.1-alpha.135_darwin_arm64.tar.gz` | macOS Apple Silicon |
-| `sailfin_0.1.1-alpha.135_windows_x86_64.tar.gz` | Windows x86_64 |
+| `sailfin_0.5.1_linux_x86_64.tar.gz` | Linux x86_64 |
+| `sailfin_0.5.1_macos_arm64.tar.gz` | macOS Apple Silicon |
+| `sailfin_0.5.1_windows_x86_64.tar.gz` | Windows x86_64 |
 
 ### Step 2: Extract and place the binary
 
 ```bash
 # Download (replace the filename with the one that matches your platform)
-curl -LO https://github.com/SailfinIO/sailfin/releases/download/v0.1.1-alpha.135/sailfin_0.1.1-alpha.135_linux_x86_64.tar.gz
+curl -LO https://github.com/SailfinIO/sailfin/releases/download/v0.5.1/sailfin_0.5.1_linux_x86_64.tar.gz
 
 # Extract
-tar -xzf sailfin_0.1.1-alpha.135_linux_x86_64.tar.gz
+tar -xzf sailfin_0.5.1_linux_x86_64.tar.gz
 
 # The archive contains bin/sailfin and bin/sfn
 # Move them to a directory on your PATH
@@ -231,7 +229,7 @@ chmod +x ~/.local/bin/sailfin ~/.local/bin/sfn
 
 ```bash
 sfn --version
-# sailfin v0.1.1-alpha.135
+# sfn 0.5.1
 ```
 
 ---
@@ -292,7 +290,7 @@ existing binaries in-place:
 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 
 # Linux / macOS: update to a specific version
-VERSION=0.1.1-alpha.135 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
+VERSION=0.5.1 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
 ```powershell
@@ -394,7 +392,7 @@ you hit rate limits (common in CI environments), set a GitHub token:
 GITHUB_TOKEN=ghp_your_token_here curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
 ```
 
-Alternatively, pin the version explicitly with `VERSION=0.1.1-alpha.135` — this
+Alternatively, pin the version explicitly with `VERSION=0.5.1` — this
 skips the API call and downloads the asset directly.
 
 ### Windows: script execution policy
