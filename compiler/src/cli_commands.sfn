@@ -294,9 +294,15 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
         if !is_prebuilt {
             if !_string_list_contains_cmd(next_visited, dep_path) {
                 if !fs.exists(dep_path) {
-                    print("test import inlining: missing dependency: " + dep_path);
-                    index += 1;
-                    continue;
+                    // Directory import fallback: ./dir -> dir/mod.sfn
+                    let mod_fallback = substring(dep_path, 0, dep_path.length - 4) + "/mod.sfn";
+                    if fs.exists(mod_fallback) {
+                        dep_path = mod_fallback;
+                    } else {
+                        print("test import inlining: missing dependency: " + dep_path);
+                        index += 1;
+                        continue;
+                    }
                 }
                 let dep_source = fs.readFile(dep_path);
                 next_visited.push(dep_path);
