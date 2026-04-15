@@ -71,8 +71,14 @@ feature availability.
 | `scope.with_timeout(...)` | **Not implemented** | |
 | `unsafe` / `extern` | Parsed only | Syntax accepted; enforcement not active |
 | Policy decorators (`@policy(...)`) | Parsed only | No compiler or runtime effect |
-| LSP / notebook support | Not started | Post-1.0 |
-| Package registry (`sfn add/publish`) | Not started | Post-1.0 |
+| `sfn fmt` (formatter) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn check` (fast analysis) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn doc` (doc generator) | Planned | 1.0; see `docs/proposals/tooling.md` |
+| `sfn fix` (auto-rewriter) | Planned | 1.0; see `docs/proposals/tooling.md` |
+| Notebook support | Not started | Post-1.0 |
+| Package registry (`sfn init/add/publish`) | Shipped | CLI commands implemented; registry at `registry.sailfin.dev` |
 
 ## Print API (Current)
 

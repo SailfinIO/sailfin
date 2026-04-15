@@ -114,6 +114,20 @@ or C runtime**. All items below are hard requirements, not stretch goals.
    - [x] Remove Python runtime shims (`runtime/runtime_support.py`,
          `runtime/native_runner*.py`).
    - [ ] Remove Python-generated compiler artifacts from the 1.0 toolchain.
+   - [ ] Build tooling features on top of the richer diagnostics work tracked in
+         **2. Language feature completeness** (multi-span snippets, severity,
+         suggested fixes).
+   - [ ] Implement `sfn fmt` — canonical token-stream formatter, no configuration.
+         Format compiler source and add CI enforcement.
+   - [ ] Implement `sfn check` — fast typecheck + effect check without codegen.
+   - [ ] Implement `sfn vet` — static analyzer with initial rule set (unused
+         imports/vars, dead code, missing effects, redundant mut).
+   - [ ] Implement `sfn lsp` Phase 1 — diagnostics on save, go-to-definition,
+         hover types (replaces prototype TypeScript LSP).
+   - [ ] Implement `sfn doc` — documentation generator from `///` doc comments.
+   - [ ] Implement `sfn fix` — automated rewriter from diagnostic suggestions.
+
+   See `docs/proposals/tooling.md` for the full design and rationale.
 
 5. **Release pipeline and distribution hardening**
    - [ ] Publish signed checksums and provenance metadata alongside release artifacts.
@@ -222,13 +236,18 @@ The AI-native features are central to Sailfin's long-term vision but ship after
       and the `gpu` effect runtime.
 - [ ] **`|>` pipeline operator** — implement parsing and lowering of the pipe
       operator; enable async/lazy pipelines with backpressure.
+- [ ] **`sfn lsp` Phase 2** — completions, cross-file navigation, workspace-wide
+      rename, quick fixes, signature help. Extract compiler front-end into
+      `sfn/compiler` library capsule for standalone LSP binary.
+- [ ] **`sfn bench` framework** — first-class benchmarking with `bench` blocks,
+      statistical analysis, and regression tracking.
 
 ## Exploration Backlog (Research / Design)
 
 - [ ] WebAssembly emission once LLVM backend coverage is complete.
 - [ ] `unsafe` capability enforcement for explicit FFI boundaries.
 - [ ] Currency literals (`$0.05`) and time literals (`1s`, `150ms`).
-- [ ] Notebook, LSP, and interactive tooling with live cost/latency overlays.
+- [ ] Notebook and interactive tooling with live cost/latency overlays.
 - [ ] Training workflow (see `docs/proposals/model-engines-and-training.md`).
 
 ## Design Principles (Pre-1.0 Decision Framework)
