@@ -18,7 +18,7 @@ or C runtime**. All items below are hard requirements, not stretch goals.
    a public API. They are cheaper to make now with zero external users than after
    launch. Each item is independent and can be shipped incrementally.
 
-   - [ ] **Colon type annotations** — replace `->` in parameter and variable
+   - [x] **Colon type annotations** — replace `->` in parameter and variable
          type positions with `:`. Function return types keep `->`.
          Before: `fn add(x -> number, y -> number) -> number`
          After:  `fn add(x: number, y: number) -> number`
@@ -26,6 +26,10 @@ or C runtime**. All items below are hard requirements, not stretch goals.
          "returns/maps-to." Every mainstream typed language (TypeScript, Rust,
          Python, Kotlin, Swift, Zig) uses `:` for annotations. The current
          syntax is the single most likely reason a new user bounces.
+         Source migration complete (compiler, runtime, capsules, tests,
+         examples, docs). Emitter update (Phase 5) and parser split
+         (Phase 6) are tracked separately; see
+         `docs/proposals/colon-type-annotations.md`.
    - [ ] **String interpolation delimiters** — replace `{{ expr }}` with
          `${ expr }`.
          Before: `"Hello, {{ name }}!"`

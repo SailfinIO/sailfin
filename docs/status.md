@@ -146,27 +146,24 @@ be resolved before 1.0 to avoid breaking a public API. Each is tracked in
 `docs/roadmap.md` §0 (Syntax Reform). This section records the *problem*; the
 roadmap records the *plan*.
 
-### Type annotation syntax (`->` vs `:`)
+### Type annotation syntax (`->` vs `:`) — **migrated**
 
-**Problem**: `->` is used for both "has type" (parameters, variables) and
-"returns" (function return type). This conflicts with the universal meaning of
-`->` as "maps to / returns" in every typed language (Rust, TypeScript, Haskell,
-Kotlin, Swift, Python).
+**Resolution**: The compiler source, runtime, capsules, tests, and examples
+all use `:` for parameter, variable, and field type annotations. Function
+return types continue to use `->`.
 
 ```sfn
-// Current — three arrows, two meanings
-fn add(x -> number, y -> number) -> number { ... }
-// Target
 fn add(x: number, y: number) -> number { ... }
+let name: string = "Sailfin";
+struct User { id: number; name: string; }
 ```
 
-**Impact**: High. This is the first syntax new users see. It will cause
-immediate confusion and is the most likely reason someone trying the language
-will stop.
-
-**Status**: Parser already accepts `:` as `TypeSep` alongside `->` (see EBNF
-`TypeSep = "->" | ":"`). Migration: deprecate `->` in type positions, then
-remove.
+**Remaining work**:
+- Emitters still output `->` in annotation positions (tracked under roadmap §0
+  Phase 5); will be updated to `:` so generated/printed code matches source.
+- Parser still accepts both `->` and `:` via the shared `TypeSep` rule;
+  splitting into `AnnotationSep = ":"` and `ReturnSep = "->"` is tracked as
+  Phase 6 of the same epic.
 
 ### String interpolation (`{{ }}` vs `${ }`)
 

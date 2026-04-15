@@ -76,9 +76,9 @@ FunctionModifier    = "async" | "unsafe" | "extern" ;
 // of a block body.
 //
 // Examples:
-//   unsafe extern fn malloc(size -> usize) -> *u8;
-//   unsafe extern fn free(ptr -> *u8) -> void;
-//   unsafe extern fn strlen(s -> *u8) -> usize;
+//   unsafe extern fn malloc(size: usize) -> *u8;
+//   unsafe extern fn free(ptr: *u8) -> void;
+//   unsafe extern fn strlen(s: *u8) -> usize;
 
 PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
                       [ TypeSep Type ] [ EffectList ] Block ;
