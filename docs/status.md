@@ -8,7 +8,14 @@ feature availability.
 
 ## Build Pipeline (Current)
 
-- `scripts/build.sh` is the sole build driver — pure shell, no fixups.
+- `scripts/build.sh` is the sole build driver for the compiler's self-build —
+  pure shell, no fixups. It stages in-tree capsule sources
+  (`capsules/<scope>/<name>/src/`) as import-context artifacts so the seed can
+  resolve imports like `from "sfn/cli"` during the bootstrap.
+- End-user builds (`sfn build`, `sfn run`) resolve capsule deps via
+  `compiler/src/capsule_resolver.sfn` — real separate-compilation of capsule
+  modules through the same `build/native/import-context/<slug>.*` path the
+  compiler uses on itself. No text-level inlining for declared capsule deps.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - The legacy Python fixup script (`selfhost_native.py`) was removed after the
