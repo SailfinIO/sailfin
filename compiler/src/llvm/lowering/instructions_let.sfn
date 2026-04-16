@@ -25,6 +25,7 @@ import {
 
 import {
     empty_string_constant_set,
+    merge_string_constants,
 } from "../strings";
 
 import {
@@ -240,11 +241,13 @@ fn lower_let_instruction(
         if fs.exists("build/sailfin/.trace_lowering") {
             print.err("let-lowering: got operand, accessing string_constants");
         }
-        // Scan only the NEW lines (appended by this let's lower_expression)
-        // for @.runtime.field.X references.  Under the seedcheck the
-        // ExpressionResult struct return is ABI-corrupted so
-        // .string_constants is garbage; scanning the lines is reliable.
-        string_constants = _infer_field_constants_from_lines(current_lines, _pre_expr_line_count);
+        // Use lowered.string_constants directly (covers enum variant
+        // globals and any other constants the expression produced).
+        // Also merge line-scanned @.runtime.field.* constants as a
+        // safety net in case the struct return is incomplete.
+        string_constants = lowered.string_constants;
+        let inferred = _infer_field_constants_from_lines(current_lines, _pre_expr_line_count);
+        string_constants = merge_string_constants(string_constants, inferred);
     }
 
     if fs.exists("build/sailfin/.trace_lowering") {
