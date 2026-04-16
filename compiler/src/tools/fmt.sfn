@@ -6,7 +6,7 @@
 import { Token } from "../token";
 import { lex } from "../lexer";
 import { char_at, substring, strings_equal } from "../string_utils";
-import { wraps_at_threshold } from "./fmt_rules";
+import { wraps_at_threshold, import_group } from "./fmt_rules";
 
 // ═══════════════════════════════════════════════════════════════════
 // Enriched token for formatting
@@ -123,6 +123,22 @@ fn _is_assign_op(lexeme: string) -> boolean {
     if strings_equal(lexeme, "-=") { return true; }
     if strings_equal(lexeme, "*=") { return true; }
     if strings_equal(lexeme, "/=") { return true; }
+    return false;
+}
+
+fn _is_top_level_decl(lexeme: string) -> boolean {
+    if strings_equal(lexeme, "fn") { return true; }
+    if strings_equal(lexeme, "struct") { return true; }
+    if strings_equal(lexeme, "enum") { return true; }
+    if strings_equal(lexeme, "interface") { return true; }
+    if strings_equal(lexeme, "test") { return true; }
+    if strings_equal(lexeme, "const") { return true; }
+    if strings_equal(lexeme, "type") { return true; }
+    if strings_equal(lexeme, "impl") { return true; }
+    if strings_equal(lexeme, "model") { return true; }
+    if strings_equal(lexeme, "pipeline") { return true; }
+    if strings_equal(lexeme, "export") { return true; }
+    if strings_equal(lexeme, "extern") { return true; }
     return false;
 }
 
@@ -488,14 +504,69 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         }
 
         // ── Emit blank line ──
-        if ft.blank_lines_before > 0 {
-            if i > 0 {
-                if !in_inline {
-                    if !at_line_start {
+        if i > 0 {
+            if !in_inline {
+                // Suppress blank lines at block start (after {)
+                let suppress_blank = false;
+                if strings_equal(prev_role, "block_open") {
+                    suppress_blank = true;
+                }
+                // Suppress blank lines at block end (before })
+                if strings_equal(role, "block_close") {
+                    suppress_blank = true;
+                }
+
+                if ft.blank_lines_before > 0 {
+                    if !suppress_blank {
+                        if !at_line_start {
+                            out = out + "\n";
+                        }
                         out = out + "\n";
+                        at_line_start = true;
                     }
-                    out = out + "\n";
-                    at_line_start = true;
+                } else {
+                    // Inject blank line between top-level declarations at indent 0
+                    if indent == 0 {
+                        if _is_top_level_decl(lexeme) {
+                            // Only if previous wasn't also at top level start or file start
+                            if !strings_equal(prev_role, "") {
+                                // Check if this is the first decl after imports
+                                let need_blank = false;
+                                if strings_equal(prev_role, "semicolon") {
+                                    need_blank = true;
+                                }
+                                if strings_equal(prev_role, "block_close") {
+                                    need_blank = true;
+                                }
+                                if need_blank {
+                                    if !at_line_start {
+                                        out = out + "\n";
+                                    }
+                                    out = out + "\n";
+                                    at_line_start = true;
+                                }
+                            }
+                        }
+                        // Also inject blank line before top-level decorators
+                        if strings_equal(role, "decorator") {
+                            if !strings_equal(prev_role, "") {
+                                if strings_equal(prev_role, "semicolon") {
+                                    if !at_line_start {
+                                        out = out + "\n";
+                                    }
+                                    out = out + "\n";
+                                    at_line_start = true;
+                                }
+                                if strings_equal(prev_role, "block_close") {
+                                    if !at_line_start {
+                                        out = out + "\n";
+                                    }
+                                    out = out + "\n";
+                                    at_line_start = true;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -594,7 +665,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         out = out + lexeme;
 
         // ── Adjust indent after opening tokens (skip in inline mode) ──
-        if !in_inline || inline_block_depth == 0 {
+        if inline_block_depth == 0 {
             if strings_equal(role, "block_open") {
                 indent += 1;
             }
@@ -654,6 +725,299 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Import sorting
+// ═══════════════════════════════════════════════════════════════════
+
+// An import statement is a contiguous range of FmtTokens from
+// "import" to ";".  We collect these, extract the path, sort, and
+// rebuild the token list.
+
+struct ImportSpan {
+    start: number;
+    end: number;
+    path: string;
+    group: number;
+}
+
+fn _extract_import_path(fmt_tokens: FmtToken[], start: number, end: number) -> string {
+    // Find the "from" keyword, then the next token is the path string
+    let mut j = start;
+    loop {
+        if j > end { break; }
+        if strings_equal(fmt_tokens[j].token.lexeme, "from") {
+            if j + 1 <= end {
+                return fmt_tokens[j + 1].token.lexeme;
+            }
+        }
+        j += 1;
+    }
+    return "";
+}
+
+fn _find_import_spans(fmt_tokens: FmtToken[]) -> ImportSpan[] {
+    let mut spans: ImportSpan[] = [];
+    let mut i = 0;
+    loop {
+        if i >= fmt_tokens.length { break; }
+        if strings_equal(fmt_tokens[i].token.lexeme, "import") {
+            let start = i;
+            // Scan to the semicolon
+            let mut j = i;
+            loop {
+                if j >= fmt_tokens.length { break; }
+                if strings_equal(fmt_tokens[j].role, "semicolon") {
+                    let path = _extract_import_path(fmt_tokens, start, j);
+                    let grp = import_group(path);
+                    spans.push(ImportSpan { start: start, end: j, path: path, group: grp });
+                    i = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if j >= fmt_tokens.length { break; }
+            continue;
+        }
+        i += 1;
+    }
+    return spans;
+}
+
+fn _are_consecutive_imports(fmt_tokens: FmtToken[], spans: ImportSpan[]) -> boolean {
+    if spans.length <= 1 { return true; }
+    let mut k = 0;
+    loop {
+        if k >= spans.length - 1 { break; }
+        let cur_end = spans[k].end;
+        let next_start = spans[k + 1].start;
+        // Between end of one import (;) and start of next (import keyword),
+        // there should be nothing except blank lines and comments
+        let mut j = cur_end + 1;
+        loop {
+            if j >= next_start { break; }
+            let ft = fmt_tokens[j];
+            // If we hit a non-import structural token, imports are not consecutive
+            if !strings_equal(ft.role, "comment") {
+                return false;
+            }
+            j += 1;
+        }
+        k += 1;
+    }
+    return true;
+}
+
+// Simple insertion sort on import spans by (group, path)
+fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
+    let mut sorted: ImportSpan[] = [];
+    let mut si = 0;
+    loop {
+        if si >= spans.length { break; }
+        sorted.push(spans[si]);
+        si += 1;
+    }
+    let mut i = 1;
+    loop {
+        if i >= sorted.length { break; }
+        let key = sorted[i];
+        let mut j = i;
+        loop {
+            if j <= 0 { break; }
+            let prev = sorted[j - 1];
+            let mut should_swap = false;
+            if prev.group > key.group {
+                should_swap = true;
+            } else if prev.group == key.group {
+                // Compare paths lexicographically
+                let mut ci = 0;
+                let a = prev.path;
+                let b = key.path;
+                let min_len = a.length;
+                if b.length < min_len { min_len = b.length; }
+                let mut cmp = 0;
+                loop {
+                    if ci >= min_len { break; }
+                    let ca = char_at(a, ci);
+                    let cb = char_at(b, ci);
+                    if ca < cb { cmp = -1; break; }
+                    if ca > cb { cmp = 1; break; }
+                    ci += 1;
+                }
+                if cmp == 0 {
+                    if a.length > b.length { cmp = 1; }
+                    if a.length < b.length { cmp = -1; }
+                }
+                if cmp > 0 { should_swap = true; }
+            }
+            if !should_swap { break; }
+            sorted[j] = sorted[j - 1];
+            sorted[j - 1] = key;
+            j -= 1;
+        }
+        i += 1;
+    }
+    return sorted;
+}
+
+// Sort the specifiers inside a single import { A, C, B } alphabetically
+fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: number, end: number) -> FmtToken[] {
+    // Find the { and } within this import span
+    let mut brace_open = -1;
+    let mut brace_close = -1;
+    let mut j = start;
+    loop {
+        if j > end { break; }
+        if strings_equal(fmt_tokens[j].role, "block_open") {
+            brace_open = j;
+        }
+        if strings_equal(fmt_tokens[j].role, "block_close") {
+            brace_close = j;
+            break;
+        }
+        j += 1;
+    }
+    if brace_open < 0 { return []; }
+    if brace_close < 0 { return []; }
+
+    // Collect specifier names between { and }
+    let mut names: string[] = [];
+    let mut k = brace_open + 1;
+    loop {
+        if k >= brace_close { break; }
+        let ft = fmt_tokens[k];
+        if strings_equal(ft.role, "value") {
+            names.push(ft.token.lexeme);
+        }
+        k += 1;
+    }
+
+    // Sort names with insertion sort
+    let mut ni = 1;
+    loop {
+        if ni >= names.length { break; }
+        let key_name = names[ni];
+        let mut nj = ni;
+        loop {
+            if nj <= 0 { break; }
+            let prev_name = names[nj - 1];
+            // Compare lexicographically
+            let mut ci = 0;
+            let min_len = prev_name.length;
+            if key_name.length < min_len { min_len = key_name.length; }
+            let mut cmp = 0;
+            loop {
+                if ci >= min_len { break; }
+                let ca = char_at(prev_name, ci);
+                let cb = char_at(key_name, ci);
+                if ca < cb { cmp = -1; break; }
+                if ca > cb { cmp = 1; break; }
+                ci += 1;
+            }
+            if cmp == 0 {
+                if prev_name.length > key_name.length { cmp = 1; }
+                if prev_name.length < key_name.length { cmp = -1; }
+            }
+            if cmp <= 0 { break; }
+            names[nj] = names[nj - 1];
+            names[nj - 1] = key_name;
+            nj -= 1;
+        }
+        ni += 1;
+    }
+
+    return names;
+}
+
+fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
+    let spans = _find_import_spans(fmt_tokens);
+    if spans.length <= 1 { return fmt_tokens; }
+
+    // Check that all imports are in a consecutive block at the top
+    if !_are_consecutive_imports(fmt_tokens, spans) { return fmt_tokens; }
+
+    let sorted_spans = _sort_import_spans(spans);
+
+    // Rebuild the token array: tokens before imports, sorted imports, tokens after
+    let first_start = spans[0].start;
+    let last_end = spans[spans.length - 1].end;
+
+    let mut result: FmtToken[] = [];
+
+    // Copy tokens before the import block
+    let mut i = 0;
+    loop {
+        if i >= first_start { break; }
+        result.push(fmt_tokens[i]);
+        i += 1;
+    }
+
+    // Emit sorted imports
+    let mut prev_group = -1;
+    let mut si = 0;
+    loop {
+        if si >= sorted_spans.length { break; }
+        let span = sorted_spans[si];
+
+        // Insert blank line between import groups
+        if prev_group >= 0 {
+            if span.group != prev_group {
+                // Add blank_lines_before to the first token of this import
+                let first_ft = fmt_tokens[span.start];
+                result.push(FmtToken {
+                        token: first_ft.token,
+                        leading_comments: first_ft.leading_comments,
+                        trailing_comment: first_ft.trailing_comment,
+                        blank_lines_before: 1,
+                        role: first_ft.role,
+                });
+                let mut j = span.start + 1;
+                loop {
+                    if j > span.end { break; }
+                    result.push(fmt_tokens[j]);
+                    j += 1;
+                }
+            } else {
+                // Same group: clear any blank lines between
+                let first_ft = fmt_tokens[span.start];
+                result.push(FmtToken {
+                        token: first_ft.token,
+                        leading_comments: first_ft.leading_comments,
+                        trailing_comment: first_ft.trailing_comment,
+                        blank_lines_before: 0,
+                        role: first_ft.role,
+                });
+                let mut j = span.start + 1;
+                loop {
+                    if j > span.end { break; }
+                    result.push(fmt_tokens[j]);
+                    j += 1;
+                }
+            }
+        } else {
+            // First import: preserve any existing blank_lines_before
+            let mut j = span.start;
+            loop {
+                if j > span.end { break; }
+                result.push(fmt_tokens[j]);
+                j += 1;
+            }
+        }
+
+        prev_group = span.group;
+        si += 1;
+    }
+
+    // Copy tokens after the import block
+    let mut k = last_end + 1;
+    loop {
+        if k >= fmt_tokens.length { break; }
+        result.push(fmt_tokens[k]);
+        k += 1;
+    }
+
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Public entry point
 // ═══════════════════════════════════════════════════════════════════
 
@@ -677,7 +1041,8 @@ fn format_source(source: string) -> string {
         }
         return out;
     }
-    return emit_formatted(fmt_tokens);
+    let sorted = sort_imports(fmt_tokens);
+    return emit_formatted(sorted);
 }
 
 export { format_source };

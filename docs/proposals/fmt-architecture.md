@@ -524,6 +524,15 @@ imports → sorted and grouped.
 
 **Deliverable:** Production-ready formatter for standard Sailfin code.
 
+**Status:** Complete. Import sorting implemented with `_find_import_spans`,
+`_sort_import_spans` (insertion sort by group then path), and
+`_sort_import_specifiers` (alphabetical within a single import). Stdlib
+imports (`sfn/...`) sort before relative imports, with a blank line between
+groups. Blank line normalization: suppress blank lines at block start/end,
+enforce exactly 1 between top-level declarations and before decorators at
+indent 0. Fixed inline block indent tracking (opening `{` no longer
+increments indent when inlined).
+
 ### Step 5: Edge Cases, Self-Hosting Validation & CI
 
 **Goal:** Handle all edge cases in the compiler source and wire into CI.
