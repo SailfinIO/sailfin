@@ -104,7 +104,7 @@ rand, clock]`), ownership types, and AI-native constructs.
 You MUST always call at least one safe output tool. If you cannot generate release notes (e.g., no previous tag found, no commits between tags), call the `noop` tool:
 `{"noop": {"message": "No action needed: [brief explanation]"}}`
 
-Do NOT finish without calling a safe output tool — the workflow will fail silently.
+Do NOT finish without calling a safe output tool — the workflow will fail with a `No Safe Outputs Generated` error.
 
 ## Guidelines
 
