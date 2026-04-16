@@ -1,0 +1,225 @@
+// Regression tests for capsule lockfile parsing, lookup, and generation.
+
+import {
+    lock_get_versions,
+    lock_get_version,
+    lock_get_hash,
+    lock_add_entry,
+} from "../../src/lock";
+
+// -- Local helpers for string assertions --
+
+fn _str_eq(a: string, b: string) -> boolean {
+    return strings_equal(a, b);
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Duplicated dep lookup for testing the lock_get_versions format contract.
+fn _test_lookup_dep(deps: string, name: string) -> string {
+    if deps.length == 0 { return ""; }
+    let mut start: number = 0;
+    let len = deps.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if deps[end] == "\n" { break; }
+            end += 1;
+        }
+        let mut eq_pos: number = -1;
+        let mut ei: number = start;
+        loop {
+            if ei >= end { break; }
+            if deps[ei] == "=" {
+                eq_pos = ei;
+                break;
+            }
+            ei += 1;
+        }
+        if eq_pos > start {
+            let dep_name = substring(deps, start, eq_pos);
+            if strings_equal(dep_name, name) {
+                return substring(deps, eq_pos + 1, end);
+            }
+        }
+        start = end + 1;
+    }
+    return "";
+}
+
+// -- Sample lockfiles --
+
+fn _empty_lock() -> string {
+    return "# capsule.lock\n\n[packages]\n";
+}
+
+fn _single_lock() -> string {
+    return "# capsule.lock\n\n[packages]\n\"http\" = \"0.1.0 sha256:abc123\"\n";
+}
+
+fn _multi_lock() -> string {
+    return "# capsule.lock\n\n[packages]\n\"http\" = \"0.1.0 sha256:abc123\"\n\"acme/router\" = \"2.0.0 sha256:def456\"\n\"cli\" = \"0.3.1 sha256:ghi789\"\n";
+}
+
+// -- Tests: lock_get_versions --
+
+test "lock_get_versions: empty lockfile returns empty string" {
+    let versions = lock_get_versions(_empty_lock());
+    assert _str_eq(versions, "");
+}
+
+test "lock_get_versions: single entry" {
+    let versions = lock_get_versions(_single_lock());
+    assert _str_eq(versions, "http=0.1.0");
+}
+
+test "lock_get_versions: multiple entries" {
+    let versions = lock_get_versions(_multi_lock());
+    assert _contains(versions, "http=0.1.0");
+    assert _contains(versions, "acme/router=2.0.0");
+    assert _contains(versions, "cli=0.3.1");
+    assert _contains(versions, "\n");
+}
+
+test "lock_get_versions: round-trip lookup matches toml format" {
+    let versions = lock_get_versions(_multi_lock());
+    assert _str_eq(_test_lookup_dep(versions, "http"), "0.1.0");
+    assert _str_eq(_test_lookup_dep(versions, "acme/router"), "2.0.0");
+    assert _str_eq(_test_lookup_dep(versions, "cli"), "0.3.1");
+    assert _str_eq(_test_lookup_dep(versions, "nonexistent"), "");
+}
+
+// -- Tests: lock_get_version --
+
+test "lock_get_version: found" {
+    assert _str_eq(lock_get_version(_single_lock(), "http"), "0.1.0");
+}
+
+test "lock_get_version: not found" {
+    assert _str_eq(lock_get_version(_single_lock(), "missing"), "");
+}
+
+test "lock_get_version: multiple entries" {
+    let lock = _multi_lock();
+    assert _str_eq(lock_get_version(lock, "http"), "0.1.0");
+    assert _str_eq(lock_get_version(lock, "acme/router"), "2.0.0");
+    assert _str_eq(lock_get_version(lock, "cli"), "0.3.1");
+}
+
+test "lock_get_version: empty lockfile" {
+    assert _str_eq(lock_get_version("", "http"), "");
+}
+
+// -- Tests: lock_get_hash --
+
+test "lock_get_hash: found" {
+    assert _str_eq(lock_get_hash(_single_lock(), "http"), "sha256:abc123");
+}
+
+test "lock_get_hash: not found" {
+    assert _str_eq(lock_get_hash(_single_lock(), "missing"), "");
+}
+
+test "lock_get_hash: multiple entries" {
+    let lock = _multi_lock();
+    assert _str_eq(lock_get_hash(lock, "http"), "sha256:abc123");
+    assert _str_eq(lock_get_hash(lock, "acme/router"), "sha256:def456");
+    assert _str_eq(lock_get_hash(lock, "cli"), "sha256:ghi789");
+}
+
+test "lock_get_hash: empty lockfile" {
+    assert _str_eq(lock_get_hash("", "http"), "");
+}
+
+// -- Tests: lock_add_entry --
+
+test "lock_add_entry: add to empty lockfile" {
+    let result = lock_add_entry("", "http", "0.1.0", "sha256:abc123");
+    assert _contains(result, "[packages]");
+    assert _contains(result, "\"http\" = \"0.1.0 sha256:abc123\"");
+}
+
+test "lock_add_entry: add new entry to existing lockfile" {
+    let result = lock_add_entry(_single_lock(), "cli", "0.3.0", "sha256:newone");
+    assert _contains(result, "\"http\" = \"0.1.0 sha256:abc123\"");
+    assert _contains(result, "\"cli\" = \"0.3.0 sha256:newone\"");
+}
+
+test "lock_add_entry: update existing entry" {
+    let result = lock_add_entry(_single_lock(), "http", "0.2.0", "sha256:updated");
+    assert _contains(result, "\"http\" = \"0.2.0 sha256:updated\"");
+    // Old version should not be present
+    let old_present = _contains(result, "sha256:abc123");
+    assert old_present == false;
+}
+
+test "lock_add_entry: update preserves other entries" {
+    let result = lock_add_entry(_multi_lock(), "http", "0.2.0", "sha256:updated");
+    assert _contains(result, "\"http\" = \"0.2.0 sha256:updated\"");
+    assert _contains(result, "\"acme/router\" = \"2.0.0 sha256:def456\"");
+    assert _contains(result, "\"cli\" = \"0.3.1 sha256:ghi789\"");
+}
+
+// -- Tests: lockfile format --
+
+test "lock format: header comment present" {
+    let result = lock_add_entry("", "http", "0.1.0", "sha256:abc");
+    assert _contains(result, "# capsule.lock");
+    assert _contains(result, "Do not edit manually");
+}
+
+test "lock format: update hint in header" {
+    let result = lock_add_entry("", "http", "0.1.0", "sha256:abc");
+    assert _contains(result, "sfn add --update");
+}
+
+test "lock format: packages section present" {
+    let result = lock_add_entry("", "http", "0.1.0", "sha256:abc");
+    assert _contains(result, "[packages]");
+}
+
+// -- Tests: parsing edge cases --
+
+test "lock parse: ignores comments" {
+    let lock = "# comment\n# another\n\n[packages]\n\"http\" = \"0.1.0 sha256:abc\"\n";
+    assert _str_eq(lock_get_version(lock, "http"), "0.1.0");
+}
+
+test "lock parse: ignores non-packages sections" {
+    let lock = "[metadata]\nfoo = \"bar\"\n\n[packages]\n\"http\" = \"0.1.0 sha256:abc\"\n";
+    assert _str_eq(lock_get_version(lock, "http"), "0.1.0");
+}
+
+test "lock parse: handles entry without hash" {
+    let lock = "[packages]\n\"http\" = \"0.1.0\"\n";
+    assert _str_eq(lock_get_version(lock, "http"), "0.1.0");
+    assert _str_eq(lock_get_hash(lock, "http"), "");
+}
+
+test "lock parse: handles empty string" {
+    assert _str_eq(lock_get_version("", "http"), "");
+    assert _str_eq(lock_get_hash("", "http"), "");
+    assert _str_eq(lock_get_versions(""), "");
+}

@@ -17,6 +17,11 @@ import {
     toml_add_dependency,
     toml_add_dev_dependency,
 } from "./toml_parser";
+import {
+    lock_get_versions,
+    lock_get_version,
+    lock_add_entry,
+} from "./lock";
 import { substring } from "./string_utils";
 
 import {
@@ -371,13 +376,21 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
     // Read project dependencies once for cached capsule resolution.
     // Try capsule.toml in base_dir first, then CWD as fallback, then
     // walk up from base_dir to find the nearest capsule.toml.
+    // When capsule.lock exists alongside capsule.toml, prefer locked versions.
     let mut project_deps: string = "";
     let mut toml_found: boolean = false;
+    let mut lock_deps: string = "";
+    let mut lock_found: boolean = false;
     if base_dir.length > 0 {
         let base_toml = _path_join_cmd(base_dir, "capsule.toml");
         if fs.exists(base_toml) {
             project_deps = toml_get_dependencies(fs.readFile(base_toml));
             toml_found = true;
+            let base_lock = _path_join_cmd(base_dir, "capsule.lock");
+            if fs.exists(base_lock) {
+                lock_deps = lock_get_versions(fs.readFile(base_lock));
+                lock_found = true;
+            }
         }
         if !toml_found {
             // Walk up parent directories from base_dir
@@ -390,6 +403,11 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
                 if fs.exists(parent_toml) {
                     project_deps = toml_get_dependencies(fs.readFile(parent_toml));
                     toml_found = true;
+                    let parent_lock = _path_join_cmd(search_dir, "capsule.lock");
+                    if fs.exists(parent_lock) {
+                        lock_deps = lock_get_versions(fs.readFile(parent_lock));
+                        lock_found = true;
+                    }
                     break;
                 }
                 let next_dir = _dirname_cmd(search_dir);
@@ -402,9 +420,13 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
     if !toml_found {
         if fs.exists("capsule.toml") {
             project_deps = toml_get_dependencies(fs.readFile("capsule.toml"));
+            toml_found = true;
+            if fs.exists("capsule.lock") {
+                lock_deps = lock_get_versions(fs.readFile("capsule.lock"));
+                lock_found = true;
+            }
         }
     }
-
     let mut index: number = 0;
     loop {
         if index >= spans.length { break; }
@@ -424,10 +446,22 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
                 is_capsule_import = true;
             }
         }
-        // Check cached capsule dependencies from capsule.toml
+        // Check cached capsule dependencies — prefer lockfile, fall back to capsule.toml
         if !is_capsule_import {
             if _has_slash_cmd(spec) {
-                let cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
+                let mut cached_path: string = "";
+                if lock_found {
+                    cached_path = _resolve_cached_capsule_path_cmd(spec, lock_deps);
+                    if cached_path.length == 0 {
+                        // Not in lockfile — fall back to capsule.toml and warn
+                        cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
+                        if cached_path.length > 0 {
+                            print.err("warning: dependency \"" + spec + "\" is not in capsule.lock — run `sfn add " + spec + "` to lock it");
+                        }
+                    }
+                } else {
+                    cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
+                }
                 if cached_path.length > 0 {
                     dep_path = cached_path;
                     is_capsule_import = true;
@@ -804,19 +838,28 @@ fn handle_publish_command(args: string[]) -> number ![io] {
 
 fn handle_add_command(args: string[]) -> number ![io] {
     let mut is_dev: boolean = false;
+    let mut is_update: boolean = false;
     let mut capsule_arg: string = "";
-    if args.length == 2 {
-        capsule_arg = args[1];
-    } else if args.length == 3 {
-        if strings_equal(args[1], "--dev") {
+    // Parse flags: sfn add [--dev] [--update] <capsule>
+    let mut argi: number = 1;
+    loop {
+        if argi >= args.length { break; }
+        if strings_equal(args[argi], "--dev") {
             is_dev = true;
-            capsule_arg = args[2];
+        } else if strings_equal(args[argi], "--update") {
+            is_update = true;
         } else {
-            print("usage: sfn add [--dev] <capsule>");
-            return 2;
+            if capsule_arg.length > 0 {
+                print("error: unexpected argument \"" + args[argi] + "\"");
+                print("usage: sfn add [--dev] [--update] <capsule>");
+                return 2;
+            }
+            capsule_arg = args[argi];
         }
-    } else {
-        print("usage: sfn add [--dev] <capsule>");
+        argi += 1;
+    }
+    if capsule_arg.length == 0 {
+        print("usage: sfn add [--dev] [--update] <capsule>");
         return 2;
     }
 
@@ -828,14 +871,33 @@ fn handle_add_command(args: string[]) -> number ![io] {
     let registry_name = _resolve_capsule_name_cmd(capsule_arg);
     let display_name = _display_capsule_name_cmd(registry_name);
 
-    print("fetching registry index...");
-    let latest_version = _shell_read_cmd(
-        "curl -sfS 'https://registry.sailfin.dev/api/index.json'"
-        + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + registry_name + "',{}); print(c.get('latest',''))\" 2>/dev/null"
-    );
-    if latest_version.length == 0 {
-        print("capsule not found in registry: " + registry_name);
-        return 1;
+    // If --update was not passed and a lockfile entry exists, use the locked version.
+    let mut use_locked: boolean = false;
+    let mut locked_version: string = "";
+    if !is_update {
+        if fs.exists("capsule.lock") {
+            let lock_text = fs.readFile("capsule.lock");
+            locked_version = lock_get_version(lock_text, display_name);
+            if locked_version.length > 0 {
+                use_locked = true;
+            }
+        }
+    }
+
+    let mut resolved_version: string = "";
+    if use_locked {
+        resolved_version = locked_version;
+        print("using locked version: " + display_name + "@" + resolved_version);
+    } else {
+        print("fetching registry index...");
+        resolved_version = _shell_read_cmd(
+            "curl -sfS 'https://registry.sailfin.dev/api/index.json'"
+            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + registry_name + "',{}); print(c.get('latest',''))\" 2>/dev/null"
+        );
+        if resolved_version.length == 0 {
+            print("capsule not found in registry: " + registry_name);
+            return 1;
+        }
     }
 
     let slash_pos = find_char(registry_name, "/", 0);
@@ -845,13 +907,27 @@ fn handle_add_command(args: string[]) -> number ![io] {
     }
     let scope = substring(registry_name, 0, slash_pos);
     let name = substring(registry_name, slash_pos + 1, registry_name.length);
+    // Validate path segments to prevent directory traversal (especially
+    // when resolved_version comes from capsule.lock).
+    if !_is_safe_capsule_segment_cmd(scope) {
+        print("invalid capsule scope: " + scope);
+        return 1;
+    }
+    if !_is_safe_capsule_segment_cmd(name) {
+        print("invalid capsule name: " + name);
+        return 1;
+    }
+    if !_is_safe_capsule_version_cmd(resolved_version) {
+        print("invalid version (possible path traversal): " + resolved_version);
+        return 1;
+    }
 
     let home = _get_home_cmd();
     if home.length == 0 {
         print("could not determine home directory");
         return 1;
     }
-    let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + latest_version;
+    let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + resolved_version;
     _ensure_dir_recursive_cmd(home + "/.sfn");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules");
@@ -859,9 +935,9 @@ fn handle_add_command(args: string[]) -> number ![io] {
     _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules/" + scope + "/" + name);
     _ensure_dir_recursive_cmd(cache_base);
 
-    let pkg_path = cache_base + "/" + latest_version + ".sfnpkg";
-    let download_url = "https://registry.sailfin.dev/api/capsules/" + scope + "/" + name + "/" + latest_version + ".sfnpkg";
-    print("downloading " + display_name + "@" + latest_version + "...");
+    let pkg_path = cache_base + "/" + resolved_version + ".sfnpkg";
+    let download_url = "https://registry.sailfin.dev/api/capsules/" + scope + "/" + name + "/" + resolved_version + ".sfnpkg";
+    print("downloading " + display_name + "@" + resolved_version + "...");
     let dl_rc = _curl_download_cmd(download_url, pkg_path);
     if dl_rc != 0 {
         print("failed to download: " + download_url);
@@ -874,15 +950,35 @@ fn handle_add_command(args: string[]) -> number ![io] {
     let toml_text = fs.readFile("capsule.toml");
     let mut updated_toml: string = "";
     if is_dev {
-        updated_toml = toml_add_dev_dependency(toml_text, display_name, latest_version);
+        updated_toml = toml_add_dev_dependency(toml_text, display_name, resolved_version);
     } else {
-        updated_toml = toml_add_dependency(toml_text, display_name, latest_version);
+        updated_toml = toml_add_dependency(toml_text, display_name, resolved_version);
     }
     fs.writeFile("capsule.toml", updated_toml);
+
+    // Compute integrity hash of the downloaded package and write capsule.lock
+    let raw_hash = _sha256_of_file_cmd(pkg_path);
+    if raw_hash.length == 0 {
+        print("warning: could not compute integrity hash for " + pkg_path + " — lockfile entry will have no hash");
+    }
+    let mut pkg_hash: string = "";
+    if raw_hash.length > 0 {
+        pkg_hash = "sha256:" + raw_hash;
+    }
+    let mut existing_lock: string = "";
+    if fs.exists("capsule.lock") {
+        existing_lock = fs.readFile("capsule.lock");
+    }
+    let updated_lock = lock_add_entry(existing_lock, display_name, resolved_version, pkg_hash);
+    fs.writeFile("capsule.lock", updated_lock);
+
     if is_dev {
-        print("added dev dependency: " + display_name + "@" + latest_version);
+        print("added dev dependency: " + display_name + "@" + resolved_version);
     } else {
-        print("added " + display_name + "@" + latest_version);
+        print("added " + display_name + "@" + resolved_version);
+    }
+    if is_update {
+        print("lock entry updated for " + display_name);
     }
     return 0;
 }
