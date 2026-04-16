@@ -336,6 +336,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
             parameter_types: ["{ i8**, i64 }*"],
             effects: ["io"],
     });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+            target: "process.exit",
+            symbol: "sailfin_runtime_process_exit",
+            return_type: "void",
+            parameter_types: ["double"],
+            effects: ["io"],
+    });
 
     // Filesystem adapters
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {

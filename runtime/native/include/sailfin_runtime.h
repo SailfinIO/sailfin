@@ -80,6 +80,9 @@ extern "C"
     // Execute a command (argv[0] is program). Returns the exit code.
     double sailfin_runtime_process_run(SailfinPtrArray *argv);
 
+    // Terminate the process with the given exit code. Never returns.
+    void sailfin_runtime_process_exit(double code);
+
     // Additional prelude/runtime helpers (currently minimal implementations).
     void sailfin_runtime_copy_bytes(char *dest, char *src, int64_t length);
     char *sailfin_runtime_log_execution(char *value);

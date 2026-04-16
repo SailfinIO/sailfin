@@ -23,7 +23,6 @@ import {
     inline_imports_for_source,
 } from "./cli_commands";
 import { resolve_compiler_version } from "./version";
-import { bold } from "sfn/cli";
 
 fn _usage() -> string {
     return "usage:\n" +
@@ -416,7 +415,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
 
             return 2;
         }
-        print(bold("sfn") + " " + resolve_compiler_version());
+        print("sfn " + resolve_compiler_version());
         return 0;
     }
 

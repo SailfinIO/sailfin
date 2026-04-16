@@ -682,6 +682,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     runtime_helpers = append_unique_effect(runtime_helpers, "find_char");
     runtime_helpers = append_unique_effect(runtime_helpers, "string_starts_with");
     runtime_helpers = append_unique_effect(runtime_helpers, "process.run");
+    runtime_helpers = append_unique_effect(runtime_helpers, "process.exit");
     runtime_helpers = append_unique_effect(runtime_helpers, "is_decimal_digit");
     let mut direct_effects: FunctionEffectEntry[] = [];
     let mut aggregated_effects: FunctionEffectEntry[] = [];

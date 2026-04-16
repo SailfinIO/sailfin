@@ -5010,6 +5010,12 @@ double sailfin_runtime_process_run(SailfinPtrArray *argv)
 #endif
 }
 
+void sailfin_runtime_process_exit(double code)
+{
+    int exit_code = (int)code;
+    exit(exit_code);
+}
+
 bool sailfin_runtime_is_callable(char *value)
 {
     (void)value;
