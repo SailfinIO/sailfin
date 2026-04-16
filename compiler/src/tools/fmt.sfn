@@ -3,8 +3,9 @@
 // Canonical formatter for .sfn files. Operates on the token stream
 // (not the AST) to preserve comments. One style, no configuration.
 
-import { Token, TokenKind } from "../token";
+import { Token } from "../token";
 import { lex } from "../lexer";
+import { char_at, substring, strings_equal } from "../string_utils";
 
 // ═══════════════════════════════════════════════════════════════════
 // Enriched token for formatting
@@ -31,13 +32,471 @@ struct FmtContext {
 }
 
 // ═══════════════════════════════════════════════════════════════════
+// Helpers
+// ═══════════════════════════════════════════════════════════════════
+
+fn _count_newlines(text: string) -> number {
+    let mut count = 0;
+    let mut i = 0;
+    loop {
+        if i >= text.length { break; }
+        if char_at(text, i) == "\n" {
+            count += 1;
+        }
+        i += 1;
+    }
+    return count;
+}
+
+fn _emit_indent(depth: number) -> string {
+    let mut result = "";
+    let mut i = 0;
+    loop {
+        if i >= depth { break; }
+        result = result + "    ";
+        i += 1;
+    }
+    return result;
+}
+
+fn _is_keyword(lexeme: string) -> boolean {
+    if strings_equal(lexeme, "fn") { return true; }
+    if strings_equal(lexeme, "let") { return true; }
+    if strings_equal(lexeme, "mut") { return true; }
+    if strings_equal(lexeme, "if") { return true; }
+    if strings_equal(lexeme, "else") { return true; }
+    if strings_equal(lexeme, "for") { return true; }
+    if strings_equal(lexeme, "in") { return true; }
+    if strings_equal(lexeme, "loop") { return true; }
+    if strings_equal(lexeme, "while") { return true; }
+    if strings_equal(lexeme, "match") { return true; }
+    if strings_equal(lexeme, "return") { return true; }
+    if strings_equal(lexeme, "break") { return true; }
+    if strings_equal(lexeme, "continue") { return true; }
+    if strings_equal(lexeme, "struct") { return true; }
+    if strings_equal(lexeme, "enum") { return true; }
+    if strings_equal(lexeme, "interface") { return true; }
+    if strings_equal(lexeme, "import") { return true; }
+    if strings_equal(lexeme, "export") { return true; }
+    if strings_equal(lexeme, "from") { return true; }
+    if strings_equal(lexeme, "const") { return true; }
+    if strings_equal(lexeme, "type") { return true; }
+    if strings_equal(lexeme, "test") { return true; }
+    if strings_equal(lexeme, "impl") { return true; }
+    if strings_equal(lexeme, "model") { return true; }
+    if strings_equal(lexeme, "pipeline") { return true; }
+    if strings_equal(lexeme, "tool") { return true; }
+    if strings_equal(lexeme, "prompt") { return true; }
+    if strings_equal(lexeme, "routine") { return true; }
+    if strings_equal(lexeme, "extern") { return true; }
+    if strings_equal(lexeme, "try") { return true; }
+    if strings_equal(lexeme, "catch") { return true; }
+    if strings_equal(lexeme, "throw") { return true; }
+    if strings_equal(lexeme, "as") { return true; }
+    if strings_equal(lexeme, "new") { return true; }
+    if strings_equal(lexeme, "null") { return true; }
+    return false;
+}
+
+fn _is_binary_op(lexeme: string) -> boolean {
+    if strings_equal(lexeme, "+") { return true; }
+    if strings_equal(lexeme, "-") { return true; }
+    if strings_equal(lexeme, "*") { return true; }
+    if strings_equal(lexeme, "/") { return true; }
+    if strings_equal(lexeme, "%") { return true; }
+    if strings_equal(lexeme, "==") { return true; }
+    if strings_equal(lexeme, "!=") { return true; }
+    if strings_equal(lexeme, "<") { return true; }
+    if strings_equal(lexeme, ">") { return true; }
+    if strings_equal(lexeme, "<=") { return true; }
+    if strings_equal(lexeme, ">=") { return true; }
+    if strings_equal(lexeme, "&&") { return true; }
+    if strings_equal(lexeme, "||") { return true; }
+    if strings_equal(lexeme, "..") { return true; }
+    return false;
+}
+
+fn _is_assign_op(lexeme: string) -> boolean {
+    if strings_equal(lexeme, "=") { return true; }
+    if strings_equal(lexeme, "+=") { return true; }
+    if strings_equal(lexeme, "-=") { return true; }
+    if strings_equal(lexeme, "*=") { return true; }
+    if strings_equal(lexeme, "/=") { return true; }
+    return false;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase 2: Strip whitespace, classify tokens, attach comments
+// ═══════════════════════════════════════════════════════════════════
+
+fn _classify_role(token: Token, prev_lexeme: string, next_lexeme: string) -> string {
+    let kind = token.kind.variant;
+    let lex = token.lexeme;
+
+    if strings_equal(kind, "Comment") { return "comment"; }
+
+    if strings_equal(kind, "Symbol") {
+        if strings_equal(lex, "{") { return "block_open"; }
+        if strings_equal(lex, "}") { return "block_close"; }
+        if strings_equal(lex, "(") { return "paren_open"; }
+        if strings_equal(lex, ")") { return "paren_close"; }
+        if strings_equal(lex, "[") { return "bracket_open"; }
+        if strings_equal(lex, "]") { return "bracket_close"; }
+        if strings_equal(lex, ",") { return "separator"; }
+        if strings_equal(lex, ";") { return "semicolon"; }
+        if strings_equal(lex, ".") { return "dot"; }
+        if strings_equal(lex, ":") { return "colon"; }
+        if strings_equal(lex, "->") { return "arrow"; }
+        if strings_equal(lex, "=>") { return "arrow"; }
+        if strings_equal(lex, "!") {
+            if strings_equal(next_lexeme, "[") { return "bang_bracket"; }
+            return "operator";
+        }
+        if strings_equal(lex, "@") { return "decorator"; }
+        if _is_assign_op(lex) { return "assign"; }
+        if _is_binary_op(lex) { return "operator"; }
+        return "symbol";
+    }
+
+    if strings_equal(kind, "Identifier") {
+        if _is_keyword(lex) { return "keyword"; }
+        return "value";
+    }
+
+    // NumberLiteral, StringLiteral, BooleanLiteral
+    return "value";
+}
+
+fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
+    let mut result: FmtToken[] = [];
+    let mut pending_comments: Token[] = [];
+    let mut blank_lines: number = 0;
+    let mut last_structural_line: number = -1;
+
+    let mut i = 0;
+    loop {
+        if i >= tokens.length { break; }
+        let token = tokens[i];
+        let kind = token.kind.variant;
+
+        // Skip whitespace, but track blank lines
+        if strings_equal(kind, "Whitespace") {
+            let nl = _count_newlines(token.lexeme);
+            if nl >= 2 {
+                blank_lines = 1;
+            }
+            i += 1;
+            continue;
+        }
+
+        // Skip EOF
+        if strings_equal(kind, "EndOfFile") {
+            i += 1;
+            continue;
+        }
+
+        // Collect comments
+        if strings_equal(kind, "Comment") {
+            // Check if this is a trailing comment (same line as previous structural token)
+            if result.length > 0 {
+                if last_structural_line == token.line {
+                    // Trailing comment — attach to the previous FmtToken
+                    let prev_idx = result.length - 1;
+                    let prev_ft = result[prev_idx];
+                    result[prev_idx] = FmtToken {
+                        token: prev_ft.token,
+                        leading_comments: prev_ft.leading_comments,
+                        trailing_comment: [token],
+                        blank_lines_before: prev_ft.blank_lines_before,
+                        role: prev_ft.role,
+                    };
+                    i += 1;
+                    continue;
+                }
+            }
+            // Leading comment for the next token
+            pending_comments.push(token);
+            i += 1;
+            continue;
+        }
+
+        // Structural token — classify it
+        let prev_lex = "";
+        if result.length > 0 {
+            prev_lex = result[result.length - 1].token.lexeme;
+        }
+        let next_lex = "";
+        let mut ni = i + 1;
+        loop {
+            if ni >= tokens.length { break; }
+            let nk = tokens[ni].kind.variant;
+            if strings_equal(nk, "Whitespace") { ni += 1; continue; }
+            if strings_equal(nk, "Comment") { ni += 1; continue; }
+            next_lex = tokens[ni].lexeme;
+            break;
+        }
+
+        let role = _classify_role(token, prev_lex, next_lex);
+
+        result.push(FmtToken {
+                token: token,
+                leading_comments: pending_comments,
+                trailing_comment: [],
+                blank_lines_before: blank_lines,
+                role: role,
+        });
+
+        last_structural_line = token.line;
+        pending_comments = [];
+        blank_lines = 0;
+        i += 1;
+    }
+
+    // If there are trailing comments at EOF, attach them to the last token
+    if pending_comments.length > 0 {
+        if result.length > 0 {
+            let last_idx = result.length - 1;
+            let last_ft = result[last_idx];
+            // Append them as leading comments of a virtual end — for now, treat as trailing
+            let mut merged: Token[] = last_ft.trailing_comment;
+            let mut ci = 0;
+            loop {
+                if ci >= pending_comments.length { break; }
+                merged.push(pending_comments[ci]);
+                ci += 1;
+            }
+            result[last_idx] = FmtToken {
+                token: last_ft.token,
+                leading_comments: last_ft.leading_comments,
+                trailing_comment: merged,
+                blank_lines_before: last_ft.blank_lines_before,
+                role: last_ft.role,
+            };
+        }
+    }
+
+    return result;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Phase 3: Emit formatted output
+// ═══════════════════════════════════════════════════════════════════
+
+fn _needs_newline_before(role: string, prev_role: string, lexeme: string, prev_lexeme: string) -> boolean {
+    // Close brace always on its own line (unless empty block)
+    if strings_equal(role, "block_close") {
+        if strings_equal(prev_role, "block_open") { return false; }
+        return true;
+    }
+    // After semicolon or open brace → new line
+    if strings_equal(prev_role, "semicolon") { return true; }
+    if strings_equal(prev_role, "block_open") {
+        if strings_equal(role, "block_close") { return false; }
+        return true;
+    }
+    if strings_equal(prev_role, "block_close") {
+        // Tokens that attach to the closing brace (stay on same line)
+        if strings_equal(role, "separator") { return false; }
+        if strings_equal(role, "semicolon") { return false; }
+        if strings_equal(role, "arrow") { return false; }
+        if strings_equal(role, "dot") { return false; }
+        if strings_equal(role, "paren_close") { return false; }
+        if strings_equal(role, "bracket_close") { return false; }
+        if strings_equal(lexeme, "else") { return false; }
+        if strings_equal(lexeme, "catch") { return false; }
+        if strings_equal(lexeme, "from") { return false; }
+        if strings_equal(lexeme, "as") { return false; }
+        // Everything else (new statement/declaration) → new line
+        return true;
+    }
+    return false;
+}
+
+fn _needs_space_before(role: string, prev_role: string, lexeme: string, prev_lexeme: string) -> boolean {
+    // No space at start of output
+    if strings_equal(prev_role, "") { return false; }
+
+    // Compound assignment: operator followed by = (lexer splits += into + and =)
+    if strings_equal(role, "assign") {
+        if strings_equal(prev_role, "operator") { return false; }
+    }
+
+    // Dot: no space either side
+    if strings_equal(role, "dot") { return false; }
+    if strings_equal(prev_role, "dot") { return false; }
+
+    // No space after open parens/brackets, no space before close
+    if strings_equal(prev_role, "paren_open") { return false; }
+    if strings_equal(prev_role, "bracket_open") { return false; }
+    if strings_equal(role, "paren_close") { return false; }
+    if strings_equal(role, "bracket_close") { return false; }
+
+    // No space before separator/semicolon
+    if strings_equal(role, "separator") { return false; }
+    if strings_equal(role, "semicolon") { return false; }
+
+    // Colon: no space before, space after
+    if strings_equal(role, "colon") { return false; }
+
+    // Function call: no space before (
+    if strings_equal(role, "paren_open") {
+        if strings_equal(prev_role, "value") { return false; }
+        if strings_equal(prev_role, "paren_close") { return false; }
+        if strings_equal(prev_role, "bracket_close") { return false; }
+    }
+
+    // Index: no space before [
+    if strings_equal(role, "bracket_open") {
+        if strings_equal(prev_role, "value") { return false; }
+        if strings_equal(prev_role, "paren_close") { return false; }
+        if strings_equal(prev_role, "bracket_close") { return false; }
+    }
+
+    // bang_bracket: space before, no space after !
+    if strings_equal(role, "bang_bracket") { return true; }
+    if strings_equal(prev_role, "bang_bracket") { return false; }
+
+    // Decorator @: no space after
+    if strings_equal(prev_role, "decorator") { return false; }
+
+    return true;
+}
+
+fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
+    let mut out = "";
+    let mut indent = 0;
+    let mut prev_role = "";
+    let mut prev_lexeme = "";
+    let mut at_line_start = true;
+    let mut paren_depth = 0;
+
+    let mut i = 0;
+    loop {
+        if i >= fmt_tokens.length { break; }
+        let ft = fmt_tokens[i];
+        let role = ft.role;
+        let lexeme = ft.token.lexeme;
+
+        // ── Emit blank line ──
+        if ft.blank_lines_before > 0 {
+            if i > 0 {
+                out = out + "\n";
+                at_line_start = true;
+            }
+        }
+
+        // ── Emit leading comments ──
+        let mut ci = 0;
+        loop {
+            if ci >= ft.leading_comments.length { break; }
+            let comment = ft.leading_comments[ci];
+            if !at_line_start {
+                out = out + "\n";
+            }
+            out = out + _emit_indent(indent) + comment.lexeme + "\n";
+            at_line_start = true;
+            ci += 1;
+        }
+
+        // ── Adjust indent before closing tokens ──
+        if strings_equal(role, "block_close") {
+            indent -= 1;
+            if indent < 0 { indent = 0; }
+        }
+        if strings_equal(role, "paren_close") {
+            paren_depth -= 1;
+            if paren_depth < 0 { paren_depth = 0; }
+        }
+        if strings_equal(role, "bracket_close") {
+            paren_depth -= 1;
+            if paren_depth < 0 { paren_depth = 0; }
+        }
+
+        // ── Determine whitespace before token ──
+        let needs_nl = _needs_newline_before(role, prev_role, lexeme, prev_lexeme);
+        if needs_nl {
+            if !at_line_start {
+                out = out + "\n";
+            }
+            out = out + _emit_indent(indent);
+            at_line_start = false;
+        } else {
+            if at_line_start {
+                if i > 0 {
+                    out = out + _emit_indent(indent);
+                }
+                at_line_start = false;
+            } else {
+                let needs_sp = _needs_space_before(role, prev_role, lexeme, prev_lexeme);
+                if needs_sp {
+                    out = out + " ";
+                }
+            }
+        }
+
+        // ── Emit the token ──
+        out = out + lexeme;
+
+        // ── Adjust indent after opening tokens ──
+        if strings_equal(role, "block_open") {
+            indent += 1;
+        }
+        if strings_equal(role, "paren_open") {
+            paren_depth += 1;
+        }
+        if strings_equal(role, "bracket_open") {
+            paren_depth += 1;
+        }
+
+        // ── Emit trailing comment ──
+        if ft.trailing_comment.length > 0 {
+            let tc = ft.trailing_comment[0];
+            out = out + "  " + tc.lexeme;
+        }
+
+        // ── Emit newline after statement-ending tokens ──
+        if strings_equal(role, "semicolon") {
+            out = out + "\n";
+            at_line_start = true;
+        }
+
+        // ── Newline after comma at statement level ──
+        if strings_equal(role, "separator") {
+            if paren_depth == 0 {
+                out = out + "\n";
+                at_line_start = true;
+            }
+        }
+
+        prev_role = role;
+        prev_lexeme = lexeme;
+        i += 1;
+    }
+
+    // Ensure file ends with exactly one newline
+    if out.length > 0 {
+        if !at_line_start {
+            out = out + "\n";
+        }
+    }
+
+    return out;
+}
+
+// ═══════════════════════════════════════════════════════════════════
 // Public entry point
 // ═══════════════════════════════════════════════════════════════════
 
 fn format_source(source: string) -> string {
-    // Step 1: identity pass — return source unchanged.
-    // Subsequent steps will lex, strip, classify, and re-emit.
-    return source;
+    if source.length == 0 {
+        return "";
+    }
+    let tokens = lex(source);
+    let fmt_tokens = strip_and_classify(tokens);
+    if fmt_tokens.length == 0 {
+        return "";
+    }
+    return emit_formatted(fmt_tokens);
 }
 
 export { format_source };
