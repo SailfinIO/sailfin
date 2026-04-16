@@ -1,6 +1,6 @@
 # Architecture: `sfn fmt` — Canonical Formatter
 
-Status: Draft  
+Status: In Progress (Steps 1-2 complete)  
 Date: April 15, 2026  
 Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
 
@@ -432,7 +432,7 @@ fn handle_fmt_command(args: string[]) -> number ![io] {
 The formatter is built in 5 incremental steps. Each step produces a
 working (if incomplete) formatter that can be tested independently.
 
-### Step 1: Scaffold & CLI Wiring
+### Step 1: Scaffold & CLI Wiring ✅
 
 **Goal:** `sfn fmt file.sfn` runs and prints the file unchanged (identity pass).
 
@@ -448,7 +448,9 @@ working (if incomplete) formatter that can be tested independently.
 
 **Deliverable:** Working CLI plumbing; format logic is a no-op.
 
-### Step 2: Token Stripping & Basic Indentation
+**Status:** Complete. Committed in `7df95ec`.
+
+### Step 2: Token Stripping & Basic Indentation ✅
 
 **Goal:** Strip existing whitespace and re-emit with canonical indentation.
 Comments are preserved but may not be perfectly placed yet.
@@ -466,6 +468,17 @@ Comments are preserved but may not be perfectly placed yet.
 
 **Deliverable:** Correct indentation for braces and statement terminators.
 Spacing between tokens may still be wrong.
+
+**Status:** Complete. Committed in `8db565b`. Implementation went beyond the
+minimum — includes full role classification (23 roles), spacing rules,
+paren/bracket depth tracking for statement vs expression commas, compound
+assignment handling, and block-close attachment rules.
+
+**Known issues in current Step 2 output:**
+- Single-field struct literals `{ x: 1 }` expand to multi-line
+- Import specifier lists expand vertically
+- No line-length wrapping heuristic
+- `fmt_rules.sfn` tables are stubs (return defaults)
 
 ### Step 3: Spacing Rules & Comment Attachment
 
