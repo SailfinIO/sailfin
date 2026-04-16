@@ -490,11 +490,24 @@ after keywords, etc.) and correct comment placement.
 - Implement `attach_comments()` — trailing vs leading comment attachment
 - Implement `spacing_between()` and the rule tables in `fmt_rules.sfn`
 - Implement `is_keyword()`, `is_binary_operator()`, `is_unary_prefix()`
+- Implement short-form wrapping: struct literals and import specifier lists
+  that fit on one line (≤80 chars, ≤3 items) stay inline
+- Implement `_measure_inline_block()` lookahead to compute single-line length
+- Implement `_is_inline_block_context()` to detect struct literals and imports
 
 **Test:** Format expressions like `x+y*z` → `x + y * z`; verify comments
-on the same line as code stay on that line.
+on the same line as code stay on that line. Short struct literals stay inline.
 
-**Deliverable:** Fully correct token-level formatting (spacing, comments).
+**Deliverable:** Fully correct token-level formatting (spacing, comments),
+short-form wrapping for struct literals and imports.
+
+**Status:** Complete. `fmt_rules.sfn` stubs filled in with full spacing
+rule table, classification helpers (`opens_block`, `closes_statement`,
+`is_binary_operator`, `is_unary_prefix`, `import_group`), and wrapping
+threshold logic. `fmt.sfn` emit phase extended with inline block detection
+(`_measure_inline_block`, `_is_inline_block_context`) and inline emit mode
+that suppresses newlines/indent changes for short struct literals and import
+specifier lists.
 
 ### Step 4: Blank Line Normalization & Import Sorting
 
@@ -510,6 +523,15 @@ on the same line as code stay on that line.
 imports → sorted and grouped.
 
 **Deliverable:** Production-ready formatter for standard Sailfin code.
+
+**Status:** Complete. Import sorting implemented with `_find_import_spans`,
+`_sort_import_spans` (insertion sort by group then path), and
+`_sort_import_specifiers` (alphabetical within a single import). Stdlib
+imports (`sfn/...`) sort before relative imports, with a blank line between
+groups. Blank line normalization: suppress blank lines at block start/end,
+enforce exactly 1 between top-level declarations and before decorators at
+indent 0. Fixed inline block indent tracking (opening `{` no longer
+increments indent when inlined).
 
 ### Step 5: Edge Cases, Self-Hosting Validation & CI
 
