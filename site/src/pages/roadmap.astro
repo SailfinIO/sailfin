@@ -16,6 +16,40 @@ interface RoadmapCategory {
 
 const v1Categories: RoadmapCategory[] = [
   {
+    title: "Effect System Hardening",
+    description: "Make the effect system world-class — Sailfin's core differentiator.",
+    items: [
+      { label: "Hierarchical effect enforcement (io.fs, net.http, etc.)", status: "planned" },
+      { label: "Effect polymorphism for generics (fn map<T, E>(f: Fn ![E]) ![E])", status: "planned" },
+      { label: "Transitive call-graph enforcement (if A calls B ![net], A needs ![net])", status: "planned" },
+      { label: "--fix workflow for automatically inserting missing effect annotations", status: "planned" },
+      { label: "gpu and rand effect enforcement", status: "planned" },
+      { label: "Capsule-level capability enforcement via capsule.toml", status: "planned" },
+    ],
+  },
+  {
+    title: "Foundation Types",
+    description: "Fix the type system foundation before building on it.",
+    items: [
+      { label: "int (i64) and float (f64) numeric types replacing number", status: "planned" },
+      { label: "Result<T, E> type and ? error propagation operator", status: "planned" },
+      { label: "${} string interpolation replacing {{ }}", status: "planned" },
+      { label: "Complete generic type inference", status: "planned" },
+      { label: "Interface conformance validation with variance checks", status: "planned" },
+      { label: "Richer diagnostics — multi-span, severity levels, fix-it hints", status: "planned" },
+    ],
+  },
+  {
+    title: "Structured Concurrency",
+    description: "First-class concurrency primitives with capability tracking.",
+    items: [
+      { label: "await expression parsing and lowering", status: "planned" },
+      { label: "routine { } block parsing and lowering", status: "planned" },
+      { label: "channel() as the core concurrency primitive", status: "planned" },
+      { label: "spawn expression", status: "planned" },
+    ],
+  },
+  {
     title: "Compiler Stabilization",
     description: "Build pipeline and LLVM backend correctness.",
     items: [
@@ -23,23 +57,6 @@ const v1Categories: RoadmapCategory[] = [
       { label: "Make build.sh the sole clean build path with no post-processing", status: "done" },
       { label: "Pass make check with no fallbacks", status: "planned" },
       { label: "Stabilize control-flow LLVM lowering (loop/if/break headers)", status: "planned" },
-    ],
-  },
-  {
-    title: "Language Feature Completeness",
-    description: "Core language constructs required for a stable 1.0.",
-    items: [
-      { label: "await expression parsing and lowering", status: "planned" },
-      { label: "routine { } block parsing and lowering", status: "planned" },
-      { label: "channel() as the core concurrency primitive", status: "planned" },
-      { label: "spawn expression", status: "planned" },
-      { label: "Complete generic type inference", status: "planned" },
-      { label: "Interface conformance validation with variance checks", status: "planned" },
-      { label: "Affine<T> / Linear<T> move and consume enforcement", status: "planned" },
-      { label: "Richer diagnostics — multi-span, severity levels, fix-it hints", status: "planned" },
-      { label: "--fix workflow for automatically inserting missing effect annotations", status: "planned" },
-      { label: "gpu and rand effect enforcement", status: "planned" },
-      { label: "Hierarchical effect enforcement (io.fs.read, net.http, etc.)", status: "planned" },
     ],
   },
   {
@@ -55,8 +72,12 @@ const v1Categories: RoadmapCategory[] = [
   },
   {
     title: "Tooling & Developer Workflow",
-    description: "CLI and build toolchain modernization.",
+    description: "CLI tools and build toolchain modernization.",
     items: [
+      { label: "sfn fmt — code formatter", status: "planned" },
+      { label: "sfn check — fast type and effect analysis", status: "planned" },
+      { label: "sfn vet — static analyzer", status: "planned" },
+      { label: "sfn audit — dependency capability surface analysis", status: "planned" },
       { label: "Replace the sfn shell wrapper with a Sailfin-native CLI binary", status: "planned" },
       { label: "Remove Python tooling and scripts from the release pipeline", status: "planned" },
       { label: "Remove Python runtime shims", status: "done" },
@@ -83,18 +104,15 @@ const v1Categories: RoadmapCategory[] = [
 ];
 
 const postV1Ai: RoadmapCategory = {
-  title: "AI / Model Execution",
-  description: "AI-native features ship after 1.0 as the first major milestone once a stable self-hosted toolchain is in place.",
+  title: "Enterprise Hardening & AI Integration",
+  description: "Library-level AI support, taint tracking, and advanced safety features — delivered as capsules, not language syntax.",
   items: [
-    { label: "Model runtime — Model<I,O>.call() execution with provider adapters", status: "planned" },
-    { label: "Generation cards — signed provenance metadata for every model call", status: "planned" },
-    { label: "Prompt dispatch pipeline (system → user → assistant → tool)", status: "planned" },
-    { label: "Tool dispatcher with capability and taint enforcement", status: "planned" },
-    { label: "Typed prompt channels (prompt user<SummaryRequest> { })", status: "planned" },
-    { label: "Evaluators (Faithfulness, LatencyBudget, etc.)", status: "planned" },
-    { label: "PII<T> / Secret<T> runtime taint tracking and egress guards", status: "planned" },
-    { label: "Model evaluators, replay, and golden tests", status: "planned" },
-    { label: "Sailfin-native model adapters (HTTP / gRPC for model providers)", status: "planned" },
+    { label: "sfn/ai capsule — model invocation, prompt templating, generation provenance", status: "planned" },
+    { label: "Migrate model/prompt/tool/pipeline from language syntax to sfn/ai library", status: "planned" },
+    { label: "Secret<T> / PII<T> taint tracking integrated with the effect system", status: "planned" },
+    { label: "sfn lsp — language server for IDE integration", status: "planned" },
+    { label: "sfn audit enhancements — transitive capability analysis, SBOM generation", status: "planned" },
+    { label: "Ownership and borrowing enforcement (Affine<T>, Linear<T>, &T, &mut T)", status: "planned" },
   ],
 };
 
@@ -104,19 +122,19 @@ const postV1Platform: RoadmapCategory = {
   items: [
     { label: "Async runtime — Sailfin-native event loop, task scheduler, and channels", status: "planned" },
     { label: "Runtime diagnostics — structured tracing and allocation telemetry", status: "planned" },
-    { label: "Package registry workflow — sfn init, sfn add, sfn publish", status: "planned" },
+    { label: "WebAssembly emission target", status: "planned" },
     { label: "Native test framework — golden, adversarial, and replay test types", status: "planned" },
-    { label: "Tensor / GPU effects — Vector<N>, Tensor<Shape, DType>, GPU batching", status: "planned" },
     { label: "|> pipeline operator with async and lazy semantics", status: "planned" },
+    { label: "GPU effect enforcement and tensor dispatch", status: "planned" },
   ],
 };
 
 const exploration: RoadmapItem[] = [
-  { label: "WebAssembly emission", status: "planned" },
   { label: "unsafe capability enforcement", status: "planned" },
   { label: "Currency literals ($0.05) and time literals (1s, 150ms)", status: "planned" },
-  { label: "Notebook, LSP, and interactive tooling with cost and latency overlays", status: "planned" },
-  { label: "Training workflow integration", status: "planned" },
+  { label: "Notebook and interactive tooling", status: "planned" },
+  { label: "Effect handlers (algebraic effect semantics)", status: "planned" },
+  { label: "Capability-scoped sandboxing for capsule execution", status: "planned" },
 ];
 
 // Helpers

@@ -199,43 +199,43 @@ only structured mechanism, supplemented by ad-hoc union return types
 call site requires manual `match`. Error types proliferate across module
 boundaries with no composition mechanism.
 
-### Unfinished safety claims
+### Unenforced syntax (deferred to post-1.0)
 
-**Problem**: `Affine<T>`, `Linear<T>`, `&T`, `&mut T`, `PII<T>`, `Secret<T>`
-are all parsed but not enforced. Claiming "Rust-grade safety" or
-"ownership-aware" in marketing materials while these are purely syntactic is a
-credibility risk.
+**Decision**: `Affine<T>`, `Linear<T>`, `&T`, `&mut T`, `PII<T>`, `Secret<T>`
+are all parsed but not enforced. Rather than marketing unenforced guarantees,
+these features are explicitly deferred to post-1.0. Sailfin's safety story is
+**effects and capabilities**, not borrow checking or taint tracking — those will
+ship when they can be enforced end-to-end.
 
-**Impact**: Medium. Users who come for the safety story will discover it doesn't
-work and leave. Better to remove unfinished syntax than to advertise unenforced
-guarantees.
+**Status**: Ownership and taint types remain in the parser for forward
+compatibility but are not advertised as shipped features. They will be removed
+from marketing materials and the homepage.
 
-### Scope creep risk
+### Strategic focus
 
-**Problem**: The spec describes Rust-grade ownership, Swift-like ergonomics,
-AI-native constructs, effect types, capability security, taint tracking, GPU
-acceleration, structured concurrency, policy DSLs, generation cards, and tensor
-types. This is a feature list for five different languages.
+**Decision**: Sailfin's three differentiators are: (1) effect system,
+(2) capability-based security, (3) structured concurrency. All pre-1.0 effort
+focuses on making these world-class. AI integration, ownership enforcement,
+and taint tracking are post-1.0 library and compiler work.
 
-**Recommendation**: Pick 3 differentiators (effect system, capability security,
-structured concurrency) and ship those well. Defer everything else ruthlessly.
+## AI / Model Constructs (Migration to Library)
 
-## AI / Model Features (Design Preview)
+The `model`, `prompt`, `tool`, and `pipeline` keywords were originally designed
+as language-level syntax. Following a strategic review, these are being migrated
+to the `sfn/ai` library capsule for post-1.0 delivery. Rationale:
 
-The following features are central to Sailfin's AI-native vision and are fully
-designed. They are tracked in the spec (`docs/spec.md` Part B) and proposals
-(`docs/proposals/`) but are **not yet functional** in the current compiler or
-runtime:
+- AI APIs change faster than language grammars can evolve
+- Library-level features can iterate independently of compiler releases
+- The `![model]` effect — the capability gate — remains a language-level feature
+- Keyword syntax reserved unnecessary grammar surface for features that have
+  no runtime behavior today
 
-- `model` blocks declare metadata and are emitted to `.sfn-asm`, but `.call()`
-  performs no actual model invocation.
-- `prompt` blocks emit IR directives but do not dispatch to any model API.
-- Generation cards (provenance metadata: engine, params, seeds, input hashes,
-  latency, cost) are not yet produced.
-- Model evaluators (`Faithfulness`, `LatencyBudget(...)`) are design-stage.
-- `tool` dispatcher (model-invocable typed capabilities) is not yet implemented.
-- Tensor/GPU workloads (`Vector<N>`, `Tensor<Shape, DType>`, GPU batching) are
-  not yet implemented.
+**Current state**: `model`, `prompt`, `tool`, and `pipeline` blocks are still
+parsed and emit metadata to `.sfn-asm`, but perform no runtime execution. They
+will be migrated to the `sfn/ai` capsule as library types and functions.
 
-These features are tracked as a post-1.0 milestone. The design is preserved in
-`docs/spec.md` §3.6–§3.9 and `docs/proposals/model-engines-and-training.md`.
+**What stays in the language**: The `![model]` effect annotation, which gates
+AI operations through the capability system. This is enforced today.
+
+Design documents are preserved in `docs/spec.md` §3.6–§3.9 and
+`docs/proposals/model-engines-and-training.md`.

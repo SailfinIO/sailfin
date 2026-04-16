@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection. The repository hosts the **self-hosted native compiler** (primary toolchain), plus legacy bootstrap code kept for emergency recovery while marching toward 1.0.
+Sailfin is a compiled systems language with compile-time capability enforcement. The repository hosts the **self-hosted native compiler** (primary toolchain), plus legacy bootstrap code kept for emergency recovery while marching toward 1.0.
 
 **Current architecture:**
 
@@ -14,7 +14,7 @@ Note: the codebase may still contain historical `stage2` names in internal paths
 
 The runtime currently ships as C under `runtime/native/` and is planned to move into Sailfin for the 1.0 release.
 
-The language features effect types (`![io, net, model, gpu, rand, clock]`), ownership-aware linear/affine types, capability-based security, and first-class AI constructs (models, prompts, pipelines, tools).
+**Language pillars:** (1) effect types (`![io, net, model, clock]`) for compile-time capability enforcement, (2) capability-based security via capsule manifests and dependency auditing, (3) structured concurrency (planned). AI integration is a library-level concern (`sfn/ai` capsule, post-1.0) gated by the `![model]` effect — not language-level syntax.
 
 ## Essential Commands
 
@@ -81,16 +81,11 @@ fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 
 Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effects emit diagnostics with source spans and fix-it hints.
 
-### Ownership & Borrowing (Native Compiler)
+### Ownership & Borrowing (Deferred)
 
-Sailfin uses move-by-default semantics with explicit borrows:
+Ownership syntax (`Affine<T>`, `Linear<T>`, `&T`, `&mut T`) is parsed but **not enforced**. These features are deferred to post-1.0 to avoid shipping unenforced safety claims. The native LLVM backend tracks some ownership metadata internally, but no user-facing guarantees are made.
 
-- `Affine<T>`: may be dropped, not duplicated
-- `Linear<T>`: must be consumed exactly once
-- `&T`: shared (read-only) borrow
-- `&mut T`: exclusive mutable borrow
-
-**Bootstrap status:** Parsed but not enforced. The native LLVM backend tracks ownership metadata, rejects conflicting borrows, and flags use-after-move.
+Do not market or document ownership/borrowing as a shipped feature. Sailfin's safety story is effects and capabilities, not borrow checking.
 
 ### Runtime Bridges
 
@@ -295,7 +290,7 @@ When uncertain about feature status or semantics:
 3. **[sailfin.dev/roadmap](https://sailfin.dev/roadmap)** — Active workstreams and sequencing (source: `site/src/pages/roadmap.astro`)
 4. **`docs/runtime_audit.md`** — Python→Sailfin migration tracker
 
-**Examples are bootstrap-only** unless marked with future syntax comments (e.g., `|>` pipeline operator, currency literals like `$0.05`).
+**Examples are compiler-only** unless marked with future syntax comments (e.g., `|>` pipeline operator, currency literals like `$0.05`).
 
 ## Stabilization Goals (Pre-1.0)
 
@@ -366,14 +361,24 @@ When adding features or making design choices, apply these principles:
   syntax reduces error rates in generated code. Unusual choices cause systematic
   LLM failures.
 - **Pick 3 differentiators.** Sailfin's top 3 are: (1) effect system,
-  (2) capability-based security, (3) structured concurrency. Don't dilute these
-  with half-finished ownership, AI constructs, or GPU features.
+  (2) capability-based security, (3) structured concurrency. Everything else
+  is a library concern or a post-1.0 feature. Don't dilute the core with
+  half-finished ownership, AI syntax, or GPU features.
 - **Don't ship unfinished safety claims.** "Parsed but not enforced" is worse
   than not having the syntax at all — it teaches users to ignore the feature.
-- **Keywords are expensive.** A keyword can never become a variable name. Only
-  add keywords for constructs that can't be expressed as library functions.
-- **Fix the foundation first.** Integer types, `Result<T, E>`, and generic
-  constraints are prerequisites for everything else.
+  Ownership types, taint types, and AI constructs stay out of marketing until
+  they are enforced end-to-end.
+- **Libraries over keywords.** A keyword can never become a variable name.
+  Only add keywords for constructs that can't be expressed as library functions.
+  AI constructs (`model`, `prompt`, `tool`, `pipeline`) are being migrated from
+  language syntax to the `sfn/ai` capsule. The `![model]` effect stays as a
+  language-level capability gate.
+- **Fix the foundation first.** Integer types, `Result<T, E>`, generic
+  constraints, hierarchical effects, and effect polymorphism are prerequisites
+  for everything else.
+- **Chase timeless problems.** Effect types and capability security solve
+  problems that will matter in 20 years. AI API wrappers change every 6 months.
+  Language syntax is permanent; library APIs can iterate.
 
 ## Important Constraints
 
@@ -381,10 +386,11 @@ When adding features or making design choices, apply these principles:
 
 - No pipeline operator (`|>`) — use function calls
 - No currency literals — use numeric literals with comments (`0.05 // USD`)
-- `Affine<T>`/`Linear<T>` parsed but not enforced
-- `PII<T>`/`Secret<T>` parsed but no runtime enforcement
-- `model` blocks emit metadata only (no `.call()` execution)
-- `prompt` blocks are parsed but don't send messages
+- `Affine<T>`/`Linear<T>` parsed but not enforced (deferred to post-1.0)
+- `PII<T>`/`Secret<T>` parsed but no runtime enforcement (deferred to post-1.0)
+- `model`/`prompt`/`tool`/`pipeline` blocks emit metadata only — these are
+  being migrated from language syntax to the `sfn/ai` library capsule
+- No concurrency runtime (`routine`, `spawn`, `channel`, `await` not yet implemented)
 
 ### Bootstrap (stage1) Readiness Checklist
 
@@ -481,10 +487,10 @@ gh workflow run release.yml -f channel=alpha -f bump=prerelease -f dry_run=true
 
 ## Key Terminology
 
-- **Capsule**: A Sailfin package with `capsule.toml` manifest
+- **Capsule**: A Sailfin package with `capsule.toml` manifest declaring capability requirements
 - **Workspace**: Multi-capsule project with shared `workspace.toml` policies
-- **Effect**: Capability annotation (`![io]`, `![net]`, etc.)
-- **Generation card**: Provenance metadata for model calls (input hashes, cost, latency, seed)
+- **Effect**: Capability annotation (`![io]`, `![net]`, etc.) — the language's core differentiator
+- **Capability enforcement**: Compile-time guarantee that code cannot exceed its declared effects
 - **Native IR**: `.sfn-asm` textual intermediate representation
 - **Prelude**: Core runtime library (`runtime/prelude.sfn`)
 - **Stage0/1/2**: Bootstrap (Python) / Self-hosted (Sailfin→Python) / Native (Sailfin→LLVM)
