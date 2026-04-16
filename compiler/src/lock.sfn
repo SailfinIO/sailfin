@@ -193,7 +193,11 @@ fn _lock_write(entries: _LockEntry[]) -> string {
     loop {
         if i >= entries.length { break; }
         let e = entries[i];
-        out = out + "\"" + e.capsule + "\" = \"" + e.version + " " + e.hash + "\"\n";
+        let mut value: string = e.version;
+        if e.hash.length > 0 {
+            value = value + " " + e.hash;
+        }
+        out = out + "\"" + e.capsule + "\" = \"" + value + "\"\n";
         i += 1;
     }
     return out;

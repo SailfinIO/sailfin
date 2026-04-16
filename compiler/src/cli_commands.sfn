@@ -849,6 +849,11 @@ fn handle_add_command(args: string[]) -> number ![io] {
         } else if strings_equal(args[argi], "--update") {
             is_update = true;
         } else {
+            if capsule_arg.length > 0 {
+                print("error: unexpected argument \"" + args[argi] + "\"");
+                print("usage: sfn add [--dev] [--update] <capsule>");
+                return 2;
+            }
             capsule_arg = args[argi];
         }
         argi += 1;
@@ -902,6 +907,20 @@ fn handle_add_command(args: string[]) -> number ![io] {
     }
     let scope = substring(registry_name, 0, slash_pos);
     let name = substring(registry_name, slash_pos + 1, registry_name.length);
+    // Validate path segments to prevent directory traversal (especially
+    // when resolved_version comes from capsule.lock).
+    if !_is_safe_capsule_segment_cmd(scope) {
+        print("invalid capsule scope: " + scope);
+        return 1;
+    }
+    if !_is_safe_capsule_segment_cmd(name) {
+        print("invalid capsule name: " + name);
+        return 1;
+    }
+    if !_is_safe_capsule_version_cmd(resolved_version) {
+        print("invalid version (possible path traversal): " + resolved_version);
+        return 1;
+    }
 
     let home = _get_home_cmd();
     if home.length == 0 {
@@ -938,7 +957,14 @@ fn handle_add_command(args: string[]) -> number ![io] {
     fs.writeFile("capsule.toml", updated_toml);
 
     // Compute integrity hash of the downloaded package and write capsule.lock
-    let pkg_hash = "sha256:" + _sha256_of_file_cmd(pkg_path);
+    let raw_hash = _sha256_of_file_cmd(pkg_path);
+    if raw_hash.length == 0 {
+        print("warning: could not compute integrity hash for " + pkg_path + " — lockfile entry will have no hash");
+    }
+    let mut pkg_hash: string = "";
+    if raw_hash.length > 0 {
+        pkg_hash = "sha256:" + raw_hash;
+    }
     let mut existing_lock: string = "";
     if fs.exists("capsule.lock") {
         existing_lock = fs.readFile("capsule.lock");
