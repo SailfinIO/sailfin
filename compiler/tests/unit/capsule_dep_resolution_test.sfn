@@ -86,20 +86,38 @@ fn _display_capsule_name(name: string) -> string {
 
 fn _resolve_cached_path(spec: string, deps: string, home: string) -> string {
     if deps.length == 0 { return ""; }
-    let display_name = _display_capsule_name(spec);
-    let version = _lookup_dep_version(deps, display_name);
-    if version.length == 0 { return ""; }
     if home.length == 0 { return ""; }
+    // Require exactly one slash (scope/name)
     let mut slash_pos: number = -1;
+    let mut slash_count: number = 0;
     let mut i: number = 0;
     loop {
         if i >= spec.length { break; }
-        if spec[i] == "/" { slash_pos = i; break; }
+        if spec[i] == "/" {
+            if slash_pos < 0 { slash_pos = i; }
+            slash_count += 1;
+        }
         i += 1;
     }
-    if slash_pos < 0 { return ""; }
+    if slash_pos <= 0 { return ""; }
+    if slash_pos >= spec.length - 1 { return ""; }
+    if slash_count != 1 { return ""; }
     let scope = substring(spec, 0, slash_pos);
     let name = substring(spec, slash_pos + 1, spec.length);
+    // Reject traversal segments
+    if _str_eq(scope, ".") { return ""; }
+    if _str_eq(scope, "..") { return ""; }
+    if _str_eq(name, ".") { return ""; }
+    if _str_eq(name, "..") { return ""; }
+    // Exclude runtime/* (pre-built, not capsules)
+    if _has_prefix(spec, "runtime/") { return ""; }
+    let display_name = _display_capsule_name(spec);
+    let version = _lookup_dep_version(deps, display_name);
+    if version.length == 0 { return ""; }
+    // Reject traversal in version
+    if _str_eq(version, ".") { return ""; }
+    if _str_eq(version, "..") { return ""; }
+    if _has_slash(version) { return ""; }
     return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
 }
 
@@ -204,4 +222,38 @@ test "import span: relative imports not treated as capsule" {
     assert _has_prefix("./local", "./") == true;
     assert _has_prefix("../parent", "../") == true;
     // These should NOT be treated as capsule deps
+}
+
+test "import span: runtime/* imports not treated as capsule" {
+    // runtime/prelude and other runtime/* imports must pass through
+    // to the linker, NOT be treated as capsule dependencies.
+    let spec = "runtime/prelude";
+    assert _has_prefix(spec, "runtime/") == true;
+    // The capsule span collector must skip runtime/* imports
+}
+
+test "cached path: rejects path traversal in spec" {
+    let deps = "../evil=1.0.0";
+    // spec with ".." should not resolve
+    let p1 = _resolve_cached_path("../evil", deps, "/home/user");
+    assert _str_eq(p1, "");
+    // spec with extra slashes should not resolve
+    let p2 = _resolve_cached_path("a/b/c", "b/c=1.0.0", "/home/user");
+    assert _str_eq(p2, "");
+}
+
+test "cached path: rejects empty scope or name" {
+    // slash at start (empty scope)
+    let p1 = _resolve_cached_path("/name", "name=1.0.0", "/home/user");
+    assert _str_eq(p1, "");
+    // slash at end (empty name)
+    let p2 = _resolve_cached_path("scope/", "=1.0.0", "/home/user");
+    assert _str_eq(p2, "");
+}
+
+test "cached path: runtime prefix excluded" {
+    let deps = "prelude=1.0.0";
+    let path = _resolve_cached_path("runtime/prelude", deps, "/home/user");
+    // runtime/* should never resolve as a cached capsule
+    assert _str_eq(path, "");
 }

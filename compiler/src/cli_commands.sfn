@@ -211,8 +211,12 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                         } else {
                             // Non-stdlib scoped import (e.g. "sfn/cli", "acme/router") —
                             // may be a cached capsule dependency declared in capsule.toml.
+                            // Exclude runtime/* imports which are pre-built and handled
+                            // separately by the linker.
                             if _has_slash_cmd(spec) {
-                                spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                                if !_has_prefix_cmd(spec, "runtime/") {
+                                    spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                                }
                             }
                         }
                     }
@@ -306,21 +310,52 @@ fn _lookup_dep_version_cmd(deps: string, name: string) -> string {
     return "";
 }
 
+// Validate a path segment (scope, name) contains no traversal or illegal chars.
+fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    if strings_equal(value, ".") { return false; }
+    if strings_equal(value, "..") { return false; }
+    if find_char(value, "/", 0) >= 0 { return false; }
+    if find_char(value, "\\", 0) >= 0 { return false; }
+    return true;
+}
+
+// Validate a version string contains no traversal sequences.
+fn _is_safe_capsule_version_cmd(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    if strings_equal(value, ".") { return false; }
+    if strings_equal(value, "..") { return false; }
+    if find_char(value, "/", 0) >= 0 { return false; }
+    if find_char(value, "\\", 0) >= 0 { return false; }
+    if _string_contains_cmd(value, "..") { return false; }
+    return true;
+}
+
 // Resolve a capsule import spec (e.g. "sfn/cli") to the cached source path
 // using the dependency version from capsule.toml. Returns "" if not found.
+// Validates that spec is exactly "scope/name" (single slash) and that all
+// path segments are safe to prevent directory traversal.
 fn _resolve_cached_capsule_path_cmd(spec: string, deps: string) -> string ![io] {
     if deps.length == 0 { return ""; }
+    // Require exactly one slash (scope/name format)
+    let slash_pos = find_char(spec, "/", 0);
+    if slash_pos <= 0 { return ""; }
+    if slash_pos >= spec.length - 1 { return ""; }
+    // Reject specs with more than one slash
+    let second_slash = find_char(spec, "/", slash_pos + 1);
+    if second_slash >= 0 { return ""; }
+    let scope = substring(spec, 0, slash_pos);
+    let name = substring(spec, slash_pos + 1, spec.length);
+    if !_is_safe_capsule_segment_cmd(scope) { return ""; }
+    if !_is_safe_capsule_segment_cmd(name) { return ""; }
     // Convert spec to the display name used in capsule.toml
     let display_name = _display_capsule_name_cmd(spec);
     let version = _lookup_dep_version_cmd(deps, display_name);
     if version.length == 0 { return ""; }
+    if !_is_safe_capsule_version_cmd(version) { return ""; }
     // Build cache path: ~/.sfn/cache/capsules/{scope}/{name}/{version}/src/mod.sfn
     let home = _get_home_cmd();
     if home.length == 0 { return ""; }
-    let slash_pos = find_char(spec, "/", 0);
-    if slash_pos < 0 { return ""; }
-    let scope = substring(spec, 0, slash_pos);
-    let name = substring(spec, slash_pos + 1, spec.length);
     return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
 }
 
@@ -333,11 +368,41 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
     let mut next_visited = visited;
     let mut remove: _RelativeImportSpanCmd[] = [];
 
-    // Read project dependencies once for cached capsule resolution
+    // Read project dependencies once for cached capsule resolution.
+    // Try capsule.toml in base_dir first, then CWD as fallback, then
+    // walk up from base_dir to find the nearest capsule.toml.
     let mut project_deps: string = "";
-    if fs.exists("capsule.toml") {
-        let toml_text = fs.readFile("capsule.toml");
-        project_deps = toml_get_dependencies(toml_text);
+    let mut toml_found: boolean = false;
+    if base_dir.length > 0 {
+        let base_toml = _path_join_cmd(base_dir, "capsule.toml");
+        if fs.exists(base_toml) {
+            project_deps = toml_get_dependencies(fs.readFile(base_toml));
+            toml_found = true;
+        }
+        if !toml_found {
+            // Walk up parent directories from base_dir
+            let mut search_dir = _dirname_cmd(base_dir);
+            let mut walk_depth: number = 0;
+            loop {
+                if walk_depth >= 10 { break; }
+                if search_dir.length == 0 { break; }
+                let parent_toml = _path_join_cmd(search_dir, "capsule.toml");
+                if fs.exists(parent_toml) {
+                    project_deps = toml_get_dependencies(fs.readFile(parent_toml));
+                    toml_found = true;
+                    break;
+                }
+                let next_dir = _dirname_cmd(search_dir);
+                if strings_equal(next_dir, search_dir) { break; }
+                search_dir = next_dir;
+                walk_depth += 1;
+            }
+        }
+    }
+    if !toml_found {
+        if fs.exists("capsule.toml") {
+            project_deps = toml_get_dependencies(fs.readFile("capsule.toml"));
+        }
     }
 
     let mut index: number = 0;
@@ -370,12 +435,15 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
             }
         }
         if !is_capsule_import {
-            // Scoped import not found in capsule.toml — hard error
+            // Scoped import not found in capsule.toml — hard error.
+            // Exclude runtime/* (pre-built) and relative imports.
             if _has_slash_cmd(spec) {
                 if !_has_prefix_cmd(spec, "./") {
                     if !_has_prefix_cmd(spec, "../") {
-                        print.err("error: dependency \"" + spec + "\" is not declared in capsule.toml — run `sfn add " + spec + "` first");
-                        return "";
+                        if !_has_prefix_cmd(spec, "runtime/") {
+                            print.err("error: dependency \"" + spec + "\" is not declared in capsule.toml — run `sfn add " + spec + "` first");
+                            return "";
+                        }
                     }
                 }
             }

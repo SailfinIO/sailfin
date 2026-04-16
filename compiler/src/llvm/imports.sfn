@@ -104,7 +104,9 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
             if index_of(module_path, "/") >= 0 {
                 if !starts_with(module_path, "./") {
                     if !starts_with(module_path, "../") {
-                        is_cached_capsule = true;
+                        if !starts_with(module_path, "runtime/") {
+                            is_cached_capsule = true;
+                        }
                     }
                 }
             }
@@ -436,13 +438,27 @@ fn resolve_cached_capsule_source(module: string, deps: string, home_dir: string)
     if module.length == 0 { return ""; }
     if home_dir.length == 0 { return ""; }
     // Only handle scoped imports (containing "/") that aren't relative
+    // or runtime-internal
     let slash = index_of(module, "/");
-    if slash < 0 { return ""; }
+    if slash <= 0 { return ""; }
     if starts_with(module, "./") { return ""; }
     if starts_with(module, "../") { return ""; }
+    if starts_with(module, "runtime/") { return ""; }
+    // Require exactly scope/name (no extra slashes)
+    let slash2 = index_of(substring(module, slash + 1, module.length), "/");
+    if slash2 >= 0 { return ""; }
+    if slash >= module.length - 1 { return ""; }
 
     let scope = substring(module, 0, slash);
     let name = substring(module, slash + 1, module.length);
+
+    // Reject path traversal in segments
+    let mut _safe: boolean = true;
+    if scope == "." { _safe = false; }
+    if scope == ".." { _safe = false; }
+    if name == "." { _safe = false; }
+    if name == ".." { _safe = false; }
+    if !_safe { return ""; }
 
     // Look up the display name in deps. For sfn-scoped capsules, the dep
     // key is the bare name (e.g. "cli" for "sfn/cli").  For third-party
@@ -486,6 +502,13 @@ fn resolve_cached_capsule_source(module: string, deps: string, home_dir: string)
         start = end + 1;
     }
     if version.length == 0 { return ""; }
+    // Reject path traversal in version
+    let mut _version_safe: boolean = true;
+    if version == "." { _version_safe = false; }
+    if version == ".." { _version_safe = false; }
+    if index_of(version, "/") >= 0 { _version_safe = false; }
+    if index_of(version, "\\") >= 0 { _version_safe = false; }
+    if !_version_safe { return ""; }
 
     // Construct cache path
     let cached_path = home_dir + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
