@@ -245,6 +245,22 @@ fn toml_get_description(text: string) -> string {
     return t.description;
 }
 
+// Return dependencies as a newline-separated string of "capsule=version" pairs.
+// Callers can split on "\n" and "=" to recover individual entries without
+// needing the SailToml struct across module boundaries.
+fn toml_get_dependencies(text: string) -> string {
+    let t = _parse_toml_internal(text);
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= t.dependencies.length { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + t.dependencies[i].capsule + "=" + t.dependencies[i].version;
+        i += 1;
+    }
+    return out;
+}
+
 // Generate a capsule.toml string from individual fields
 fn toml_generate(name: string, version: string, description: string, entry: string) -> string {
     let mut out: string = "[capsule]\n";

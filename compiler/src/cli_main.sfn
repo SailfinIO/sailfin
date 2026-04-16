@@ -19,6 +19,7 @@ import {
     handle_init_command,
     handle_login_command,
     handle_guillermo_command,
+    inline_imports_for_source,
 } from "./cli_commands";
 import { resolve_compiler_version } from "./version";
 
@@ -582,8 +583,11 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         let ll_path = "build/sailfin/run.ll";
         let exe_path = "build/sailfin/run";
 
-        // compile + link into build/sailfin/run then execute
-        let source = fs.readFile(input_path);
+        // Inline imports (relative, stdlib, and capsule deps from capsule.toml)
+        // before compilation so dependency sources are available.
+        let raw_source = fs.readFile(input_path);
+        let base_dir = _dirname(input_path);
+        let source = inline_imports_for_source(raw_source, base_dir);
         let module_name = module_name_from_path(input_path);
         let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
         if !ok {

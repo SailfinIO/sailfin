@@ -22,6 +22,7 @@ import {
 import { split_lines } from "./native_ir_utils_text";
 import { substring } from "./string_utils";
 import { Token } from "./token";
+import { toml_get_dependencies } from "./toml_parser";
 import { typecheck_diagnostics, typecheck_has_errors } from "./typecheck";
 
 fn _ms_since(start_ms: number) -> number {
@@ -835,5 +836,16 @@ fn repeat_character(ch: string, count: number) -> string {
         index += 1;
     }
     return result;
+}
+
+// Read the project's capsule.toml and return dependencies as a
+// newline-separated "name=version" string. Returns "" if no capsule.toml
+// is found in the current directory.
+fn read_project_dependencies() -> string ![io] {
+    if !fs.exists("capsule.toml") {
+        return "";
+    }
+    let text = fs.readFile("capsule.toml");
+    return toml_get_dependencies(text);
 }
 

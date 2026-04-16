@@ -1,0 +1,136 @@
+// Regression tests for toml_get_dependencies() and capsule dependency
+// resolution helpers used by compile-time dependency resolution.
+
+import { toml_get_dependencies } from "../../src/toml_parser";
+
+// -- Local helpers for string assertions --
+
+fn _str_eq(a: string, b: string) -> boolean {
+    return strings_equal(a, b);
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _starts_with(value: string, prefix: string) -> boolean {
+    if prefix.length > value.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= prefix.length { break; }
+        if value[i] != prefix[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// Lookup a dep version from the newline-separated deps string.
+// Duplicated here to test the format contract independently.
+fn _test_lookup_dep(deps: string, name: string) -> string {
+    if deps.length == 0 { return ""; }
+    let mut start: number = 0;
+    let len = deps.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if deps[end] == "\n" { break; }
+            end += 1;
+        }
+        let mut eq_pos: number = -1;
+        let mut ei: number = start;
+        loop {
+            if ei >= end { break; }
+            if deps[ei] == "=" {
+                eq_pos = ei;
+                break;
+            }
+            ei += 1;
+        }
+        if eq_pos > start {
+            let dep_name = substring(deps, start, eq_pos);
+            if strings_equal(dep_name, name) {
+                return substring(deps, eq_pos + 1, end);
+            }
+        }
+        start = end + 1;
+    }
+    return "";
+}
+
+// -- Tests --
+
+test "toml_get_dependencies: empty toml returns empty string" {
+    let toml = "[capsule]\nname = \"test\"\nversion = \"0.1.0\"\n";
+    let deps = toml_get_dependencies(toml);
+    assert _str_eq(deps, "");
+}
+
+test "toml_get_dependencies: empty deps section returns empty string" {
+    let toml = "[capsule]\nname = \"test\"\n\n[dependencies]\n\n[build]\nentry = \"src/main.sfn\"\n";
+    let deps = toml_get_dependencies(toml);
+    assert _str_eq(deps, "");
+}
+
+test "toml_get_dependencies: single dependency" {
+    let toml = "[capsule]\nname = \"myapp\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"cli\" = \"0.2.0\"\n";
+    let deps = toml_get_dependencies(toml);
+    assert _str_eq(deps, "cli=0.2.0");
+}
+
+test "toml_get_dependencies: multiple dependencies" {
+    let toml = "[capsule]\nname = \"myapp\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"cli\" = \"0.2.0\"\n\"acme/router\" = \"1.0.0\"\n";
+    let deps = toml_get_dependencies(toml);
+    assert _contains(deps, "cli=0.2.0");
+    assert _contains(deps, "acme/router=1.0.0");
+    // Should be newline-separated
+    assert _contains(deps, "\n");
+}
+
+test "toml_get_dependencies: round-trip lookup" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"1.0.0\"\n\n[dependencies]\n\"cli\" = \"0.2.0\"\n\"http\" = \"0.3.1\"\n\"acme/router\" = \"2.0.0\"\n";
+    let deps = toml_get_dependencies(toml);
+
+    // Lookup each dependency by name
+    assert _str_eq(_test_lookup_dep(deps, "cli"), "0.2.0");
+    assert _str_eq(_test_lookup_dep(deps, "http"), "0.3.1");
+    assert _str_eq(_test_lookup_dep(deps, "acme/router"), "2.0.0");
+
+    // Non-existent dependency returns ""
+    assert _str_eq(_test_lookup_dep(deps, "nonexistent"), "");
+    assert _str_eq(_test_lookup_dep(deps, ""), "");
+}
+
+test "toml_get_dependencies: dev-deps are excluded" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"1.0.0\"\n\n[dependencies]\n\"cli\" = \"0.2.0\"\n\n[dev-dependencies]\n\"test\" = \"0.1.0\"\n";
+    let deps = toml_get_dependencies(toml);
+    assert _str_eq(_test_lookup_dep(deps, "cli"), "0.2.0");
+    // dev-deps should NOT appear
+    assert _str_eq(_test_lookup_dep(deps, "test"), "");
+}
+
+test "toml_get_dependencies: quoted keys preserved" {
+    let toml = "[capsule]\nname = \"app\"\nversion = \"1.0.0\"\n\n[dependencies]\n\"sfn/special\" = \"0.5.0\"\n";
+    let deps = toml_get_dependencies(toml);
+    // The toml parser strips quotes, so the key should be "sfn/special"
+    assert _str_eq(_test_lookup_dep(deps, "sfn/special"), "0.5.0");
+}
