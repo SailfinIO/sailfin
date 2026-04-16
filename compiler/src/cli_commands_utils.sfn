@@ -305,12 +305,10 @@ fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
 
 fn _is_stdlib_capsule_cmd(name: string) -> boolean {
     if name == "cli" { return true; }
-    if name == "collections" { return true; }
     if name == "crypto" { return true; }
     if name == "fmt" { return true; }
     if name == "fs" { return true; }
     if name == "http" { return true; }
-    if name == "io" { return true; }
     if name == "json" { return true; }
     if name == "layers" { return true; }
     if name == "log" { return true; }

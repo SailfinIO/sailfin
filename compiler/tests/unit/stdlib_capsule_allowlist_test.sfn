@@ -1,0 +1,85 @@
+// Regression tests for the stdlib capsule allowlist used by
+// _is_stdlib_capsule_cmd and _resolve_capsule_name_cmd.
+//
+// These guard against drift between the allowlist in cli_commands_utils.sfn
+// and the actual set of capsules shipped under `capsules/sfn/`. When a new
+// capsule is added to the tree, the allowlist must be updated in the same
+// change — if this test fails, either add the capsule dir or remove the
+// stale allowlist entry.
+
+import {
+    _is_stdlib_capsule_cmd,
+    _resolve_capsule_name_cmd,
+    _display_capsule_name_cmd,
+} from "../../src/cli_commands_utils";
+
+// -- Known-good: every capsule currently under capsules/sfn/ --
+
+test "stdlib allowlist: every shipped sfn/* capsule is recognized" {
+    assert _is_stdlib_capsule_cmd("cli");
+    assert _is_stdlib_capsule_cmd("crypto");
+    assert _is_stdlib_capsule_cmd("fmt");
+    assert _is_stdlib_capsule_cmd("fs");
+    assert _is_stdlib_capsule_cmd("http");
+    assert _is_stdlib_capsule_cmd("json");
+    assert _is_stdlib_capsule_cmd("layers");
+    assert _is_stdlib_capsule_cmd("log");
+    assert _is_stdlib_capsule_cmd("losses");
+    assert _is_stdlib_capsule_cmd("math");
+    assert _is_stdlib_capsule_cmd("net");
+    assert _is_stdlib_capsule_cmd("nn");
+    assert _is_stdlib_capsule_cmd("os");
+    assert _is_stdlib_capsule_cmd("path");
+    assert _is_stdlib_capsule_cmd("sync");
+    assert _is_stdlib_capsule_cmd("tensor");
+    assert _is_stdlib_capsule_cmd("test");
+    assert _is_stdlib_capsule_cmd("time");
+    assert _is_stdlib_capsule_cmd("toml");
+}
+
+// -- Known-bad: effect names and removed entries must not be in the list --
+
+test "stdlib allowlist: effect names and unknown names are rejected" {
+    // `io`, `clock`, `model`, `gpu`, `rand` are effect names, not capsules.
+    assert !_is_stdlib_capsule_cmd("io");
+    assert !_is_stdlib_capsule_cmd("clock");
+    assert !_is_stdlib_capsule_cmd("model");
+    assert !_is_stdlib_capsule_cmd("gpu");
+    assert !_is_stdlib_capsule_cmd("rand");
+    // `collections` was removed from the allowlist — no in-tree capsule.
+    assert !_is_stdlib_capsule_cmd("collections");
+    // Arbitrary unknowns.
+    assert !_is_stdlib_capsule_cmd("");
+    assert !_is_stdlib_capsule_cmd("nonexistent");
+    assert !_is_stdlib_capsule_cmd("Cli");
+}
+
+// -- Name normalization --
+
+test "resolve capsule name: bare stdlib name gets sfn/ scope" {
+    assert _resolve_capsule_name_cmd("cli") == "sfn/cli";
+    assert _resolve_capsule_name_cmd("fmt") == "sfn/fmt";
+    assert _resolve_capsule_name_cmd("toml") == "sfn/toml";
+}
+
+test "resolve capsule name: scoped names pass through unchanged" {
+    assert _resolve_capsule_name_cmd("sfn/cli") == "sfn/cli";
+    assert _resolve_capsule_name_cmd("acme/router") == "acme/router";
+}
+
+test "resolve capsule name: unknown bare names pass through unchanged" {
+    assert _resolve_capsule_name_cmd("nonexistent") == "nonexistent";
+    assert _resolve_capsule_name_cmd("io") == "io";
+}
+
+// -- Display name (inverse of resolve) --
+
+test "display capsule name: sfn/* strips the scope" {
+    assert _display_capsule_name_cmd("sfn/cli") == "cli";
+    assert _display_capsule_name_cmd("sfn/fmt") == "fmt";
+}
+
+test "display capsule name: non-sfn scopes are preserved" {
+    assert _display_capsule_name_cmd("acme/router") == "acme/router";
+    assert _display_capsule_name_cmd("cli") == "cli";
+}

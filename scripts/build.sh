@@ -367,9 +367,10 @@ COMPILER_MANIFEST="$REPO_ROOT/compiler/capsule.toml"
 [[ -d "$RUNTIME_SRC" ]] || die "missing runtime sources: $RUNTIME_SRC"
 
 # Parse the [dependencies] table in compiler/capsule.toml and echo one
-# "scope/name" per line. Accepts bare-name keys (sfn/<name>) and quoted
-# scoped keys ("scope/name"). Comments and blank lines are ignored. The
-# parser stops when another [section] header is encountered.
+# "scope/name" per line. Accepts bare keys (<name>, normalized to
+# "sfn/<name>") and quoted scoped keys ("scope/name"). Comments and blank
+# lines are ignored. The parser stops when another [section] header is
+# encountered.
 collect_compiler_capsule_deps() {
     local manifest="$1"
     [[ -f "$manifest" ]] || return 0
@@ -407,15 +408,23 @@ while IFS= read -r -d '' f; do
 done < <(find "$RUNTIME_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
 
 # Pull in declared capsule dependencies. For now we resolve them against
-# the in-tree `capsules/<scope>/<name>/src/` layout. Third-party capsules
-# that only exist in the user cache (~/.sfn/cache/capsules/...) are not
-# yet handled here — add support once we actually take a third-party dep.
+# the in-tree `capsules/<scope>/<name>/src/` layout.
+#
+# Resolution policy:
+#   - sfn/* deps MUST have an in-tree source — fail fast if missing, since
+#     that indicates a stale allowlist or a typo in compiler/capsule.toml.
+#   - Third-party (non-sfn/) deps that only live in the user cache
+#     (~/.sfn/cache/capsules/...) are warned-and-skipped for now. Wire
+#     them up here once the compiler actually takes a third-party dep.
 CAPSULE_DEP_COUNT=0
 while IFS= read -r dep; do
     [[ -n "$dep" ]] || continue
     cap_dir="$CAPSULES_DIR/$dep/src"
     if [[ ! -d "$cap_dir" ]]; then
-        warn "capsule dep '$dep' has no in-tree source at $cap_dir; skipping"
+        if [[ "$dep" == sfn/* ]]; then
+            die "capsule dep '$dep' declared in compiler/capsule.toml but no in-tree source at $cap_dir"
+        fi
+        warn "capsule dep '$dep' has no in-tree source at $cap_dir; skipping (user-cache resolution not yet wired)"
         continue
     fi
     while IFS= read -r -d '' f; do
@@ -458,13 +467,16 @@ module_name_from_path() {
     fi
 
     # Capsule sources: capsules/<scope>/<name>/src/<rel>.sfn → capsule__<scope>__<name>__<rel>
-    if [[ "$src" == "$CAPSULES_DIR"/*/*/src/* ]]; then
+    # The regex handles arbitrary depth under src/ (e.g. src/foo/bar.sfn).
+    if [[ "$src" == "$CAPSULES_DIR"/* ]]; then
         rel="${src#"$CAPSULES_DIR/"}"
-        rel="${rel%.sfn}"
-        # strip the /src/ segment so it doesn't collide with compiler src/ paths
-        rel="${rel/\/src\//\/}"
-        echo "capsule__${rel//\//__}"
-        return
+        if [[ "$rel" =~ ^[^/]+/[^/]+/src/ ]]; then
+            rel="${rel%.sfn}"
+            # strip the /src/ segment so it doesn't collide with compiler src/ paths
+            rel="${rel/\/src\//\/}"
+            echo "capsule__${rel//\//__}"
+            return
+        fi
     fi
 
     # Fallback: basename
@@ -495,13 +507,16 @@ slug_from_path() {
 
     # Capsule sources use <scope>/<name>/<rel> as the slug so that
     # `import { ... } from "<scope>/<name>"` resolves via the standard
-    # "<slug>/mod" fallback in the compiler's import resolver.
-    if [[ "$src" == "$CAPSULES_DIR"/*/*/src/* ]]; then
+    # "<slug>/mod" fallback in the compiler's import resolver. The regex
+    # handles arbitrary depth under src/ (e.g. src/foo/bar.sfn).
+    if [[ "$src" == "$CAPSULES_DIR"/* ]]; then
         rel="${src#"$CAPSULES_DIR/"}"
-        rel="${rel%.sfn}"
-        rel="${rel/\/src\//\/}"
-        echo "$rel"
-        return
+        if [[ "$rel" =~ ^[^/]+/[^/]+/src/ ]]; then
+            rel="${rel%.sfn}"
+            rel="${rel/\/src\//\/}"
+            echo "$rel"
+            return
+        fi
     fi
 
     basename "$src" .sfn
