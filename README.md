@@ -1,7 +1,7 @@
 # Sailfin
 
 Sailfin is a compiled systems language with compile-time capability enforcement.
-Every function declares what it can do — IO, network, clock, and more — and the compiler proves your code stays within those boundaries before it runs.
+Every function declares what it can do — IO, network, clock, and more — and the compiler checks direct usage of effectful operations against those declarations before your code runs.
 
 ## Why Sailfin
 
@@ -20,7 +20,7 @@ The self-hosted native compiler (`build/native/sailfin`) supports:
 - Effect annotations (`![io, net, model, clock]`) — the effect checker enforces capabilities at compile time
 - String interpolation (`{{ expression }}`), decorators, `async fn`
 - Standard library capsules: `fmt`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`, `time`, `cli`, `http` (partial)
-- Package registry at `registry.sailfin.dev` with capability auditing
+- Package registry at `registry.sailfin.dev` with dependency resolution (capability auditing planned)
 - `print(value)` / `print.err(value)` for stdout/stderr output
 - `sfn test` for running `*_test.sfn` files
 

@@ -17,19 +17,17 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         <p>
           Every function in Sailfin declares what it can do. A function that reads files declares
           <code>![io]</code>. A function that calls an API declares <code>![net]</code>. A function
-          that does neither declares nothing — and the compiler guarantees it stays that way.
+          that does neither declares nothing, and direct effect usage is checked against that
+          declaration at compile time.
         </p>
-        <pre><code>// This won't compile — fetch_data needs ![net] but main only grants ![io]
+        <pre><code>// This won't compile — http.get requires ![net], but main only declares ![io]
 fn main() ![io] {"{"}
-    let data = fetch_data("https://api.example.com");  // ERROR
-{"}"}
-
-fn fetch_data(url: string) -> string ![net] {"{"}
-    return http.get(url).body;
+    let data = http.get("https://api.example.com").body;  // ERROR
 {"}"}</code></pre>
         <p>
           No other mainstream systems language offers this. Go, Rust, and Zig all rely on convention
-          and documentation to track side effects. Sailfin enforces it at compile time.
+          and documentation to track side effects. Sailfin checks declared effects at compile time,
+          with transitive call-graph enforcement on the roadmap.
         </p>
       </section>
 
@@ -70,6 +68,15 @@ fn fetch_data(url: string) -> string ![net] {"{"}
             for CLI tools, build systems, and developer infrastructure.
           </p>
         </div>
+      </section>
+
+      <section id="security">
+        <h2>Security by Design</h2>
+        <p>
+          Sailfin makes security properties visible in function signatures. Effects are explicit and
+          compiler-checked, so code that needs network, file system, or model access must declare
+          those capabilities up front. Dependency-tree capability auditing is on the roadmap.
+        </p>
       </section>
 
       <section id="comparison">
