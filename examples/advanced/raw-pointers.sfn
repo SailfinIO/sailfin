@@ -1,10 +1,10 @@
 // examples/advanced/raw-pointers.sfn
 
 fn main() ![unsafe, io] {
-    let mut value -> i32 = 42;
+    let mut value: i32 = 42;
 
     // Take a raw pointer to the value
-    let ptr -> *i32 = &raw value;
+    let ptr: *i32 = &raw value;
 
     unsafe {
         // Read through the pointer

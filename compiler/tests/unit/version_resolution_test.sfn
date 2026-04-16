@@ -1,0 +1,127 @@
+// Tests for the capsule.toml-based version resolution system.
+//
+// These tests verify that:
+//   1. version_from_capsule_toml() correctly parses a version from TOML text
+//   2. sailfin_version() returns a valid semver-ish fallback
+//   3. resolve_compiler_version() finds capsule.toml from the repo root
+
+import {
+    sailfin_version,
+    version_from_capsule_toml,
+    resolve_compiler_version,
+} from "../../src/version";
+
+fn _index_of(haystack: string, needle: string) -> number {
+    if needle.length == 0 {
+        return 0;
+    }
+    if haystack.length < needle.length {
+        return -1;
+    }
+    let mut i: number = 0;
+    loop {
+        if i + needle.length > haystack.length {
+            break;
+        }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length {
+                break;
+            }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches {
+            return i;
+        }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return _index_of(haystack, needle) >= 0;
+}
+
+fn _starts_with_digit(s: string) -> boolean {
+    if s.length == 0 { return false; }
+    return _contains("0123456789", s[0]);
+}
+
+// ---------------------------------------------------------------------------
+// Pure function tests (no IO needed)
+// ---------------------------------------------------------------------------
+
+test "version: fallback returns valid semver-ish string" {
+    let v = sailfin_version();
+    assert v.length > 0;
+    assert _contains(v, ".");
+    assert !_contains(v, " ");
+    assert _starts_with_digit(v);
+}
+
+test "version: version_from_capsule_toml parses version" {
+    let toml = "[capsule]\nname = \"test\"\nversion = \"1.2.3\"\n";
+    let v = version_from_capsule_toml(toml);
+    assert strings_equal(v, "1.2.3");
+}
+
+test "version: version_from_capsule_toml parses prerelease version" {
+    let toml = "[capsule]\nname = \"test\"\nversion = \"0.5.1-alpha.3\"\n";
+    let v = version_from_capsule_toml(toml);
+    assert strings_equal(v, "0.5.1-alpha.3");
+}
+
+test "version: version_from_capsule_toml returns fallback for empty input" {
+    let v = version_from_capsule_toml("");
+    // Should return the fallback version (non-empty, semver-ish)
+    assert v.length > 0;
+    assert _contains(v, ".");
+}
+
+test "version: version_from_capsule_toml returns fallback for missing version key" {
+    let toml = "[capsule]\nname = \"test\"\n";
+    let v = version_from_capsule_toml(toml);
+    // No explicit version key → strict extractor returns "", so we get
+    // the baked-in fallback (which is sailfin_version()).
+    let fallback = sailfin_version();
+    assert strings_equal(v, fallback);
+}
+
+test "version: version_from_capsule_toml handles extra fields" {
+    let toml = "[capsule]\nname = \"myapp\"\nversion = \"2.0.0\"\ndescription = \"A test app\"\n\n[build]\nentry = \"src/main.sfn\"\n";
+    let v = version_from_capsule_toml(toml);
+    assert strings_equal(v, "2.0.0");
+}
+
+// ---------------------------------------------------------------------------
+// IO-based tests (require capsule.toml on disk — run from repo root)
+// ---------------------------------------------------------------------------
+
+test "version: resolve_compiler_version returns non-empty string" ![io] {
+    let v = resolve_compiler_version();
+    assert v.length > 0;
+    assert _contains(v, ".");
+    assert _starts_with_digit(v);
+}
+
+test "version: resolve_compiler_version matches capsule.toml when available" ![io] {
+    // When running from the repo root, compiler/capsule.toml should exist.
+    // Read it directly and verify the resolved version starts with the
+    // capsule version (it may have a +dev.<hash> suffix from the build stamp).
+    let toml_path = "compiler/capsule.toml";
+    assert fs.exists(toml_path);
+    let toml_text = fs.readFile(toml_path);
+    let capsule_ver = version_from_capsule_toml(toml_text);
+
+    let v = resolve_compiler_version();
+    // The resolved version must start with the capsule version.
+    // It may be exactly the capsule version, or <capsule_ver>+dev.<hash>.
+    assert v.length >= capsule_ver.length;
+    let prefix = substring(v, 0, capsule_ver.length);
+    assert strings_equal(prefix, capsule_ver);
+}

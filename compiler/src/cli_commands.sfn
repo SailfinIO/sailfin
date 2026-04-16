@@ -12,11 +12,18 @@ import {
 import {
     toml_get_name,
     toml_get_version,
+    toml_get_dependencies,
     toml_generate,
     toml_add_dependency,
     toml_add_dev_dependency,
 } from "./toml_parser";
+import {
+    lock_get_versions,
+    lock_get_version,
+    lock_add_entry,
+} from "./lock";
 import { substring } from "./string_utils";
+import { format_source } from "./tools/fmt";
 
 import {
     _ends_with_cmd,
@@ -51,21 +58,21 @@ import {
 } from "./cli_commands_utils";
 
 struct _RelativeImportSpanCmd {
-    start -> number;
-    end -> number;
-    spec -> string;
+    start: number;
+    end: number;
+    spec: string;
 }
 
-fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCmd[] {
-    let mut spans -> _RelativeImportSpanCmd[] = [];
+fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[] {
+    let mut spans: _RelativeImportSpanCmd[] = [];
     let source_len = source.length;
-    let mut steps -> number = 0;
+    let mut steps: number = 0;
     let max_steps = source_len * 6 + 1000;
-    let mut i -> number = 0;
-    let mut in_string -> boolean = false;
-    let mut escaping -> boolean = false;
-    let mut in_line_comment -> boolean = false;
-    let mut in_block_comment -> boolean = false;
+    let mut i: number = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
 
     loop {
         if i >= source_len { break; }
@@ -109,13 +116,13 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
 
         if _word_matches_cmd(source, i, "import") {
             let stmt_start = i;
-            let mut j -> number = i;
-            let mut s_in_string -> boolean = false;
-            let mut s_escaping -> boolean = false;
-            let mut s_in_line_comment -> boolean = false;
-            let mut s_in_block_comment -> boolean = false;
-            let mut spec -> string = "";
-            let mut stmt_end -> number = -1;
+            let mut j: number = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: number = -1;
 
             loop {
                 if j >= source_len { break; }
@@ -157,7 +164,7 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
                         loop {
                             if k >= source_len { break; }
                             let wk = _byte_at_cmd(source, k);
-                            let mut ws -> boolean = false;
+                            let mut ws: boolean = false;
                             if wk == " " { ws = true; }
                             if wk == "\t" { ws = true; }
                             if wk == "\n" { ws = true; }
@@ -169,7 +176,7 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
                             if _byte_at_cmd(source, k) == "\"" {
                                 k += 1;
                                 let start = k;
-                                let mut esc -> boolean = false;
+                                let mut esc: boolean = false;
                                 loop {
                                     if k >= source_len { break; }
                                     let sk = _byte_at_cmd(source, k);
@@ -190,14 +197,14 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
             }
             if stmt_end > 0 {
                 if spec.length > 0 {
-                    let mut is_relative -> boolean = false;
+                    let mut is_relative: boolean = false;
                     if _has_prefix_cmd(spec, "./") { is_relative = true; }
                     if _has_prefix_cmd(spec, "../") { is_relative = true; }
                     if is_relative {
                         spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
                     } else {
                         // Check for capsule imports: bare name ("test") or scoped ("sfn/test")
-                        let mut is_capsule -> boolean = false;
+                        let mut is_capsule: boolean = false;
                         if _is_stdlib_capsule_cmd(spec) { is_capsule = true; }
                         if !is_capsule {
                             if _has_prefix_cmd(spec, "sfn/") {
@@ -207,6 +214,16 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
                         }
                         if is_capsule {
                             spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                        } else {
+                            // Non-stdlib scoped import (e.g. "sfn/cli", "acme/router") —
+                            // may be a cached capsule dependency declared in capsule.toml.
+                            // Exclude runtime/* imports which are pre-built and handled
+                            // separately by the linker.
+                            if _has_slash_cmd(spec) {
+                                if !_has_prefix_cmd(spec, "runtime/") {
+                                    spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                                }
+                            }
                         }
                     }
                 }
@@ -218,7 +235,7 @@ fn _collect_relative_import_spans_cmd(source -> string) -> _RelativeImportSpanCm
     return spans;
 }
 
-fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string {
+fn _resolve_import_path_cmd(base_dir: string, spec: string) -> string {
     let mut current_base = base_dir;
     let mut remainder = spec;
     loop {
@@ -238,12 +255,12 @@ fn _resolve_import_path_cmd(base_dir -> string, spec -> string) -> string {
     return path + ".sfn";
 }
 
-fn _strip_relative_import_lines_cmd(source -> string) -> string {
+fn _strip_relative_import_lines_cmd(source: string) -> string {
     let spans = _collect_relative_import_spans_cmd(source);
     if spans.length == 0 { return source; }
-    let mut out -> string = "";
-    let mut keep_start -> number = 0;
-    let mut index -> number = 0;
+    let mut out: string = "";
+    let mut keep_start: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= spans.length { break; }
         let span = spans[index];
@@ -259,22 +276,166 @@ fn _strip_relative_import_lines_cmd(source -> string) -> string {
     return out;
 }
 
-fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> number, visited -> string[]) -> string ![io] {
+// Look up a dependency version from the deps string returned by
+// toml_get_dependencies(). The deps string has the format
+// "name=version\nname=version\n...". Returns the version string
+// if found, or "" if not.
+fn _lookup_dep_version_cmd(deps: string, name: string) -> string {
+    if deps.length == 0 { return ""; }
+    if name.length == 0 { return ""; }
+    let mut start: number = 0;
+    let len = deps.length;
+    loop {
+        if start >= len { break; }
+        // Find end of current line
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if deps[end] == "\n" { break; }
+            end += 1;
+        }
+        // Parse "capsule=version" from this line
+        let mut eq_pos: number = -1;
+        let mut ei: number = start;
+        loop {
+            if ei >= end { break; }
+            if deps[ei] == "=" {
+                eq_pos = ei;
+                break;
+            }
+            ei += 1;
+        }
+        if eq_pos > start {
+            let dep_name = substring(deps, start, eq_pos);
+            if strings_equal(dep_name, name) {
+                return substring(deps, eq_pos + 1, end);
+            }
+        }
+        start = end + 1;
+    }
+    return "";
+}
+
+// Validate a path segment (scope, name) contains no traversal or illegal chars.
+fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    if strings_equal(value, ".") { return false; }
+    if strings_equal(value, "..") { return false; }
+    if find_char(value, "/", 0) >= 0 { return false; }
+    if find_char(value, "\\", 0) >= 0 { return false; }
+    return true;
+}
+
+// Validate a version string contains no traversal sequences.
+fn _is_safe_capsule_version_cmd(value: string) -> boolean {
+    if value.length == 0 { return false; }
+    if strings_equal(value, ".") { return false; }
+    if strings_equal(value, "..") { return false; }
+    if find_char(value, "/", 0) >= 0 { return false; }
+    if find_char(value, "\\", 0) >= 0 { return false; }
+    if _string_contains_cmd(value, "..") { return false; }
+    return true;
+}
+
+// Resolve a capsule import spec (e.g. "sfn/cli") to the cached source path
+// using the dependency version from capsule.toml. Returns "" if not found.
+// Validates that spec is exactly "scope/name" (single slash) and that all
+// path segments are safe to prevent directory traversal.
+fn _resolve_cached_capsule_path_cmd(spec: string, deps: string) -> string ![io] {
+    if deps.length == 0 { return ""; }
+    // Require exactly one slash (scope/name format)
+    let slash_pos = find_char(spec, "/", 0);
+    if slash_pos <= 0 { return ""; }
+    if slash_pos >= spec.length - 1 { return ""; }
+    // Reject specs with more than one slash
+    let second_slash = find_char(spec, "/", slash_pos + 1);
+    if second_slash >= 0 { return ""; }
+    let scope = substring(spec, 0, slash_pos);
+    let name = substring(spec, slash_pos + 1, spec.length);
+    if !_is_safe_capsule_segment_cmd(scope) { return ""; }
+    if !_is_safe_capsule_segment_cmd(name) { return ""; }
+    // Convert spec to the display name used in capsule.toml
+    let display_name = _display_capsule_name_cmd(spec);
+    let version = _lookup_dep_version_cmd(deps, display_name);
+    if version.length == 0 { return ""; }
+    if !_is_safe_capsule_version_cmd(version) { return ""; }
+    // Build cache path: ~/.sfn/cache/capsules/{scope}/{name}/{version}/src/mod.sfn
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
+}
+
+fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number, visited: string[]) -> string ![io] {
     if depth <= 0 {
         return _strip_relative_import_lines_cmd(source);
     }
     let spans = _collect_relative_import_spans_cmd(source);
-    let mut combined -> string = "";
+    let mut combined: string = "";
     let mut next_visited = visited;
-    let mut remove -> _RelativeImportSpanCmd[] = [];
-    let mut index -> number = 0;
+    let mut remove: _RelativeImportSpanCmd[] = [];
+
+    // Read project dependencies once for cached capsule resolution.
+    // Try capsule.toml in base_dir first, then CWD as fallback, then
+    // walk up from base_dir to find the nearest capsule.toml.
+    // When capsule.lock exists alongside capsule.toml, prefer locked versions.
+    let mut project_deps: string = "";
+    let mut toml_found: boolean = false;
+    let mut lock_deps: string = "";
+    let mut lock_found: boolean = false;
+    if base_dir.length > 0 {
+        let base_toml = _path_join_cmd(base_dir, "capsule.toml");
+        if fs.exists(base_toml) {
+            project_deps = toml_get_dependencies(fs.readFile(base_toml));
+            toml_found = true;
+            let base_lock = _path_join_cmd(base_dir, "capsule.lock");
+            if fs.exists(base_lock) {
+                lock_deps = lock_get_versions(fs.readFile(base_lock));
+                lock_found = true;
+            }
+        }
+        if !toml_found {
+            // Walk up parent directories from base_dir
+            let mut search_dir = _dirname_cmd(base_dir);
+            let mut walk_depth: number = 0;
+            loop {
+                if walk_depth >= 10 { break; }
+                if search_dir.length == 0 { break; }
+                let parent_toml = _path_join_cmd(search_dir, "capsule.toml");
+                if fs.exists(parent_toml) {
+                    project_deps = toml_get_dependencies(fs.readFile(parent_toml));
+                    toml_found = true;
+                    let parent_lock = _path_join_cmd(search_dir, "capsule.lock");
+                    if fs.exists(parent_lock) {
+                        lock_deps = lock_get_versions(fs.readFile(parent_lock));
+                        lock_found = true;
+                    }
+                    break;
+                }
+                let next_dir = _dirname_cmd(search_dir);
+                if strings_equal(next_dir, search_dir) { break; }
+                search_dir = next_dir;
+                walk_depth += 1;
+            }
+        }
+    }
+    if !toml_found {
+        if fs.exists("capsule.toml") {
+            project_deps = toml_get_dependencies(fs.readFile("capsule.toml"));
+            toml_found = true;
+            if fs.exists("capsule.lock") {
+                lock_deps = lock_get_versions(fs.readFile("capsule.lock"));
+                lock_found = true;
+            }
+        }
+    }
+    let mut index: number = 0;
     loop {
         if index >= spans.length { break; }
         let spec = spans[index].spec;
 
         // Resolve capsule imports to filesystem paths
-        let mut dep_path -> string = "";
-        let mut is_capsule_import -> boolean = false;
+        let mut dep_path: string = "";
+        let mut is_capsule_import: boolean = false;
         if _is_stdlib_capsule_cmd(spec) {
             let resolved_name = _resolve_capsule_name_cmd(spec);
             dep_path = "capsules/" + resolved_name + "/src/mod.sfn";
@@ -286,7 +447,41 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
                 is_capsule_import = true;
             }
         }
+        // Check cached capsule dependencies — prefer lockfile, fall back to capsule.toml
         if !is_capsule_import {
+            if _has_slash_cmd(spec) {
+                let mut cached_path: string = "";
+                if lock_found {
+                    cached_path = _resolve_cached_capsule_path_cmd(spec, lock_deps);
+                    if cached_path.length == 0 {
+                        // Not in lockfile — fall back to capsule.toml and warn
+                        cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
+                        if cached_path.length > 0 {
+                            print.err("warning: dependency \"" + spec + "\" is not in capsule.lock — run `sfn add " + spec + "` to lock it");
+                        }
+                    }
+                } else {
+                    cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
+                }
+                if cached_path.length > 0 {
+                    dep_path = cached_path;
+                    is_capsule_import = true;
+                }
+            }
+        }
+        if !is_capsule_import {
+            // Scoped import not found in capsule.toml — hard error.
+            // Exclude runtime/* (pre-built) and relative imports.
+            if _has_slash_cmd(spec) {
+                if !_has_prefix_cmd(spec, "./") {
+                    if !_has_prefix_cmd(spec, "../") {
+                        if !_has_prefix_cmd(spec, "runtime/") {
+                            print.err("error: dependency \"" + spec + "\" is not declared in capsule.toml — run `sfn add " + spec + "` first");
+                            return "";
+                        }
+                    }
+                }
+            }
             dep_path = _resolve_import_path_cmd(base_dir, spec);
         }
 
@@ -294,9 +489,19 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
         if !is_prebuilt {
             if !_string_list_contains_cmd(next_visited, dep_path) {
                 if !fs.exists(dep_path) {
-                    print("test import inlining: missing dependency: " + dep_path);
-                    index += 1;
-                    continue;
+                    // Directory import fallback: ./dir -> dir/mod.sfn
+                    let mod_fallback = substring(dep_path, 0, dep_path.length - 4) + "/mod.sfn";
+                    if fs.exists(mod_fallback) {
+                        dep_path = mod_fallback;
+                    } else {
+                        if is_capsule_import {
+                            print.err("error: cached capsule not found: " + dep_path + " — run `sfn add " + spec + "` to download it");
+                        } else {
+                            print.err("import inlining: missing dependency: " + dep_path);
+                        }
+                        index += 1;
+                        continue;
+                    }
                 }
                 let dep_source = fs.readFile(dep_path);
                 next_visited.push(dep_path);
@@ -310,8 +515,8 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
     }
     let mut stripped = source;
     if remove.length > 0 {
-        let mut out -> string = "";
-        let mut keep_start -> number = 0;
+        let mut out: string = "";
+        let mut keep_start: number = 0;
         index = 0;
         loop {
             if index >= remove.length { break; }
@@ -331,8 +536,8 @@ fn _inline_relative_imports_cmd(source -> string, base_dir -> string, depth -> n
     return combined;
 }
 
-fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> string) -> number ![io] {
-    let mut args -> string[] = ["clang", "-O0", "-o", out_path, ll_path];
+fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string) -> number ![io] {
+    let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
     if runtime_root.length > 0 {
         let src_dir = runtime_root + "/native/src";
         let include_dir = runtime_root + "/native/include";
@@ -341,7 +546,7 @@ fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> s
                 args.push("-I" + include_dir);
             }
             let entries = fs.listDirectory(src_dir);
-            let mut i -> number = 0;
+            let mut i: number = 0;
             loop {
                 if i >= entries.length { break; }
                 if _ends_with_cmd(entries[i], ".c") {
@@ -358,14 +563,14 @@ fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> s
             args.push(globals_ll);
         }
         // Link prelude object — check known locations
-        let prelude_paths -> string[] = [
+        let prelude_paths: string[] = [
             "build/selfhost/native/obj/runtime/prelude.o",
             "build/native/obj/runtime/prelude.o",
             "build/native/obj/prelude.o",
             runtime_root + "/native/obj/runtime/prelude.o",
             runtime_root + "/native/obj/prelude.o",
         ];
-        let mut pi -> number = 0;
+        let mut pi: number = 0;
         loop {
             if pi >= prelude_paths.length { break; }
             if fs.exists(prelude_paths[pi]) {
@@ -396,8 +601,8 @@ fn _clang_link_test_cmd(ll_path -> string, out_path -> string, runtime_root -> s
 
 // ---- Exported command handlers ----
 
-fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io] {
-    let mut root -> string = ".";
+fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
+    let mut root: string = ".";
     if args.length == 2 {
         root = args[1];
     } else if args.length != 1 {
@@ -425,7 +630,7 @@ fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io]
     let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
     let skip_inlining = fs.exists("build/sailfin/.skip_test_inlining");
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= test_files.length { break; }
         let path = test_files[index];
@@ -477,16 +682,31 @@ fn handle_test_command(args -> string[], runtime_root -> string) -> number ![io]
     return 0;
 }
 
-fn handle_publish_command(args -> string[]) -> number ![io] {
-    if args.length != 1 {
-        print("usage: sfn publish");
+fn handle_publish_command(args: string[]) -> number ![io] {
+    if args.length > 2 {
+        print("usage: sfn publish [path]");
         return 2;
     }
-    if !fs.exists("capsule.toml") {
+    let mut capsule_dir: string = "";
+    if args.length == 2 {
+        capsule_dir = args[1];
+        if capsule_dir.length > 0 {
+            if substring(capsule_dir, capsule_dir.length - 1, capsule_dir.length) == "/" {
+                capsule_dir = substring(capsule_dir, 0, capsule_dir.length - 1);
+            }
+        }
+    }
+    let mut toml_path: string = "capsule.toml";
+    let mut src_dir: string = "src";
+    if capsule_dir.length > 0 {
+        toml_path = capsule_dir + "/capsule.toml";
+        src_dir = capsule_dir + "/src";
+    }
+    if !fs.exists(toml_path) {
         print("no capsule.toml found — run `sfn init` first");
         return 1;
     }
-    let toml_text = fs.readFile("capsule.toml");
+    let toml_text = fs.readFile(toml_path);
     let pkg_name = toml_get_name(toml_text);
     let pkg_version = toml_get_version(toml_text);
     if pkg_name.length == 0 {
@@ -498,7 +718,7 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
         return 1;
     }
 
-    let mut token -> string = "";
+    let mut token: string = "";
     let env_token = _get_env_cmd("SFN_TOKEN");
     if env_token.length > 0 {
         token = env_token;
@@ -518,72 +738,129 @@ fn handle_publish_command(args -> string[]) -> number ![io] {
     }
 
     print("packaging " + pkg_name + "@" + pkg_version + "...");
-    let mut payload -> string = "SFNPKG/1\n";
+    let mut payload: string = "SFNPKG/1\n";
     payload = payload + "--- path: capsule.toml\n" + toml_text + "\n";
 
-    let src_files = _collect_sfn_files_cmd("src", 10);
-    let mut fi -> number = 0;
+    let src_files = _collect_sfn_files_cmd(src_dir, 10);
+    let mut fi: number = 0;
     loop {
         if fi >= src_files.length { break; }
         let file_path = src_files[fi];
         let content = fs.readFile(file_path);
-        payload = payload + "--- path: " + file_path + "\n" + content + "\n";
+        let mut rel_path: string = file_path;
+        if capsule_dir.length > 0 {
+            rel_path = substring(file_path, capsule_dir.length + 1, file_path.length);
+        }
+        payload = payload + "--- path: " + rel_path + "\n" + content + "\n";
         fi += 1;
     }
 
-    let payload_tmp = "/tmp/.sfn_payload_tmp";
+    let payload_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    if payload_tmp.length == 0 {
+        print("failed to create temp file");
+        return 1;
+    }
     fs.writeFile(payload_tmp, payload);
-    let digest = _sha256_of_file_cmd(payload_tmp);
-    if digest.length == 0 {
+    let raw_digest = _sha256_of_file_cmd(payload_tmp);
+    if raw_digest.length == 0 {
         print("failed to compute digest");
         process.run(["rm", "-f", payload_tmp]);
         return 1;
     }
+    let digest = "sha256:" + raw_digest;
 
-    let body_tmp = "/tmp/.sfn_publish_body_tmp";
+    let body_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    if body_tmp.length == 0 {
+        print("failed to create temp file");
+        process.run(["rm", "-f", payload_tmp]);
+        return 1;
+    }
     let build_json_rc = process.run(["sh", "-c",
             "printf '{\"type\":\"capsule\",\"capsule\":\"" + pkg_name
             + "\",\"version\":\"" + pkg_version
             + "\",\"digest\":\"" + digest
             + "\",\"content_b64\":\"' > " + body_tmp
-            + " && base64 -w0 '" + payload_tmp + "' >> " + body_tmp
+            + " && base64 < '" + payload_tmp + "' | tr -d '\\n' >> " + body_tmp
             + " && printf '\",\"meta\":{}}' >> " + body_tmp
     ]);
     if build_json_rc != 0 {
         print("failed to build publish payload");
         process.run(["rm", "-f", payload_tmp]);
+        process.run(["rm", "-f", body_tmp]);
         return 1;
     }
 
     let auth_header = "Bearer " + token;
     let registry_url = "https://registry.sailfin.dev/api/publish";
     print("publishing to " + registry_url + "...");
-    let response = _curl_post_json_cmd(registry_url, body_tmp, auth_header);
+    let response_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let header_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
+    let curl_rc = process.run(["curl", "-sS", "-X", "POST",
+            "-H", "Content-Type: application/json",
+            "-H", "Authorization: " + auth_header,
+            "-d", "@" + body_tmp,
+            "-o", response_tmp,
+            "-D", header_tmp,
+            registry_url
+    ]);
     process.run(["rm", "-f", payload_tmp]);
     process.run(["rm", "-f", body_tmp]);
-    if response.length == 0 {
-        print("publish failed — check your token and network connection");
+    let mut response: string = "";
+    if fs.exists(response_tmp) {
+        response = _toml_trim_cmd(fs.readFile(response_tmp));
+        process.run(["rm", "-f", response_tmp]);
+    }
+    let mut status: string = "";
+    if fs.exists(header_tmp) {
+        let headers = fs.readFile(header_tmp);
+        process.run(["rm", "-f", header_tmp]);
+        let sp = find_char(headers, " ", 0);
+        if sp >= 0 {
+            if headers.length >= sp + 4 {
+                status = substring(headers, sp + 1, sp + 4);
+            }
+        }
+    }
+    if curl_rc != 0 {
+        print("publish failed — could not reach registry");
+        if response.length > 0 { print("server: " + response); }
         return 1;
+    }
+    if status.length >= 1 {
+        if substring(status, 0, 1) != "2" {
+            print("publish failed (HTTP " + status + ")");
+            if response.length > 0 { print("server: " + response); }
+            return 1;
+        }
     }
     print(response);
     return 0;
 }
 
-fn handle_add_command(args -> string[]) -> number ![io] {
-    let mut is_dev -> boolean = false;
-    let mut capsule_arg -> string = "";
-    if args.length == 2 {
-        capsule_arg = args[1];
-    } else if args.length == 3 {
-        if strings_equal(args[1], "--dev") {
+fn handle_add_command(args: string[]) -> number ![io] {
+    let mut is_dev: boolean = false;
+    let mut is_update: boolean = false;
+    let mut capsule_arg: string = "";
+    // Parse flags: sfn add [--dev] [--update] <capsule>
+    let mut argi: number = 1;
+    loop {
+        if argi >= args.length { break; }
+        if strings_equal(args[argi], "--dev") {
             is_dev = true;
-            capsule_arg = args[2];
+        } else if strings_equal(args[argi], "--update") {
+            is_update = true;
         } else {
-            print("usage: sfn add [--dev] <capsule>");
-            return 2;
+            if capsule_arg.length > 0 {
+                print("error: unexpected argument \"" + args[argi] + "\"");
+                print("usage: sfn add [--dev] [--update] <capsule>");
+                return 2;
+            }
+            capsule_arg = args[argi];
         }
-    } else {
-        print("usage: sfn add [--dev] <capsule>");
+        argi += 1;
+    }
+    if capsule_arg.length == 0 {
+        print("usage: sfn add [--dev] [--update] <capsule>");
         return 2;
     }
 
@@ -595,14 +872,33 @@ fn handle_add_command(args -> string[]) -> number ![io] {
     let registry_name = _resolve_capsule_name_cmd(capsule_arg);
     let display_name = _display_capsule_name_cmd(registry_name);
 
-    print("fetching registry index...");
-    let latest_version = _shell_read_cmd(
-        "curl -sfS 'https://registry.sailfin.dev/api/index.json'"
-        + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + registry_name + "',{}); print(c.get('latest',''))\" 2>/dev/null"
-    );
-    if latest_version.length == 0 {
-        print("capsule not found in registry: " + registry_name);
-        return 1;
+    // If --update was not passed and a lockfile entry exists, use the locked version.
+    let mut use_locked: boolean = false;
+    let mut locked_version: string = "";
+    if !is_update {
+        if fs.exists("capsule.lock") {
+            let lock_text = fs.readFile("capsule.lock");
+            locked_version = lock_get_version(lock_text, display_name);
+            if locked_version.length > 0 {
+                use_locked = true;
+            }
+        }
+    }
+
+    let mut resolved_version: string = "";
+    if use_locked {
+        resolved_version = locked_version;
+        print("using locked version: " + display_name + "@" + resolved_version);
+    } else {
+        print("fetching registry index...");
+        resolved_version = _shell_read_cmd(
+            "curl -sfS 'https://registry.sailfin.dev/api/index.json'"
+            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + registry_name + "',{}); print(c.get('latest',''))\" 2>/dev/null"
+        );
+        if resolved_version.length == 0 {
+            print("capsule not found in registry: " + registry_name);
+            return 1;
+        }
     }
 
     let slash_pos = find_char(registry_name, "/", 0);
@@ -612,13 +908,27 @@ fn handle_add_command(args -> string[]) -> number ![io] {
     }
     let scope = substring(registry_name, 0, slash_pos);
     let name = substring(registry_name, slash_pos + 1, registry_name.length);
+    // Validate path segments to prevent directory traversal (especially
+    // when resolved_version comes from capsule.lock).
+    if !_is_safe_capsule_segment_cmd(scope) {
+        print("invalid capsule scope: " + scope);
+        return 1;
+    }
+    if !_is_safe_capsule_segment_cmd(name) {
+        print("invalid capsule name: " + name);
+        return 1;
+    }
+    if !_is_safe_capsule_version_cmd(resolved_version) {
+        print("invalid version (possible path traversal): " + resolved_version);
+        return 1;
+    }
 
     let home = _get_home_cmd();
     if home.length == 0 {
         print("could not determine home directory");
         return 1;
     }
-    let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + latest_version;
+    let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + resolved_version;
     _ensure_dir_recursive_cmd(home + "/.sfn");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules");
@@ -626,9 +936,9 @@ fn handle_add_command(args -> string[]) -> number ![io] {
     _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules/" + scope + "/" + name);
     _ensure_dir_recursive_cmd(cache_base);
 
-    let pkg_path = cache_base + "/" + latest_version + ".sfnpkg";
-    let download_url = "https://registry.sailfin.dev/api/capsules/" + scope + "/" + name + "/" + latest_version + ".sfnpkg";
-    print("downloading " + display_name + "@" + latest_version + "...");
+    let pkg_path = cache_base + "/" + resolved_version + ".sfnpkg";
+    let download_url = "https://registry.sailfin.dev/api/capsules/" + scope + "/" + name + "/" + resolved_version + ".sfnpkg";
+    print("downloading " + display_name + "@" + resolved_version + "...");
     let dl_rc = _curl_download_cmd(download_url, pkg_path);
     if dl_rc != 0 {
         print("failed to download: " + download_url);
@@ -639,22 +949,42 @@ fn handle_add_command(args -> string[]) -> number ![io] {
     _extract_sfnpkg_cmd(pkg_content, cache_base);
 
     let toml_text = fs.readFile("capsule.toml");
-    let mut updated_toml -> string = "";
+    let mut updated_toml: string = "";
     if is_dev {
-        updated_toml = toml_add_dev_dependency(toml_text, display_name, latest_version);
+        updated_toml = toml_add_dev_dependency(toml_text, display_name, resolved_version);
     } else {
-        updated_toml = toml_add_dependency(toml_text, display_name, latest_version);
+        updated_toml = toml_add_dependency(toml_text, display_name, resolved_version);
     }
     fs.writeFile("capsule.toml", updated_toml);
+
+    // Compute integrity hash of the downloaded package and write capsule.lock
+    let raw_hash = _sha256_of_file_cmd(pkg_path);
+    if raw_hash.length == 0 {
+        print("warning: could not compute integrity hash for " + pkg_path + " — lockfile entry will have no hash");
+    }
+    let mut pkg_hash: string = "";
+    if raw_hash.length > 0 {
+        pkg_hash = "sha256:" + raw_hash;
+    }
+    let mut existing_lock: string = "";
+    if fs.exists("capsule.lock") {
+        existing_lock = fs.readFile("capsule.lock");
+    }
+    let updated_lock = lock_add_entry(existing_lock, display_name, resolved_version, pkg_hash);
+    fs.writeFile("capsule.lock", updated_lock);
+
     if is_dev {
-        print("added dev dependency: " + display_name + "@" + latest_version);
+        print("added dev dependency: " + display_name + "@" + resolved_version);
     } else {
-        print("added " + display_name + "@" + latest_version);
+        print("added " + display_name + "@" + resolved_version);
+    }
+    if is_update {
+        print("lock entry updated for " + display_name);
     }
     return 0;
 }
 
-fn handle_init_command(args -> string[]) -> number ![io] {
+fn handle_init_command(args: string[]) -> number ![io] {
     if args.length != 1 {
         print("usage: sfn init");
         return 2;
@@ -664,10 +994,10 @@ fn handle_init_command(args -> string[]) -> number ![io] {
         return 1;
     }
     let cwd = _get_env_cmd("PWD");
-    let mut pkg_name -> string = "my-capsule";
+    let mut pkg_name: string = "my-capsule";
     if cwd.length > 0 {
-        let mut last_slash -> number = -1;
-        let mut si -> number = 0;
+        let mut last_slash: number = -1;
+        let mut si: number = 0;
         loop {
             if si >= cwd.length { break; }
             if substring(cwd, si, si + 1) == "/" {
@@ -693,13 +1023,13 @@ fn handle_init_command(args -> string[]) -> number ![io] {
     return 0;
 }
 
-fn handle_login_command(args -> string[]) -> number ![io] {
+fn handle_login_command(args: string[]) -> number ![io] {
     if args.length > 2 {
         print("usage: sfn login [token]");
         return 2;
     }
 
-    let mut token -> string = "";
+    let mut token: string = "";
     if args.length == 2 {
         token = _toml_trim_cmd(args[1]);
     } else {
@@ -815,4 +1145,105 @@ fn handle_guillermo_command() -> number ![io] {
     return 0;
 }
 
-export { handle_test_command, handle_publish_command, handle_add_command, handle_init_command, handle_login_command, handle_guillermo_command };
+// ═══════════════════════════════════════════════════════════════════
+// sfn fmt — canonical formatter
+// ═══════════════════════════════════════════════════════════════════
+
+fn handle_fmt_command(args: string[]) -> number ![io] {
+    let mut check_mode = false;
+    let mut write_mode = false;
+    let mut paths: string[] = [];
+
+    let mut i = 1;
+    loop {
+        if i >= args.length { break; }
+        let arg = args[i];
+        if strings_equal(arg, "--check") {
+            check_mode = true;
+        } else if strings_equal(arg, "--write") {
+            write_mode = true;
+        } else {
+            paths.push(arg);
+        }
+        i += 1;
+    }
+
+    if check_mode {
+        if write_mode {
+            print("error: --check and --write are mutually exclusive");
+            return 1;
+        }
+    }
+
+    if paths.length == 0 {
+        print("usage: sfn fmt [--check] [--write] <path...>");
+        return 1;
+    }
+
+    // Collect .sfn files from all paths
+    let mut files: string[] = [];
+    let mut pi = 0;
+    loop {
+        if pi >= paths.length { break; }
+        let collected = _collect_sfn_files_cmd(paths[pi], 10);
+        let mut ci = 0;
+        loop {
+            if ci >= collected.length { break; }
+            files.push(collected[ci]);
+            ci += 1;
+        }
+        pi += 1;
+    }
+
+    if files.length == 0 {
+        print("no .sfn files found");
+        return 1;
+    }
+
+    let mut would_change = 0;
+    let mut fi = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        let source = fs.readFile(path);
+        let formatted = format_source(source);
+
+        if check_mode {
+            if !strings_equal(source, formatted) {
+                print(path);
+                would_change += 1;
+            }
+        } else if write_mode {
+            if !strings_equal(source, formatted) {
+                fs.writeFile(path, formatted);
+            }
+        } else {
+            // Strip trailing newline since print() adds one
+            if formatted.length > 0 {
+                if strings_equal(substring(formatted, formatted.length - 1, formatted.length), "\n") {
+                    print(substring(formatted, 0, formatted.length - 1));
+                } else {
+                    print(formatted);
+                }
+            }
+        }
+        fi += 1;
+    }
+
+    if check_mode {
+        if would_change > 0 {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+// Inline all imports (relative, stdlib, and cached capsule deps) for a
+// source file.  Exposed so `sfn run` can resolve capsule deps before
+// compilation.
+fn inline_imports_for_source(source: string, base_dir: string) -> string ![io] {
+    return _inline_relative_imports_cmd(source, base_dir, 10, []);
+}
+
+export { handle_test_command, handle_publish_command, handle_add_command, handle_init_command, handle_login_command, handle_guillermo_command, handle_fmt_command, inline_imports_for_source };

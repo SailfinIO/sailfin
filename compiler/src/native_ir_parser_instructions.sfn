@@ -33,14 +33,14 @@ fn initial_instruction_depth_state() -> InstructionDepthState {
     return InstructionDepthState { paren_depth: 0, bracket_depth: 0, brace_depth: 0, in_string: false, escaping: false };
 }
 
-fn update_instruction_depth_state(state -> InstructionDepthState, text -> string) -> InstructionDepthState {
+fn update_instruction_depth_state(state: InstructionDepthState, text: string) -> InstructionDepthState {
     let mut paren_depth = state.paren_depth;
     let mut bracket_depth = state.bracket_depth;
     let mut brace_depth = state.brace_depth;
     let mut in_string = state.in_string;
     let mut escaping = state.escaping;
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= text.length {
             break;
@@ -117,7 +117,7 @@ fn update_instruction_depth_state(state -> InstructionDepthState, text -> string
     };
 }
 
-fn instruction_requires_continuation(state -> InstructionDepthState) -> boolean {
+fn instruction_requires_continuation(state: InstructionDepthState) -> boolean {
     if state.in_string {
         return true;
     }
@@ -133,7 +133,7 @@ fn instruction_requires_continuation(state -> InstructionDepthState) -> boolean 
     return false;
 }
 
-fn instruction_supports_multiline(line -> string) -> boolean {
+fn instruction_supports_multiline(line: string) -> boolean {
     if starts_with(line, "eval ") {
         return true;
     }
@@ -146,7 +146,7 @@ fn instruction_supports_multiline(line -> string) -> boolean {
     return false;
 }
 
-fn instruction_line_requires_operator_continuation(line -> string) -> boolean {
+fn instruction_line_requires_operator_continuation(line: string) -> boolean {
     let trimmed = trim_text(line);
     if trimmed.length == 0 {
         return false;
@@ -157,7 +157,7 @@ fn instruction_line_requires_operator_continuation(line -> string) -> boolean {
             return false;
         }
         let ch = trimmed[index];
-        let mut _if360 -> boolean = false;
+        let mut _if360: boolean = false;
         if ch == " " { _if360 = true; }
         if ch == "\t" { _if360 = true; }
         if ch == "\n" { _if360 = true; }
@@ -175,7 +175,7 @@ fn instruction_line_requires_operator_continuation(line -> string) -> boolean {
     return false;
 }
 
-fn is_native_directive_line(line -> string) -> boolean {
+fn is_native_directive_line(line: string) -> boolean {
     let trimmed = trim_text(line);
     if trimmed.length == 0 {
         return false;
@@ -183,7 +183,7 @@ fn is_native_directive_line(line -> string) -> boolean {
     return starts_with(trimmed, ".");
 }
 
-fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGatherResult {
+fn gather_instruction(lines: string[], start_index: number) -> InstructionGatherResult {
     if start_index >= lines.length {
         return InstructionGatherResult { text: "", lines_consumed: 0 };
     }
@@ -202,8 +202,8 @@ fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGa
         }
     }
 
-    let mut combined -> string = first_line;
-    let mut consumed -> number = 0;
+    let mut combined: string = first_line;
+    let mut consumed: number = 0;
     let mut index = start_index + 1;
     let mut last_nonempty = first_line;
     loop {
@@ -233,7 +233,7 @@ fn gather_instruction(lines -> string[], start_index -> number) -> InstructionGa
     return InstructionGatherResult { text: normalized, lines_consumed: consumed };
 }
 
-fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> NativeSourceSpan?) -> InstructionParseResult {
+fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSourceSpan?) -> InstructionParseResult {
     if line == "noop" {
         return InstructionParseResult { instructions: [NativeInstruction.Noop()], span_consumed: false, value_span_consumed: false };
     }
@@ -308,7 +308,7 @@ fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> Na
     }
     if starts_with(line, ".return") {
         let remainder = trim_text(strip_prefix(line, ".return"));
-        let mut expression -> string = "";
+        let mut expression: string = "";
         if remainder.length > 0 {
             expression = trim_trailing_delimiters(remainder);
         }
@@ -327,7 +327,7 @@ fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> Na
             };
         }
         let separator = line[3];
-        let mut _if361 -> boolean = false;
+        let mut _if361: boolean = false;
         if separator == " " { _if361 = true; }
         if separator == "\t" { _if361 = true; }
         if _if361 {
@@ -348,7 +348,7 @@ fn parse_instruction(line -> string, span -> NativeSourceSpan?, value_span -> Na
     }
     if starts_with(line, "eval let ") {
         let body = trim_text(strip_prefix(line, "eval let "));
-        let mut is_mutable -> boolean = false;
+        let mut is_mutable: boolean = false;
         if starts_with(body, "mut ") {
             is_mutable = true;
             body = trim_text(strip_prefix(body, "mut "));

@@ -45,12 +45,12 @@ import { struct_declares_interface, struct_satisfies_interface_structurally, joi
 // =============================================================================
 
 struct EnumLayoutFixupResult {
-    enums -> NativeEnum[];
-    diagnostics -> string[];
+    enums: NativeEnum[];
+    diagnostics: string[];
 }
 
-fn is_unit_enum(enum_def -> NativeEnum) -> boolean {
-    let mut index -> number = 0;
+fn is_unit_enum(enum_def: NativeEnum) -> boolean {
+    let mut index: number = 0;
     loop {
         if index >= enum_def.variants.length {
             break;
@@ -64,11 +64,11 @@ fn is_unit_enum(enum_def -> NativeEnum) -> boolean {
     return true;
 }
 
-fn synthesize_unit_enum_layout(enum_def -> NativeEnum) -> NativeEnumLayout {
-    let tag_size -> number = 4;
-    let tag_align -> number = 4;
-    let mut layouts -> NativeEnumVariantLayout[] = [];
-    let mut index -> number = 0;
+fn synthesize_unit_enum_layout(enum_def: NativeEnum) -> NativeEnumLayout {
+    let tag_size: number = 4;
+    let tag_align: number = 4;
+    let mut layouts: NativeEnumVariantLayout[] = [];
+    let mut index: number = 0;
     loop {
         if index >= enum_def.variants.length {
             break;
@@ -94,18 +94,18 @@ fn synthesize_unit_enum_layout(enum_def -> NativeEnum) -> NativeEnumLayout {
     };
 }
 
-fn enum_layout_matches_variants(enum_def -> NativeEnum, layout -> NativeEnumLayout) -> boolean {
+fn enum_layout_matches_variants(enum_def: NativeEnum, layout: NativeEnumLayout) -> boolean {
     if layout.variants.length != enum_def.variants.length {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= enum_def.variants.length {
             break;
         }
         let expected = enum_def.variants[index].name;
-        let mut found -> boolean = false;
-        let mut layout_index -> number = 0;
+        let mut found: boolean = false;
+        let mut layout_index: number = 0;
         loop {
             if layout_index >= layout.variants.length {
                 break;
@@ -124,16 +124,16 @@ fn enum_layout_matches_variants(enum_def -> NativeEnum, layout -> NativeEnumLayo
     return true;
 }
 
-fn fixup_enum_layouts(enums -> NativeEnum[]) -> EnumLayoutFixupResult {
+fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
     if enums.length > 10000 {
         return EnumLayoutFixupResult {
             enums: [],
             diagnostics: ["llvm lowering: enum layout fixup skipped (too many enums=" + number_to_string(enums.length) + ")"],
         };
     }
-    let mut diagnostics -> string[] = [];
-    let mut updated -> NativeEnum[] = [];
-    let mut index -> number = 0;
+    let mut diagnostics: string[] = [];
+    let mut updated: NativeEnum[] = [];
+    let mut index: number = 0;
     loop {
         if index >= enums.length {
             break;
@@ -176,13 +176,13 @@ fn empty_type_context() -> TypeContext {
     return TypeContext { structs: [], enums: [], interfaces: [], vtables: [] };
 }
 
-fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfaces -> NativeInterface[]) -> TypeContextBuild {
+fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: NativeInterface[]) -> TypeContextBuild {
     // Guard against absurdly large collections that could indicate ABI corruption.
     // Use 1000000 as the limit — real programs have at most a few hundred types,
     // but corrupted lengths from cross-module ABI issues can be arbitrarily large.
     // A lower limit (e.g. 10000) incorrectly triggers on valid counts that appear
     // corrupted due to number_to_string bugs in the seed.
-    let mut _if300 -> boolean = false;
+    let mut _if300: boolean = false;
     if structs.length > 1000000 { _if300 = true; }
     if enums.length > 1000000 { _if300 = true; }
     if interfaces.length > 1000000 { _if300 = true; }
@@ -200,9 +200,9 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             ],
         };
     }
-    let mut diagnostics -> string[] = [];
-    let mut struct_entries -> StructTypeInfo[] = [];
-    let mut index -> number = 0;
+    let mut diagnostics: string[] = [];
+    let mut struct_entries: StructTypeInfo[] = [];
+    let mut index: number = 0;
     loop {
         if index >= structs.length {
             break;
@@ -216,15 +216,15 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         let layout = definition.layout;
         let sanitized = sanitize_symbol(definition.name);
         let llvm_name = "%" + sanitized;
-        let mut fields -> StructFieldInfo[] = [];
-        let mut field_index -> number = 0;
+        let mut fields: StructFieldInfo[] = [];
+        let mut field_index: number = 0;
         loop {
             if field_index >= layout.fields.length {
                 break;
             }
             let layout_field = layout.fields[field_index];
             let mapped = map_struct_field_annotation(layout_field.type_annotation);
-            let mut llvm_field_type -> string = mapped;
+            let mut llvm_field_type: string = mapped;
             if llvm_field_type.length == 0 {
                 diagnostics.push("llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
                 llvm_field_type = "i8*";
@@ -243,7 +243,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, type_annotation: layout_field.type_annotation, index: field_index, offset: layout_field.offset });
             field_index += 1;
         }
-        let mut align_value -> number = layout.align;
+        let mut align_value: number = layout.align;
         if align_value <= 0 {
             align_value = 1;
         }
@@ -251,8 +251,8 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         index += 1;
     }
 
-    let mut enum_entries -> EnumTypeInfo[] = [];
-    let mut enum_index -> number = 0;
+    let mut enum_entries: EnumTypeInfo[] = [];
+    let mut enum_index: number = 0;
     loop {
         if enum_index >= enums.length {
             break;
@@ -266,22 +266,22 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         let enum_layout = enum_def.layout;
         let sanitized_enum = sanitize_symbol(enum_def.name);
         let llvm_enum_name = "%" + sanitized_enum;
-        let mut variants -> EnumVariantInfo[] = [];
-        let mut variant_index -> number = 0;
+        let mut variants: EnumVariantInfo[] = [];
+        let mut variant_index: number = 0;
         loop {
             if variant_index >= enum_layout.variants.length {
                 break;
             }
             let variant_layout = enum_layout.variants[variant_index];
-            let mut variant_fields -> StructFieldInfo[] = [];
-            let mut variant_field_index -> number = 0;
+            let mut variant_fields: StructFieldInfo[] = [];
+            let mut variant_field_index: number = 0;
             loop {
                 if variant_field_index >= variant_layout.fields.length {
                     break;
                 }
                 let variant_field = variant_layout.fields[variant_field_index];
                 let mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation);
-                let mut llvm_variant_field_type -> string = mapped_variant_type;
+                let mut llvm_variant_field_type: string = mapped_variant_type;
                 if llvm_variant_field_type.length == 0 {
                     diagnostics.push("llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
                     llvm_variant_field_type = "i8*";
@@ -310,12 +310,12 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             });
             variant_index += 1;
         }
-        let mut enum_align_value -> number = enum_layout.align;
+        let mut enum_align_value: number = enum_layout.align;
         if enum_align_value <= 0 {
             enum_align_value = 1;
         }
-        let mut max_payload_size -> number = 0;
-        let mut payload_scan -> number = 0;
+        let mut max_payload_size: number = 0;
+        let mut payload_scan: number = 0;
         loop {
             if payload_scan >= variants.length {
                 break;
@@ -341,8 +341,8 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
     }
 
     // Build interface type information
-    let mut interface_entries -> InterfaceTypeInfo[] = [];
-    let mut interface_index -> number = 0;
+    let mut interface_entries: InterfaceTypeInfo[] = [];
+    let mut interface_index: number = 0;
     loop {
         if interface_index >= interfaces.length {
             break;
@@ -360,8 +360,8 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
     }
 
     // Build vtable information for each struct-interface pair
-    let mut vtable_entries -> VTableInfo[] = [];
-    let mut struct_vtable_index -> number = 0;
+    let mut vtable_entries: VTableInfo[] = [];
+    let mut struct_vtable_index: number = 0;
     loop {
         if struct_vtable_index >= structs.length {
             break;
@@ -371,15 +371,15 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
         if implements == null {
             implements = [];
         }
-        let mut implements_index -> number = 0;
+        let mut implements_index: number = 0;
         loop {
             if implements_index >= implements.length {
                 break;
             }
             let interface_name = implements[implements_index];
             // Find the interface definition
-            let mut interface_def_opt -> NativeInterface? = null;
-            let mut search_idx -> number = 0;
+            let mut interface_def_opt: NativeInterface? = null;
+            let mut search_idx: number = 0;
             loop {
                 if search_idx >= interfaces.length {
                     break;
@@ -404,16 +404,16 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
             let vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const";
 
             // Build vtable entries for each method
-            let mut vtable_method_entries -> VTableEntry[] = [];
-            let mut sig_index -> number = 0;
+            let mut vtable_method_entries: VTableEntry[] = [];
+            let mut sig_index: number = 0;
             loop {
                 if sig_index >= interface_def.signatures.length {
                     break;
                 }
                 let signature = interface_def.signatures[sig_index];
                 // Build function pointer type: return_type (param_types...)*
-                let mut param_types -> string[] = ["i8*"];  // First param is always self as i8*
-                let mut param_idx -> number = 1;  // Skip self since we already added it
+                let mut param_types: string[] = ["i8*"];  // First param is always self as i8*
+                let mut param_idx: number = 1;  // Skip self since we already added it
                 loop {
                     if param_idx >= signature.parameters.length {
                         break;
@@ -446,7 +446,7 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
 
         // Structural conformance: if the struct doesn't explicitly declare `implements`,
         // but does provide compatible methods, synthesize a vtable anyway.
-        let mut interface_scan -> number = 0;
+        let mut interface_scan: number = 0;
         loop {
             if interface_scan >= interfaces.length {
                 break;
@@ -460,15 +460,15 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
                     let vtable_type_name = "%vtable." + sanitized_struct + "." + sanitized_iface;
                     let vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const";
 
-                    let mut vtable_method_entries -> VTableEntry[] = [];
-                    let mut sig_index -> number = 0;
+                    let mut vtable_method_entries: VTableEntry[] = [];
+                    let mut sig_index: number = 0;
                     loop {
                         if sig_index >= interface_def.signatures.length {
                             break;
                         }
                         let signature = interface_def.signatures[sig_index];
-                        let mut param_types -> string[] = ["i8*"];
-                        let mut param_idx -> number = 1;
+                        let mut param_types: string[] = ["i8*"];
+                        let mut param_idx: number = 1;
                         loop {
                             if param_idx >= signature.parameters.length {
                                 break;
@@ -509,43 +509,43 @@ fn build_type_context(structs -> NativeStruct[], enums -> NativeEnum[], interfac
 // Append Helpers
 // =============================================================================
 
-fn append_struct_type_info(values -> StructTypeInfo[], value -> StructTypeInfo) -> StructTypeInfo[] {
+fn append_struct_type_info(values: StructTypeInfo[], value: StructTypeInfo) -> StructTypeInfo[] {
     let mut out = values;
     out = out.push(value);
     return out;
 }
 
-fn append_struct_field_info(values -> StructFieldInfo[], value -> StructFieldInfo) -> StructFieldInfo[] {
+fn append_struct_field_info(values: StructFieldInfo[], value: StructFieldInfo) -> StructFieldInfo[] {
     let mut out = values;
     out = out.push(value);
     return out;
 }
 
-fn append_enum_variant_info(values -> EnumVariantInfo[], value -> EnumVariantInfo) -> EnumVariantInfo[] {
+fn append_enum_variant_info(values: EnumVariantInfo[], value: EnumVariantInfo) -> EnumVariantInfo[] {
     let mut out = values;
     out = out.push(value);
     return out;
 }
 
-fn append_enum_type_info(values -> EnumTypeInfo[], value -> EnumTypeInfo) -> EnumTypeInfo[] {
+fn append_enum_type_info(values: EnumTypeInfo[], value: EnumTypeInfo) -> EnumTypeInfo[] {
     let mut out = values;
     out = out.push(value);
     return out;
 }
 
-fn append_interface_type_info(values -> InterfaceTypeInfo[], value -> InterfaceTypeInfo) -> InterfaceTypeInfo[] {
+fn append_interface_type_info(values: InterfaceTypeInfo[], value: InterfaceTypeInfo) -> InterfaceTypeInfo[] {
     let mut out = values;
     out = out.push(value);
     return out;
 }
 
-fn append_vtable_info(values -> VTableInfo[], value -> VTableInfo) -> VTableInfo[] {
+fn append_vtable_info(values: VTableInfo[], value: VTableInfo) -> VTableInfo[] {
     let mut out = values;
     out = out.push(value);
     return out;
 }
 
-fn append_vtable_entry(values -> VTableEntry[], value -> VTableEntry) -> VTableEntry[] {
+fn append_vtable_entry(values: VTableEntry[], value: VTableEntry) -> VTableEntry[] {
     let mut out = values;
     out = out.push(value);
     return out;

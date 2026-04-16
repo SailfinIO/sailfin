@@ -130,10 +130,12 @@ sfn --version
 **Example output:**
 
 ```
-sfn 0.4.0
+sfn 0.5.1
 ```
 
-The version string follows semantic versioning: `<major>.<minor>.<patch>` for stable releases, `<major>.<minor>.<patch>-alpha.<n>` for pre-releases.
+The version string follows semantic versioning: `<major>.<minor>.<patch>` for stable releases, `<major>.<minor>.<patch>-alpha.<n>` for pre-releases. Local dev builds include a git hash suffix: `<version>+dev.<hash>` (e.g. `sfn 0.5.1+dev.abc1234`).
+
+The version is read from `compiler/capsule.toml` at runtime. For installed binaries where that file is not available, a baked-in fallback is used.
 
 ---
 
@@ -160,44 +162,19 @@ The repository Makefile provides higher-level build orchestration for the self-h
 | Target | Description |
 |---|---|
 | `make compile` | Build the native compiler binary from a released seed, using the self-hosting pipeline. Skips rebuild if the binary is up to date. |
-| `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Uses `BUILD_DRIVER` to select the shell or Python build driver (default: `sh`). |
-| `make rebuild-sh` | Force rebuild using the shell build driver (`scripts/build.sh`). No Python or Conda required. |
-| `make rebuild-py` | Force rebuild using the legacy Python build driver (`scripts/selfhost_native.py`). Requires the `sailfin` Conda environment. |
+| `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Uses `scripts/build.sh` (pure shell). |
 | `make install` | Install the built compiler binary into `$(BINDIR)` (default: `~/.local/bin`). Requires `make compile` to have run first. |
 | `make check` | Compile (if needed), build a `sailfin-seedcheck` binary, verify it can run `hello-world.sfn`, then run the full test suite against it. This is the authoritative CI gate. |
-| `make smoke` | Rebuild + run smoke tests (hello-world + emit-llvm-file). Faster than `make check`. |
-| `make smoke-sh` | Smoke test using the shell build driver. |
-| `make smoke-py` | Smoke test using the Python build driver. |
 | `make test` | Run the full Sailfin-native test suite (unit + integration + e2e). Requires `make compile` first. |
 | `make test-unit` | Run unit tests from `compiler/tests/unit/*_test.sfn`. |
 | `make test-integration` | Run integration tests from `compiler/tests/integration/*_test.sfn`. |
 | `make test-e2e` | Run end-to-end tests from `compiler/tests/e2e/*_test.sfn`. |
 | `make package` | Build and package native artifacts into `dist/`. Used for release artifacts. |
 | `make fetch-seed` | Download the latest released seed compiler from GitHub Releases into `build/seed/`. Requires `GITHUB_TOKEN`. |
-| `make env` | Create or update the `sailfin` Conda environment from `environment.yml`. Only needed when `BUILD_DRIVER=py`. |
-| `make rebuild-asan` | Rebuild with AddressSanitizer instrumentation for memory error diagnostics. Requires the Python build driver. |
 | `make clean` | Remove `dist/` packaged artifacts. Does not remove build intermediates. |
 | `make clean-build` | Remove `build/` artifacts (keeps `build/seed/` by default). Pass `KEEP_SEED=0` to also remove the downloaded seed. |
 | `make clean-all` | Remove both `dist/` and `build/` artifacts completely. |
 | `make help` | Print a summary of available targets. |
-
----
-
-### Build driver selection
-
-The self-hosting build supports two drivers:
-
-| Driver | Selection | Requirements | Notes |
-|---|---|---|---|
-| `sh` | `BUILD_DRIVER=sh` (default) | `clang`, `bash` | No Python or Conda required. Preferred for most development. |
-| `py` | `BUILD_DRIVER=py` | Python, Conda, `sailfin` env | Legacy driver. Used in some CI configurations. |
-
-Switch drivers:
-
-```bash
-make rebuild BUILD_DRIVER=sh   # shell driver (default)
-make rebuild BUILD_DRIVER=py   # Python driver
-```
 
 ---
 
@@ -223,7 +200,6 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | `PREFIX` | Makefile | Installation prefix. Defaults to `$HOME/.local`. The binary is installed to `$(PREFIX)/bin`. |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
 | `GITHUB_TOKEN` | `make fetch-seed` | GitHub personal access token used to download seed releases from the `SailfinIO/sailfin` repository. Required for `make fetch-seed`. |
-| `BUILD_DRIVER` | Makefile | Select the build driver: `sh` (default, no Python) or `py` (legacy Python). |
 | `BUILD_JOBS` | Makefile | Number of parallel compile jobs. Default: `1`. |
 | `BUILD_ARGS` | Makefile | Extra arguments passed through to the build orchestrator script. |
 | `SEED` | Makefile | Path to (or name of) the seed compiler used as the bootstrap. Defaults to `sfn` (resolved from `PATH`). |

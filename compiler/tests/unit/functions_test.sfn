@@ -1,31 +1,31 @@
-fn _add(x -> number, y -> number) -> number {
+fn _add(x: number, y: number) -> number {
     return x + y;
 }
 
-fn _multiply(x -> number, y -> number) -> number {
+fn _multiply(x: number, y: number) -> number {
     return x * y;
 }
 
-fn _subtract(a -> number, b -> number) -> number {
+fn _subtract(a: number, b: number) -> number {
     return a - b;
 }
 
-fn _identity(x -> number) -> number {
+fn _identity(x: number) -> number {
     return x;
 }
 
-fn _is_even(n -> number) -> boolean {
+fn _is_even(n: number) -> boolean {
     return n % 2 == 0;
 }
 
-fn _factorial(n -> number) -> number {
+fn _factorial(n: number) -> number {
     if n <= 1 {
         return 1;
     }
     return n * _factorial(n - 1);
 }
 
-fn _fibonacci(n -> number) -> number {
+fn _fibonacci(n: number) -> number {
     if n <= 0 {
         return 0;
     }
@@ -35,7 +35,7 @@ fn _fibonacci(n -> number) -> number {
     return _fibonacci(n - 1) + _fibonacci(n - 2);
 }
 
-fn _greet(name -> string) -> string {
+fn _greet(name: string) -> string {
     return "Hello, " + name + "!";
 }
 

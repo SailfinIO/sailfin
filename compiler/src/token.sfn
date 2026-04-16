@@ -16,13 +16,13 @@ enum TokenKind {
 }
 
 struct Token {
-    kind -> TokenKind;
-    lexeme -> string;
-    line -> number;
-    column -> number;
+    kind: TokenKind;
+    lexeme: string;
+    line: number;
+    column: number;
 }
 
-fn eof_token(line -> number, column -> number) -> Token {
+fn eof_token(line: number, column: number) -> Token {
     return Token {
         kind: TokenKind.EndOfFile(),
         lexeme: "",

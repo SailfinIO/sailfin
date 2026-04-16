@@ -308,12 +308,12 @@ These patterns will compose naturally with `routine { }` and `channel()` once th
 
 Concurrency primitives (`routine`, `channel`, `await`, structured scopes) are part of the 1.0 release milestone. The `async fn` declaration syntax is already in place. The runtime scheduler and channel implementation are being built on top of the stable self-hosted LLVM backend.
 
-See [`docs/roadmap.md`](/docs/roadmap) for the current timeline and sequencing.
+See the [roadmap](/roadmap) for the current timeline and sequencing.
 
 ---
 
 ## Next Steps
 
-- [AI Constructs](/docs/learn/ai-constructs) — Models, prompts, pipelines, and tools
+- [AI Integration](/docs/learn/ai-constructs) — The `![model]` effect and the `sfn/ai` capsule
 - [Testing](/docs/learn/testing) — Testing your Sailfin code
 - [The Effect System](/docs/learn/effects) — How effects govern what code is allowed to do

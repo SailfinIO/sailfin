@@ -30,7 +30,7 @@ import { extend_string_lines, extend_string_lines_checked, ensure_intrinsic_decl
 import { lower_to_llvm_with_context, lower_to_llvm_with_parsed_context } from "./entrypoints";
 
 // Stub: kept for import-graph compatibility (main.sfn imports this symbol).
-fn lower_to_llvm_for_tests(native_module -> NativeModule) -> LoweredLLVMResult ![io] {
+fn lower_to_llvm_for_tests(native_module: NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
         return LoweredLLVMResult {

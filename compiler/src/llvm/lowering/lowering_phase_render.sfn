@@ -59,7 +59,7 @@ fn render_llvm_preamble(
     runtime_helpers: string[],
     debug_lowering: boolean
 ) -> string[] ![io] {
-    let mut lines -> string[] = [];
+    let mut lines: string[] = [];
     lines.push("source_filename = \"" + module_source_filename(module_name) + "\"");
     lines.push("");
 
@@ -87,9 +87,9 @@ fn render_llvm_preamble(
     }
     let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
     // Filter out corrupted struct type lines (empty name: "% = type ...").
-    let mut stl_valid -> boolean = struct_type_lines.length > 0;
+    let mut stl_valid: boolean = struct_type_lines.length > 0;
     if stl_valid {
-        let mut stl_check -> number = 0;
+        let mut stl_check: number = 0;
         loop {
             if stl_check >= struct_type_lines.length { break; }
             if starts_with(struct_type_lines[stl_check], "% =") {
@@ -226,7 +226,7 @@ fn render_llvm_preamble(
 // Recover struct type definitions from the .struct_info file.
 // Used when render_struct_type_definitions produced corrupted output.
 fn recover_struct_types_from_file() -> string[] ![io] {
-    let mut result -> string[] = [];
+    let mut result: string[] = [];
     if !fs.exists("build/sailfin/.struct_info") {
         return result;
     }
@@ -234,11 +234,11 @@ fn recover_struct_types_from_file() -> string[] ![io] {
     if raw.length == 0 {
         return result;
     }
-    let mut pos -> number = 0;
+    let mut pos: number = 0;
     loop {
         if pos >= raw.length { break; }
         let nl = index_of(substring(raw, pos, raw.length), "\n");
-        let mut line -> string = "";
+        let mut line: string = "";
         if nl < 0 {
             line = substring(raw, pos, raw.length);
             pos = raw.length;
@@ -256,14 +256,14 @@ fn recover_struct_types_from_file() -> string[] ![io] {
         let fields_str = substring(rest, t2 + 1, rest.length);
         if llvm.length == 0 { continue; }
         // Build field type list
-        let mut ftypes -> string = "";
+        let mut ftypes: string = "";
         if fields_str.length > 0 {
-            let mut fpos -> number = 0;
-            let mut first -> boolean = true;
+            let mut fpos: number = 0;
+            let mut first: boolean = true;
             loop {
                 if fpos >= fields_str.length { break; }
                 let comma = index_of(substring(fields_str, fpos, fields_str.length), ",");
-                let mut fentry -> string = "";
+                let mut fentry: string = "";
                 if comma < 0 {
                     fentry = substring(fields_str, fpos, fields_str.length);
                     fpos = fields_str.length;

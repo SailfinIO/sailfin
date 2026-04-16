@@ -3,7 +3,7 @@
 import { logExecution } from "runtime/prelude";
 
 @logExecution
-fn compute(x -> number) -> number ![io] {
+fn compute(x: number) -> number ![io] {
   return x * x;
 }
 

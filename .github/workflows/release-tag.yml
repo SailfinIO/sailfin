@@ -2,7 +2,7 @@ name: Release (tag)
 
 env:
   # Seed used only for bootstrapping the tag build.
-  SEED_VERSION: 0.1.1
+  SEED_VERSION: 0.5.2-alpha.1
   # Tag to build/upload (e.g. v0.1.1)
   RELEASE_TAG: ${{ inputs.tag }}
 
@@ -37,11 +37,9 @@ jobs:
           - os: macos-latest
             package_label: macos-arm64
             clang: clang
-            max_attempts: 15
           - os: ubuntu-24.04
             package_label: linux-x86_64
             clang: clang-18
-            max_attempts: 10
 
     steps:
       - name: Checkout repository (tag)
@@ -59,14 +57,6 @@ jobs:
             echo "[ci][error] expected ${RELEASE_TAG}, got $current" >&2
             exit 1
           fi
-
-      - name: Set up Miniconda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-          activate-environment: sailfin
-          environment-file: environment.yml
-          auto-update-conda: false
-          use-mamba: true
 
       - name: Install clang (Linux)
         if: runner.os == 'Linux'
@@ -88,18 +78,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
         with:
           target: ${{ matrix.package_label }}
-          max_attempts: ${{ matrix.max_attempts }}
           clang: ${{ matrix.clang }}
           seed_version: ${{ env.SEED_VERSION }}
 
       - name: Verify compiler version matches tag
-        shell: bash -l {0}
+        shell: bash {0}
         run: |
           set -euo pipefail
           expected="${RELEASE_TAG#v}"
-          file_version="$(python -c "import re, pathlib; text=pathlib.Path('compiler/src/version.sfn').read_text(encoding='utf-8'); m=re.search(r'__version__\\s*=\\s*\"([^\"]+)\"', text); print(m.group(1) if m else '')")"
+          file_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' compiler/capsule.toml)"
           if [ "$file_version" != "$expected" ]; then
-            echo "[ci][error] compiler/src/version.sfn has '$file_version', expected '$expected'" >&2
+            echo "[ci][error] compiler/capsule.toml has '$file_version', expected '$expected'" >&2
             exit 1
           fi
           actual="$(build/native/sailfin version | sed -n 's/.*sfn //p')"
@@ -109,7 +98,7 @@ jobs:
           fi
 
       - name: Verify installer payload version
-        shell: bash -l {0}
+        shell: bash {0}
         run: |
           set -euo pipefail
           expected="${RELEASE_TAG#v}"
@@ -131,10 +120,10 @@ jobs:
 
       - name: Cross-compile for Windows (Linux)
         if: matrix.package_label == 'linux-x86_64'
-        shell: bash -l {0}
+        shell: bash {0}
         run: |
           set -euo pipefail
-          CONDA=$(which conda) make ci-cross-windows
+          make ci-cross-windows
 
       - name: Upload native artifacts
         uses: actions/upload-artifact@v7
@@ -236,7 +225,7 @@ jobs:
           done
 
       - name: Upload release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.RELEASE_TAG }}
           prerelease: ${{ contains(env.RELEASE_TAG, '-') }}

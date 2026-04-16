@@ -85,7 +85,7 @@ Verify code quality, test coverage, and project standards.
 - [ ] Effects declared explicitly and minimally on all functions
 - [ ] `CamelCase` for types/models/capsules, `snake_case` for functions/locals
 - [ ] Commits use Conventional Commit prefixes
-- [ ] No new fixup passes added to `scripts/selfhost_native.py`
+- [ ] No fixup passes added to build scripts
 - [ ] No Python bootstrap (Stage0) usage
 
 ### Test Coverage
@@ -97,6 +97,17 @@ Verify code quality, test coverage, and project standards.
 - Missing tests for new code paths
 - New fixup passes in the build script
 - New dependencies on Python bootstrap
+
+## Important: Always Produce Output
+
+You MUST always call at least one safe output tool.
+
+If the PR has no blocking issues, still submit a PR review with **Approve**.
+
+Only call the `noop` tool when you cannot complete the review or cannot produce a real review output:
+`{"noop": {"message": "No action needed: [brief explanation]"}}`
+
+Do NOT finish without calling a safe output tool — the workflow will fail with a `No Safe Outputs Generated` error.
 
 ---
 
@@ -167,7 +178,7 @@ Cross-reference every claim against the codebase:
 ### Documentation Checklist
 - [ ] `docs/status.md` updated if feature status changed
 - [ ] `docs/spec.md` updated if syntax or semantics changed
-- [ ] `docs/roadmap.md` updated if priorities shifted
+- [ ] [Roadmap](https://sailfin.dev/roadmap) (`site/src/pages/roadmap.astro`) updated if priorities shifted
 
 ### Pitfalls to Flag
 - Pipeline operator (`|>`) documented as available (it's not)

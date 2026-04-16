@@ -5,7 +5,7 @@ This directory showcases the evolving Sailfin language surface implemented by th
 > **Syntax reform notice:** These examples use pre-reform syntax (`->` for type
 > annotations, `{{ }}` for string interpolation). A pre-1.0 syntax reform is
 > underway that will migrate to `:` for type annotations and `${ }` for
-> interpolation. The parser already accepts `:` — see `docs/roadmap.md` §0 for
+> interpolation. The parser already accepts `:` — see the [roadmap](https://sailfin.dev/roadmap) for
 > the full plan. Examples will be migrated as each reform item lands.
 
 Always check `docs/status.md` before relying on an example in production code. Examples stay limited to the bootstrap feature set unless noted; future-facing snippets include inline comments.

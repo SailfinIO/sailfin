@@ -12,7 +12,7 @@ enum Priority {
     Critical,
 }
 
-fn _priority_value(p -> Priority) -> number {
+fn _priority_value(p: Priority) -> number {
     if p == Priority.Low { return 1; }
     if p == Priority.Medium { return 2; }
     if p == Priority.High { return 3; }
@@ -20,11 +20,11 @@ fn _priority_value(p -> Priority) -> number {
     return 0;
 }
 
-fn _max_priority(priorities -> Priority[]) -> Priority {
+fn _max_priority(priorities: Priority[]) -> Priority {
     if priorities.length == 0 { return Priority.Low; }
-    let mut best -> Priority = priorities[0];
-    let mut best_val -> number = _priority_value(best);
-    let mut i -> number = 1;
+    let mut best: Priority = priorities[0];
+    let mut best_val: number = _priority_value(best);
+    let mut i: number = 1;
     loop {
         if i >= priorities.length { break; }
         let val = _priority_value(priorities[i]);
@@ -45,7 +45,7 @@ test "enum_complex: priority values" {
 }
 
 test "enum_complex: max priority from array" {
-    let mut priorities -> Priority[] = [];
+    let mut priorities: Priority[] = [];
     priorities.push(Priority.Low);
     priorities.push(Priority.High);
     priorities.push(Priority.Medium);
@@ -53,7 +53,7 @@ test "enum_complex: max priority from array" {
 }
 
 test "enum_complex: max priority single" {
-    let mut priorities -> Priority[] = [];
+    let mut priorities: Priority[] = [];
     priorities.push(Priority.Critical);
     assert _max_priority(priorities) == Priority.Critical;
 }
@@ -70,19 +70,19 @@ enum TaskStatus {
 }
 
 struct Task {
-    name -> string;
-    priority -> Priority;
-    status -> TaskStatus;
-    effort -> number;
+    name: string;
+    priority: Priority;
+    status: TaskStatus;
+    effort: number;
 }
 
-fn _is_actionable(t -> Task) -> boolean {
+fn _is_actionable(t: Task) -> boolean {
     if t.status == TaskStatus.Done { return false; }
     if t.status == TaskStatus.Blocked { return false; }
     return true;
 }
 
-fn _task_score(t -> Task) -> number {
+fn _task_score(t: Task) -> number {
     let pval = _priority_value(t.priority);
     if t.status == TaskStatus.InProgress {
         return pval * 10 + t.effort;

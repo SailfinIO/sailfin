@@ -8,7 +8,7 @@ import { Program, Statement, FunctionSignature, Block, FieldDeclaration, MethodD
 import { Token, TokenKind } from "./token";
 import { Diagnostic, SymbolEntry, SymbolCollectionResult, ScopeResult, check_function_signature, check_type_parameters, check_struct_fields, check_struct_methods, check_struct_implements_interfaces, check_enum_variants, check_interface_members, check_model_properties, register_local_symbol, register_symbol, clone_bindings } from "./typecheck_types";
 
-fn typecheck_diagnostics(program -> Program) -> Diagnostic[] {
+fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
     let top_level = collect_top_level_symbols(program);
     let interfaces = collect_interface_definitions(program);
     let scoped_diagnostics = check_program_scopes(program, interfaces);
@@ -19,18 +19,18 @@ fn typecheck_diagnostics(program -> Program) -> Diagnostic[] {
     return diagnostics_with_scopes;
 }
 
-fn typecheck_error_count(program -> Program) -> number {
+fn typecheck_error_count(program: Program) -> number {
     let diagnostics = typecheck_diagnostics(program);
     return diagnostics.length;
 }
 
-fn typecheck_has_errors(program -> Program) -> boolean {
+fn typecheck_has_errors(program: Program) -> boolean {
     let count = typecheck_error_count(program);
     return count > 0;
 }
 
-fn collect_interface_definitions(program -> Program) -> Statement[] {
-    let mut interfaces -> Statement[] = [];
+fn collect_interface_definitions(program: Program) -> Statement[] {
+    let mut interfaces: Statement[] = [];
 
     for statement in program.statements {
         if statement.variant == "InterfaceDeclaration" {
@@ -40,14 +40,14 @@ fn collect_interface_definitions(program -> Program) -> Statement[] {
     return interfaces;
 }
 
-fn collect_top_level_symbols(program -> Program) -> SymbolCollectionResult {
-    let mut symbols -> SymbolEntry[] = [];
-    let mut diagnostics -> Diagnostic[] = [];
+fn collect_top_level_symbols(program: Program) -> SymbolCollectionResult {
+    let mut symbols: SymbolEntry[] = [];
+    let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
         let result = register_top_level_symbol(statement, symbols);
         symbols = result.symbols;
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= result.diagnostics.length {
                 break;
@@ -63,7 +63,7 @@ fn collect_top_level_symbols(program -> Program) -> SymbolCollectionResult {
     };
 }
 
-fn register_top_level_symbol(statement -> Statement, existing -> SymbolEntry[]) -> SymbolCollectionResult {
+fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> SymbolCollectionResult {
     if statement.variant == "FunctionDeclaration" {
         return register_symbol(statement.signature.name, "function", statement.signature.name_span, existing);
     }
@@ -100,14 +100,14 @@ fn register_top_level_symbol(statement -> Statement, existing -> SymbolEntry[]) 
     };
 }
 
-fn check_program_scopes(program -> Program, interfaces -> Statement[]) -> Diagnostic[] {
-    let mut bindings -> SymbolEntry[] = [];
-    let mut diagnostics -> Diagnostic[] = [];
+fn check_program_scopes(program: Program, interfaces: Statement[]) -> Diagnostic[] {
+    let mut bindings: SymbolEntry[] = [];
+    let mut diagnostics: Diagnostic[] = [];
 
     for statement in program.statements {
         let result = check_statement(statement, bindings, interfaces);
         bindings = result.bindings;
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= result.diagnostics.length {
                 break;
@@ -120,7 +120,7 @@ fn check_program_scopes(program -> Program, interfaces -> Statement[]) -> Diagno
     return diagnostics;
 }
 
-fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces -> Statement[]) -> ScopeResult {
+fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: Statement[]) -> ScopeResult {
     if statement.variant == "VariableDeclaration" {
         return register_local_symbol(bindings, statement.name, "variable", statement.span);
     }
@@ -128,7 +128,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.signature.name, "function", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_function_signature(statement.signature);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _sig_diags.length {
                 break;
@@ -137,7 +137,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             _ci += 1;
         }
         let function_diagnostics = check_function_body(statement.signature, statement.body, interfaces);
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= function_diagnostics.length {
                 break;
@@ -154,7 +154,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.name, "struct", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         let _tp_diags = check_type_parameters(statement.type_parameters);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _tp_diags.length {
                 break;
@@ -163,7 +163,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             _ci += 1;
         }
         let _sf_diags = check_struct_fields(statement.fields);
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= _sf_diags.length {
                 break;
@@ -172,7 +172,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             _ci2 += 1;
         }
         let _sm_diags = check_struct_methods(statement.methods);
-        let mut _ci3 -> number = 0;
+        let mut _ci3: number = 0;
         loop {
             if _ci3 >= _sm_diags.length {
                 break;
@@ -181,7 +181,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             _ci3 += 1;
         }
         let _si_diags = check_struct_implements_interfaces(statement, interfaces);
-        let mut _ci4 -> number = 0;
+        let mut _ci4: number = 0;
         loop {
             if _ci4 >= _si_diags.length {
                 break;
@@ -189,14 +189,14 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             diagnostics.push(_si_diags[_ci4]);
             _ci4 += 1;
         }
-        let mut index -> number = 0;
+        let mut index: number = 0;
         loop {
             if index >= statement.methods.length {
                 break;
             }
             let method = statement.methods[index];
             let _mb_diags = check_function_body(method.signature, method.body, interfaces);
-            let mut _ci5 -> number = 0;
+            let mut _ci5: number = 0;
             loop {
                 if _ci5 >= _mb_diags.length {
                     break;
@@ -215,7 +215,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.name, "enum", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         let _tp_diags = check_type_parameters(statement.type_parameters);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _tp_diags.length {
                 break;
@@ -224,7 +224,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             _ci += 1;
         }
         let _ev_diags = check_enum_variants(statement.variants);
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= _ev_diags.length {
                 break;
@@ -241,7 +241,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.name, "interface", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         let _tp_diags = check_type_parameters(statement.type_parameters);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _tp_diags.length {
                 break;
@@ -250,7 +250,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             _ci += 1;
         }
         let _im_diags = check_interface_members(statement.members);
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= _im_diags.length {
                 break;
@@ -267,7 +267,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.name, "model", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         let _mp_diags = check_model_properties(statement.properties);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _mp_diags.length {
                 break;
@@ -284,7 +284,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.signature.name, "pipeline", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_function_signature(statement.signature);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _sig_diags.length {
                 break;
@@ -293,7 +293,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             _ci += 1;
         }
         let _fb_diags = check_function_body(statement.signature, statement.body, interfaces);
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= _fb_diags.length {
                 break;
@@ -310,7 +310,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.signature.name, "tool", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
         let _sig_diags = check_function_signature(statement.signature);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _sig_diags.length {
                 break;
@@ -319,7 +319,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             _ci += 1;
         }
         let _fb_diags = check_function_body(statement.signature, statement.body, interfaces);
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= _fb_diags.length {
                 break;
@@ -336,7 +336,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.name, "test", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         let _blk_diags = check_block(statement.body, [], interfaces);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _blk_diags.length {
                 break;
@@ -362,15 +362,15 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         };
     }
     if statement.variant == "MatchStatement" {
-        let mut diagnostics -> Diagnostic[] = [];
-        let mut index -> number = 0;
+        let mut diagnostics: Diagnostic[] = [];
+        let mut index: number = 0;
         loop {
             if index >= statement.cases.length {
                 break;
             }
             let case = statement.cases[index];
             let _blk_diags = check_block(case.body, bindings, interfaces);
-            let mut _ci -> number = 0;
+            let mut _ci: number = 0;
             loop {
                 if _ci >= _blk_diags.length {
                     break;
@@ -391,7 +391,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             let branch = statement.else_branch;
             if branch.body != null {
                 let _blk_diags = check_block(branch.body, bindings, interfaces);
-                let mut _ci -> number = 0;
+                let mut _ci: number = 0;
                 loop {
                     if _ci >= _blk_diags.length {
                         break;
@@ -402,7 +402,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
             }
             if branch.statement != null {
                 let result = check_statement(branch.statement, bindings, interfaces);
-                let mut _ci2 -> number = 0;
+                let mut _ci2: number = 0;
                 loop {
                     if _ci2 >= result.diagnostics.length {
                         break;
@@ -433,7 +433,7 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
         let registration = register_local_symbol(bindings, statement.name, "type", statement.name_span);
         let mut diagnostics = registration.diagnostics;
         let _tp_diags = check_type_parameters(statement.type_parameters);
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= _tp_diags.length {
                 break;
@@ -452,11 +452,11 @@ fn check_statement(statement -> Statement, bindings -> SymbolEntry[], interfaces
     };
 }
 
-fn check_function_body(signature -> FunctionSignature, body -> Block, interfaces -> Statement[]) -> Diagnostic[] {
+fn check_function_body(signature: FunctionSignature, body: Block, interfaces: Statement[]) -> Diagnostic[] {
     let parameter_scope = seed_parameter_scope(signature);
     let body_diagnostics = check_block(body, parameter_scope.bindings, interfaces);
     let mut _result = parameter_scope.diagnostics;
-    let mut _ci -> number = 0;
+    let mut _ci: number = 0;
     loop {
         if _ci >= body_diagnostics.length {
             break;
@@ -467,14 +467,14 @@ fn check_function_body(signature -> FunctionSignature, body -> Block, interfaces
     return _result;
 }
 
-fn seed_parameter_scope(signature -> FunctionSignature) -> ScopeResult {
-    let mut bindings -> SymbolEntry[] = [];
-    let mut diagnostics -> Diagnostic[] = [];
+fn seed_parameter_scope(signature: FunctionSignature) -> ScopeResult {
+    let mut bindings: SymbolEntry[] = [];
+    let mut diagnostics: Diagnostic[] = [];
 
     for parameter in signature.parameters {
         let registration = register_local_symbol(bindings, parameter.name, "parameter", parameter.span);
         bindings = registration.bindings;
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= registration.diagnostics.length {
                 break;
@@ -490,14 +490,14 @@ fn seed_parameter_scope(signature -> FunctionSignature) -> ScopeResult {
     };
 }
 
-fn check_block(block -> Block, parent_bindings -> SymbolEntry[], interfaces -> Statement[]) -> Diagnostic[] {
+fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Statement[]) -> Diagnostic[] {
     let mut bindings = clone_bindings(parent_bindings);
-    let mut diagnostics -> Diagnostic[] = [];
+    let mut diagnostics: Diagnostic[] = [];
 
     for statement in block.statements {
         let result = check_statement(statement, bindings, interfaces);
         bindings = result.bindings;
-        let mut _ci -> number = 0;
+        let mut _ci: number = 0;
         loop {
             if _ci >= result.diagnostics.length {
                 break;

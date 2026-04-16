@@ -7,8 +7,8 @@ name: CI (branch push)
 
 env:
     # Pinned seed used for self-host bootstrap in CI.
-    # Bump this once the latest release assets are healthy again.
-    SEED_VERSION: 0.1.1
+    # 0.5.0-alpha.22: first seed that produces clean LLVM IR (no Python fixups needed).
+    SEED_VERSION: 0.5.0-alpha.22
 
 on:
     push:
@@ -45,23 +45,13 @@ jobs:
                     - os: macos-latest
                       package_label: macos-arm64
                       clang: clang
-                      max_attempts: 15
                     - os: ubuntu-24.04
                       package_label: linux-x86_64
                       clang: clang-18
-                      max_attempts: 10
 
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6
-
-            - name: Set up Miniconda
-              uses: conda-incubator/setup-miniconda@v3
-              with:
-                  activate-environment: sailfin
-                  environment-file: environment.yml
-                  auto-update-conda: false
-                  use-mamba: true
 
             - name: Install clang (Linux)
               if: runner.os == 'Linux'
@@ -83,12 +73,11 @@ jobs:
                   GITHUB_TOKEN: ${{ secrets.RELEASE_PAT || secrets.GITHUB_TOKEN }}
               with:
                   target: ${{ matrix.package_label }}
-                  max_attempts: ${{ matrix.max_attempts }}
                   clang: ${{ matrix.clang }}
                   seed_version: ${{ env.SEED_VERSION }}
 
             - name: Report compiler metadata
-              shell: bash -l {0}
+              shell: bash {0}
               run: |
                   set -euo pipefail
                   ls -lh build/native/sailfin

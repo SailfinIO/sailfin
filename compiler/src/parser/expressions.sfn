@@ -48,22 +48,22 @@ import {
 // Expression State Operations
 // ============================================================================
 
-fn expression_tokens_is_at_end(state -> ExpressionTokens) -> boolean {
+fn expression_tokens_is_at_end(state: ExpressionTokens) -> boolean {
     return state.index >= state.tokens.length;
 }
 
-fn expression_tokens_peek(state -> ExpressionTokens) -> Token {
+fn expression_tokens_peek(state: ExpressionTokens) -> Token {
     return state.tokens[state.index];
 }
 
-fn expression_tokens_advance(state -> ExpressionTokens) -> ExpressionTokens {
+fn expression_tokens_advance(state: ExpressionTokens) -> ExpressionTokens {
     if state.index >= state.tokens.length {
         return state;
     }
     return ExpressionTokens { tokens: state.tokens, index: state.index + 1 };
 }
 
-fn expression_parse_failure(state -> ExpressionTokens) -> ExpressionParseResult {
+fn expression_parse_failure(state: ExpressionTokens) -> ExpressionParseResult {
     return ExpressionParseResult {
         state: state,
         expression: Expression.Raw { text: "" },
@@ -75,7 +75,7 @@ fn expression_parse_failure(state -> ExpressionTokens) -> ExpressionParseResult 
 // Type Separator Parsing
 // ============================================================================
 
-fn expression_tokens_consume_type_separator(state -> ExpressionTokens, accept_colon -> boolean, accept_arrow -> boolean) -> ExpressionTypeSeparatorParseResult {
+fn expression_tokens_consume_type_separator(state: ExpressionTokens, accept_colon: boolean, accept_arrow: boolean) -> ExpressionTypeSeparatorParseResult {
     if expression_tokens_is_at_end(state) {
         return ExpressionTypeSeparatorParseResult { state: state, used_separator: "", found: false };
     }
@@ -127,20 +127,20 @@ fn expression_tokens_consume_type_separator(state -> ExpressionTokens, accept_co
 // Expression Token Collection
 // ============================================================================
 
-fn expression_tokens_collect_until(state -> ExpressionTokens, terminators -> string[]) -> ExpressionCollectResult {
+fn expression_tokens_collect_until(state: ExpressionTokens, terminators: string[]) -> ExpressionCollectResult {
     let mut current = state;
-    let mut collected -> Token[] = [];
-    let mut angle -> number = 0;
-    let mut paren -> number = 0;
-    let mut brace -> number = 0;
-    let mut bracket -> number = 0;
+    let mut collected: Token[] = [];
+    let mut angle: number = 0;
+    let mut paren: number = 0;
+    let mut brace: number = 0;
+    let mut bracket: number = 0;
 
     loop {
         if expression_tokens_is_at_end(current) {
             return ExpressionCollectResult { state: current, tokens: collected, success: false };
         }
         let token = expression_tokens_peek(current);
-        let mut _let402 -> boolean = false;
+        let mut _let402: boolean = false;
         if angle == 0 {
             if paren == 0 {
                 if brace == 0 {
@@ -193,7 +193,7 @@ fn expression_tokens_collect_until(state -> ExpressionTokens, terminators -> str
     return ExpressionCollectResult { state: current, tokens: collected, success: true };
 }
 
-fn collect_expression_block(state -> ExpressionTokens) -> ExpressionBlockParseResult {
+fn collect_expression_block(state: ExpressionTokens) -> ExpressionBlockParseResult {
     let mut current = state;
     if expression_tokens_is_at_end(current) {
         return ExpressionBlockParseResult { state: current, tokens: [], success: false };
@@ -203,8 +203,8 @@ fn collect_expression_block(state -> ExpressionTokens) -> ExpressionBlockParseRe
         return ExpressionBlockParseResult { state: current, tokens: [], success: false };
     }
 
-    let mut tokens -> Token[] = [];
-    let mut depth -> number = 0;
+    let mut tokens: Token[] = [];
+    let mut depth: number = 0;
 
     loop {
         if expression_tokens_is_at_end(current) {
@@ -234,7 +234,7 @@ fn collect_expression_block(state -> ExpressionTokens) -> ExpressionBlockParseRe
 // Main Expression Entry Point
 // ============================================================================
 
-fn expression_from_tokens(tokens -> Token[]) -> Expression {
+fn expression_from_tokens(tokens: Token[]) -> Expression {
     let filtered = filter_trivia(tokens);
     if filtered.length == 0 {
         return Expression.Raw { text: "" };
@@ -260,7 +260,7 @@ fn expression_from_tokens(tokens -> Token[]) -> Expression {
     return result.expression;
 }
 
-fn expression_from_single_token(token -> Token) -> Expression? {
+fn expression_from_single_token(token: Token) -> Expression? {
     if token.kind.variant == "NumberLiteral" {
         return Expression.NumberLiteral { value: token.lexeme };
     }
@@ -290,7 +290,7 @@ fn expression_from_single_token(token -> Token) -> Expression? {
 // Pratt Parser - Binary Precedence Climbing
 // ============================================================================
 
-fn parse_expression_bp(state -> ExpressionTokens, min_precedence -> number) -> ExpressionParseResult {
+fn parse_expression_bp(state: ExpressionTokens, min_precedence: number) -> ExpressionParseResult {
     let prefix_result = parse_prefix_expression(state);
     if !prefix_result.success {
         return prefix_result;
@@ -344,7 +344,7 @@ fn parse_expression_bp(state -> ExpressionTokens, min_precedence -> number) -> E
     };
 }
 
-fn parse_prefix_expression(state -> ExpressionTokens) -> ExpressionParseResult {
+fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
     if expression_tokens_is_at_end(state) {
         return expression_parse_failure(state);
     }
@@ -352,7 +352,7 @@ fn parse_prefix_expression(state -> ExpressionTokens) -> ExpressionParseResult {
     let token = expression_tokens_peek(state);
     if token.kind.variant == "Symbol" {
         let sym = token.lexeme;
-        let mut _if403 -> boolean = false;
+        let mut _if403: boolean = false;
         if strings_equal(sym, "-") { _if403 = true; }
         if strings_equal(sym, "!") { _if403 = true; }
         if _if403 {
@@ -388,7 +388,7 @@ fn parse_prefix_expression(state -> ExpressionTokens) -> ExpressionParseResult {
     return parse_postfix_chain(primary_result.state, primary_result.expression);
 }
 
-fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult {
+fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
     if expression_tokens_is_at_end(state) {
         return expression_parse_failure(state);
     }
@@ -496,7 +496,7 @@ fn parse_primary_expression(state -> ExpressionTokens) -> ExpressionParseResult 
 // Postfix Operators (calls, member access, indexing, struct literals)
 // ============================================================================
 
-fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> ExpressionParseResult {
+fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> ExpressionParseResult {
     let mut current_state = state;
     let mut current_expression = expression;
 
@@ -585,9 +585,9 @@ fn parse_postfix_chain(state -> ExpressionTokens, expression -> Expression) -> E
 // Call Arguments
 // ============================================================================
 
-fn parse_call_arguments(state -> ExpressionTokens) -> CallArgumentsParseResult {
+fn parse_call_arguments(state: ExpressionTokens) -> CallArgumentsParseResult {
     let mut current = expression_tokens_advance(state);
-    let mut arguments -> Expression[] = [];
+    let mut arguments: Expression[] = [];
 
     if expression_tokens_is_at_end(current) {
         return CallArgumentsParseResult { state: state, arguments: [], success: false };
@@ -630,9 +630,9 @@ fn parse_call_arguments(state -> ExpressionTokens) -> CallArgumentsParseResult {
 // Array Literals
 // ============================================================================
 
-fn parse_array_literal(state -> ExpressionTokens) -> ArrayLiteralParseResult {
+fn parse_array_literal(state: ExpressionTokens) -> ArrayLiteralParseResult {
     let mut current = state;
-    let mut elements -> Expression[] = [];
+    let mut elements: Expression[] = [];
 
     if expression_tokens_is_at_end(current) {
         return ArrayLiteralParseResult { state: state, elements: [], success: false };
@@ -685,9 +685,9 @@ fn parse_array_literal(state -> ExpressionTokens) -> ArrayLiteralParseResult {
 // Object Literals
 // ============================================================================
 
-fn parse_object_literal(state -> ExpressionTokens) -> ObjectLiteralParseResult {
+fn parse_object_literal(state: ExpressionTokens) -> ObjectLiteralParseResult {
     let mut current = state;
-    let mut fields -> ObjectField[] = [];
+    let mut fields: ObjectField[] = [];
 
     if expression_tokens_is_at_end(current) {
         return ObjectLiteralParseResult { state: state, fields: [], success: false };
@@ -758,7 +758,7 @@ fn parse_object_literal(state -> ExpressionTokens) -> ObjectLiteralParseResult {
 // Struct Literals
 // ============================================================================
 
-fn parse_struct_literal(state -> ExpressionTokens, target -> Expression) -> ExpressionParseResult {
+fn parse_struct_literal(state: ExpressionTokens, target: Expression) -> ExpressionParseResult {
     let type_result = collect_struct_type_name(target);
     if !type_result.success {
         return expression_parse_failure(state);
@@ -779,7 +779,7 @@ fn parse_struct_literal(state -> ExpressionTokens, target -> Expression) -> Expr
     };
 }
 
-fn expression_is_struct_target(expression -> Expression) -> boolean {
+fn expression_is_struct_target(expression: Expression) -> boolean {
     if expression.variant == "Identifier" {
         return true;
     }
@@ -789,7 +789,7 @@ fn expression_is_struct_target(expression -> Expression) -> boolean {
     return false;
 }
 
-fn collect_struct_type_name(expression -> Expression) -> StructTypeNameResult {
+fn collect_struct_type_name(expression: Expression) -> StructTypeNameResult {
     if expression.variant == "Identifier" {
         return StructTypeNameResult { parts: [expression.name], success: true };
     }
@@ -810,13 +810,13 @@ fn collect_struct_type_name(expression -> Expression) -> StructTypeNameResult {
 // Lambda Expressions
 // ============================================================================
 
-fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult {
+fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
     let mut current = state;
     if expression_tokens_is_at_end(current) {
         return expression_parse_failure(state);
     }
     let token = expression_tokens_peek(current);
-    let mut _if404 -> boolean = false;
+    let mut _if404: boolean = false;
     if token.kind.variant != "Identifier" { _if404 = true; }
     if !identifier_matches(token, "fn") { _if404 = true; }
     if _if404 {
@@ -840,9 +840,9 @@ fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult {
     current = params_result.state;
     let parameters = params_result.parameters;
 
-    let mut return_type -> TypeAnnotation? = null;
+    let mut return_type: TypeAnnotation? = null;
     if !expression_tokens_is_at_end(current) {
-        let sep_result = expression_tokens_consume_type_separator(current, true, true);
+        let sep_result = expression_tokens_consume_type_separator(current, false, true);
         if sep_result.found {
             current = sep_result.state;
             let capture = expression_tokens_collect_until(current, ["{"]);
@@ -869,10 +869,10 @@ fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult {
 
     let mut block_tokens = block_result.tokens;
     block_tokens = append_token(block_tokens, Token {
-        kind: TokenKind.EndOfFile(),
-        lexeme: "",
-        line: 0,
-        column: 0,
+            kind: TokenKind.EndOfFile(),
+            lexeme: "",
+            line: 0,
+            column: 0,
     });
     let block_parser = Parser { tokens: block_tokens, index: 0 };
     let parsed_block = parse_block_for_lambda(block_parser);
@@ -889,7 +889,7 @@ fn parse_lambda_expression(state -> ExpressionTokens) -> ExpressionParseResult {
     };
 }
 
-fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResult {
+fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult {
     let mut current = state;
     if expression_tokens_is_at_end(current) {
         return LambdaParameterParseResult { state: current, parameter: Parameter { name: "", type_annotation: null, default_value: null, mutable: false, span: null }, success: false };
@@ -915,9 +915,9 @@ fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResu
     let name = identifier_text(name_token);
     current = expression_tokens_advance(current);
 
-    let mut type_annotation -> TypeAnnotation? = null;
+    let mut type_annotation: TypeAnnotation? = null;
     if !expression_tokens_is_at_end(current) {
-        let sep_result = expression_tokens_consume_type_separator(current, true, true);
+        let sep_result = expression_tokens_consume_type_separator(current, true, false);
         if sep_result.found {
             current = sep_result.state;
             let capture = expression_tokens_collect_until(current, ["=", ",", ")"]);
@@ -932,7 +932,7 @@ fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResu
         }
     }
 
-    let mut default_value -> Expression? = null;
+    let mut default_value: Expression? = null;
     if !expression_tokens_is_at_end(current) {
         let assign = expression_tokens_peek(current);
         if symbol_matches(assign, "=") {
@@ -960,9 +960,9 @@ fn parse_lambda_parameter(state -> ExpressionTokens) -> LambdaParameterParseResu
     return LambdaParameterParseResult { state: current, parameter: parameter, success: true };
 }
 
-fn parse_lambda_parameter_list(state -> ExpressionTokens) -> LambdaParameterListParseResult {
+fn parse_lambda_parameter_list(state: ExpressionTokens) -> LambdaParameterListParseResult {
     let mut current = state;
-    let mut parameters -> Parameter[] = [];
+    let mut parameters: Parameter[] = [];
 
     if expression_tokens_is_at_end(current) {
         return LambdaParameterListParseResult { state: current, parameters: parameters, success: false };
@@ -1005,7 +1005,7 @@ fn parse_lambda_parameter_list(state -> ExpressionTokens) -> LambdaParameterList
 // Operator Precedence
 // ============================================================================
 
-fn binary_precedence(op -> string) -> number {
+fn binary_precedence(op: string) -> number {
     if op == ".." {
         return 0;
     }
@@ -1015,13 +1015,13 @@ fn binary_precedence(op -> string) -> number {
     if op == "&&" {
         return 2;
     }
-    let mut _if405 -> boolean = false;
+    let mut _if405: boolean = false;
     if op == "==" { _if405 = true; }
     if op == "!=" { _if405 = true; }
     if _if405 {
         return 3;
     }
-    let mut _if406 -> boolean = false;
+    let mut _if406: boolean = false;
     if op == "<" { _if406 = true; }
     if op == "<=" { _if406 = true; }
     if op == ">" { _if406 = true; }
@@ -1029,13 +1029,13 @@ fn binary_precedence(op -> string) -> number {
     if _if406 {
         return 4;
     }
-    let mut _if407 -> boolean = false;
+    let mut _if407: boolean = false;
     if op == "+" { _if407 = true; }
     if op == "-" { _if407 = true; }
     if _if407 {
         return 5;
     }
-    let mut _if408 -> boolean = false;
+    let mut _if408: boolean = false;
     if op == "*" { _if408 = true; }
     if op == "/" { _if408 = true; }
     if op == "%" { _if408 = true; }
@@ -1053,7 +1053,7 @@ fn unary_precedence() -> number {
 // Expression Normalization
 // ============================================================================
 
-fn normalize_expression(tokens -> Token[], expr -> Expression) -> Expression {
+fn normalize_expression(tokens: Token[], expr: Expression) -> Expression {
     if expr.variant == "Raw" {
         let filtered = filter_trivia(tokens);
         if filtered.length == 1 {
@@ -1090,7 +1090,7 @@ fn normalize_expression(tokens -> Token[], expr -> Expression) -> Expression {
     return expr;
 }
 
-fn strip_surrounding_quotes_expr(text -> string) -> string {
+fn strip_surrounding_quotes_expr(text: string) -> string {
     if text.length < 2 {
         return text;
     }
@@ -1104,12 +1104,12 @@ fn strip_surrounding_quotes_expr(text -> string) -> string {
     return text;
 }
 
-fn looks_like_number_expr(text -> string) -> boolean {
+fn looks_like_number_expr(text: string) -> boolean {
     if text.length == 0 {
         return false;
     }
-    let mut has_decimal -> boolean = false;
-    let mut index -> number = 0;
+    let mut has_decimal: boolean = false;
+    let mut index: number = 0;
     if char_at(text, 0) == "-" {
         if text.length == 1 {
             return false;
@@ -1137,8 +1137,8 @@ fn looks_like_number_expr(text -> string) -> boolean {
     return true;
 }
 
-fn is_decimal_digit_expr(ch -> string) -> boolean {
-    let mut _ret409 -> boolean = false;
+fn is_decimal_digit_expr(ch: string) -> boolean {
+    let mut _ret409: boolean = false;
     if ch == "0" { _ret409 = true; }
     if ch == "1" { _ret409 = true; }
     if ch == "2" { _ret409 = true; }
@@ -1156,22 +1156,22 @@ fn is_decimal_digit_expr(ch -> string) -> boolean {
 // Append Helpers
 // ============================================================================
 
-fn append_expression(expressions -> Expression[], expression -> Expression) -> Expression[] {
+fn append_expression(expressions: Expression[], expression: Expression) -> Expression[] {
     expressions.push(expression);
     return expressions;
 }
 
-fn append_object_field(fields -> ObjectField[], field -> ObjectField) -> ObjectField[] {
+fn append_object_field(fields: ObjectField[], field: ObjectField) -> ObjectField[] {
     fields.push(field);
     return fields;
 }
 
-fn append_parameter(parameters -> Parameter[], parameter -> Parameter) -> Parameter[] {
+fn append_parameter(parameters: Parameter[], parameter: Parameter) -> Parameter[] {
     parameters.push(parameter);
     return parameters;
 }
 
-fn append_string_local(values -> string[], value -> string) -> string[] {
+fn append_string_local(values: string[], value: string) -> string[] {
     values.push(value);
     return values;
 }
@@ -1183,7 +1183,7 @@ fn append_string_local(values -> string[], value -> string) -> string[] {
 // and the actual implementation will be in statements.sfn
 // ============================================================================
 
-fn parse_block_for_lambda(parser -> Parser) -> BlockParseResult {
+fn parse_block_for_lambda(parser: Parser) -> BlockParseResult {
     let mut current = parser;
     current = skip_trivia(current);
     let token = parser_peek_raw(current);
@@ -1195,11 +1195,11 @@ fn parse_block_for_lambda(parser -> Parser) -> BlockParseResult {
     }
 
     let start_index = current.index;
-    let mut block_end_index -> number = start_index;
+    let mut block_end_index: number = start_index;
     current = parser_advance_raw(current);
 
     // Simple block collection - just collect tokens until matching }
-    let mut depth -> number = 1;
+    let mut depth: number = 1;
     loop {
         current = skip_trivia(current);
         let tok = parser_peek_raw(current);

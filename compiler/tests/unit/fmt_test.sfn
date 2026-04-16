@@ -2,10 +2,10 @@
 // Tests only functions that don't depend on char_code/char_at (prelude
 // functions unavailable in standalone test files).
 
-fn _find(text -> string, needle -> string, start -> number) -> number {
+fn _find(text: string, needle: string, start: number) -> number {
     if needle.length == 0 { return start; }
     if needle.length > text.length { return -1; }
-    let mut i -> number = start;
+    let mut i: number = start;
     let limit = text.length - needle.length;
     loop {
         if i > limit { return -1; }
@@ -17,9 +17,9 @@ fn _find(text -> string, needle -> string, start -> number) -> number {
     return -1;
 }
 
-fn _trim(text -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = text.length;
+fn _trim(text: string) -> string {
+    let mut start: number = 0;
+    let mut end: number = text.length;
     loop {
         if start >= end { break; }
         let ch = text[start];
@@ -37,8 +37,8 @@ fn _trim(text -> string) -> string {
     return substring(text, start, end);
 }
 
-fn _trim_left(text -> string) -> string {
-    let mut start -> number = 0;
+fn _trim_left(text: string) -> string {
+    let mut start: number = 0;
     loop {
         if start >= text.length { break; }
         let ch = text[start];
@@ -49,8 +49,8 @@ fn _trim_left(text -> string) -> string {
     return substring(text, start, text.length);
 }
 
-fn _trim_right(text -> string) -> string {
-    let mut end -> number = text.length;
+fn _trim_right(text: string) -> string {
+    let mut end: number = text.length;
     loop {
         if end <= 0 { break; }
         let ch = text[end - 1];
@@ -61,14 +61,14 @@ fn _trim_right(text -> string) -> string {
     return substring(text, 0, end);
 }
 
-fn _char_at_index(text -> string, index -> number) -> string {
+fn _char_at_index(text: string, index: number) -> string {
     if index < 0 || index >= text.length { return ""; }
     return substring(text, index, index + 1);
 }
 
-fn _reverse(text -> string) -> string {
-    let mut out -> string = "";
-    let mut i -> number = text.length;
+fn _reverse(text: string) -> string {
+    let mut out: string = "";
+    let mut i: number = text.length;
     loop {
         if i <= 0 { break; }
         i -= 1;
@@ -77,10 +77,10 @@ fn _reverse(text -> string) -> string {
     return out;
 }
 
-fn _count(text -> string, needle -> string) -> number {
+fn _count(text: string, needle: string) -> number {
     if needle.length == 0 { return 0; }
-    let mut total -> number = 0;
-    let mut pos -> number = 0;
+    let mut total: number = 0;
+    let mut pos: number = 0;
     loop {
         let idx = _find(text, needle, pos);
         if idx < 0 { break; }
@@ -90,11 +90,11 @@ fn _count(text -> string, needle -> string) -> number {
     return total;
 }
 
-fn _is_empty(text -> string) -> boolean {
+fn _is_empty(text: string) -> boolean {
     return text.length == 0;
 }
 
-fn _is_blank(text -> string) -> boolean {
+fn _is_blank(text: string) -> boolean {
     return _trim(text).length == 0;
 }
 

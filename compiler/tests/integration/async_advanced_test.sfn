@@ -21,9 +21,9 @@ test "async_adv: string return" {
 // Async with computation
 // ---------------------------------------------------------------------------
 
-async fn compute_sum(n -> number) -> number {
-    let mut total -> number = 0;
-    let mut i -> number = 1;
+async fn compute_sum(n: number) -> number {
+    let mut total: number = 0;
+    let mut i: number = 1;
     loop {
         if i > n { break; }
         total += i;
@@ -93,7 +93,7 @@ test "async_adv: results combined" {
 // Async with conditional logic
 // ---------------------------------------------------------------------------
 
-async fn conditional_async(flag -> boolean) -> number {
+async fn conditional_async(flag: boolean) -> number {
     if flag {
         return 100;
     }
@@ -115,11 +115,11 @@ test "async_adv: conditional false" {
 // ---------------------------------------------------------------------------
 
 struct AsyncResult {
-    value -> number;
-    label -> string;
+    value: number;
+    label: string;
 }
 
-async fn compute_with_label(v -> number, l -> string) -> AsyncResult {
+async fn compute_with_label(v: number, l: string) -> AsyncResult {
     return AsyncResult { value: v * 2, label: l };
 }
 
@@ -138,11 +138,11 @@ async fn step1() -> number {
     return 5;
 }
 
-async fn step2(input -> number) -> number {
+async fn step2(input: number) -> number {
     return input * 3;
 }
 
-async fn step3(input -> number) -> number {
+async fn step3(input: number) -> number {
     return input + 10;
 }
 

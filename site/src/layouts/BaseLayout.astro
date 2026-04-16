@@ -12,7 +12,7 @@ interface Props {
 
 const {
   title,
-  description = "An AI-native, systems-friendly programming language designed for precision, safety, and introspection.",
+  description = "A compiled systems language with compile-time capability enforcement.",
   image = "/images/sfn_lang_logo_256.png",
   type = "website",
 } = Astro.props;
@@ -39,7 +39,7 @@ const pageTitle = title === "Home" ? "Sailfin" : `${title} - Sailfin`;
     <meta property="og:title" content={pageTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:image" content={ogImage} />
-    <meta property="og:image:alt" content="Sailfin — AI-native programming language" />
+    <meta property="og:image:alt" content="Sailfin — systems language with compile-time capabilities" />
 
     <!-- Twitter Card -->
     <meta name="twitter:card" content="summary_large_image" />
@@ -47,7 +47,7 @@ const pageTitle = title === "Home" ? "Sailfin" : `${title} - Sailfin`;
     <meta name="twitter:title" content={pageTitle} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
-    <meta name="twitter:image:alt" content="Sailfin — AI-native programming language" />
+    <meta name="twitter:image:alt" content="Sailfin — systems language with compile-time capabilities" />
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

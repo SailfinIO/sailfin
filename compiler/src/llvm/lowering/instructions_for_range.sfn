@@ -22,52 +22,52 @@ import { parse_range_iterable } from "../expression_lowering/native/core_parse";
 import { make_child_scope_id } from "../lifetime";
 import { collect_mutation_names, find_mutation_for_name } from "./phi";
 import { lower_instruction_range } from "./instructions";
-import { extend_lifetime_regions, extend_mutations, _write_block_result_files, _parse_int_from_string } from "./instructions_helpers";
+import { extend_lifetime_regions, extend_mutations, _parse_int_from_string } from "./instructions_helpers";
 import { allocate_block_label } from "./instructions_condition";
 import { append_loop_context } from "./instructions_loops";
 
 // Lower a range-based for loop (e.g., `for i in 0..10`).
 // Returns null if the iterable is not a recognized range pattern.
 fn lower_for_range(
-    function -> NativeFunction,
-    structure -> LoopStructure,
-    raw_target -> string,
-    iterable_text -> string,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    allocas -> string[],
-    lines -> string[],
-    temp_index -> number,
-    block_counter -> number,
-    next_local_id -> number,
-    next_region_id -> number,
-    functions -> NativeFunction[],
-    loop_stack -> LoopContext[],
-    context -> TypeContext,
-    scope_id -> string,
-    scope_depth -> number,
-    next_index -> number
+    function: NativeFunction,
+    structure: LoopStructure,
+    raw_target: string,
+    iterable_text: string,
+    llvm_return: string,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    allocas: string[],
+    lines: string[],
+    temp_index: number,
+    block_counter: number,
+    next_local_id: number,
+    next_region_id: number,
+    functions: NativeFunction[],
+    loop_stack: LoopContext[],
+    context: TypeContext,
+    scope_id: string,
+    scope_depth: number,
+    next_index: number
 ) -> BlockLoweringResult? {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
-    let mut current_allocas -> string[] = allocas;
-    let mut current_locals -> LocalBinding[] = locals;
-    let mut current_bindings -> ParameterBinding[] = bindings;
-    let mut current_temp -> number = temp_index;
-    let mut current_block_counter -> number = block_counter;
-    let mut current_next_local -> number = next_local_id;
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut current_next_region -> number = next_region_id;
-    let mut collected_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_bindings: ParameterBinding[] = bindings;
+    let mut current_temp: number = temp_index;
+    let mut current_block_counter: number = block_counter;
+    let mut current_next_local: number = next_local_id;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut current_next_region: number = next_region_id;
+    let mut collected_mutations: LocalMutation[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let range_parse = parse_range_iterable(iterable_text);
     if !range_parse.success {
         return null;
     }
 
-    let mut _ci9 -> number = 0;
+    let mut _ci9: number = 0;
     loop {
         if _ci9 >= range_parse.diagnostics.length { break; }
         diagnostics.push(range_parse.diagnostics[_ci9]);
@@ -75,7 +75,7 @@ fn lower_for_range(
     }
 
     let start_result = lower_expression(range_parse.start, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    let mut _ci10 -> number = 0;
+    let mut _ci10: number = 0;
     loop {
         if _ci10 >= start_result.diagnostics.length { break; }
         diagnostics.push(start_result.diagnostics[_ci10]);
@@ -86,7 +86,6 @@ fn lower_for_range(
 
     if start_result.operand == null {
         diagnostics.push("llvm lowering: unable to lower `.for` range start in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -105,7 +104,7 @@ fn lower_for_range(
     }
 
     let end_result = lower_expression(range_parse.end, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    let mut _ci11 -> number = 0;
+    let mut _ci11: number = 0;
     loop {
         if _ci11 >= end_result.diagnostics.length { break; }
         diagnostics.push(end_result.diagnostics[_ci11]);
@@ -116,7 +115,6 @@ fn lower_for_range(
 
     if end_result.operand == null {
         diagnostics.push("llvm lowering: unable to lower `.for` range end in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -135,7 +133,7 @@ fn lower_for_range(
     }
 
     let start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines);
-    let mut _ci12 -> number = 0;
+    let mut _ci12: number = 0;
     loop {
         if _ci12 >= start_coerced.diagnostics.length { break; }
         diagnostics.push(start_coerced.diagnostics[_ci12]);
@@ -145,7 +143,6 @@ fn lower_for_range(
     current_temp = start_coerced.temp_index;
     if start_coerced.operand == null {
         diagnostics.push("llvm lowering: `.for` start expression must evaluate to `number` in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -165,7 +162,7 @@ fn lower_for_range(
     let start_operand = start_coerced.operand;
 
     let end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines);
-    let mut _ci13 -> number = 0;
+    let mut _ci13: number = 0;
     loop {
         if _ci13 >= end_coerced.diagnostics.length { break; }
         diagnostics.push(end_coerced.diagnostics[_ci13]);
@@ -175,7 +172,6 @@ fn lower_for_range(
     current_temp = end_coerced.temp_index;
     if end_coerced.operand == null {
         diagnostics.push("llvm lowering: `.for` end expression must evaluate to `number` in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -198,7 +194,7 @@ fn lower_for_range(
     let stride_text = trim_text(range_parse.stride);
     if stride_text.length > 0 {
         let stride_result = lower_expression(stride_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci14 -> number = 0;
+        let mut _ci14: number = 0;
         loop {
             if _ci14 >= stride_result.diagnostics.length { break; }
             diagnostics.push(stride_result.diagnostics[_ci14]);
@@ -209,7 +205,6 @@ fn lower_for_range(
 
         if stride_result.operand == null {
             diagnostics.push("llvm lowering: `.for` stride expression did not produce a value in `" + function.name + "`");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -228,7 +223,7 @@ fn lower_for_range(
         }
 
         let stride_coerced = coerce_operand_to_type(stride_result.operand, "double", current_temp, current_lines);
-        let mut _ci15 -> number = 0;
+        let mut _ci15: number = 0;
         loop {
             if _ci15 >= stride_coerced.diagnostics.length { break; }
             diagnostics.push(stride_coerced.diagnostics[_ci15]);
@@ -238,7 +233,6 @@ fn lower_for_range(
         current_temp = stride_coerced.temp_index;
         if stride_coerced.operand == null {
             diagnostics.push("llvm lowering: `.for` stride expression must evaluate to `number` in `" + function.name + "`");
-            _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -296,7 +290,7 @@ fn lower_for_range(
     let loop_body_scope_id = make_child_scope_id(scope_id, loop_body_label);
     let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: "double", type_annotation: "number", ownership: null, consumed: false, scope_id: loop_body_scope_id, scope_depth: scope_depth + 1 };
     let header_load = load_local_operand(iteration_binding, current_temp, current_lines);
-    let mut _ci16 -> number = 0;
+    let mut _ci16: number = 0;
     loop {
         if _ci16 >= header_load.diagnostics.length { break; }
         diagnostics.push(header_load.diagnostics[_ci16]);
@@ -309,7 +303,6 @@ fn lower_for_range(
         diagnostics.push("llvm lowering: internal error loading `.for` iteration value in `" + function.name + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -340,7 +333,7 @@ fn lower_for_range(
     current_temp += 1;
 
     let ascending_comparison = emit_comparison_instruction("<", header_load.operand, end_operand, current_temp, current_lines);
-    let mut _ci17 -> number = 0;
+    let mut _ci17: number = 0;
     loop {
         if _ci17 >= ascending_comparison.diagnostics.length { break; }
         diagnostics.push(ascending_comparison.diagnostics[_ci17]);
@@ -353,7 +346,6 @@ fn lower_for_range(
         diagnostics.push("llvm lowering: unable to compare `.for` range bounds in `" + function.name + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -372,7 +364,7 @@ fn lower_for_range(
     }
 
     let descending_comparison = emit_comparison_instruction(">", header_load.operand, end_operand, current_temp, current_lines);
-    let mut _ci18 -> number = 0;
+    let mut _ci18: number = 0;
     loop {
         if _ci18 >= descending_comparison.diagnostics.length { break; }
         diagnostics.push(descending_comparison.diagnostics[_ci18]);
@@ -385,7 +377,6 @@ fn lower_for_range(
         diagnostics.push("llvm lowering: unable to compare descending `.for` range bounds in `" + function.name + "`");
         current_lines.push("  br label %" + loop_exit_label);
         current_lines.push(loop_exit_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -442,14 +433,7 @@ fn lower_for_range(
         scope_depth + 1,
         loop_body_label
     );
-    // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-    let _br_fo_temp = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_temp_index"));
-    let _br_fo_blkctr = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_block_counter"));
-    let _br_fo_nextloc = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_local_id"));
-    let _br_fo_nextreg = _parse_int_from_string(fs.readFile("build/sailfin/.block_result_next_lifetime_region_id"));
-    let _br_fo_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-
-    let mut _ci19 -> number = 0;
+    let mut _ci19: number = 0;
     loop {
         if _ci19 >= body_result.diagnostics.length { break; }
         diagnostics.push(body_result.diagnostics[_ci19]);
@@ -458,22 +442,22 @@ fn lower_for_range(
     lifetime_regions = extend_lifetime_regions(lifetime_regions, body_result.lifetime_regions);
     current_lines = extend_string_array(current_lines, body_result.lines);
     current_allocas = body_result.allocas;
-    current_temp = _br_fo_temp;
-    current_block_counter = _br_fo_blkctr;
-    current_next_local = _br_fo_nextloc;
+    current_temp = body_result.temp_index;
+    current_block_counter = body_result.block_counter;
+    current_next_local = body_result.next_local_id;
     current_bindings = body_result.bindings;
-    current_next_region = _br_fo_nextreg;
+    current_next_region = body_result.next_lifetime_region_id;
     collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
-    if !_br_fo_term {
+    if !body_result.terminated {
         current_lines.push("  br label %" + loop_increment_label);
     }
 
     current_lines.push(loop_increment_label + ":");
 
     let increment_load = load_local_operand(iteration_binding, current_temp, current_lines);
-    let mut _ci20 -> number = 0;
+    let mut _ci20: number = 0;
     loop {
         if _ci20 >= increment_load.diagnostics.length { break; }
         diagnostics.push(increment_load.diagnostics[_ci20]);
@@ -505,7 +489,6 @@ fn lower_for_range(
 
     current_locals = locals;
 
-    _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, next_index);
     return BlockLoweringResult {
         lines: current_lines,
         allocas: current_allocas,
@@ -525,18 +508,18 @@ fn lower_for_range(
 
 // Shared helper: build exit mutations for loop locals after the loop exit label.
 fn build_loop_exit_mutations(
-    collected_mutations -> LocalMutation[],
-    locals -> LocalBinding[],
-    lines -> string[],
-    temp_index -> number,
-    exit_label -> string
+    collected_mutations: LocalMutation[],
+    locals: LocalBinding[],
+    lines: string[],
+    temp_index: number,
+    exit_label: string
 ) -> BlockLoweringResult {
-    let mut current_lines -> string[] = lines;
-    let mut current_temp -> number = temp_index;
+    let mut current_lines: string[] = lines;
+    let mut current_temp: number = temp_index;
 
     let mutated_names = collect_mutation_names(collected_mutations);
-    let mut exit_loads -> string[] = [];
-    let mut load_idx -> number = 0;
+    let mut exit_loads: string[] = [];
+    let mut load_idx: number = 0;
     loop {
         if load_idx >= mutated_names.length {
             break;
@@ -554,21 +537,21 @@ fn build_loop_exit_mutations(
         load_idx += 1;
     }
 
-    let mut exit_mutations -> LocalMutation[] = [];
-    let mut exit_idx -> number = 0;
+    let mut exit_mutations: LocalMutation[] = [];
+    let mut exit_idx: number = 0;
     loop {
         if exit_idx >= mutated_names.length {
             break;
         }
         let name = mutated_names[exit_idx];
-        let mut exit_value -> string = "";
+        let mut exit_value: string = "";
         if exit_idx < exit_loads.length {
             exit_value = exit_loads[exit_idx];
         }
         if exit_value.length > 0 {
             let original = find_mutation_for_name(collected_mutations, name);
-            let mut llvm_type -> string = "";
-            let mut original_span -> NativeSourceSpan? = null;
+            let mut llvm_type: string = "";
+            let mut original_span: NativeSourceSpan? = null;
             if original != null {
                 llvm_type = original.llvm_type;
                 original_span = original.span;

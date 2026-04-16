@@ -81,9 +81,7 @@ import {
     extend_lifetime_regions,
     extend_mutations,
     insert_lines_before_index,
-    _write_block_result_files,
     _parse_int_from_string,
-    _read_ipc_int_min,
 } from "./instructions_helpers";
 
 import {
@@ -97,20 +95,20 @@ import {
 } from "./lowering_native_helpers";
 
 fn collect_if_structure(
-    instructions -> NativeInstruction[],
-    start_index -> number,
-    end -> number,
-    function_name -> string
+    instructions: NativeInstruction[],
+    start_index: number,
+    end: number,
+    function_name: string
 ) -> IfStructure {
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     let then_start = start_index + 1;
     let mut then_end = end;
-    let mut else_start -> number = -1;
-    let mut else_end -> number = -1;
-    let mut has_else -> boolean = false;
-    let mut depth -> number = 0;
-    let mut index -> number = then_start;
-    let mut limit -> number = end;
+    let mut else_start: number = -1;
+    let mut else_end: number = -1;
+    let mut has_else: boolean = false;
+    let mut depth: number = 0;
+    let mut index: number = then_start;
+    let mut limit: number = end;
     if limit > instructions.length {
         limit = instructions.length;
     }
@@ -182,42 +180,42 @@ fn collect_if_structure(
 }
 
 fn lower_if_instruction(
-    function -> NativeFunction,
-    start_index -> number,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    allocas -> string[],
-    lines -> string[],
-    temp_index -> number,
-    block_counter -> number,
-    next_local_id -> number,
-    next_region_id -> number,
-    functions -> NativeFunction[],
-    loop_stack -> LoopContext[],
-    end -> number,
-    context -> TypeContext,
-    scope_id -> string,
-    scope_depth -> number,
-    current_label -> string
+    function: NativeFunction,
+    start_index: number,
+    llvm_return: string,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    allocas: string[],
+    lines: string[],
+    temp_index: number,
+    block_counter: number,
+    next_local_id: number,
+    next_region_id: number,
+    functions: NativeFunction[],
+    loop_stack: LoopContext[],
+    end: number,
+    context: TypeContext,
+    scope_id: string,
+    scope_depth: number,
+    current_label: string
 ) -> BlockLoweringResult {
-    let mut current_lines -> string[] = lines;
+    let mut current_lines: string[] = lines;
     let base_lines_snapshot = copy_string_array(lines);
-    let mut current_allocas -> string[] = allocas;
-    let mut current_locals -> LocalBinding[] = locals;
-    let mut current_temp -> number = temp_index;
-    let mut current_block_counter -> number = block_counter;
-    let mut current_next_local -> number = next_local_id;
-    let mut diagnostics -> string[] = [];
-    let base_bindings -> ParameterBinding[] = bindings;
-    let mut then_bindings -> ParameterBinding[] = base_bindings;
-    let mut else_bindings -> ParameterBinding[] = base_bindings;
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut current_next_region -> number = next_region_id;
-    let mut collected_mutations -> LocalMutation[] = [];
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_temp: number = temp_index;
+    let mut current_block_counter: number = block_counter;
+    let mut current_next_local: number = next_local_id;
+    let mut diagnostics: string[] = [];
+    let base_bindings: ParameterBinding[] = bindings;
+    let mut then_bindings: ParameterBinding[] = base_bindings;
+    let mut else_bindings: ParameterBinding[] = base_bindings;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut current_next_region: number = next_region_id;
+    let mut collected_mutations: LocalMutation[] = [];
 
     let structure = collect_if_structure(function.instructions, start_index, end, function.name);
-    let mut _ci12 -> number = 0;
+    let mut _ci12: number = 0;
     loop {
         if _ci12 >= structure.diagnostics.length { break; }
         diagnostics.push(structure.diagnostics[_ci12]);
@@ -241,7 +239,7 @@ fn lower_if_instruction(
         functions,
         context
     );
-    let mut _ci13 -> number = 0;
+    let mut _ci13: number = 0;
     loop {
         if _ci13 >= condition.diagnostics.length { break; }
         diagnostics.push(condition.diagnostics[_ci13]);
@@ -249,7 +247,7 @@ fn lower_if_instruction(
     }
     current_lines = condition.lines;
     current_temp = condition.temp_index;
-    let mut collected_string_constants -> StringConstant[] = condition.string_constants;
+    let mut collected_string_constants: StringConstant[] = condition.string_constants;
 
     if condition.operand == null {
         let rendered_condition = sanitized_condition_source;
@@ -258,7 +256,6 @@ fn lower_if_instruction(
         } else {
             diagnostics.push("llvm lowering: unable to lower if condition in `" + function.name + "` for `" + rendered_condition + "`");
         }
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -281,7 +278,7 @@ fn lower_if_instruction(
     let then_label = then_label_alloc.label;
     current_block_counter = then_label_alloc.next_counter;
 
-    let mut else_label -> string = "";
+    let mut else_label: string = "";
     if structure.has_else {
         let else_alloc = allocate_block_label("else", current_block_counter);
         else_label = else_alloc.label;
@@ -292,14 +289,14 @@ fn lower_if_instruction(
     let merge_label = merge_alloc.label;
     current_block_counter = merge_alloc.next_counter;
 
-    let mut false_target -> string = merge_label;
+    let mut false_target: string = merge_label;
     if structure.has_else {
         false_target = else_label;
     }
 
     // Preload all locals before the branch (needed for phi nodes in both straight-line and if/else cases)
-    let mut preloaded_locals -> string[] = [];
-    let mut preload_index -> number = 0;
+    let mut preloaded_locals: string[] = [];
+    let mut preload_index: number = 0;
     loop {
         if preload_index >= current_locals.length {
             break;
@@ -347,15 +344,7 @@ fn lower_if_instruction(
         scope_depth + 1,
         then_label
     );
-    // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-    // Use _read_ipc_int_min to prevent the counter from going backwards
-    // (stale/empty IPC files can cause duplicate SSA names).
-    let _br_then_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-    let _br_then_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-    let _br_then_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-    let _br_then_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-    let _br_then_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-    let mut _ci14 -> number = 0;
+    let mut _ci14: number = 0;
     loop {
         if _ci14 >= then_result.diagnostics.length { break; }
         diagnostics.push(then_result.diagnostics[_ci14]);
@@ -364,28 +353,28 @@ fn lower_if_instruction(
     lifetime_regions = extend_lifetime_regions(lifetime_regions, then_result.lifetime_regions);
     current_allocas = then_result.allocas;
     current_locals = then_result.locals;
-    current_temp = _br_then_temp;
-    current_block_counter = _br_then_blkctr;
-    current_next_local = _br_then_nextloc;
+    current_temp = then_result.temp_index;
+    current_block_counter = then_result.block_counter;
+    current_next_local = then_result.next_local_id;
     then_bindings = then_result.bindings;
-    current_next_region = _br_then_nextreg;
+    current_next_region = then_result.next_lifetime_region_id;
     current_lines = extend_string_array(current_lines, then_result.lines);
     let then_exit_label = find_last_label(current_lines, then_label);
     let mut then_mutations = retarget_recent_mutations(then_result.mutations, 0, then_exit_label);
     collected_mutations = extend_mutations(collected_mutations, then_mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, then_result.string_constants);
-    let then_terminated = _br_then_term;
-    let mut then_merge_insert_index -> number = -1;
+    let then_terminated = then_result.terminated;
+    let mut then_merge_insert_index: number = -1;
     if !then_terminated {
         let merge_branch_index = current_lines.length;
         current_lines.push("  br label %" + merge_label);
         then_merge_insert_index = merge_branch_index;
     }
 
-    let mut else_terminated -> boolean = false;
-    let mut else_mutations -> LocalMutation[] = [];
-    let mut else_exit_label -> string = else_label;
-    let mut else_merge_insert_index -> number = -1;
+    let mut else_terminated: boolean = false;
+    let mut else_mutations: LocalMutation[] = [];
+    let mut else_exit_label: string = else_label;
+    let mut else_merge_insert_index: number = -1;
     if structure.has_else {
         current_lines.push(else_label + ":");
         let else_scope_id = make_child_scope_id(scope_id, else_label);
@@ -409,13 +398,7 @@ fn lower_if_instruction(
             scope_depth + 1,
             else_label
         );
-        // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-        let _br_else_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-        let _br_else_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-        let _br_else_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-        let _br_else_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-        let _br_else_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-        let mut _ci15 -> number = 0;
+        let mut _ci15: number = 0;
         loop {
             if _ci15 >= else_result.diagnostics.length { break; }
             diagnostics.push(else_result.diagnostics[_ci15]);
@@ -424,13 +407,13 @@ fn lower_if_instruction(
         lifetime_regions = extend_lifetime_regions(lifetime_regions, else_result.lifetime_regions);
         current_allocas = else_result.allocas;
         current_locals = else_result.locals;
-        current_temp = _br_else_temp;
-        current_block_counter = _br_else_blkctr;
-        current_next_local = _br_else_nextloc;
+        current_temp = else_result.temp_index;
+        current_block_counter = else_result.block_counter;
+        current_next_local = else_result.next_local_id;
         else_bindings = else_result.bindings;
-        current_next_region = _br_else_nextreg;
+        current_next_region = else_result.next_lifetime_region_id;
         current_lines = extend_string_array(current_lines, else_result.lines);
-        else_terminated = _br_else_term;
+        else_terminated = else_result.terminated;
         let exit_label = find_last_label(current_lines, else_label);
         else_exit_label = exit_label;
         let mut branch_mutations = retarget_recent_mutations(else_result.mutations, 0, exit_label);
@@ -444,9 +427,9 @@ fn lower_if_instruction(
         }
     }
 
-    let mut _if227 -> boolean = false;
+    let mut _if227: boolean = false;
     if structure.has_else {
-        let mut _if232 -> boolean = false;
+        let mut _if232: boolean = false;
         if !then_terminated { _if232 = true; }
         if !else_terminated { _if232 = true; }
         if _if232 {
@@ -456,15 +439,15 @@ fn lower_if_instruction(
     if _if227 {
         let then_names = collect_mutation_names(then_mutations);
         let else_names = collect_mutation_names(else_mutations);
-        let mut mutated_names -> string[] = then_names;
-        let mut else_idx -> number = 0;
+        let mut mutated_names: string[] = then_names;
+        let mut else_idx: number = 0;
         loop {
             if else_idx >= else_names.length {
                 break;
             }
             let else_name = else_names[else_idx];
-            let mut already_added -> boolean = false;
-            let mut check_idx -> number = 0;
+            let mut already_added: boolean = false;
+            let mut check_idx: number = 0;
             loop {
                 if check_idx >= mutated_names.length {
                     break;
@@ -481,10 +464,10 @@ fn lower_if_instruction(
             else_idx += 1;
         }
 
-        let mut then_exit_loads -> string[] = [];
-        let mut then_added -> LocalMutation[] = [];
+        let mut then_exit_loads: string[] = [];
+        let mut then_added: LocalMutation[] = [];
         if !then_terminated {
-            let mut name_idx -> number = 0;
+            let mut name_idx: number = 0;
             loop {
                 if name_idx >= mutated_names.length {
                     break;
@@ -499,7 +482,7 @@ fn lower_if_instruction(
                         "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
                     );
                     let original = find_mutation_for_name(then_mutations, name);
-                    let mut original_span -> NativeSourceSpan? = null;
+                    let mut original_span: NativeSourceSpan? = null;
                     if original != null {
                         original_span = original.span;
                     }
@@ -516,11 +499,11 @@ fn lower_if_instruction(
             }
         }
 
-        let mut else_exit_loads -> string[] = [];
-        let mut else_added -> LocalMutation[] = [];
+        let mut else_exit_loads: string[] = [];
+        let mut else_added: LocalMutation[] = [];
         if structure.has_else {
             if !else_terminated {
-                let mut name_idx -> number = 0;
+                let mut name_idx: number = 0;
                 loop {
                     if name_idx >= mutated_names.length {
                         break;
@@ -535,7 +518,7 @@ fn lower_if_instruction(
                             "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
                         );
                         let original = find_mutation_for_name(else_mutations, name);
-                        let mut original_span -> NativeSourceSpan? = null;
+                        let mut original_span: NativeSourceSpan? = null;
                         if original != null {
                             original_span = original.span;
                         }
@@ -553,8 +536,8 @@ fn lower_if_instruction(
             }
         }
 
-        let mut inserted_then -> boolean = false;
-        let mut inserted_else -> boolean = false;
+        let mut inserted_then: boolean = false;
+        let mut inserted_else: boolean = false;
         if then_exit_loads.length > 0 {
             if then_merge_insert_index >= 0 {
                 if else_exit_loads.length > 0 {
@@ -609,9 +592,9 @@ fn lower_if_instruction(
     if !structure.has_else {
         if !then_terminated {
             let mutated_names = collect_mutation_names(then_mutations);
-            let mut then_exit_loads -> string[] = [];
-            let mut then_added -> LocalMutation[] = [];
-            let mut name_idx -> number = 0;
+            let mut then_exit_loads: string[] = [];
+            let mut then_added: LocalMutation[] = [];
+            let mut name_idx: number = 0;
             loop {
                 if name_idx >= mutated_names.length {
                     break;
@@ -626,7 +609,7 @@ fn lower_if_instruction(
                         "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer
                     );
                     let original = find_mutation_for_name(then_mutations, name);
-                    let mut original_span -> NativeSourceSpan? = null;
+                    let mut original_span: NativeSourceSpan? = null;
                     if original != null {
                         original_span = original.span;
                     }
@@ -651,9 +634,9 @@ fn lower_if_instruction(
         }
     }
 
-    let mut terminated -> boolean = false;
+    let mut terminated: boolean = false;
     if structure.has_else {
-        let mut _asgn228 -> boolean = false;
+        let mut _asgn228: boolean = false;
         if then_terminated {
             if else_terminated {
                 _asgn228 = true;
@@ -662,7 +645,7 @@ fn lower_if_instruction(
         terminated = _asgn228;
     }
 
-    let mut _if229 -> boolean = false;
+    let mut _if229: boolean = false;
     if !terminated { _if229 = true; }
     if !structure.has_else { _if229 = true; }
     if _if229 {
@@ -671,8 +654,8 @@ fn lower_if_instruction(
         // Emit phi nodes for mutated locals
         if structure.has_else {
             // Full if/else: emit phi nodes merging values from both branches
-            let mut _if233 -> boolean = false;
-            let mut _if235 -> boolean = false;
+            let mut _if233: boolean = false;
+            let mut _if235: boolean = false;
             if !then_terminated { _if235 = true; }
             if !else_terminated { _if235 = true; }
             if _if235 {
@@ -740,7 +723,7 @@ fn lower_if_instruction(
     }
 
     current_locals = base_locals;
-    let mut merged_bindings -> ParameterBinding[] = base_bindings;
+    let mut merged_bindings: ParameterBinding[] = base_bindings;
     if !then_terminated {
         merged_bindings = merge_parameter_bindings(merged_bindings, then_bindings);
     }
@@ -750,12 +733,11 @@ fn lower_if_instruction(
         }
     }
 
-    let mut merged_lines -> string[] = current_lines;
+    let mut merged_lines: string[] = current_lines;
     if merged_lines.length < base_lines_snapshot.length {
         merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
     }
 
-    _write_block_result_files(merged_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.next_index + 1);
     return BlockLoweringResult {
         lines: merged_lines,
         allocas: current_allocas,

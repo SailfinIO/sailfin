@@ -9,16 +9,16 @@ import { Token, TokenKind, eof_token } from "./token";
 import { char_code } from "./string_utils";
 
 struct LexerState {
-    source -> string;
-    source_len -> number;
-    index -> number;
-    line -> number;
-    column -> number;
+    source: string;
+    source_len: number;
+    index: number;
+    line: number;
+    column: number;
 }
 
-fn lex(source -> string) -> Token[] {
+fn lex(source: string) -> Token[] {
     let length = source.length;
-    let state -> LexerState = LexerState {
+    let state: LexerState = LexerState {
         source: source,
         source_len: length,
         index: 0,
@@ -26,8 +26,8 @@ fn lex(source -> string) -> Token[] {
         column: 1,
     };
 
-    let tokens -> Token[] = [];
-    let mut guard -> number = 0;
+    let tokens: Token[] = [];
+    let mut guard: number = 0;
     let max_guard = length * 8 + 1000;
 
     loop {
@@ -84,14 +84,14 @@ fn lex(source -> string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
 
-                let mut comment_end -> number = state.source_len;
-                let mut scan_index -> number = state.index;
+                let mut comment_end: number = state.source_len;
+                let mut scan_index: number = state.index;
                 loop {
                     if scan_index >= state.source_len {
                         break;
                     }
                     let scan_character = byte_at(state.source, scan_index);
-                    let mut _if35 -> boolean = false;
+                    let mut _if35: boolean = false;
                     if scan_character == "\n" { _if35 = true; }
                     if scan_character == "\r" { _if35 = true; }
                     if _if35 {
@@ -102,7 +102,7 @@ fn lex(source -> string) -> Token[] {
                 }
 
                 let lexeme = slice(state.source, start_index, comment_end);
-                let consumed_columns -> number = comment_end - state.index;
+                let consumed_columns: number = comment_end - state.index;
                 state.index = comment_end;
                 state.column += consumed_columns;
                 tokens = append(tokens, Token {
@@ -168,7 +168,7 @@ fn lex(source -> string) -> Token[] {
             // Note: we only need to advance to the closing quote.
             // The token stores the raw lexeme slice; we do not build an
             // unescaped string here.
-            let escaped -> boolean = false;
+            let escaped: boolean = false;
 
             loop {
                 if state.index >= state.source_len {
@@ -235,7 +235,7 @@ fn lex(source -> string) -> Token[] {
 
             if state.index < state.source_len {
                 if byte_at(state.source, state.index) == "." {
-                    let mut _let43 -> boolean = false;
+                    let mut _let43: boolean = false;
                     if state.index + 1 < state.source_len {
                         if is_digit(byte_at(state.source, state.index + 1)) {
                             _let43 = true;
@@ -286,7 +286,7 @@ fn lex(source -> string) -> Token[] {
                 state.column += 1;
             }
             let value = slice(state.source, start, state.index);
-            let mut _if36 -> boolean = false;
+            let mut _if36: boolean = false;
             if value == "true" { _if36 = true; }
             if value == "false" { _if36 = true; }
             if _if36 {
@@ -315,7 +315,7 @@ fn lex(source -> string) -> Token[] {
         if _lex_next < state.source_len {
             let pair = slice(state.source, state.index, _lex_next2);
             // Fast-path: keep <= / >= stable.
-            let mut _if37 -> boolean = false;
+            let mut _if37: boolean = false;
             if pair == "<=" { _if37 = true; }
             if pair == ">=" { _if37 = true; }
             if _if37 {
@@ -364,8 +364,8 @@ fn lex(source -> string) -> Token[] {
     return tokens;
 }
 
-fn is_whitespace(ch -> string) -> boolean {
-    let mut _ret38 -> boolean = false;
+fn is_whitespace(ch: string) -> boolean {
+    let mut _ret38: boolean = false;
     if ch == " " { _ret38 = true; }
     if ch == "\t" { _ret38 = true; }
     if ch == "\n" { _ret38 = true; }
@@ -373,23 +373,23 @@ fn is_whitespace(ch -> string) -> boolean {
     return _ret38;
 }
 
-fn is_identifier_start(ch -> string) -> boolean {
-    let mut _ret39 -> boolean = false;
+fn is_identifier_start(ch: string) -> boolean {
+    let mut _ret39: boolean = false;
     if is_letter(ch) { _ret39 = true; }
     if ch == "_" { _ret39 = true; }
     return _ret39;
 }
 
-fn is_identifier_part(ch -> string) -> boolean {
-    let mut _ret40 -> boolean = false;
+fn is_identifier_part(ch: string) -> boolean {
+    let mut _ret40: boolean = false;
     if is_identifier_start(ch) { _ret40 = true; }
     if is_digit(ch) { _ret40 = true; }
     return _ret40;
 }
 
-fn is_letter(ch -> string) -> boolean {
+fn is_letter(ch: string) -> boolean {
     let c = char_code(ch);
-    let mut _ret41 -> boolean = false;
+    let mut _ret41: boolean = false;
     if c >= 65 {
         if c <= 90 {
             _ret41 = true;
@@ -403,9 +403,9 @@ fn is_letter(ch -> string) -> boolean {
     return _ret41;
 }
 
-fn is_digit(ch -> string) -> boolean {
+fn is_digit(ch: string) -> boolean {
     let c = char_code(ch);
-    let mut _ret42 -> boolean = false;
+    let mut _ret42: boolean = false;
     if c >= 48 {
         if c <= 57 {
             _ret42 = true;
@@ -414,15 +414,15 @@ fn is_digit(ch -> string) -> boolean {
     return _ret42;
 }
 
-fn is_double_quote(ch -> string) -> boolean {
+fn is_double_quote(ch: string) -> boolean {
     return ch == "\"";
 }
 
-fn is_backslash(ch -> string) -> boolean {
+fn is_backslash(ch: string) -> boolean {
     return ch == "\\";
 }
 
-fn slice(text -> string, start -> number, end -> number) -> string {
+fn slice(text: string, start: number, end: number) -> string {
     let text_len = text.length;
     let mut safe_start = start;
     let mut safe_end = end;
@@ -441,7 +441,7 @@ fn slice(text -> string, start -> number, end -> number) -> string {
     return substring_unchecked(text, safe_start, safe_end);
 }
 
-fn byte_at(text -> string, index -> number) -> string {
+fn byte_at(text: string, index: number) -> string {
     let text_len = text.length;
     if text_len == 0 {
         return "";
@@ -455,12 +455,12 @@ fn byte_at(text -> string, index -> number) -> string {
     return substring_unchecked(text, index, index + 1);
 }
 
-fn append(tokens -> Token[], token -> Token) -> Token[] {
+fn append(tokens: Token[], token: Token) -> Token[] {
     tokens.push(token);
     return tokens;
 }
 
-fn is_two_char_symbol(value -> string) -> boolean {
+fn is_two_char_symbol(value: string) -> boolean {
     if value == "->" {
         return true;
     }

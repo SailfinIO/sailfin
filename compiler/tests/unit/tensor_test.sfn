@@ -3,15 +3,15 @@
 // -- Types and helpers copied from sfn/tensor --
 
 struct Tensor {
-    data -> number[];
-    shape -> number[];
-    size -> number;
+    data: number[];
+    shape: number[];
+    size: number;
 }
 
-fn _shape_size(shape -> number[]) -> number {
+fn _shape_size(shape: number[]) -> number {
     if shape.length == 0 { return 1; }
-    let mut n -> number = 1;
-    let mut i -> number = 0;
+    let mut n: number = 1;
+    let mut i: number = 0;
     loop {
         if i >= shape.length { break; }
         n = n * shape[i];
@@ -20,10 +20,10 @@ fn _shape_size(shape -> number[]) -> number {
     return n;
 }
 
-fn _flat_index(shape -> number[], indices -> number[]) -> number {
-    let mut flat -> number = 0;
-    let mut stride -> number = 1;
-    let mut i -> number = shape.length;
+fn _flat_index(shape: number[], indices: number[]) -> number {
+    let mut flat: number = 0;
+    let mut stride: number = 1;
+    let mut i: number = shape.length;
     loop {
         if i <= 0 { break; }
         i -= 1;
@@ -33,15 +33,15 @@ fn _flat_index(shape -> number[], indices -> number[]) -> number {
     return flat;
 }
 
-fn _min_size(a -> number, b -> number) -> number {
+fn _min_size(a: number, b: number) -> number {
     if a <= b { return a; }
     return b;
 }
 
-fn _zeros(shape -> number[]) -> Tensor {
+fn _zeros(shape: number[]) -> Tensor {
     let n = _shape_size(shape);
-    let mut data -> number[] = [];
-    let mut i -> number = 0;
+    let mut data: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         data.push(0);
@@ -50,10 +50,10 @@ fn _zeros(shape -> number[]) -> Tensor {
     return Tensor { data: data, shape: shape, size: n };
 }
 
-fn _ones(shape -> number[]) -> Tensor {
+fn _ones(shape: number[]) -> Tensor {
     let n = _shape_size(shape);
-    let mut data -> number[] = [];
-    let mut i -> number = 0;
+    let mut data: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         data.push(1);
@@ -62,10 +62,10 @@ fn _ones(shape -> number[]) -> Tensor {
     return Tensor { data: data, shape: shape, size: n };
 }
 
-fn _fill(shape -> number[], value -> number) -> Tensor {
+fn _fill(shape: number[], value: number) -> Tensor {
     let n = _shape_size(shape);
-    let mut data -> number[] = [];
-    let mut i -> number = 0;
+    let mut data: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         data.push(value);
@@ -74,24 +74,24 @@ fn _fill(shape -> number[], value -> number) -> Tensor {
     return Tensor { data: data, shape: shape, size: n };
 }
 
-fn _from_array(data -> number[], shape -> number[]) -> Tensor {
+fn _from_array(data: number[], shape: number[]) -> Tensor {
     let n = _shape_size(shape);
     return Tensor { data: data, shape: shape, size: n };
 }
 
-fn _scalar(value -> number) -> Tensor {
+fn _scalar(value: number) -> Tensor {
     return Tensor { data: [value], shape: [], size: 1 };
 }
 
-fn _get(t -> Tensor, indices -> number[]) -> number {
+fn _get(t: Tensor, indices: number[]) -> number {
     let flat = _flat_index(t.shape, indices);
     return t.data[flat];
 }
 
-fn _set(t -> Tensor, indices -> number[], value -> number) -> Tensor {
+fn _set(t: Tensor, indices: number[], value: number) -> Tensor {
     let flat = _flat_index(t.shape, indices);
-    let mut new_data -> number[] = [];
-    let mut i -> number = 0;
+    let mut new_data: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= t.size { break; }
         if i == flat {
@@ -104,10 +104,10 @@ fn _set(t -> Tensor, indices -> number[], value -> number) -> Tensor {
     return Tensor { data: new_data, shape: t.shape, size: t.size };
 }
 
-fn _add(a -> Tensor, b -> Tensor) -> Tensor {
+fn _add(a: Tensor, b: Tensor) -> Tensor {
     let n = _min_size(a.size, b.size);
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         out.push(a.data[i] + b.data[i]);
@@ -116,10 +116,10 @@ fn _add(a -> Tensor, b -> Tensor) -> Tensor {
     return Tensor { data: out, shape: a.shape, size: n };
 }
 
-fn _subtract(a -> Tensor, b -> Tensor) -> Tensor {
+fn _subtract(a: Tensor, b: Tensor) -> Tensor {
     let n = _min_size(a.size, b.size);
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         out.push(a.data[i] - b.data[i]);
@@ -128,10 +128,10 @@ fn _subtract(a -> Tensor, b -> Tensor) -> Tensor {
     return Tensor { data: out, shape: a.shape, size: n };
 }
 
-fn _multiply(a -> Tensor, b -> Tensor) -> Tensor {
+fn _multiply(a: Tensor, b: Tensor) -> Tensor {
     let n = _min_size(a.size, b.size);
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         out.push(a.data[i] * b.data[i]);
@@ -140,9 +140,9 @@ fn _multiply(a -> Tensor, b -> Tensor) -> Tensor {
     return Tensor { data: out, shape: a.shape, size: n };
 }
 
-fn _scale(t -> Tensor, s -> number) -> Tensor {
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+fn _scale(t: Tensor, s: number) -> Tensor {
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= t.size { break; }
         out.push(t.data[i] * s);
@@ -151,13 +151,13 @@ fn _scale(t -> Tensor, s -> number) -> Tensor {
     return Tensor { data: out, shape: t.shape, size: t.size };
 }
 
-fn _negate(t -> Tensor) -> Tensor {
+fn _negate(t: Tensor) -> Tensor {
     return _scale(t, -1);
 }
 
-fn _sum(t -> Tensor) -> number {
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+fn _sum(t: Tensor) -> number {
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= t.size { break; }
         total = total + t.data[i];
@@ -166,22 +166,22 @@ fn _sum(t -> Tensor) -> number {
     return total;
 }
 
-fn _mean(t -> Tensor) -> number {
+fn _mean(t: Tensor) -> number {
     if t.size == 0 { return 0; }
     return _sum(t) / t.size;
 }
 
-fn _reshape(t -> Tensor, new_shape -> number[]) -> Tensor {
+fn _reshape(t: Tensor, new_shape: number[]) -> Tensor {
     return Tensor { data: t.data, shape: new_shape, size: t.size };
 }
 
-fn _rank(t -> Tensor) -> number {
+fn _rank(t: Tensor) -> number {
     return t.shape.length;
 }
 
-fn _dot(a -> Tensor, b -> Tensor) -> number {
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+fn _dot(a: Tensor, b: Tensor) -> number {
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= a.size { break; }
         total = total + a.data[i] * b.data[i];
@@ -190,7 +190,7 @@ fn _dot(a -> Tensor, b -> Tensor) -> number {
     return total;
 }
 
-fn _matmul(a -> Tensor, b -> Tensor) -> Tensor {
+fn _matmul(a: Tensor, b: Tensor) -> Tensor {
     if a.shape.length != 2 || b.shape.length != 2 {
         return _zeros([0]);
     }
@@ -200,15 +200,15 @@ fn _matmul(a -> Tensor, b -> Tensor) -> Tensor {
     let m = a.shape[0];
     let k = a.shape[1];
     let n = b.shape[1];
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= m { break; }
-        let mut j -> number = 0;
+        let mut j: number = 0;
         loop {
             if j >= n { break; }
-            let mut val -> number = 0;
-            let mut p -> number = 0;
+            let mut val: number = 0;
+            let mut p: number = 0;
             loop {
                 if p >= k { break; }
                 val = val + a.data[i * k + p] * b.data[p * n + j];
@@ -222,14 +222,14 @@ fn _matmul(a -> Tensor, b -> Tensor) -> Tensor {
     return Tensor { data: out, shape: [m, n], size: m * n };
 }
 
-fn _transpose(t -> Tensor) -> Tensor {
+fn _transpose(t: Tensor) -> Tensor {
     let rows = t.shape[0];
     let cols = t.shape[1];
-    let mut out -> number[] = [];
-    let mut j -> number = 0;
+    let mut out: number[] = [];
+    let mut j: number = 0;
     loop {
         if j >= cols { break; }
-        let mut i -> number = 0;
+        let mut i: number = 0;
         loop {
             if i >= rows { break; }
             out.push(t.data[i * cols + j]);

@@ -1,19 +1,19 @@
 import { sailfin_version } from "../../src/version";
 
-fn _index_of(haystack -> string, needle -> string) -> number {
+fn _index_of(haystack: string, needle: string) -> number {
     if needle.length == 0 {
         return 0;
     }
     if haystack.length < needle.length {
         return -1;
     }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i + needle.length > haystack.length {
             break;
         }
-        let mut j -> number = 0;
-        let mut matches -> boolean = true;
+        let mut j: number = 0;
+        let mut matches: boolean = true;
         loop {
             if j >= needle.length {
                 break;
@@ -32,7 +32,7 @@ fn _index_of(haystack -> string, needle -> string) -> number {
     return -1;
 }
 
-fn _contains(haystack -> string, needle -> string) -> boolean {
+fn _contains(haystack: string, needle: string) -> boolean {
     return _index_of(haystack, needle) >= 0;
 }
 

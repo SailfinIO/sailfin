@@ -7,7 +7,7 @@
 // Deep recursion (100+ levels)
 // ---------------------------------------------------------------------------
 
-fn _sum_recursive(n -> number) -> number {
+fn _sum_recursive(n: number) -> number {
     if n <= 0 { return 0; }
     return n + _sum_recursive(n - 1);
 }
@@ -28,12 +28,12 @@ test "deep_recursion: sum to 0" {
 // Mutual recursion (two functions calling each other)
 // ---------------------------------------------------------------------------
 
-fn _is_even_rec(n -> number) -> boolean {
+fn _is_even_rec(n: number) -> boolean {
     if n == 0 { return true; }
     return _is_odd_rec(n - 1);
 }
 
-fn _is_odd_rec(n -> number) -> boolean {
+fn _is_odd_rec(n: number) -> boolean {
     if n == 0 { return false; }
     return _is_even_rec(n - 1);
 }
@@ -62,12 +62,12 @@ test "deep_recursion: mutual recursion cross-check" {
 // ---------------------------------------------------------------------------
 
 struct TreeResult {
-    sum -> number;
-    depth -> number;
-    count -> number;
+    sum: number;
+    depth: number;
+    count: number;
 }
 
-fn _tree_accumulate(depth -> number, value -> number) -> TreeResult {
+fn _tree_accumulate(depth: number, value: number) -> TreeResult {
     if depth <= 0 {
         return TreeResult { sum: value, depth: 0, count: 1 };
     }
@@ -106,35 +106,35 @@ test "deep_recursion: recursive struct return depth 3" {
 // Long call chain (A calls B calls C calls D ...)
 // ---------------------------------------------------------------------------
 
-fn _chain_a(n -> number) -> number {
+fn _chain_a(n: number) -> number {
     return _chain_b(n + 1);
 }
 
-fn _chain_b(n -> number) -> number {
+fn _chain_b(n: number) -> number {
     return _chain_c(n + 1);
 }
 
-fn _chain_c(n -> number) -> number {
+fn _chain_c(n: number) -> number {
     return _chain_d(n + 1);
 }
 
-fn _chain_d(n -> number) -> number {
+fn _chain_d(n: number) -> number {
     return _chain_e(n + 1);
 }
 
-fn _chain_e(n -> number) -> number {
+fn _chain_e(n: number) -> number {
     return _chain_f(n + 1);
 }
 
-fn _chain_f(n -> number) -> number {
+fn _chain_f(n: number) -> number {
     return _chain_g(n + 1);
 }
 
-fn _chain_g(n -> number) -> number {
+fn _chain_g(n: number) -> number {
     return _chain_h(n + 1);
 }
 
-fn _chain_h(n -> number) -> number {
+fn _chain_h(n: number) -> number {
     return n + 1;
 }
 
@@ -151,7 +151,7 @@ test "deep_recursion: call chain preserves large values" {
 // Recursion with string accumulation
 // ---------------------------------------------------------------------------
 
-fn _repeat_string(s -> string, n -> number) -> string {
+fn _repeat_string(s: string, n: number) -> string {
     if n <= 0 { return ""; }
     if n == 1 { return s; }
     return s + _repeat_string(s, n - 1);
@@ -177,7 +177,7 @@ test "deep_recursion: string repeat 5" {
 // Recursive array building (power set size calculation)
 // ---------------------------------------------------------------------------
 
-fn _power_of_two(n -> number) -> number {
+fn _power_of_two(n: number) -> number {
     if n == 0 { return 1; }
     return 2 * _power_of_two(n - 1);
 }
@@ -193,7 +193,7 @@ test "deep_recursion: power of two" {
 // Ackermann-like function (tests deep recursion with branching)
 // ---------------------------------------------------------------------------
 
-fn _ackermann_bounded(m -> number, n -> number) -> number {
+fn _ackermann_bounded(m: number, n: number) -> number {
     if m == 0 { return n + 1; }
     if n == 0 { return _ackermann_bounded(m - 1, 1); }
     return _ackermann_bounded(m - 1, _ackermann_bounded(m, n - 1));

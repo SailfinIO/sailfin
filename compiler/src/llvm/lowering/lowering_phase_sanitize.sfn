@@ -211,7 +211,7 @@ fn sanitize_structs(structs: NativeStruct[], diagnostics: string[]) -> NativeStr
 fn sanitize_enums(enums: NativeEnum[], diagnostics: string[], _trace_enums: boolean) -> NativeEnum[] {
     let mut safe = enums;
     if _trace_enums {
-        let mut _enum_len_text -> string = "null";
+        let mut _enum_len_text: string = "null";
         if safe != null {
             _enum_len_text = number_to_string(safe.length);
         }
@@ -318,7 +318,7 @@ fn sanitize_functions(
             }
             let mut recovered_functions = parse_native_functions_from_text(recovery_text);
             let mut recovered_has_body = false;
-            let mut recovered_index -> number = 0;
+            let mut recovered_index: number = 0;
             loop {
                 if recovered_index >= recovered_functions.length {
                     break;
@@ -334,7 +334,7 @@ fn sanitize_functions(
                 }
                 recovered_index += 1;
             }
-            let mut _if249 -> boolean = false;
+            let mut _if249: boolean = false;
             if recovered_functions.length == 0 { _if249 = true; }
             if !recovered_has_body { _if249 = true; }
             if _if249 {
@@ -356,7 +356,7 @@ fn sanitize_functions(
                     }
                     recovered_index += 1;
                 }
-                let mut _if261 -> boolean = false;
+                let mut _if261: boolean = false;
                 if light_has_body { _if261 = true; }
                 if recovered_functions.length == 0 { _if261 = true; }
                 if _if261 {
@@ -402,16 +402,16 @@ fn recover_structs_if_corrupt(
     native_text_override_path: string,
     debug_lowering: boolean
 ) -> NativeStruct[] ![io] {
-    let mut structs_look_corrupt -> boolean = safe_structs.length == 0;
+    let mut structs_look_corrupt: boolean = safe_structs.length == 0;
     if !structs_look_corrupt {
         if safe_structs.length > 0 {
-            let mut check_i -> number = 0;
+            let mut check_i: number = 0;
             loop {
                 if check_i >= safe_structs.length {
                     break;
                 }
                 let check_struct = safe_structs[check_i];
-                let mut _if262 -> boolean = false;
+                let mut _if262: boolean = false;
                 if check_struct.name == null { _if262 = true; }
                 if check_struct.name.length == 0 { _if262 = true; }
                 if _if262 {

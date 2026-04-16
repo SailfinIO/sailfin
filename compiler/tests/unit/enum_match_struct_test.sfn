@@ -16,19 +16,19 @@ enum TaskStatus {
 }
 
 struct Task {
-    name -> string;
-    priority -> Priority;
-    status -> TaskStatus;
-    effort -> number;
+    name: string;
+    priority: Priority;
+    status: TaskStatus;
+    effort: number;
 }
 
 // ---------------------------------------------------------------------------
 // Enum equality in loops and conditions
 // ---------------------------------------------------------------------------
 
-fn _count_by_status(tasks -> Task[], status -> TaskStatus) -> number {
-    let mut count -> number = 0;
-    let mut i -> number = 0;
+fn _count_by_status(tasks: Task[], status: TaskStatus) -> number {
+    let mut count: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= tasks.length { break; }
         if tasks[i].status == status {
@@ -40,7 +40,7 @@ fn _count_by_status(tasks -> Task[], status -> TaskStatus) -> number {
 }
 
 test "enum_match: count tasks by status" {
-    let mut tasks -> Task[] = [];
+    let mut tasks: Task[] = [];
     tasks.push(Task { name: "A", priority: Priority.High, status: TaskStatus.Todo, effort: 1 });
     tasks.push(Task { name: "B", priority: Priority.Low, status: TaskStatus.Done, effort: 2 });
     tasks.push(Task { name: "C", priority: Priority.Medium, status: TaskStatus.Todo, effort: 3 });
@@ -59,7 +59,7 @@ test "enum_match: count tasks by status" {
 // must appear below _format_task for the seedcheck's recovery parser.
 // ---------------------------------------------------------------------------
 
-fn _format_task(t -> Task) -> string {
+fn _format_task(t: Task) -> string {
     let plabel = _priority_label(t.priority);
     return "[" + plabel + "] " + t.name;
 }
@@ -74,12 +74,12 @@ test "enum_match: format with struct" {
     assert _format_task(t) == "[P0] Deploy";
 }
 
-fn _priority_label(p -> Priority) -> string {
+fn _priority_label(p: Priority) -> string {
     match p {
-        Priority.Low -> return "P3",
-        Priority.Medium -> return "P2",
-        Priority.High -> return "P1",
-        Priority.Critical -> return "P0",
+        Priority.Low: return "P3",
+        Priority.Medium: return "P2",
+        Priority.High: return "P1",
+        Priority.Critical: return "P0",
     }
 }
 

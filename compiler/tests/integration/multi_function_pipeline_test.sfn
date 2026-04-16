@@ -15,12 +15,12 @@ enum TokenKind {
 }
 
 struct Token {
-    kind -> TokenKind;
-    text -> string;
-    position -> number;
+    kind: TokenKind;
+    text: string;
+    position: number;
 }
 
-fn _classify_char(ch -> string) -> TokenKind {
+fn _classify_char(ch: string) -> TokenKind {
     if ch == " " { return TokenKind.Whitespace; }
     if ch == "+" { return TokenKind.Symbol; }
     if ch == "-" { return TokenKind.Symbol; }
@@ -42,9 +42,9 @@ fn _classify_char(ch -> string) -> TokenKind {
     return TokenKind.Word;
 }
 
-fn _tokenize_simple(input -> string) -> Token[] {
-    let mut tokens -> Token[] = [];
-    let mut i -> number = 0;
+fn _tokenize_simple(input: string) -> Token[] {
+    let mut tokens: Token[] = [];
+    let mut i: number = 0;
     loop {
         if i >= input.length { break; }
         let ch = substring(input, i, i + 1);
@@ -60,7 +60,7 @@ fn _tokenize_simple(input -> string) -> Token[] {
             continue;
         }
         // For words and numbers, consume consecutive characters of same kind
-        let mut end -> number = i + 1;
+        let mut end: number = i + 1;
         loop {
             if end >= input.length { break; }
             let next_ch = substring(input, end, end + 1);
@@ -108,9 +108,9 @@ test "pipeline: tokenize only spaces" {
 // Filter tokens (e.g., remove whitespace, extract only words)
 // ---------------------------------------------------------------------------
 
-fn _filter_by_kind(tokens -> Token[], kind -> TokenKind) -> Token[] {
-    let mut result -> Token[] = [];
-    let mut i -> number = 0;
+fn _filter_by_kind(tokens: Token[], kind: TokenKind) -> Token[] {
+    let mut result: Token[] = [];
+    let mut i: number = 0;
     loop {
         if i >= tokens.length { break; }
         if tokens[i].kind == kind {
@@ -121,9 +121,9 @@ fn _filter_by_kind(tokens -> Token[], kind -> TokenKind) -> Token[] {
     return result;
 }
 
-fn _token_texts(tokens -> Token[]) -> string[] {
-    let mut result -> string[] = [];
-    let mut i -> number = 0;
+fn _token_texts(tokens: Token[]) -> string[] {
+    let mut result: string[] = [];
+    let mut i: number = 0;
     loop {
         if i >= tokens.length { break; }
         result.push(tokens[i].text);
@@ -132,9 +132,9 @@ fn _token_texts(tokens -> Token[]) -> string[] {
     return result;
 }
 
-fn _join_strings(arr -> string[], sep -> string) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _join_strings(arr: string[], sep: string) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= arr.length { break; }
         if i > 0 {
@@ -167,18 +167,18 @@ test "pipeline: filter symbols" {
 // ---------------------------------------------------------------------------
 
 struct TokenStats {
-    total -> number;
-    words -> number;
-    numbers -> number;
-    symbols -> number;
+    total: number;
+    words: number;
+    numbers: number;
+    symbols: number;
 }
 
-fn _compute_token_stats(input -> string) -> TokenStats {
+fn _compute_token_stats(input: string) -> TokenStats {
     let tokens = _tokenize_simple(input);
-    let mut words -> number = 0;
-    let mut numbers -> number = 0;
-    let mut symbols -> number = 0;
-    let mut i -> number = 0;
+    let mut words: number = 0;
+    let mut numbers: number = 0;
+    let mut symbols: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= tokens.length { break; }
         if tokens[i].kind == TokenKind.Word { words += 1; }
@@ -216,18 +216,18 @@ test "pipeline: token stats for pure numbers" {
 // ---------------------------------------------------------------------------
 
 struct Student {
-    name -> string;
-    score -> number;
-    passed -> boolean;
+    name: string;
+    score: number;
+    passed: boolean;
 }
 
-fn _make_student(name -> string, score -> number) -> Student {
+fn _make_student(name: string, score: number) -> Student {
     return Student { name: name, score: score, passed: score >= 60 };
 }
 
-fn _count_passing(students -> Student[]) -> number {
-    let mut count -> number = 0;
-    let mut i -> number = 0;
+fn _count_passing(students: Student[]) -> number {
+    let mut count: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= students.length { break; }
         if students[i].passed {
@@ -238,10 +238,10 @@ fn _count_passing(students -> Student[]) -> number {
     return count;
 }
 
-fn _highest_score(students -> Student[]) -> number {
+fn _highest_score(students: Student[]) -> number {
     if students.length == 0 { return 0; }
-    let mut best -> number = students[0].score;
-    let mut i -> number = 1;
+    let mut best: number = students[0].score;
+    let mut i: number = 1;
     loop {
         if i >= students.length { break; }
         if students[i].score > best {
@@ -252,10 +252,10 @@ fn _highest_score(students -> Student[]) -> number {
     return best;
 }
 
-fn _average_score(students -> Student[]) -> number {
+fn _average_score(students: Student[]) -> number {
     if students.length == 0 { return 0; }
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= students.length { break; }
         total += students[i].score;
@@ -277,7 +277,7 @@ test "pipeline: student failing" {
 }
 
 test "pipeline: student array operations" {
-    let mut students -> Student[] = [];
+    let mut students: Student[] = [];
     students.push(_make_student("Alice", 90));
     students.push(_make_student("Bob", 45));
     students.push(_make_student("Charlie", 72));
@@ -294,12 +294,12 @@ test "pipeline: student array operations" {
 // ---------------------------------------------------------------------------
 
 struct QueryBuilder {
-    table -> string;
-    conditions -> string;
-    condition_count -> number;
-    limit_val -> number;
+    table: string;
+    conditions: string;
+    condition_count: number;
+    limit_val: number;
 
-    fn from_table(name -> string) -> QueryBuilder {
+    fn from_table(name: string) -> QueryBuilder {
         return QueryBuilder {
             table: name,
             conditions: "",
@@ -308,7 +308,7 @@ struct QueryBuilder {
         };
     }
 
-    fn where_eq(self, field -> string, value -> string) -> QueryBuilder {
+    fn where_eq(self, field: string, value: string) -> QueryBuilder {
         let mut conds = self.conditions;
         if self.condition_count > 0 {
             conds = conds + " AND ";
@@ -322,7 +322,7 @@ struct QueryBuilder {
         };
     }
 
-    fn with_limit(self, n -> number) -> QueryBuilder {
+    fn with_limit(self, n: number) -> QueryBuilder {
         return QueryBuilder {
             table: self.table,
             conditions: self.conditions,
@@ -332,7 +332,7 @@ struct QueryBuilder {
     }
 
     fn build(self) -> string {
-        let mut sql -> string = "SELECT * FROM " + self.table;
+        let mut sql: string = "SELECT * FROM " + self.table;
         if self.condition_count > 0 {
             sql = sql + " WHERE " + self.conditions;
         }

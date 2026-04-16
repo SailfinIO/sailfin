@@ -1,7 +1,7 @@
 // examples/advanced/pointer-arithmetic.sfn
 
-unsafe extern fn malloc(size -> usize) -> *u8;
-unsafe extern fn free(ptr -> *u8) -> void;
+unsafe extern fn malloc(size: usize) -> *u8;
+unsafe extern fn free(ptr: *u8) -> void;
 
 fn main() ![unsafe, io] {
     unsafe {

@@ -97,9 +97,16 @@ Key terminology: capsule (package), fleet (workspace), generation card (model pr
    [If applicable, brief notes on how this might be addressed]
    ```
 
+## Important: Always Produce Output
+
+You MUST always call at least one safe output tool. If the issue requires no triage action (e.g., already triaged, or is a workflow-generated `[aw]` failure issue), call the `noop` tool:
+`{"noop": {"message": "No action needed: [brief explanation]"}}`
+
+Do NOT finish without calling a safe output tool — the workflow will fail with a `No Safe Outputs Generated` error.
+
 ## Important Notes
 
 - Reference `docs/status.md` for current feature implementation status
-- Reference `docs/roadmap.md` for active workstreams
+- Reference the [roadmap](https://sailfin.dev/roadmap) for active workstreams
 - The compiler pipeline is: lexer -> parser -> AST -> type check -> effect check -> emit -> LLVM lowering
 - Do NOT suggest using the Python bootstrap (Stage0) — all work targets the native compiler

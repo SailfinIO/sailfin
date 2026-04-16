@@ -19,8 +19,8 @@ import {
     is_trim_char,
 } from "./core_text";
 
-fn lines_end_with_terminator(lines -> string[]) -> boolean {
-    let mut index -> number = lines.length - 1;
+fn lines_end_with_terminator(lines: string[]) -> boolean {
+    let mut index: number = lines.length - 1;
     loop {
         if lines.length == 0 {
             return false;
@@ -50,19 +50,19 @@ fn lines_end_with_terminator(lines -> string[]) -> boolean {
     return false;
 }
 
-fn strip_enclosing_parentheses(expression -> string) -> string {
+fn strip_enclosing_parentheses(expression: string) -> string {
     let trimmed = trim_text(expression);
     if trimmed.length < 2 {
         return trimmed;
     }
-    let mut _if90 -> boolean = false;
+    let mut _if90: boolean = false;
     if substring(trimmed, 0, 1) != "(" { _if90 = true; }
     if substring(trimmed, trimmed.length - 1, trimmed.length) != ")" { _if90 = true; }
     if _if90 {
         return trimmed;
     }
-    let mut depth -> number = 0;
-    let mut index -> number = 0;
+    let mut depth: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= trimmed.length {
             break;
@@ -85,17 +85,17 @@ fn strip_enclosing_parentheses(expression -> string) -> string {
     return trimmed;
 }
 
-fn find_top_level_operator(expression -> string, operators -> string) -> OperatorMatch {
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut angle_depth -> number = 0;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape_next -> boolean = false;
-    let mut candidate_index -> number = -1;
-    let mut candidate_symbol -> string = "";
-    let mut index -> number = 0;
+fn find_top_level_operator(expression: string, operators: string) -> OperatorMatch {
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut angle_depth: number = 0;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut candidate_index: number = -1;
+    let mut candidate_symbol: string = "";
+    let mut index: number = 0;
     loop {
         if index >= expression.length {
             break;
@@ -225,13 +225,13 @@ fn find_top_level_operator(expression -> string, operators -> string) -> Operato
     return OperatorMatch { index: -1, symbol: "", success: false };
 }
 
-fn find_comparison_operator(expression -> string) -> OperatorMatch {
-    let mut depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut index -> number = 0;
-    let mut in_string -> boolean = false;
-    let mut escape_next -> boolean = false;
+fn find_comparison_operator(expression: string) -> OperatorMatch {
+    let mut depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut index: number = 0;
+    let mut in_string: boolean = false;
+    let mut escape_next: boolean = false;
     loop {
         if index >= expression.length {
             break;
@@ -337,13 +337,13 @@ fn find_comparison_operator(expression -> string) -> OperatorMatch {
     return OperatorMatch { index: -1, symbol: "", success: false };
 }
 
-fn find_logical_operator(expression -> string) -> OperatorMatch {
-    let mut depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut index -> number = 0;
-    let mut in_string -> boolean = false;
-    let mut escape_next -> boolean = false;
+fn find_logical_operator(expression: string) -> OperatorMatch {
+    let mut depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut index: number = 0;
+    let mut in_string: boolean = false;
+    let mut escape_next: boolean = false;
 
     let _lo_limit = expression.length - 1;
     loop {
@@ -510,11 +510,11 @@ fn find_logical_operator(expression -> string) -> OperatorMatch {
     return OperatorMatch { index: -1, symbol: "", success: false };
 }
 
-fn contains_char(set -> string, ch -> string) -> boolean {
+fn contains_char(set: string, ch: string) -> boolean {
     if ch.length == 0 {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= set.length {
             break;
@@ -528,14 +528,14 @@ fn contains_char(set -> string, ch -> string) -> boolean {
     return false;
 }
 
-fn is_binary_minus(expression -> string, index -> number) -> boolean {
+fn is_binary_minus(expression: string, index: number) -> boolean {
     let previous = find_previous_non_space_char(expression, index);
     let next = find_next_non_space_char(expression, index);
     if previous == null {
         return false;
     }
     let prev_char = previous;
-    let mut _if91 -> boolean = false;
+    let mut _if91: boolean = false;
     if prev_char == "+" { _if91 = true; }
     if prev_char == "-" { _if91 = true; }
     if prev_char == "*" { _if91 = true; }
@@ -549,7 +549,7 @@ fn is_binary_minus(expression -> string, index -> number) -> boolean {
         return false;
     }
     let next_char = next;
-    let mut _if92 -> boolean = false;
+    let mut _if92: boolean = false;
     if next_char == "+" { _if92 = true; }
     if next_char == "-" { _if92 = true; }
     if next_char == "*" { _if92 = true; }
@@ -562,14 +562,14 @@ fn is_binary_minus(expression -> string, index -> number) -> boolean {
     return true;
 }
 
-fn is_binary_star(expression -> string, index -> number) -> boolean {
+fn is_binary_star(expression: string, index: number) -> boolean {
     let previous = find_previous_non_space_char(expression, index);
     let next = find_next_non_space_char(expression, index);
     if previous == null {
         return false;
     }
     let prev_char = previous;
-    let mut _if93 -> boolean = false;
+    let mut _if93: boolean = false;
     if prev_char == "+" { _if93 = true; }
     if prev_char == "-" { _if93 = true; }
     if prev_char == "*" { _if93 = true; }
@@ -583,7 +583,7 @@ fn is_binary_star(expression -> string, index -> number) -> boolean {
         return false;
     }
     let next_char = next;
-    let mut _if94 -> boolean = false;
+    let mut _if94: boolean = false;
     if next_char == "+" { _if94 = true; }
     if next_char == "-" { _if94 = true; }
     if next_char == "*" { _if94 = true; }
@@ -596,8 +596,8 @@ fn is_binary_star(expression -> string, index -> number) -> boolean {
     return true;
 }
 
-fn find_previous_non_space_char(value -> string, index -> number) -> string? {
-    let mut position -> number = index;
+fn find_previous_non_space_char(value: string, index: number) -> string? {
+    let mut position: number = index;
     loop {
         if position <= 0 {
             break;
@@ -611,8 +611,8 @@ fn find_previous_non_space_char(value -> string, index -> number) -> string? {
     return null;
 }
 
-fn find_next_non_space_char(value -> string, index -> number) -> string? {
-    let mut position -> number = index + 1;
+fn find_next_non_space_char(value: string, index: number) -> string? {
+    let mut position: number = index + 1;
     loop {
         if position >= value.length {
             break;

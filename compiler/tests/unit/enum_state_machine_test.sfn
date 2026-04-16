@@ -8,7 +8,7 @@ enum State {
     Stopped,
 }
 
-fn _transition(current -> State, event -> string) -> State {
+fn _transition(current: State, event: string) -> State {
     if current == State.Idle {
         if event == "start" { return State.Running; }
         return State.Idle;
@@ -26,9 +26,9 @@ fn _transition(current -> State, event -> string) -> State {
     return State.Stopped;
 }
 
-fn _run_state_machine(events -> string[]) -> State {
-    let mut state -> State = State.Idle;
-    let mut i -> number = 0;
+fn _run_state_machine(events: string[]) -> State {
+    let mut state: State = State.Idle;
+    let mut i: number = 0;
     loop {
         if i >= events.length { break; }
         state = _transition(state, events[i]);
@@ -50,7 +50,7 @@ test "enum_sm: invalid transition" {
 }
 
 test "enum_sm: sequence" {
-    let mut events -> string[] = [];
+    let mut events: string[] = [];
     events.push("start");
     events.push("pause");
     events.push("resume");
@@ -59,7 +59,7 @@ test "enum_sm: sequence" {
 }
 
 test "enum_sm: start only" {
-    let mut events -> string[] = [];
+    let mut events: string[] = [];
     events.push("start");
     assert _run_state_machine(events) == State.Running;
 }

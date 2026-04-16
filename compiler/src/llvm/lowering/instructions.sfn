@@ -35,18 +35,7 @@ import {
 import {
     extend_lifetime_regions,
     extend_mutations,
-    _write_block_result_files,
     _parse_int_from_string,
-    _read_ipc_int_min,
-    _read_ipc_terminated,
-    write_bindings_to_files,
-    write_locals_to_files,
-    read_block_result_string_constants,
-    read_expr_string_constants,
-    read_let_result_string_constants,
-    read_let_result_from_files,
-    read_expr_mutations,
-    recover_temp_from_lines,
 } from "./instructions_helpers";
 
 import {
@@ -109,49 +98,49 @@ import {
 } from "./lowering_native_helpers";
 
 fn lower_instruction_range(
-    function -> NativeFunction,
-    start_index -> number,
-    end -> number,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    allocas -> string[],
-    lines -> string[],
-    temp_index -> number,
-    block_counter -> number,
-    next_local_id -> number,
-    next_region_id -> number,
-    functions -> NativeFunction[],
-    loop_stack -> LoopContext[],
-    context -> TypeContext,
-    scope_id -> string,
-    scope_depth -> number,
-    current_label -> string
+    function: NativeFunction,
+    start_index: number,
+    end: number,
+    llvm_return: string,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    allocas: string[],
+    lines: string[],
+    temp_index: number,
+    block_counter: number,
+    next_local_id: number,
+    next_region_id: number,
+    functions: NativeFunction[],
+    loop_stack: LoopContext[],
+    context: TypeContext,
+    scope_id: string,
+    scope_depth: number,
+    current_label: string
 ) -> BlockLoweringResult ![io] {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
-    let mut current_allocas -> string[] = allocas;
-    let mut current_locals -> LocalBinding[] = locals;
-    let mut current_bindings -> ParameterBinding[] = bindings;
-    let mut current_temp -> number = temp_index;
-    let mut current_block_counter -> number = block_counter;
-    let mut current_next_local -> number = next_local_id;
-    let mut current_next_region -> number = next_region_id;
-    let mut terminated -> boolean = false;
-    let mut current_loop_stack -> LoopContext[] = loop_stack;
-    let mut index -> number = start_index;
-    let mut collected_lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut current_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
-    let mut active_label -> string = current_label;
-    let mut guard -> number = 0;
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_bindings: ParameterBinding[] = bindings;
+    let mut current_temp: number = temp_index;
+    let mut current_block_counter: number = block_counter;
+    let mut current_next_local: number = next_local_id;
+    let mut current_next_region: number = next_region_id;
+    let mut terminated: boolean = false;
+    let mut current_loop_stack: LoopContext[] = loop_stack;
+    let mut index: number = start_index;
+    let mut collected_lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut current_mutations: LocalMutation[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
+    let mut active_label: string = current_label;
+    let mut guard: number = 0;
     let max_guard = (end - start_index) * 16 + 1024;
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
         print.err("emit-llvm: lower_instruction_range name=" + function.name + " start=" + number_to_string(start_index) + " end=" + number_to_string(end) + " depth=" + number_to_string(scope_depth));
         print.err("emit-llvm: lower_instruction_range bindings_len=" + number_to_string(bindings.length) + " current_bindings_len=" + number_to_string(current_bindings.length));
     }
-    let mut _let220 -> boolean = false;
+    let mut _let220: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
         if fs.exists("build/sailfin/.test_runner_active") {
             _let220 = true;
@@ -167,8 +156,8 @@ fn lower_instruction_range(
                     + " end="
                     + number_to_string(end)
                 );
-                let mut preview_index -> number = start_index;
-                let mut preview_limit -> number = start_index + 5;
+                let mut preview_index: number = start_index;
+                let mut preview_limit: number = start_index + 5;
                 if preview_limit > end {
                     preview_limit = end;
                 }
@@ -198,7 +187,6 @@ fn lower_instruction_range(
             // The v0.1.1 seed generates unconditional `br label %loop.body` for
             // loop.header20, meaning `break` never actually exits. Using `return`
             // instead bypasses the broken loop header entirely.
-            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -229,7 +217,6 @@ fn lower_instruction_range(
                 );
             }
             // Return directly (same loop-break workaround as index>=end case)
-            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -266,29 +253,21 @@ fn lower_instruction_range(
         //   For=6, EndFor=7, Loop=8, EndLoop=9, Break=10, Continue=11,
         //   Match=12, Case=13, EndMatch=14, Try=15, Catch=16, Finally=17,
         //   EndTry=18, Throw=19, Noop=20, Unknown=21
-        let mut _tag_handled -> boolean = false;
+        let mut _tag_handled: boolean = false;
         if _instr_tag == 2 {
             let lowered = lower_let_instruction(function, instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
-            current_locals = read_let_result_from_files(diagnostics, current_locals, current_lines, current_allocas, scope_id, scope_depth);
-            // Always read string constants from file IPC regardless of path
-            collected_string_constants = read_let_result_string_constants(collected_string_constants);
-            if fs.readFile("build/sailfin/.let_ipc_used") == "1" {
-                current_temp = _read_ipc_int_min("build/sailfin/.let_ipc_temp", current_temp);
-                current_next_local = _read_ipc_int_min("build/sailfin/.let_ipc_next_local", current_next_local);
-                current_next_region = _read_ipc_int_min("build/sailfin/.let_ipc_next_region", current_next_region);
-            } else {
-                diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
-                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-                collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
-                current_lines = lowered.lines;
-                current_allocas = lowered.allocas;
-                current_locals = lowered.locals;
-                current_bindings = lowered.bindings;
-                current_temp = lowered.temp_index;
-                current_next_local = lowered.next_local_id;
-                current_next_region = lowered.next_region_id;
-                current_mutations = extend_mutations(current_mutations, lowered.mutations);
-            }
+            diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+            collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
+            current_lines = lowered.lines;
+            current_allocas = lowered.allocas;
+            current_locals = lowered.locals;
+            current_bindings = lowered.bindings;
+            current_temp = lowered.temp_index;
+            current_next_local = lowered.next_local_id;
+            current_next_region = lowered.next_region_id;
+            current_mutations = extend_mutations(current_mutations, lowered.mutations);
+            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             active_label = find_last_label(current_lines, active_label);
             index += 1;
             _tag_handled = true;
@@ -297,7 +276,7 @@ fn lower_instruction_range(
             if _instr_tag == 1 {
                 let _raw_expr = get_instruction_text(function.instructions, index);
                 let trimmed_expression = trim_text(_raw_expr);
-                let mut handled_inline_let -> boolean = false;
+                let mut handled_inline_let: boolean = false;
                 if trimmed_expression.length >= 4 {
                     let prefix = substring(trimmed_expression, 0, 4);
                     if prefix == "let " {
@@ -313,48 +292,28 @@ fn lower_instruction_range(
                                 value_span: null,
                             };
                             let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
-                            current_locals = read_let_result_from_files(diagnostics, current_locals, current_lines, current_allocas, scope_id, scope_depth);
-                            // Always read string constants from file IPC regardless of path
-                            collected_string_constants = read_let_result_string_constants(collected_string_constants);
-                            if fs.readFile("build/sailfin/.let_ipc_used") == "1" {
-                                current_temp = _read_ipc_int_min("build/sailfin/.let_ipc_temp", current_temp);
-                                current_next_local = _read_ipc_int_min("build/sailfin/.let_ipc_next_local", current_next_local);
-                                current_next_region = _read_ipc_int_min("build/sailfin/.let_ipc_next_region", current_next_region);
-                            } else {
-                                diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
-                                collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-                                collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
-                                current_lines = lowered.lines;
-                                current_allocas = lowered.allocas;
-                                current_locals = lowered.locals;
-                                current_bindings = lowered.bindings;
-                                current_temp = lowered.temp_index;
-                                current_next_local = lowered.next_local_id;
-                                current_next_region = lowered.next_region_id;
-                                current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                            }
+                            diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+                            collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                            collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
+                            current_lines = lowered.lines;
+                            current_allocas = lowered.allocas;
+                            current_locals = lowered.locals;
+                            current_bindings = lowered.bindings;
+                            current_temp = lowered.temp_index;
+                            current_next_local = lowered.next_local_id;
+                            current_next_region = lowered.next_region_id;
+                            current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                             handled_inline_let = true;
                         }
                     }
                 }
                 if !handled_inline_let {
-                    fs.writeFile("build/sailfin/.instr_has_span", "0");
-                    write_bindings_to_files(current_bindings);
-                    write_locals_to_files(current_locals);
-                    let previous_temp = current_temp;
                     let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
-                    current_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", current_temp);
-                    // Extra recovery: only scan accumulated lines for the highest
-                    // %tN when the IPC temp counter failed to advance, to guard
-                    // against stale cross-module expression-lowering state from the
-                    // v0.1.1 seed ABI corruption without paying the scan cost on
-                    // every expression statement.
-                    if current_temp <= previous_temp {
-                        current_temp = recover_temp_from_lines(current_lines, current_temp);
-                    }
-                    current_next_region = _read_ipc_int_min("build/sailfin/.expr_stmt_next_region_id", current_next_region);
-                    current_mutations = read_expr_mutations(current_mutations);
-                    collected_string_constants = read_expr_string_constants(collected_string_constants);
+                    current_temp = lowered.temp_index;
+                    current_next_region = lowered.next_region_id;
+                    current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                    collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                 }
                 active_label = find_last_label(current_lines, active_label);
                 index += 1;
@@ -363,20 +322,10 @@ fn lower_instruction_range(
         }
         if !_tag_handled {
             if _instr_tag == 0 {
-                let _ret_expr = get_instruction_text(function.instructions, index);
-                let mut safe_instr_expr -> string = "";
-                if _ret_expr != null {
-                    safe_instr_expr = _ret_expr;
-                }
-                fs.writeFile("build/sailfin/.instr_fn_name", function.name);
-                fs.writeFile("build/sailfin/.instr_expression", safe_instr_expr);
-                fs.writeFile("build/sailfin/.instr_llvm_return", llvm_return);
-                write_bindings_to_files(current_bindings);
-                write_locals_to_files(current_locals);
                 let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
-                current_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", current_temp);
-                current_next_region = _read_ipc_int_min("build/sailfin/.expr_stmt_next_region_id", current_next_region);
-                collected_string_constants = read_expr_string_constants(collected_string_constants);
+                current_temp = lowered.temp_index;
+                current_next_region = lowered.next_region_id;
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                 terminated = true;
                 index += 1;
                 _tag_handled = true;
@@ -385,13 +334,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 3 {
                 let lowered = lower_if_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let _if_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-                let _if_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-                let _if_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-                let _if_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-                let _if_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _if_term = _read_ipc_terminated();
-                let mut _ci0 -> number = 0;
+                let mut _ci0: number = 0;
                 loop {
                     if _ci0 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci0]);
@@ -402,14 +345,14 @@ fn lower_instruction_range(
                 current_allocas = lowered.allocas;
                 current_locals = lowered.locals;
                 current_bindings = lowered.bindings;
-                current_temp = _if_temp;
-                current_block_counter = _if_blkctr;
-                current_next_local = _if_nextloc;
-                current_next_region = _if_nextreg;
+                current_temp = lowered.temp_index;
+                current_block_counter = lowered.block_counter;
+                current_next_local = lowered.next_local_id;
+                current_next_region = lowered.next_lifetime_region_id;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                collected_string_constants = read_block_result_string_constants(collected_string_constants);
-                terminated = _if_term;
-                index = _if_nextidx;
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                terminated = lowered.terminated;
+                index = lowered.next_index;
                 active_label = find_last_label(current_lines, active_label);
                 _tag_handled = true;
             }
@@ -417,13 +360,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 8 {
                 let lowered = lower_loop_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let _lp_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-                let _lp_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-                let _lp_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-                let _lp_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-                let _lp_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _lp_term = _read_ipc_terminated();
-                let mut _ci1 -> number = 0;
+                let mut _ci1: number = 0;
                 loop {
                     if _ci1 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci1]);
@@ -434,14 +371,14 @@ fn lower_instruction_range(
                 current_allocas = lowered.allocas;
                 current_locals = lowered.locals;
                 current_bindings = lowered.bindings;
-                current_temp = _lp_temp;
-                current_block_counter = _lp_blkctr;
-                current_next_local = _lp_nextloc;
-                current_next_region = _lp_nextreg;
+                current_temp = lowered.temp_index;
+                current_block_counter = lowered.block_counter;
+                current_next_local = lowered.next_local_id;
+                current_next_region = lowered.next_lifetime_region_id;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                collected_string_constants = read_block_result_string_constants(collected_string_constants);
-                terminated = _lp_term;
-                index = _lp_nextidx;
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                terminated = lowered.terminated;
+                index = lowered.next_index;
                 active_label = find_last_label(current_lines, active_label);
                 _tag_handled = true;
             }
@@ -449,13 +386,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 12 {
                 let lowered = lower_match_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let _ma_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-                let _ma_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-                let _ma_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-                let _ma_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-                let _ma_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _ma_term = _read_ipc_terminated();
-                let mut _ci2 -> number = 0;
+                let mut _ci2: number = 0;
                 loop {
                     if _ci2 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci2]);
@@ -466,14 +397,14 @@ fn lower_instruction_range(
                 current_allocas = lowered.allocas;
                 current_locals = lowered.locals;
                 current_bindings = lowered.bindings;
-                current_temp = _ma_temp;
-                current_block_counter = _ma_blkctr;
-                current_next_local = _ma_nextloc;
-                current_next_region = _ma_nextreg;
+                current_temp = lowered.temp_index;
+                current_block_counter = lowered.block_counter;
+                current_next_local = lowered.next_local_id;
+                current_next_region = lowered.next_lifetime_region_id;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                collected_string_constants = read_block_result_string_constants(collected_string_constants);
-                terminated = _ma_term;
-                index = _ma_nextidx;
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                terminated = lowered.terminated;
+                index = lowered.next_index;
                 active_label = find_last_label(current_lines, active_label);
                 _tag_handled = true;
             }
@@ -481,7 +412,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 15 {
                 let lowered = lower_try_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let mut _ci3 -> number = 0;
+                let mut _ci3: number = 0;
                 loop {
                     if _ci3 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci3]);
@@ -492,20 +423,14 @@ fn lower_instruction_range(
                 current_allocas = lowered.allocas;
                 current_locals = lowered.locals;
                 current_bindings = lowered.bindings;
-                let _tr_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-                let _tr_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-                let _tr_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-                let _tr_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-                let _tr_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _tr_term = _read_ipc_terminated();
-                current_temp = _tr_temp;
-                current_block_counter = _tr_blkctr;
-                current_next_local = _tr_nextloc;
-                current_next_region = _tr_nextreg;
+                current_temp = lowered.temp_index;
+                current_block_counter = lowered.block_counter;
+                current_next_local = lowered.next_local_id;
+                current_next_region = lowered.next_lifetime_region_id;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                collected_string_constants = read_block_result_string_constants(collected_string_constants);
-                terminated = _tr_term;
-                index = _tr_nextidx;
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                terminated = lowered.terminated;
+                index = lowered.next_index;
                 active_label = find_last_label(current_lines, active_label);
                 _tag_handled = true;
             }
@@ -513,14 +438,14 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 19 {
                 let lowered = lower_throw_instruction(function.name, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, functions, context);
-                let mut _ci4 -> number = 0;
+                let mut _ci4: number = 0;
                 loop {
                     if _ci4 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci4]);
                     _ci4 += 1;
                 }
                 current_lines = lowered.lines;
-                current_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
+                current_temp = lowered.temp_index;
                 let temp_constants = collected_string_constants;
                 collected_string_constants = merge_string_constants(temp_constants, lowered.string_constants);
                 terminated = true;
@@ -531,7 +456,7 @@ fn lower_instruction_range(
         if !_tag_handled {
             if _instr_tag == 6 {
                 let lowered = lower_for_instruction(function, index, llvm_return, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, current_loop_stack, end, context, scope_id, scope_depth, active_label);
-                let mut _ci5 -> number = 0;
+                let mut _ci5: number = 0;
                 loop {
                     if _ci5 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci5]);
@@ -542,20 +467,14 @@ fn lower_instruction_range(
                 current_allocas = lowered.allocas;
                 current_locals = lowered.locals;
                 current_bindings = lowered.bindings;
-                let _fo_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-                let _fo_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-                let _fo_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-                let _fo_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-                let _fo_nextidx = _read_ipc_int_min("build/sailfin/.block_result_next_index", index);
-                let _fo_term = _read_ipc_terminated();
-                current_temp = _fo_temp;
-                current_block_counter = _fo_blkctr;
-                current_next_local = _fo_nextloc;
-                current_next_region = _fo_nextreg;
+                current_temp = lowered.temp_index;
+                current_block_counter = lowered.block_counter;
+                current_next_local = lowered.next_local_id;
+                current_next_region = lowered.next_lifetime_region_id;
                 current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                collected_string_constants = read_block_result_string_constants(collected_string_constants);
-                terminated = _fo_term;
-                index = _fo_nextidx;
+                collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
+                terminated = lowered.terminated;
+                index = lowered.next_index;
                 active_label = find_last_label(current_lines, active_label);
                 _tag_handled = true;
             }
@@ -588,7 +507,7 @@ fn lower_instruction_range(
         }
         // Else/EndIf, EndLoop, EndMatch, EndFor are block terminators — break out.
         if !_tag_handled {
-            let mut _is_terminator -> boolean = false;
+            let mut _is_terminator: boolean = false;
             if _instr_tag == 4 { _is_terminator = true; }
             if _instr_tag == 5 { _is_terminator = true; }
             if _instr_tag == 7 { _is_terminator = true; }
@@ -596,7 +515,6 @@ fn lower_instruction_range(
             if _instr_tag == 14 { _is_terminator = true; }
             if _is_terminator {
                 // Return directly to avoid seed loop-break bug.
-                _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
                 return BlockLoweringResult {
                     lines: current_lines,
                     allocas: current_allocas,
@@ -626,25 +544,20 @@ fn lower_instruction_range(
                 let _raw_expr_21 = get_instruction_text(function.instructions, index);
                 let trimmed_21 = trim_text(_raw_expr_21);
                 // Detect return instructions that the tag couldn't distinguish
-                let mut _is_ret_21 -> boolean = false;
+                let mut _is_ret_21: boolean = false;
                 if trimmed_21.length >= 4 {
                     if substring(trimmed_21, 0, 4) == "ret " { _is_ret_21 = true; }
                 }
                 if trimmed_21 == "ret" { _is_ret_21 = true; }
                 if _is_ret_21 {
-                    let mut _ret_val_21 -> string = "";
+                    let mut _ret_val_21: string = "";
                     if trimmed_21.length > 4 {
                         _ret_val_21 = trim_text(substring(trimmed_21, 4, trimmed_21.length));
                     }
-                    fs.writeFile("build/sailfin/.instr_fn_name", function.name);
-                    fs.writeFile("build/sailfin/.instr_expression", _ret_val_21);
-                    fs.writeFile("build/sailfin/.instr_llvm_return", llvm_return);
-                    write_bindings_to_files(current_bindings);
-                    write_locals_to_files(current_locals);
                     let _lowered_ret_21 = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
-                    current_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", current_temp);
-                    current_next_region = _read_ipc_int_min("build/sailfin/.expr_stmt_next_region_id", current_next_region);
-                    collected_string_constants = read_expr_string_constants(collected_string_constants);
+                    current_temp = _lowered_ret_21.temp_index;
+                    current_next_region = _lowered_ret_21.next_region_id;
+                    collected_string_constants = merge_string_constants(collected_string_constants, _lowered_ret_21.string_constants);
                     terminated = true;
                     index += 1;
                     _tag_handled = true;
@@ -652,7 +565,7 @@ fn lower_instruction_range(
                 // Otherwise treat as expression (handles eval + eval let)
                 if !_tag_handled {
                     if trimmed_21.length > 0 {
-                        let mut handled_inline_let_21 -> boolean = false;
+                        let mut handled_inline_let_21: boolean = false;
                         if trimmed_21.length >= 4 {
                             let prefix_21 = substring(trimmed_21, 0, 4);
                             if prefix_21 == "let " {
@@ -668,43 +581,28 @@ fn lower_instruction_range(
                                         value_span: null,
                                     };
                                     let lowered = lower_let_instruction(function, inline_instruction, current_bindings, current_locals, current_allocas, current_lines, current_temp, current_next_local, current_next_region, functions, context, scope_id, scope_depth, active_label);
-                                    current_locals = read_let_result_from_files(diagnostics, current_locals, current_lines, current_allocas, scope_id, scope_depth);
-                                    if fs.readFile("build/sailfin/.let_ipc_used") == "1" {
-                                        current_temp = _read_ipc_int_min("build/sailfin/.let_ipc_temp", current_temp);
-                                        current_next_local = _read_ipc_int_min("build/sailfin/.let_ipc_next_local", current_next_local);
-                                        current_next_region = _read_ipc_int_min("build/sailfin/.let_ipc_next_region", current_next_region);
-                                    } else {
-                                        diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
-                                        collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
-                                        collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
-                                        current_lines = lowered.lines;
-                                        current_allocas = lowered.allocas;
-                                        current_locals = lowered.locals;
-                                        current_bindings = lowered.bindings;
-                                        current_temp = lowered.temp_index;
-                                        current_next_local = lowered.next_local_id;
-                                        current_next_region = lowered.next_region_id;
-                                        current_mutations = extend_mutations(current_mutations, lowered.mutations);
-                                        let tmp_sc = collected_string_constants;
-                                        collected_string_constants = merge_string_constants(tmp_sc, lowered.string_constants);
-                                    }
+                                    diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
+                                    collected_lifetime_regions = extend_lifetime_regions(collected_lifetime_regions, lowered.lifetime_regions);
+                                    collected_lifetime_regions = apply_lifetime_release_events(collected_lifetime_regions, lowered.lifetime_releases);
+                                    current_lines = lowered.lines;
+                                    current_allocas = lowered.allocas;
+                                    current_locals = lowered.locals;
+                                    current_bindings = lowered.bindings;
+                                    current_temp = lowered.temp_index;
+                                    current_next_local = lowered.next_local_id;
+                                    current_next_region = lowered.next_region_id;
+                                    current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                                    collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                                     handled_inline_let_21 = true;
                                 }
                             }
                         }
                         if !handled_inline_let_21 {
-                            fs.writeFile("build/sailfin/.instr_has_span", "0");
-                            write_bindings_to_files(current_bindings);
-                            write_locals_to_files(current_locals);
-                            let previous_temp_21 = current_temp;
                             let lowered = lower_expression_statement(function.name, instruction, trimmed_21, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, active_label);
-                            current_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", current_temp);
-                            if current_temp <= previous_temp_21 {
-                                current_temp = recover_temp_from_lines(current_lines, current_temp);
-                            }
-                            current_next_region = _read_ipc_int_min("build/sailfin/.expr_stmt_next_region_id", current_next_region);
-                            current_mutations = read_expr_mutations(current_mutations);
-                            collected_string_constants = read_expr_string_constants(collected_string_constants);
+                            current_temp = lowered.temp_index;
+                            current_next_region = lowered.next_region_id;
+                            current_mutations = extend_mutations(current_mutations, lowered.mutations);
+                            collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                         }
                         active_label = find_last_label(current_lines, active_label);
                         index += 1;
@@ -721,7 +619,6 @@ fn lower_instruction_range(
         // For terminated instructions (return, throw, break, continue), exit loop.
         if terminated {
             // Return directly to avoid seed loop-break bug.
-            _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
             return BlockLoweringResult {
                 lines: current_lines,
                 allocas: current_allocas,
@@ -750,7 +647,7 @@ fn lower_instruction_range(
     if trace {
         if start_index == 0 {
             if scope_depth == 0 {
-                let mut term_label -> string = "false";
+                let mut term_label: string = "false";
                 if terminated {
                     term_label = "true";
                 }
@@ -776,7 +673,6 @@ fn lower_instruction_range(
             print.err("emit-llvm: pre-write-block line[0]=" + current_lines[0]);
         }
     }
-    _write_block_result_files(current_lines, current_allocas, terminated, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, index);
 
     return BlockLoweringResult {
         lines: current_lines,
@@ -794,51 +690,4 @@ fn lower_instruction_range(
         mutations: current_mutations,
         string_constants: collected_string_constants,
     };
-}
-
-// Void wrapper for lower_instruction_range.
-// The v0.1.1 seed cannot handle cross-module struct returns (BlockLoweringResult).
-// This wrapper returns void so that callers in other modules (e.g. emission.sfn)
-// can invoke lower_instruction_range without triggering the struct-return ABI bug.
-// Results are communicated via file IPC (_write_block_result_files).
-fn lower_instruction_range_void(
-    function -> NativeFunction,
-    start_index -> number,
-    end -> number,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    allocas -> string[],
-    lines -> string[],
-    temp_index -> number,
-    block_counter -> number,
-    next_local_id -> number,
-    next_region_id -> number,
-    functions -> NativeFunction[],
-    loop_stack -> LoopContext[],
-    context -> TypeContext,
-    scope_id -> string,
-    scope_depth -> number,
-    current_label -> string
-) ![io] {
-    lower_instruction_range(
-        function,
-        start_index,
-        end,
-        llvm_return,
-        bindings,
-        locals,
-        allocas,
-        lines,
-        temp_index,
-        block_counter,
-        next_local_id,
-        next_region_id,
-        functions,
-        loop_stack,
-        context,
-        scope_id,
-        scope_depth,
-        current_label
-    );
 }

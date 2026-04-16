@@ -71,13 +71,13 @@ import { lower_expression } from "./core";
 // The seed compiler (v0.1.1) has a bug where `arr[idx]` inside complex loops
 // compiles as substring() on the wrong local variable.  Extracting the access
 // into a tiny function produces correct array-element-load LLVM IR.
-fn get_string_at(arr -> string[], idx -> number) -> string {
+fn get_string_at(arr: string[], idx: number) -> string {
     return arr[idx];
 }
 
-fn lower_call_expression(target -> string, arguments -> string[], bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult ![io] {
-    let mut diagnostics -> string[] = [];
-    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
     let empty_constants = empty_string_constant_set();
     let mut trimmed_target = trim_text(target);
     if trimmed_target.length == 0 {
@@ -97,25 +97,25 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
 
         let enum_info = resolve_enum_info_for_literal(context, enum_name);
         if trace_calls {
-            let mut found_text -> string = "null";
+            let mut found_text: string = "null";
             if enum_info != null {
                 found_text = "found";
             }
             print.err("call_lowering: enum_name='" + enum_name + "' variant='" + variant_name + "' resolved=" + found_text);
         }
         if enum_info != null {
-            let mut fields -> StructLiteralField[] = [];
+            let mut fields: StructLiteralField[] = [];
 
             if arguments.length > 0 {
                 let variant_info = resolve_enum_variant_info(enum_info, variant_name);
-                let mut _if54 -> boolean = false;
+                let mut _if54: boolean = false;
                 if variant_info != null {
                     if variant_info.fields.length == arguments.length {
                         _if54 = true;
                     }
                 }
                 if _if54 {
-                    let mut arg_index -> number = 0;
+                    let mut arg_index: number = 0;
                     loop {
                         if arg_index >= arguments.length {
                             break;
@@ -147,7 +147,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     let resolution = resolve_call_method_target(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context, diagnostics, collected_string_constants);
     trimmed_target = resolution.trimmed_target;
     let mut current_lines = resolution.current_lines;
-    let mut current_temp -> number = resolution.current_temp;
+    let mut current_temp: number = resolution.current_temp;
     diagnostics = resolution.diagnostics;
     collected_string_constants = resolution.string_constants;
     let method_operand = resolution.method_operand;
@@ -205,8 +205,8 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     }
 
     // Phase 3: Lower arguments
-    let mut operands -> LLVMOperand[] = [];
-    let mut index -> number = 0;
+    let mut operands: LLVMOperand[] = [];
+    let mut index: number = 0;
     loop {
         if index >= arguments.length {
             break;
@@ -215,7 +215,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
         if argument_text.length == 0 {
             diagnostics.push("llvm lowering: empty argument in call to `" + trimmed_target + "`");
         }
-        let mut argument_expected_type -> string = "";
+        let mut argument_expected_type: string = "";
         let parameter_index = index + injected_argument_count;
         if expected_params.length > parameter_index {
             argument_expected_type = expected_params[parameter_index];
@@ -236,9 +236,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     // Prepend method operand
     if method_operand != null {
         let operand_value = method_operand;
-        let mut combined_operands -> LLVMOperand[] = [];
+        let mut combined_operands: LLVMOperand[] = [];
         combined_operands.push(operand_value);
-        let mut operand_index -> number = 0;
+        let mut operand_index: number = 0;
         loop {
             if operand_index >= operands.length {
                 break;
@@ -281,7 +281,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
     // Default argument filling
     if function_entry != null {
         if operands.length < expected_params.length {
-            let mut param_index -> number = operands.length;
+            let mut param_index: number = operands.length;
             loop {
                 if param_index >= expected_params.length {
                     break;
@@ -333,7 +333,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                             let base_name = trim_text(method_parse.base);
                             if is_simple_identifier(base_name) {
                                 let local_pointer = find_local_binding(locals, base_name);
-                                let mut _if62 -> boolean = false;
+                                let mut _if62: boolean = false;
                                 if local_pointer != null {
                                     if (local_pointer.llvm_type + "*") == expected_self_type {
                                         _if62 = true;
@@ -344,7 +344,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                                     operands = replace_llvm_operand(operands, 0, updated_operand);
                                 } else {
                                     let parameter_pointer = find_parameter_binding(bindings, base_name);
-                                    let mut _if64 -> boolean = false;
+                                    let mut _if64: boolean = false;
                                     if parameter_pointer != null {
                                         if parameter_pointer.llvm_type == expected_self_type {
                                             _if64 = true;
@@ -354,7 +354,7 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                                         let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: parameter_pointer.llvm_name };
                                         operands = replace_llvm_operand(operands, 0, updated_operand);
                                     } else {
-                                        let mut _elif66 -> boolean = false;
+                                        let mut _elif66: boolean = false;
                                         if parameter_pointer != null {
                                             if parameter_pointer.llvm_type == strip_pointer_suffix(expected_self_type) {
                                                 _elif66 = true;
@@ -369,9 +369,9 @@ fn lower_call_expression(target -> string, arguments -> string[], bindings -> Pa
                                 }
                             } else {
                                 let receiver_base = strip_pointer_suffix(expected_self_type);
-                                let mut _if63 -> boolean = false;
+                                let mut _if63: boolean = false;
                                 if self_operand.llvm_type == receiver_base {
-                                    let mut _if65 -> boolean = false;
+                                    let mut _if65: boolean = false;
                                     if starts_with(receiver_base, "%") { _if65 = true; }
                                     if starts_with(receiver_base, "{") { _if65 = true; }
                                     if _if65 {

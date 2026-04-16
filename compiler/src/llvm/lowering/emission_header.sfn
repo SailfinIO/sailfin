@@ -11,9 +11,9 @@
 
 import { trim_text, substring } from "../utils";
 
-fn build_define_header_line(linkage -> string, llvm_return -> string, sanitized -> string, signature -> string) -> string {
-    let _b -> string = "(){}";
-    let h1 -> string = "define " + linkage + llvm_return + " @" + sanitized;
-    let h2 -> string = h1 + "(" + signature + ") " + substring(_b, 2, 3);
+fn build_define_header_line(linkage: string, llvm_return: string, sanitized: string, signature: string) -> string {
+    let _b: string = "(){}";
+    let h1: string = "define " + linkage + llvm_return + " @" + sanitized;
+    let h2: string = h1 + "(" + signature + ") " + substring(_b, 2, 3);
     return trim_text(h2);
 }

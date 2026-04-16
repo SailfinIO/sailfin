@@ -62,7 +62,7 @@ import { lower_inline_gep_field_access } from "./core_member_helpers";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
 
-fn make_expression_result(lines -> string[], temp_index -> number, operand -> LLVMOperand?, diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
+fn make_expression_result(lines: string[], temp_index: number, operand: LLVMOperand?, diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
@@ -72,8 +72,8 @@ fn make_expression_result(lines -> string[], temp_index -> number, operand -> LL
     };
 }
 
-fn emit_string_constant_pointer(constant -> StringConstant, temp_index -> number, lines -> string[]) -> StringPointerResult {
-    let mut current_lines -> string[] = lines;
+fn emit_string_constant_pointer(constant: StringConstant, temp_index: number, lines: string[]) -> StringPointerResult {
+    let mut current_lines: string[] = lines;
     let array_length = constant.byte_count + 1;
     let array_type = "[" + number_to_string(array_length) + " x i8]";
     let temp_name = format_temp_name(temp_index);
@@ -81,10 +81,10 @@ fn emit_string_constant_pointer(constant -> StringConstant, temp_index -> number
     return StringPointerResult { lines: current_lines, temp_index: temp_index + 1, pointer: temp_name };
 }
 
-fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
-    let mut current_lines -> string[] = lines;
-    let mut current_temp -> number = temp_index;
-    let mut dynamic_string_constants -> StringConstant[] = string_constants;
+fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
+    let mut current_lines: string[] = lines;
+    let mut current_temp: number = temp_index;
+    let mut dynamic_string_constants: StringConstant[] = string_constants;
 
     let sanitized_field = sanitize_symbol(field);
     // Build the constant name in two parts to avoid a single "@.runtime.field."
@@ -92,7 +92,7 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     let _rf_prefix = "@.runtime" + ".field.";
     let constant_name = _rf_prefix + sanitized_field;
     let existing_constant = find_string_constant_by_name(dynamic_string_constants, constant_name);
-    let mut field_constant -> StringConstant = StringConstant { name: constant_name, content: field, byte_count: field.length };
+    let mut field_constant: StringConstant = StringConstant { name: constant_name, content: field, byte_count: field.length };
     if existing_constant != null {
         field_constant = existing_constant;
     } else {
@@ -108,7 +108,7 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     current_lines.push("  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")");
     current_temp += 1;
 
-    let mut _if70 -> boolean = false;
+    let mut _if70: boolean = false;
     if field == "align" { _if70 = true; }
     if field == "size" { _if70 = true; }
     if field == "offset" { _if70 = true; }
@@ -131,7 +131,7 @@ fn lower_dynamic_member_access(field -> string, base_operand -> LLVMOperand, tem
     return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
 }
 
-fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> ExpressionResult {
+fn lower_runtime_global_reference(temp_index: number, lines: string[]) -> ExpressionResult {
     let runtime_temp = format_temp_name(temp_index);
     let mut current_lines = lines;
     current_lines.push("  " + runtime_temp + " = load i8*, i8** @runtime");
@@ -140,13 +140,13 @@ fn lower_runtime_global_reference(temp_index -> number, lines -> string[]) -> Ex
     return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: empty_constants };
 }
 
-fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInfo, base_operand -> LLVMOperand, pointer_available -> boolean, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[], expected_type -> string) -> ExpressionResult {
-    let mut current_lines -> string[] = lines;
-    let mut current_temp -> number = temp_index;
-    let mut enum_string_constants -> StringConstant[] = string_constants;
-    let mut messages -> string[] = diagnostics;
+fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[], expected_type: string) -> ExpressionResult {
+    let mut current_lines: string[] = lines;
+    let mut current_temp: number = temp_index;
+    let mut enum_string_constants: StringConstant[] = string_constants;
+    let mut messages: string[] = diagnostics;
 
-    let mut tag_operand -> LLVMOperand = LLVMOperand { llvm_type: enum_info.tag_type, value: "" };
+    let mut tag_operand: LLVMOperand = LLVMOperand { llvm_type: enum_info.tag_type, value: "" };
     if pointer_available {
         let tag_ptr = format_temp_name(current_temp);
         current_lines.push("  " + tag_ptr + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + base_operand.value + ", i32 0, i32 0");
@@ -166,7 +166,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         let sanitized_enum = sanitize_symbol(enum_info.name);
         let default_constant_name = "@.enum." + sanitized_enum + ".variant.default";
         let existing_default = find_string_constant_by_name(enum_string_constants, default_constant_name);
-        let mut default_constant -> StringConstant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
+        let mut default_constant: StringConstant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
         if existing_default != null {
             default_constant = existing_default;
         } else {
@@ -177,9 +177,9 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         let default_pointer_result = emit_string_constant_pointer(default_constant, current_temp, current_lines);
         current_lines = default_pointer_result.lines;
         current_temp = default_pointer_result.temp_index;
-        let mut current_pointer -> string = default_pointer_result.pointer;
+        let mut current_pointer: string = default_pointer_result.pointer;
 
-        let mut variant_index -> number = 0;
+        let mut variant_index: number = 0;
         loop {
             if variant_index >= enum_info.variants.length {
                 break;
@@ -188,7 +188,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
             let sanitized_variant = sanitize_symbol(variant_info.name);
             let constant_name = "@.enum." + sanitized_enum + "." + sanitized_variant + ".variant";
             let existing_variant = find_string_constant_by_name(enum_string_constants, constant_name);
-            let mut variant_constant -> StringConstant = StringConstant { name: constant_name, content: "", byte_count: 0 };
+            let mut variant_constant: StringConstant = StringConstant { name: constant_name, content: "", byte_count: 0 };
             if existing_variant != null {
                 variant_constant = existing_variant;
             } else {
@@ -217,9 +217,9 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
     }
 
-    let mut matched_variants -> EnumVariantInfo[] = [];
-    let mut matched_fields -> StructFieldInfo[] = [];
-    let mut variant_check_index -> number = 0;
+    let mut matched_variants: EnumVariantInfo[] = [];
+    let mut matched_fields: StructFieldInfo[] = [];
+    let mut variant_check_index: number = 0;
     loop {
         if variant_check_index >= enum_info.variants.length {
             break;
@@ -263,13 +263,13 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
-    let mut selected_variants -> EnumVariantInfo[] = matched_variants;
-    let mut selected_fields -> StructFieldInfo[] = matched_fields;
+    let mut selected_variants: EnumVariantInfo[] = matched_variants;
+    let mut selected_fields: StructFieldInfo[] = matched_fields;
 
     if expected_type.length > 0 {
-        let mut filtered_variants -> EnumVariantInfo[] = [];
-        let mut filtered_fields -> StructFieldInfo[] = [];
-        let mut selection_index -> number = 0;
+        let mut filtered_variants: EnumVariantInfo[] = [];
+        let mut filtered_fields: StructFieldInfo[] = [];
+        let mut selection_index: number = 0;
         loop {
             if selection_index >= matched_fields.length {
                 break;
@@ -297,8 +297,8 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     }
 
     let first_type = selected_fields[0].llvm_type;
-    let mut base_type -> string = first_type;
-    let mut first_pointer_depth -> number = 0;
+    let mut base_type: string = first_type;
+    let mut first_pointer_depth: number = 0;
     loop {
         if !ends_with_pointer_suffix(base_type) {
             break;
@@ -307,18 +307,18 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         first_pointer_depth += 1;
     }
 
-    let mut min_pointer_depth -> number = first_pointer_depth;
-    let mut max_pointer_depth -> number = first_pointer_depth;
-    let mut consistent_base -> boolean = true;
-    let mut pointer_depth_mismatch -> boolean = false;
-    let mut type_index -> number = 1;
+    let mut min_pointer_depth: number = first_pointer_depth;
+    let mut max_pointer_depth: number = first_pointer_depth;
+    let mut consistent_base: boolean = true;
+    let mut pointer_depth_mismatch: boolean = false;
+    let mut type_index: number = 1;
     loop {
         if type_index >= selected_fields.length {
             break;
         }
         let candidate_type = selected_fields[type_index].llvm_type;
-        let mut candidate_base -> string = candidate_type;
-        let mut candidate_depth -> number = 0;
+        let mut candidate_base: string = candidate_type;
+        let mut candidate_depth: number = 0;
         loop {
             if !ends_with_pointer_suffix(candidate_base) {
                 break;
@@ -347,7 +347,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
-    let mut field_type -> string = selected_fields[0].llvm_type;
+    let mut field_type: string = selected_fields[0].llvm_type;
     if field_type.length == 0 {
         let mut mapped = map_type_annotation(selected_fields[0].type_annotation);
         if mapped == "void" {
@@ -366,9 +366,9 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         }
         field_type = mapped;
     }
-    let mut pointer_coercion -> boolean = false;
+    let mut pointer_coercion: boolean = false;
     if pointer_depth_mismatch {
-        let mut _if71 -> boolean = false;
+        let mut _if71: boolean = false;
         if max_pointer_depth - min_pointer_depth == 1 {
             if base_type.length > 0 {
                 if substring(base_type, 0, 1) == "%" {
@@ -385,7 +385,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         }
     }
 
-    let mut enum_pointer_value -> string = base_operand.value;
+    let mut enum_pointer_value: string = base_operand.value;
     if !pointer_available {
         let alloca_temp = format_temp_name(current_temp);
         current_lines.push("  " + alloca_temp + " = alloca " + enum_info.llvm_name);
@@ -395,8 +395,8 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     }
 
     let default_literal = default_return_literal(field_type);
-    let mut current_value_text -> string = default_literal;
-    let mut match_index -> number = 0;
+    let mut current_value_text: string = default_literal;
+    let mut match_index: number = 0;
     loop {
         if match_index >= selected_variants.length {
             break;
@@ -405,7 +405,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         let field_info = selected_fields[match_index];
 
         let payload_ptr_temp = format_temp_name(current_temp);
-        let mut payload_field_index -> number = 1;
+        let mut payload_field_index: number = 1;
         if enum_info.max_payload_size > 0 {
             if enum_info.align > enum_info.tag_size {
                 payload_field_index = 2;
@@ -419,7 +419,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         current_temp += 1;
 
         let field_offset_in_payload = field_info.offset - variant_info.offset;
-        let mut field_ptr_temp -> string = byte_ptr_temp;
+        let mut field_ptr_temp: string = byte_ptr_temp;
         if field_offset_in_payload > 0 {
             let offset_ptr_temp = format_temp_name(current_temp);
             current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
@@ -450,7 +450,7 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
         current_lines.push("  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
         current_temp += 1;
 
-        let mut value_temp -> string = typed_ptr_temp;
+        let mut value_temp: string = typed_ptr_temp;
         if pointer_coercion {
             if ends_with_pointer_suffix(storage_type) {
                 value_temp = format_temp_name(current_temp);
@@ -479,16 +479,16 @@ fn lower_enum_member_access(parse -> MemberAccessParse, enum_info -> EnumTypeInf
     return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
 }
 
-fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult ![io] {
+fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
-    let mut diagnostics -> string[] = base_result.diagnostics;
-    let mut collected_string_constants -> StringConstant[] = base_result.string_constants;
+    let mut diagnostics: string[] = base_result.diagnostics;
+    let mut collected_string_constants: StringConstant[] = base_result.string_constants;
     if base_result.operand == null {
         return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
     }
 
-    let mut current_lines -> string[] = base_result.lines;
-    let mut current_temp -> number = base_result.temp_index;
+    let mut current_lines: string[] = base_result.lines;
+    let mut current_temp: number = base_result.temp_index;
     let base_operand = base_result.operand;
 
     if parse.field == "length" {
@@ -526,10 +526,10 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
         }
     }
 
-    let mut struct_info -> StructTypeInfo? = null;
-    let mut pointer_available -> boolean = false;
+    let mut struct_info: StructTypeInfo? = null;
+    let mut pointer_available: boolean = false;
     let pointer_operand = base_operand;
-    let mut base_type_trimmed -> string = base_operand.llvm_type;
+    let mut base_type_trimmed: string = base_operand.llvm_type;
     loop {
         if !starts_with(base_type_trimmed, " ") {
             break;
@@ -661,16 +661,16 @@ fn lower_member_access(parse -> MemberAccessParse, bindings -> ParameterBinding[
 // File-based struct field access: when the TypeContext is corrupted (v0.1.1 seed ABI),
 // look up struct info from the .struct_info file and emit a proper GEP instruction
 // instead of sailfin_runtime_get_field.
-fn try_file_based_struct_field_access(base_name -> string, field_name -> string, base_operand -> LLVMOperand, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult ![io] {
+fn try_file_based_struct_field_access(base_name: string, field_name: string, base_operand: LLVMOperand, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult ![io] {
     let empty_constants = empty_string_constant_set();
     let null_result = ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     if !fs.exists("build/sailfin/.struct_info") {
         return null_result;
     }
     // Find the struct type annotation for this base from bindings or locals.
-    let mut struct_type_ann -> string = "";
+    let mut struct_type_ann: string = "";
     let trimmed_base = trim_text(base_name);
-    let mut _bi -> number = 0;
+    let mut _bi: number = 0;
     loop {
         if _bi >= bindings.length { break; }
         if bindings[_bi].name == trimmed_base {
@@ -683,11 +683,11 @@ fn try_file_based_struct_field_access(base_name -> string, field_name -> string,
         // Check condition_locals file for locals
         if fs.exists("build/sailfin/.condition_locals") {
             let _cl_raw = fs.readFile("build/sailfin/.condition_locals");
-            let mut _cl_pos -> number = 0;
+            let mut _cl_pos: number = 0;
             loop {
                 if _cl_pos >= _cl_raw.length { break; }
                 let _cl_nl = index_of(substring(_cl_raw, _cl_pos, _cl_raw.length), "\n");
-                let mut _cl_line -> string = "";
+                let mut _cl_line: string = "";
                 if _cl_nl < 0 {
                     _cl_line = substring(_cl_raw, _cl_pos, _cl_raw.length);
                     _cl_pos = _cl_raw.length;
@@ -720,11 +720,11 @@ fn try_file_based_struct_field_access(base_name -> string, field_name -> string,
                     // Check each struct in .struct_info; if the function name
                     // starts with the struct name, that's our struct.
                     let _sf_raw = fs.readFile("build/sailfin/.struct_info");
-                    let mut _sf_pos -> number = 0;
+                    let mut _sf_pos: number = 0;
                     loop {
                         if _sf_pos >= _sf_raw.length { break; }
                         let _sf_nl = index_of(substring(_sf_raw, _sf_pos, _sf_raw.length), "\n");
-                        let mut _sf_line -> string = "";
+                        let mut _sf_line: string = "";
                         if _sf_nl < 0 {
                             _sf_line = substring(_sf_raw, _sf_pos, _sf_raw.length);
                             _sf_pos = _sf_raw.length;
@@ -758,14 +758,14 @@ fn try_file_based_struct_field_access(base_name -> string, field_name -> string,
     if _si_raw.length == 0 {
         return null_result;
     }
-    let mut _si_llvm -> string = "";
-    let mut _si_field_idx -> number = -1;
-    let mut _si_field_type -> string = "";
-    let mut _si_pos -> number = 0;
+    let mut _si_llvm: string = "";
+    let mut _si_field_idx: number = -1;
+    let mut _si_field_type: string = "";
+    let mut _si_pos: number = 0;
     loop {
         if _si_pos >= _si_raw.length { break; }
         let _si_nl = index_of(substring(_si_raw, _si_pos, _si_raw.length), "\n");
-        let mut _si_line -> string = "";
+        let mut _si_line: string = "";
         if _si_nl < 0 {
             _si_line = substring(_si_raw, _si_pos, _si_raw.length);
             _si_pos = _si_raw.length;
@@ -784,12 +784,12 @@ fn try_file_based_struct_field_access(base_name -> string, field_name -> string,
         _si_llvm = substring(_si_rest, 0, _si_t2);
         let _si_fields = substring(_si_rest, _si_t2 + 1, _si_rest.length);
         // Find the field index and type
-        let mut _fi -> number = 0;
-        let mut _fpos -> number = 0;
+        let mut _fi: number = 0;
+        let mut _fpos: number = 0;
         loop {
             if _fpos >= _si_fields.length { break; }
             let _fcomma = index_of(substring(_si_fields, _fpos, _si_fields.length), ",");
-            let mut _fentry -> string = "";
+            let mut _fentry: string = "";
             if _fcomma < 0 {
                 _fentry = substring(_si_fields, _fpos, _si_fields.length);
                 _fpos = _si_fields.length;
@@ -810,7 +810,7 @@ fn try_file_based_struct_field_access(base_name -> string, field_name -> string,
         }
         break;
     }
-    let mut _if72 -> boolean = false;
+    let mut _if72: boolean = false;
     if _si_llvm.length == 0 { _if72 = true; }
     if _si_field_idx < 0 { _if72 = true; }
     if _si_field_type.length == 0 { _if72 = true; }

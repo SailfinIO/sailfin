@@ -1,21 +1,21 @@
 struct Point {
-    x -> number;
-    y -> number;
+    x: number;
+    y: number;
 
     fn distance_squared_from_origin(self) -> number {
         return self.x * self.x + self.y * self.y;
     }
 
-    fn translate(self, dx -> number, dy -> number) -> Point {
+    fn translate(self, dx: number, dy: number) -> Point {
         return Point { x: self.x + dx, y: self.y + dy };
     }
 }
 
 struct Rectangle {
-    width -> number;
-    height -> number;
+    width: number;
+    height: number;
 
-    fn new(w -> number, h -> number) -> Rectangle {
+    fn new(w: number, h: number) -> Rectangle {
         return Rectangle { width: w, height: h };
     }
 
@@ -36,7 +36,7 @@ struct Rectangle {
         return self.width == self.height;
     }
 
-    fn scale(self, factor -> number) -> Rectangle {
+    fn scale(self, factor: number) -> Rectangle {
         return Rectangle { width: self.width * factor, height: self.height * factor };
     }
 }

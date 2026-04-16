@@ -1,6 +1,6 @@
 // examples/basics/conditionals.sfn
 
-fn checkNumber(value -> number) ![io] {
+fn checkNumber(value: number) ![io] {
   if value > 0 {
     print("{{ value }} is positive");
   } else if value < 0 {
@@ -10,9 +10,9 @@ fn checkNumber(value -> number) ![io] {
   }
 
   match value {
-    42 ->   print("The answer to life, the universe, and everything!"),
-    -1 ->   print("A special negative number!"),
-    _ ->    print("Just another number."),
+    42: print("The answer to life, the universe, and everything!"),
+    -1: print("A special negative number!"),
+    _: print("Just another number."),
   }
 }
 

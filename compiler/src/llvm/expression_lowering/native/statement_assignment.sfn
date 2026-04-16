@@ -66,9 +66,9 @@ import {
 // Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
 // when returned from cross-module calls. Scan lines for the highest %tN
 // definition and use max(found+1, floor) as the recovered counter.
-fn _recover_assign_temp(lines -> string[], floor -> number) -> number {
-    let mut result -> number = floor;
-    let mut ri -> number = 0;
+fn _recover_assign_temp(lines: string[], floor: number) -> number {
+    let mut result: number = floor;
+    let mut ri: number = 0;
     loop {
         if ri >= lines.length { break; }
         let rl = lines[ri];
@@ -88,15 +88,15 @@ fn _recover_assign_temp(lines -> string[], floor -> number) -> number {
     return result;
 }
 
-fn _assign_parse_int(text -> string) -> number {
+fn _assign_parse_int(text: string) -> number {
     let len = text.length;
     if len == 0 { return 0; }
-    let mut result -> number = 0;
-    let mut i -> number = 0;
+    let mut result: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= len { break; }
         let ch = substring(text, i, i + 1);
-        let mut digit -> number = -1;
+        let mut digit: number = -1;
         if ch == "0" { digit = 0; }
         if ch == "1" { digit = 1; }
         if ch == "2" { digit = 2; }
@@ -115,12 +115,12 @@ fn _assign_parse_int(text -> string) -> number {
 }
 
 fn _write_assign_result_files(
-    pre_lines_count -> number,
-    lines -> string[],
-    temp_index -> number,
-    mutations -> LocalMutation[],
-    next_region_id -> number,
-    string_constants -> StringConstant[]
+    pre_lines_count: number,
+    lines: string[],
+    temp_index: number,
+    mutations: LocalMutation[],
+    next_region_id: number,
+    string_constants: StringConstant[]
 ) ![io] {
     let new_count = lines.length - pre_lines_count;
     fs.writeFile("build/sailfin/.call_result_lines_count", number_to_string(lines.length));
@@ -132,67 +132,46 @@ fn _write_assign_result_files(
     // (struct field mutations like state.index += 1) leave a stale counter and
     // the next statement reuses the same %tN temporaries.
     fs.writeFile("build/sailfin/.expr_stmt_temp_index", number_to_string(temp_index));
-    fs.writeFile("build/sailfin/.expr_stmt_mutation_count", number_to_string(mutations.length));
-    let mut mi -> number = 0;
-    loop {
-        if mi >= mutations.length { break; }
-        let prefix = "build/sailfin/.expr_stmt_mutation_" + number_to_string(mi);
-        fs.writeFile(prefix + "_name", mutations[mi].name);
-        fs.writeFile(prefix + "_llvm_type", mutations[mi].llvm_type);
-        fs.writeFile(prefix + "_value_name", mutations[mi].value_name);
-        fs.writeFile(prefix + "_originating_label", mutations[mi].originating_label);
-        mi += 1;
-    }
     fs.writeFile("build/sailfin/.expr_stmt_next_region_id", number_to_string(next_region_id));
-    // Write string constants count
-    fs.writeFile("build/sailfin/.expr_stmt_string_constants_count", number_to_string(string_constants.length));
-    let mut sci -> number = 0;
-    loop {
-        if sci >= string_constants.length { break; }
-        let sc_prefix = "build/sailfin/.expr_stmt_string_constant_" + number_to_string(sci);
-        fs.writeFile(sc_prefix + "_name", string_constants[sci].name);
-        fs.writeFile(sc_prefix + "_value", string_constants[sci].value);
-        sci += 1;
-    }
 }
 
 // Handles deref (*ptr = value), member access (obj.field = value), and
 // array index (arr[i] = value) assignments. Returns ExpressionStatementResult.
 fn lower_lvalue_assignment_stmt(
-    assign_target -> string,
-    assign_value -> string,
-    assign_operator -> string,
-    current_bindings -> ParameterBinding[],
-    current_locals -> LocalBinding[],
-    temp_index -> number,
-    lines -> string[],
-    pre_lines_count -> number,
-    next_region_id -> number,
-    scope_id -> string,
-    scope_depth -> number,
-    functions -> NativeFunction[],
-    context -> TypeContext,
-    current_label -> string
+    assign_target: string,
+    assign_value: string,
+    assign_operator: string,
+    current_bindings: ParameterBinding[],
+    current_locals: LocalBinding[],
+    temp_index: number,
+    lines: string[],
+    pre_lines_count: number,
+    next_region_id: number,
+    scope_id: string,
+    scope_depth: number,
+    functions: NativeFunction[],
+    context: TypeContext,
+    current_label: string
 ) -> ExpressionStatementResult ![io] {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
-    let mut current_temp -> number = temp_index;
-    let mut string_constants -> StringConstant[] = empty_string_constant_set();
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut lifetime_releases -> LifetimeReleaseEvent[] = [];
-    let mut current_next_region -> number = next_region_id;
-    let mut mutations -> LocalMutation[] = [];
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_temp: number = temp_index;
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut lifetime_releases: LifetimeReleaseEvent[] = [];
+    let mut current_next_region: number = next_region_id;
+    let mut mutations: LocalMutation[] = [];
 
     let trimmed_target = trim_text(assign_target);
 
     // Pointer dereference assignment: `*ptr = value`
     if starts_with(trimmed_target, "*") {
-        let mut effective_value -> string = assign_value;
+        let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = trimmed_target + " " + assign_operator + " " + assign_value;
         }
         let lowered_value = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci0 -> number = 0;
+        let mut _ci0: number = 0;
         loop {
             if _ci0 >= lowered_value.diagnostics.length { break; }
             diagnostics.push(lowered_value.diagnostics[_ci0]);
@@ -214,7 +193,7 @@ fn lower_lvalue_assignment_stmt(
             return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
         }
         let lowered_ptr = lower_expression(pointer_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci1 -> number = 0;
+        let mut _ci1: number = 0;
         loop {
             if _ci1 >= lowered_ptr.diagnostics.length { break; }
             diagnostics.push(lowered_ptr.diagnostics[_ci1]);
@@ -235,7 +214,7 @@ fn lower_lvalue_assignment_stmt(
         }
         let element_type = strip_pointer_suffix(lowered_ptr.operand.llvm_type);
         let coerced = coerce_operand_to_type(lowered_value.operand, element_type, current_temp, current_lines);
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= coerced.diagnostics.length { break; }
             diagnostics.push(coerced.diagnostics[_ci2]);
@@ -257,12 +236,12 @@ fn lower_lvalue_assignment_stmt(
     // Member access assignment: base.field = value
     let member_parse = parse_member_access(assign_target);
     if member_parse.success {
-        let mut effective_value -> string = assign_value;
+        let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = assign_target + " " + assign_operator + " " + assign_value;
         }
         let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci3 -> number = 0;
+        let mut _ci3: number = 0;
         loop {
             if _ci3 >= lowered.diagnostics.length { break; }
             diagnostics.push(lowered.diagnostics[_ci3]);
@@ -276,7 +255,7 @@ fn lower_lvalue_assignment_stmt(
             diagnostics.push("llvm lowering: failed to lower assignment value for member `" + assign_target + "`");
         } else {
             let base_result = lower_expression(member_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-            let mut _ci4 -> number = 0;
+            let mut _ci4: number = 0;
             loop {
                 if _ci4 >= base_result.diagnostics.length { break; }
                 diagnostics.push(base_result.diagnostics[_ci4]);
@@ -289,8 +268,8 @@ fn lower_lvalue_assignment_stmt(
                 diagnostics.push("llvm lowering: member access assignment base `" + member_parse.base + "` produced no value");
             } else {
                 let base_operand = base_result.operand;
-                let mut base_pointer_type -> string = base_operand.llvm_type;
-                let mut base_pointer_value -> string = base_operand.value;
+                let mut base_pointer_type: string = base_operand.llvm_type;
+                let mut base_pointer_value: string = base_operand.value;
                 let base_name = trim_text(member_parse.base);
                 if !ends_with_pointer_suffix(base_pointer_type) {
                     if is_simple_identifier(base_name) {
@@ -325,7 +304,7 @@ fn lower_lvalue_assignment_stmt(
                     } else {
                         let field_info = struct_info.fields[field_index];
                         let coerced = coerce_operand_to_type(lowered.operand, field_info.llvm_type, current_temp, current_lines);
-                        let mut _ci5 -> number = 0;
+                        let mut _ci5: number = 0;
                         loop {
                             if _ci5 >= coerced.diagnostics.length { break; }
                             diagnostics.push(coerced.diagnostics[_ci5]);
@@ -351,12 +330,12 @@ fn lower_lvalue_assignment_stmt(
     // Array index assignment: arr[i] = value
     let index_parse = parse_index_expression(assign_target);
     if index_parse.success {
-        let mut effective_value -> string = assign_value;
+        let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = assign_target + " " + assign_operator + " " + assign_value;
         }
         let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-        let mut _ci6 -> number = 0;
+        let mut _ci6: number = 0;
         loop {
             if _ci6 >= lowered.diagnostics.length { break; }
             diagnostics.push(lowered.diagnostics[_ci6]);
@@ -370,7 +349,7 @@ fn lower_lvalue_assignment_stmt(
             diagnostics.push("llvm lowering: failed to lower assignment value for array index `" + assign_target + "`");
         } else {
             let base_result = lower_expression(index_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-            let mut _ci7 -> number = 0;
+            let mut _ci7: number = 0;
             loop {
                 if _ci7 >= base_result.diagnostics.length { break; }
                 diagnostics.push(base_result.diagnostics[_ci7]);
@@ -383,7 +362,7 @@ fn lower_lvalue_assignment_stmt(
                 diagnostics.push("llvm lowering: array index assignment base `" + index_parse.base + "` produced no value");
             } else {
                 let index_result = lower_expression(index_parse.index, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-                let mut _ci8 -> number = 0;
+                let mut _ci8: number = 0;
                 loop {
                     if _ci8 >= index_result.diagnostics.length { break; }
                     diagnostics.push(index_result.diagnostics[_ci8]);
@@ -400,7 +379,7 @@ fn lower_lvalue_assignment_stmt(
                         diagnostics.push("llvm lowering: cannot determine element type for array assignment `" + base_result.operand.llvm_type + "`");
                     } else {
                         let coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines);
-                        let mut _ci9 -> number = 0;
+                        let mut _ci9: number = 0;
                         loop {
                             if _ci9 >= coerced.diagnostics.length { break; }
                             diagnostics.push(coerced.diagnostics[_ci9]);
@@ -411,7 +390,7 @@ fn lower_lvalue_assignment_stmt(
                         current_temp = _recover_assign_temp(current_lines, current_temp);
                         if coerced.operand != null {
                             let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines);
-                            let mut _ci10 -> number = 0;
+                            let mut _ci10: number = 0;
                             loop {
                                 if _ci10 >= coerced_index.diagnostics.length { break; }
                                 diagnostics.push(coerced_index.diagnostics[_ci10]);
@@ -455,13 +434,13 @@ fn lower_lvalue_assignment_stmt(
 // Writes result to build/sailfin/.self_field_expr and .self_field_temp files,
 // and appends GEP lines to the provided lines array.
 fn preprocess_self_field_access(
-    expression -> string,
-    current_temp -> number,
-    current_lines -> string[]
+    expression: string,
+    current_temp: number,
+    current_lines: string[]
 ) ![io] {
-    let mut result_expr -> string = expression;
-    let mut result_temp -> number = current_temp;
-    let mut result_lines -> string[] = current_lines;
+    let mut result_expr: string = expression;
+    let mut result_temp: number = current_temp;
+    let mut result_lines: string[] = current_lines;
 
     if index_of(result_expr, "self.") < 0 {
         fs.writeFile("build/sailfin/.self_field_expr", result_expr);
@@ -484,14 +463,14 @@ fn preprocess_self_field_access(
 
     let _ret_fn = fs.readFile("build/sailfin/.instr_fn_name");
     let _ret_si = fs.readFile("build/sailfin/.struct_info");
-    let mut _ret_sname -> string = "";
-    let mut _ret_sllvm -> string = "";
-    let mut _ret_sfields -> string = "";
-    let mut _ret_sp -> number = 0;
+    let mut _ret_sname: string = "";
+    let mut _ret_sllvm: string = "";
+    let mut _ret_sfields: string = "";
+    let mut _ret_sp: number = 0;
     loop {
         if _ret_sp >= _ret_si.length { break; }
         let _ret_nl = index_of(substring(_ret_si, _ret_sp, _ret_si.length), "\n");
-        let mut _ret_ln -> string = "";
+        let mut _ret_ln: string = "";
         if _ret_nl < 0 { _ret_ln = substring(_ret_si, _ret_sp, _ret_si.length); _ret_sp = _ret_si.length; }
         else { _ret_ln = substring(_ret_si, _ret_sp, _ret_sp + _ret_nl); _ret_sp = _ret_sp + _ret_nl + 1; }
         if _ret_ln.length == 0 { continue; }
@@ -526,13 +505,13 @@ fn preprocess_self_field_access(
         return;
     }
 
-    let mut _ret_scan -> number = 0;
+    let mut _ret_scan: number = 0;
     loop {
         let _ret_idx = index_of(substring(result_expr, _ret_scan, result_expr.length), "self.");
         if _ret_idx < 0 { break; }
         let _ret_abs = _ret_scan + _ret_idx;
         let _ret_after = _ret_abs + 5;
-        let mut _ret_end -> number = _ret_after;
+        let mut _ret_end: number = _ret_after;
         loop {
             if _ret_end >= result_expr.length { break; }
             let _ret_ch = substring(result_expr, _ret_end, _ret_end + 1);
@@ -550,8 +529,8 @@ fn preprocess_self_field_access(
         }
         if _ret_end <= _ret_after { _ret_scan = _ret_end + 1; continue; }
         let _ret_field = substring(result_expr, _ret_after, _ret_end);
-        let mut _ret_is_call -> boolean = false;
-        let mut _ret_peek -> number = _ret_end;
+        let mut _ret_is_call: boolean = false;
+        let mut _ret_peek: number = _ret_end;
         loop {
             if _ret_peek >= result_expr.length { break; }
             let _ret_pk = substring(result_expr, _ret_peek, _ret_peek + 1);
@@ -560,14 +539,14 @@ fn preprocess_self_field_access(
             break;
         }
         if _ret_is_call { _ret_scan = _ret_end + 1; continue; }
-        let mut _ret_fidx -> number = -1;
-        let mut _ret_ftype -> string = "";
-        let mut _ret_fi -> number = 0;
-        let mut _ret_fp -> number = 0;
+        let mut _ret_fidx: number = -1;
+        let mut _ret_ftype: string = "";
+        let mut _ret_fi: number = 0;
+        let mut _ret_fp: number = 0;
         loop {
             if _ret_fp >= _ret_sfields.length { break; }
             let _ret_fc = index_of(substring(_ret_sfields, _ret_fp, _ret_sfields.length), ",");
-            let mut _ret_fe -> string = "";
+            let mut _ret_fe: string = "";
             if _ret_fc < 0 { _ret_fe = substring(_ret_sfields, _ret_fp, _ret_sfields.length); _ret_fp = _ret_sfields.length; }
             else { _ret_fe = substring(_ret_sfields, _ret_fp, _ret_fp + _ret_fc); _ret_fp = _ret_fp + _ret_fc + 1; }
             let _ret_fk = index_of(_ret_fe, ":");

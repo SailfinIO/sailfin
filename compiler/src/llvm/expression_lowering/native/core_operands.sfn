@@ -42,14 +42,14 @@ import {
     BinaryAlignmentResult,
 } from "../../types";
 
-fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
+fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: number, lines: string[]) -> ComparisonEmission {
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
     if left_operand.llvm_type != right_operand.llvm_type {
         diagnostics.push("llvm lowering: comparison operands have mismatched types `" + left_operand.llvm_type + "` and `" + right_operand.llvm_type + "`");
     }
-    let mut symbol_is_equality -> boolean = false;
-    let mut _if73 -> boolean = false;
+    let mut symbol_is_equality: boolean = false;
+    let mut _if73: boolean = false;
     if symbol == "==" { _if73 = true; }
     if symbol == "!=" { _if73 = true; }
     if _if73 {
@@ -92,9 +92,9 @@ fn emit_comparison_instruction(symbol -> string, left_operand -> LLVMOperand, ri
     return ComparisonEmission { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics };
 }
 
-fn emit_boolean_and(left_operand -> LLVMOperand, right_operand -> LLVMOperand, temp_index -> number, lines -> string[]) -> ComparisonEmission {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
+fn emit_boolean_and(left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: number, lines: string[]) -> ComparisonEmission {
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
     if left_operand.llvm_type != "i1" {
         diagnostics.push("llvm lowering: expected boolean operand for `and`, found `" + left_operand.llvm_type + "`");
     }
@@ -107,7 +107,7 @@ fn emit_boolean_and(left_operand -> LLVMOperand, right_operand -> LLVMOperand, t
     return ComparisonEmission { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics };
 }
 
-fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> string {
+fn comparison_predicate_for_symbol(symbol: string, llvm_type: string) -> string {
     // Use direct string == comparisons instead of char_code_at_text which is
     // broken in older seeds.
     if llvm_type == "double" {
@@ -119,7 +119,7 @@ fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> str
         if symbol == ">=" { return "fcmp oge"; }
         return "";
     }
-    let mut _if74 -> boolean = false;
+    let mut _if74: boolean = false;
     if llvm_type == "i32" { _if74 = true; }
     if llvm_type == "i64" { _if74 = true; }
     if _if74 {
@@ -160,17 +160,17 @@ fn comparison_predicate_for_symbol(symbol -> string, llvm_type -> string) -> str
     return "";
 }
 
-fn is_string_pointer_type(llvm_type -> string) -> boolean {
+fn is_string_pointer_type(llvm_type: string) -> boolean {
     if llvm_type == "i8*" {
         return true;
     }
     return false;
 }
 
-fn load_local_operand(local -> LocalBinding, temp_index -> number, lines -> string[]) -> LoadLocalResult {
-    let mut diagnostics -> string[] = [];
+fn load_local_operand(local: LocalBinding, temp_index: number, lines: string[]) -> LoadLocalResult {
+    let mut diagnostics: string[] = [];
     let load_name = format_temp_name(temp_index);
-    let mut current_lines -> string[] = lines;
+    let mut current_lines: string[] = lines;
     current_lines.push("  " + load_name + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
     let operand = LLVMOperand { llvm_type: local.llvm_type, value: load_name };
     return LoadLocalResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: diagnostics };
@@ -179,7 +179,7 @@ fn load_local_operand(local -> LocalBinding, temp_index -> number, lines -> stri
 // Collapse runs of consecutive spaces to a single space inside LLVM type strings.
 // Uses find_substring_from + substring which rely on the C runtime (grapheme_at)
 // rather than the [] operator that older seeds miscompile.
-fn collapse_type_spaces(value -> string) -> string {
+fn collapse_type_spaces(value: string) -> string {
     let mut result = value;
     loop {
         let idx = find_substring_from(result, "  ", 0);
@@ -193,9 +193,9 @@ fn collapse_type_spaces(value -> string) -> string {
 
 // Numeric primitive coercion: handles conversions between double/i64/i32/i8/i1.
 // Returns null if neither type is a numeric primitive — caller should try other coercion paths.
-fn coerce_numeric_primitive(operand -> LLVMOperand, operand_type -> string, target -> string, temp_index -> number, lines -> string[]) -> CoercionResult? {
-    let mut current_lines -> string[] = lines;
-    let mut diagnostics -> string[] = [];
+fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: string, temp_index: number, lines: string[]) -> CoercionResult? {
+    let mut current_lines: string[] = lines;
+    let mut diagnostics: string[] = [];
 
     if target == "double" {
         if operand_type == "i64" {
@@ -410,9 +410,9 @@ fn coerce_numeric_primitive(operand -> LLVMOperand, operand_type -> string, targ
 
 // Pointer/struct coercion: handles bitcasts, boxing, unboxing, pointer derefs.
 // Returns null if no pointer coercion applies.
-fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, target -> string, temp_index -> number, lines -> string[]) -> CoercionResult? {
-    let mut current_lines -> string[] = lines;
-    let mut diagnostics -> string[] = [];
+fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: string, temp_index: number, lines: string[]) -> CoercionResult? {
+    let mut current_lines: string[] = lines;
+    let mut diagnostics: string[] = [];
 
     if target == "i8*" {
         if operand_type != "i8*" {
@@ -451,7 +451,7 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
         if tgt_last == "*" {
             let tgt_base = trim_text(substring(target, 0, target.length - 1));
             if tgt_base == operand_type {
-                let mut _if75 -> boolean = false;
+                let mut _if75: boolean = false;
                 if starts_with(operand_type, "%") { _if75 = true; }
                 if starts_with(operand_type, "{") { _if75 = true; }
                 if _if75 {
@@ -487,9 +487,9 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
             }
         }
     }
-    let mut _if76 -> boolean = false;
+    let mut _if76: boolean = false;
     if target == "i8*" {
-        let mut _if83 -> boolean = false;
+        let mut _if83: boolean = false;
         if starts_with(operand_type, "%") { _if83 = true; }
         if starts_with(operand_type, "{") { _if83 = true; }
         if _if83 {
@@ -510,9 +510,9 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
         let boxed = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
         return CoercionResult { lines: current_lines, temp_index: temp_index + 4, operand: boxed, diagnostics: diagnostics };
     }
-    let mut _if77 -> boolean = false;
+    let mut _if77: boolean = false;
     if operand_type == "i8*" {
-        let mut _if84 -> boolean = false;
+        let mut _if84: boolean = false;
         if starts_with(target, "%") { _if84 = true; }
         if starts_with(target, "{") { _if84 = true; }
         if _if84 {
@@ -531,15 +531,15 @@ fn coerce_pointer_or_struct(operand -> LLVMOperand, operand_type -> string, targ
 }
 
 // General coercion fallbacks: boxing, union construction, pointer variance, null handling.
-fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, target -> string, temp_index -> number, lines -> string[]) -> CoercionResult? {
-    let mut current_lines -> string[] = lines;
-    let mut diagnostics -> string[] = [];
+fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: string, temp_index: number, lines: string[]) -> CoercionResult? {
+    let mut current_lines: string[] = lines;
+    let mut diagnostics: string[] = [];
 
     if ends_with_pointer_suffix(target) {
         if !ends_with_pointer_suffix(operand_type) {
             let expected_value_type = strip_pointer_suffix(target);
             if expected_value_type == operand_type {
-                let mut _if85 -> boolean = false;
+                let mut _if85: boolean = false;
                 if starts_with(operand_type, "%") { _if85 = true; }
                 if starts_with(operand_type, "{") { _if85 = true; }
                 if _if85 {
@@ -561,21 +561,21 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
     }
     if is_union_llvm_type(target) {
         let variants = parse_union_payload_types(target);
-        let mut variant_index -> number = 0;
+        let mut variant_index: number = 0;
         loop {
             if variant_index >= variants.length {
                 break;
             }
             let variant_type = variants[variant_index];
-            let mut has_value -> boolean = false;
-            let mut value_text -> string = "";
-            let mut local_lines -> string[] = current_lines;
-            let mut local_temp -> number = temp_index;
+            let mut has_value: boolean = false;
+            let mut value_text: string = "";
+            let mut local_lines: string[] = current_lines;
+            let mut local_temp: number = temp_index;
             if operand_type == variant_type {
                 has_value = true;
                 value_text = operand.value;
             } else {
-                let mut _elif78 -> boolean = false;
+                let mut _elif78: boolean = false;
                 if !ends_with_pointer_suffix(operand_type) {
                     if ends_with_pointer_suffix(variant_type) {
                         _elif78 = true;
@@ -599,14 +599,14 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
                         local_temp += 4;
                     }
                 } else {
-                    let mut _elif86 -> boolean = false;
+                    let mut _elif86: boolean = false;
                     if variant_type == "i8*" {
                         if !ends_with_pointer_suffix(operand_type) {
                             _elif86 = true;
                         }
                     }
                     if _elif86 {
-                        let mut _if89 -> boolean = false;
+                        let mut _if89: boolean = false;
                         if starts_with(operand_type, "%") { _if89 = true; }
                         if starts_with(operand_type, "{") { _if89 = true; }
                         if _if89 {
@@ -651,7 +651,7 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
     }
     if operand_type == "i8*" {
         if !ends_with_pointer_suffix(target) {
-            let mut _if87 -> boolean = false;
+            let mut _if87: boolean = false;
             if starts_with(target, "%") { _if87 = true; }
             if starts_with(target, "{") { _if87 = true; }
             if _if87 {
@@ -680,7 +680,7 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
     }
     if target == "i8*" {
         if !ends_with_pointer_suffix(operand.llvm_type) {
-            let mut _if88 -> boolean = false;
+            let mut _if88: boolean = false;
             if starts_with(operand.llvm_type, "%") { _if88 = true; }
             if starts_with(operand.llvm_type, "{") { _if88 = true; }
             if _if88 {
@@ -721,8 +721,8 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* " + malloc_temp + " to " + operand.llvm_type + "*");
                 current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + typed_ptr_temp);
                 current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* " + malloc_temp + ")");
-                let mut pointer_value -> string = typed_ptr_temp;
-                let mut next_index -> number = temp_index + 4;
+                let mut pointer_value: string = typed_ptr_temp;
+                let mut next_index: number = temp_index + 4;
                 let typed_pointer_type = operand.llvm_type + "*";
                 if typed_pointer_type != target {
                     let cast_temp = format_temp_name(next_index);
@@ -742,8 +742,8 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
                 let alloca_temp = format_temp_name(temp_index);
                 current_lines.push("  " + alloca_temp + " = alloca " + operand.llvm_type);
                 current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + alloca_temp);
-                let mut next_index -> number = temp_index + 1;
-                let mut pointer_value -> string = alloca_temp;
+                let mut next_index: number = temp_index + 1;
+                let mut pointer_value: string = alloca_temp;
                 let operand_pointer_type = operand.llvm_type + "*";
                 if operand_pointer_type != target {
                     let bitcast_temp = format_temp_name(next_index);
@@ -789,9 +789,9 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
     }
     if !ends_with_pointer_suffix(target) {
         if ends_with_pointer_suffix(operand.llvm_type) {
-            let mut pointer_type -> string = operand.llvm_type;
-            let mut pointer_value -> string = operand.value;
-            let mut pointer_temp_index -> number = temp_index;
+            let mut pointer_type: string = operand.llvm_type;
+            let mut pointer_value: string = operand.value;
+            let mut pointer_temp_index: number = temp_index;
             let base_type = strip_pointer_suffix(pointer_type);
             if base_type != target {
                 let desired_pointer_type = target + "*";
@@ -810,13 +810,13 @@ fn coerce_general_fallback(operand -> LLVMOperand, operand_type -> string, targe
     return null;
 }
 
-fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_index -> number, lines -> string[]) -> CoercionResult {
+fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[]) -> CoercionResult {
     let debug_coerce = fs.exists("build/sailfin/.trace_lowering");
     if debug_coerce {
         print.err("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type + " target=" + target_type);
     }
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
     let operand_type = collapse_type_spaces(trim_text(operand.llvm_type));
     let target = collapse_type_spaces(trim_text(target_type));
     if target.length == 0 {
@@ -842,7 +842,7 @@ fn coerce_operand_to_type(operand -> LLVMOperand, target_type -> string, temp_in
     return CoercionResult { lines: current_lines, temp_index: temp_index, operand: null, diagnostics: diagnostics };
 }
 
-fn dominant_type(first -> string, second -> string) -> string {
+fn dominant_type(first: string, second: string) -> string {
     if first.length == 0 {
         return second;
     }
@@ -869,20 +869,20 @@ fn dominant_type(first -> string, second -> string) -> string {
             return first;
         }
     }
-    let mut _if79 -> boolean = false;
+    let mut _if79: boolean = false;
     if first == "double" { _if79 = true; }
     if second == "double" { _if79 = true; }
     if _if79 {
         return "double";
     }
-    let mut _if80 -> boolean = false;
+    let mut _if80: boolean = false;
     if first == "i64" { _if80 = true; }
     if second == "i64" { _if80 = true; }
     if _if80 {
         return "i64";
     }
     // i8 is narrower than i64, so i64 dominates
-    let mut _if81 -> boolean = false;
+    let mut _if81: boolean = false;
     if first == "i8" {
         if second == "i64" {
             _if81 = true;
@@ -896,7 +896,7 @@ fn dominant_type(first -> string, second -> string) -> string {
     if _if81 {
         return "i64";
     }
-    let mut _if82 -> boolean = false;
+    let mut _if82: boolean = false;
     if first == "i1" { _if82 = true; }
     if second == "i1" { _if82 = true; }
     if _if82 {
@@ -905,10 +905,10 @@ fn dominant_type(first -> string, second -> string) -> string {
     return first;
 }
 
-fn harmonise_operands(left -> LLVMOperand, right -> LLVMOperand, temp_index -> number, lines -> string[]) -> BinaryAlignmentResult {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
-    let mut current_temp -> number = temp_index;
+fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number, lines: string[]) -> BinaryAlignmentResult {
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
+    let mut current_temp: number = temp_index;
     let mut left_operand = left;
     let mut right_operand = right;
     if left_operand.value == "null" {
@@ -933,7 +933,7 @@ fn harmonise_operands(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
     }
     let target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type);
     let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines);
-    let mut _ci0 -> number = 0;
+    let mut _ci0: number = 0;
     loop {
         if _ci0 >= left_coercion.diagnostics.length { break; }
         diagnostics.push(left_coercion.diagnostics[_ci0]);
@@ -955,7 +955,7 @@ fn harmonise_operands(left -> LLVMOperand, right -> LLVMOperand, temp_index -> n
     current_temp = left_coercion.temp_index;
 
     let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines);
-    let mut _ci1 -> number = 0;
+    let mut _ci1: number = 0;
     loop {
         if _ci1 >= right_coercion.diagnostics.length { break; }
         diagnostics.push(right_coercion.diagnostics[_ci1]);

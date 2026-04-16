@@ -2,9 +2,9 @@
 // concatenation across functions, loops, and branches.
 // Targets: cross-module ABI for string returns, SSA for string accumulators.
 
-fn _repeat_char(ch -> string, count -> number) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _repeat_char(ch: string, count: number) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= count { break; }
         result = result + ch;
@@ -13,9 +13,9 @@ fn _repeat_char(ch -> string, count -> number) -> string {
     return result;
 }
 
-fn _reverse_string(text -> string) -> string {
-    let mut result -> string = "";
-    let mut i -> number = text.length;
+fn _reverse_string(text: string) -> string {
+    let mut result: string = "";
+    let mut i: number = text.length;
     loop {
         if i <= 0 { break; }
         i -= 1;
@@ -24,9 +24,9 @@ fn _reverse_string(text -> string) -> string {
     return result;
 }
 
-fn _count_char(text -> string, target -> string) -> number {
-    let mut count -> number = 0;
-    let mut i -> number = 0;
+fn _count_char(text: string, target: string) -> number {
+    let mut count: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         if substring(text, i, i + 1) == target {
@@ -37,9 +37,9 @@ fn _count_char(text -> string, target -> string) -> number {
     return count;
 }
 
-fn _join_array(parts -> string[], separator -> string) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _join_array(parts: string[], separator: string) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= parts.length { break; }
         if i > 0 {
@@ -51,10 +51,10 @@ fn _join_array(parts -> string[], separator -> string) -> string {
     return result;
 }
 
-fn _contains(text -> string, needle -> string) -> boolean {
+fn _contains(text: string, needle: string) -> boolean {
     if needle.length > text.length { return false; }
     if needle.length == 0 { return true; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     let limit = text.length - needle.length;
     loop {
         if i > limit { return false; }
@@ -99,7 +99,7 @@ test "strings: join single element" {
 }
 
 test "strings: join empty array" {
-    let mut parts -> string[] = [];
+    let mut parts: string[] = [];
     assert _join_array(parts, ",") == "";
 }
 
@@ -115,15 +115,15 @@ test "strings: contains" {
 // String building across multiple function calls
 // ---------------------------------------------------------------------------
 
-fn _bracket(text -> string) -> string {
+fn _bracket(text: string) -> string {
     return "[" + text + "]";
 }
 
-fn _quote(text -> string) -> string {
+fn _quote(text: string) -> string {
     return "\"" + text + "\"";
 }
 
-fn _wrap(text -> string, before -> string, after -> string) -> string {
+fn _wrap(text: string, before: string, after: string) -> string {
     return before + text + after;
 }
 
@@ -146,13 +146,13 @@ test "strings: nested wrapping" {
 // Building strings from conditional logic
 // ---------------------------------------------------------------------------
 
-fn _fizzbuzz(n -> number) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 1;
+fn _fizzbuzz(n: number) -> string {
+    let mut result: string = "";
+    let mut i: number = 1;
     loop {
         if i > n { break; }
         if i > 1 { result = result + " "; }
-        let mut entry -> string = "";
+        let mut entry: string = "";
         if i % 3 == 0 {
             entry = entry + "fizz";
         }
@@ -161,16 +161,16 @@ fn _fizzbuzz(n -> number) -> string {
         }
         if entry == "" {
             // Convert number to string manually for small numbers
-            let mut num_str -> string = "";
-            let mut val -> number = i;
+            let mut num_str: string = "";
+            let mut val: number = i;
             let digits = "0123456789";
             if val == 0 {
                 num_str = "0";
             } else {
                 loop {
                     if val <= 0 { break; }
-                    let mut temp -> number = val;
-                    let mut q -> number = 0;
+                    let mut temp: number = val;
+                    let mut q: number = 0;
                     loop {
                         if temp < 10 { break; }
                         temp -= 10;

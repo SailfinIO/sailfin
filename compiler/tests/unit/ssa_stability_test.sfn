@@ -5,7 +5,7 @@
 
 // --- SSA temp_index stability across control flow ---
 
-fn _nested_lets_in_branches(n -> number) -> number {
+fn _nested_lets_in_branches(n: number) -> number {
     let a = n + 1;
     let b = a * 2;
     if n > 10 {
@@ -19,9 +19,9 @@ fn _nested_lets_in_branches(n -> number) -> number {
     }
 }
 
-fn _lets_across_loop(n -> number) -> number {
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+fn _lets_across_loop(n: number) -> number {
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= n {
             break;
@@ -37,8 +37,8 @@ fn _lets_across_loop(n -> number) -> number {
 
 // --- Phi node ordering (value-producing if/else) ---
 
-fn _conditional_value(flag -> boolean) -> number {
-    let mut result -> number = 0;
+fn _conditional_value(flag: boolean) -> number {
+    let mut result: number = 0;
     if flag {
         result = 42;
     } else {
@@ -47,14 +47,14 @@ fn _conditional_value(flag -> boolean) -> number {
     return result;
 }
 
-fn _chained_conditionals(a -> number, b -> number) -> number {
-    let mut x -> number = 0;
+fn _chained_conditionals(a: number, b: number) -> number {
+    let mut x: number = 0;
     if a > b {
         x = a - b;
     } else {
         x = b - a;
     }
-    let mut y -> number = 0;
+    let mut y: number = 0;
     if x > 10 {
         y = x * 2;
     } else {
@@ -63,7 +63,7 @@ fn _chained_conditionals(a -> number, b -> number) -> number {
     return y;
 }
 
-fn _deeply_nested_control_flow(x -> number) -> number {
+fn _deeply_nested_control_flow(x: number) -> number {
     let a = x + 1;
     if a > 100 {
         let b = a - 50;

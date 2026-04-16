@@ -12,5 +12,5 @@ When working in the compiler directory:
 - Add regression tests in `compiler/tests/` for every change.
 - Spell effects explicitly: `fn foo() -> Bar ![io, model]`.
 - Use `CamelCase` for types, `snake_case` for functions and locals.
-- Fix bugs in the compiler source, never by adding fixup passes to `scripts/selfhost_native.py` or `scripts/build.sh`.
+- Fix bugs in the compiler source, never by adding fixup passes to `scripts/build.sh`.
 - Reference `docs/status.md` for current feature implementation status.

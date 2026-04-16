@@ -1,0 +1,376 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+// ---------------------------------------------------------------------------
+// Fetch release data from GitHub API at build time.
+// The site is output: "static", so this runs once during `astro build` and
+// the result is baked into the HTML. Cloudflare Pages rebuilds on every push
+// to main — including the version-bump commit the release workflow creates —
+// so the downloads page stays current automatically.
+// ---------------------------------------------------------------------------
+
+interface GHAsset {
+  name: string;
+  size: number;
+  browser_download_url: string;
+  digest?: string;
+}
+
+interface GHRelease {
+  tag_name: string;
+  prerelease: boolean;
+  draft: boolean;
+  assets: GHAsset[];
+}
+
+interface ParsedAsset {
+  file: string;
+  url: string;
+  os: string;
+  arch: string;
+  friendlyArch: string;
+  icon: string;
+  size: string;
+  sha256: string;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(1)} MB`;
+  if (bytes >= 1_024) return `${(bytes / 1_024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function parseAsset(asset: GHAsset): ParsedAsset | null {
+  const match = asset.name.match(/^sailfin_([\d.]+[^_]*)_([a-z]+)_(.+)\.tar\.gz$/);
+  if (!match) return null;
+
+  const osRaw = match[2];
+  const archRaw = match[3];
+
+  const osLabels: Record<string, string> = { linux: "Linux", macos: "macOS", darwin: "macOS", windows: "Windows" };
+  const os = osLabels[osRaw] ?? osRaw;
+  const arch = archRaw === "arm64" ? "ARM64" : archRaw;
+  const friendlyArch = osRaw === "macos" && archRaw === "arm64" ? "Apple Silicon"
+                     : osRaw === "darwin" && archRaw === "arm64" ? "Apple Silicon"
+                     : arch;
+  const icons: Record<string, string> = { linux: "linux", macos: "apple", darwin: "apple", windows: "windows" };
+  const icon = icons[osRaw] ?? "linux";
+
+  return {
+    file: asset.name,
+    url: asset.browser_download_url,
+    os,
+    arch,
+    friendlyArch,
+    icon,
+    size: formatBytes(asset.size),
+    sha256: asset.digest?.replace(/^sha256:/, "") ?? "",
+  };
+}
+
+// Fetch releases — tolerate API failures gracefully
+let stableVersion = "0.5.1";
+let stableTag = `v${stableVersion}`;
+let allAssets: ParsedAsset[] = [];
+
+try {
+  const headers: Record<string, string> = { Accept: "application/vnd.github+json" };
+  const token = import.meta.env.GITHUB_TOKEN;
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+
+  const res = await fetch("https://api.github.com/repos/SailfinIO/sailfin/releases?per_page=30", { headers });
+  if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+
+  const releases: GHRelease[] = await res.json();
+  const stable = releases.find((r) => !r.prerelease && !r.draft);
+
+  if (stable) {
+    stableTag = stable.tag_name;
+    stableVersion = stableTag.replace(/^v/, "");
+
+    // Filter to installer tarballs (sailfin_VERSION_OS_ARCH.tar.gz), skip .sha256 / .manifest.json / native build assets
+    const installerAssets = stable.assets.filter((a) =>
+      /^sailfin_[\d.]/.test(a.name) &&
+      a.name.endsWith(".tar.gz") &&
+      !a.name.endsWith(".sha256") &&
+      !a.name.includes("-native-")
+    );
+
+    allAssets = installerAssets.map(parseAsset).filter((a): a is ParsedAsset => a !== null);
+  }
+} catch (e) {
+  console.warn(`[dl] Failed to fetch releases from GitHub, using fallback: ${e}`);
+}
+
+// Fallback if API returned nothing
+if (allAssets.length === 0) {
+  const ghBase = `https://github.com/SailfinIO/sailfin/releases/download/${stableTag}`;
+  allAssets = [
+    { file: `sailfin_${stableVersion}_linux_x86_64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_linux_x86_64.tar.gz`, os: "Linux", arch: "x86_64", friendlyArch: "x86_64", icon: "linux", size: "", sha256: "" },
+    { file: `sailfin_${stableVersion}_macos_arm64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_macos_arm64.tar.gz`, os: "macOS", arch: "ARM64", friendlyArch: "Apple Silicon", icon: "apple", size: "", sha256: "" },
+    { file: `sailfin_${stableVersion}_windows_x86_64.tar.gz`, url: `${ghBase}/sailfin_${stableVersion}_windows_x86_64.tar.gz`, os: "Windows", arch: "x86_64", friendlyArch: "x86_64", icon: "windows", size: "", sha256: "" },
+  ];
+}
+
+const featured = allAssets;
+---
+
+<BaseLayout title="Downloads" description="Download the Sailfin compiler for your platform.">
+  <section class="dl-hero">
+    <div class="container">
+      <h1>Download Sailfin</h1>
+      <p class="dl-subtitle">Get the Sailfin compiler and toolchain for your platform.</p>
+      <span class="version-badge">Stable: {stableTag}</span>
+    </div>
+  </section>
+
+  <section class="dl-quick">
+    <div class="container">
+      <h2>Quick Install</h2>
+      <p class="section-desc">The fastest way to get started. Detects your platform and installs automatically.</p>
+      <div class="quick-grid">
+        <div class="quick-card">
+          <h3>Linux &amp; macOS</h3>
+          <div class="code-block">
+            <code>curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash</code>
+          </div>
+        </div>
+        <div class="quick-card">
+          <h3>Windows (PowerShell)</h3>
+          <div class="code-block">
+            <code>irm https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.ps1 | iex</code>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="dl-featured">
+    <div class="container">
+      <h2>Featured Downloads</h2>
+      <p class="section-desc">Pre-built binaries for supported platforms. Download, extract, and add to your PATH.</p>
+      <div class="featured-grid">
+        {featured.map((d) => (
+          <a href={d.url} class="featured-card">
+            <div class="featured-icon" aria-hidden="true">{d.icon === "linux" ? "\u{1F427}" : d.icon === "apple" ? "\u{1F34E}" : "\u{1FA9F}"}</div>
+            <div class="featured-info">
+              <strong>{d.os}</strong>
+              <span class="featured-arch">{d.friendlyArch}</span>
+              {d.size && <span class="featured-size">{d.size}</span>}
+            </div>
+            <span class="featured-file">{d.file}</span>
+          </a>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <section class="dl-table-section">
+    <div class="container">
+      <h2>All Downloads — {stableTag}</h2>
+      <p class="section-desc">Every asset for the current stable release.</p>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>File</th>
+              <th>OS</th>
+              <th>Arch</th>
+              <th>Size</th>
+              <th>SHA256</th>
+            </tr>
+          </thead>
+          <tbody>
+            {allAssets.map((a) => (
+              <tr>
+                <td><a href={a.url}>{a.file}</a></td>
+                <td>{a.os}</td>
+                <td>{a.arch}</td>
+                <td>{a.size || "—"}</td>
+                <td class="sha-cell">{a.sha256 ? <code>{a.sha256}</code> : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p class="gh-link">
+        Looking for older releases or checksums? See <a href="https://github.com/SailfinIO/sailfin/releases">all releases on GitHub</a>.
+      </p>
+    </div>
+  </section>
+
+  <section class="dl-source">
+    <div class="container">
+      <h2>Build from Source</h2>
+      <p class="section-desc">Clone the repository and build the self-hosted compiler via LLVM. Requires LLVM 17+, clang, and make.</p>
+      <div class="code-block source-block">
+        <code>git clone https://github.com/SailfinIO/sailfin.git && cd sailfin && make compile && make install</code>
+      </div>
+      <p class="source-detail">See the <a href="/docs/getting-started/install#building-from-source">full build instructions</a> for prerequisites and troubleshooting.</p>
+    </div>
+  </section>
+
+  <section class="dl-next">
+    <div class="container">
+      <h2>Next Steps</h2>
+      <div class="next-grid">
+        <a href="/docs/getting-started/install" class="next-card">
+          <strong>Installation Guide</strong>
+          <p>Detailed install instructions, version pinning, and troubleshooting.</p>
+        </a>
+        <a href="/docs/getting-started/editor-setup" class="next-card">
+          <strong>Editor Setup</strong>
+          <p>Get syntax highlighting and snippets in VS Code.</p>
+        </a>
+        <a href="/docs/getting-started/hello-world" class="next-card">
+          <strong>Hello, World!</strong>
+          <p>Write and run your first Sailfin program.</p>
+        </a>
+        <a href="/docs/getting-started/tour" class="next-card">
+          <strong>Take the Tour</strong>
+          <p>A guided walkthrough of every major language feature.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+</BaseLayout>
+
+<style>
+  .dl-hero {
+    background: linear-gradient(180deg, var(--sfn-blue-light) 0%, var(--color-bg) 100%);
+    padding: 4rem 0 3rem;
+    text-align: center;
+  }
+  .dl-hero h1 { font-size: 2.5rem; margin-bottom: 0.5rem; }
+  .dl-subtitle { color: var(--color-text-secondary); font-size: 1.1rem; margin-bottom: 1.25rem; }
+  .version-badge {
+    display: inline-block;
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.85rem;
+    font-weight: 600;
+    padding: 0.35rem 1rem;
+    border-radius: 20px;
+  }
+
+  .section-desc { color: var(--color-text-secondary); margin-bottom: 1.5rem; }
+
+  /* Quick Install */
+  .dl-quick { padding: 3rem 0; }
+  .dl-quick h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .quick-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.25rem; }
+  .quick-card {
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    padding: 1.5rem;
+    min-width: 0;
+  }
+  .quick-card h3 { font-size: 1rem; margin-bottom: 0.75rem; }
+  .code-block {
+    background: var(--gray-900);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    max-width: 100%;
+  }
+  .code-block code {
+    color: var(--gray-300);
+    font-size: 0.825rem;
+    background: none;
+    padding: 0;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  /* Featured Downloads */
+  .dl-featured { padding: 3rem 0; background: var(--color-bg-alt); }
+  .dl-featured h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .featured-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 1rem;
+  }
+  .featured-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 1.5rem 1rem;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .featured-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 12px rgba(0, 114, 206, 0.08);
+    text-decoration: none;
+  }
+  .featured-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+  .featured-info strong { display: block; font-size: 1rem; }
+  .featured-arch { font-size: 0.85rem; color: var(--color-text-secondary); display: block; }
+  .featured-size { font-size: 0.8rem; color: var(--color-text-tertiary); display: block; margin-top: 0.15rem; }
+  .featured-file {
+    display: block;
+    margin-top: 0.75rem;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    color: var(--color-text-tertiary);
+    word-break: break-all;
+  }
+
+  /* Table */
+  .dl-table-section { padding: 3rem 0; }
+  .dl-table-section h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .table-wrapper { overflow-x: auto; max-width: 100%; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 0.75rem 1rem; border: 1px solid var(--color-border); text-align: left; font-size: 0.9rem; }
+  th { background: var(--color-bg-alt); font-weight: 600; white-space: nowrap; }
+  td a { font-family: var(--font-mono); font-size: 0.825rem; word-break: break-all; }
+  .sha-cell code { font-size: 0.7rem; word-break: break-all; background: var(--color-bg-alt); padding: 0.15em 0.3em; border-radius: 3px; }
+  .gh-link { margin-top: 1.25rem; font-size: 0.9rem; color: var(--color-text-secondary); }
+
+  /* Source */
+  .dl-source { padding: 3rem 0; background: var(--color-bg-alt); }
+  .dl-source h2 { font-size: 1.5rem; margin-bottom: 0.5rem; }
+  .source-block { margin-bottom: 1rem; }
+  .source-detail { font-size: 0.9rem; color: var(--color-text-secondary); }
+
+  /* Next Steps */
+  .dl-next { padding: 3rem 0 4rem; }
+  .dl-next h2 { font-size: 1.5rem; margin-bottom: 1.5rem; text-align: center; }
+  .next-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
+  .next-card {
+    padding: 1.25rem;
+    border: 1px solid var(--color-border);
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .next-card:hover {
+    border-color: var(--color-primary);
+    box-shadow: 0 2px 12px rgba(0, 114, 206, 0.08);
+    text-decoration: none;
+  }
+  .next-card strong { display: block; margin-bottom: 0.25rem; color: var(--color-primary); }
+  .next-card p { font-size: 0.85rem; color: var(--color-text-secondary); line-height: 1.5; }
+
+  @media (max-width: 768px) {
+    .dl-hero h1 { font-size: 2rem; }
+    .quick-grid { grid-template-columns: 1fr; }
+    .featured-grid { grid-template-columns: repeat(2, 1fr); }
+    .next-grid { grid-template-columns: repeat(2, 1fr); }
+    .code-block { padding: 0.6rem 0.75rem; }
+    .code-block code { font-size: 0.75rem; }
+    th, td { padding: 0.5rem 0.6rem; font-size: 0.8rem; }
+    td a { font-size: 0.75rem; }
+    .sha-cell code { font-size: 0.6rem; }
+  }
+  @media (max-width: 480px) {
+    .featured-grid { grid-template-columns: 1fr; }
+    .next-grid { grid-template-columns: 1fr; }
+  }
+</style>

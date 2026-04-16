@@ -1,29 +1,93 @@
 # Add a Language Feature
 
-Walk through the full pipeline for adding a new language feature to Sailfin. This follows the checklist from CLAUDE.md.
+Orchestrate the full pipeline for adding a new language feature to Sailfin, from design through documentation.
 
 ## Feature: $ARGUMENTS
 
-Before writing any code, create a plan covering each stage of the compiler pipeline:
+---
 
-1. **Parser** (`compiler/src/parser.sfn`) — What new syntax needs to be recognized?
-2. **AST** (`compiler/src/ast.sfn`) — What new node types are needed?
-3. **Type Checker** (`compiler/src/typecheck.sfn`) — Any new type rules or constraints?
-4. **Effect Checker** (`compiler/src/effect_checker.sfn`) — Does this involve effects?
-5. **Native Emitter** (`compiler/src/emit_native.sfn`) — How does this emit to `.sfn-asm`?
-6. **LLVM Lowering** (`compiler/src/llvm/lowering/entrypoints.sfn`) — How does this lower to LLVM IR?
-7. **Tests** — Unit tests in `compiler/tests/unit/`, integration tests in `compiler/tests/integration/`
+## Phase 1: DESIGN
 
-## Workflow
+Spawn the **compiler-architect** agent to produce a design plan for this feature. The architect will:
+- Read `site/src/pages/roadmap.astro` (the [roadmap](https://sailfin.dev/roadmap)), `docs/status.md`, and `docs/spec.md` for context
+- Trace the current compiler pipeline to identify every file that needs changes
+- Produce a concrete plan covering: AST representation, type rules, IR representation, LLVM lowering, self-hosting migration strategy, and test cases
+- Identify dependencies and risks
 
-1. Present the plan and wait for approval before writing code.
-2. Implement one pipeline stage at a time, running `make test-unit` after each stage.
-3. After all stages are done, run `make test` to verify nothing is broken.
-4. Run `make compile` to verify the compiler still self-hosts.
-5. Update `docs/spec.md` and `docs/status.md` if the feature is shipping.
+**Present the architect's plan to the user and wait for approval before proceeding.** Do not write any code until the user approves the design. If the user requests changes to the plan, iterate on the design before moving on.
+
+---
+
+## Phase 2: IMPLEMENT
+
+Implement the feature **one pipeline stage at a time**, following the architect's plan in order:
+
+1. **Parser** (`compiler/src/parser/`) — new syntax recognition
+2. **AST** (`compiler/src/ast.sfn`) — new node types
+3. **Type Checker** (`compiler/src/typecheck.sfn`) — type rules and constraints
+4. **Effect Checker** (`compiler/src/effect_checker.sfn`) — if this involves effects
+5. **Native Emitter** (`compiler/src/emit_native.sfn`) — `.sfn-asm` emission
+6. **LLVM Lowering** (`compiler/src/llvm/`) — LLVM IR generation
+7. **Tests** — unit tests in `compiler/tests/unit/`, integration tests in `compiler/tests/integration/`
+
+After each stage, run targeted tests to verify:
+```bash
+ulimit -v 8388608 && make test-unit
+```
+
+After all stages are complete, verify self-hosting:
+```bash
+ulimit -v 8388608 && make compile
+```
+
+If any step fails, diagnose the root cause before proceeding. Do not skip stages or batch multiple stages without testing.
+
+---
+
+## Phase 3: REVIEW
+
+Spawn the **code-reviewer** agent to review all changes. The reviewer will check:
+- Self-hosting safety
+- Pipeline completeness (all stages covered)
+- Effect system correctness
+- LLVM IR correctness
+- Test coverage adequacy
+- Convention compliance
+
+If the reviewer flags issues, fix them before proceeding. Re-run the reviewer after fixes to confirm resolution.
+
+---
+
+## Phase 4: VALIDATE
+
+Spawn the **test-runner** agent to run the full validation suite:
+
+```bash
+ulimit -v 8388608 && make test
+```
+
+Then verify self-hosting still works:
+```bash
+ulimit -v 8388608 && make compile
+```
+
+If tests fail, diagnose and fix. Do not proceed to documentation with failing tests.
+
+---
+
+## Phase 5: DOCUMENT
+
+Spawn the **docs-updater** agent to update documentation in this order:
+1. `docs/status.md` — update the feature matrix
+2. `docs/spec.md` — add to Part A if fully shipped, Part B if partial
+3. `site/src/pages/roadmap.astro` — update progress markers on the [roadmap](https://sailfin.dev/roadmap)
+
+---
 
 ## Constraints
 
-- The compiler must still self-host after your changes (`make compile` must pass).
-- Do not refactor surrounding code — keep changes minimal and focused.
-- Always apply `ulimit -v 8388608` before running the compiler.
+- The compiler must self-host after every stage (`make compile` must pass)
+- Keep changes minimal and focused — do not refactor surrounding code
+- Always apply `ulimit -v 8388608` before running the compiler
+- Never proceed past the design gate without user approval
+- If the feature requires a self-hosting migration (new syntax used by the compiler itself), the architect's plan must include the seed transition strategy

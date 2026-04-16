@@ -1,0 +1,105 @@
+// Tests for the compiler's string_append optimization.
+// When the compiler detects chained string concatenations (a + b + c + d),
+// it emits string_append instead of string_concat for intermediates,
+// reusing the buffer via realloc instead of allocating a new one each time.
+// These tests verify that the optimization produces correct results.
+
+test "string_append: 3-way chain" {
+    let a = "hello";
+    let b = " ";
+    let c = "world";
+    let result = a + b + c;
+    assert result == "hello world";
+    assert result.length == 11;
+}
+
+test "string_append: 4-way chain" {
+    let a = "a";
+    let b = "b";
+    let c = "c";
+    let d = "d";
+    let result = a + b + c + d;
+    assert result == "abcd";
+    assert result.length == 4;
+}
+
+test "string_append: 5-way chain with longer strings" {
+    let result = "define " + "double " + "@foo" + "(double %x)" + " {\n}";
+    assert result == "define double @foo(double %x) {\n}";
+}
+
+test "string_append: chain with empty strings" {
+    let result = "" + "hello" + "" + " world" + "";
+    assert result == "hello world";
+}
+
+test "string_append: chain with single chars" {
+    let result = "a" + "b" + "c" + "d" + "e";
+    assert result == "abcde";
+    assert result.length == 5;
+}
+
+test "string_append: chain preserves newlines" {
+    let result = "line1\n" + "line2\n" + "line3\n";
+    assert result.length == 18;
+    assert result[5] == "\n";
+    assert result[11] == "\n";
+    assert result[17] == "\n";
+}
+
+test "string_append: chain with interpolation" {
+    let name = "world";
+    let result = "hello " + "{{name}}" + "!";
+    assert result == "hello world!";
+}
+
+test "string_append: original args unchanged after chain" {
+    let a = "hello";
+    let b = " ";
+    let c = "world";
+    let result = a + b + c;
+    // Original strings must be unmodified (string_append consumes only
+    // intermediate concat results, never source variables).
+    assert a == "hello";
+    assert b == " ";
+    assert c == "world";
+    assert result == "hello world";
+}
+
+test "string_append: chain used in further expressions" {
+    let part1 = "abc" + "def" + "ghi";
+    let part2 = "jkl" + "mno";
+    let combined = part1 + " " + part2;
+    assert combined == "abcdefghi jklmno";
+}
+
+test "string_append: long chain builds IR-like content" {
+    let mut ir = "source_filename = \"test.ll\"\n\n";
+    ir = ir + "define double @main() {\n";
+    ir = ir + "entry:\n";
+    ir = ir + "  %t0 = call double @foo()\n";
+    ir = ir + "  ret double %t0\n";
+    ir = ir + "}\n";
+    assert ir.length > 50;
+    assert ir[0] == "s";
+}
+
+test "string_append: chain with function call between concats" {
+    // Ensures the peephole fires correctly when the chain involves a
+    // helper function that returns a string between concat operations.
+    fn make_tag(name: string) -> string {
+        return "<" + name + ">";
+    }
+    let result = "prefix:" + make_tag("div") + ":suffix";
+    assert result == "prefix:<div>:suffix";
+}
+
+test "string_append: chain result used as variable then concatenated again" {
+    // The intermediate is assigned to a variable, then used in a new chain.
+    // The variable load produces a fresh SSA name, so the peephole should NOT
+    // fire for the first concat of the second chain (it's a load, not a concat).
+    let first = "abc" + "def";
+    let second = first + "ghi" + "jkl";
+    assert first == "abcdef";
+    assert second == "abcdefghijkl";
+}

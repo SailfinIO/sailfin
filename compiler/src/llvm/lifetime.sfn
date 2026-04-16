@@ -20,9 +20,9 @@ import { unwrap_move_wrapper } from "./type_mapping";
 // Borrow Expression Parsing
 // =============================================================================
 
-fn parse_borrow_expression(text -> string) -> BorrowParseResult {
+fn parse_borrow_expression(text: string) -> BorrowParseResult {
     let trimmed = trim_text(text);
-    let diagnostics -> string[] = [];
+    let diagnostics: string[] = [];
     if trimmed.length == 0 {
         return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
     }
@@ -40,12 +40,12 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
                 }
             }
         }
-        let mut remainder -> string = trim_text(substring(trimmed, 6, trimmed.length));
+        let mut remainder: string = trim_text(substring(trimmed, 6, trimmed.length));
         if remainder.length == 0 {
             let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
             return BorrowParseResult { recognized: true, success: false, target: "", mutable: false, diagnostics: issue };
         }
-        let mut mutable_flag -> boolean = false;
+        let mut mutable_flag: boolean = false;
         if starts_with(remainder, "mut") {
             let after_mut = substring(remainder, 3, remainder.length);
             mutable_flag = true;
@@ -54,14 +54,14 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
         if remainder.length > 0 {
             if substring(remainder, 0, 1) == "(" {
                 let argument_parse = extract_borrow_argument(remainder);
-                let mut messages -> string[] = [];
-                let mut _ci0 -> number = 0;
+                let mut messages: string[] = [];
+                let mut _ci0: number = 0;
                 loop {
                     if _ci0 >= diagnostics.length { break; }
                     messages.push(diagnostics[_ci0]);
                     _ci0 += 1;
                 }
-                let mut _ci1 -> number = 0;
+                let mut _ci1: number = 0;
                 loop {
                     if _ci1 >= argument_parse.diagnostics.length { break; }
                     messages.push(argument_parse.diagnostics[_ci1]);
@@ -70,7 +70,7 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
                 if !argument_parse.success {
                     return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
                 }
-                let mut argument_text -> string = argument_parse.argument;
+                let mut argument_text: string = argument_parse.argument;
                 if starts_with(argument_text, "mut") {
                     let after_mut = substring(argument_text, 3, argument_text.length);
                     let trimmed_after_mut = trim_text(after_mut);
@@ -106,8 +106,8 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
     if starts_with(trimmed, "&&") {
         return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
     }
-    let mut remainder -> string = trim_text(substring(trimmed, 1, trimmed.length));
-    let mut mutable_flag -> boolean = false;
+    let mut remainder: string = trim_text(substring(trimmed, 1, trimmed.length));
+    let mut mutable_flag: boolean = false;
     if starts_with(remainder, "mut") {
         mutable_flag = true;
         let after_mut = substring(remainder, 3, remainder.length);
@@ -120,11 +120,11 @@ fn parse_borrow_expression(text -> string) -> BorrowParseResult {
     return BorrowParseResult { recognized: true, success: true, target: trim_text(remainder), mutable: mutable_flag, diagnostics: diagnostics };
 }
 
-fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
-    let mut diagnostics -> string[] = [];
-    let mut depth -> number = 0;
-    let mut index -> number = 0;
-    let mut closing_index -> number = -1;
+fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
+    let mut diagnostics: string[] = [];
+    let mut depth: number = 0;
+    let mut index: number = 0;
+    let mut closing_index: number = -1;
     loop {
         if index >= text.length {
             break;
@@ -164,14 +164,14 @@ fn extract_borrow_argument(text -> string) -> BorrowArgumentParse {
     return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
 }
 
-fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
-    let mut diagnostics -> string[] = [];
+fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
+    let mut diagnostics: string[] = [];
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         diagnostics.push("llvm lowering: borrow expression missing target");
         return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= trimmed.length {
             break;
@@ -195,12 +195,12 @@ fn extract_simple_borrow_target(text -> string) -> BorrowArgumentParse {
     return BorrowArgumentParse { success: true, argument: target, diagnostics: diagnostics };
 }
 
-fn is_valid_borrow_target(text -> string) -> boolean {
+fn is_valid_borrow_target(text: string) -> boolean {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= trimmed.length {
             break;
@@ -228,8 +228,8 @@ fn is_valid_borrow_target(text -> string) -> boolean {
 // Borrow Expression Lowering
 // =============================================================================
 
-fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[]) -> ExpressionResult {
-    let mut diagnostics -> string[] = parse.diagnostics;
+fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[]) -> ExpressionResult {
+    let mut diagnostics: string[] = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
@@ -269,7 +269,7 @@ fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBind
 // Ownership Analysis
 // =============================================================================
 
-fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
+fn analyze_value_ownership(initializer: string?, span: NativeSourceSpan?, locals: LocalBinding[], bindings: ParameterBinding[]) -> OwnershipAnalysis {
     if initializer == null {
         return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: [] };
     }
@@ -279,7 +279,7 @@ fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, lo
     }
 
     let parse = parse_borrow_expression(trimmed);
-    let mut diagnostics -> string[] = parse.diagnostics;
+    let mut diagnostics: string[] = parse.diagnostics;
     if parse.recognized {
         if !parse.success {
             return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
@@ -325,9 +325,9 @@ fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, lo
     return OwnershipAnalysis { ownership: null, consumption: null, diagnostics: diagnostics };
 }
 
-fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership -> OwnershipInfo?) -> LocalBinding[] {
-    let mut result -> LocalBinding[] = [];
-    let mut index -> number = 0;
+fn update_local_ownership(locals: LocalBinding[], name: string, ownership: OwnershipInfo?) -> LocalBinding[] {
+    let mut result: LocalBinding[] = [];
+    let mut index: number = 0;
     loop {
         if index >= locals.length {
             break;
@@ -357,8 +357,8 @@ fn update_local_ownership(locals -> LocalBinding[], name -> string, ownership ->
 // Borrow Conflict Detection
 // =============================================================================
 
-fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {
-    let mut diagnostics -> string[] = [];
+fn detect_borrow_conflicts(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> string[] {
+    let mut diagnostics: string[] = [];
     if ownership == null {
         return diagnostics;
     }
@@ -366,7 +366,7 @@ fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[]
         return diagnostics;
     }
     let base = trim_text(ownership.base);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= locals.length {
             break;
@@ -396,11 +396,11 @@ fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[]
     return diagnostics;
 }
 
-fn resolve_borrow_base(target -> string, locals -> LocalBinding[]) -> string {
+fn resolve_borrow_base(target: string, locals: LocalBinding[]) -> string {
     return resolve_borrow_base_inner(trim_text(target), locals, 0);
 }
 
-fn resolve_borrow_base_inner(target -> string, locals -> LocalBinding[], depth -> number) -> string {
+fn resolve_borrow_base_inner(target: string, locals: LocalBinding[], depth: number) -> string {
     let trimmed = trim_text(target);
     if trimmed.length == 0 {
         return trimmed;
@@ -425,7 +425,7 @@ fn resolve_borrow_base_inner(target -> string, locals -> LocalBinding[], depth -
     return resolve_borrow_base_inner(details.base, locals, depth + 1);
 }
 
-fn normalise_borrow_base(raw_base -> string) -> string {
+fn normalise_borrow_base(raw_base: string) -> string {
     let mut trimmed = trim_text(raw_base);
     loop {
         if trimmed.length == 0 {
@@ -450,7 +450,7 @@ fn normalise_borrow_base(raw_base -> string) -> string {
     return trimmed;
 }
 
-fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
+fn is_mutable_borrow_annotation(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return false;
@@ -476,21 +476,21 @@ fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
 // Lifetime Region Management
 // =============================================================================
 
-fn append_lifetime_region(values -> LifetimeRegionMetadata[], value -> LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
+fn append_lifetime_region(values: LifetimeRegionMetadata[], value: LifetimeRegionMetadata) -> LifetimeRegionMetadata[] {
     let mut out = values;
     out = out.push(value);
     return out;
 }
 
-fn append_lifetime_release_event(events -> LifetimeReleaseEvent[], event -> LifetimeReleaseEvent) -> LifetimeReleaseEvent[] {
+fn append_lifetime_release_event(events: LifetimeReleaseEvent[], event: LifetimeReleaseEvent) -> LifetimeReleaseEvent[] {
     let mut out = events;
     out = out.push(event);
     return out;
 }
 
-fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id -> number, scope_id -> string, scope_depth -> number) -> LifetimeRegionMetadata[] {
-    let mut result -> LifetimeRegionMetadata[] = [];
-    let mut index -> number = 0;
+fn mark_lifetime_region_released(regions: LifetimeRegionMetadata[], region_id: number, scope_id: string, scope_depth: number) -> LifetimeRegionMetadata[] {
+    let mut result: LifetimeRegionMetadata[] = [];
+    let mut index: number = 0;
     loop {
         if index >= regions.length {
             break;
@@ -520,12 +520,12 @@ fn mark_lifetime_region_released(regions -> LifetimeRegionMetadata[], region_id 
     return result;
 }
 
-fn apply_lifetime_release_events(regions -> LifetimeRegionMetadata[], releases -> LifetimeReleaseEvent[]) -> LifetimeRegionMetadata[] {
+fn apply_lifetime_release_events(regions: LifetimeRegionMetadata[], releases: LifetimeReleaseEvent[]) -> LifetimeRegionMetadata[] {
     if releases.length == 0 {
         return regions;
     }
-    let mut current_regions -> LifetimeRegionMetadata[] = regions;
-    let mut index -> number = 0;
+    let mut current_regions: LifetimeRegionMetadata[] = regions;
+    let mut index: number = 0;
     loop {
         if index >= releases.length {
             break;
@@ -537,7 +537,7 @@ fn apply_lifetime_release_events(regions -> LifetimeRegionMetadata[], releases -
     return current_regions;
 }
 
-fn make_lifetime_region_metadata(id -> number, binding -> string, ownership -> OwnershipInfo, scope_id -> string, scope_depth -> number, base_scope_id -> string, base_scope_depth -> number) -> LifetimeRegionMetadata {
+fn make_lifetime_region_metadata(id: number, binding: string, ownership: OwnershipInfo, scope_id: string, scope_depth: number, base_scope_id: string, base_scope_depth: number) -> LifetimeRegionMetadata {
     return LifetimeRegionMetadata {
         id: id,
         binding: binding,
@@ -554,7 +554,7 @@ fn make_lifetime_region_metadata(id -> number, binding -> string, ownership -> O
     };
 }
 
-fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string) -> ScopeMetadata {
+fn infer_borrow_base_scope(base: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string) -> ScopeMetadata {
     let local = find_local_binding(locals, base);
     if local != null {
         return ScopeMetadata { scope_id: local.scope_id, scope_depth: local.scope_depth };
@@ -570,8 +570,8 @@ fn infer_borrow_base_scope(base -> string, locals -> LocalBinding[], bindings ->
 // Lifetime Validation
 // =============================================================================
 
-fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegionMetadata[]) -> string[] {
-    let mut diagnostics -> string[] = [];
+fn validate_borrow_lifetimes(function: NativeFunction, regions: LifetimeRegionMetadata[]) -> string[] {
+    let mut diagnostics: string[] = [];
     if regions == null {
         return diagnostics;
     }
@@ -579,7 +579,7 @@ fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegi
         diagnostics.push("llvm lowering: lifetime region overflow in `" + function.name + "` (len=" + number_to_string(regions.length) + ")");
         return diagnostics;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     let root_scope = format_root_scope_id(function.name);
     loop {
         if index >= regions.length {
@@ -592,7 +592,7 @@ fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegi
             base_scope_id = root_scope;
             base_scope_depth = 0;
         }
-        let mut violation -> boolean = false;
+        let mut violation: boolean = false;
         if region.released {
             if region.end_scope_id.length == 0 {
                 violation = true;
@@ -607,7 +607,7 @@ fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegi
             }
         }
         if violation {
-            let mut location -> string = "";
+            let mut location: string = "";
             if region.start_span != null {
                 location = " at " + format_span_location(region.start_span);
             }
@@ -622,9 +622,9 @@ fn validate_borrow_lifetimes(function -> NativeFunction, regions -> LifetimeRegi
 // Suspension Conflict Detection (for async/await)
 // =============================================================================
 
-fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string, suspension_span -> NativeSourceSpan?) -> string[] {
-    let mut diagnostics -> string[] = [];
-    let mut index -> number = 0;
+fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
+    let mut diagnostics: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= locals.length {
             break;
@@ -644,7 +644,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
         }
         index += 1;
     }
-    let mut parameter_index -> number = 0;
+    let mut parameter_index: number = 0;
     loop {
         if parameter_index >= bindings.length {
             break;
@@ -661,7 +661,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
     return diagnostics;
 }
 
-fn detect_suspension_conflicts(expression -> string?, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string, suspension_span -> NativeSourceSpan?) -> string[] {
+fn detect_suspension_conflicts(expression: string?, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
     if expression == null {
         return [];
     }
@@ -676,13 +676,13 @@ fn detect_suspension_conflicts(expression -> string?, locals -> LocalBinding[], 
     return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span);
 }
 
-fn find_suspension_keyword(text -> string) -> string {
+fn find_suspension_keyword(text: string) -> string {
     if starts_with(text, "await") {
         if text.length == 5 {
             return "await";
         }
         let next = char_at(text, 5);
-        let mut _if192 -> boolean = false;
+        let mut _if192: boolean = false;
         if next == " " { _if192 = true; }
         if next == "\t" { _if192 = true; }
         if next == "(" { _if192 = true; }
@@ -695,7 +695,7 @@ fn find_suspension_keyword(text -> string) -> string {
             return "yield";
         }
         let next = char_at(text, 5);
-        let mut _if193 -> boolean = false;
+        let mut _if193: boolean = false;
         if next == " " { _if193 = true; }
         if next == "\t" { _if193 = true; }
         if next == "(" { _if193 = true; }
@@ -710,16 +710,16 @@ fn find_suspension_keyword(text -> string) -> string {
 // Scope ID Helpers
 // =============================================================================
 
-fn format_root_scope_id(function_name -> string) -> string {
-    let mut sanitized -> string = sanitize_symbol(function_name);
+fn format_root_scope_id(function_name: string) -> string {
+    let mut sanitized: string = sanitize_symbol(function_name);
     if sanitized.length == 0 {
         sanitized = "fn";
     }
     return "fn:" + sanitized;
 }
 
-fn make_child_scope_id(parent -> string, child -> string) -> string {
-    let mut sanitized_child -> string = sanitize_symbol(child);
+fn make_child_scope_id(parent: string, child: string) -> string {
+    let mut sanitized_child: string = sanitize_symbol(child);
     if sanitized_child.length == 0 {
         sanitized_child = "scope";
     }
@@ -729,7 +729,7 @@ fn make_child_scope_id(parent -> string, child -> string) -> string {
     return parent + "__" + sanitized_child;
 }
 
-fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
+fn is_scope_descendant(parent: string, candidate: string) -> boolean {
     if parent.length == 0 {
         return true;
     }
@@ -750,28 +750,28 @@ fn is_scope_descendant(parent -> string, candidate -> string) -> boolean {
 // Formatting Helpers
 // =============================================================================
 
-fn format_use_after_move_message(name -> string, span -> NativeSourceSpan?) -> string {
+fn format_use_after_move_message(name: string, span: NativeSourceSpan?) -> string {
     if span == null {
         return "llvm lowering: use-after-move of `" + name + "`";
     }
     return "llvm lowering: use-after-move of `" + name + "` at " + format_span_location(span);
 }
 
-fn format_span_location(span -> NativeSourceSpan) -> string {
+fn format_span_location(span: NativeSourceSpan) -> string {
     let start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column);
     let end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column);
     return start + "-" + end;
 }
 
-fn format_suspension_location(keyword -> string, borrow_span -> NativeSourceSpan?, suspension_span -> NativeSourceSpan?) -> string {
-    let mut has_segment -> boolean = false;
-    let mut combined -> string = "";
+fn format_suspension_location(keyword: string, borrow_span: NativeSourceSpan?, suspension_span: NativeSourceSpan?) -> string {
+    let mut has_segment: boolean = false;
+    let mut combined: string = "";
     if borrow_span != null {
         combined = "borrow at " + format_span_location(borrow_span);
         has_segment = true;
     }
     if suspension_span != null {
-        let mut label -> string = keyword;
+        let mut label: string = keyword;
         if label.length == 0 {
             label = "suspend";
         }

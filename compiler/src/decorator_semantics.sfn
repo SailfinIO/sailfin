@@ -9,11 +9,11 @@
 // module free of `Decorator` indexing so self-host-from-release-seed remains
 // reliable.
 
-fn infer_effects(existing -> string[], decorator_names -> string[]) -> string[] {
+fn infer_effects(existing: string[], decorator_names: string[]) -> string[] {
     let mut effects = clone_effects(existing);
-    let mut requires_io -> boolean = contains_effect(effects, "io");
+    let mut requires_io: boolean = contains_effect(effects, "io");
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= decorator_names.length {
             break;
@@ -40,14 +40,14 @@ fn infer_effects(existing -> string[], decorator_names -> string[]) -> string[] 
     return effects;
 }
 
-fn append_string(collection -> string[], item -> string) -> string[] {
+fn append_string(collection: string[], item: string) -> string[] {
     collection.push(item);
     return collection;
 }
 
-fn clone_effects(effects -> string[]) -> string[] {
-    let mut clone -> string[] = [];
-    let mut index -> number = 0;
+fn clone_effects(effects: string[]) -> string[] {
+    let mut clone: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= effects.length {
             break;
@@ -58,8 +58,8 @@ fn clone_effects(effects -> string[]) -> string[] {
     return clone;
 }
 
-fn contains_effect(effects -> string[], effect -> string) -> boolean {
-    let mut index -> number = 0;
+fn contains_effect(effects: string[], effect: string) -> boolean {
+    let mut index: number = 0;
     loop {
         if index >= effects.length {
             break;
