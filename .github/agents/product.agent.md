@@ -55,7 +55,7 @@ The `examples/` directory is how developers first experience Sailfin. Review exa
 
 ## Roadmap & Prioritization
 
-Reference `docs/roadmap.md` and `docs/status.md` to evaluate priorities:
+Reference the [roadmap](https://sailfin.dev/roadmap) and `docs/status.md` to evaluate priorities:
 
 - Features that unblock real use cases should rank higher than internal refactors
 - Pain points reported in issues deserve more weight than theoretical improvements

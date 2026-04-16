@@ -32,11 +32,11 @@ You are the Sailfin Architect agent. Your role is to review design decisions, ev
 - Evaluate whether the change moves toward or away from the 1.0 goal (pure Sailfin toolchain)
 - Consider effect system implications — does the change respect capability boundaries?
 - Check for ownership/borrowing implications (move-by-default, `Affine<T>`, `Linear<T>`)
-- Ensure documentation updates are included (`docs/status.md` → `docs/spec.md` → `docs/roadmap.md`)
+- Ensure documentation updates are included (`docs/status.md` → `docs/spec.md` → `site/src/pages/roadmap.astro`)
 
 ## Key Documents to Reference
 
-- `docs/roadmap.md` — Active workstreams and priorities
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — Active workstreams and priorities (source: `site/src/pages/roadmap.astro`)
 - `docs/status.md` — Current feature implementation status
 - `docs/spec.md` — Language specification (Part A: shipped, Part B: planned)
 - `docs/proposals/` — Future-facing designs

@@ -243,8 +243,8 @@ type Result<T> = Response | T;
 > `![model]` effect annotation is valuable and should remain a language feature,
 > but the declaration syntax could potentially be expressed as library types
 > (e.g., `sfn/model` capsule) without losing safety or expressiveness. This
-> question should be resolved before these features ship. See `docs/roadmap.md`
-> §Post-1.0 AI section for discussion.
+> question should be resolved before these features ship. See the
+> [roadmap](https://sailfin.dev/roadmap) Post-1.0 AI section for discussion.
 
 Models are first-class program artefacts. A `model` block declares metadata,
 versions, schemas, and evaluator suites, producing a `Model<Input, Output>`
@@ -404,7 +404,7 @@ adapter boundaries.
 > site with no compiler enforcement or propagation operator. Pre-1.0 will add
 > `Result<T, E>` to the type system and a `?` propagation operator. `try`/`catch`
 > remains for truly exceptional / unrecoverable errors.
-> See `docs/roadmap.md` §0.
+> See the [roadmap](https://sailfin.dev/roadmap) and `docs/proposals/colon-type-annotations.md`.
 
 ## 5. Concurrency and Performance
 
@@ -477,7 +477,7 @@ is limited to ergonomic runtime type guards.
 > `float` (64-bit IEEE 754). `number` will become an alias for `float`.
 > Integer literals will default to `int`; array indexing will require `int`.
 > This change also resolves the "double-encoded pointers" compiler fixup
-> category. See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
+> category. See the [roadmap](https://sailfin.dev/roadmap) and `docs/status.md` §Known Design Issues.
 
 Composite types include structs, enums, generics (e.g. `Vec<T>`, `Seq<T>`),
 optionals (`T?`), and unions (`A | B`). The array sugar `Type[]` is deprecated
@@ -964,7 +964,7 @@ each embedded expression directly.
 > `format!`. Using it for the opposite meaning guarantees confusion. LLMs
 > trained on billions of lines where `{{ }}` means "don't interpolate" will
 > produce systematically wrong code.
-> See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
+> See the [roadmap](https://sailfin.dev/roadmap) and `docs/status.md` §Known Design Issues.
 
 ## 10. Runtime Semantics
 
@@ -1050,7 +1050,7 @@ sources receive the same behavior across runtime targets.
 ## Part B — Design Preview
 
 The sections below describe the direction of the compiler and adjacent tooling.
-They complement the roadmap (`docs/roadmap.md`) and proposals under
+They complement the [roadmap](https://sailfin.dev/roadmap) and proposals under
 `docs/proposals/`.
 
 ## 11. Roadmap

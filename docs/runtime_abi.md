@@ -373,6 +373,6 @@ The migration has three honest preconditions:
 - `docs/runtime_audit.md` — current runtime state and compiler prerequisites.
 - `docs/build-performance.md` — perf analysis that motivated the memory
   model decision.
-- `docs/roadmap.md` §3 — 1.0 runtime rewrite workstream.
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — 1.0 runtime rewrite workstream.
 - `compiler/src/llvm/runtime_helpers.sfn` — current runtime helper registry
   (source of truth for the Part A surface).

@@ -308,7 +308,7 @@ These patterns will compose naturally with `routine { }` and `channel()` once th
 
 Concurrency primitives (`routine`, `channel`, `await`, structured scopes) are part of the 1.0 release milestone. The `async fn` declaration syntax is already in place. The runtime scheduler and channel implementation are being built on top of the stable self-hosted LLVM backend.
 
-See [`docs/roadmap.md`](/docs/roadmap) for the current timeline and sequencing.
+See the [roadmap](/roadmap) for the current timeline and sequencing.
 
 ---
 

@@ -52,4 +52,4 @@ tools/             # Developer tooling
 When changing language behavior, update in order:
 1. `docs/status.md` — What ships today
 2. `docs/spec.md` — Language reference
-3. `docs/roadmap.md` — If it affects planned work
+3. The [roadmap](/roadmap) — If it affects planned work

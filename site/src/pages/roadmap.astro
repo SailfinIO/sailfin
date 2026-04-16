@@ -151,8 +151,7 @@ const statusLabel = (s: Status) =>
           Sailfin's path from alpha to a stable 1.0 release and beyond.
         </p>
         <p class="meta">
-          Last updated April 2026 &middot;
-          Canonical source: <a href="https://github.com/SailfinIO/sailfin/blob/main/docs/roadmap.md"><code>docs/roadmap.md</code></a>
+          Last updated April 2026
         </p>
       </header>
 
@@ -169,7 +168,7 @@ const statusLabel = (s: Status) =>
           <h2>Release 1.0</h2>
           <span class="v1-stat">{v1Stats.done} of {v1Stats.total} milestones complete</span>
         </div>
-        <div class="progress-bar-track">
+        <div class="progress-bar-track" role="progressbar" aria-valuenow={v1Stats.done} aria-valuemin={0} aria-valuemax={v1Stats.total} aria-label={`Release 1.0 progress: ${v1Stats.done} of ${v1Stats.total} milestones complete`}>
           <div class="progress-bar-fill" style={`width: ${v1Percent}%`}></div>
         </div>
       </section>
@@ -188,7 +187,7 @@ const statusLabel = (s: Status) =>
                 </div>
                 <span class="category-count">{stats.done}/{stats.total}</span>
               </div>
-              <div class="progress-bar-track small">
+              <div class="progress-bar-track small" role="progressbar" aria-valuenow={stats.done} aria-valuemin={0} aria-valuemax={stats.total} aria-label={`${cat.title} progress: ${stats.done} of ${stats.total} complete`}>
                 <div
                   class:list={["progress-bar-fill", { empty: pct === 0 }]}
                   style={`width: ${Math.max(pct, 0)}%`}

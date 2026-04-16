@@ -167,7 +167,7 @@ Cross-reference every claim against the codebase:
 ### Documentation Checklist
 - [ ] `docs/status.md` updated if feature status changed
 - [ ] `docs/spec.md` updated if syntax or semantics changed
-- [ ] `docs/roadmap.md` updated if priorities shifted
+- [ ] [Roadmap](https://sailfin.dev/roadmap) (`site/src/pages/roadmap.astro`) updated if priorities shifted
 
 ### Pitfalls to Flag
 - Pipeline operator (`|>`) documented as available (it's not)

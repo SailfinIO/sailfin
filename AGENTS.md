@@ -3,7 +3,7 @@
 ## Project Structure & Module Organization
 
 - `compiler/src/` carries the Sailfin-native compiler sources; the **self-hosted native compiler** (legacy name: stage2) is the primary toolchain.
-- `docs/` now has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), roadmap (`docs/roadmap.md`), bootstrap spec (`docs/spec.md`), grammar, and keyword references. Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
+- `docs/` now has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), bootstrap spec (`docs/spec.md`), grammar, and keyword references. The roadmap lives at [sailfin.dev/roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`). Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
 - `docs/proposals/` holds future-facing designs (e.g., package management); leave implementation notes there until the status page marks them shipped.
 - `runtime/native/` hosts the current C runtime implementation; the runtime is planned to move into Sailfin for the 1.0 release.
 

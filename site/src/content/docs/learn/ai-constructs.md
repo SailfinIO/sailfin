@@ -319,7 +319,7 @@ The post-1.0 AI milestone will deliver:
 - Evaluator framework
 - Tool dispatcher for model-invoked tools
 
-These features build on the stable self-hosted LLVM backend targeted by the 1.0 release. See [`docs/roadmap.md`](/docs/roadmap) for the current timeline.
+These features build on the stable self-hosted LLVM backend targeted by the 1.0 release. See the [roadmap](/roadmap) for the current timeline.
 
 ---
 

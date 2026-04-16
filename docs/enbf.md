@@ -273,7 +273,7 @@ Identifier         = Letter { Letter | Digit | '_' } ;
 > type (f64). Pre-1.0 will introduce `int` (i64) and `float` (f64) as distinct
 > types. Integer literals (no decimal point) will default to `int`; decimal
 > literals default to `float`. `number` becomes an alias for `float`.
-> See `docs/roadmap.md` §0.
+> See the [roadmap](https://sailfin.dev/roadmap) and `docs/proposals/colon-type-annotations.md`.
 
 ### String Interpolation
 
@@ -285,7 +285,7 @@ For example `"Hello, {{ name }}!"` becomes a formatted string.
 > **REFORM (pre-1.0):** The `{{ expr }}` delimiter will change to `${ expr }`.
 > `{{ }}` universally means "escape interpolation / literal braces" in template
 > languages and Rust's `format!`. Using it for the opposite meaning confuses
-> both humans and LLM code generators. See `docs/roadmap.md` §0.
+> both humans and LLM code generators. See the [roadmap](https://sailfin.dev/roadmap) and `docs/proposals/colon-type-annotations.md`.
 
 Named arguments appear in both function calls and pipeline stages:
 

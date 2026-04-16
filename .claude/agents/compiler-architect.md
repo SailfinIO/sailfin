@@ -60,7 +60,7 @@ Always consult these before designing:
 
 | Document | Contains |
 |---|---|
-| `docs/roadmap.md` | 1.0 priorities, syntax reform plan, feature completeness requirements |
+| `site/src/pages/roadmap.astro` | 1.0 priorities and feature completeness requirements ([sailfin.dev/roadmap](https://sailfin.dev/roadmap)) |
 | `docs/status.md` | Current feature matrix — what ships, what's partial, what's missing |
 | `docs/spec.md` | Language reference (Part A: shipped, Part B: planned) |
 | `docs/build-performance.md` | Build bottleneck root causes and optimization plan |
@@ -74,7 +74,7 @@ You'll be asked to architect one of these:
 
 For a new language feature (syntax reform, new construct, etc.):
 
-- **Read the current state** — check `docs/status.md` and `docs/roadmap.md` for context
+- **Read the current state** — check `docs/status.md` and the [roadmap](https://sailfin.dev/roadmap) for context
 - **Trace the pipeline** — identify every file that needs changes, in pipeline order
 - **Design the AST representation** — what nodes are added/modified in `ast.sfn`
 - **Design the type rules** — how does type checking work for this feature

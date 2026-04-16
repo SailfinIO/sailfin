@@ -56,7 +56,7 @@ lexer -> parser -> AST -> type check -> effect check -> emit (.sfn-asm) -> LLVM 
 ### Key References
 
 Read these files to inform your review:
-- `docs/roadmap.md` — Active workstreams and priorities
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — Active workstreams and priorities (source: `site/src/pages/roadmap.astro`)
 - `docs/status.md` — Current feature implementation status
 - `docs/spec.md` — Language specification (Part A: shipped, Part B: planned)
 - `CLAUDE.md` — Full development context and constraints
@@ -67,7 +67,7 @@ Read these files to inform your review:
 
 2. **Evaluate against the pipeline**: Does the proposal require changes across the full pipeline (parser -> AST -> type check -> effect check -> emit -> LLVM lowering -> tests -> docs)?
 
-3. **Check roadmap alignment**: Read `docs/roadmap.md` and `docs/status.md`. Does this move toward or away from the 1.0 goal?
+3. **Check roadmap alignment**: Read the [roadmap](https://sailfin.dev/roadmap) and `docs/status.md`. Does this move toward or away from the 1.0 goal?
 
 4. **Assess impact**:
    - Will this break self-hosting? (`make compile` must still succeed)

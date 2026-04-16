@@ -651,7 +651,7 @@ tool code is largely independent and testable in isolation.
 
 - Go tooling philosophy: https://go.dev/blog/tool-chain
 - Rust Clippy architecture: independent lint passes over HIR
-- `docs/roadmap.md` — items 2 (diagnostics), 4 (tooling), 6 (capsule system)
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — diagnostics, tooling, and capsule system priorities
 - `docs/status.md` — current diagnostic and testing capabilities
 - `compiler/src/typecheck_types.sfn` — current Diagnostic struct
 - `compiler/src/effect_checker.sfn` — current effect validation

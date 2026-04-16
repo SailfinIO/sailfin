@@ -20,14 +20,14 @@ Prerequisites: `clang`, `bash`, and LLVM tools required by the native build scri
 
 The primary workflow for development is as follows:
 
-1.  **Select a Task**: Choose a task from the [roadmap.md](docs/roadmap.md).
+1.  **Select a Task**: Choose a task from the [roadmap](https://sailfin.dev/roadmap).
 2.  **Implement the Task**: Make the necessary code changes to complete the task.
 3.  **Compile and Test**: Re-compile the language and run the test suite to ensure that your changes have not introduced any regressions.
     ```bash
     make check
     ```
-4.  **Update Documentation**: Update the [roadmap.md](docs/roadmap.md), [docs/status.md](docs/status.md), and any other relevant documentation to reflect the changes you have made.
-5.  **Add New Tasks**: If you discover any new tasks during the development process, add them to the [roadmap.md](docs/roadmap.md).
+4.  **Update Documentation**: Update the [roadmap](https://sailfin.dev/roadmap), [docs/status.md](docs/status.md), and any other relevant documentation to reflect the changes you have made.
+5.  **Add New Tasks**: If you discover any new tasks during the development process, add them to the [roadmap](https://sailfin.dev/roadmap).
 
 ### Development Commands
 
@@ -46,7 +46,7 @@ The `docs` folder is a critical part of the Sailfin project. It contains the pro
 
 Key documents include:
 
-- [docs/roadmap.md](docs/roadmap.md): The project's roadmap, which tracks tasks and future development.
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap): The project's roadmap, which tracks tasks and future development (source: `site/src/pages/roadmap.astro`).
 - [docs/status.md](docs/status.md): The source of truth for what ships today (native compiler primary; legacy name stage2) versus what is still in progress.
 - [docs/spec.md](docs/spec.md): The bootstrap language reference with design-preview callouts.
 

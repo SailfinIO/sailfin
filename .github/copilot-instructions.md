@@ -124,7 +124,7 @@ Update documents in this order when behaviour changes:
 
 1. `docs/status.md` — keep the feature matrix authoritative
 2. `docs/spec.md` — sync bootstrap reference (Part A shipped, Part B planned)
-3. `docs/roadmap.md` — adjust for sequencing changes
+3. `site/src/pages/roadmap.astro` — adjust the [roadmap](https://sailfin.dev/roadmap) for sequencing changes
 4. Relevant folder `README` (`compiler/README.md`, `runtime/README.md`, etc.)
 
 ## Commit & Pull Request Guidelines
@@ -140,7 +140,7 @@ Update documents in this order when behaviour changes:
 |---|---|
 | `docs/status.md` | What ships today (Stage0/1/2 breakdown) |
 | `docs/spec.md` | Language reference (Part A: bootstrap, Part B: planned) |
-| `docs/roadmap.md` | Active workstreams and sequencing |
+| [sailfin.dev/roadmap](https://sailfin.dev/roadmap) | Active workstreams and sequencing (source: `site/src/pages/roadmap.astro`) |
 | `docs/runtime_audit.md` | Python→Sailfin migration tracker |
 
 ## Important Constraints

@@ -137,7 +137,7 @@ The following capsules ship as part of the Sailfin standard library under
   `runtime/native/src/sailfin_runtime.c`.
 - **The C runtime will be replaced by a Sailfin-native runtime before 1.0.** This
   is a hard prerequisite for the 1.0 release, not a post-1.0 item. See
-  `docs/roadmap.md` and `docs/runtime_audit.md`.
+  the [roadmap](https://sailfin.dev/roadmap) and `docs/runtime_audit.md`.
 
 ## Installer (Current)
 
@@ -149,7 +149,7 @@ The following capsules ship as part of the Sailfin standard library under
 
 The following design issues have been identified through external review and must
 be resolved before 1.0 to avoid breaking a public API. Each is tracked in
-`docs/roadmap.md` §0 (Syntax Reform). This section records the *problem*; the
+the [roadmap](https://sailfin.dev/roadmap) and `docs/proposals/colon-type-annotations.md`. This section records the *problem*; the
 roadmap records the *plan*.
 
 ### Type annotation syntax (`->` vs `:`) — **migrated**
