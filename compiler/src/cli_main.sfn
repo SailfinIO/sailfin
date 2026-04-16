@@ -22,6 +22,13 @@ import {
     handle_fmt_command,
     inline_imports_for_source,
 } from "./cli_commands";
+import {
+    discover_project_root,
+    enumerate_capsule_sources,
+    stage_capsule_imports,
+    compile_capsule_modules,
+    CapsuleSource,
+} from "./capsule_resolver";
 import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
@@ -247,6 +254,13 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, opt_flag: string, cache_dir: string) -> number ![io] {
+    // Thin wrapper: most callers have one .ll; capsule-aware callers use
+    // _clang_link_multi_with_opt directly.
+    let single: string[] = [ll_path];
+    return _clang_link_multi_with_opt(single, out_path, runtime_root, opt_flag, cache_dir);
+}
+
+fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, opt_flag: string, cache_dir: string) -> number ![io] {
     if runtime_root.length == 0 {
         print("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
         return 1;
@@ -254,6 +268,10 @@ fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string,
     if !_runtime_bundle_exists(runtime_root) {
         print("runtime bundle missing expected files under: " + runtime_root);
 
+        return 1;
+    }
+    if ll_paths.length == 0 {
+        print("_clang_link_multi_with_opt: no input .ll files");
         return 1;
     }
 
@@ -276,24 +294,61 @@ fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string,
         return 1;
     }
 
-    let args: string[] = [
+    let mut args: string[] = [
         "clang",
         opt_flag,
         "-Wno-override-module",
         runtime_obj,
         globals_obj,
         prelude_obj,
-        ll_path,
-        "-o",
-        out_path,
-        "-lm",
     ];
+    let mut i: number = 0;
+    loop {
+        if i >= ll_paths.length { break; }
+        args.push(ll_paths[i]);
+        i += 1;
+    }
+    args.push("-o");
+    args.push(out_path);
+    args.push("-lm");
     return process.run(args);
 }
 
 fn _clang_link(ll_path: string, out_path: string, runtime_root: string) -> number ![io] {
-    // Default link used by `build` and `run`.
+    // Default link used by `build` and `run` for single-module programs.
     return _clang_link_with_opt(ll_path, out_path, runtime_root, "-O2", "build/sailfin");
+}
+
+fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string) -> number ![io] {
+    // Default link used by `build` and `run` for multi-module programs
+    // (main source + capsule dependency modules).
+    return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, "-O2", "build/sailfin");
+}
+
+// Resolve, stage, and compile every capsule declared in the project's
+// capsule.toml. Returns the list of capsule .ll paths to feed the linker
+// (empty if the source file has no project manifest or declares no deps).
+// Prints diagnostics on failure and returns [] to signal the caller to
+// bail before linking.
+fn _prepare_project_capsules(input_path: string) -> string[] ![io] {
+    let base_dir = _dirname(input_path);
+    let project_root = discover_project_root(base_dir);
+    if project_root.length == 0 {
+        // No capsule.toml found — the source file is standalone and has
+        // no declared deps. Single-module compile is the right path.
+        return [];
+    }
+    let sources = enumerate_capsule_sources(project_root);
+    if sources.length == 0 {
+        return [];
+    }
+    let staged = stage_capsule_imports(sources);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return [];
+    }
+    let capsule_lls = compile_capsule_modules(sources);
+    return capsule_lls;
 }
 
 fn sailfin_cli_main(argv: string[]) -> number ![io] {
@@ -540,6 +595,12 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         _ensure_dir("build");
         _ensure_dir("build/sailfin");
 
+        // Resolve and compile any capsule deps declared in the project's
+        // capsule.toml before compiling the main source. stage_capsule_imports
+        // writes .sfn-asm + .layout-manifest into build/native/import-context/
+        // where the main module's lowering will find them.
+        let capsule_lls = _prepare_project_capsules(input_path);
+
         let ll_path = "build/sailfin/program.ll";
         let source = fs.readFile(input_path);
         let module_name = module_name_from_path(input_path);
@@ -551,7 +612,14 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         }
 
         let exe_path = out_path;
-        let rc = _clang_link(ll_path, exe_path, runtime_root);
+        let mut all_lls: string[] = [ll_path];
+        let mut cli: number = 0;
+        loop {
+            if cli >= capsule_lls.length { break; }
+            all_lls.push(capsule_lls[cli]);
+            cli += 1;
+        }
+        let rc = _clang_link_multi(all_lls, exe_path, runtime_root);
         if rc != 0 {
             print("link failed (clang exit=" + number_to_string(rc) + ")");
 
@@ -586,11 +654,20 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         let ll_path = "build/sailfin/run.ll";
         let exe_path = "build/sailfin/run";
 
-        // Inline imports (relative, stdlib, and capsule deps from capsule.toml)
-        // before compilation so dependency sources are available.
-        let raw_source = fs.readFile(input_path);
-        let base_dir = _dirname(input_path);
-        let source = inline_imports_for_source(raw_source, base_dir);
+        // Resolve and compile capsule deps before lowering the main file.
+        // This replaces the older inline_imports_for_source text hack with
+        // real separate-compilation via the standard import-context path.
+        let capsule_lls = _prepare_project_capsules(input_path);
+
+        // Fall back to text-level inlining only if capsule resolution
+        // produced no output AND the source still references capsule
+        // imports — keeps relative imports (./helper.sfn) working in
+        // single-file programs without a manifest.
+        let mut source = fs.readFile(input_path);
+        if capsule_lls.length == 0 {
+            let base_dir = _dirname(input_path);
+            source = inline_imports_for_source(source, base_dir);
+        }
         let module_name = module_name_from_path(input_path);
         let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
         if !ok {
@@ -599,7 +676,14 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
             return 1;
         }
 
-        let link_rc = _clang_link(ll_path, exe_path, runtime_root);
+        let mut all_lls: string[] = [ll_path];
+        let mut rli: number = 0;
+        loop {
+            if rli >= capsule_lls.length { break; }
+            all_lls.push(capsule_lls[rli]);
+            rli += 1;
+        }
+        let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root);
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
             print("run: native link failed; attempting seed fallback via `sfn run`");
