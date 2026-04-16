@@ -109,13 +109,13 @@ test: test-unit test-integration test-e2e
 # Install a released seed compiler into the workspace.
 # Requires a GitHub token in GITHUB_TOKEN.
 SEED_REPO ?= SailfinIO/sailfin
-SEED_VERSION ?= 0.5.2-alpha.1
+SEED_VERSION ?= 0.5.3-alpha.1
 SEED_EXCLUDE_TAG ?=
 SEED_INSTALL_BASE ?= build/seed/versions
 SEED_GLOBAL_BIN_DIR ?= build/seed/bin
 
 # Default seed compiler used for self-hosting.
-# Points to the fetched seed binary (0.5.2-alpha.1+).
+# Points to the fetched seed binary (0.5.3-alpha.1+).
 SEED ?= build/seed/bin/sailfin
 
 FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)

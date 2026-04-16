@@ -3,12 +3,73 @@
 // Formatting rule tables for sfn fmt. Spacing, blank-line, and
 // classification lookups used by the emit phase in fmt.sfn.
 
+import { strings_equal, substring } from "../string_utils";
+
 // ═══════════════════════════════════════════════════════════════════
 // Spacing rules
 // ═══════════════════════════════════════════════════════════════════
 
+// Returns "space", "none", or "newline" for the gap between two tokens
+// based on their roles.
 fn get_spacing_rule(left_role: string, right_role: string) -> string {
-    // Stub — will return "space", "none", or "newline"
+    // Dot: no space either side
+    if strings_equal(left_role, "dot") { return "none"; }
+    if strings_equal(right_role, "dot") { return "none"; }
+
+    // No space after open delimiters, no space before close
+    if strings_equal(left_role, "paren_open") { return "none"; }
+    if strings_equal(left_role, "bracket_open") { return "none"; }
+    if strings_equal(right_role, "paren_close") { return "none"; }
+    if strings_equal(right_role, "bracket_close") { return "none"; }
+
+    // No space before comma/semicolon
+    if strings_equal(right_role, "separator") { return "none"; }
+    if strings_equal(right_role, "semicolon") { return "none"; }
+
+    // Comma: space after
+    if strings_equal(left_role, "separator") { return "space"; }
+
+    // Colon: no space before, space after
+    if strings_equal(right_role, "colon") { return "none"; }
+    if strings_equal(left_role, "colon") { return "space"; }
+
+    // Arrow: space before and after
+    if strings_equal(right_role, "arrow") { return "space"; }
+    if strings_equal(left_role, "arrow") { return "space"; }
+
+    // Operators: space before and after
+    if strings_equal(right_role, "operator") { return "space"; }
+    if strings_equal(left_role, "operator") { return "space"; }
+
+    // Assignment: space before and after
+    if strings_equal(right_role, "assign") { return "space"; }
+    if strings_equal(left_role, "assign") { return "space"; }
+
+    // Bang bracket: space before, no space after
+    if strings_equal(right_role, "bang_bracket") { return "space"; }
+    if strings_equal(left_role, "bang_bracket") { return "none"; }
+
+    // Decorator: no space after @
+    if strings_equal(left_role, "decorator") { return "none"; }
+
+    // Function call: value followed by ( → no space
+    if strings_equal(right_role, "paren_open") {
+        if strings_equal(left_role, "value") { return "none"; }
+        if strings_equal(left_role, "paren_close") { return "none"; }
+        if strings_equal(left_role, "bracket_close") { return "none"; }
+    }
+
+    // Index: value followed by [ → no space
+    if strings_equal(right_role, "bracket_open") {
+        if strings_equal(left_role, "value") { return "none"; }
+        if strings_equal(left_role, "paren_close") { return "none"; }
+        if strings_equal(left_role, "bracket_close") { return "none"; }
+    }
+
+    // Keywords: space after
+    if strings_equal(left_role, "keyword") { return "space"; }
+
+    // Default: space
     return "space";
 }
 
@@ -16,7 +77,11 @@ fn get_spacing_rule(left_role: string, right_role: string) -> string {
 // Blank-line rules
 // ═══════════════════════════════════════════════════════════════════
 
+// Returns the number of blank lines required for a context transition.
+// context values: "top_level", "after_imports", "in_block"
 fn get_blank_line_rule(context: string) -> number {
+    if strings_equal(context, "top_level") { return 1; }
+    if strings_equal(context, "after_imports") { return 1; }
     return 0;
 }
 
@@ -25,13 +90,34 @@ fn get_blank_line_rule(context: string) -> number {
 // ═══════════════════════════════════════════════════════════════════
 
 fn opens_block(lexeme: string) -> boolean {
+    if strings_equal(lexeme, "fn") { return true; }
+    if strings_equal(lexeme, "struct") { return true; }
+    if strings_equal(lexeme, "enum") { return true; }
+    if strings_equal(lexeme, "interface") { return true; }
+    if strings_equal(lexeme, "if") { return true; }
+    if strings_equal(lexeme, "else") { return true; }
+    if strings_equal(lexeme, "for") { return true; }
+    if strings_equal(lexeme, "loop") { return true; }
+    if strings_equal(lexeme, "while") { return true; }
+    if strings_equal(lexeme, "match") { return true; }
+    if strings_equal(lexeme, "test") { return true; }
+    if strings_equal(lexeme, "impl") { return true; }
+    if strings_equal(lexeme, "try") { return true; }
+    if strings_equal(lexeme, "catch") { return true; }
+    if strings_equal(lexeme, "model") { return true; }
+    if strings_equal(lexeme, "pipeline") { return true; }
+    if strings_equal(lexeme, "routine") { return true; }
     return false;
 }
 
 fn closes_statement(lexeme: string) -> boolean {
+    if strings_equal(lexeme, ";") { return true; }
+    if strings_equal(lexeme, "}") { return true; }
     return false;
 }
 
+// Wrapping decision for collections (imports, struct literals).
+// Returns true if the collection should be wrapped to one-per-line.
 fn wraps_at_threshold(items: number, line_length: number) -> boolean {
     if items > 3 { return true; }
     if line_length > 80 { return true; }
@@ -39,15 +125,53 @@ fn wraps_at_threshold(items: number, line_length: number) -> boolean {
 }
 
 fn is_binary_operator(lexeme: string) -> boolean {
+    if strings_equal(lexeme, "+") { return true; }
+    if strings_equal(lexeme, "-") { return true; }
+    if strings_equal(lexeme, "*") { return true; }
+    if strings_equal(lexeme, "/") { return true; }
+    if strings_equal(lexeme, "%") { return true; }
+    if strings_equal(lexeme, "==") { return true; }
+    if strings_equal(lexeme, "!=") { return true; }
+    if strings_equal(lexeme, "<") { return true; }
+    if strings_equal(lexeme, ">") { return true; }
+    if strings_equal(lexeme, "<=") { return true; }
+    if strings_equal(lexeme, ">=") { return true; }
+    if strings_equal(lexeme, "&&") { return true; }
+    if strings_equal(lexeme, "||") { return true; }
+    if strings_equal(lexeme, "..") { return true; }
     return false;
 }
 
+// Context-dependent: is this a unary prefix operator?
+// `-` and `!` are unary when preceded by an operator, open delimiter,
+// assignment, keyword, or at expression start.
 fn is_unary_prefix(lexeme: string, prev_role: string) -> boolean {
+    if !strings_equal(lexeme, "-") {
+        if !strings_equal(lexeme, "!") {
+            return false;
+        }
+    }
+    // After these roles, - and ! are unary prefix
+    if strings_equal(prev_role, "") { return true; }
+    if strings_equal(prev_role, "assign") { return true; }
+    if strings_equal(prev_role, "operator") { return true; }
+    if strings_equal(prev_role, "paren_open") { return true; }
+    if strings_equal(prev_role, "bracket_open") { return true; }
+    if strings_equal(prev_role, "separator") { return true; }
+    if strings_equal(prev_role, "keyword") { return true; }
+    if strings_equal(prev_role, "colon") { return true; }
+    if strings_equal(prev_role, "arrow") { return true; }
+    if strings_equal(prev_role, "semicolon") { return true; }
     return false;
 }
 
+// Returns import group number for sorting: 0 = stdlib, 1 = relative
 fn import_group(path: string) -> number {
-    return 0;
+    if path.length >= 5 {
+        if strings_equal(substring(path, 0, 5), "\"sfn/") { return 0; }
+        if strings_equal(substring(path, 0, 5), "'sfn/") { return 0; }
+    }
+    return 1;
 }
 
 export { get_spacing_rule, get_blank_line_rule, opens_block, closes_statement, wraps_at_threshold, is_binary_operator, is_unary_prefix, import_group };
