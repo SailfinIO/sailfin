@@ -16,8 +16,59 @@ interface RoadmapCategory {
 
 const v1Categories: RoadmapCategory[] = [
   {
+    title: "Phase 1: Runtime Enablement — Systems Primitives",
+    description: "Language features that unblock the pure Sailfin runtime rewrite. Nothing in the runtime can be ported without these.",
+    items: [
+      { label: "extern fn with typed linker-resolved symbols (parser ✓, emitter ✓, type-checker registration needed)", status: "in-progress" },
+      { label: "int (i64) and float (f64) numeric types replacing number", status: "planned" },
+      { label: "Raw pointer types (*T, *const T, *mut T) — enforced, not just parsed", status: "planned" },
+      { label: "Result<T, E> type and ? error propagation operator", status: "planned" },
+      { label: "Bitwise operators on integer types (&, |, ^, >>, <<)", status: "planned" },
+      { label: "${} string interpolation replacing {{ }}", status: "planned" },
+    ],
+  },
+  {
+    title: "Phase 2: Runtime Enablement — Containers & Resources",
+    description: "Higher-level features needed to express typed containers, resource handles, and higher-order operations in the runtime.",
+    items: [
+      { label: "Closures with captured variables (not just non-capturing lambdas)", status: "planned" },
+      { label: "Generic type constraints (fn sort<T: Comparable>(arr: Array<T>))", status: "planned" },
+      { label: "Deterministic drop emission — compiler emits scope-exit drop calls for owned values", status: "planned" },
+      { label: "Complete generic type inference", status: "planned" },
+      { label: "Interface conformance validation with variance checks", status: "planned" },
+    ],
+  },
+  {
+    title: "Phase 3: Sailfin-Native Runtime",
+    description: "Replace the C runtime with pure Sailfin. Depends on Phase 1 and 2 compiler features being shipped.",
+    items: [
+      { label: "Core memory management — arena allocator, string/array allocation in Sailfin", status: "planned" },
+      { label: "String subsystem — {ptr, len, cap} layout, concat, append, substring, grapheme ops", status: "planned" },
+      { label: "Array/collection subsystem — typed Array<T>, Slice<T>, push, concat, map/filter/reduce", status: "planned" },
+      { label: "File I/O subsystem — fs.read, fs.write, fs.exists, directory ops via extern fn", status: "planned" },
+      { label: "Process execution — posix_spawnp/CreateProcessA via extern fn", status: "planned" },
+      { label: "Exception subsystem — replace TLS-flag polling or migrate to Result<T, E> internally", status: "planned" },
+      { label: "Time/clock subsystem — clock_gettime/mach_absolute_time via extern fn", status: "planned" },
+      { label: "Crypto subsystem — SHA-256, Base64 in pure Sailfin (bitwise int ops)", status: "planned" },
+      { label: "Native CLI driver — replace native_driver.c with Sailfin entry point", status: "planned" },
+      { label: "Remove the C runtime once parity and performance gates are met", status: "planned" },
+    ],
+  },
+  {
+    title: "Phase 4: Structured Concurrency",
+    description: "Concurrency primitives with capability tracking. Requires Phase 1-2 features plus atomic intrinsics.",
+    items: [
+      { label: "Atomic intrinsics (atomic_add, atomic_cas, memory fences)", status: "planned" },
+      { label: "await expression parsing and lowering", status: "planned" },
+      { label: "routine { } block parsing and lowering", status: "planned" },
+      { label: "channel() as the core concurrency primitive", status: "planned" },
+      { label: "spawn expression", status: "planned" },
+      { label: "Runtime task scheduler and work queue", status: "planned" },
+    ],
+  },
+  {
     title: "Effect System Hardening",
-    description: "Make the effect system world-class — Sailfin's core differentiator.",
+    description: "Make the effect system world-class — Sailfin's core differentiator. Can progress in parallel with runtime work.",
     items: [
       { label: "Hierarchical effect enforcement (io.fs, net.http, etc.)", status: "planned" },
       { label: "Effect polymorphism for generics (fn map<T, E>(f: Fn ![E]) ![E])", status: "planned" },
@@ -28,28 +79,6 @@ const v1Categories: RoadmapCategory[] = [
     ],
   },
   {
-    title: "Foundation Types",
-    description: "Fix the type system foundation before building on it.",
-    items: [
-      { label: "int (i64) and float (f64) numeric types replacing number", status: "planned" },
-      { label: "Result<T, E> type and ? error propagation operator", status: "planned" },
-      { label: "${} string interpolation replacing {{ }}", status: "planned" },
-      { label: "Complete generic type inference", status: "planned" },
-      { label: "Interface conformance validation with variance checks", status: "planned" },
-      { label: "Richer diagnostics — multi-span, severity levels, fix-it hints", status: "planned" },
-    ],
-  },
-  {
-    title: "Structured Concurrency",
-    description: "First-class concurrency primitives with capability tracking.",
-    items: [
-      { label: "await expression parsing and lowering", status: "planned" },
-      { label: "routine { } block parsing and lowering", status: "planned" },
-      { label: "channel() as the core concurrency primitive", status: "planned" },
-      { label: "spawn expression", status: "planned" },
-    ],
-  },
-  {
     title: "Compiler Stabilization",
     description: "Build pipeline and LLVM backend correctness.",
     items: [
@@ -57,17 +86,7 @@ const v1Categories: RoadmapCategory[] = [
       { label: "Make build.sh the sole clean build path with no post-processing", status: "done" },
       { label: "Pass make check with no fallbacks", status: "planned" },
       { label: "Stabilize control-flow LLVM lowering (loop/if/break headers)", status: "planned" },
-    ],
-  },
-  {
-    title: "Sailfin-Native Runtime",
-    description: "The C runtime under runtime/native/ must be fully replaced before 1.0.",
-    items: [
-      { label: "Execute the runtime migration plan", status: "planned" },
-      { label: "Finalize the Sailfin-native ABI spec", status: "planned" },
-      { label: "Port core runtime helpers: strings, arrays, exceptions, type metadata", status: "planned" },
-      { label: "Remove the C runtime once parity and performance gates are met", status: "planned" },
-      { label: "Ship Sailfin-native filesystem, HTTP, and clock adapters", status: "planned" },
+      { label: "Richer diagnostics — multi-span, severity levels, fix-it hints", status: "planned" },
     ],
   },
   {

@@ -333,6 +333,40 @@ make rebuild                    # Force rebuild from seed
 
 If `make check` fails, it means the compiler has a bug. Fix the compiler.
 
+### Runtime Enablement Sequencing
+
+The 1.0 release requires a **pure Sailfin runtime** — no C source files. The
+compiler must ship specific language features before each phase of the runtime
+rewrite can begin. This is the critical path to 1.0:
+
+**Phase 1 — Systems primitives (unblocks basic runtime porting):**
+- `extern fn` with LLVM `declare` emission (90% done — type-checker registration missing)
+- `int` (i64) / `float` (f64) numeric types (fixes precision, enables sizes/indices/bitwise)
+- Raw pointer types (`*T`, `*const T`) enforced (needed for OS API handles: `*FILE`, `*DIR`)
+- `Result<T, E>` + `?` operator (every OS call can fail)
+- Bitwise operators on integers (`&`, `|`, `^`, `>>`, `<<`) (needed for SHA-256, Base64, flags)
+
+**Phase 2 — Containers & resources (unblocks typed collections and RAII):**
+- Closures with capture (needed for `map`/`filter`/`reduce`, spawn handlers)
+- Generic type constraints (`fn sort<T: Comparable>`) (needed for `Array<T>`, `HashMap<K, V>`)
+- Deterministic drop emission (compiler emits scope-exit drops for owned values)
+
+**Phase 3 — Runtime migration (depends on Phase 1 + 2):**
+- Port ~90 runtime ABI functions from C to Sailfin (strings, arrays, I/O, exceptions, crypto)
+- Replace `native_driver.c` with a Sailfin entry point
+- Remove `runtime/native/` entirely
+
+**Phase 4 — Structured concurrency (depends on Phase 1-2 + atomics):**
+- Atomic intrinsics (`atomic_add`, `atomic_cas`, fences)
+- `routine`/`await`/`channel`/`spawn` keywords
+- Task scheduler and work queue
+
+Effect system hardening (hierarchical effects, polymorphism, transitive enforcement)
+can progress **in parallel** with all phases — it doesn't block or depend on runtime work.
+
+See the [roadmap](https://sailfin.dev/roadmap) for the full breakdown and `docs/runtime_audit.md`
+for the migration tracker.
+
 ## Pre-1.0 Syntax Reform (Active)
 
 The following breaking syntax changes are planned before 1.0. All new code

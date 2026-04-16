@@ -135,9 +135,29 @@ The following capsules ship as part of the Sailfin standard library under
   Implemented in `compiler/src/llvm/expression_lowering/native/core_strings.sfn`
   and `core_ops_lowering.sfn`; runtime entry point in
   `runtime/native/src/sailfin_runtime.c`.
-- **The C runtime will be replaced by a Sailfin-native runtime before 1.0.** This
-  is a hard prerequisite for the 1.0 release, not a post-1.0 item. See
-  the [roadmap](https://sailfin.dev/roadmap) and `docs/runtime_audit.md`.
+- **The C runtime will be replaced by a pure Sailfin runtime before 1.0.** No C
+  shim — the entire runtime (~90 ABI functions across strings, arrays, I/O,
+  exceptions, crypto, time, and process execution) will be rewritten in Sailfin.
+  This is a hard prerequisite for the 1.0 release.
+
+### Runtime Migration Prerequisites
+
+The runtime rewrite depends on compiler features that must ship first. The
+[roadmap](https://sailfin.dev/roadmap) sequences these as numbered phases:
+
+| Compiler Feature | Status | Runtime Subsystems It Unblocks |
+|---|---|---|
+| `extern fn` (LLVM `declare` emission) | In progress (type-checker registration needed) | All — nothing can call `malloc`/`fopen`/`write` without it |
+| `int` / `float` numeric types | Planned | Sizes, indices, bitwise ops; fixes f64 precision hazard |
+| Raw pointer types (`*T`) enforced | Planned | OS handles (`*FILE`, `*DIR`, `*pthread_t`), buffer pointers |
+| `Result<T, E>` + `?` operator | Planned | Every fallible operation (file I/O, allocation, network) |
+| Bitwise integer operators | Planned | SHA-256, Base64, flags, enum tag extraction |
+| Closures with capture | Planned | `map`/`filter`/`reduce`, spawn handlers, route handlers |
+| Generic type constraints | Planned | `Array<T>`, `Slice<T>`, `HashMap<K, V>`, `Channel<T>` |
+| Deterministic drop emission | Planned | Memory reclamation — enables `string_drop` and `array_drop` |
+| Atomic intrinsics | Planned | Reference counting, task queues, channel implementation |
+
+See `docs/runtime_audit.md` for the full migration plan.
 
 ## Installer (Current)
 
