@@ -314,6 +314,6 @@ See the [roadmap](/roadmap) for the current timeline and sequencing.
 
 ## Next Steps
 
-- [AI Constructs](/docs/learn/ai-constructs) — Models, prompts, pipelines, and tools
+- [AI Integration](/docs/learn/ai-constructs) — The `![model]` effect and the `sfn/ai` capsule
 - [Testing](/docs/learn/testing) — Testing your Sailfin code
 - [The Effect System](/docs/learn/effects) — How effects govern what code is allowed to do

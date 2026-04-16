@@ -5,33 +5,27 @@ import Hero from "../components/Hero.astro";
 const features = [
   {
     title: "Effect Types",
-    description: "Declare what your code can do — IO, network, and more. The compiler checks direct use of effectful operations and catches violations before runtime.",
+    description: "Every function declares what it can do — IO, network, clock, and more. The compiler checks effectful operations and catches capability violations before runtime.",
     icon: "shield",
     href: "/docs/learn/effects",
   },
   {
-    title: "Self-Hosted Compiler",
-    description: "Sailfin compiles itself via LLVM. An open-source systems language with a real native toolchain, not an interpreter wrapper.",
-    icon: "terminal",
-    href: "/docs/contributing/architecture",
-  },
-  {
     title: "Capability Security",
-    description: "Functions declare required capabilities. Code must declare effects to directly perform IO, network, or model operations.",
+    description: "Capsules declare required capabilities in their manifest. Direct use of effectful operations is checked at compile time, with full dependency-tree auditing on the roadmap.",
     icon: "key",
     href: "/docs/reference/effects",
   },
   {
-    title: "Ownership & Borrowing",
-    description: "Move-by-default semantics with explicit borrows. Linear and affine type syntax is in place, with full enforcement landing before 1.0.",
-    icon: "lock",
-    href: "/docs/learn/ownership",
+    title: "Self-Hosted Compiler",
+    description: "Sailfin compiles itself via LLVM. A real native toolchain producing single-binary output — not an interpreter wrapper.",
+    icon: "terminal",
+    href: "/docs/contributing/architecture",
   },
   {
-    title: "AI Constructs",
-    description: "Models, prompts, and pipelines are language-level syntax — not library hacks. Execution support is under active development for a post-1.0 milestone.",
-    icon: "cpu",
-    href: "/docs/learn/ai-constructs",
+    title: "Pragmatic Ergonomics",
+    description: "Conventional TypeScript/Rust-like syntax, fast compilation, and clear error messages with fix-it hints. Easy for humans and LLMs alike.",
+    icon: "zap",
+    href: "/docs/getting-started/tour",
   },
   {
     title: "Package Registry",
@@ -39,24 +33,30 @@ const features = [
     icon: "package",
     href: "https://registry.sailfin.dev",
   },
+  {
+    title: "Structured Concurrency",
+    description: "Routines, channels, and scoped parallelism as first-class constructs with deterministic lifetime semantics. Coming in 1.0.",
+    icon: "layers",
+    href: "/docs/reference/concurrency",
+  },
 ];
 
 const useCases = [
   {
-    title: "Systems Programming",
-    description: "Native compilation via LLVM and a self-hosted toolchain make Sailfin suitable for performance-critical infrastructure.",
+    title: "Capability-Controlled Services",
+    description: "The effect system guarantees that IO, network, and other capabilities are declared at compile time. Audit your entire service's capability surface before it reaches production.",
   },
   {
-    title: "Capability-Controlled Services",
-    description: "The effect system checks that IO, network, and other capabilities are declared at compile time — catching direct violations before runtime.",
+    title: "Systems Programming",
+    description: "Native compilation via LLVM, single-binary output, and a self-hosted toolchain make Sailfin suitable for performance-critical infrastructure.",
   },
   {
     title: "CLI Tools & Automation",
-    description: "Concise syntax, fast compilation, and single-binary output make Sailfin ideal for developer tooling.",
+    description: "Concise syntax, fast compilation, and single-binary output make Sailfin ideal for developer tooling and build systems.",
   },
   {
-    title: "Safe Concurrent Systems",
-    description: "Effect tracking helps you build reliable services today, with structured concurrency planned to make capability boundaries even more explicit and auditable.",
+    title: "Supply-Chain Security",
+    description: "Every capsule declares its capability requirements. Know exactly what your dependencies can do — no hidden network calls, no surprise file access.",
   },
 ];
 ---
@@ -68,7 +68,7 @@ const useCases = [
   <section class="features">
     <div class="container">
       <h2 class="section-title">Why Sailfin?</h2>
-      <p class="section-subtitle">A language designed from the ground up for safe, intelligent systems.</p>
+      <p class="section-subtitle">A language designed from the ground up for compile-time capability enforcement.</p>
       <div class="features-grid">
         {features.map((f) => (
           <a href={f.href} class="feature-card">
@@ -252,6 +252,17 @@ const useCases = [
 
     .use-cases-grid {
       grid-template-columns: 1fr;
+    }
+
+    .cta-actions {
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .cta-actions .btn {
+      width: 100%;
+      max-width: 280px;
+      justify-content: center;
     }
   }
 

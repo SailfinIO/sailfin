@@ -1,15 +1,15 @@
 # Sailfin
 
-Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection.
-Its type system unifies deterministic computation, effect isolation, and capability-aware security to make large-scale model-driven software reliable by default.
+Sailfin is a compiled systems language with compile-time capability enforcement.
+Every function declares what it can do — IO, network, clock, and more — and the compiler checks direct usage of effectful operations against those declarations before your code runs.
 
 ## Why Sailfin
 
-- **Effect system** — Effects such as `io`, `net`, `model`, `gpu`, `rand`, and `clock` are explicit in function signatures. You can look at a function and know exactly what capabilities it uses — no hidden side effects. The compiler enforces these at compile time.
-- **Capability-based security** — Capsules declare what effects they need in their manifest. Undeclared capabilities are compile-time errors. Secrets, PII, and data egress policies are designed for enforcement through the type system and runtime guards.
-- **Structured concurrency (planned)** — Routines, channels, and parallel blocks as first-class language constructs with determinism controls.
-- **AI-native vision (post-1.0)** — Models, prompts, and generation provenance are designed as language concepts. The focus is shipping a solid foundation first; AI constructs ship after the core is stable. See _What's Coming_ below.
-- **Interoperable by design** — Sailfin integrates safely with native binaries and sandboxed adapters while maintaining strong typing and effect boundaries.
+- **Effect types** — Capabilities like `io`, `net`, `clock`, and `model` are explicit in function signatures. You can look at a function and know exactly what it does — no hidden side effects. The compiler enforces these at compile time.
+- **Capability-based security** — Capsules declare what effects they need in their manifest. Undeclared capabilities are compile-time errors. Audit your entire dependency tree's capability surface before deploying.
+- **Pragmatic ergonomics** — Conventional syntax (TypeScript/Rust-like), fast compilation, single-binary output, and good error messages with fix-it hints. A language that's easy for humans and LLMs alike.
+- **Structured concurrency (planned)** — Routines, channels, and parallel blocks as first-class language constructs with deterministic scoping.
+- **Self-hosted native compiler** — Sailfin compiles itself via LLVM. A real native toolchain, not an interpreter wrapper.
 
 ## What Works Today
 
@@ -17,13 +17,10 @@ The self-hosted native compiler (`build/native/sailfin`) supports:
 
 - Functions, structs, enums, interfaces, type aliases, and generics (parsed; inference is limited)
 - `let`/`let mut` variables, pattern matching (`match`), `if`/`else`, `for`, `while`, `try`/`catch`
-- Effect annotations (`![io, net, model, ...]`) — the effect checker enforces `io`, `net`, and `model` (for `prompt` blocks)
+- Effect annotations (`![io, net, model, clock]`) — the effect checker enforces capabilities at compile time
 - String interpolation (`{{ expression }}`), decorators, `async fn`
-- `model` and `prompt` blocks — parsed and emitted to `.sfn-asm` IR; **no runtime model execution yet**
-- `pipeline` declarations — parsed as plain functions; the `|>` operator is not yet implemented
-- `tool` declarations — parsed and recorded; dispatcher is not yet implemented
-- `Affine<T>`, `Linear<T>`, `PII<T>`, `Secret<T>` — parsed; ownership and taint enforcement are not yet active
-- The `sfn/log` capsule for structured logging
+- Standard library capsules: `fmt`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`, `time`, `cli`, `http` (partial)
+- Package registry at `registry.sailfin.dev` with dependency resolution (capability auditing planned)
 - `print(value)` / `print.err(value)` for stdout/stderr output
 - `sfn test` for running `*_test.sfn` files
 
@@ -55,37 +52,25 @@ test "greet produces correct output" {
 
 Sailfin is working toward a 1.0 release with a fully self-hosted toolchain — no Python build scripts, no C runtime. Key upcoming milestones:
 
-- **Syntax reform** — colon type annotations (`:` instead of `->`), `${}` string interpolation, `int`/`float` numeric types, `Result<T, E>` + `?` error handling
-- **Compiler stabilization** — eliminating the Python post-processing fixup script; `build.sh` becomes the sole build path
+- **Foundation types** — `int`/`float` numeric types, `Result<T, E>` + `?` error handling, `${}` string interpolation
+- **Effect system hardening** — hierarchical effects (`io.fs`, `net.http`), effect polymorphism for generics, transitive call-graph enforcement, `--fix` auto-inserter for missing annotations
+- **Structured concurrency** — `await`, `routine { }` blocks, `channel()`, and `spawn` as first-class constructs
+- **Capability auditing** — `sfn audit` for dependency tree capability analysis; capsule-level effect enforcement
 - **Sailfin-native runtime** — replacing the current C runtime; a hard prerequisite for 1.0
-- **Concurrency primitives** — `await`, `routine { }` blocks, and `channel()` as first-class constructs
-- **Ownership enforcement** — move semantics, borrow checking, use-after-move errors (if ready for 1.0; otherwise deferred to avoid shipping unenforced guarantees)
+- **Developer tooling** — `sfn fmt`, `sfn check`, `sfn vet`
 
-After 1.0, the focus shifts to making AI constructs fully functional:
+After 1.0, the focus shifts to ecosystem growth:
 
-```sfn
-// Future: model execution, typed prompt blocks, generation cards, and provenance metadata
-model Summarizer : Model<Text, Summary> {
-  engine    = "gpt-neo@3.1"
-  schema    = Summary
-  max_tok   = 2000
-  // cost_cap = 0.05  // USD — currency literal syntax planned
-}
-
-fn summarize_doc(doc: Text) -> Summary ![io, model] {
-  prompt system { "You are a careful technical summarizer." }
-  prompt user   { "Summarize:\n{{ doc }}" }
-  let generation = Summarizer.call()
-  print(generation.card)    // provenance metadata
-  return generation.output  // typed Summary
-}
-```
+- **AI integration** — `sfn/ai` capsule for model invocation, prompt templating, and generation provenance (using the `![model]` effect for capability gating)
+- **Taint types** — `Secret<T>` and `PII<T>` with compiler-enforced data flow tracking, integrated with the effect system
+- **Ownership enforcement** — move semantics and borrow checking (deferred from 1.0 to avoid shipping unenforced guarantees)
+- **WebAssembly target** — WASM emission for portable deployment
 
 See `docs/status.md` for a detailed feature matrix and the [roadmap](https://sailfin.dev/roadmap) for sequencing.
 
 ## Current Status
 
-Sailfin is under active development targeting a 1.0 release. The recommended compiler is `v0.1.1` (pinned in CI); releases past that point are built with the Python stabilization script and are pre-stabilization artifacts.
+Sailfin is under active development targeting a 1.0 release. The self-hosted compiler compiles itself via LLVM and passes a growing test suite.
 
 - `docs/status.md` — source of truth for what the compiler enforces versus what is still planned
 - `docs/spec.md` — language reference with design-preview callouts
@@ -133,10 +118,10 @@ Notes:
 
 ## Architecture Overview
 
-Sailfin targets a capsule-based architecture with fleets coordinating compiler,
-runtime, and tooling capsules. The current repository hosts the native compiler
-(under `build/native`) alongside the Sailfin runtime (`runtime/`). Future capsule
-manifests and fleet layout are tracked on the [roadmap](https://sailfin.dev/roadmap).
+The repository hosts the self-hosted native compiler (under `build/native`)
+alongside the Sailfin runtime (`runtime/`). Packages are distributed as capsules
+with `capsule.toml` manifests that declare capability requirements. The
+[roadmap](https://sailfin.dev/roadmap) tracks the path to 1.0.
 
 ## Local Development
 
