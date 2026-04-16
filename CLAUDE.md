@@ -414,6 +414,41 @@ When adding features or making design choices, apply these principles:
   problems that will matter in 20 years. AI API wrappers change every 6 months.
   Language syntax is permanent; library APIs can iterate.
 
+## LLM & Agent Adoption Strategy
+
+Sailfin's long-term positioning is as a **verification layer for AI-generated code** — the
+language where capability surface and side effects are provable at compile time. This
+matters because as AI agents write more code, the bottleneck shifts from generation to
+verification.
+
+### Adoption Levers (in priority order)
+
+1. **Effect enforcement as compilation gate** — the #1 prerequisite. `validate_effects()`
+   exists in `effect_checker.sfn` but is NOT called from the compilation pipeline in
+   `main.sfn`. Until this ships, "compiler-enforced effects" is aspirational. This is the
+   top item in the Effect System Hardening track on the roadmap.
+
+2. **llms.txt** — a canonical single-file language reference at `llms.txt` (also served
+   at `sailfin.dev/llms.txt`) designed for LLM context windows. Update it with every
+   release. It covers syntax, effects, stdlib, what works, and what doesn't.
+
+3. **Structured diagnostics (`--json`)** — machine-readable compiler output that agents
+   can parse and act on. Unblocks the MCP server and any agentic compile-check-fix loop.
+   Not yet implemented.
+
+4. **MCP server** — wraps the compiler so any agent can compile, type-check, and iterate
+   Sailfin code as a tool call. Depends on `--json` diagnostics. Not yet implemented.
+
+5. **Training data presence** — Rosetta Code ports, algorithm examples, blog posts, and
+   technical content in scraper-visible locations. The more `.sfn` code exists publicly,
+   the more future models will natively understand the language.
+
+### What This Does NOT Change
+
+- The 1.0 critical path (runtime enablement, language semantics) is not deprioritized
+- sfn/ai remains post-1.0 — effects are the story, not AI libraries
+- No overclaiming — features are enforced or explicitly deferred, never "parsed but marketed"
+
 ## Important Constraints
 
 ### Bootstrap Limitations

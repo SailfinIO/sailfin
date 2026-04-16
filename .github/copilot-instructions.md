@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection. Its type system unifies deterministic computation, effect isolation, and capability-aware security to make large-scale model-driven software reliable by default.
+Sailfin is a compiled systems language with effect type annotations for capabilities. Every function declares what it can do (IO, network, clock, etc.); effect annotations are supported today, while full enforcement (compilation gating) is the top priority on the roadmap. The language targets LLVM, produces native single-binary executables, and is designed so that code capabilities are verifiable at compile time.
 
 **Primary toolchain:** The self-hosted native compiler (`compiler/src/`) targeting LLVM via a `.sfn-asm` intermediate representation. Release artifacts install as `sailfin`/`sfn`.
 
@@ -12,10 +12,15 @@ The runtime currently ships as C under `runtime/native/` and is planned to move 
 
 Key language features:
 
-- Effect types (`![io, net, model, gpu, rand, clock]`)
-- Ownership-aware linear/affine types
-- Capability-based security
-- First-class AI constructs (models, prompts, pipelines, tools)
+- Effect types (`![io, net, model, gpu, rand, clock]`) — the core differentiator
+- Capability-based security via capsule manifests
+- Self-hosted compiler targeting LLVM
+- Pragmatic TypeScript/Rust-like syntax
+
+Deferred features (parsed but not enforced, post-1.0):
+- Ownership types (`Affine<T>`, `Linear<T>`)
+- Taint tracking (`PII<T>`, `Secret<T>`)
+- AI constructs (`model`/`prompt`/`tool`/`pipeline`) — migrating to `sfn/ai` library capsule
 
 ## Repository Layout
 
@@ -166,10 +171,8 @@ Update documents in this order when behaviour changes:
 
 | Term | Meaning |
 |---|---|
-| Capsule | A Sailfin package with `sail.toml` manifest |
-| Fleet | Multi-capsule workspace with shared `fleet.toml` policies |
-| Effect | Capability annotation (`![io]`, `![net]`, etc.) |
-| Generation card | Provenance metadata for model calls (input hashes, cost, latency, seed) |
+| Capsule | A Sailfin package with `capsule.toml` manifest |
+| Workspace | Multi-capsule project with shared `workspace.toml` policies |
+| Effect | Capability annotation (`![io]`, `![net]`, etc.) — the language's core differentiator |
 | Native IR | `.sfn-asm` textual intermediate representation |
 | Prelude | Core runtime library (`runtime/prelude.sfn`) |
-| Stage0/1/2 | Bootstrap (Python) / Self-hosted (Sailfin→Python) / Native (Sailfin→LLVM) |

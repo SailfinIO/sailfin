@@ -12,11 +12,14 @@ permissions:
 
 on:
   pull_request:
-    paths-ignore:
-      - 'site/**'
-      - CHANGELOG.md
-      - 'docs/**'
-      - '*.md'
+    paths:
+      - 'compiler/**'
+      - 'runtime/**'
+      - 'capsules/**'
+      - 'scripts/**'
+      - 'Makefile'
+      - '.github/workflows/ci.yml'
+      - '.github/actions/**'
   workflow_dispatch:
     inputs: {}
 

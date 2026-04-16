@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 12, 2026
+Updated: April 16, 2026
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -18,8 +18,14 @@ feature availability.
 
 - The self-hosted native compiler in `compiler/src/` is the primary toolchain;
   `make compile` produces `build/native/sailfin`.
-- Pipeline: Lexer → Parser → Type Checker → Effect Checker → Native Emitter
+- Pipeline: Lexer → Parser → Type Checker → Native Emitter
   (`.sfn-asm` IR) → LLVM Lowering.
+- **Effect checker status**: `validate_effects()` exists in `effect_checker.sfn`
+  but is **not invoked by the compiler or CLI during normal builds** — users will
+  not see effect diagnostics during compilation, and effect violations do not
+  block compilation. Wiring effect enforcement into the build is the top priority
+  in the Effect System Hardening track on the
+  [roadmap](https://sailfin.dev/roadmap).
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
   and attach release assets.
@@ -44,11 +50,12 @@ feature availability.
 | String interpolation (`{{ }}`) | Shipped | |
 | Pattern matching exhaustiveness | Partial | Runtime backstop via `match_exhaustive_failed` |
 | Effect annotations (`![...]`) | Shipped | Parsing and declaration |
-| Effect enforcement — `io` | Shipped | `print.*`, `console.*`, `fs.*`, `@logExecution` |
-| Effect enforcement — `net` | Shipped | `http.*`, `websocket.*`, `serve` |
-| Effect enforcement — `model` | Shipped | Required for any `prompt` block |
-| Effect enforcement — `clock` | Partial | `sleep`/`runtime.sleep` checked; hierarchical names not enforced |
-| Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; not validated |
+| Effect enforcement — `io` | Not enforced | Checker logic exists for `print.*`, `console.*`, `fs.*`, `@logExecution` but is not run during compilation |
+| Effect enforcement — `net` | Not enforced | Checker logic exists for `http.*`, `websocket.*`, `serve` but is not run during compilation |
+| Effect enforcement — `model` | Not enforced | Checker logic exists for `prompt` blocks but is not run during compilation |
+| Effect enforcement — `clock` | Not enforced | Checker logic exists for `sleep`/`runtime.sleep` but is not run during compilation |
+| Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; no checker logic |
+| Effect enforcement as compilation gate | **Not yet** | `validate_effects()` exists but is not invoked by the compiler; top priority |
 | Generic type inference | Partial | Type params captured; inference coverage is limited |
 | Interface conformance validation | Partial | Basic checks; variance not yet enforced |
 | `Affine<T>` / `Linear<T>` | Parsed only | Ownership wrappers accepted; move/consume rules not enforced |
@@ -255,7 +262,9 @@ parsed and emit metadata to `.sfn-asm`, but perform no runtime execution. They
 will be migrated to the `sfn/ai` capsule as library types and functions.
 
 **What stays in the language**: The `![model]` effect annotation, which gates
-AI operations through the capability system. This is enforced today.
+AI operations through the capability system. The effect checker detects
+violations, but enforcement does not yet block compilation (see Effect
+System Hardening on the [roadmap](https://sailfin.dev/roadmap)).
 
 Design documents are preserved in `docs/spec.md` §3.6–§3.9 and
 `docs/proposals/model-engines-and-training.md`.
