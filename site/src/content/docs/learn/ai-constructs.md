@@ -1,13 +1,13 @@
 ---
-title: AI Constructs
-description: Models, prompts, pipelines, and tools — Sailfin's first-class AI syntax, what works today, and what's planned.
+title: AI Integration
+description: How Sailfin gates AI operations through the effect system, and the planned sfn/ai library capsule.
 section: learn
 order: 8
 ---
 
-Sailfin is AI-native: the language has dedicated first-class syntax for declaring models, composing prompts, defining pipelines, and exposing tools. These constructs are part of the language grammar — not a library bolted on afterward.
+Sailfin gates AI operations through the `![model]` effect — the same capability system used for IO, networking, and other side effects. AI-specific constructs (model invocation, prompt templating, generation provenance) are being delivered as the `sfn/ai` library capsule rather than language-level syntax. This keeps the language grammar stable while letting AI integration iterate independently of compiler releases.
 
-> **Current status:** The parser and `.sfn-asm` IR support `model`, `prompt`, `pipeline`, and `tool` constructs today. The `model` effect is enforced at compile time. Model execution, generation cards, typed output schemas, and evaluators are planned for the post-1.0 AI milestone, which builds on the stable self-hosted toolchain. Calling `.call()` on a model currently parses as a method call but performs no inference.
+> **Current status:** The compiler parses `model`, `prompt`, `pipeline`, and `tool` blocks and emits them to `.sfn-asm` IR. The `![model]` effect is enforced at compile time. However, **no runtime execution exists** — these constructs emit metadata only. They are being migrated to the `sfn/ai` capsule for post-1.0 delivery. The syntax documented below reflects the current parser; the library API may differ.
 
 ---
 
