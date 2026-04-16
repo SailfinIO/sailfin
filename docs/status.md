@@ -78,7 +78,7 @@ feature availability.
 | `scope.with_timeout(...)` | **Not implemented** | |
 | `unsafe` / `extern` | Parsed only | Syntax accepted; enforcement not active |
 | Policy decorators (`@policy(...)`) | Parsed only | No compiler or runtime effect |
-| `sfn fmt` (formatter) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn fmt` (formatter) | Partial (Steps 1-2 of 5) | CLI wiring, token-stream formatting with indentation/spacing; see `docs/proposals/fmt-architecture.md` |
 | `sfn check` (fast analysis) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |

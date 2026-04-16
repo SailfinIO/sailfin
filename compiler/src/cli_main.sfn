@@ -19,6 +19,7 @@ import {
     handle_init_command,
     handle_login_command,
     handle_guillermo_command,
+    handle_fmt_command,
     inline_imports_for_source,
 } from "./cli_commands";
 import { resolve_compiler_version } from "./version";
@@ -32,6 +33,7 @@ fn _usage() -> string {
     "  sfn run <file.sfn>\n" +
     "  sfn run <exe>\n" +
     "  sfn test [path]\n" +
+    "  sfn fmt [--check] [--write] [path...]\n" +
     "  sfn init\n" +
     "  sfn publish [path]\n" +
     "  sfn add [--dev] <capsule>\n" +
@@ -397,6 +399,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     let is_publish = strings_equal(cmd, "publish");
     let is_add = strings_equal(cmd, "add");
     let is_login = strings_equal(cmd, "login");
+    let is_fmt = strings_equal(cmd, "fmt");
     if trace_argv {
         if is_emit {
             print.err("cli: cmd_is_emit=true");
@@ -637,6 +640,10 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
 
     if is_login {
         return handle_login_command(args);
+    }
+
+    if is_fmt {
+        return handle_fmt_command(args);
     }
 
     if strings_equal(cmd, "guillermo") {
