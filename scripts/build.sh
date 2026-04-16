@@ -360,9 +360,43 @@ log "seed: $SEED ($("$SEED" version 2>/dev/null || "$SEED" --version 2>/dev/null
 # ---------------------------------------------------------------------------
 COMPILER_SRC="$REPO_ROOT/compiler/src"
 RUNTIME_SRC="$REPO_ROOT/runtime"
+CAPSULES_DIR="$REPO_ROOT/capsules"
+COMPILER_MANIFEST="$REPO_ROOT/compiler/capsule.toml"
 
 [[ -d "$COMPILER_SRC" ]] || die "missing compiler sources: $COMPILER_SRC"
 [[ -d "$RUNTIME_SRC" ]] || die "missing runtime sources: $RUNTIME_SRC"
+
+# Parse the [dependencies] table in compiler/capsule.toml and echo one
+# "scope/name" per line. Accepts bare keys (<name>, normalized to
+# "sfn/<name>") and quoted scoped keys ("scope/name"). Comments and blank
+# lines are ignored. The parser stops when another [section] header is
+# encountered.
+collect_compiler_capsule_deps() {
+    local manifest="$1"
+    [[ -f "$manifest" ]] || return 0
+    awk '
+        /^[[:space:]]*\[dependencies\][[:space:]]*$/ { in_deps = 1; next }
+        /^[[:space:]]*\[[^]]+\][[:space:]]*$/ { in_deps = 0; next }
+        !in_deps { next }
+        /^[[:space:]]*#/ { next }
+        /^[[:space:]]*$/ { next }
+        {
+            line = $0
+            sub(/#.*$/, "", line)
+            eq = index(line, "=")
+            if (eq == 0) next
+            key = substr(line, 1, eq - 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+            gsub(/^"|"$/, "", key)
+            if (key == "") next
+            if (index(key, "/") == 0) {
+                print "sfn/" key
+            } else {
+                print key
+            }
+        }
+    ' "$manifest"
+}
 
 # Collect all .sfn files in deterministic order
 SOURCES=()
@@ -373,8 +407,38 @@ while IFS= read -r -d '' f; do
     SOURCES+=("$f")
 done < <(find "$RUNTIME_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
 
+# Pull in declared capsule dependencies. For now we resolve them against
+# the in-tree `capsules/<scope>/<name>/src/` layout.
+#
+# Resolution policy:
+#   - sfn/* deps MUST have an in-tree source — fail fast if missing, since
+#     that indicates a stale allowlist or a typo in compiler/capsule.toml.
+#   - Third-party (non-sfn/) deps that only live in the user cache
+#     (~/.sfn/cache/capsules/...) are warned-and-skipped for now. Wire
+#     them up here once the compiler actually takes a third-party dep.
+CAPSULE_DEP_COUNT=0
+while IFS= read -r dep; do
+    [[ -n "$dep" ]] || continue
+    cap_dir="$CAPSULES_DIR/$dep/src"
+    if [[ ! -d "$cap_dir" ]]; then
+        if [[ "$dep" == sfn/* ]]; then
+            die "capsule dep '$dep' declared in compiler/capsule.toml but no in-tree source at $cap_dir"
+        fi
+        warn "capsule dep '$dep' has no in-tree source at $cap_dir; skipping (user-cache resolution not yet wired)"
+        continue
+    fi
+    while IFS= read -r -d '' f; do
+        SOURCES+=("$f")
+        CAPSULE_DEP_COUNT=$((CAPSULE_DEP_COUNT + 1))
+    done < <(find "$cap_dir" -name '*.sfn' -print0 | LC_ALL=C sort -z)
+done < <(collect_compiler_capsule_deps "$COMPILER_MANIFEST")
+
 [[ ${#SOURCES[@]} -gt 0 ]] || die "no .sfn sources found"
-log "found ${#SOURCES[@]} source modules"
+if [[ $CAPSULE_DEP_COUNT -gt 0 ]]; then
+    log "found ${#SOURCES[@]} source modules (includes $CAPSULE_DEP_COUNT from capsule deps)"
+else
+    log "found ${#SOURCES[@]} source modules"
+fi
 
 # ---------------------------------------------------------------------------
 # Module naming helpers
@@ -402,6 +466,19 @@ module_name_from_path() {
         return
     fi
 
+    # Capsule sources: capsules/<scope>/<name>/src/<rel>.sfn → capsule__<scope>__<name>__<rel>
+    # The regex handles arbitrary depth under src/ (e.g. src/foo/bar.sfn).
+    if [[ "$src" == "$CAPSULES_DIR"/* ]]; then
+        rel="${src#"$CAPSULES_DIR/"}"
+        if [[ "$rel" =~ ^[^/]+/[^/]+/src/ ]]; then
+            rel="${rel%.sfn}"
+            # strip the /src/ segment so it doesn't collide with compiler src/ paths
+            rel="${rel/\/src\//\/}"
+            echo "capsule__${rel//\//__}"
+            return
+        fi
+    fi
+
     # Fallback: basename
     local base
     base="$(basename "$src" .sfn)"
@@ -411,6 +488,7 @@ module_name_from_path() {
 # Converts a source path to an import-context slug
 # e.g. compiler/src/llvm/types.sfn → llvm/types
 #      runtime/prelude.sfn → runtime/prelude
+#      capsules/sfn/cli/src/mod.sfn → sfn/cli/mod
 slug_from_path() {
     local src="$1"
     local rel
@@ -425,6 +503,20 @@ slug_from_path() {
         rel="${src#"$RUNTIME_SRC/"}"
         echo "runtime/${rel%.sfn}"
         return
+    fi
+
+    # Capsule sources use <scope>/<name>/<rel> as the slug so that
+    # `import { ... } from "<scope>/<name>"` resolves via the standard
+    # "<slug>/mod" fallback in the compiler's import resolver. The regex
+    # handles arbitrary depth under src/ (e.g. src/foo/bar.sfn).
+    if [[ "$src" == "$CAPSULES_DIR"/* ]]; then
+        rel="${src#"$CAPSULES_DIR/"}"
+        if [[ "$rel" =~ ^[^/]+/[^/]+/src/ ]]; then
+            rel="${rel%.sfn}"
+            rel="${rel/\/src\//\/}"
+            echo "$rel"
+            return
+        fi
     fi
 
     basename "$src" .sfn
