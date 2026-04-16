@@ -46,7 +46,7 @@ test "greet produces correct output" {
 }
 ```
 
-> **Note:** The language is undergoing a [syntax reform](docs/roadmap.md) before
+> **Note:** The language is undergoing a [syntax reform](https://sailfin.dev/roadmap) before
 > 1.0. The `:` type annotation style shown above is the preferred form (the
 > parser also accepts `->` in type positions, but this is being deprecated).
 > String interpolation (`{{ }}`) will change to `${ }` in a future release.
@@ -81,7 +81,7 @@ fn summarize_doc(doc: Text) -> Summary ![io, model] {
 }
 ```
 
-See `docs/status.md` for a detailed feature matrix and `docs/roadmap.md` for sequencing.
+See `docs/status.md` for a detailed feature matrix and the [roadmap](https://sailfin.dev/roadmap) for sequencing.
 
 ## Current Status
 
@@ -89,7 +89,7 @@ Sailfin is under active development targeting a 1.0 release. The recommended com
 
 - `docs/status.md` — source of truth for what the compiler enforces versus what is still planned
 - `docs/spec.md` — language reference with design-preview callouts
-- `docs/roadmap.md` — milestones and sequencing toward 1.0
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — milestones and sequencing toward 1.0
 - `docs/enbf.md` — grammar sketch aligned to the current parser
 
 ## Installing the Compiler
@@ -136,7 +136,7 @@ Notes:
 Sailfin targets a capsule-based architecture with fleets coordinating compiler,
 runtime, and tooling capsules. The current repository hosts the native compiler
 (under `build/native`) alongside the Sailfin runtime (`runtime/`). Future capsule
-manifests and fleet layout are tracked in `docs/roadmap.md`.
+manifests and fleet layout are tracked on the [roadmap](https://sailfin.dev/roadmap).
 
 ## Local Development
 

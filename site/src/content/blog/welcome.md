@@ -28,7 +28,7 @@ Sailfin is a systems-friendly programming language designed for precision, safet
 
 Sailfin is pre-1.0, with active development toward a pure Sailfin toolchain. The self-hosted compiler can compile itself, and we're working on migrating the runtime from C to Sailfin.
 
-Check out the [roadmap](/docs/contributing/roadmap) to see what's planned.
+Check out the [roadmap](/roadmap) to see what's planned.
 
 ## Get Involved
 

@@ -1,7 +1,7 @@
 # Colon Type Annotations Migration Plan
 
 **Status:** Phases 1–6 implemented (migration complete).
-**Roadmap ref:** `docs/roadmap.md` Section 0 — Syntax reform (breaking, do first)
+**Roadmap ref:** [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — Syntax reform (pre-1.0)
 **Date:** 2026-04-15
 
 ## Summary

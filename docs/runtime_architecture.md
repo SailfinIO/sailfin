@@ -1498,7 +1498,7 @@ Sailfin toolchain source is `.sfn`.
   confirms its layouts).
 - `docs/build-performance.md` — perf analysis; M0.5 directly addresses its
   Phase 0.
-- `docs/roadmap.md` — 1.0 priorities; §0 is M0, §3 is M2-M5.
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — 1.0 priorities (syntax reform, runtime rewrite).
 - `compiler/src/llvm/runtime_helpers.sfn` — runtime helper registry (updated
   at M1).
 - `compiler/src/llvm/types.sfn` — compiler-internal types (extended at M1 for

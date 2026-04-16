@@ -171,12 +171,12 @@ Agents add value for open-ended investigation, cross-cutting analysis, and tasks
 
 ## Task Tracking
 
-The roadmap (`docs/roadmap.md`) is strategic — it lists epics, not session-sized work. Actual day-to-day work lives in **GitHub Issues**, scoped tightly enough that a single Claude session can take an issue from open to merged PR.
+The roadmap (`site/src/pages/roadmap.astro`, published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap)) is strategic — it lists epics, not session-sized work. Actual day-to-day work lives in **GitHub Issues**, scoped tightly enough that a single Claude session can take an issue from open to merged PR.
 
 ### The flow
 
 ```
-docs/roadmap.md (epics)
+sailfin.dev/roadmap (epics)
        │
        │  /groom <epic>           — compiler-architect breaks epic into XS/S/M issues
        ▼
@@ -292,7 +292,7 @@ When uncertain about feature status or semantics:
 
 1. **`docs/status.md`** — What ships today (Stage0/1/2 breakdown)
 2. **`docs/spec.md`** — Language reference (Part A: bootstrap, Part B: planned)
-3. **`docs/roadmap.md`** — Active workstreams and sequencing
+3. **[sailfin.dev/roadmap](https://sailfin.dev/roadmap)** — Active workstreams and sequencing (source: `site/src/pages/roadmap.astro`)
 4. **`docs/runtime_audit.md`** — Python→Sailfin migration tracker
 
 **Examples are bootstrap-only** unless marked with future syntax comments (e.g., `|>` pipeline operator, currency literals like `$0.05`).
@@ -342,7 +342,7 @@ If `make check` fails, it means the compiler has a bug. Fix the compiler.
 
 The following breaking syntax changes are planned before 1.0. All new code
 written by agents or humans should prefer the new forms where the parser already
-accepts them. See `docs/roadmap.md` §0 for the full plan and rationale.
+accepts them. See `docs/proposals/colon-type-annotations.md` and the roadmap at [sailfin.dev/roadmap](https://sailfin.dev/roadmap) for the full plan and rationale.
 
 1. **Type annotations: `:` not `->`** — Use `x: number` not `x -> number` for
    parameters, variables, and fields. Return types keep `->`. The parser already

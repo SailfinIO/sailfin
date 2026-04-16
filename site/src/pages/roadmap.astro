@@ -1,0 +1,590 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+
+type Status = "done" | "in-progress" | "planned";
+
+interface RoadmapItem {
+  label: string;
+  status: Status;
+}
+
+interface RoadmapCategory {
+  title: string;
+  description?: string;
+  items: RoadmapItem[];
+}
+
+const v1Categories: RoadmapCategory[] = [
+  {
+    title: "Compiler Stabilization",
+    description: "Build pipeline and LLVM backend correctness.",
+    items: [
+      { label: "Eliminate the Python fixup script", status: "done" },
+      { label: "Make build.sh the sole clean build path with no post-processing", status: "done" },
+      { label: "Pass make check with no fallbacks", status: "planned" },
+      { label: "Stabilize control-flow LLVM lowering (loop/if/break headers)", status: "planned" },
+    ],
+  },
+  {
+    title: "Language Feature Completeness",
+    description: "Core language constructs required for a stable 1.0.",
+    items: [
+      { label: "await expression parsing and lowering", status: "planned" },
+      { label: "routine { } block parsing and lowering", status: "planned" },
+      { label: "channel() as the core concurrency primitive", status: "planned" },
+      { label: "spawn expression", status: "planned" },
+      { label: "Complete generic type inference", status: "planned" },
+      { label: "Interface conformance validation with variance checks", status: "planned" },
+      { label: "Affine<T> / Linear<T> move and consume enforcement", status: "planned" },
+      { label: "Richer diagnostics — multi-span, severity levels, fix-it hints", status: "planned" },
+      { label: "--fix workflow for automatically inserting missing effect annotations", status: "planned" },
+      { label: "gpu and rand effect enforcement", status: "planned" },
+      { label: "Hierarchical effect enforcement (io.fs.read, net.http, etc.)", status: "planned" },
+    ],
+  },
+  {
+    title: "Sailfin-Native Runtime",
+    description: "The C runtime under runtime/native/ must be fully replaced before 1.0.",
+    items: [
+      { label: "Execute the runtime migration plan", status: "planned" },
+      { label: "Finalize the Sailfin-native ABI spec", status: "planned" },
+      { label: "Port core runtime helpers: strings, arrays, exceptions, type metadata", status: "planned" },
+      { label: "Remove the C runtime once parity and performance gates are met", status: "planned" },
+      { label: "Ship Sailfin-native filesystem, HTTP, and clock adapters", status: "planned" },
+    ],
+  },
+  {
+    title: "Tooling & Developer Workflow",
+    description: "CLI and build toolchain modernization.",
+    items: [
+      { label: "Replace the sfn shell wrapper with a Sailfin-native CLI binary", status: "planned" },
+      { label: "Remove Python tooling and scripts from the release pipeline", status: "planned" },
+      { label: "Remove Python runtime shims", status: "done" },
+    ],
+  },
+  {
+    title: "Release Pipeline Hardening",
+    description: "Supply-chain security and reproducible builds.",
+    items: [
+      { label: "Signed checksums and provenance metadata with release artifacts", status: "planned" },
+      { label: "Installer CI that validates install.sh against staging artifacts", status: "planned" },
+      { label: "Only self-hosted compiler artifacts in build and release workflows", status: "planned" },
+    ],
+  },
+  {
+    title: "Documentation",
+    description: "Docs, spec, and examples aligned with compiler reality.",
+    items: [
+      { label: "Align README, status, roadmap, and spec with compiler reality", status: "done" },
+      { label: "Expand site docs to production-quality coverage", status: "in-progress" },
+      { label: "Remove legacy compiler-stage references from docs and examples", status: "planned" },
+    ],
+  },
+];
+
+const postV1Ai: RoadmapCategory = {
+  title: "AI / Model Execution",
+  description: "AI-native features ship after 1.0 as the first major milestone once a stable self-hosted toolchain is in place.",
+  items: [
+    { label: "Model runtime — Model<I,O>.call() execution with provider adapters", status: "planned" },
+    { label: "Generation cards — signed provenance metadata for every model call", status: "planned" },
+    { label: "Prompt dispatch pipeline (system → user → assistant → tool)", status: "planned" },
+    { label: "Tool dispatcher with capability and taint enforcement", status: "planned" },
+    { label: "Typed prompt channels (prompt user<SummaryRequest> { })", status: "planned" },
+    { label: "Evaluators (Faithfulness, LatencyBudget, etc.)", status: "planned" },
+    { label: "PII<T> / Secret<T> runtime taint tracking and egress guards", status: "planned" },
+    { label: "Model evaluators, replay, and golden tests", status: "planned" },
+    { label: "Sailfin-native model adapters (HTTP / gRPC for model providers)", status: "planned" },
+  ],
+};
+
+const postV1Platform: RoadmapCategory = {
+  title: "Platform & Ecosystem",
+  description: "Runtime, tooling, and ecosystem infrastructure for post-1.0 growth.",
+  items: [
+    { label: "Async runtime — Sailfin-native event loop, task scheduler, and channels", status: "planned" },
+    { label: "Runtime diagnostics — structured tracing and allocation telemetry", status: "planned" },
+    { label: "Package registry workflow — sfn init, sfn add, sfn publish", status: "planned" },
+    { label: "Native test framework — golden, adversarial, and replay test types", status: "planned" },
+    { label: "Tensor / GPU effects — Vector<N>, Tensor<Shape, DType>, GPU batching", status: "planned" },
+    { label: "|> pipeline operator with async and lazy semantics", status: "planned" },
+  ],
+};
+
+const exploration: RoadmapItem[] = [
+  { label: "WebAssembly emission", status: "planned" },
+  { label: "unsafe capability enforcement", status: "planned" },
+  { label: "Currency literals ($0.05) and time literals (1s, 150ms)", status: "planned" },
+  { label: "Notebook, LSP, and interactive tooling with cost and latency overlays", status: "planned" },
+  { label: "Training workflow integration", status: "planned" },
+];
+
+// Helpers
+function countByStatus(items: RoadmapItem[]) {
+  const done = items.filter(i => i.status === "done").length;
+  const inProgress = items.filter(i => i.status === "in-progress").length;
+  const planned = items.filter(i => i.status === "planned").length;
+  return { done, inProgress, planned, total: items.length };
+}
+
+function percent(done: number, total: number) {
+  return total === 0 ? 0 : Math.round((done / total) * 100);
+}
+
+// Aggregate 1.0 stats
+const allV1Items = v1Categories.flatMap(c => c.items);
+const v1Stats = countByStatus(allV1Items);
+const v1Percent = percent(v1Stats.done, v1Stats.total);
+
+const statusLabel = (s: Status) =>
+  s === "done" ? "Done" : s === "in-progress" ? "In progress" : "Planned";
+---
+
+<BaseLayout title="Roadmap" description="Sailfin's development roadmap toward 1.0 and beyond.">
+  <div class="page">
+    <div class="container">
+
+      <!-- Header -->
+      <header class="roadmap-header">
+        <h1>Roadmap</h1>
+        <p class="lead">
+          Sailfin's path from alpha to a stable 1.0 release and beyond.
+        </p>
+        <p class="meta">
+          Last updated April 2026
+        </p>
+      </header>
+
+      <!-- Legend -->
+      <div class="legend">
+        <span class="legend-item"><span class="status-dot done" aria-hidden="true"></span> Done</span>
+        <span class="legend-item"><span class="status-dot in-progress" aria-hidden="true"></span> In progress</span>
+        <span class="legend-item"><span class="status-dot planned" aria-hidden="true"></span> Planned</span>
+      </div>
+
+      <!-- 1.0 Overview -->
+      <section class="v1-overview">
+        <div class="v1-overview-header">
+          <h2>Release 1.0</h2>
+          <span class="v1-stat">{v1Stats.done} of {v1Stats.total} milestones complete</span>
+        </div>
+        <div class="progress-bar-track" role="progressbar" aria-valuenow={v1Stats.done} aria-valuemin={0} aria-valuemax={v1Stats.total} aria-label={`Release 1.0 progress: ${v1Stats.done} of ${v1Stats.total} milestones complete`}>
+          <div class="progress-bar-fill" style={`width: ${v1Percent}%`}></div>
+        </div>
+      </section>
+
+      <!-- 1.0 Categories -->
+      <div class="categories">
+        {v1Categories.map((cat) => {
+          const stats = countByStatus(cat.items);
+          const pct = percent(stats.done, stats.total);
+          return (
+            <section class="category-card">
+              <div class="category-header">
+                <div>
+                  <h3>{cat.title}</h3>
+                  {cat.description && <p class="category-desc">{cat.description}</p>}
+                </div>
+                <span class="category-count">{stats.done}/{stats.total}</span>
+              </div>
+              <div class="progress-bar-track small" role="progressbar" aria-valuenow={stats.done} aria-valuemin={0} aria-valuemax={stats.total} aria-label={`${cat.title} progress: ${stats.done} of ${stats.total} complete`}>
+                <div
+                  class:list={["progress-bar-fill", { empty: pct === 0 }]}
+                  style={`width: ${Math.max(pct, 0)}%`}
+                ></div>
+              </div>
+              <ul class="item-list">
+                {cat.items.map((item) => (
+                  <li class:list={["item", item.status]}>
+                    <span class={`status-dot ${item.status}`} aria-label={statusLabel(item.status)}></span>
+                    <span class="item-label">{item.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
+
+      <!-- Post-1.0 -->
+      <div class="post-v1">
+        <h2>Post-1.0</h2>
+        <p class="section-desc">These workstreams begin after a stable self-hosted toolchain ships.</p>
+
+        <div class="post-v1-grid">
+          {[postV1Ai, postV1Platform].map((cat) => (
+            <section class="category-card future">
+              <div class="category-header">
+                <div>
+                  <h3>{cat.title}</h3>
+                  {cat.description && <p class="category-desc">{cat.description}</p>}
+                </div>
+                <span class="category-count">{cat.items.length} items</span>
+              </div>
+              <ul class="item-list">
+                {cat.items.map((item) => (
+                  <li class:list={["item", item.status]}>
+                    <span class={`status-dot ${item.status}`} aria-label={statusLabel(item.status)}></span>
+                    <span class="item-label">{item.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      </div>
+
+      <!-- Exploration Backlog -->
+      <section class="exploration">
+        <h2>Exploration Backlog</h2>
+        <p class="section-desc">Under consideration with no committed milestone.</p>
+        <ul class="item-list exploration-list">
+          {exploration.map((item) => (
+            <li class:list={["item", item.status]}>
+              <span class={`status-dot ${item.status}`} aria-label={statusLabel(item.status)}></span>
+              <span class="item-label">{item.label}</span>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <!-- Contribute -->
+      <section class="contribute">
+        <h2>Contributing</h2>
+        <p>
+          Open an issue or start a discussion in a pull request. Tag it with the appropriate milestone
+          label so it can be triaged against the 1.0 scope. Major design changes that affect the language
+          or ABI should reference a written proposal in <code>docs/proposals/</code> before implementation begins.
+        </p>
+        <div class="contribute-actions">
+          <a href="https://github.com/SailfinIO/sailfin/issues" class="btn btn-primary">Open an Issue</a>
+          <a href="/docs/contributing/guide" class="btn btn-secondary">Contributor Guide</a>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</BaseLayout>
+
+<style>
+  .page {
+    padding: 3rem 0 5rem;
+  }
+
+  /* Header */
+  .roadmap-header {
+    margin-bottom: 2rem;
+  }
+
+  .roadmap-header h1 {
+    font-size: 2.5rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .lead {
+    font-size: 1.2rem;
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    max-width: 40rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .meta {
+    font-size: 0.85rem;
+    color: var(--color-text-tertiary);
+  }
+
+  .meta code {
+    font-size: 0.8rem;
+  }
+
+  /* Legend */
+  .legend {
+    display: flex;
+    gap: 1.5rem;
+    padding: 0.75rem 0;
+    margin-bottom: 2rem;
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    color: var(--color-text-secondary);
+  }
+
+  /* Status dots */
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .status-dot.done {
+    background: #16a34a;
+  }
+
+  .status-dot.in-progress {
+    background: var(--color-primary);
+  }
+
+  .status-dot.planned {
+    background: var(--gray-400);
+  }
+
+  /* 1.0 Overview */
+  .v1-overview {
+    margin-bottom: 2rem;
+  }
+
+  .v1-overview-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .v1-overview-header h2 {
+    font-size: 1.5rem;
+    margin: 0;
+  }
+
+  .v1-stat {
+    font-size: 0.875rem;
+    color: var(--color-text-secondary);
+    font-weight: 500;
+  }
+
+  /* Progress bars */
+  .progress-bar-track {
+    width: 100%;
+    height: 8px;
+    background: var(--gray-200);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .progress-bar-track.small {
+    height: 4px;
+    margin-bottom: 1rem;
+  }
+
+  .progress-bar-fill {
+    height: 100%;
+    background: var(--color-primary);
+    border-radius: 4px;
+    transition: width 0.4s ease;
+    min-width: 0;
+  }
+
+  .progress-bar-fill.empty {
+    width: 0 !important;
+  }
+
+  /* Category cards */
+  .categories {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.25rem;
+    margin-bottom: 3.5rem;
+  }
+
+  .category-card {
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    background: var(--color-bg);
+  }
+
+  .category-card.future {
+    background: var(--color-bg-alt);
+  }
+
+  .category-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 1rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .category-header h3 {
+    font-size: 1.05rem;
+    margin: 0;
+    color: var(--color-text);
+  }
+
+  .category-desc {
+    font-size: 0.825rem;
+    color: var(--color-text-tertiary);
+    line-height: 1.5;
+    margin-top: 0.25rem;
+  }
+
+  .category-count {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    background: var(--gray-100);
+    padding: 0.2rem 0.6rem;
+    border-radius: 10px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* Item lists */
+  .item-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.4rem 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    color: var(--color-text);
+  }
+
+  .item .status-dot {
+    margin-top: 0.35rem;
+  }
+
+  .item.done .item-label {
+    color: var(--color-text-secondary);
+  }
+
+  .item.planned .item-label {
+    color: var(--color-text-secondary);
+  }
+
+  /* Post-1.0 */
+  .post-v1 {
+    margin-bottom: 3.5rem;
+  }
+
+  .post-v1 > h2 {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .section-desc {
+    font-size: 0.925rem;
+    color: var(--color-text-secondary);
+    margin-bottom: 1.5rem;
+  }
+
+  .post-v1-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.25rem;
+  }
+
+  /* Exploration */
+  .exploration {
+    margin-bottom: 3.5rem;
+  }
+
+  .exploration > h2 {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+  }
+
+  .exploration-list {
+    max-width: 36rem;
+  }
+
+  /* Contribute */
+  .contribute {
+    border-top: 1px solid var(--color-border);
+    padding-top: 2.5rem;
+  }
+
+  .contribute h2 {
+    font-size: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .contribute p {
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+    max-width: 40rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .contribute-actions {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.6rem 1.25rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: 8px;
+    text-decoration: none;
+    transition: all 0.15s;
+  }
+
+  .btn:hover {
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background: var(--color-primary);
+    color: #fff;
+  }
+
+  .btn-primary:hover {
+    background: var(--color-primary-dark);
+  }
+
+  .btn-secondary {
+    background: var(--color-bg);
+    color: var(--color-text);
+    border: 1px solid var(--color-border);
+  }
+
+  .btn-secondary:hover {
+    background: var(--color-bg-alt);
+  }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .categories {
+      grid-template-columns: 1fr;
+    }
+
+    .post-v1-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .roadmap-header h1 {
+      font-size: 2rem;
+    }
+
+    .v1-overview-header {
+      flex-direction: column;
+    }
+
+    .contribute-actions {
+      flex-direction: column;
+    }
+
+    .btn {
+      text-align: center;
+      justify-content: center;
+    }
+  }
+</style>

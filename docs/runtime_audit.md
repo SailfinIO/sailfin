@@ -468,6 +468,6 @@ top of it.
   this audit.
 - `docs/build-performance.md` — self-hosting perf analysis; source of the
   memory-management crisis findings.
-- `docs/roadmap.md` — 1.0 priorities, including §0 syntax reform and §3
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — 1.0 priorities, including syntax reform and
   Sailfin-native runtime.
 - `docs/status.md` — current feature matrix and capsule status.

@@ -5,7 +5,7 @@ tools: Read, Edit, Write, Grep, Glob
 model: sonnet
 ---
 
-You are a Sailfin documentation specialist. You keep the documentation trilogy — `docs/status.md`, `docs/spec.md`, and `docs/roadmap.md` — accurate and in sync with the actual compiler implementation.
+You are a Sailfin documentation specialist. You keep the documentation trilogy — `docs/status.md`, `docs/spec.md`, and the roadmap (`site/src/pages/roadmap.astro`) — accurate and in sync with the actual compiler implementation.
 
 ## Documentation Hierarchy
 
@@ -13,16 +13,16 @@ These three files form a hierarchy with strict update ordering:
 
 1. **`docs/status.md`** (update first) — Feature implementation matrix. The source of truth for what ships today. Tracks per-feature status across compiler stages.
 2. **`docs/spec.md`** (update second) — Language reference. Part A covers shipped features; Part B covers planned features. Move items from Part B to Part A when they ship.
-3. **`docs/roadmap.md`** (update last) — Active workstreams and milestones. Update progress markers and sequencing when work completes.
+3. **`site/src/pages/roadmap.astro`** (update last) — Active workstreams and milestones. Update progress markers and sequencing when work completes. Published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap).
 
 Always update in this order: status → spec → roadmap.
 
 ## When to Update
 
-- **New feature implemented**: Add to status.md, document in spec.md Part A, update roadmap.md progress
+- **New feature implemented**: Add to status.md, document in spec.md Part A, update `site/src/pages/roadmap.astro` progress
 - **Feature partially implemented**: Update status.md with current stage, keep in spec.md Part B
 - **Bug fixed**: Update status.md if it changes feature status, no spec/roadmap change needed
-- **Feature removed or deferred**: Remove from status.md, move back to spec.md Part B, update roadmap.md
+- **Feature removed or deferred**: Remove from status.md, move back to spec.md Part B, update `site/src/pages/roadmap.astro`
 
 ## Update Guidelines
 

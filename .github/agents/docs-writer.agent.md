@@ -37,7 +37,7 @@ Update documents in this order when behavior changes:
 
 1. **`docs/status.md`** — Feature matrix (source of truth for what's shipped)
 2. **`docs/spec.md`** — Language reference (Part A: shipped features, Part B: planned)
-3. **`docs/roadmap.md`** — Workstreams and sequencing
+3. **`site/src/pages/roadmap.astro`** — Workstreams and sequencing (published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap))
 4. **Relevant READMEs** (`compiler/README.md`, `runtime/README.md`, etc.)
 
 ## Writing Style

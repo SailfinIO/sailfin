@@ -6,7 +6,7 @@ Take a high-level roadmap item and decompose it into session-sized GitHub issues
 
 The argument can be:
 - A roadmap section name (e.g., "syntax reform", "compiler stabilization")
-- A specific bullet from `docs/roadmap.md` (e.g., "Implement await expression parsing")
+- A specific bullet from the [roadmap](https://sailfin.dev/roadmap) (e.g., "Implement await expression parsing")
 - A document to mine for work items (e.g., `docs/build-performance.md`)
 - A free-form description of work that needs breaking down
 
@@ -15,7 +15,7 @@ The argument can be:
 ## Phase 1: UNDERSTAND THE EPIC
 
 Read the relevant context:
-- `docs/roadmap.md` — find the epic and its surrounding priorities
+- `site/src/pages/roadmap.astro` — find the epic and its surrounding priorities (published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap))
 - `docs/status.md` — current state of the affected feature(s)
 - `docs/spec.md` — what the language commits to
 - Any document referenced in the argument

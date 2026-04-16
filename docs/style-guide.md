@@ -102,7 +102,7 @@ import { parse_expression } from "./parser/mod";
 ## Documentation Alignment
 
 - Update `docs/status.md` first whenever behavior changes.
-- Follow up with `docs/spec.md` and `docs/roadmap.md` as needed.
+- Follow up with `docs/spec.md` and the [roadmap](https://sailfin.dev/roadmap) (`site/src/pages/roadmap.astro`) as needed.
 - Add or adjust proposal docs under `docs/proposals/` for future work.
 
 ## Sailfin Language Style
@@ -114,7 +114,7 @@ import { parse_expression } from "./parser/mod";
 
 ### Syntax Reform (Pre-1.0)
 
-The following syntax changes are active. See `docs/roadmap.md` §0 for rationale.
+The following syntax changes are active. See `docs/proposals/colon-type-annotations.md` and the [roadmap](https://sailfin.dev/roadmap) for rationale.
 
 - **Type annotations**: Use `:` (colon) for parameter, variable, and struct
   field types. Function return types use `->`. The parser still accepts `->`

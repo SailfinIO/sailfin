@@ -476,7 +476,7 @@ test "name" ![effects] {
 ## Part B — Design Preview
 
 The features below are specified and designed but **not yet implemented**. They
-are tracked as 1.0 or post-1.0 milestones in [`docs/roadmap.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/roadmap.md).
+are tracked as 1.0 or post-1.0 milestones on the [roadmap](/roadmap).
 
 ### Concurrency
 
