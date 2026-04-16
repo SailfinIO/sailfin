@@ -1,0 +1,43 @@
+// compiler/src/tools/fmt.sfn
+//
+// Canonical formatter for .sfn files. Operates on the token stream
+// (not the AST) to preserve comments. One style, no configuration.
+
+import { Token, TokenKind } from "../token";
+import { lex } from "../lexer";
+
+// ═══════════════════════════════════════════════════════════════════
+// Enriched token for formatting
+// ═══════════════════════════════════════════════════════════════════
+
+struct FmtToken {
+    token: Token;
+    leading_comments: Token[];
+    trailing_comment: Token[];
+    blank_lines_before: number;
+    role: string;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Formatting context (state carried through the emit phase)
+// ═══════════════════════════════════════════════════════════════════
+
+struct FmtContext {
+    indent: number;
+    line_pos: number;
+    last_emitted: string;
+    in_import: boolean;
+    in_effect_list: boolean;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Public entry point
+// ═══════════════════════════════════════════════════════════════════
+
+fn format_source(source: string) -> string {
+    // Step 1: identity pass — return source unchanged.
+    // Subsequent steps will lex, strip, classify, and re-emit.
+    return source;
+}
+
+export { format_source };
