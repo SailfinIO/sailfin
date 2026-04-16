@@ -4,6 +4,7 @@ version = "0.5.3-alpha.1"
 description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm IR"
 
 [dependencies]
+"sfn/cli" = "0.1.1"
 
 [capabilities]
 required = ["io"]
