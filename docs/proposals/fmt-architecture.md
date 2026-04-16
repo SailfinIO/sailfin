@@ -533,18 +533,18 @@ enforce exactly 1 between top-level declarations and before decorators at
 indent 0. Fixed inline block indent tracking (opening `{` no longer
 increments indent when inlined).
 
-### Step 5: Edge Cases, Self-Hosting Validation & CI
+### Step 5: Edge Cases, Self-Hosting Validation & CI ✅
 
 **Goal:** Handle all edge cases in the compiler source and wire into CI.
 
-- Format all 120 compiler source files; fix any formatter bugs discovered
-- Verify `sfn fmt --write compiler/src/ && make compile` succeeds
+- ✅ Format all 123 compiler source files + `runtime/prelude.sfn`; fixed formatter bugs discovered during the pass
+- ✅ Verify `sfn fmt --write compiler/src/ && make rebuild` succeeds
   (formatted code self-hosts)
-- Add idempotency test: `sfn fmt | sfn fmt` produces same output
-- Add `--check` validation to CI (GitHub Actions)
-- Handle edge cases:
-  - Empty files
-  - Files with only comments
+- ✅ Idempotency verified: second `sfn fmt` pass produces identical output across all files
+- ✅ `--check` validation added to CI (GitHub Actions `ci.yml`)
+- ✅ Handle edge cases:
+  - Empty files (returns empty string)
+  - Files with only comments (emits comments directly)
   - Deeply nested constructs (6+ levels)
   - Very long string literals
   - Adjacent comments with no code between them
@@ -552,11 +552,22 @@ increments indent when inlined).
   - Enum variants with payloads
   - Match expressions with `=>`
   - Decorator syntax (`@logExecution`)
+  - Unary operators `!` and `-` (no space after via `_reclassify_unary_ops` post-pass)
+  - Optional type suffix `?` (no space before via `optional_suffix` role)
+  - Struct/enum declaration inlining guard (blocks with both colons and semicolons rejected)
+- ✅ E2E test suite: `compiler/tests/e2e/test_fmt.sh` (17 tests)
 
 **Test:** `sfn fmt --check compiler/src/` exits 0 after running
 `sfn fmt --write compiler/src/`.
 
 **Deliverable:** CI-enforced canonical formatting for the entire project.
+
+**Known limitations (v1):**
+- Bulk `sfn fmt --write <directory>` with many files may OOM due to `string_concat` accumulation; CI uses a per-file loop as workaround
+- No expression wrapping — long expressions stay on one line regardless of length
+- Blank lines between section-divider comments and declarations may be collapsed
+- No semantic formatting (cannot reorder match arms, inline function bodies, etc.)
+- No `--diff` mode (compare formatted vs original inline)
 
 ## Key Design Decisions & Rationale
 

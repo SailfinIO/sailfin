@@ -4,6 +4,20 @@ This guide captures the current Sailfin repository layout and the conventions
 the compiler, runtime, and examples follow. Treat it as the source of truth
 for naming, organization, and where new work should land.
 
+## Code Formatting
+
+All `.sfn` files in the repository are formatted with `sfn fmt` and CI enforces
+this on every pull request. There is one canonical style with no configuration.
+
+```bash
+sfn fmt --write compiler/src/   # format files in place
+sfn fmt --check compiler/src/   # verify formatting (CI mode)
+```
+
+Do not manually adjust indentation, spacing, or brace placement — `sfn fmt`
+handles all of it. If you disagree with a formatting decision, file an issue
+against the formatter rather than overriding the output.
+
 ## Goals
 
 - Keep one major concern per file (lexer, parser, lowering, etc.).

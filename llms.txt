@@ -1,6 +1,6 @@
 # Sailfin Language Reference for LLMs
 
-> Version: 0.5.2-alpha.1 | Updated: 2026-04-16
+> Version: 0.5.3-alpha.1 | Updated: 2026-04-16
 > Source: https://github.com/SailfinIO/sailfin | Site: https://sailfin.dev
 
 Sailfin is a compiled systems language with compile-time capability enforcement
@@ -273,6 +273,7 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 - Effect annotations (parsed and carried through to IR)
 - Colon type annotations (x: Type) for params, variables, fields
 - Arrow return types (-> Type) for functions
+- Code formatting via sfn fmt (token-stream, idempotent, CI-enforced)
 
 ## What Is Parsed but Not Fully Implemented
 
@@ -313,6 +314,31 @@ Build commands:
     make test       -- run unit + integration + e2e test suites
     make check      -- full validation including seedcheck
     make install    -- install to ~/.local/bin
+
+## Tooling
+
+### sfn fmt — Code Formatter
+
+Built-in formatter with one canonical style, no configuration. Like gofmt.
+
+    sfn fmt file.sfn              # print formatted output to stdout
+    sfn fmt --write src/          # format files in place
+    sfn fmt --check src/          # CI mode: exit 1 if any file would change
+
+Formatting rules:
+- 4-space indentation, K&R braces (opening brace on same line)
+- Spaces around operators and after keywords
+- No space before : ; ? (optional suffix) or after unary ! -
+- Imports sorted by path, specifiers sorted alphabetically
+- Blank lines: exactly 1 between top-level declarations
+- Inline blocks: single-statement blocks stay on one line if they fit
+- Comments preserved exactly as written
+
+Known limitations:
+- No expression wrapping (long lines stay as-is)
+- No --diff mode
+- Bulk directory formatting may OOM on very large codebases (use per-file loop)
+- No semantic restructuring (match arm reordering, function inlining)
 
 ## Package Manifest (capsule.toml)
 
