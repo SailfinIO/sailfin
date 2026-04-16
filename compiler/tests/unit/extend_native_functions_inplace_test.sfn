@@ -1,0 +1,113 @@
+// Regression test for the in-place-extend contract that Phase 1b (PR #145)
+// depends on.
+//
+// `extend_native_functions_inplace` in lowering_helpers_mangling.sfn is
+// built on three runtime guarantees:
+//
+//   1. `let mut out = input_array;` creates a reference to the same
+//      underlying storage, not a copy.
+//   2. `out.push(x)` extends that storage in place; it does not allocate
+//      a fresh array.
+//   3. The returned reference is still aliased to the caller's original
+//      variable — appending through the returned handle is visible
+//      through the input handle.
+//
+// If ANY of these three guarantees breaks in the runtime, the function's
+// in-place contract breaks with it. Call sites that depend on the alias
+// (lowering_core.sfn:568, 576) would then silently see stale data —
+// the same class of bug as the 220c8b7 revert, just from the opposite
+// direction.
+//
+// A direct unit test of extend_native_functions_inplace would require
+// importing from compiler/src/llvm/lowering/, which pulls the full LLVM
+// subsystem into the test's transitive closure and times out the test
+// runner. Instead, this file tests the three runtime guarantees using
+// simple types. The function itself stays covered by the self-host build
+// (make compile exercises it every run), and the doc comment at
+// lowering_helpers_mangling.sfn:424 cross-references this file.
+//
+// See docs/build-performance.md Phase 1b and the aliasing commentary at
+// lowering_core.sfn:565-578 for the full rationale.
+
+test "runtime contract: mut binding shares storage with input (no copy)" {
+    let original: number[] = [1, 2, 3];
+    let mut alias_view = original;
+    alias_view.push(4);
+    // Read through alias_view so the unused-binding check sees it.
+    assert alias_view.length == 4;
+    assert alias_view[3] == 4;
+    // The actual invariant: the write through alias_view is visible
+    // through the original handle. If the mut binding had produced a
+    // copy, original.length would still be 3. Phase 1b's in-place
+    // extend explicitly relies on this NOT being the case.
+    assert original.length == 4;
+    assert original[3] == 4;
+}
+
+test "runtime contract: push on array extends in place (amortized)" {
+    // The runtime's array_push does amortized O(1) growth. If this ever
+    // regressed to allocate-and-copy, extend_native_functions_inplace
+    // would lose its optimization (and its contract — the returned array
+    // would no longer alias dst).
+    let arr: number[] = [];
+    let mut view = arr;
+    let mut i: number = 0;
+    loop {
+        if i >= 10 {
+            break;
+        }
+        view.push(i);
+        i += 1;
+    }
+    assert arr.length == 10;
+    assert arr[0] == 0;
+    assert arr[9] == 9;
+}
+
+test "runtime contract: appending through returned alias is visible through input" {
+    // This mirrors the exact body shape of extend_native_functions_inplace:
+    //   let mut out = dst;
+    //   for x in src { out = out.push(x); }
+    //   return out;
+    //
+    // The test asserts that after the function body runs, the *input* array
+    // (not just the returned reference) contains the extended data. That is
+    // the critical invariant at lowering_core.sfn:568 where `safe_functions`
+    // must alias `local_functions` post-call.
+    let dst: string[] = ["a", "b"];
+    let src: string[] = ["c", "d"];
+    let mut out = dst;
+    let mut i: number = 0;
+    loop {
+        if i >= src.length {
+            break;
+        }
+        out.push(src[i]);
+        i += 1;
+    }
+    // Returned handle has all 4 elements
+    assert out.length == 4;
+    // AND the input handle sees the mutation — this is the aliasing contract
+    assert dst.length == 4;
+    assert dst[0] == "a";
+    assert dst[1] == "b";
+    assert dst[2] == "c";
+    assert dst[3] == "d";
+}
+
+test "runtime contract: empty src leaves dst unchanged" {
+    let dst: number[] = [42];
+    let src: number[] = [];
+    let mut out = dst;
+    let mut i: number = 0;
+    loop {
+        if i >= src.length {
+            break;
+        }
+        out.push(src[i]);
+        i += 1;
+    }
+    assert out.length == 1;
+    assert dst.length == 1;
+    assert dst[0] == 42;
+}

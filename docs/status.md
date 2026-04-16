@@ -1,6 +1,6 @@
 # Status
 
-Updated: March 31, 2026
+Updated: April 16, 2026
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -8,22 +8,24 @@ feature availability.
 
 ## Build Pipeline (Current)
 
-- CI pins to `v0.1.1` as the seed compiler. Releases past that version are built
-  with the Python stabilization script (`scripts/selfhost_native.py`) and are
-  pre-stabilization artifacts with known issues.
-- `scripts/selfhost_native.py` (~13,000 lines) applies post-processing fixups to
-  generated LLVM IR to work around current compiler bugs. This is build debt.
-- `scripts/build.sh` is the clean target — no fixups. It does not yet succeed;
-  eliminating the Python script is a hard 1.0 requirement.
-- `make compile` (default `BUILD_DRIVER=py`) uses the Python script. `make check`
+- `scripts/build.sh` is the sole build driver — pure shell, no fixups.
+- `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
+- The legacy Python fixup script (`selfhost_native.py`) was removed after the
+  compiler reached clean LLVM IR output (v0.5.0-alpha.22+).
 
 ## Compiler Pipeline (Current)
 
 - The self-hosted native compiler in `compiler/src/` is the primary toolchain;
   `make compile` produces `build/native/sailfin`.
-- Pipeline: Lexer → Parser → Type Checker → Effect Checker → Native Emitter
+- Pipeline: Lexer → Parser → Type Checker → Native Emitter
   (`.sfn-asm` IR) → LLVM Lowering.
+- **Effect checker status**: `validate_effects()` exists in `effect_checker.sfn`
+  but is **not invoked by the compiler or CLI during normal builds** — users will
+  not see effect diagnostics during compilation, and effect violations do not
+  block compilation. Wiring effect enforcement into the build is the top priority
+  in the Effect System Hardening track on the
+  [roadmap](https://sailfin.dev/roadmap).
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
   and attach release assets.
@@ -48,11 +50,12 @@ feature availability.
 | String interpolation (`{{ }}`) | Shipped | |
 | Pattern matching exhaustiveness | Partial | Runtime backstop via `match_exhaustive_failed` |
 | Effect annotations (`![...]`) | Shipped | Parsing and declaration |
-| Effect enforcement — `io` | Shipped | `print.*`, `console.*`, `fs.*`, `@logExecution` |
-| Effect enforcement — `net` | Shipped | `http.*`, `websocket.*`, `serve` |
-| Effect enforcement — `model` | Shipped | Required for any `prompt` block |
-| Effect enforcement — `clock` | Partial | `sleep`/`runtime.sleep` checked; hierarchical names not enforced |
-| Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; not validated |
+| Effect enforcement — `io` | Not enforced | Checker logic exists for `print.*`, `console.*`, `fs.*`, `@logExecution` but is not run during compilation |
+| Effect enforcement — `net` | Not enforced | Checker logic exists for `http.*`, `websocket.*`, `serve` but is not run during compilation |
+| Effect enforcement — `model` | Not enforced | Checker logic exists for `prompt` blocks but is not run during compilation |
+| Effect enforcement — `clock` | Not enforced | Checker logic exists for `sleep`/`runtime.sleep` but is not run during compilation |
+| Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; no checker logic |
+| Effect enforcement as compilation gate | **Not yet** | `validate_effects()` exists but is not invoked by the compiler; top priority |
 | Generic type inference | Partial | Type params captured; inference coverage is limited |
 | Interface conformance validation | Partial | Basic checks; variance not yet enforced |
 | `Affine<T>` / `Linear<T>` | Parsed only | Ownership wrappers accepted; move/consume rules not enforced |
@@ -75,8 +78,14 @@ feature availability.
 | `scope.with_timeout(...)` | **Not implemented** | |
 | `unsafe` / `extern` | Parsed only | Syntax accepted; enforcement not active |
 | Policy decorators (`@policy(...)`) | Parsed only | No compiler or runtime effect |
-| LSP / notebook support | Not started | Post-1.0 |
-| Package registry (`sfn add/publish`) | Not started | Post-1.0 |
+| `sfn fmt` (formatter) | Partial (Steps 1-2 of 5) | CLI wiring, token-stream formatting with indentation/spacing; see `docs/proposals/fmt-architecture.md` |
+| `sfn check` (fast analysis) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn doc` (doc generator) | Planned | 1.0; see `docs/proposals/tooling.md` |
+| `sfn fix` (auto-rewriter) | Planned | 1.0; see `docs/proposals/tooling.md` |
+| Notebook support | Not started | Post-1.0 |
+| Package registry (`sfn init/add/publish`) | Shipped | CLI commands implemented; registry at `registry.sailfin.dev` |
 
 ## Print API (Current)
 
@@ -124,9 +133,38 @@ The following capsules ship as part of the Sailfin standard library under
   `runtime/*.py` helpers.
 - The native filesystem adapter supports `readFile`, `writeFile`, `appendFile`,
   `writeLines`, and directory helpers.
-- **The C runtime will be replaced by a Sailfin-native runtime before 1.0.** This
-  is a hard prerequisite for the 1.0 release, not a post-1.0 item. See
-  `docs/roadmap.md` and `docs/runtime_audit.md`.
+- **String concat optimization (`string_append`)**: The LLVM lowering emits
+  `sailfin_runtime_string_append` (realloc-based in-place extend) for intermediate
+  results in chained `+` concat chains instead of `sailfin_runtime_string_concat`
+  (malloc+copy). This eliminates 2 dead intermediate allocations per 4-way concat
+  and is estimated to reduce per-module peak memory 30-50% for string-heavy
+  compilation paths. Pure lowering optimization — no user-visible syntax change.
+  Implemented in `compiler/src/llvm/expression_lowering/native/core_strings.sfn`
+  and `core_ops_lowering.sfn`; runtime entry point in
+  `runtime/native/src/sailfin_runtime.c`.
+- **The C runtime will be replaced by a pure Sailfin runtime before 1.0.** No C
+  shim — the entire runtime (~90 ABI functions across strings, arrays, I/O,
+  exceptions, crypto, time, and process execution) will be rewritten in Sailfin.
+  This is a hard prerequisite for the 1.0 release.
+
+### Runtime Migration Prerequisites
+
+The runtime rewrite depends on compiler features that must ship first. The
+[roadmap](https://sailfin.dev/roadmap) sequences these as numbered phases:
+
+| Compiler Feature | Status | Runtime Subsystems It Unblocks |
+|---|---|---|
+| `extern fn` (LLVM `declare` emission) | In progress (type-checker registration needed) | All — nothing can call `malloc`/`fopen`/`write` without it |
+| `int` / `float` numeric types | Planned | Sizes, indices, bitwise ops; fixes f64 precision hazard |
+| Raw pointer types (`*T`) enforced | Planned | OS handles (`*FILE`, `*DIR`, `*pthread_t`), buffer pointers |
+| `Result<T, E>` + `?` operator | Planned | Every fallible operation (file I/O, allocation, network) |
+| Bitwise integer operators | Planned | SHA-256, Base64, flags, enum tag extraction |
+| Closures with capture | Planned | `map`/`filter`/`reduce`, spawn handlers, route handlers |
+| Generic type constraints | Planned | `Array<T>`, `Slice<T>`, `HashMap<K, V>`, `Channel<T>` |
+| Deterministic drop emission | Planned | Memory reclamation — enables `string_drop` and `array_drop` |
+| Atomic intrinsics | Planned | Reference counting, task queues, channel implementation |
+
+See `docs/runtime_audit.md` for the full migration plan.
 
 ## Installer (Current)
 
@@ -138,30 +176,23 @@ The following capsules ship as part of the Sailfin standard library under
 
 The following design issues have been identified through external review and must
 be resolved before 1.0 to avoid breaking a public API. Each is tracked in
-`docs/roadmap.md` §0 (Syntax Reform). This section records the *problem*; the
+the [roadmap](https://sailfin.dev/roadmap) and `docs/proposals/colon-type-annotations.md`. This section records the *problem*; the
 roadmap records the *plan*.
 
-### Type annotation syntax (`->` vs `:`)
+### Type annotation syntax (`->` vs `:`) — **migrated**
 
-**Problem**: `->` is used for both "has type" (parameters, variables) and
-"returns" (function return type). This conflicts with the universal meaning of
-`->` as "maps to / returns" in every typed language (Rust, TypeScript, Haskell,
-Kotlin, Swift, Python).
+**Resolution**: The compiler source, runtime, capsules, tests, and examples
+all use `:` for parameter, variable, and field type annotations. Function
+return types continue to use `->`.
 
 ```sfn
-// Current — three arrows, two meanings
-fn add(x -> number, y -> number) -> number { ... }
-// Target
 fn add(x: number, y: number) -> number { ... }
+let name: string = "Sailfin";
+struct User { id: number; name: string; }
 ```
 
-**Impact**: High. This is the first syntax new users see. It will cause
-immediate confusion and is the most likely reason someone trying the language
-will stop.
-
-**Status**: Parser already accepts `:` as `TypeSep` alongside `->` (see EBNF
-`TypeSep = "->" | ":"`). Migration: deprecate `->` in type positions, then
-remove.
+**Remaining work**: None — migration complete. The parser now enforces
+`:` in annotation positions and `->` in return-type positions.
 
 ### String interpolation (`{{ }}` vs `${ }`)
 
@@ -195,43 +226,45 @@ only structured mechanism, supplemented by ad-hoc union return types
 call site requires manual `match`. Error types proliferate across module
 boundaries with no composition mechanism.
 
-### Unfinished safety claims
+### Unenforced syntax (deferred to post-1.0)
 
-**Problem**: `Affine<T>`, `Linear<T>`, `&T`, `&mut T`, `PII<T>`, `Secret<T>`
-are all parsed but not enforced. Claiming "Rust-grade safety" or
-"ownership-aware" in marketing materials while these are purely syntactic is a
-credibility risk.
+**Decision**: `Affine<T>`, `Linear<T>`, `&T`, `&mut T`, `PII<T>`, `Secret<T>`
+are all parsed but not enforced. Rather than marketing unenforced guarantees,
+these features are explicitly deferred to post-1.0. Sailfin's safety story is
+**effects and capabilities**, not borrow checking or taint tracking — those will
+ship when they can be enforced end-to-end.
 
-**Impact**: Medium. Users who come for the safety story will discover it doesn't
-work and leave. Better to remove unfinished syntax than to advertise unenforced
-guarantees.
+**Status**: Ownership and taint types remain in the parser for forward
+compatibility but are not advertised as shipped features. They will be removed
+from marketing materials and the homepage.
 
-### Scope creep risk
+### Strategic focus
 
-**Problem**: The spec describes Rust-grade ownership, Swift-like ergonomics,
-AI-native constructs, effect types, capability security, taint tracking, GPU
-acceleration, structured concurrency, policy DSLs, generation cards, and tensor
-types. This is a feature list for five different languages.
+**Decision**: Sailfin's three differentiators are: (1) effect system,
+(2) capability-based security, (3) structured concurrency. All pre-1.0 effort
+focuses on making these world-class. AI integration, ownership enforcement,
+and taint tracking are post-1.0 library and compiler work.
 
-**Recommendation**: Pick 3 differentiators (effect system, capability security,
-structured concurrency) and ship those well. Defer everything else ruthlessly.
+## AI / Model Constructs (Migration to Library)
 
-## AI / Model Features (Design Preview)
+The `model`, `prompt`, `tool`, and `pipeline` keywords were originally designed
+as language-level syntax. Following a strategic review, these are being migrated
+to the `sfn/ai` library capsule for post-1.0 delivery. Rationale:
 
-The following features are central to Sailfin's AI-native vision and are fully
-designed. They are tracked in the spec (`docs/spec.md` Part B) and proposals
-(`docs/proposals/`) but are **not yet functional** in the current compiler or
-runtime:
+- AI APIs change faster than language grammars can evolve
+- Library-level features can iterate independently of compiler releases
+- The `![model]` effect — the capability gate — remains a language-level feature
+- Keyword syntax reserved unnecessary grammar surface for features that have
+  no runtime behavior today
 
-- `model` blocks declare metadata and are emitted to `.sfn-asm`, but `.call()`
-  performs no actual model invocation.
-- `prompt` blocks emit IR directives but do not dispatch to any model API.
-- Generation cards (provenance metadata: engine, params, seeds, input hashes,
-  latency, cost) are not yet produced.
-- Model evaluators (`Faithfulness`, `LatencyBudget(...)`) are design-stage.
-- `tool` dispatcher (model-invocable typed capabilities) is not yet implemented.
-- Tensor/GPU workloads (`Vector<N>`, `Tensor<Shape, DType>`, GPU batching) are
-  not yet implemented.
+**Current state**: `model`, `prompt`, `tool`, and `pipeline` blocks are still
+parsed and emit metadata to `.sfn-asm`, but perform no runtime execution. They
+will be migrated to the `sfn/ai` capsule as library types and functions.
 
-These features are tracked as a post-1.0 milestone. The design is preserved in
-`docs/spec.md` §3.6–§3.9 and `docs/proposals/model-engines-and-training.md`.
+**What stays in the language**: The `![model]` effect annotation, which gates
+AI operations through the capability system. The effect checker detects
+violations, but enforcement does not yet block compilation (see Effect
+System Hardening on the [roadmap](https://sailfin.dev/roadmap)).
+
+Design documents are preserved in `docs/spec.md` §3.6–§3.9 and
+`docs/proposals/model-engines-and-training.md`.

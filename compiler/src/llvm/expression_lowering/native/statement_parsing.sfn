@@ -18,11 +18,11 @@ import {
 import { substring } from "../../../string_utils";
 
 
-fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
+fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut index -> number = 0;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= trimmed.length {
             break;
@@ -52,7 +52,7 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             index += 1;
             continue;
         }
-        let mut _if141 -> boolean = false;
+        let mut _if141: boolean = false;
         if paren_depth > 0 { _if141 = true; }
         if bracket_depth > 0 { _if141 = true; }
         if _if141 {
@@ -60,11 +60,11 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             continue;
         }
         if ch == "=" {
-            let mut previous -> string = "";
+            let mut previous: string = "";
             if index > 0 {
                 previous = substring(trimmed, index - 1, index);
             }
-            let mut next_char -> string = "";
+            let mut next_char: string = "";
             let _stmt_next = index + 1;
             if _stmt_next < trimmed.length {
                 let _stmt_next2 = index + 2;
@@ -72,7 +72,7 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             }
 
             // Check for compound assignment operators: +=, -=, *=, /=
-            let mut _if142 -> boolean = false;
+            let mut _if142: boolean = false;
             if previous == "+" { _if142 = true; }
             if previous == "-" { _if142 = true; }
             if previous == "*" { _if142 = true; }
@@ -81,7 +81,7 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
                 // This is a compound assignment
                 let target = trim_text(substring(trimmed, 0, index - 1));
                 let value = trim_text(substring(trimmed, index + 1, trimmed.length));
-                let mut _if165 -> boolean = false;
+                let mut _if165: boolean = false;
                 if target.length == 0 { _if165 = true; }
                 if value.length == 0 { _if165 = true; }
                 if _if165 {
@@ -91,7 +91,7 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             }
 
             // Skip comparison operators and other non-assignment uses of =
-            let mut _if143 -> boolean = false;
+            let mut _if143: boolean = false;
             if previous == "=" { _if143 = true; }
             if previous == "!" { _if143 = true; }
             if previous == ">" { _if143 = true; }
@@ -100,7 +100,7 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
                 index += 1;
                 continue;
             }
-            let mut _if144 -> boolean = false;
+            let mut _if144: boolean = false;
             if next_char == "=" { _if144 = true; }
             if next_char == ">" { _if144 = true; }
             if _if144 {
@@ -111,7 +111,7 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
             // Simple assignment
             let target = trim_text(substring(trimmed, 0, index));
             let value = trim_text(substring(trimmed, index + 1, trimmed.length));
-            let mut _if145 -> boolean = false;
+            let mut _if145: boolean = false;
             if target.length == 0 { _if145 = true; }
             if value.length == 0 { _if145 = true; }
             if _if145 {
@@ -124,8 +124,8 @@ fn parse_assignment_expression(expression -> string) -> AssignmentParseResult {
     return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
 }
 
-fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
-    let mut diagnostics -> string[] = [];
+fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
+    let mut diagnostics: string[] = [];
     let trimmed = trim_text(expression);
     if trimmed.length < 4 {
         diagnostics.push("llvm lowering: malformed let expression `" + expression + "`");
@@ -135,8 +135,8 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
     if prefix != "let " {
         return InlineLetParseResult { success: false, name: "", mutable: false, type_annotation: "", initializer: null, diagnostics: diagnostics };
     }
-    let mut remainder -> string = trim_text(substring(trimmed, 4, trimmed.length));
-    let mut is_mutable -> boolean = false;
+    let mut remainder: string = trim_text(substring(trimmed, 4, trimmed.length));
+    let mut is_mutable: boolean = false;
     if remainder.length >= 4 {
         let mut_prefix = substring(remainder, 0, 4);
         if mut_prefix == "mut " {
@@ -148,14 +148,14 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
         diagnostics.push("llvm lowering: let expression missing binding name in `" + expression + "`");
         return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: null, diagnostics: diagnostics };
     }
-    let mut name -> string = "";
-    let mut index -> number = 0;
+    let mut name: string = "";
+    let mut index: number = 0;
     loop {
         if index >= remainder.length {
             break;
         }
         let ch = substring(remainder, index, index + 1);
-        let mut _if146 -> boolean = false;
+        let mut _if146: boolean = false;
         if ch == " " { _if146 = true; }
         if ch == ":" { _if146 = true; }
         if ch == "-" { _if146 = true; }
@@ -171,9 +171,9 @@ fn parse_inline_let_expression(expression -> string) -> InlineLetParseResult {
         diagnostics.push("llvm lowering: let expression missing binding name in `" + expression + "`");
         return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: null, diagnostics: diagnostics };
     }
-    let mut tail -> string = trim_text(substring(remainder, index, remainder.length));
-    let mut type_annotation -> string = "";
-    let mut initializer -> string? = null;
+    let mut tail: string = trim_text(substring(remainder, index, remainder.length));
+    let mut type_annotation: string = "";
+    let mut initializer: string? = null;
     if tail.length > 0 {
         if tail.length >= 2 {
             let annotation_prefix = substring(tail, 0, 2);

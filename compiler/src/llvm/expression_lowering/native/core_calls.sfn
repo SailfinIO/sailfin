@@ -9,19 +9,19 @@ import {
     append_string,
 } from "../../utils";
 
-fn find_call_site(expression -> string) -> number {
+fn find_call_site(expression: string) -> number {
     // Find the opening paren of the outermost (last) call in a chained
     // expression like `Builder.create("hello").finish()`.  We scan
     // left-to-right, tracking balanced parens/braces/brackets/strings,
     // and record the last `(` seen at depth-0.
-    let mut paren_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut in_double -> boolean = false;
-    let mut in_single -> boolean = false;
-    let mut escape_next -> boolean = false;
-    let mut last_top_level_open -> number = -1;
-    let mut index -> number = 0;
+    let mut paren_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut in_double: boolean = false;
+    let mut in_single: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut last_top_level_open: number = -1;
+    let mut index: number = 0;
     loop {
         if index >= expression.length {
             break;
@@ -86,20 +86,20 @@ fn find_call_site(expression -> string) -> number {
     return last_top_level_open;
 }
 
-fn split_call_arguments(text -> string) -> string[] {
+fn split_call_arguments(text: string) -> string[] {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return [];
     }
-    let mut entries -> string[] = [];
-    let mut current -> string = "";
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
-    let mut index -> number = 0;
+    let mut entries: string[] = [];
+    let mut current: string = "";
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
+    let mut index: number = 0;
     loop {
         if index >= text.length {
             break;
@@ -166,7 +166,7 @@ fn split_call_arguments(text -> string) -> string[] {
             }
             current = current + ch;
         } else {
-            let mut _elif67 -> boolean = false;
+            let mut _elif67: boolean = false;
             if ch == "," {
                 if paren_depth == 0 {
                     if bracket_depth == 0 {

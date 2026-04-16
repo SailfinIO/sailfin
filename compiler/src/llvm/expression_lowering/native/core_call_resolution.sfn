@@ -82,29 +82,29 @@ import { lower_expression } from "./core";
 // Also handles file-based method resolution and parse_member_access dispatch.
 // Returns a CallTargetResolution with the resolved target, method operand, etc.
 fn resolve_call_method_target(
-    trimmed_target -> string,
-    arguments -> string[],
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    current_temp -> number,
-    current_lines -> string[],
-    functions -> NativeFunction[],
-    context -> TypeContext,
-    diagnostics -> string[],
-    collected_string_constants -> StringConstant[]
+    trimmed_target: string,
+    arguments: string[],
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    current_temp: number,
+    current_lines: string[],
+    functions: NativeFunction[],
+    context: TypeContext,
+    diagnostics: string[],
+    collected_string_constants: StringConstant[]
 ) -> CallTargetResolution ![io] {
     let mut result_target = trimmed_target;
     let mut result_lines = current_lines;
-    let mut result_temp -> number = current_temp;
+    let mut result_temp: number = current_temp;
     let mut result_diagnostics = diagnostics;
     let mut result_string_constants = collected_string_constants;
-    let mut method_operand -> LLVMOperand? = null;
-    let mut helper_descriptor -> RuntimeHelperDescriptor? = null;
-    let mut injected_argument_count -> number = 0;
-    let mut is_array_concat -> boolean = false;
-    let mut array_concat_element_type -> string = "";
-    let mut is_array_push -> boolean = false;
-    let mut array_push_element_type -> string = "";
+    let mut method_operand: LLVMOperand? = null;
+    let mut helper_descriptor: RuntimeHelperDescriptor? = null;
+    let mut injected_argument_count: number = 0;
+    let mut is_array_concat: boolean = false;
+    let mut array_concat_element_type: string = "";
+    let mut is_array_push: boolean = false;
+    let mut array_push_element_type: string = "";
 
     // Defensive: some front-end rewriting paths can fuse a receiver name into the call
     // target (e.g. `values.concat(xs)` becomes `valuesconcat(xs)` or (rarely) `@valuesconcat(xs)`).
@@ -122,11 +122,11 @@ fn resolve_call_method_target(
                 if is_simple_identifier(receiver_name) {
                     let local = find_local_binding(locals, receiver_name);
                     let parameter = find_parameter_binding(bindings, receiver_name);
-                    let mut receiver_operand -> LLVMOperand? = null;
+                    let mut receiver_operand: LLVMOperand? = null;
 
                     if local != null {
                         let load_result = load_local_operand(local, result_temp, result_lines);
-                        let mut _ci0 -> number = 0;
+                        let mut _ci0: number = 0;
                         loop {
                             if _ci0 >= load_result.diagnostics.length { break; }
                             result_diagnostics.push(load_result.diagnostics[_ci0]);
@@ -168,29 +168,29 @@ fn resolve_call_method_target(
 
     // Defuse fused push targets (e.g. `loaded_argspush(x)` → `push`)
     // FLAT structure — NO nested ifs — to survive seed degenerate-if bug.
-    let mut _push_score -> number = 0;
+    let mut _push_score: number = 0;
     if ends_with(canonical_fused, "push") { _push_score += 1; }
     if canonical_fused.length > 4 { _push_score += 1; }
-    let mut _push_receiver_name -> string = "";
+    let mut _push_receiver_name: string = "";
     if _push_score >= 2 {
         _push_receiver_name = trim_text(substring(canonical_fused, 0, canonical_fused.length - 4));
     }
     if _push_receiver_name.length > 0 { _push_score += 1; }
-    let mut _push_is_ident -> boolean = false;
+    let mut _push_is_ident: boolean = false;
     if _push_score >= 3 {
         _push_is_ident = is_simple_identifier(_push_receiver_name);
     }
     if _push_is_ident { _push_score += 1; }
-    let mut _push_local -> LocalBinding? = null;
-    let mut _push_param -> ParameterBinding? = null;
+    let mut _push_local: LocalBinding? = null;
+    let mut _push_param: ParameterBinding? = null;
     if _push_score >= 4 {
         _push_local = find_local_binding(locals, _push_receiver_name);
         _push_param = find_parameter_binding(bindings, _push_receiver_name);
     }
-    let mut _push_receiver_operand -> LLVMOperand? = null;
+    let mut _push_receiver_operand: LLVMOperand? = null;
     if _push_local != null {
         let push_load_result = load_local_operand(_push_local, result_temp, result_lines);
-        let mut _pci0 -> number = 0;
+        let mut _pci0: number = 0;
         loop {
             if _pci0 >= push_load_result.diagnostics.length { break; }
             result_diagnostics.push(push_load_result.diagnostics[_pci0]);
@@ -232,12 +232,12 @@ fn resolve_call_method_target(
                                 if fs.exists("build/sailfin/.condition_locals") {
                                     let _pre_raw = fs.readFile("build/sailfin/.condition_locals");
                                     if _pre_raw.length > 0 {
-                                        let mut _pre_pos -> number = 0;
-                                        let mut _pre_struct -> string = "";
+                                        let mut _pre_pos: number = 0;
+                                        let mut _pre_struct: string = "";
                                         loop {
                                             if _pre_pos >= _pre_raw.length { break; }
                                             let _pre_nl = index_of(substring(_pre_raw, _pre_pos, _pre_raw.length), "\n");
-                                            let mut _pre_line -> string = "";
+                                            let mut _pre_line: string = "";
                                             if _pre_nl < 0 {
                                                 _pre_line = substring(_pre_raw, _pre_pos, _pre_raw.length);
                                                 _pre_pos = _pre_raw.length;
@@ -258,7 +258,7 @@ fn resolve_call_method_target(
                                         }
                                         if _pre_struct.length > 0 {
                                             let _pre_lowered = lower_expression(_pre_base, bindings, locals, result_temp, result_lines, functions, context, "");
-                                            let mut _ci1 -> number = 0;
+                                            let mut _ci1: number = 0;
                                             loop {
                                                 if _ci1 >= _pre_lowered.diagnostics.length { break; }
                                                 result_diagnostics.push(_pre_lowered.diagnostics[_ci1]);
@@ -296,32 +296,32 @@ fn resolve_call_method_target(
 // Resolves method calls via parse_member_access (struct methods, interface dispatch,
 // runtime helpers, array concat/push).
 fn resolve_parsed_method_dispatch(
-    result_target -> string,
-    arguments -> string[],
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    result_temp -> number,
-    result_lines -> string[],
-    functions -> NativeFunction[],
-    context -> TypeContext,
-    result_diagnostics -> string[],
-    result_string_constants -> StringConstant[],
-    method_operand -> LLVMOperand?,
-    helper_descriptor -> RuntimeHelperDescriptor?,
-    injected_argument_count -> number,
-    is_array_concat -> boolean,
-    array_concat_element_type -> string,
-    is_array_push -> boolean,
-    array_push_element_type -> string
+    result_target: string,
+    arguments: string[],
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    result_temp: number,
+    result_lines: string[],
+    functions: NativeFunction[],
+    context: TypeContext,
+    result_diagnostics: string[],
+    result_string_constants: StringConstant[],
+    method_operand: LLVMOperand?,
+    helper_descriptor: RuntimeHelperDescriptor?,
+    injected_argument_count: number,
+    is_array_concat: boolean,
+    array_concat_element_type: string,
+    is_array_push: boolean,
+    array_push_element_type: string
 ) -> CallTargetResolution ![io] {
     let mut r_target = result_target;
     let mut r_lines = result_lines;
-    let mut r_temp -> number = result_temp;
+    let mut r_temp: number = result_temp;
     let mut r_diagnostics = result_diagnostics;
     let mut r_string_constants = result_string_constants;
     let mut r_method_operand = method_operand;
     let mut r_helper_descriptor = helper_descriptor;
-    let mut r_injected_count -> number = injected_argument_count;
+    let mut r_injected_count: number = injected_argument_count;
     let mut r_is_array_concat = is_array_concat;
     let mut r_array_concat_element_type = array_concat_element_type;
     let mut r_is_array_push = is_array_push;
@@ -330,12 +330,12 @@ fn resolve_parsed_method_dispatch(
     let method_parse = parse_member_access(r_target);
     if method_parse.success {
         if r_method_operand == null {
-            let mut _if58 -> boolean = false;
+            let mut _if58: boolean = false;
             if method_parse.field == "concat" { _if58 = true; }
             if method_parse.field == "push" { _if58 = true; }
             if _if58 {
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                let mut _ci2 -> number = 0;
+                let mut _ci2: number = 0;
                 loop {
                     if _ci2 >= lowered_self.diagnostics.length { break; }
                     r_diagnostics.push(lowered_self.diagnostics[_ci2]);
@@ -400,7 +400,7 @@ fn resolve_parsed_method_dispatch(
                 if is_simple_identifier(base_name) {
                     let bound_local = find_local_binding(locals, base_name);
                     let bound_param = find_parameter_binding(bindings, base_name);
-                    let mut _if59 -> boolean = false;
+                    let mut _if59: boolean = false;
                     if bound_local == null {
                         if bound_param == null {
                             _if59 = true;
@@ -411,7 +411,7 @@ fn resolve_parsed_method_dispatch(
                         r_injected_count = 0;
                     } else {
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                        let mut _ci3 -> number = 0;
+                        let mut _ci3: number = 0;
                         loop {
                             if _ci3 >= lowered_self.diagnostics.length { break; }
                             r_diagnostics.push(lowered_self.diagnostics[_ci3]);
@@ -437,7 +437,7 @@ fn resolve_parsed_method_dispatch(
                     }
                 } else {
                     let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                    let mut _ci4 -> number = 0;
+                    let mut _ci4: number = 0;
                     loop {
                         if _ci4 >= lowered_self.diagnostics.length { break; }
                         r_diagnostics.push(lowered_self.diagnostics[_ci4]);
@@ -463,7 +463,7 @@ fn resolve_parsed_method_dispatch(
                 }
             } else if interface_info != null {
                 let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                let mut _ci5 -> number = 0;
+                let mut _ci5: number = 0;
                 loop {
                     if _ci5 >= lowered_self.diagnostics.length { break; }
                     r_diagnostics.push(lowered_self.diagnostics[_ci5]);
@@ -492,8 +492,8 @@ fn resolve_parsed_method_dispatch(
                 // resolve_struct_info_for_method_target returns null.  Search
                 // all known structs for one that has a function with a fused
                 // name (StructNamefield) in the function list / file context.
-                let mut _struct_fallback_info -> StructTypeInfo? = null;
-                let mut _sfi -> number = 0;
+                let mut _struct_fallback_info: StructTypeInfo? = null;
+                let mut _sfi: number = 0;
                 loop {
                     if _sfi >= context.structs.length { break; }
                     let _sf_candidate = context.structs[_sfi];
@@ -508,7 +508,7 @@ fn resolve_parsed_method_dispatch(
                 if _struct_fallback_info != null {
                     // Found a struct method — lower the base and dispatch
                     let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                    let mut _ci6b -> number = 0;
+                    let mut _ci6b: number = 0;
                     loop {
                         if _ci6b >= lowered_self.diagnostics.length { break; }
                         r_diagnostics.push(lowered_self.diagnostics[_ci6b]);
@@ -538,7 +538,7 @@ fn resolve_parsed_method_dispatch(
                     } else {
                         let field_helper = find_runtime_helper(method_parse.field);
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
-                        let mut _ci6 -> number = 0;
+                        let mut _ci6: number = 0;
                         loop {
                             if _ci6 >= lowered_self.diagnostics.length { break; }
                             r_diagnostics.push(lowered_self.diagnostics[_ci6]);
@@ -567,7 +567,7 @@ fn resolve_parsed_method_dispatch(
                         }
 
                         let array_element_type = array_pointer_element_type(base_operand.llvm_type);
-                        let mut _if60 -> boolean = false;
+                        let mut _if60: boolean = false;
                         if array_element_type.length > 0 {
                             if method_parse.field == "concat" {
                                 _if60 = true;
@@ -590,7 +590,7 @@ fn resolve_parsed_method_dispatch(
                                 };
                             }
                         } else {
-                            let mut _elif61 -> boolean = false;
+                            let mut _elif61: boolean = false;
                             if array_element_type.length > 0 {
                                 if method_parse.field == "push" {
                                     _elif61 = true;
@@ -634,11 +634,11 @@ fn resolve_parsed_method_dispatch(
     };
 }
 
-fn _parse_int_res(text -> string) -> number {
+fn _parse_int_res(text: string) -> number {
     let len = text.length;
     if len == 0 { return 0; }
-    let mut result -> number = 0;
-    let mut i -> number = 0;
+    let mut result: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= len { break; }
         let ch = char_at(text, i);
@@ -653,16 +653,16 @@ fn _parse_int_res(text -> string) -> number {
     return result;
 }
 
-fn _find_function_from_files_res(target -> string) -> NativeFunction? ![io] {
+fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
     if !fs.exists("build/sailfin/.ctx_func_count") {
         return null;
     }
     let count_str = fs.readFile("build/sailfin/.ctx_func_count");
     let count = _parse_int_res(count_str);
-    let mut suffix_match -> NativeFunction? = null;
-    let mut suffix_match_count -> number = 0;
+    let mut suffix_match: NativeFunction? = null;
+    let mut suffix_match_count: number = 0;
     let suffix_prefix = target + "__";
-    let mut idx -> number = 0;
+    let mut idx: number = 0;
     loop {
         if idx >= count { break; }
         let prefix = "build/sailfin/.ctx_func_" + number_to_string(idx);
@@ -674,17 +674,17 @@ fn _find_function_from_files_res(target -> string) -> NativeFunction? ![io] {
             let is_async = is_async_str == "1";
             let pc_str = fs.readFile(prefix + "_param_count");
             let pc = _parse_int_res(pc_str);
-            let mut params -> NativeParameter[] = [];
-            let mut j -> number = 0;
+            let mut params: NativeParameter[] = [];
+            let mut j: number = 0;
             loop {
                 if j >= pc { break; }
                 let pp = prefix + "_param_" + number_to_string(j);
                 let pname = fs.readFile(pp + "_name");
                 let ptype = fs.readFile(pp + "_type");
-                params = params.concat([NativeParameter {
+                params.push(NativeParameter {
                             name: pname, type_annotation: ptype,
                             mutable: false, default_value: null, span: null,
-                }]);
+                });
                 j += 1;
             }
             return NativeFunction {
@@ -702,17 +702,17 @@ fn _find_function_from_files_res(target -> string) -> NativeFunction? ![io] {
                 let is_async = is_async_str == "1";
                 let pc_str = fs.readFile(prefix + "_param_count");
                 let pc = _parse_int_res(pc_str);
-                let mut params -> NativeParameter[] = [];
-                let mut j -> number = 0;
+                let mut params: NativeParameter[] = [];
+                let mut j: number = 0;
                 loop {
                     if j >= pc { break; }
                     let pp = prefix + "_param_" + number_to_string(j);
                     let pname = fs.readFile(pp + "_name");
                     let ptype = fs.readFile(pp + "_type");
-                    params = params.concat([NativeParameter {
+                    params.push(NativeParameter {
                                 name: pname, type_annotation: ptype,
                                 mutable: false, default_value: null, span: null,
-                    }]);
+                    });
                     j += 1;
                 }
                 suffix_match = NativeFunction {
@@ -731,7 +731,7 @@ fn _find_function_from_files_res(target -> string) -> NativeFunction? ![io] {
     return null;
 }
 
-fn _find_function_by_name_or_import(functions -> NativeFunction[], target -> string) -> NativeFunction? ![io] {
+fn _find_function_by_name_or_import(functions: NativeFunction[], target: string) -> NativeFunction? ![io] {
     let file_result = _find_function_from_files_res(target);
     if file_result != null {
         return file_result;
@@ -741,8 +741,8 @@ fn _find_function_by_name_or_import(functions -> NativeFunction[], target -> str
         return exact;
     }
     let suffix_prefix = target + "__";
-    let mut match_result -> NativeFunction? = null;
-    let mut idx -> number = 0;
+    let mut match_result: NativeFunction? = null;
+    let mut idx: number = 0;
     loop {
         if idx >= functions.length { break; }
         let candidate = functions[idx];
@@ -760,20 +760,20 @@ fn _find_function_by_name_or_import(functions -> NativeFunction[], target -> str
 // Resolve the function signature for a call target: return type, expected parameter
 // types, whether it's a trait dispatch, and the resolved function entry.
 fn resolve_call_signature(
-    trimmed_target -> string,
-    helper_descriptor -> RuntimeHelperDescriptor?,
-    method_operand -> LLVMOperand?,
-    is_array_concat -> boolean,
-    array_concat_element_type -> string,
-    functions -> NativeFunction[],
-    context -> TypeContext
+    trimmed_target: string,
+    helper_descriptor: RuntimeHelperDescriptor?,
+    method_operand: LLVMOperand?,
+    is_array_concat: boolean,
+    array_concat_element_type: string,
+    functions: NativeFunction[],
+    context: TypeContext
 ) -> CallSignatureResolution ![io] {
     let mut result_target = trimmed_target;
-    let mut function_entry -> NativeFunction? = null;
-    let mut llvm_return -> string = "i8*";
-    let mut expected_params -> string[] = [];
-    let mut is_trait_dispatch -> boolean = false;
-    let mut result_diagnostics -> string[] = [];
+    let mut function_entry: NativeFunction? = null;
+    let mut llvm_return: string = "i8*";
+    let mut expected_params: string[] = [];
+    let mut is_trait_dispatch: boolean = false;
+    let mut result_diagnostics: string[] = [];
     let mut result_helper = helper_descriptor;
 
     if substring(result_target, 0, 16) == "trait_dispatch__" {
@@ -782,8 +782,8 @@ fn resolve_call_signature(
         let sep_pos = find_last_index_of_char(after_prefix, "_");
         if sep_pos > 1 {
             // Look for "__" separator (double underscore)
-            let mut _td_split -> number = -1;
-            let mut _td_i -> number = 0;
+            let mut _td_split: number = -1;
+            let mut _td_i: number = 0;
             loop {
                 if _td_i >= after_prefix.length { break; }
                 if substring(after_prefix, _td_i, _td_i + 2) == "__" {
@@ -796,7 +796,7 @@ fn resolve_call_signature(
                 let method_name = substring(after_prefix, _td_split + 2, after_prefix.length);
                 let interface_info2 = find_interface_info_by_name(context, interface_name);
                 if interface_info2 != null {
-                    let mut sig_idx -> number = 0;
+                    let mut sig_idx: number = 0;
                     loop {
                         if sig_idx >= interface_info2.signatures.length {
                             break;
@@ -823,11 +823,11 @@ fn resolve_call_signature(
     }
 
     // File-based function resolution with mapped parameter types
-    let mut _file_fn_name -> string = "";
-    let mut _file_fn_return_type -> string = "";
-    let mut _file_fn_is_async -> boolean = false;
-    let mut _file_fn_param_types -> string[] = [];
-    let mut _file_fn_found -> boolean = false;
+    let mut _file_fn_name: string = "";
+    let mut _file_fn_return_type: string = "";
+    let mut _file_fn_is_async: boolean = false;
+    let mut _file_fn_param_types: string[] = [];
+    let mut _file_fn_found: boolean = false;
     let _trace_ccl = fs.exists("build/sailfin/.trace_lowering");
     if !is_trait_dispatch {
         if result_helper == null {
@@ -835,9 +835,9 @@ fn resolve_call_signature(
                 let _fl_count_str = fs.readFile("build/sailfin/.ctx_func_count");
                 let _fl_count = _parse_int_res(_fl_count_str);
                 let _fl_suffix_prefix = result_target + "__";
-                let mut _fl_suffix_idx -> number = -1;
-                let mut _fl_suffix_count -> number = 0;
-                let mut _fl_i -> number = 0;
+                let mut _fl_suffix_idx: number = -1;
+                let mut _fl_suffix_count: number = 0;
+                let mut _fl_i: number = 0;
                 loop {
                     if _fl_i >= _fl_count { break; }
                     let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_i);
@@ -850,12 +850,12 @@ fn resolve_call_signature(
                         _file_fn_is_async = _fl_async_str == "1";
                         let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
                         let _fl_pc = _parse_int_res(_fl_pc_str);
-                        let mut _fl_j -> number = 0;
+                        let mut _fl_j: number = 0;
                         loop {
                             if _fl_j >= _fl_pc { break; }
                             let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
                             let _fl_mapped = map_parameter_type(context, _fl_ptype);
-                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
+                            _file_fn_param_types.push(_fl_mapped);
                             _fl_j += 1;
                         }
                         _file_fn_found = true;
@@ -876,12 +876,12 @@ fn resolve_call_signature(
                         _file_fn_is_async = _fl_async_str == "1";
                         let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
                         let _fl_pc = _parse_int_res(_fl_pc_str);
-                        let mut _fl_j -> number = 0;
+                        let mut _fl_j: number = 0;
                         loop {
                             if _fl_j >= _fl_pc { break; }
                             let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
                             let _fl_mapped = map_parameter_type(context, _fl_ptype);
-                            _file_fn_param_types = _file_fn_param_types.concat([_fl_mapped]);
+                            _file_fn_param_types.push(_fl_mapped);
                             _fl_j += 1;
                         }
                         _file_fn_found = true;

@@ -24,12 +24,12 @@ enum TokType {
 }
 
 struct Tok {
-    kind -> TokType;
-    text -> string;
-    pos -> number;
+    kind: TokType;
+    text: string;
+    pos: number;
 }
 
-fn _is_alpha(ch -> string) -> boolean {
+fn _is_alpha(ch: string) -> boolean {
     if ch == "a" { return true; } if ch == "b" { return true; }
     if ch == "c" { return true; } if ch == "d" { return true; }
     if ch == "e" { return true; } if ch == "f" { return true; }
@@ -46,7 +46,7 @@ fn _is_alpha(ch -> string) -> boolean {
     return false;
 }
 
-fn _is_digit(ch -> string) -> boolean {
+fn _is_digit(ch: string) -> boolean {
     if ch == "0" { return true; } if ch == "1" { return true; }
     if ch == "2" { return true; } if ch == "3" { return true; }
     if ch == "4" { return true; } if ch == "5" { return true; }
@@ -55,7 +55,7 @@ fn _is_digit(ch -> string) -> boolean {
     return false;
 }
 
-fn _is_keyword(text -> string) -> boolean {
+fn _is_keyword(text: string) -> boolean {
     if text == "let" { return true; }
     if text == "fn" { return true; }
     if text == "if" { return true; }
@@ -64,9 +64,9 @@ fn _is_keyword(text -> string) -> boolean {
     return false;
 }
 
-fn _lex(input -> string) -> Tok[] {
-    let mut tokens -> Tok[] = [];
-    let mut i -> number = 0;
+fn _lex(input: string) -> Tok[] {
+    let mut tokens: Tok[] = [];
+    let mut i: number = 0;
     loop {
         if i >= input.length { break; }
         let ch = substring(input, i, i + 1);
@@ -174,25 +174,25 @@ enum NodeKind {
 }
 
 struct ASTNode {
-    kind -> NodeKind;
-    text -> string;
-    value -> number;
-    child_count -> number;
+    kind: NodeKind;
+    text: string;
+    value: number;
+    child_count: number;
 }
 
-fn _make_num_lit(val -> number) -> ASTNode {
+fn _make_num_lit(val: number) -> ASTNode {
     return ASTNode { kind: NodeKind.NumLit, text: "", value: val, child_count: 0 };
 }
 
-fn _make_var_ref(name -> string) -> ASTNode {
+fn _make_var_ref(name: string) -> ASTNode {
     return ASTNode { kind: NodeKind.VarRef, text: name, value: 0, child_count: 0 };
 }
 
-fn _make_binary_op(op -> string) -> ASTNode {
+fn _make_binary_op(op: string) -> ASTNode {
     return ASTNode { kind: NodeKind.BinaryOp, text: op, value: 0, child_count: 2 };
 }
 
-fn _make_let_binding(name -> string) -> ASTNode {
+fn _make_let_binding(name: string) -> ASTNode {
     return ASTNode { kind: NodeKind.LetBinding, text: name, value: 0, child_count: 1 };
 }
 
@@ -218,16 +218,16 @@ test "bootstrap: AST node construction" {
 // Phase 3: Code generation from AST
 // ---------------------------------------------------------------------------
 
-fn _codegen_node(node -> ASTNode, ssa_counter -> number) -> string {
+fn _codegen_node(node: ASTNode, ssa_counter: number) -> string {
     if node.kind == NodeKind.NumLit {
         let digits = "0123456789";
-        let mut result -> string = "";
-        let mut rem -> number = node.value;
+        let mut result: string = "";
+        let mut rem: number = node.value;
         if rem == 0 { return "0.0"; }
         loop {
             if rem <= 0 { break; }
-            let mut temp -> number = rem;
-            let mut q -> number = 0;
+            let mut temp: number = rem;
+            let mut q: number = 0;
             loop {
                 if temp < 10 { break; }
                 temp -= 10;
@@ -264,12 +264,12 @@ test "bootstrap: codegen variable reference" {
 // ---------------------------------------------------------------------------
 
 struct CompileResult {
-    success -> boolean;
-    output -> string;
-    error_count -> number;
+    success: boolean;
+    output: string;
+    error_count: number;
 }
 
-fn _compile_expression(input -> string) -> CompileResult {
+fn _compile_expression(input: string) -> CompileResult {
     let tokens = _lex(input);
     if tokens.length == 0 {
         return CompileResult { success: false, output: "", error_count: 1 };
@@ -289,7 +289,7 @@ fn _compile_expression(input -> string) -> CompileResult {
     if tokens.length == 3 && tokens[1].kind == TokType.Op && tokens[1].text == "+" {
         let left = tokens[0].text;
         let right = tokens[2].text;
-        let mut output -> string = "";
+        let mut output: string = "";
         output = output + "  %sum = fadd double " + left + ", " + right + "\n";
         output = output + "  ret double %sum";
         return CompileResult { success: true, output: output, error_count: 0 };
@@ -322,13 +322,13 @@ test "bootstrap: compile empty fails" {
 // ---------------------------------------------------------------------------
 
 struct Module {
-    name -> string;
-    source -> string;
-    compiled -> boolean;
-    output -> string;
+    name: string;
+    source: string;
+    compiled: boolean;
+    output: string;
 }
 
-fn _compile_module(mod -> Module) -> Module {
+fn _compile_module(mod: Module) -> Module {
     let result = _compile_expression(mod.source);
     return Module {
         name: mod.name,
@@ -338,9 +338,9 @@ fn _compile_module(mod -> Module) -> Module {
     };
 }
 
-fn _compile_all(modules -> Module[]) -> number {
-    let mut success_count -> number = 0;
-    let mut i -> number = 0;
+fn _compile_all(modules: Module[]) -> number {
+    let mut success_count: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= modules.length { break; }
         let compiled = _compile_module(modules[i]);
@@ -353,7 +353,7 @@ fn _compile_all(modules -> Module[]) -> number {
 }
 
 test "bootstrap: multi-module compilation" {
-    let mut modules -> Module[] = [];
+    let mut modules: Module[] = [];
     modules.push(Module { name: "mod_a", source: "42", compiled: false, output: "" });
     modules.push(Module { name: "mod_b", source: "a + b", compiled: false, output: "" });
     modules.push(Module { name: "mod_c", source: "100", compiled: false, output: "" });
@@ -363,7 +363,7 @@ test "bootstrap: multi-module compilation" {
 }
 
 test "bootstrap: module compilation with failures" {
-    let mut modules -> Module[] = [];
+    let mut modules: Module[] = [];
     modules.push(Module { name: "good", source: "42", compiled: false, output: "" });
     modules.push(Module { name: "bad", source: "", compiled: false, output: "" });
     modules.push(Module { name: "good2", source: "10", compiled: false, output: "" });
@@ -377,18 +377,18 @@ test "bootstrap: module compilation with failures" {
 // ---------------------------------------------------------------------------
 
 struct FunctionDef {
-    name -> string;
-    params -> string[];
-    param_types -> string[];
-    return_type -> string;
-    body_lines -> string[];
+    name: string;
+    params: string[];
+    param_types: string[];
+    return_type: string;
+    body_lines: string[];
 }
 
-fn _build_function_ir(func -> FunctionDef) -> string {
-    let mut output -> string = "";
+fn _build_function_ir(func: FunctionDef) -> string {
+    let mut output: string = "";
     // Header
     output = output + "define " + func.return_type + " @" + func.name + "(";
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= func.params.length { break; }
         if i > 0 { output = output + ", "; }
@@ -402,7 +402,7 @@ fn _build_function_ir(func -> FunctionDef) -> string {
     }
     output = output + ") {\nentry:\n";
     // Body
-    let mut j -> number = 0;
+    let mut j: number = 0;
     loop {
         if j >= func.body_lines.length { break; }
         output = output + "  " + func.body_lines[j] + "\n";
@@ -413,13 +413,13 @@ fn _build_function_ir(func -> FunctionDef) -> string {
 }
 
 test "bootstrap: function IR generation" {
-    let mut params -> string[] = [];
+    let mut params: string[] = [];
     params.push("x");
     params.push("y");
-    let mut types -> string[] = [];
+    let mut types: string[] = [];
     types.push("double");
     types.push("double");
-    let mut body -> string[] = [];
+    let mut body: string[] = [];
     body.push("%sum = fadd double %x, %y");
     body.push("ret double %sum");
 
@@ -439,9 +439,9 @@ test "bootstrap: function IR generation" {
 }
 
 test "bootstrap: function IR with empty body" {
-    let mut params -> string[] = [];
-    let mut types -> string[] = [];
-    let mut body -> string[] = [];
+    let mut params: string[] = [];
+    let mut types: string[] = [];
+    let mut body: string[] = [];
     body.push("ret void");
 
     let func = FunctionDef {

@@ -1,0 +1,140 @@
+// Regression tests for IR separator backward compatibility.
+// Cached IR may use "->" as the annotation separator while the type text
+// contains ":" (e.g. function types like fn(x: number) -> Response).
+// The parser must pick the earliest valid separator to avoid mis-splits.
+// See: docs/proposals/colon-type-annotations.md, Phase 5.
+
+// ── Minimal helpers ──────────────────────────────────────────────────
+
+fn _index_of(haystack: string, needle: string) -> number {
+    let mut i: number = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let slice = substring(haystack, i, i + needle.length);
+        if slice == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _trim(text: string) -> string {
+    let mut start: number = 0;
+    loop {
+        if start >= text.length { break; }
+        let ch = text[start];
+        let mut is_ws: boolean = false;
+        if ch == " " { is_ws = true; }
+        if ch == "\t" { is_ws = true; }
+        if ch == "\n" { is_ws = true; }
+        if !is_ws { break; }
+        start += 1;
+    }
+    let mut end: number = text.length;
+    loop {
+        if end <= start { break; }
+        let ch = text[end - 1];
+        let mut is_ws: boolean = false;
+        if ch == " " { is_ws = true; }
+        if ch == "\t" { is_ws = true; }
+        if ch == "\n" { is_ws = true; }
+        if !is_ws { break; }
+        end -= 1;
+    }
+    return substring(text, start, end);
+}
+
+// Mirrors the earliest-separator logic used in parse_struct_field_line,
+// parse_enum_variant_field, and the lowering recovery parsers.
+fn _pick_separator(text: string) -> number[] {
+    let colon_idx = _index_of(text, ": ");
+    let arrow_idx = _index_of(text, " -> ");
+    let mut sep_idx: number = -1;
+    let mut sep_len: number = 0;
+    if colon_idx >= 0 {
+        sep_idx = colon_idx;
+        sep_len = 2;
+    }
+    if arrow_idx >= 0 {
+        let mut use_arrow: boolean = false;
+        if sep_idx < 0 { use_arrow = true; }
+        if sep_idx >= 0 {
+            if arrow_idx < sep_idx { use_arrow = true; }
+        }
+        if use_arrow {
+            sep_idx = arrow_idx;
+            sep_len = 4;
+        }
+    }
+    return [sep_idx, sep_len];
+}
+
+fn _split_field(text: string) -> string[] {
+    let result = _pick_separator(text);
+    let sep_idx = result[0];
+    let sep_len = result[1];
+    if sep_idx < 0 { return ["", ""]; }
+    let name = _trim(substring(text, 0, sep_idx));
+    let type_text = _trim(substring(text, sep_idx + sep_len, text.length));
+    return [name, type_text];
+}
+
+// ── New format: colon separator ──────────────────────────────────────
+
+test "ir-parse: simple field with colon separator" {
+    let parts = _split_field("x: number");
+    assert parts[0] == "x";
+    assert parts[1] == "number";
+}
+
+test "ir-parse: field with colon and function type containing arrow" {
+    let parts = _split_field("handler: fn(req: Request) -> Response");
+    assert parts[0] == "handler";
+    assert parts[1] == "fn(req: Request) -> Response";
+}
+
+test "ir-parse: field with colon and nested colons in type" {
+    let parts = _split_field("cb: fn(x: number, y: string) -> boolean");
+    assert parts[0] == "cb";
+    assert parts[1] == "fn(x: number, y: string) -> boolean";
+}
+
+// ── Legacy format: arrow separator (cached IR backward compat) ──────
+
+test "ir-parse: simple field with legacy arrow separator" {
+    let parts = _split_field("x -> number");
+    assert parts[0] == "x";
+    assert parts[1] == "number";
+}
+
+test "ir-parse: legacy arrow with colon inside type text" {
+    // Cached IR: field uses -> but type contains : from source migration
+    let parts = _split_field("handler -> fn(req: Request) -> Response");
+    assert parts[0] == "handler";
+    assert parts[1] == "fn(req: Request) -> Response";
+}
+
+test "ir-parse: legacy arrow with multiple colons inside type" {
+    let parts = _split_field("cb -> fn(x: number, y: string) -> boolean");
+    assert parts[0] == "cb";
+    assert parts[1] == "fn(x: number, y: string) -> boolean";
+}
+
+// ── Edge cases ───────────────────────────────────────────────────────
+
+test "ir-parse: no separator returns empty" {
+    let parts = _split_field("noseparator");
+    assert parts[0] == "";
+    assert parts[1] == "";
+}
+
+test "ir-parse: parameter with colon separator" {
+    let parts = _split_field("name: string");
+    assert parts[0] == "name";
+    assert parts[1] == "string";
+}
+
+test "ir-parse: parameter with legacy arrow separator" {
+    let parts = _split_field("name -> string");
+    assert parts[0] == "name";
+    assert parts[1] == "string";
+}

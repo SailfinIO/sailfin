@@ -3,7 +3,7 @@
 // Provides secure hash functions for data integrity, checksums, and
 // content-addressable storage. No effects required — pure computation.
 
-fn sha256(data -> string) -> string {
+fn sha256(data: string) -> string {
     // Compute the SHA-256 hash of a string.
     // Returns the digest in the format "sha256:<64 hex chars>".
     //
@@ -14,7 +14,7 @@ fn sha256(data -> string) -> string {
     return crypto.sha256(data, data.length);
 }
 
-fn sha256_hex(data -> string) -> string {
+fn sha256_hex(data: string) -> string {
     // Compute the SHA-256 hash and return just the hex string (no prefix).
     let full = crypto.sha256(data, data.length);
     // Strip "sha256:" prefix (7 chars)
@@ -24,7 +24,7 @@ fn sha256_hex(data -> string) -> string {
     return full;
 }
 
-fn base64_encode(data -> string) -> string {
+fn base64_encode(data: string) -> string {
     // Encode a string to base64.
     // Delegates to the C runtime via the `base64.encode` runtime helper
     // (see compiler/src/llvm/runtime_helpers.sfn).

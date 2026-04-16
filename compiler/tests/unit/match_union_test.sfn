@@ -2,21 +2,21 @@
 // https://github.com/SailfinIO/sailfin/issues/50 — Pattern 4
 
 struct DivError {
-    message -> string;
+    message: string;
 }
 
-fn _safe_divide(a -> number, b -> number) -> number | DivError {
+fn _safe_divide(a: number, b: number) -> number | DivError {
     if b == 0 {
         return DivError { message: "division by zero" };
     }
     return a / b;
 }
 
-fn _describe_divide(a -> number, b -> number) -> string {
+fn _describe_divide(a: number, b: number) -> string {
     let result = _safe_divide(a, b);
     match result {
-        DivError { message } -> return "error: " + message,
-        _ -> return "ok",
+        DivError { message }: return "error: " + message,
+        _: return "ok",
     }
 }
 
@@ -29,21 +29,21 @@ test "match: union return type error path" {
 }
 
 struct NegativeError {
-    message -> string;
+    message: string;
 }
 
-fn _parse_positive(n -> number) -> number | NegativeError {
+fn _parse_positive(n: number) -> number | NegativeError {
     if n < 0 {
         return NegativeError { message: "negative" };
     }
     return n;
 }
 
-fn _describe_parse(n -> number) -> string {
+fn _describe_parse(n: number) -> string {
     let result = _parse_positive(n);
     match result {
-        NegativeError { message } -> return "error: " + message,
-        _ -> return "valid",
+        NegativeError { message }: return "error: " + message,
+        _: return "valid",
     }
 }
 

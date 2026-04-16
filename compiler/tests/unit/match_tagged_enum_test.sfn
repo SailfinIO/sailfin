@@ -2,14 +2,14 @@
 // https://github.com/SailfinIO/sailfin/issues/50 — Pattern 3
 
 enum Shape {
-    Circle { radius -> number },
-    Rectangle { width -> number, height -> number },
+    Circle { radius: number },
+    Rectangle { width: number, height: number },
 }
 
-fn _shape_area(shape -> Shape) -> number {
+fn _shape_area(shape: Shape) -> number {
     match shape {
-        Shape.Circle { radius } -> return 3 * radius * radius,
-        Shape.Rectangle { width, height } -> return width * height,
+        Shape.Circle { radius }: return 3 * radius * radius,
+        Shape.Rectangle { width, height }: return width * height,
     }
 }
 
@@ -36,14 +36,14 @@ test "match: tagged enum destructure Rectangle square" {
 // Second tagged enum to verify it's not a one-off
 
 enum Expr {
-    Literal { value -> number },
-    Negate { operand -> number },
+    Literal { value: number },
+    Negate { operand: number },
 }
 
-fn _eval_expr(e -> Expr) -> number {
+fn _eval_expr(e: Expr) -> number {
     match e {
-        Expr.Literal { value } -> return value,
-        Expr.Negate { operand } -> return 0 - operand,
+        Expr.Literal { value }: return value,
+        Expr.Negate { operand }: return 0 - operand,
     }
 }
 

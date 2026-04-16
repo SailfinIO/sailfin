@@ -2,26 +2,26 @@
 
 // -- Helpers copied from sfn/nn --
 
-fn _relu(x -> number) -> number {
+fn _relu(x: number) -> number {
     if x > 0 { return x; }
     return 0;
 }
 
-fn _leaky_relu(x -> number, alpha -> number) -> number {
+fn _leaky_relu(x: number, alpha: number) -> number {
     if x > 0 { return x; }
     return alpha * x;
 }
 
-fn _step(x -> number) -> number {
+fn _step(x: number) -> number {
     if x >= 0 { return 1; }
     return 0;
 }
 
-fn _normalize(input -> number[]) -> number[] {
+fn _normalize(input: number[]) -> number[] {
     if input.length == 0 { return []; }
-    let mut min_v -> number = input[0];
-    let mut max_v -> number = input[0];
-    let mut i -> number = 1;
+    let mut min_v: number = input[0];
+    let mut max_v: number = input[0];
+    let mut i: number = 1;
     loop {
         if i >= input.length { break; }
         if input[i] < min_v { min_v = input[i]; }
@@ -30,7 +30,7 @@ fn _normalize(input -> number[]) -> number[] {
     }
     let range = max_v - min_v;
     if range == 0 { return input; }
-    let mut out -> number[] = [];
+    let mut out: number[] = [];
     i = 0;
     loop {
         if i >= input.length { break; }
@@ -40,11 +40,11 @@ fn _normalize(input -> number[]) -> number[] {
     return out;
 }
 
-fn _argmax(input -> number[]) -> number {
+fn _argmax(input: number[]) -> number {
     if input.length == 0 { return -1; }
-    let mut best_idx -> number = 0;
-    let mut best_val -> number = input[0];
-    let mut i -> number = 1;
+    let mut best_idx: number = 0;
+    let mut best_val: number = input[0];
+    let mut i: number = 1;
     loop {
         if i >= input.length { break; }
         if input[i] > best_val {
@@ -56,11 +56,11 @@ fn _argmax(input -> number[]) -> number {
     return best_idx;
 }
 
-fn _argmin(input -> number[]) -> number {
+fn _argmin(input: number[]) -> number {
     if input.length == 0 { return -1; }
-    let mut best_idx -> number = 0;
-    let mut best_val -> number = input[0];
-    let mut i -> number = 1;
+    let mut best_idx: number = 0;
+    let mut best_val: number = input[0];
+    let mut i: number = 1;
     loop {
         if i >= input.length { break; }
         if input[i] < best_val {
@@ -72,9 +72,9 @@ fn _argmin(input -> number[]) -> number {
     return best_idx;
 }
 
-fn _one_hot(index -> number, size -> number) -> number[] {
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+fn _one_hot(index: number, size: number) -> number[] {
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= size { break; }
         if i == index {
@@ -87,7 +87,7 @@ fn _one_hot(index -> number, size -> number) -> number[] {
     return out;
 }
 
-fn _clip(x -> number, lo -> number, hi -> number) -> number {
+fn _clip(x: number, lo: number, hi: number) -> number {
     if x < lo { return lo; }
     if x > hi { return hi; }
     return x;
@@ -124,9 +124,9 @@ test "nn: normalize inline computation" {
     // Test normalize logic inline since array return from functions
     // can hit a known compiler issue with push-built arrays.
     let input = [0, 5, 10];
-    let mut min_v -> number = input[0];
-    let mut max_v -> number = input[0];
-    let mut i -> number = 1;
+    let mut min_v: number = input[0];
+    let mut max_v: number = input[0];
+    let mut i: number = 1;
     loop {
         if i >= input.length { break; }
         if input[i] < min_v { min_v = input[i]; }

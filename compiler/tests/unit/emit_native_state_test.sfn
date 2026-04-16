@@ -9,11 +9,11 @@
 
 // ── Local copies of functions under test ─────────────────────────────
 
-fn _ends_with(value -> string, suffix -> string) -> boolean {
+fn _ends_with(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
     if value.length < suffix.length { return false; }
     let start = value.length - suffix.length;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= suffix.length { break; }
         let _cmp_pos = start + index;
@@ -23,9 +23,9 @@ fn _ends_with(value -> string, suffix -> string) -> boolean {
     return true;
 }
 
-fn _quote_string(value -> string) -> string {
-    let mut result -> string = "\"";
-    let mut index -> number = 0;
+fn _quote_string(value: string) -> string {
+    let mut result: string = "\"";
+    let mut index: number = 0;
     loop {
         if index >= value.length { break; }
         let ch = value[index];
@@ -46,10 +46,10 @@ fn _quote_string(value -> string) -> string {
     return result;
 }
 
-fn _join(values -> string[], separator -> string) -> string {
+fn _join(values: string[], separator: string) -> string {
     if values.length == 0 { return ""; }
-    let mut result -> string = values[0];
-    let mut index -> number = 1;
+    let mut result: string = values[0];
+    let mut index: number = 1;
     loop {
         if index >= values.length { break; }
         result = result + separator + values[index];
@@ -58,8 +58,8 @@ fn _join(values -> string[], separator -> string) -> string {
     return result;
 }
 
-fn _contains(values -> string[], target -> string) -> boolean {
-    let mut index -> number = 0;
+fn _contains(values: string[], target: string) -> boolean {
+    let mut index: number = 0;
     loop {
         if index >= values.length { break; }
         if values[index] == target { return true; }
@@ -68,21 +68,21 @@ fn _contains(values -> string[], target -> string) -> boolean {
     return false;
 }
 
-fn _append_unique(values -> string[], value -> string) -> string[] {
+fn _append_unique(values: string[], value: string) -> string[] {
     if _contains(values, value) { return values; }
     values.push(value);
     return values;
 }
 
-fn _is_array_type(t -> string) -> boolean {
+fn _is_array_type(t: string) -> boolean {
     return _ends_with(t, "[]");
 }
 
-fn _is_optional(t -> string) -> boolean {
+fn _is_optional(t: string) -> boolean {
     return _ends_with(t, "?");
 }
 
-fn _escape_char(ch -> string) -> string {
+fn _escape_char(ch: string) -> string {
     if ch == "\"" { return "\\\""; }
     if ch == "\\" { return "\\\\"; }
     if ch == "\n" { return "\\n"; }
@@ -168,7 +168,7 @@ test "state: join single" {
 }
 
 test "state: join empty" {
-    let empty -> string[] = [];
+    let empty: string[] = [];
     assert _join(empty, ",") == "";
 }
 
@@ -187,7 +187,7 @@ test "state: contains not found" {
 }
 
 test "state: contains empty array" {
-    let empty -> string[] = [];
+    let empty: string[] = [];
     assert _contains(empty, "x") == false;
 }
 

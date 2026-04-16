@@ -72,7 +72,7 @@ fn empty_trait_metadata() -> TraitMetadata {
     return TraitMetadata { interfaces: [], implementations: [] };
 }
 
-fn sanitize_collection_length(value -> number, max -> number) -> number {
+fn sanitize_collection_length(value: number, max: number) -> number {
     if value != value {
         return 0;
     }
@@ -85,7 +85,7 @@ fn sanitize_collection_length(value -> number, max -> number) -> number {
     return value;
 }
 
-fn extend_native_structs(values -> NativeStruct[], extras -> NativeStruct[]) -> NativeStruct[] {
+fn extend_native_structs(values: NativeStruct[], extras: NativeStruct[]) -> NativeStruct[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -93,7 +93,7 @@ fn extend_native_structs(values -> NativeStruct[], extras -> NativeStruct[]) -> 
     if extras == null {
         return out;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= extras.length {
             break;
@@ -104,7 +104,7 @@ fn extend_native_structs(values -> NativeStruct[], extras -> NativeStruct[]) -> 
     return out;
 }
 
-fn extend_native_enums(values -> NativeEnum[], extras -> NativeEnum[]) -> NativeEnum[] {
+fn extend_native_enums(values: NativeEnum[], extras: NativeEnum[]) -> NativeEnum[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -112,7 +112,7 @@ fn extend_native_enums(values -> NativeEnum[], extras -> NativeEnum[]) -> Native
     if extras == null {
         return out;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= extras.length {
             break;
@@ -123,7 +123,7 @@ fn extend_native_enums(values -> NativeEnum[], extras -> NativeEnum[]) -> Native
     return out;
 }
 
-fn extend_native_interfaces(values -> NativeInterface[], extras -> NativeInterface[]) -> NativeInterface[] {
+fn extend_native_interfaces(values: NativeInterface[], extras: NativeInterface[]) -> NativeInterface[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -131,7 +131,7 @@ fn extend_native_interfaces(values -> NativeInterface[], extras -> NativeInterfa
     if extras == null {
         return out;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= extras.length {
             break;
@@ -142,7 +142,7 @@ fn extend_native_interfaces(values -> NativeInterface[], extras -> NativeInterfa
     return out;
 }
 
-fn extend_native_functions(values -> NativeFunction[], extras -> NativeFunction[]) -> NativeFunction[] {
+fn extend_native_functions(values: NativeFunction[], extras: NativeFunction[]) -> NativeFunction[] {
     let mut out = values;
     if out == null {
         out = [];
@@ -150,7 +150,7 @@ fn extend_native_functions(values -> NativeFunction[], extras -> NativeFunction[
     if extras == null {
         return out;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= extras.length {
             break;
@@ -161,7 +161,7 @@ fn extend_native_functions(values -> NativeFunction[], extras -> NativeFunction[
     return out;
 }
 
-fn is_test_module_slug(module_name -> string) -> boolean {
+fn is_test_module_slug(module_name: string) -> boolean {
     if module_name.length == 0 {
         return false;
     }
@@ -177,33 +177,54 @@ fn is_test_module_slug(module_name -> string) -> boolean {
     return false;
 }
 
-fn _escape_llvm_string_h(text -> string) -> string {
-    let mut out -> string = "";
-    let mut i -> number = 0;
+fn _escape_llvm_string_h(text: string) -> string {
+    // Chunked: O(K) memory where K = number of escape chars, instead of
+    // O(N^2) per-character `out = out + ch` accumulation.
+    let mut chunks: string[] = [];
+    let mut chunk_start: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         let ch = substring(text, i, i + 1);
+        let mut esc: string = "";
         if ch == "\"" {
-            out = out + "\\22";
+            esc = "\\22";
         } else if ch == "\\" {
-            out = out + "\\5C";
-        } else {
-            out = out + ch;
+            esc = "\\5C";
+        }
+        if esc.length > 0 {
+            if i > chunk_start {
+                chunks.push(substring(text, chunk_start, i));
+            }
+            chunks.push(esc);
+            chunk_start = i + 1;
         }
         i += 1;
+    }
+    if chunk_start < text.length {
+        chunks.push(substring(text, chunk_start, text.length));
+    }
+    if chunks.length == 0 { return ""; }
+    if chunks.length == 1 { return chunks[0]; }
+    let mut out: string = chunks[0];
+    let mut j: number = 1;
+    loop {
+        if j >= chunks.length { break; }
+        out = out + chunks[j];
+        j += 1;
     }
     return out;
 }
 
-fn _test_label_from_name_h(raw_name -> string) -> string {
+fn _test_label_from_name_h(raw_name: string) -> string {
     let mut name = raw_name;
     if name.length >= 5 {
         if substring(name, 0, 5) == "test:" {
             name = substring(name, 5, name.length);
         }
     }
-    let mut cleaned -> string = "";
-    let mut i -> number = 0;
+    let mut cleaned: string = "";
+    let mut i: number = 0;
     loop {
         if i >= name.length { break; }
         let ch = substring(name, i, i + 1);
@@ -217,11 +238,11 @@ fn _test_label_from_name_h(raw_name -> string) -> string {
     return cleaned;
 }
 
-fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug -> string, mangle_symbols -> boolean) -> string[] {
-    let mut lines -> string[] = [];
+fn render_test_harness_main_for_module(tests: NativeFunction[], module_slug: string, mangle_symbols: boolean) -> string[] {
+    let mut lines: string[] = [];
     let test_count = tests.length;
 
-    let mut _let264 -> boolean = false;
+    let mut _let264: boolean = false;
     if mangle_symbols {
         if !starts_with(module_slug, "runtime/") {
             _let264 = true;
@@ -231,7 +252,7 @@ fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug ->
     let module_suffix = sanitize_module_suffix(module_slug);
 
     // String constants for test names
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= test_count { break; }
         let label = _test_label_from_name_h(tests[index].name);
@@ -279,16 +300,16 @@ fn render_test_harness_main_for_module(tests -> NativeFunction[], module_slug ->
 }
 
 struct MangledModuleResult {
-    lines -> string[];
-    diagnostics -> string[];
+    lines: string[];
+    diagnostics: string[];
 }
 
 struct DeclareSignature {
-    return_type -> string;
-    param_types -> string[];
+    return_type: string;
+    param_types: string[];
 }
 
-fn is_llvm_symbol_char(ch -> string) -> boolean {
+fn is_llvm_symbol_char(ch: string) -> boolean {
     if ch.length == 0 {
         return false;
     }
@@ -320,12 +341,12 @@ fn is_llvm_symbol_char(ch -> string) -> boolean {
     return false;
 }
 
-fn sanitize_module_suffix(module_name -> string) -> string {
+fn sanitize_module_suffix(module_name: string) -> string {
     if module_name.length == 0 {
         return "module";
     }
-    let mut out -> string = "";
-    let mut index -> number = 0;
+    let mut out: string = "";
+    let mut index: number = 0;
     loop {
         if index >= module_name.length {
             break;
@@ -348,7 +369,7 @@ fn sanitize_module_suffix(module_name -> string) -> string {
     return out;
 }
 
-fn should_keep_unmangled_abi_symbol(symbol -> string) -> boolean {
+fn should_keep_unmangled_abi_symbol(symbol: string) -> boolean {
     if symbol == "native_cli_main" {
         return true;
     }
@@ -364,7 +385,7 @@ fn should_keep_unmangled_abi_symbol(symbol -> string) -> boolean {
     return false;
 }
 
-fn extract_module_name_from_native_text(native_text -> string) -> string {
+fn extract_module_name_from_native_text(native_text: string) -> string {
     if native_text.length == 0 {
         return "";
     }
@@ -380,7 +401,7 @@ fn extract_module_name_from_native_text(native_text -> string) -> string {
             break;
         }
         let ch = native_text[start];
-        let mut _if265 -> boolean = false;
+        let mut _if265: boolean = false;
         if ch == " " { _if265 = true; }
         if ch == "\t" { _if265 = true; }
         if _if265 {
@@ -404,15 +425,15 @@ fn extract_module_name_from_native_text(native_text -> string) -> string {
     return trim_text(substring(native_text, start, end));
 }
 
-fn collect_available_import_module_names(imported_native_texts -> string[]) -> string[] {
-    let mut names -> string[] = [];
-    let mut index -> number = 0;
+fn collect_available_import_module_names(imported_native_texts: string[]) -> string[] {
+    let mut names: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= imported_native_texts.length {
             break;
         }
         let text = imported_native_texts[index];
-        let mut _if266 -> boolean = false;
+        let mut _if266: boolean = false;
         if text == null { _if266 = true; }
         if text.length == 0 { _if266 = true; }
         if _if266 {
@@ -430,7 +451,7 @@ fn collect_available_import_module_names(imported_native_texts -> string[]) -> s
     return names;
 }
 
-fn resolve_import_provider_module_name(import_path -> string, current_module_slug -> string, available_module_names -> string[]) -> string {
+fn resolve_import_provider_module_name(import_path: string, current_module_slug: string, available_module_names: string[]) -> string {
     let base = resolve_import_module_slug_for_module(import_path, current_module_slug);
     if base.length == 0 {
         return base;
@@ -449,16 +470,16 @@ fn resolve_import_provider_module_name(import_path -> string, current_module_slu
     return base;
 }
 
-fn collect_defined_function_symbols(lines -> string[]) -> string[] {
-    let mut symbols -> string[] = [];
-    let mut index -> number = 0;
+fn collect_defined_function_symbols(lines: string[]) -> string[] {
+    let mut symbols: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= lines.length {
             break;
         }
         let trimmed = trim_text(lines[index]);
         if starts_with(trimmed, "define ") {
-            let mut at_index -> number = index_of(trimmed, "@");
+            let mut at_index: number = index_of(trimmed, "@");
             if at_index >= 0 {
                 let mut start = at_index + 1;
                 let mut end = start;
@@ -484,10 +505,10 @@ fn collect_defined_function_symbols(lines -> string[]) -> string[] {
     return symbols;
 }
 
-fn find_substitution_index(olds -> string[], news -> string[], symbol -> string) -> number {
-    let mut index -> number = 0;
+fn find_substitution_index(olds: string[], news: string[], symbol: string) -> number {
+    let mut index: number = 0;
     loop {
-        let mut _if267 -> boolean = false;
+        let mut _if267: boolean = false;
         if index >= olds.length { _if267 = true; }
         if index >= news.length { _if267 = true; }
         if _if267 {
@@ -501,16 +522,16 @@ fn find_substitution_index(olds -> string[], news -> string[], symbol -> string)
     return -1;
 }
 
-fn replace_symbol_refs_in_line(line -> string, olds -> string[], news -> string[]) -> string {
+fn replace_symbol_refs_in_line(line: string, olds: string[], news: string[]) -> string {
     if olds.length == 0 {
         return line;
     }
     if line.length == 0 {
         return line;
     }
-    let mut out -> string = "";
-    let mut index -> number = 0;
-    let mut in_string -> boolean = false;
+    let mut out: string = "";
+    let mut index: number = 0;
+    let mut in_string: boolean = false;
     loop {
         if index >= line.length {
             break;
@@ -569,12 +590,12 @@ fn replace_symbol_refs_in_line(line -> string, olds -> string[], news -> string[
     return out;
 }
 
-fn apply_symbol_substitutions(lines -> string[], olds -> string[], news -> string[]) -> string[] {
+fn apply_symbol_substitutions(lines: string[], olds: string[], news: string[]) -> string[] {
     if olds.length == 0 {
         return lines;
     }
     let mut out = lines;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= out.length {
             break;
@@ -585,7 +606,7 @@ fn apply_symbol_substitutions(lines -> string[], olds -> string[], news -> strin
     return out;
 }
 
-fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbol -> string) -> DeclareSignature? {
+fn _extract_signature_from_header(trimmed: string, prefix_len: number, symbol: string) -> DeclareSignature? {
     let at_index = index_of(trimmed, "@");
     if at_index < 0 {
         return null;
@@ -636,7 +657,7 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
     }
     let ret_type = trim_text(substring(trimmed, prefix_len, at_index));
     let params_text = trim_text(substring(trimmed, open_index + 1, close_index));
-    let mut _if269 -> boolean = false;
+    let mut _if269: boolean = false;
     if params_text.length == 0 { _if269 = true; }
     if params_text == "void" { _if269 = true; }
     if _if269 {
@@ -644,11 +665,11 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
     }
 
     // Split parameters on top-level commas only (struct types include commas).
-    let mut parts -> string[] = [];
-    let mut start_index -> number = 0;
-    let mut scan -> number = 0;
-    let mut curly_depth -> number = 0;
-    let mut angle_depth -> number = 0;
+    let mut parts: string[] = [];
+    let mut start_index: number = 0;
+    let mut scan: number = 0;
+    let mut curly_depth: number = 0;
+    let mut angle_depth: number = 0;
     loop {
         if scan >= params_text.length {
             break;
@@ -672,7 +693,7 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
                 if angle_depth == 0 {
                     let part = trim_text(substring(params_text, start_index, scan));
                     if part.length > 0 {
-                        parts = parts.concat([part]);
+                        parts.push(part);
                     }
                     start_index = scan + 1;
                 }
@@ -682,13 +703,13 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
     }
     let final_part = trim_text(substring(params_text, start_index, params_text.length));
     if final_part.length > 0 {
-        parts = parts.concat([final_part]);
+        parts.push(final_part);
     }
     // Strip parameter names from define-style params (e.g. "i8* %text" → "i8*").
     // Only strip the trailing `%name` when it appears at the top level (curly
     // depth 0) so that struct types like "{ %Decorator*, i64 }*" are preserved.
-    let mut stripped_parts -> string[] = [];
-    let mut pi -> number = 0;
+    let mut stripped_parts: string[] = [];
+    let mut pi: number = 0;
     loop {
         if pi >= parts.length {
             break;
@@ -696,8 +717,8 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
         let p = parts[pi];
         // Scan backwards to find the last '%' at curly depth 0.
         let mut scan_pos = p.length - 1;
-        let mut pct_at_top -> number = -1;
-        let mut depth -> number = 0;
+        let mut pct_at_top: number = -1;
+        let mut depth: number = 0;
         loop {
             if scan_pos < 0 {
                 break;
@@ -718,7 +739,7 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
             }
             scan_pos -= 1;
         }
-        let mut stripped -> string = p;
+        let mut stripped: string = p;
         if pct_at_top > 0 {
             let prev_char = substring(p, pct_at_top - 1, pct_at_top);
             if prev_char == " " {
@@ -735,7 +756,7 @@ fn _extract_signature_from_header(trimmed -> string, prefix_len -> number, symbo
 // "double (i8*)* %fn".  Finds the last '%' or '@' (start of the SSA/value
 // name) and returns everything before it, trimmed.  Falls back to the whole
 // token if no sigil is found (e.g. bare constants).
-fn _extract_type_from_arg(raw -> string) -> string {
+fn _extract_type_from_arg(raw: string) -> string {
     if raw.length == 0 {
         return raw;
     }
@@ -770,12 +791,12 @@ fn _extract_type_from_arg(raw -> string) -> string {
     return raw;
 }
 
-fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignature? {
+fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? {
     if symbol.length == 0 {
         return null;
     }
     // First pass: check declare lines.
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= lines.length {
             break;
@@ -833,11 +854,11 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
                         // For multi-token types like `double (i8*)*`, split on
                         // the last `%` or `@` (start of the SSA/value name)
                         // rather than the first space.
-                        let mut call_parts -> string[] = [];
-                        let mut ps -> number = 0;
-                        let mut sc -> number = 0;
-                        let mut cd -> number = 0;
-                        let mut pd -> number = 0;
+                        let mut call_parts: string[] = [];
+                        let mut ps: number = 0;
+                        let mut sc: number = 0;
+                        let mut cd: number = 0;
+                        let mut pd: number = 0;
                         loop {
                             if sc >= params_text.length {
                                 break;
@@ -872,24 +893,24 @@ fn find_declare_signature(lines -> string[], symbol -> string) -> DeclareSignatu
     return null;
 }
 
-fn render_function_shim(export_symbol -> string, target_symbol -> string, signature -> DeclareSignature) -> string[] {
-    let mut param_decls -> string[] = [];
-    let mut call_args -> string[] = [];
-    let mut idx -> number = 0;
+fn render_function_shim(export_symbol: string, target_symbol: string, signature: DeclareSignature) -> string[] {
+    let mut param_decls: string[] = [];
+    let mut call_args: string[] = [];
+    let mut idx: number = 0;
     loop {
         if idx >= signature.param_types.length {
             break;
         }
         let ty = trim_text(signature.param_types[idx]);
         if ty == "..." {
-            param_decls = param_decls.concat(["..."]);
+            param_decls.push("...");
             // Varargs shims are not supported; omit forwarding.
             idx += 1;
             continue;
         }
         let name = "%a" + number_to_string(idx);
-        param_decls = param_decls.concat([ty + " " + name]);
-        call_args = call_args.concat([ty + " " + name]);
+        param_decls.push(ty + " " + name);
+        call_args.push(ty + " " + name);
         idx += 1;
     }
 
@@ -912,18 +933,18 @@ fn render_function_shim(export_symbol -> string, target_symbol -> string, signat
     ];
 }
 
-fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[] {
+fn insert_before_llvm_footer(lines: string[], inserted: string[]) -> string[] {
     if inserted.length == 0 {
         return lines;
     }
     let mut footer_index = lines.length;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= lines.length {
             break;
         }
         let trimmed = trim_text(lines[index]);
-        let mut _if270 -> boolean = false;
+        let mut _if270: boolean = false;
         if starts_with(trimmed, "attributes ") { _if270 = true; }
         if starts_with(trimmed, "!") { _if270 = true; }
         if _if270 {
@@ -932,32 +953,32 @@ fn insert_before_llvm_footer(lines -> string[], inserted -> string[]) -> string[
         }
         index += 1;
     }
-    let mut out -> string[] = [];
-    let mut i -> number = 0;
+    let mut out: string[] = [];
+    let mut i: number = 0;
     loop {
         if i >= lines.length {
             break;
         }
         if i == footer_index {
-            let mut j -> number = 0;
+            let mut j: number = 0;
             loop {
                 if j >= inserted.length {
                     break;
                 }
-                out = out.concat([inserted[j]]);
+                out.push(inserted[j]);
                 j += 1;
             }
         }
-        out = out.concat([lines[i]]);
+        out.push(lines[i]);
         i += 1;
     }
     if footer_index == lines.length {
-        let mut j -> number = 0;
+        let mut j: number = 0;
         loop {
             if j >= inserted.length {
                 break;
             }
-            out = out.concat([inserted[j]]);
+            out.push(inserted[j]);
             j += 1;
         }
     }

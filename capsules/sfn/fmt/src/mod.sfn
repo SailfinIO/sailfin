@@ -2,10 +2,10 @@
 //
 // Provides common string operations. No effects required — pure functions.
 
-fn trim(text -> string) -> string {
+fn trim(text: string) -> string {
     // Remove leading and trailing whitespace.
-    let mut start -> number = 0;
-    let mut end -> number = text.length;
+    let mut start: number = 0;
+    let mut end: number = text.length;
     loop {
         if start >= end { break; }
         let ch = text[start];
@@ -23,30 +23,30 @@ fn trim(text -> string) -> string {
     return substring(text, start, end);
 }
 
-fn starts_with(text -> string, prefix -> string) -> boolean {
+fn starts_with(text: string, prefix: string) -> boolean {
     // Returns true if text begins with prefix.
     if prefix.length > text.length { return false; }
     return strings_equal(substring(text, 0, prefix.length), prefix);
 }
 
-fn ends_with(text -> string, suffix -> string) -> boolean {
+fn ends_with(text: string, suffix: string) -> boolean {
     // Returns true if text ends with suffix.
     if suffix.length > text.length { return false; }
     let start = text.length - suffix.length;
     return strings_equal(substring(text, start, text.length), suffix);
 }
 
-fn contains(text -> string, needle -> string) -> boolean {
+fn contains(text: string, needle: string) -> boolean {
     // Returns true if text contains needle.
     return find(text, needle, 0) >= 0;
 }
 
-fn find(text -> string, needle -> string, start -> number) -> number {
+fn find(text: string, needle: string, start: number) -> number {
     // Find the first occurrence of needle in text starting from start.
     // Returns -1 if not found.
     if needle.length == 0 { return start; }
     if needle.length > text.length { return -1; }
-    let mut i -> number = start;
+    let mut i: number = start;
     let limit = text.length - needle.length;
     loop {
         if i > limit { return -1; }
@@ -58,13 +58,13 @@ fn find(text -> string, needle -> string, start -> number) -> number {
     return -1;
 }
 
-fn split(text -> string, separator -> string) -> string[] {
+fn split(text: string, separator: string) -> string[] {
     // Split text by separator. Returns an array of substrings.
-    let mut parts -> string[] = [];
-    let mut start -> number = 0;
+    let mut parts: string[] = [];
+    let mut start: number = 0;
     if separator.length == 0 {
         // Split into individual characters
-        let mut i -> number = 0;
+        let mut i: number = 0;
         loop {
             if i >= text.length { break; }
             parts.push(substring(text, i, i + 1));
@@ -84,10 +84,10 @@ fn split(text -> string, separator -> string) -> string[] {
     return parts;
 }
 
-fn join(parts -> string[], separator -> string) -> string {
+fn join(parts: string[], separator: string) -> string {
     // Join an array of strings with a separator.
-    let mut out -> string = "";
-    let mut i -> number = 0;
+    let mut out: string = "";
+    let mut i: number = 0;
     loop {
         if i >= parts.length { break; }
         if i > 0 { out = out + separator; }
@@ -97,17 +97,17 @@ fn join(parts -> string[], separator -> string) -> string {
     return out;
 }
 
-fn replace(text -> string, old_str -> string, new_str -> string) -> string {
+fn replace(text: string, old_str: string, new_str: string) -> string {
     // Replace all occurrences of old_str with new_str.
     if old_str.length == 0 { return text; }
     let parts = split(text, old_str);
     return join(parts, new_str);
 }
 
-fn repeat(text -> string, count -> number) -> string {
+fn repeat(text: string, count: number) -> string {
     // Repeat text count times.
-    let mut out -> string = "";
-    let mut i -> number = 0;
+    let mut out: string = "";
+    let mut i: number = 0;
     loop {
         if i >= count { break; }
         out = out + text;
@@ -116,7 +116,7 @@ fn repeat(text -> string, count -> number) -> string {
     return out;
 }
 
-fn to_upper(ch -> string) -> string {
+fn to_upper(ch: string) -> string {
     // Convert a single ASCII character to uppercase.
     let code = char_code(ch);
     if code >= 97 && code <= 122 {
@@ -126,7 +126,7 @@ fn to_upper(ch -> string) -> string {
     return ch;
 }
 
-fn to_lower(ch -> string) -> string {
+fn to_lower(ch: string) -> string {
     // Convert a single ASCII character to lowercase.
     let code = char_code(ch);
     if code >= 65 && code <= 90 {
@@ -136,19 +136,19 @@ fn to_lower(ch -> string) -> string {
     return ch;
 }
 
-fn pad_left(text -> string, width -> number, pad_char -> string = " ") -> string {
+fn pad_left(text: string, width: number, pad_char: string = " ") -> string {
     if text.length >= width { return text; }
     return repeat(pad_char, width - text.length) + text;
 }
 
-fn pad_right(text -> string, width -> number, pad_char -> string = " ") -> string {
+fn pad_right(text: string, width: number, pad_char: string = " ") -> string {
     if text.length >= width { return text; }
     return text + repeat(pad_char, width - text.length);
 }
 
-fn trim_left(text -> string) -> string {
+fn trim_left(text: string) -> string {
     // Remove leading whitespace only.
-    let mut start -> number = 0;
+    let mut start: number = 0;
     loop {
         if start >= text.length { break; }
         let ch = text[start];
@@ -159,9 +159,9 @@ fn trim_left(text -> string) -> string {
     return substring(text, start, text.length);
 }
 
-fn trim_right(text -> string) -> string {
+fn trim_right(text: string) -> string {
     // Remove trailing whitespace only.
-    let mut end -> number = text.length;
+    let mut end: number = text.length;
     loop {
         if end <= 0 { break; }
         let ch = text[end - 1];
@@ -172,10 +172,10 @@ fn trim_right(text -> string) -> string {
     return substring(text, 0, end);
 }
 
-fn to_upper_all(text -> string) -> string {
+fn to_upper_all(text: string) -> string {
     // Convert all ASCII lowercase characters to uppercase.
-    let mut out -> string = "";
-    let mut i -> number = 0;
+    let mut out: string = "";
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         out = out + to_upper(text[i]);
@@ -184,10 +184,10 @@ fn to_upper_all(text -> string) -> string {
     return out;
 }
 
-fn to_lower_all(text -> string) -> string {
+fn to_lower_all(text: string) -> string {
     // Convert all ASCII uppercase characters to lowercase.
-    let mut out -> string = "";
-    let mut i -> number = 0;
+    let mut out: string = "";
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         out = out + to_lower(text[i]);
@@ -196,16 +196,16 @@ fn to_lower_all(text -> string) -> string {
     return out;
 }
 
-fn char_at_index(text -> string, index -> number) -> string {
+fn char_at_index(text: string, index: number) -> string {
     // Return the character at the given index, or empty string if out of bounds.
     if index < 0 || index >= text.length { return ""; }
     return substring(text, index, index + 1);
 }
 
-fn reverse(text -> string) -> string {
+fn reverse(text: string) -> string {
     // Reverse a string (byte-level, works for ASCII).
-    let mut out -> string = "";
-    let mut i -> number = text.length;
+    let mut out: string = "";
+    let mut i: number = text.length;
     loop {
         if i <= 0 { break; }
         i -= 1;
@@ -214,11 +214,11 @@ fn reverse(text -> string) -> string {
     return out;
 }
 
-fn count(text -> string, needle -> string) -> number {
+fn count(text: string, needle: string) -> number {
     // Count non-overlapping occurrences of needle in text.
     if needle.length == 0 { return 0; }
-    let mut total -> number = 0;
-    let mut pos -> number = 0;
+    let mut total: number = 0;
+    let mut pos: number = 0;
     loop {
         let idx = find(text, needle, pos);
         if idx < 0 { break; }
@@ -228,12 +228,12 @@ fn count(text -> string, needle -> string) -> number {
     return total;
 }
 
-fn is_empty(text -> string) -> boolean {
+fn is_empty(text: string) -> boolean {
     // Returns true if the string has zero length.
     return text.length == 0;
 }
 
-fn is_blank(text -> string) -> boolean {
+fn is_blank(text: string) -> boolean {
     // Returns true if the string is empty or contains only whitespace.
     return trim(text).length == 0;
 }

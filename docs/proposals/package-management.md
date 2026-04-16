@@ -10,8 +10,8 @@ metadata. The interface mirrors modern dependency managers but is designed for
 deterministic, AI-native projects.
 
 > Implementation note: The `sfn` CLI is in active development. Registry
-> workflows live in this proposal until the integration work in
-> `docs/roadmap.md` lands.
+> workflows live in this proposal until the integration work on the
+> [roadmap](https://sailfin.dev/roadmap) lands.
 
 ## Getting Started
 

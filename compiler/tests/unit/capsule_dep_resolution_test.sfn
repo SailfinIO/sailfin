@@ -1,0 +1,259 @@
+// Regression tests for compile-time capsule dependency resolution.
+// Tests the dependency lookup helper, capsule name resolution, and
+// import span collection for non-stdlib scoped imports.
+
+// -- String helpers --
+
+fn _str_eq(a: string, b: string) -> boolean {
+    return strings_equal(a, b);
+}
+
+fn _has_prefix(value: string, prefix: string) -> boolean {
+    if prefix.length > value.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= prefix.length { break; }
+        if value[i] != prefix[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _has_slash(name: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= name.length { break; }
+        if name[i] == "/" { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -- Duplicated resolution helpers for standalone testing --
+
+fn _lookup_dep_version(deps: string, name: string) -> string {
+    if deps.length == 0 { return ""; }
+    if name.length == 0 { return ""; }
+    let mut start: number = 0;
+    let len = deps.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if deps[end] == "\n" { break; }
+            end += 1;
+        }
+        let mut eq_pos: number = -1;
+        let mut ei: number = start;
+        loop {
+            if ei >= end { break; }
+            if deps[ei] == "=" {
+                eq_pos = ei;
+                break;
+            }
+            ei += 1;
+        }
+        if eq_pos > start {
+            let dep_name = substring(deps, start, eq_pos);
+            if strings_equal(dep_name, name) {
+                return substring(deps, eq_pos + 1, end);
+            }
+        }
+        start = end + 1;
+    }
+    return "";
+}
+
+fn _display_capsule_name(name: string) -> string {
+    if _has_slash(name) {
+        let mut slash: number = -1;
+        let mut i: number = 0;
+        loop {
+            if i >= name.length { break; }
+            if name[i] == "/" { slash = i; break; }
+            i += 1;
+        }
+        if slash >= 0 {
+            let scope = substring(name, 0, slash);
+            if _str_eq(scope, "sfn") {
+                return substring(name, slash + 1, name.length);
+            }
+        }
+    }
+    return name;
+}
+
+fn _resolve_cached_path(spec: string, deps: string, home: string) -> string {
+    if deps.length == 0 { return ""; }
+    if home.length == 0 { return ""; }
+    // Require exactly one slash (scope/name)
+    let mut slash_pos: number = -1;
+    let mut slash_count: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= spec.length { break; }
+        if spec[i] == "/" {
+            if slash_pos < 0 { slash_pos = i; }
+            slash_count += 1;
+        }
+        i += 1;
+    }
+    if slash_pos <= 0 { return ""; }
+    if slash_pos >= spec.length - 1 { return ""; }
+    if slash_count != 1 { return ""; }
+    let scope = substring(spec, 0, slash_pos);
+    let name = substring(spec, slash_pos + 1, spec.length);
+    // Reject traversal segments
+    if _str_eq(scope, ".") { return ""; }
+    if _str_eq(scope, "..") { return ""; }
+    if _str_eq(name, ".") { return ""; }
+    if _str_eq(name, "..") { return ""; }
+    // Exclude runtime/* (pre-built, not capsules)
+    if _has_prefix(spec, "runtime/") { return ""; }
+    let display_name = _display_capsule_name(spec);
+    let version = _lookup_dep_version(deps, display_name);
+    if version.length == 0 { return ""; }
+    // Reject traversal in version
+    if _str_eq(version, ".") { return ""; }
+    if _str_eq(version, "..") { return ""; }
+    if _has_slash(version) { return ""; }
+    return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
+}
+
+// -- Tests --
+
+test "dep lookup: single entry found" {
+    let deps = "cli=0.2.0";
+    assert _str_eq(_lookup_dep_version(deps, "cli"), "0.2.0");
+}
+
+test "dep lookup: single entry not found" {
+    let deps = "cli=0.2.0";
+    assert _str_eq(_lookup_dep_version(deps, "http"), "");
+}
+
+test "dep lookup: multiple entries" {
+    let deps = "cli=0.2.0\nhttp=0.3.1\nacme/router=2.0.0";
+    assert _str_eq(_lookup_dep_version(deps, "cli"), "0.2.0");
+    assert _str_eq(_lookup_dep_version(deps, "http"), "0.3.1");
+    assert _str_eq(_lookup_dep_version(deps, "acme/router"), "2.0.0");
+}
+
+test "dep lookup: empty deps returns empty" {
+    assert _str_eq(_lookup_dep_version("", "cli"), "");
+}
+
+test "dep lookup: empty name returns empty" {
+    assert _str_eq(_lookup_dep_version("cli=0.2.0", ""), "");
+}
+
+test "dep lookup: exact match only" {
+    let deps = "cli=0.2.0\nclient=1.0.0";
+    assert _str_eq(_lookup_dep_version(deps, "cli"), "0.2.0");
+    assert _str_eq(_lookup_dep_version(deps, "client"), "1.0.0");
+    assert _str_eq(_lookup_dep_version(deps, "cl"), "");
+}
+
+test "display name: sfn-scoped strips prefix" {
+    assert _str_eq(_display_capsule_name("sfn/cli"), "cli");
+    assert _str_eq(_display_capsule_name("sfn/http"), "http");
+}
+
+test "display name: third-party unchanged" {
+    assert _str_eq(_display_capsule_name("acme/router"), "acme/router");
+}
+
+test "display name: bare name unchanged" {
+    assert _str_eq(_display_capsule_name("cli"), "cli");
+}
+
+test "cached path: sfn-scoped capsule" {
+    let deps = "cli=0.2.0";
+    let path = _resolve_cached_path("sfn/cli", deps, "/home/user");
+    assert _str_eq(path, "/home/user/.sfn/cache/capsules/sfn/cli/0.2.0/src/mod.sfn");
+}
+
+test "cached path: third-party capsule" {
+    let deps = "acme/router=1.0.0";
+    let path = _resolve_cached_path("acme/router", deps, "/home/user");
+    assert _str_eq(path, "/home/user/.sfn/cache/capsules/acme/router/1.0.0/src/mod.sfn");
+}
+
+test "cached path: not in deps returns empty" {
+    let deps = "cli=0.2.0";
+    let path = _resolve_cached_path("sfn/missing", deps, "/home/user");
+    assert _str_eq(path, "");
+}
+
+test "cached path: empty deps returns empty" {
+    let path = _resolve_cached_path("sfn/cli", "", "/home/user");
+    assert _str_eq(path, "");
+}
+
+test "cached path: empty home returns empty" {
+    let deps = "cli=0.2.0";
+    let path = _resolve_cached_path("sfn/cli", deps, "");
+    assert _str_eq(path, "");
+}
+
+test "cached path: multiple deps correct lookup" {
+    let deps = "cli=0.2.0\nhttp=0.3.1\nacme/router=2.0.0";
+    let p1 = _resolve_cached_path("sfn/cli", deps, "/home/user");
+    let p2 = _resolve_cached_path("sfn/http", deps, "/home/user");
+    let p3 = _resolve_cached_path("acme/router", deps, "/home/user");
+    assert _str_eq(p1, "/home/user/.sfn/cache/capsules/sfn/cli/0.2.0/src/mod.sfn");
+    assert _str_eq(p2, "/home/user/.sfn/cache/capsules/sfn/http/0.3.1/src/mod.sfn");
+    assert _str_eq(p3, "/home/user/.sfn/cache/capsules/acme/router/2.0.0/src/mod.sfn");
+}
+
+test "import span: scoped non-relative import detected" {
+    // Verify that scoped import specs are recognized as potential capsule deps
+    let spec = "sfn/cli";
+    let is_scoped = _has_slash(spec);
+    let not_relative = !_has_prefix(spec, "./");
+    let not_parent = !_has_prefix(spec, "../");
+    assert is_scoped == true;
+    assert not_relative == true;
+    assert not_parent == true;
+}
+
+test "import span: relative imports not treated as capsule" {
+    assert _has_prefix("./local", "./") == true;
+    assert _has_prefix("../parent", "../") == true;
+    // These should NOT be treated as capsule deps
+}
+
+test "import span: runtime/* imports not treated as capsule" {
+    // runtime/prelude and other runtime/* imports must pass through
+    // to the linker, NOT be treated as capsule dependencies.
+    let spec = "runtime/prelude";
+    assert _has_prefix(spec, "runtime/") == true;
+    // The capsule span collector must skip runtime/* imports
+}
+
+test "cached path: rejects path traversal in spec" {
+    let deps = "../evil=1.0.0";
+    // spec with ".." should not resolve
+    let p1 = _resolve_cached_path("../evil", deps, "/home/user");
+    assert _str_eq(p1, "");
+    // spec with extra slashes should not resolve
+    let p2 = _resolve_cached_path("a/b/c", "b/c=1.0.0", "/home/user");
+    assert _str_eq(p2, "");
+}
+
+test "cached path: rejects empty scope or name" {
+    // slash at start (empty scope)
+    let p1 = _resolve_cached_path("/name", "name=1.0.0", "/home/user");
+    assert _str_eq(p1, "");
+    // slash at end (empty name)
+    let p2 = _resolve_cached_path("scope/", "=1.0.0", "/home/user");
+    assert _str_eq(p2, "");
+}
+
+test "cached path: runtime prefix excluded" {
+    let deps = "prelude=1.0.0";
+    let path = _resolve_cached_path("runtime/prelude", deps, "/home/user");
+    // runtime/* should never resolve as a cached capsule
+    assert _str_eq(path, "");
+}

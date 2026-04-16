@@ -1,10 +1,10 @@
 // examples/basics/functions.sfn
 
-fn add(x -> number, y -> number) -> number {
+fn add(x: number, y: number) -> number {
   return x + y;
 }
 
-fn greet(name -> string = "Sailfin") -> string {
+fn greet(name: string = "Sailfin") -> string {
   return "Hello, {{name}}!";
 }
 

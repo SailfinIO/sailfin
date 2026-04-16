@@ -31,14 +31,14 @@ export {
     parse_enum_payload_layout,
 };
 
-fn parse_decimal_number(text -> string) -> NumberParseResult {
+fn parse_decimal_number(text: string) -> NumberParseResult {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return NumberParseResult { success: false, value: 0 };
     }
-    let mut value -> number = 0;
-    let mut index -> number = 0;
-    let mut negative -> boolean = false;
+    let mut value: number = 0;
+    let mut index: number = 0;
+    let mut negative: boolean = false;
     if trimmed[0] == "-" {
         negative = true;
         index = 1;
@@ -72,20 +72,20 @@ fn parse_decimal_number(text -> string) -> NumberParseResult {
     return NumberParseResult { success: true, value: value };
 }
 
-fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
+fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
     let tokens = split_whitespace(trim_text(text));
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if tokens.length == 0 {
         diagnostics.push("struct layout header missing entries");
         return StructLayoutHeaderParse { success: false, name: "", size: 0, align: 0, diagnostics: diagnostics };
     }
-    let mut name_found -> boolean = false;
-    let mut size_found -> boolean = false;
-    let mut align_found -> boolean = false;
-    let mut name_value -> string = "";
-    let mut size_value -> number = 0;
-    let mut align_value -> number = 0;
-    let mut index -> number = 0;
+    let mut name_found: boolean = false;
+    let mut size_found: boolean = false;
+    let mut align_found: boolean = false;
+    let mut name_value: string = "";
+    let mut size_value: number = 0;
+    let mut align_value: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= tokens.length {
             break;
@@ -123,7 +123,7 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
     if !align_found {
         diagnostics.push("struct layout header missing align entry");
     }
-    let mut _let374 -> boolean = false;
+    let mut _let374: boolean = false;
     if size_found {
         if align_found {
             if diagnostics.length == 0 {
@@ -135,9 +135,9 @@ fn parse_struct_layout_header(text -> string) -> StructLayoutHeaderParse {
     return StructLayoutHeaderParse { success: success, name: name_value, size: size_value, align: align_value, diagnostics: diagnostics };
 }
 
-fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLayoutFieldParse {
+fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutFieldParse {
     let trimmed = trim_text(text);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 };
     if trimmed.length == 0 {
         diagnostics.push("struct " + struct_name + " layout field missing content");
@@ -153,14 +153,14 @@ fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLay
         diagnostics.push("struct " + struct_name + " layout field missing name");
         return StructLayoutFieldParse { success: false, field: default_field, diagnostics: diagnostics };
     }
-    let mut type_text -> string = "";
-    let mut offset_found -> boolean = false;
-    let mut size_found -> boolean = false;
-    let mut align_found -> boolean = false;
-    let mut offset_value -> number = 0;
-    let mut size_value -> number = 0;
-    let mut align_value -> number = 0;
-    let mut index -> number = 1;
+    let mut type_text: string = "";
+    let mut offset_found: boolean = false;
+    let mut size_found: boolean = false;
+    let mut align_found: boolean = false;
+    let mut offset_value: number = 0;
+    let mut size_value: number = 0;
+    let mut align_value: number = 0;
+    let mut index: number = 1;
     loop {
         if index >= tokens.length {
             break;
@@ -212,7 +212,7 @@ fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLay
     if !align_found {
         diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing align entry");
     }
-    let mut _let375 -> boolean = false;
+    let mut _let375: boolean = false;
     if type_text.length > 0 {
         if offset_found {
             if size_found {
@@ -229,25 +229,25 @@ fn parse_struct_layout_field(text -> string, struct_name -> string) -> StructLay
     return StructLayoutFieldParse { success: success, field: field, diagnostics: diagnostics };
 }
 
-fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
+fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
     let tokens = split_whitespace(trim_text(text));
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     if tokens.length == 0 {
         diagnostics.push("enum layout header missing entries");
         return EnumLayoutHeaderParse { success: false, name: "", size: 0, align: 0, tag_type: "", tag_size: 0, tag_align: 0, diagnostics: diagnostics };
     }
-    let mut name_found -> boolean = false;
-    let mut size_found -> boolean = false;
-    let mut align_found -> boolean = false;
-    let mut name_value -> string = "";
-    let mut tag_type -> string = "";
-    let mut tag_size_found -> boolean = false;
-    let mut tag_align_found -> boolean = false;
-    let mut size_value -> number = 0;
-    let mut align_value -> number = 0;
-    let mut tag_size_value -> number = 0;
-    let mut tag_align_value -> number = 0;
-    let mut index -> number = 0;
+    let mut name_found: boolean = false;
+    let mut size_found: boolean = false;
+    let mut align_found: boolean = false;
+    let mut name_value: string = "";
+    let mut tag_type: string = "";
+    let mut tag_size_found: boolean = false;
+    let mut tag_align_found: boolean = false;
+    let mut size_value: number = 0;
+    let mut align_value: number = 0;
+    let mut tag_size_value: number = 0;
+    let mut tag_align_value: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= tokens.length {
             break;
@@ -314,7 +314,7 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
     if !tag_align_found {
         diagnostics.push("enum layout header missing tag_align entry");
     }
-    let mut _let376 -> boolean = false;
+    let mut _let376: boolean = false;
     if size_found {
         if align_found {
             if tag_type.length > 0 {
@@ -341,9 +341,9 @@ fn parse_enum_layout_header(text -> string) -> EnumLayoutHeaderParse {
     };
 }
 
-fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutVariantParse {
+fn parse_enum_variant_layout(text: string, enum_name: string) -> EnumLayoutVariantParse {
     let trimmed = trim_text(text);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     let default_variant = NativeEnumVariantLayout { name: "", tag: 0, offset: 0, size: 0, align: 0, fields: [] };
     if trimmed.length == 0 {
         diagnostics.push("enum " + enum_name + " layout variant missing content");
@@ -359,15 +359,15 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
         diagnostics.push("enum " + enum_name + " layout variant missing name");
         return EnumLayoutVariantParse { success: false, variant: default_variant, diagnostics: diagnostics };
     }
-    let mut tag_found -> boolean = false;
-    let mut offset_found -> boolean = false;
-    let mut size_found -> boolean = false;
-    let mut align_found -> boolean = false;
-    let mut tag_value -> number = 0;
-    let mut offset_value -> number = 0;
-    let mut size_value -> number = 0;
-    let mut align_value -> number = 0;
-    let mut index -> number = 1;
+    let mut tag_found: boolean = false;
+    let mut offset_found: boolean = false;
+    let mut size_found: boolean = false;
+    let mut align_found: boolean = false;
+    let mut tag_value: number = 0;
+    let mut offset_value: number = 0;
+    let mut size_value: number = 0;
+    let mut align_value: number = 0;
+    let mut index: number = 1;
     loop {
         if index >= tokens.length {
             break;
@@ -426,7 +426,7 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
     if !align_found {
         diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing align entry");
     }
-    let mut _let377 -> boolean = false;
+    let mut _let377: boolean = false;
     if tag_found {
         if offset_found {
             if size_found {
@@ -443,9 +443,9 @@ fn parse_enum_variant_layout(text -> string, enum_name -> string) -> EnumLayoutV
     return EnumLayoutVariantParse { success: success, variant: variant, diagnostics: diagnostics };
 }
 
-fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutPayloadParse {
+fn parse_enum_payload_layout(text: string, enum_name: string) -> EnumLayoutPayloadParse {
     let trimmed = trim_text(text);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     let default_field = NativeStructLayoutField { name: "", type_annotation: "", offset: 0, size: 0, align: 0 };
     if trimmed.length == 0 {
         diagnostics.push("enum " + enum_name + " layout payload missing content");
@@ -459,7 +459,7 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
     let identifier = tokens[0];
     let dot_index = index_of(identifier, ".");
     let _dot_next = dot_index + 1;
-    let mut _if378 -> boolean = false;
+    let mut _if378: boolean = false;
     if dot_index <= 0 { _if378 = true; }
     if _dot_next >= identifier.length { _if378 = true; }
     if _if378 {
@@ -468,14 +468,14 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
     }
     let variant_name = substring(identifier, 0, dot_index);
     let field_name = substring(identifier, _dot_next, identifier.length);
-    let mut type_text -> string = "";
-    let mut offset_found -> boolean = false;
-    let mut size_found -> boolean = false;
-    let mut align_found -> boolean = false;
-    let mut offset_value -> number = 0;
-    let mut size_value -> number = 0;
-    let mut align_value -> number = 0;
-    let mut index -> number = 1;
+    let mut type_text: string = "";
+    let mut offset_found: boolean = false;
+    let mut size_found: boolean = false;
+    let mut align_found: boolean = false;
+    let mut offset_value: number = 0;
+    let mut size_value: number = 0;
+    let mut align_value: number = 0;
+    let mut index: number = 1;
     loop {
         if index >= tokens.length {
             break;
@@ -527,7 +527,7 @@ fn parse_enum_payload_layout(text -> string, enum_name -> string) -> EnumLayoutP
     if !align_found {
         diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing align entry");
     }
-    let mut _let379 -> boolean = false;
+    let mut _let379: boolean = false;
     if type_text.length > 0 {
         if offset_found {
             if size_found {

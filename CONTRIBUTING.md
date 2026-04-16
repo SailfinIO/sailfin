@@ -10,14 +10,11 @@ repository.
   navigation map.
 - Review `docs/status.md` to understand which features ship today vs what is
   planned.
-- Check `docs/roadmap.md` for current tasks and sequencing.
+- Check the [roadmap](https://sailfin.dev/roadmap) for current tasks and sequencing.
 - Familiarise yourself with `docs/style-guide.md` for Sailfin module layout,
   file naming, and doc/test mirroring conventions.
-- Ensure you have the `sailfin` Conda environment:
-
-  ```bash
-  make env
-  ```
+- Ensure you have `bash` and the LLVM toolchain available, including `clang`
+  and `llvm-link` (no Conda or Python required).
 
 ## 2. Coding Workflow
 
@@ -50,7 +47,7 @@ When behaviour, coverage, or roadmap status changes:
 1. Update `docs/status.md` first — keep the feature matrix authoritative.
 2. Sync `docs/spec.md` (bootstrap reference) and note new design work in the
    Part B preview if needed.
-3. Adjust `docs/roadmap.md` for sequencing changes.
+3. Adjust the [roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`) for sequencing changes.
 4. Touch the relevant folder README (e.g., `compiler/README.md`,
    `runtime/README.md`, `examples/README.md`) so local guidance stays accurate.
 5. For future-facing designs, add or amend proposals under `docs/proposals/`.
@@ -97,7 +94,7 @@ Reviewers will check for:
 ## 7. Questions & Help
 
 For questions about design direction or roadmap priorities, start with
-`docs/status.md` and `docs/roadmap.md`. If additional context is required, open
+`docs/status.md` and the [roadmap](https://sailfin.dev/roadmap). If additional context is required, open
 an issue referencing the relevant section or proposal.
 
 Welcome aboard, and thanks for advancing Sailfin! \*\*\*!

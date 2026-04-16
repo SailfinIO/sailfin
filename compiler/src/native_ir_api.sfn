@@ -44,12 +44,12 @@ import {
     parse_enum_payload_layout,
 } from "./native_ir_utils_layout";
 
-fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
+fn select_text_artifact(artifacts: NativeArtifact[]) -> NativeArtifact? {
     if artifacts == null {
         return null;
     }
-    let mut max_items -> number = artifacts.length;
-    let mut _if356 -> boolean = false;
+    let mut max_items: number = artifacts.length;
+    let mut _if356: boolean = false;
     if max_items != max_items { _if356 = true; }
     if max_items < 0 { _if356 = true; }
     if _if356 {
@@ -58,7 +58,7 @@ fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
     if max_items > 10000 {
         max_items = 10000;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= max_items {
             break;
@@ -72,12 +72,12 @@ fn select_text_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
     return null;
 }
 
-fn select_layout_manifest_artifact(artifacts -> NativeArtifact[]) -> NativeArtifact? {
+fn select_layout_manifest_artifact(artifacts: NativeArtifact[]) -> NativeArtifact? {
     if artifacts == null {
         return null;
     }
-    let mut max_items -> number = artifacts.length;
-    let mut _if357 -> boolean = false;
+    let mut max_items: number = artifacts.length;
+    let mut _if357: boolean = false;
     if max_items != max_items { _if357 = true; }
     if max_items < 0 { _if357 = true; }
     if _if357 {
@@ -86,7 +86,7 @@ fn select_layout_manifest_artifact(artifacts -> NativeArtifact[]) -> NativeArtif
     if max_items > 10000 {
         max_items = 10000;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= max_items {
             break;
@@ -100,11 +100,11 @@ fn select_layout_manifest_artifact(artifacts -> NativeArtifact[]) -> NativeArtif
     return null;
 }
 
-fn parse_native_artifact(text -> string) -> ParseNativeResult {
+fn parse_native_artifact(text: string) -> ParseNativeResult {
     return parse_native_artifact_impl(text, true, true);
 }
 
-fn parse_native_function_count_from_text(text -> string) -> number {
+fn parse_native_function_count_from_text(text: string) -> number {
     let parsed = parse_native_artifact_impl(text, false, false);
     if parsed.functions == null {
         return -1;
@@ -112,7 +112,7 @@ fn parse_native_function_count_from_text(text -> string) -> number {
     return parsed.functions.length;
 }
 
-fn parse_native_functions_from_text(text -> string) -> NativeFunction[] {
+fn parse_native_functions_from_text(text: string) -> NativeFunction[] {
     let parsed = parse_native_artifact_impl(text, true, true);
     if parsed.functions == null {
         return [];
@@ -120,7 +120,7 @@ fn parse_native_functions_from_text(text -> string) -> NativeFunction[] {
     return parsed.functions;
 }
 
-fn parse_native_structs_from_text(text -> string) -> NativeStruct[] {
+fn parse_native_structs_from_text(text: string) -> NativeStruct[] {
     let parsed = parse_native_artifact_impl(text, true, true);
     if parsed.structs == null {
         return [];
@@ -128,7 +128,7 @@ fn parse_native_structs_from_text(text -> string) -> NativeStruct[] {
     return parsed.structs;
 }
 
-fn parse_native_imports_from_text(text -> string) -> NativeImport[] {
+fn parse_native_imports_from_text(text: string) -> NativeImport[] {
     let parsed = parse_native_artifact_impl(text, true, true);
     if parsed.imports == null {
         return [];
@@ -136,7 +136,7 @@ fn parse_native_imports_from_text(text -> string) -> NativeImport[] {
     return parsed.imports;
 }
 
-fn parse_native_interfaces_from_text(text -> string) -> NativeInterface[] {
+fn parse_native_interfaces_from_text(text: string) -> NativeInterface[] {
     let parsed = parse_native_artifact_impl(text, true, true);
     if parsed.interfaces == null {
         return [];
@@ -144,7 +144,7 @@ fn parse_native_interfaces_from_text(text -> string) -> NativeInterface[] {
     return parsed.interfaces;
 }
 
-fn parse_native_enums_from_text(text -> string) -> NativeEnum[] {
+fn parse_native_enums_from_text(text: string) -> NativeEnum[] {
     let parsed = parse_native_artifact_impl(text, true, true);
     if parsed.enums == null {
         return [];
@@ -152,7 +152,7 @@ fn parse_native_enums_from_text(text -> string) -> NativeEnum[] {
     return parsed.enums;
 }
 
-fn parse_native_bindings_from_text(text -> string) -> NativeBinding[] {
+fn parse_native_bindings_from_text(text: string) -> NativeBinding[] {
     let parsed = parse_native_artifact_impl(text, true, true);
     if parsed.bindings == null {
         return [];
@@ -160,7 +160,7 @@ fn parse_native_bindings_from_text(text -> string) -> NativeBinding[] {
     return parsed.bindings;
 }
 
-fn parse_native_diagnostics_from_text(text -> string) -> string[] {
+fn parse_native_diagnostics_from_text(text: string) -> string[] {
     let parsed = parse_native_artifact_impl(text, true, true);
     if parsed.diagnostics == null {
         return [];
@@ -168,7 +168,7 @@ fn parse_native_diagnostics_from_text(text -> string) -> string[] {
     return parsed.diagnostics;
 }
 
-fn parse_native_structs_for_import(text -> string) -> NativeStruct[] {
+fn parse_native_structs_for_import(text: string) -> NativeStruct[] {
     let parsed = parse_native_artifact_impl(text, false, false);
     if parsed.structs == null {
         return [];
@@ -176,7 +176,7 @@ fn parse_native_structs_for_import(text -> string) -> NativeStruct[] {
     return parsed.structs;
 }
 
-fn parse_native_imports_for_import(text -> string) -> NativeImport[] {
+fn parse_native_imports_for_import(text: string) -> NativeImport[] {
     let parsed = parse_native_artifact_impl(text, false, false);
     if parsed.imports == null {
         return [];
@@ -184,7 +184,7 @@ fn parse_native_imports_for_import(text -> string) -> NativeImport[] {
     return parsed.imports;
 }
 
-fn parse_native_interfaces_for_import(text -> string) -> NativeInterface[] {
+fn parse_native_interfaces_for_import(text: string) -> NativeInterface[] {
     let parsed = parse_native_artifact_impl(text, false, false);
     if parsed.interfaces == null {
         return [];
@@ -192,7 +192,7 @@ fn parse_native_interfaces_for_import(text -> string) -> NativeInterface[] {
     return parsed.interfaces;
 }
 
-fn parse_native_enums_for_import(text -> string) -> NativeEnum[] {
+fn parse_native_enums_for_import(text: string) -> NativeEnum[] {
     let parsed = parse_native_artifact_impl(text, false, false);
     if parsed.enums == null {
         return [];
@@ -200,7 +200,7 @@ fn parse_native_enums_for_import(text -> string) -> NativeEnum[] {
     return parsed.enums;
 }
 
-fn parse_native_functions_for_import(text -> string) -> NativeFunction[] {
+fn parse_native_functions_for_import(text: string) -> NativeFunction[] {
     let parsed = parse_native_artifact_impl(text, false, false);
     if parsed.functions == null {
         return [];
@@ -208,7 +208,7 @@ fn parse_native_functions_for_import(text -> string) -> NativeFunction[] {
     return parsed.functions;
 }
 
-fn parse_native_artifact_for_import_context(text -> string) -> ParseNativeResult {
+fn parse_native_artifact_for_import_context(text: string) -> ParseNativeResult {
     return parse_native_artifact_impl(text, false, false);
 }
 
@@ -233,12 +233,12 @@ export {
     parse_layout_manifest,
 };
 
-fn parse_layout_manifest(text -> string) -> LayoutManifest {
+fn parse_layout_manifest(text: string) -> LayoutManifest {
     let lines = split_lines(text);
-    let mut diagnostics -> string[] = [];
-    let mut structs -> NativeStruct[] = [];
-    let mut enums -> NativeEnum[] = [];
-    let mut index -> number = 0;
+    let mut diagnostics: string[] = [];
+    let mut structs: NativeStruct[] = [];
+    let mut enums: NativeEnum[] = [];
+    let mut index: number = 0;
 
     loop {
         if index >= lines.length {
@@ -261,7 +261,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
 
         if starts_with(line, ".layout field ") {
             let tail = trim_text(strip_prefix(line, ".layout field "));
-            let mut is_struct_header -> boolean = false;
+            let mut is_struct_header: boolean = false;
             if starts_with(tail, "struct") {
                 if tail.length == 6 {
                     is_struct_header = true;
@@ -282,15 +282,15 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
             let body = strip_prefix(line, ".layout ");
             let struct_header = strip_prefix(body, "struct ");
             let header_result = parse_struct_layout_header(struct_header);
-            let mut _ci -> number = 0;
+            let mut _ci: number = 0;
             loop {
                 if _ci >= header_result.diagnostics.length { break; }
-                diagnostics = diagnostics.concat([header_result.diagnostics[_ci]]);
+                diagnostics.push(header_result.diagnostics[_ci]);
                 _ci += 1;
             }
 
             if header_result.success {
-                let mut fields -> NativeStructLayoutField[] = [];
+                let mut fields: NativeStructLayoutField[] = [];
                 let struct_name = header_result.name;
 
                 index += 1;
@@ -305,7 +305,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         break;
                     }
 
-                    let mut _if387 -> boolean = false;
+                    let mut _if387: boolean = false;
                     if starts_with(field_line, ".layout struct ") { _if387 = true; }
                     if starts_with(field_line, ".layout enum ") { _if387 = true; }
                     if _if387 {
@@ -317,7 +317,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                     }
 
                     let tail = trim_text(strip_prefix(field_line, ".layout field "));
-                    let mut is_struct_header -> boolean = false;
+                    let mut is_struct_header: boolean = false;
                     if starts_with(tail, "struct") {
                         if tail.length == 6 {
                             is_struct_header = true;
@@ -333,15 +333,15 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                     }
 
                     let field_result = parse_struct_layout_field(tail, struct_name);
-                    let mut _ci -> number = 0;
+                    let mut _ci: number = 0;
                     loop {
                         if _ci >= field_result.diagnostics.length { break; }
-                        diagnostics = diagnostics.concat([field_result.diagnostics[_ci]]);
+                        diagnostics.push(field_result.diagnostics[_ci]);
                         _ci += 1;
                     }
 
                     if field_result.success {
-                        fields = fields.concat([field_result.field]);
+                        fields.push(field_result.field);
                     }
                     index += 1;
                 }
@@ -357,7 +357,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         fields: fields,
                     },
                 };
-                structs = structs.concat([struct_def]);
+                structs.push(struct_def);
             }
             continue;
         }
@@ -366,15 +366,15 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
             let body = strip_prefix(line, ".layout ");
             let enum_header = strip_prefix(body, "enum ");
             let header_result = parse_enum_layout_header(enum_header);
-            let mut _ci -> number = 0;
+            let mut _ci: number = 0;
             loop {
                 if _ci >= header_result.diagnostics.length { break; }
-                diagnostics = diagnostics.concat([header_result.diagnostics[_ci]]);
+                diagnostics.push(header_result.diagnostics[_ci]);
                 _ci += 1;
             }
 
             if header_result.success {
-                let mut variants -> NativeEnumVariantLayout[] = [];
+                let mut variants: NativeEnumVariantLayout[] = [];
                 let enum_name = header_result.name;
                 index += 1;
 
@@ -401,24 +401,24 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                             continue;
                         }
                         let variant_result = parse_enum_variant_layout(variant_text, enum_name);
-                        let mut _ci -> number = 0;
+                        let mut _ci: number = 0;
                         loop {
                             if _ci >= variant_result.diagnostics.length { break; }
-                            diagnostics = diagnostics.concat([variant_result.diagnostics[_ci]]);
+                            diagnostics.push(variant_result.diagnostics[_ci]);
                             _ci += 1;
                         }
 
                         if variant_result.success {
-                            variants = variants.concat([variant_result.variant]);
+                            variants.push(variant_result.variant);
                         }
                     } else if starts_with(variant_line, ".layout payload ") {
                         let body = strip_prefix(variant_line, ".layout ");
                         let payload_text = strip_prefix(body, "payload ");
                         let payload_result = parse_enum_payload_layout(payload_text, enum_name);
-                        let mut _ci -> number = 0;
+                        let mut _ci: number = 0;
                         loop {
                             if _ci >= payload_result.diagnostics.length { break; }
-                            diagnostics = diagnostics.concat([payload_result.diagnostics[_ci]]);
+                            diagnostics.push(payload_result.diagnostics[_ci]);
                             _ci += 1;
                         }
 
@@ -426,8 +426,8 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                             if variants.length > 0 {
                                 let last_index = variants.length - 1;
                                 let last_variant = variants[last_index];
-                                let mut updated_fields -> NativeStructLayoutField[] = last_variant.fields;
-                                updated_fields = updated_fields.concat([payload_result.field]);
+                                let mut updated_fields: NativeStructLayoutField[] = last_variant.fields;
+                                updated_fields.push(payload_result.field);
                                 variants[last_index] = NativeEnumVariantLayout {
                                     name: last_variant.name,
                                     tag: last_variant.tag,
@@ -454,7 +454,7 @@ fn parse_layout_manifest(text -> string) -> LayoutManifest {
                         variants: variants,
                     },
                 };
-                enums = enums.concat([enum_def]);
+                enums.push(enum_def);
             } else {
                 index += 1;
             }

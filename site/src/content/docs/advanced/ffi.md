@@ -9,7 +9,7 @@ Sailfin's safety system — effect tracking, ownership, borrow checking — oper
 
 This page documents Sailfin's FFI system as specified in §6.1.5 of the language specification.
 
-**Bootstrap status:** The parser accepts `unsafe`, `extern`, and raw pointer syntax (`*T`, `*mut T`). The current compiler does not enforce unsafe semantics at runtime. The native compiler will enforce all rules described on this page. Code using these constructs should be written to the specification now, as the enforcement is actively being implemented.
+**Current status:** The parser accepts `unsafe`, `extern`, and raw pointer syntax (`*T`, `*mut T`). The compiler does not yet enforce unsafe semantics at runtime. Full enforcement of all rules described on this page is actively being implemented and will land before the 1.0 release. Code using these constructs should be written to the specification now.
 
 ## Overview
 
@@ -69,7 +69,7 @@ unsafe extern fn memset(dest -> *u8, val -> i32, n -> usize) -> *u8;
 unsafe extern fn strlen(s -> *u8) -> usize;
 ```
 
-Note the parameter syntax: `name -> Type` (with `->`) is the convention for struct fields and extern function parameters in Sailfin, matching the rest of the language's named-parameter style.
+Note the parameter syntax: extern function parameters use `name -> Type` (with `->`) to match the struct field declaration style. Regular function parameters use `name: Type` (with `:`). Both forms are accepted by the parser in all positions.
 
 Key properties of `unsafe extern fn` declarations:
 

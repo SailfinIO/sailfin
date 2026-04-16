@@ -5,9 +5,9 @@ interface Driveable {
 }
 
 struct Car {
-    brand -> string;
+    brand: string;
 
-    fn new(brand -> string) -> Car {
+    fn new(brand: string) -> Car {
         return Car { brand: brand };
     }
 
@@ -17,9 +17,9 @@ struct Car {
 }
 
 struct Bike {
-    brand -> string;
+    brand: string;
 
-    fn new(brand -> string) -> Bike {
+    fn new(brand: string) -> Bike {
         return Bike { brand: brand };
     }
 
@@ -29,8 +29,8 @@ struct Bike {
 }
 
 fn main() ![io] {
-    let vehicle1 -> Driveable = Car.new("Subaru");
-    let vehicle2 -> Driveable = Bike.new("Yamaha");
+    let vehicle1: Driveable = Car.new("Subaru");
+    let vehicle2: Driveable = Bike.new("Yamaha");
 
     print(vehicle1.drive());
     print(vehicle2.drive());

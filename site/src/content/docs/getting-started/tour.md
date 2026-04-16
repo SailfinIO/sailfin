@@ -1,11 +1,11 @@
 ---
 title: Tour of Sailfin
-description: A guided introduction to every major Sailfin feature, from Hello World to AI constructs.
+description: A guided introduction to every major Sailfin feature, from Hello World to effect types.
 section: getting-started
 order: 4
 ---
 
-This tour walks through Sailfin's major features with short, working examples. By the end you will have a clear picture of what makes Sailfin different and how its features — effects, ownership, pattern matching, and AI constructs — fit together into a coherent language.
+This tour walks through Sailfin's major features with short, working examples. By the end you will have a clear picture of what makes Sailfin different and how its features — effect types, capability security, pattern matching, and structured concurrency — fit together into a coherent language.
 
 Each section stands alone. If you already know what `let` does, skip to the part that is new to you.
 
@@ -530,86 +530,27 @@ These types encode resource management and security properties directly in the t
 
 ---
 
-## AI Constructs (Design Preview)
+## AI Integration (Future — Library-Based)
 
-Sailfin treats AI as a first-class language concern, not a library. Model bindings, prompts, pipelines, and tools have dedicated syntax.
+Sailfin gates AI operations through the effect system using the `![model]` effect, but AI constructs are being migrated from language-level syntax to the `sfn/ai` library capsule. This keeps the language grammar stable while letting AI integration iterate as a library.
 
-### Why first-class?
+### The `![model]` effect
 
-When AI is a library, the compiler cannot reason about it. When it is a language feature, the compiler can enforce that:
-
-- Every model call declares `![model]`
-- Prompts are well-formed at compile time
-- Generation cards (provenance metadata) are automatically attached to every call
-- Cost, latency, and seed are tracked structurally, not as ad-hoc logs
-
-### Model bindings
-
-Declare a model binding at the module level:
+Any function that interacts with an AI model must declare the `![model]` effect. This is enforced at compile time today:
 
 ```sfn
-model claude = anthropic:"claude-sonnet-4-20250514";
-model gpt4o = openai:"gpt-4o";
-```
-
-### Prompt blocks
-
-A `prompt` block composes a structured request to a model:
-
-```sfn
-fn summarize(text: string) -> string ![model] {
-    let result = prompt claude ![model] {
-        system "You are a concise summarizer. Respond in two to three sentences."
-        user "Summarize the following:\n\n{{text}}"
-    };
+fn summarize(text: string) -> string ![model, io] {
+    let result = ai.complete("Summarize: " + text);
+    print(result);
     return result;
-}
-```
-
-String interpolation works inside prompt blocks. The `![model]` annotation on the `prompt` expression matches the one on the enclosing function — it is explicit about which capability is being used.
-
-### Pipelines
-
-A pipeline chains steps into a reusable unit, each step declaring its own effects:
-
-```sfn
-pipeline analyze_feedback {
-    step classify(input: string) -> Category ![model] {
-        return prompt claude ![model] {
-            system "Classify this feedback as: positive, negative, or neutral."
-            user "{{input}}"
-        };
-    }
-
-    step extract_themes(input: string) -> Array<string> ![model] {
-        return prompt claude ![model] {
-            system "Extract the key themes from this feedback as a list."
-            user "{{input}}"
-        };
-    }
-}
-```
-
-### Tools
-
-Tools expose Sailfin functions to models for function calling:
-
-```sfn
-tool lookup_user {
-    description "Look up a user by their unique identifier"
-    param id: string "The user ID to look up"
-
-    fn execute(id: string) -> User ![io] {
-        return db.find_user(id);
-    }
 }
 ```
 
 ### Current status
 
-> **Important**: `model`, `prompt`, `pipeline`, and `tool` blocks are **parsed and syntactically validated** by the current compiler, but **model execution is not yet implemented**. Calls to `prompt` blocks do not send requests. This is planned for after the 1.0 release.
+> **Important**: The compiler currently parses `model`, `prompt`, `pipeline`, and `tool` blocks as language syntax and emits them to `.sfn-asm` IR, but **no runtime execution exists**. These constructs are being migrated to the `sfn/ai` capsule for post-1.0 delivery. The `![model]` effect annotation — the capability gate — remains a language-level feature and is enforced today.
 >
-> The syntax is stable. Writing code with these constructs today will compile, and the code will work once execution support lands.
+> See the [roadmap](/roadmap) for the timeline on `sfn/ai` capsule delivery.
 
 ---
 
@@ -623,7 +564,7 @@ You have seen every major feature of the language. Here is where to go deeper:
 - **[The Effect System](/docs/learn/effects)** — The complete capability model
 - **[Ownership & Borrowing](/docs/learn/ownership)** — Memory safety without a garbage collector
 - **[Error Handling](/docs/learn/error-handling)** — Result types, try/catch, and error design
-- **[AI Constructs](/docs/learn/ai-constructs)** — Models, prompts, pipelines, and tools
+- **[AI Integration](/docs/learn/ai-constructs)** — The `![model]` effect and the `sfn/ai` capsule (post-1.0)
 - **[Testing](/docs/learn/testing)** — Built-in testing, test organization, and patterns
 - **[Effective Sailfin](/docs/learn/effective-sailfin)** — Idioms and best practices
 - **[Language Spec](/docs/reference/spec)** — Complete formal reference

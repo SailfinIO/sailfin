@@ -7,18 +7,18 @@
 // ---------------------------------------------------------------------------
 
 struct Buffer {
-    lines -> string[];
-    indent -> number;
+    lines: string[];
+    indent: number;
 }
 
 fn _new_buffer() -> Buffer {
-    let mut lines -> string[] = [];
+    let mut lines: string[] = [];
     return Buffer { lines: lines, indent: 0 };
 }
 
-fn _buffer_indent_str(buf -> Buffer) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _buffer_indent_str(buf: Buffer) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= buf.indent { break; }
         result = result + "  ";
@@ -27,10 +27,10 @@ fn _buffer_indent_str(buf -> Buffer) -> string {
     return result;
 }
 
-fn _buffer_push(buf -> Buffer, line -> string) -> Buffer {
+fn _buffer_push(buf: Buffer, line: string) -> Buffer {
     let prefix = _buffer_indent_str(buf);
-    let mut new_lines -> string[] = [];
-    let mut i -> number = 0;
+    let mut new_lines: string[] = [];
+    let mut i: number = 0;
     loop {
         if i >= buf.lines.length { break; }
         new_lines.push(buf.lines[i]);
@@ -40,19 +40,19 @@ fn _buffer_push(buf -> Buffer, line -> string) -> Buffer {
     return Buffer { lines: new_lines, indent: buf.indent };
 }
 
-fn _buffer_increase_indent(buf -> Buffer) -> Buffer {
+fn _buffer_increase_indent(buf: Buffer) -> Buffer {
     return Buffer { lines: buf.lines, indent: buf.indent + 1 };
 }
 
-fn _buffer_decrease_indent(buf -> Buffer) -> Buffer {
+fn _buffer_decrease_indent(buf: Buffer) -> Buffer {
     let new_indent = buf.indent - 1;
     if new_indent < 0 { return Buffer { lines: buf.lines, indent: 0 }; }
     return Buffer { lines: buf.lines, indent: new_indent };
 }
 
-fn _buffer_to_string(buf -> Buffer) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _buffer_to_string(buf: Buffer) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= buf.lines.length { break; }
         result = result + buf.lines[i] + "\n";
@@ -83,27 +83,27 @@ test "ir_patterns: buffer accumulation" {
 // ---------------------------------------------------------------------------
 
 struct SSAContext {
-    counter -> number;
-    prefix -> string;
+    counter: number;
+    prefix: string;
 }
 
-fn _new_ssa(prefix -> string) -> SSAContext {
+fn _new_ssa(prefix: string) -> SSAContext {
     return SSAContext { counter: 0, prefix: prefix };
 }
 
-fn _next_name(ctx -> SSAContext) -> string {
+fn _next_name(ctx: SSAContext) -> string {
     let digits = "0123456789";
     let n = ctx.counter;
     if n < 10 {
         return "%" + ctx.prefix + substring(digits, n, n + 1);
     }
     // For larger numbers, build multi-digit string
-    let mut result -> string = "";
-    let mut remaining -> number = n;
+    let mut result: string = "";
+    let mut remaining: number = n;
     loop {
         if remaining <= 0 { break; }
-        let mut temp -> number = remaining;
-        let mut q -> number = 0;
+        let mut temp: number = remaining;
+        let mut q: number = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -115,7 +115,7 @@ fn _next_name(ctx -> SSAContext) -> string {
     return "%" + ctx.prefix + result;
 }
 
-fn _advance_ssa(ctx -> SSAContext) -> SSAContext {
+fn _advance_ssa(ctx: SSAContext) -> SSAContext {
     return SSAContext { counter: ctx.counter + 1, prefix: ctx.prefix };
 }
 
@@ -148,18 +148,18 @@ test "ir_patterns: SSA counter isolation" {
 // ---------------------------------------------------------------------------
 
 struct BlockManager {
-    labels -> string[];
-    count -> number;
+    labels: string[];
+    count: number;
 }
 
 fn _new_block_mgr() -> BlockManager {
-    let mut labels -> string[] = [];
+    let mut labels: string[] = [];
     return BlockManager { labels: labels, count: 0 };
 }
 
-fn _create_block(mgr -> BlockManager, name -> string) -> BlockManager {
-    let mut new_labels -> string[] = [];
-    let mut i -> number = 0;
+fn _create_block(mgr: BlockManager, name: string) -> BlockManager {
+    let mut new_labels: string[] = [];
+    let mut i: number = 0;
     loop {
         if i >= mgr.count { break; }
         new_labels.push(mgr.labels[i]);
@@ -169,17 +169,17 @@ fn _create_block(mgr -> BlockManager, name -> string) -> BlockManager {
     return BlockManager { labels: new_labels, count: mgr.count + 1 };
 }
 
-fn _get_block(mgr -> BlockManager, index -> number) -> string {
+fn _get_block(mgr: BlockManager, index: number) -> string {
     if index < 0 { return ""; }
     if index >= mgr.count { return ""; }
     return mgr.labels[index];
 }
 
-fn _emit_branch(from_block -> string, to_block -> string) -> string {
+fn _emit_branch(from_block: string, to_block: string) -> string {
     return "  br label %" + to_block;
 }
 
-fn _emit_cond_branch(cond -> string, true_block -> string, false_block -> string) -> string {
+fn _emit_cond_branch(cond: string, true_block: string, false_block: string) -> string {
     return "  br i1 " + cond + ", label %" + true_block + ", label %" + false_block;
 }
 
@@ -211,13 +211,13 @@ test "ir_patterns: conditional branch emission" {
 // ---------------------------------------------------------------------------
 
 struct TypeEntry {
-    name -> string;
-    llvm_type -> string;
-    is_pointer -> boolean;
-    field_count -> number;
+    name: string;
+    llvm_type: string;
+    is_pointer: boolean;
+    field_count: number;
 }
 
-fn _make_type_entry(name -> string, llvm_type -> string, is_ptr -> boolean, fields -> number) -> TypeEntry {
+fn _make_type_entry(name: string, llvm_type: string, is_ptr: boolean, fields: number) -> TypeEntry {
     return TypeEntry {
         name: name,
         llvm_type: llvm_type,
@@ -226,8 +226,8 @@ fn _make_type_entry(name -> string, llvm_type -> string, is_ptr -> boolean, fiel
     };
 }
 
-fn _find_type(entries -> TypeEntry[], name -> string) -> TypeEntry {
-    let mut i -> number = 0;
+fn _find_type(entries: TypeEntry[], name: string) -> TypeEntry {
+    let mut i: number = 0;
     loop {
         if i >= entries.length { break; }
         if entries[i].name == name {
@@ -239,7 +239,7 @@ fn _find_type(entries -> TypeEntry[], name -> string) -> TypeEntry {
 }
 
 test "ir_patterns: type context lookup" {
-    let mut types -> TypeEntry[] = [];
+    let mut types: TypeEntry[] = [];
     types.push(_make_type_entry("number", "double", false, 0));
     types.push(_make_type_entry("string", "i8*", true, 0));
     types.push(_make_type_entry("Point", "%struct.Point", true, 2));
@@ -266,17 +266,17 @@ test "ir_patterns: type context lookup" {
 // ---------------------------------------------------------------------------
 
 struct Instruction {
-    opcode -> string;
-    operand1 -> string;
-    operand2 -> string;
-    result -> string;
+    opcode: string;
+    operand1: string;
+    operand2: string;
+    result: string;
 }
 
-fn _make_instr(op -> string, a -> string, b -> string, r -> string) -> Instruction {
+fn _make_instr(op: string, a: string, b: string, r: string) -> Instruction {
     return Instruction { opcode: op, operand1: a, operand2: b, result: r };
 }
 
-fn _emit_instruction(instr -> Instruction) -> string {
+fn _emit_instruction(instr: Instruction) -> string {
     if instr.opcode == "add" {
         return "  " + instr.result + " = add double " + instr.operand1 + ", " + instr.operand2;
     }
@@ -292,9 +292,9 @@ fn _emit_instruction(instr -> Instruction) -> string {
     return "  ; unknown: " + instr.opcode;
 }
 
-fn _emit_program(instructions -> Instruction[]) -> string {
-    let mut output -> string = "";
-    let mut i -> number = 0;
+fn _emit_program(instructions: Instruction[]) -> string {
+    let mut output: string = "";
+    let mut i: number = 0;
     loop {
         if i >= instructions.length { break; }
         output = output + _emit_instruction(instructions[i]) + "\n";
@@ -309,7 +309,7 @@ test "ir_patterns: instruction emission" {
 }
 
 test "ir_patterns: program emission" {
-    let mut instrs -> Instruction[] = [];
+    let mut instrs: Instruction[] = [];
     instrs.push(_make_instr("add", "%x", "%y", "%sum"));
     instrs.push(_make_instr("mul", "%sum", "2.0", "%doubled"));
     instrs.push(_make_instr("ret", "%doubled", "", ""));
@@ -327,10 +327,10 @@ test "ir_patterns: program emission" {
 // Function signature building (parameter list construction)
 // ---------------------------------------------------------------------------
 
-fn _build_param_list(names -> string[], types -> string[]) -> string {
-    let mut result -> string = "";
+fn _build_param_list(names: string[], types: string[]) -> string {
+    let mut result: string = "";
     let count = names.length;
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= count { break; }
         if i > 0 {
@@ -347,11 +347,11 @@ fn _build_param_list(names -> string[], types -> string[]) -> string {
 }
 
 test "ir_patterns: param list building" {
-    let mut names -> string[] = [];
+    let mut names: string[] = [];
     names.push("x");
     names.push("y");
     names.push("z");
-    let mut types -> string[] = [];
+    let mut types: string[] = [];
     types.push("double");
     types.push("i8*");
     types.push("i1");
@@ -361,16 +361,16 @@ test "ir_patterns: param list building" {
 }
 
 test "ir_patterns: param list single" {
-    let mut names -> string[] = [];
+    let mut names: string[] = [];
     names.push("self");
-    let mut types -> string[] = [];
+    let mut types: string[] = [];
     types.push("i8*");
     assert _build_param_list(names, types) == "i8* %self";
 }
 
 test "ir_patterns: param list empty" {
-    let mut names -> string[] = [];
-    let mut types -> string[] = [];
+    let mut names: string[] = [];
+    let mut types: string[] = [];
     assert _build_param_list(names, types) == "";
 }
 
@@ -378,11 +378,11 @@ test "ir_patterns: param list empty" {
 // Complete function generation end-to-end
 // ---------------------------------------------------------------------------
 
-fn _generate_function(name -> string, params -> string, ret_type -> string, body_lines -> string[]) -> string {
-    let mut output -> string = "";
+fn _generate_function(name: string, params: string, ret_type: string, body_lines: string[]) -> string {
+    let mut output: string = "";
     output = output + "define " + ret_type + " @" + name + "(" + params + ") {\n";
     output = output + "entry:\n";
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= body_lines.length { break; }
         output = output + "  " + body_lines[i] + "\n";
@@ -393,7 +393,7 @@ fn _generate_function(name -> string, params -> string, ret_type -> string, body
 }
 
 test "ir_patterns: complete function generation" {
-    let mut body -> string[] = [];
+    let mut body: string[] = [];
     body.push("%sum = add double %a, %b");
     body.push("ret double %sum");
 

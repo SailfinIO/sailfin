@@ -51,7 +51,7 @@ When tests fail:
 
 1. Read the full error output — Sailfin diagnostics include source spans and fix-it hints
 2. Identify which pipeline stage failed (parse error, type error, effect error, IR error, LLVM error)
-3. For LLVM errors, check if this is a known fixup category (see `SEED_STABILIZATION.md`)
+3. For LLVM errors, check the relevant lowering code in `compiler/src/llvm/`
 4. For self-hosting failures (`make compile`), this is critical — the compiler must always compile itself
 5. Report: which test failed, the error message, the likely root cause, and a suggested fix
 

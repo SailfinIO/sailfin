@@ -50,7 +50,7 @@ For changes to `compiler/src/llvm/`:
 - `CamelCase` for types/models/capsules, `snake_case` for functions/locals
 - Effects declared minimally and ordered by impact
 - No pipeline operator (`|>`) — use function calls
-- No changes to `scripts/selfhost_native.py` to work around compiler bugs
+- No changes to `scripts/build.sh` to work around compiler bugs — fix the compiler source
 - No unnecessary refactoring of surrounding code
 
 ### 7. Test Coverage

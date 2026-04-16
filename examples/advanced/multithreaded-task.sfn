@@ -2,7 +2,7 @@
 
 import { sleep } from "time";
 
-fn computeTask(id -> number) -> string ![clock, io] {
+fn computeTask(id: number) -> string ![clock, io] {
     print("Task {{id}} started");
     sleep(1000);
     return "Result from Task {{id}}";

@@ -4,8 +4,8 @@
 //   - Missing/duplicate definitions (~12 fixups)
 
 struct Counter {
-    value -> number;
-    name -> string;
+    value: number;
+    name: string;
 
     fn increment(self) -> Counter {
         return Counter { value: self.value + 1, name: self.name };
@@ -15,7 +15,7 @@ struct Counter {
         return Counter { value: self.value - 1, name: self.name };
     }
 
-    fn add(self, n -> number) -> Counter {
+    fn add(self, n: number) -> Counter {
         return Counter { value: self.value + n, name: self.name };
     }
 
@@ -78,14 +78,14 @@ test "struct_methods: original unchanged by method" {
 // ---------------------------------------------------------------------------
 
 struct Range {
-    start -> number;
-    end -> number;
+    start: number;
+    end: number;
 
     fn length(self) -> number {
         return self.end - self.start;
     }
 
-    fn contains(self, value -> number) -> boolean {
+    fn contains(self, value: number) -> boolean {
         if value >= self.start {
             if value < self.end {
                 return true;
@@ -94,17 +94,17 @@ struct Range {
         return false;
     }
 
-    fn overlaps(self, other -> Range) -> boolean {
+    fn overlaps(self, other: Range) -> boolean {
         if self.start >= other.end { return false; }
         if other.start >= self.end { return false; }
         return true;
     }
 
-    fn shift(self, offset -> number) -> Range {
+    fn shift(self, offset: number) -> Range {
         return Range { start: self.start + offset, end: self.end + offset };
     }
 
-    fn expand(self, amount -> number) -> Range {
+    fn expand(self, amount: number) -> Range {
         return Range { start: self.start - amount, end: self.end + amount };
     }
 }
@@ -148,9 +148,9 @@ test "struct_methods: range expand" {
 // Struct passed to free functions
 // ---------------------------------------------------------------------------
 
-fn _range_sum(r -> Range) -> number {
-    let mut total -> number = 0;
-    let mut i -> number = r.start;
+fn _range_sum(r: Range) -> number {
+    let mut total: number = 0;
+    let mut i: number = r.start;
     loop {
         if i >= r.end { break; }
         total += i;
@@ -159,10 +159,10 @@ fn _range_sum(r -> Range) -> number {
     return total;
 }
 
-fn _merge_ranges(a -> Range, b -> Range) -> Range {
-    let mut lo -> number = a.start;
+fn _merge_ranges(a: Range, b: Range) -> Range {
+    let mut lo: number = a.start;
     if b.start < lo { lo = b.start; }
-    let mut hi -> number = a.end;
+    let mut hi: number = a.end;
     if b.end > hi { hi = b.end; }
     return Range { start: lo, end: hi };
 }
@@ -185,7 +185,7 @@ test "struct_methods: free function returning struct from two inputs" {
 // ---------------------------------------------------------------------------
 
 test "struct_methods: array of structs" {
-    let mut ranges -> Range[] = [];
+    let mut ranges: Range[] = [];
     ranges.push(Range { start: 0, end: 5 });
     ranges.push(Range { start: 10, end: 20 });
     ranges.push(Range { start: 100, end: 200 });

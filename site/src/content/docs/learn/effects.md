@@ -498,5 +498,5 @@ tool my_tool {
 
 - [Ownership & Borrowing](/docs/learn/ownership) — Move semantics and `Affine<T>`/`Linear<T>` enforcement
 - [Testing](/docs/learn/testing) — Writing pure and effectful tests
-- [AI Constructs](/docs/learn/ai-constructs) — `model`, `prompt`, and `pipeline` in practice
+- [AI Integration](/docs/learn/ai-constructs) — The `![model]` effect and the `sfn/ai` capsule
 - [Effect System Reference](/docs/reference/effects) — Complete specification and enforcement rules

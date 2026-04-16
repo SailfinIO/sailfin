@@ -86,9 +86,7 @@ import {
     clone_local_bindings,
     extend_lifetime_regions,
     extend_mutations,
-    _write_block_result_files,
     _parse_int_from_string,
-    _read_ipc_int_min,
 } from "./instructions_helpers";
 
 import {
@@ -101,7 +99,7 @@ import { lower_match_case_condition } from "./instructions_match_condition";
 // Helper: build a LocalBinding for match arm payload extraction.
 // Kept as a separate function so loops never have inline struct literals at the loop
 // body top level — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
-fn _match_make_local_binding(name -> string, pointer -> string, llvm_type -> string, scope_id -> string, scope_depth -> number) -> LocalBinding {
+fn _match_make_local_binding(name: string, pointer: string, llvm_type: string, scope_id: string, scope_depth: number) -> LocalBinding {
     return LocalBinding {
         name: name,
         pointer: pointer,
@@ -115,17 +113,17 @@ fn _match_make_local_binding(name -> string, pointer -> string, llvm_type -> str
 }
 
 fn collect_match_structure(
-    instructions -> NativeInstruction[],
-    start_index -> number,
-    end -> number,
-    function_name -> string
+    instructions: NativeInstruction[],
+    start_index: number,
+    end: number,
+    function_name: string
 ) -> MatchStructure {
-    let mut diagnostics -> string[] = [];
-    let mut cases -> MatchCaseStructure[] = [];
-    let mut current_case -> MatchCaseStructure? = null;
-    let mut index -> number = start_index + 1;
-    let mut depth -> number = 0;
-    let mut limit -> number = end;
+    let mut diagnostics: string[] = [];
+    let mut cases: MatchCaseStructure[] = [];
+    let mut current_case: MatchCaseStructure? = null;
+    let mut index: number = start_index + 1;
+    let mut depth: number = 0;
+    let mut limit: number = end;
     if limit > instructions.length {
         limit = instructions.length;
     }
@@ -166,7 +164,7 @@ fn collect_match_structure(
                 let finished = finalize_match_case(current_case, index);
                 cases = append_match_case(cases, finished);
             }
-            let mut guard_text -> string? = null;
+            let mut guard_text: string? = null;
             if instruction.guard != null {
                 guard_text = instruction.guard;
             }
@@ -186,13 +184,13 @@ fn collect_match_structure(
     return MatchStructure { cases: cases, end_index: limit, diagnostics: diagnostics };
 }
 
-fn append_match_case(cases -> MatchCaseStructure[], value -> MatchCaseStructure) -> MatchCaseStructure[] {
+fn append_match_case(cases: MatchCaseStructure[], value: MatchCaseStructure) -> MatchCaseStructure[] {
     let mut out = cases;
     out = out.push(value);
     return out;
 }
 
-fn finalize_match_case(case -> MatchCaseStructure?, body_end -> number) -> MatchCaseStructure {
+fn finalize_match_case(case: MatchCaseStructure?, body_end: number) -> MatchCaseStructure {
     let value = case;
     return MatchCaseStructure {
         pattern: value.pattern,
@@ -203,7 +201,7 @@ fn finalize_match_case(case -> MatchCaseStructure?, body_end -> number) -> Match
     };
 }
 
-fn is_default_pattern(pattern -> string) -> boolean {
+fn is_default_pattern(pattern: string) -> boolean {
     let trimmed = trim_text(pattern);
     if trimmed.length == 0 {
         return true;
@@ -215,42 +213,42 @@ fn is_default_pattern(pattern -> string) -> boolean {
 }
 
 fn lower_match_instruction(
-    function -> NativeFunction,
-    start_index -> number,
-    llvm_return -> string,
-    bindings -> ParameterBinding[],
-    locals -> LocalBinding[],
-    allocas -> string[],
-    lines -> string[],
-    temp_index -> number,
-    block_counter -> number,
-    next_local_id -> number,
-    next_region_id -> number,
-    functions -> NativeFunction[],
-    loop_stack -> LoopContext[],
-    end -> number,
-    context -> TypeContext,
-    scope_id -> string,
-    scope_depth -> number,
-    current_label -> string
+    function: NativeFunction,
+    start_index: number,
+    llvm_return: string,
+    bindings: ParameterBinding[],
+    locals: LocalBinding[],
+    allocas: string[],
+    lines: string[],
+    temp_index: number,
+    block_counter: number,
+    next_local_id: number,
+    next_region_id: number,
+    functions: NativeFunction[],
+    loop_stack: LoopContext[],
+    end: number,
+    context: TypeContext,
+    scope_id: string,
+    scope_depth: number,
+    current_label: string
 ) -> BlockLoweringResult {
-    let mut diagnostics -> string[] = [];
-    let mut current_lines -> string[] = lines;
+    let mut diagnostics: string[] = [];
+    let mut current_lines: string[] = lines;
     let base_lines_snapshot = copy_string_array(lines);
-    let mut current_allocas -> string[] = allocas;
-    let mut current_locals -> LocalBinding[] = locals;
-    let mut current_temp -> number = temp_index;
-    let mut current_block_counter -> number = block_counter;
-    let mut current_next_local -> number = next_local_id;
-    let base_bindings -> ParameterBinding[] = bindings;
-    let mut merged_bindings -> ParameterBinding[] = base_bindings;
-    let mut lifetime_regions -> LifetimeRegionMetadata[] = [];
-    let mut current_next_region -> number = next_region_id;
-    let mut collected_mutations -> LocalMutation[] = [];
-    let mut collected_string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut current_allocas: string[] = allocas;
+    let mut current_locals: LocalBinding[] = locals;
+    let mut current_temp: number = temp_index;
+    let mut current_block_counter: number = block_counter;
+    let mut current_next_local: number = next_local_id;
+    let base_bindings: ParameterBinding[] = bindings;
+    let mut merged_bindings: ParameterBinding[] = base_bindings;
+    let mut lifetime_regions: LifetimeRegionMetadata[] = [];
+    let mut current_next_region: number = next_region_id;
+    let mut collected_mutations: LocalMutation[] = [];
+    let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
     let structure = collect_match_structure(function.instructions, start_index, end, function.name);
-    let mut _ci0 -> number = 0;
+    let mut _ci0: number = 0;
     loop {
         if _ci0 >= structure.diagnostics.length { break; }
         diagnostics.push(structure.diagnostics[_ci0]);
@@ -260,7 +258,7 @@ fn lower_match_instruction(
     let subject_instruction = function.instructions[start_index];
     let subject_name = extract_simple_identifier(subject_instruction.expression);
     let subject_result = lower_expression(subject_instruction.expression, bindings, current_locals, current_temp, current_lines, functions, context, "");
-    let mut _ci1 -> number = 0;
+    let mut _ci1: number = 0;
     loop {
         if _ci1 >= subject_result.diagnostics.length { break; }
         diagnostics.push(subject_result.diagnostics[_ci1]);
@@ -272,7 +270,6 @@ fn lower_match_instruction(
 
     if subject_result.operand == null {
         diagnostics.push("llvm lowering: unable to lower match subject in `" + function.name + "`");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -293,9 +290,9 @@ fn lower_match_instruction(
     let subject_operand = subject_result.operand;
 
     let union_payload_types = parse_union_payload_types(subject_operand.llvm_type);
-    let mut matched_union_variants -> number[] = [];
+    let mut matched_union_variants: number[] = [];
     let subject_enum_info = find_enum_info_by_llvm_type(context, subject_operand.llvm_type);
-    let mut matched_enum_tags -> number[] = [];
+    let mut matched_enum_tags: number[] = [];
 
     if structure.cases.length == 0 {
         diagnostics.push("llvm lowering: match without cases in `" + function.name + "`");
@@ -304,7 +301,6 @@ fn lower_match_instruction(
         current_block_counter = merge_alloc.next_counter;
         current_lines.push("  br label %" + merge_label);
         current_lines.push(merge_label + ":");
-        _write_block_result_files(current_lines, current_allocas, false, diagnostics, collected_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -322,9 +318,9 @@ fn lower_match_instruction(
         };
     }
 
-    let mut test_labels -> string[] = [];
-    let mut body_labels -> string[] = [];
-    let mut index -> number = 0;
+    let mut test_labels: string[] = [];
+    let mut body_labels: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= structure.cases.length {
             break;
@@ -342,8 +338,8 @@ fn lower_match_instruction(
     current_block_counter = merge_alloc.next_counter;
 
     // Preload all locals before the match (needed for phi nodes at merge)
-    let mut preloaded_locals -> string[] = [];
-    let mut preload_index -> number = 0;
+    let mut preloaded_locals: string[] = [];
+    let mut preload_index: number = 0;
     loop {
         if preload_index >= current_locals.length {
             break;
@@ -359,10 +355,10 @@ fn lower_match_instruction(
 
     current_lines.push("  br label %" + test_labels[0]);
 
-    let mut all_terminated -> boolean = true;
-    let mut has_unconditional_default -> boolean = false;
-    let mut has_guarded_cases -> boolean = false;
-    let mut arm_mutations_list -> MatchArmMutations[] = [];
+    let mut all_terminated: boolean = true;
+    let mut has_unconditional_default: boolean = false;
+    let mut has_guarded_cases: boolean = false;
+    let mut arm_mutations_list: MatchArmMutations[] = [];
 
     index = 0;
     loop {
@@ -371,7 +367,7 @@ fn lower_match_instruction(
         }
         let case = structure.cases[index];
 
-        let mut guard_has_text -> boolean = false;
+        let mut guard_has_text: boolean = false;
         if case.guard != null {
             let guard_trimmed = trim_text(case.guard);
             if guard_trimmed.length > 0 {
@@ -380,7 +376,7 @@ fn lower_match_instruction(
             }
         }
 
-        let mut failure_target -> string = merge_label;
+        let mut failure_target: string = merge_label;
         let _mc_next = index + 1;
         if _mc_next < structure.cases.length {
             failure_target = test_labels[_mc_next];
@@ -398,7 +394,7 @@ fn lower_match_instruction(
             functions,
             context
         );
-        let mut _ci2 -> number = 0;
+        let mut _ci2: number = 0;
         loop {
             if _ci2 >= lowered_condition.diagnostics.length { break; }
             diagnostics.push(lowered_condition.diagnostics[_ci2]);
@@ -410,8 +406,8 @@ fn lower_match_instruction(
 
         if lowered_condition.union_variant_index >= 0 {
             if !guard_has_text {
-                let mut seen -> boolean = false;
-                let mut seen_index -> number = 0;
+                let mut seen: boolean = false;
+                let mut seen_index: number = 0;
                 loop {
                     if seen_index >= matched_union_variants.length {
                         break;
@@ -436,8 +432,8 @@ fn lower_match_instruction(
                         let variant_info_val = lowered_condition.variant_info;
                         if enum_info_val.llvm_name == subject_enum_info.llvm_name {
                             let tag_value = variant_info_val.tag;
-                            let mut seen_tag -> boolean = false;
-                            let mut tag_index -> number = 0;
+                            let mut seen_tag: boolean = false;
+                            let mut tag_index: number = 0;
                             loop {
                                 if tag_index >= matched_enum_tags.length {
                                     break;
@@ -468,9 +464,9 @@ fn lower_match_instruction(
 
         current_lines.push(body_labels[index] + ":");
 
-        let mut base_locals -> LocalBinding[] = clone_local_bindings(current_locals);
-        let mut base_allocas -> string[] = current_allocas;
-        let mut base_local_id -> number = current_next_local;
+        let mut base_locals: LocalBinding[] = clone_local_bindings(current_locals);
+        let mut base_allocas: string[] = current_allocas;
+        let mut base_local_id: number = current_next_local;
 
         // Extract and bind payload fields if this is an enum pattern with bindings
         if lowered_condition.field_bindings.length > 0 {
@@ -487,7 +483,7 @@ fn lower_match_instruction(
                         current_lines.push("  store " + subject_operand.llvm_type + " " + subject_operand.value + ", " + subject_operand.llvm_type + "* " + subject_alloca_temp);
                         // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
 
-                        let mut binding_idx -> number = 0;
+                        let mut binding_idx: number = 0;
                         loop {
                             if binding_idx >= lowered_condition.field_bindings.length {
                                 break;
@@ -498,7 +494,7 @@ fn lower_match_instruction(
                             // 1. Get pointer to payload byte array (field 1 of enum)
                             let payload_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            let mut payload_field_index -> number = 1;
+                            let mut payload_field_index: number = 1;
                             if enum_info_val.max_payload_size > 0 {
                                 if enum_info_val.align > enum_info_val.tag_size {
                                     payload_field_index = 2;
@@ -513,7 +509,7 @@ fn lower_match_instruction(
 
                             // 3. Offset to field position
                             let field_offset_in_payload = field_binding.field_offset - variant_info_val.offset;
-                            let mut field_ptr_temp -> string = byte_ptr_temp;
+                            let mut field_ptr_temp: string = byte_ptr_temp;
                             if field_offset_in_payload > 0 {
                                 let offset_ptr_temp = format_temp_name(current_temp);
                                 current_temp += 1;
@@ -574,7 +570,7 @@ fn lower_match_instruction(
                         typed_payload_ptr = cast_temp;
                     }
 
-                    let mut binding_idx -> number = 0;
+                    let mut binding_idx: number = 0;
                     loop {
                         if binding_idx >= lowered_condition.union_struct_bindings.length {
                             break;
@@ -609,14 +605,14 @@ fn lower_match_instruction(
         if lowered_condition.is_default {
             if union_payload_types.length > 0 {
                 if subject_name.length > 0 {
-                    let mut remaining -> number[] = [];
-                    let mut v -> number = 0;
+                    let mut remaining: number[] = [];
+                    let mut v: number = 0;
                     loop {
                         if v >= union_payload_types.length {
                             break;
                         }
-                        let mut is_matched -> boolean = false;
-                        let mut mi -> number = 0;
+                        let mut is_matched: boolean = false;
+                        let mut mi: number = 0;
                         loop {
                             if mi >= matched_union_variants.length {
                                 break;
@@ -681,14 +677,7 @@ fn lower_match_instruction(
             scope_depth + 1,
             body_labels[index]
         );
-        // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-        let _br_body_temp = _read_ipc_int_min("build/sailfin/.block_result_temp_index", current_temp);
-        let _br_body_blkctr = _read_ipc_int_min("build/sailfin/.block_result_block_counter", current_block_counter);
-        let _br_body_nextloc = _read_ipc_int_min("build/sailfin/.block_result_next_local_id", current_next_local);
-        let _br_body_nextreg = _read_ipc_int_min("build/sailfin/.block_result_next_lifetime_region_id", current_next_region);
-        let _br_body_term = fs.readFile("build/sailfin/.block_result_terminated") == "1";
-
-        let mut _ci3 -> number = 0;
+        let mut _ci3: number = 0;
         loop {
             if _ci3 >= body_result.diagnostics.length { break; }
             diagnostics.push(body_result.diagnostics[_ci3]);
@@ -698,10 +687,10 @@ fn lower_match_instruction(
         current_lines = extend_string_array(current_lines, body_result.lines);
         current_allocas = body_result.allocas;
         current_locals = base_locals;
-        current_temp = _br_body_temp;
-        current_block_counter = _br_body_blkctr;
-        current_next_local = _br_body_nextloc;
-        current_next_region = _br_body_nextreg;
+        current_temp = body_result.temp_index;
+        current_block_counter = body_result.block_counter;
+        current_next_local = body_result.next_local_id;
+        current_next_region = body_result.next_lifetime_region_id;
         collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
         collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
@@ -711,16 +700,16 @@ fn lower_match_instruction(
             MatchArmMutations {
                 mutations: body_result.mutations,
                 label: body_labels[index],
-                terminated: _br_body_term,
+                terminated: body_result.terminated,
             }
         );
 
-        if !_br_body_term {
+        if !body_result.terminated {
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
             current_lines.push("  br label %" + merge_label);
             all_terminated = false;
         } else {
-            let mut _asgn223 -> boolean = false;
+            let mut _asgn223: boolean = false;
             if all_terminated {
                 if true {
                     _asgn223 = true;
@@ -732,7 +721,7 @@ fn lower_match_instruction(
         index += 1;
     }
 
-    let mut match_exhaustive -> boolean = has_unconditional_default;
+    let mut match_exhaustive: boolean = has_unconditional_default;
     if !match_exhaustive {
         if !has_guarded_cases {
             if subject_enum_info != null {
@@ -743,7 +732,7 @@ fn lower_match_instruction(
         }
     }
 
-    let mut _let224 -> boolean = false;
+    let mut _let224: boolean = false;
     if all_terminated {
         if match_exhaustive {
             _let224 = true;
@@ -781,12 +770,11 @@ fn lower_match_instruction(
     }
 
     let result_string_constants = collected_string_constants;
-    let mut merged_lines -> string[] = current_lines;
+    let mut merged_lines: string[] = current_lines;
     if merged_lines.length < base_lines_snapshot.length {
         merged_lines = extend_string_array(base_lines_snapshot, merged_lines);
     }
 
-    _write_block_result_files(merged_lines, current_allocas, terminated, diagnostics, result_string_constants, current_temp, current_block_counter, current_next_local, current_next_region, structure.end_index + 1);
     return BlockLoweringResult {
         lines: merged_lines,
         allocas: current_allocas,

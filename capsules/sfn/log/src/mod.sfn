@@ -16,21 +16,21 @@
 // ---- Types ----
 
 struct Logger {
-    name -> string;
+    name: string;
 }
 
 // ---- Logger creation ----
 
-fn logger(name -> string) -> Logger {
+fn logger(name: string) -> Logger {
     return Logger { name: name };
 }
 
 // ---- Formatting ----
 
-fn _format_fields(fields -> string[]) -> string {
+fn _format_fields(fields: string[]) -> string {
     // Fields are key-value pairs as a flat array: ["key1", "val1", "key2", "val2"]
-    let mut out -> string = "";
-    let mut i -> number = 0;
+    let mut out: string = "";
+    let mut i: number = 0;
     loop {
         if i + 1 >= fields.length { break; }
         out = out + " " + fields[i] + "=" + fields[i + 1];
@@ -39,8 +39,8 @@ fn _format_fields(fields -> string[]) -> string {
     return out;
 }
 
-fn _format_message(level -> string, log -> Logger, message -> string, fields -> string[]) -> string {
-    let mut line -> string = "[" + level + "]";
+fn _format_message(level: string, log: Logger, message: string, fields: string[]) -> string {
+    let mut line: string = "[" + level + "]";
     if log.name.length > 0 {
         line = line + " " + log.name + ":";
     }
@@ -51,47 +51,47 @@ fn _format_message(level -> string, log -> Logger, message -> string, fields -> 
 
 // ---- Leveled output (with logger) ----
 
-fn log_info(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
+fn log_info(log: Logger, message: string, fields: string[] = []) -> void ![io] {
     print(_format_message("INFO", log, message, fields));
 }
 
-fn log_warn(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
+fn log_warn(log: Logger, message: string, fields: string[] = []) -> void ![io] {
     print(_format_message("WARN", log, message, fields));
 }
 
-fn log_error(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
+fn log_error(log: Logger, message: string, fields: string[] = []) -> void ![io] {
     print(_format_message("ERROR", log, message, fields));
 }
 
-fn log_debug(log -> Logger, message -> string, fields -> string[] = []) -> void ![io] {
+fn log_debug(log: Logger, message: string, fields: string[] = []) -> void ![io] {
     print(_format_message("DEBUG", log, message, fields));
 }
 
 // ---- Convenience: leveled output without a logger ----
 
-fn info(message -> string, fields -> string[] = []) -> void ![io] {
+fn info(message: string, fields: string[] = []) -> void ![io] {
     let root = Logger { name: "" };
     print(_format_message("INFO", root, message, fields));
 }
 
-fn warn(message -> string, fields -> string[] = []) -> void ![io] {
+fn warn(message: string, fields: string[] = []) -> void ![io] {
     let root = Logger { name: "" };
     print(_format_message("WARN", root, message, fields));
 }
 
-fn error(message -> string, fields -> string[] = []) -> void ![io] {
+fn error(message: string, fields: string[] = []) -> void ![io] {
     let root = Logger { name: "" };
     print(_format_message("ERROR", root, message, fields));
 }
 
-fn debug(message -> string, fields -> string[] = []) -> void ![io] {
+fn debug(message: string, fields: string[] = []) -> void ![io] {
     let root = Logger { name: "" };
     print(_format_message("DEBUG", root, message, fields));
 }
 
 // ---- Timing ----
 
-fn timed(log -> Logger, label -> string) -> number ![io, clock] {
+fn timed(log: Logger, label: string) -> number ![io, clock] {
     // Start a timed operation. Returns a start timestamp in milliseconds.
     // Pass the result to `timed_end` to log the elapsed time.
     //
@@ -105,7 +105,7 @@ fn timed(log -> Logger, label -> string) -> number ![io, clock] {
     return start;
 }
 
-fn timed_end(log -> Logger, label -> string, start_millis -> number) -> void ![io, clock] {
+fn timed_end(log: Logger, label: string, start_millis: number) -> void ![io, clock] {
     let elapsed = runtime.monotonic_millis() - start_millis;
     log_info(log, label + " completed", ["ms", number_to_string(elapsed)]);
 }

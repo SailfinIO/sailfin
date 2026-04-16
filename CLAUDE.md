@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection. The repository hosts the **self-hosted native compiler** (primary toolchain), plus legacy bootstrap code kept for emergency recovery while marching toward 1.0.
+Sailfin is a compiled systems language with compile-time capability enforcement. The repository hosts the **self-hosted native compiler** (primary toolchain), plus legacy bootstrap code kept for emergency recovery while marching toward 1.0.
 
 **Current architecture:**
 
@@ -14,15 +14,11 @@ Note: the codebase may still contain historical `stage2` names in internal paths
 
 The runtime currently ships as C under `runtime/native/` and is planned to move into Sailfin for the 1.0 release.
 
-The language features effect types (`![io, net, model, gpu, rand, clock]`), ownership-aware linear/affine types, capability-based security, and first-class AI constructs (models, prompts, pipelines, tools).
+**Language pillars:** (1) effect types (`![io, net, model, clock]`) for compile-time capability enforcement, (2) capability-based security via capsule manifests and dependency auditing, (3) structured concurrency (planned). AI integration is a library-level concern (`sfn/ai` capsule, post-1.0) gated by the `![model]` effect — not language-level syntax.
 
 ## Essential Commands
 
 ### Environment Setup
-
-```bash
-make env              # Create/update Conda environment (CI/release only — local builds just need python3)
-```
 
 ### Development Workflow
 
@@ -30,12 +26,11 @@ make env              # Create/update Conda environment (CI/release only — loc
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
 make install          # Install the built compiler into PREFIX/bin (default: ~/.local/bin)
 make rebuild          # Force a rebuild from a released seed
-make smoke            # Rebuild + run smoke tests
-make rebuild-asan     # Rebuild with ASAN (diagnostic)
 make check            # Compile (if needed) then run the full test suite
 make test             # Run full suite
 make test-unit        # Run Sailfin-native unit tests
 make test-integration # Run Sailfin-native integration tests
+make bench            # Benchmark per-module compile time and memory
 ```
 
 ### Build Artifacts
@@ -77,7 +72,7 @@ fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 
 **Canonical effects:** `io`, `net`, `model`, `gpu`, `rand`, `clock`
 
-**Bootstrap enforcement** (via `effect_checker.sfn` and `bootstrap/effect_checker.py`):
+**Enforcement** (via `effect_checker.sfn`):
 
 - `model`: required for `prompt` blocks
 - `io`: required for `print.*`, `console.*`, `fs.*`, decorators like `@logExecution`
@@ -86,20 +81,15 @@ fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 
 Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effects emit diagnostics with source spans and fix-it hints.
 
-### Ownership & Borrowing (Native Compiler)
+### Ownership & Borrowing (Deferred)
 
-Sailfin uses move-by-default semantics with explicit borrows:
+Ownership syntax (`Affine<T>`, `Linear<T>`, `&T`, `&mut T`) is parsed but **not enforced**. These features are deferred to post-1.0 to avoid shipping unenforced safety claims. The native LLVM backend tracks some ownership metadata internally, but no user-facing guarantees are made.
 
-- `Affine<T>`: may be dropped, not duplicated
-- `Linear<T>`: must be consumed exactly once
-- `&T`: shared (read-only) borrow
-- `&mut T`: exclusive mutable borrow
-
-**Bootstrap status:** Parsed but not enforced. The native LLVM backend tracks ownership metadata, rejects conflicting borrows, and flags use-after-move.
+Do not market or document ownership/borrowing as a shipped feature. Sailfin's safety story is effects and capabilities, not borrow checking.
 
 ### Runtime Bridges
 
-The runtime currently ships as C under `runtime/native/`. Higher-level integration helpers (e.g., runners) still live in Python under `runtime/`.
+The runtime currently ships as C under `runtime/native/`.
 
 ### Testing Philosophy
 
@@ -107,9 +97,145 @@ The runtime currently ships as C under `runtime/native/`. Higher-level integrati
 - **Integration tests**: `compiler/tests/integration/*_test.sfn`
 - **E2E tests**: `compiler/tests/e2e/*_test.sfn`
 
+## Workflow Orchestration
+
+Slash commands orchestrate multi-phase workflows using specialized subagents. Use them instead of manually driving each step. The user types a single command and Claude drives the full workflow, stopping only at explicit approval gates.
+
+### Available Workflows
+
+| Command | Phases | When to use |
+|---|---|---|
+| `/add-feature <name>` | architect → implement → review → test → docs | Adding any new language feature |
+| `/debug-compile <file>` | isolate → trace → deep diagnosis → fix → verify | Any compilation failure |
+| `/check` | clean build → full test suite → seedcheck | Pre-commit validation |
+| `/test-feature <name>` | find tests → run targeted → run full suite | Testing a specific area |
+| `/release` | version check → confirm → dispatch workflow | Cutting a new release |
+
+### Specialized Agents
+
+| Agent | Model | Role | When to spawn |
+|---|---|---|---|
+| `compiler-architect` | Opus | Designs features, refactors, and fixes with forward-thinking plans | Before implementing anything non-trivial; when a change touches multiple pipeline stages |
+| `seed-stabilizer` | Opus | Deep diagnosis of compiler bugs — miscompilation, IR errors, performance regressions | When a build fails or produces wrong output and the cause isn't obvious |
+| `compiler-explorer` | Sonnet | Traces how features flow through the pipeline; finds implementations | When you need to understand how something currently works |
+| `code-reviewer` | Sonnet | Reviews changes for correctness, safety, and conventions | After implementing, before committing |
+| `test-runner` | Sonnet | Runs tests safely with memory caps; analyzes failures | After changes, to validate correctness |
+| `docs-updater` | Sonnet | Updates status.md, spec.md, roadmap.md in sync | After a feature ships or changes status |
+
+### Workflow Patterns for Unscripted Tasks
+
+Not every task has a slash command. For tasks that don't, follow these patterns:
+
+**Performance optimization:**
+1. Spawn `seed-stabilizer` to profile and identify the bottleneck
+2. Spawn `compiler-architect` to design the fix (if non-trivial)
+3. Implement the fix
+4. Benchmark with `make bench` before and after
+5. Spawn `test-runner` to verify no regressions
+
+**Refactoring compiler internals:**
+1. Spawn `compiler-architect` to produce a migration plan where each step self-hosts
+2. Implement one step at a time, running `make compile` after each
+3. Spawn `code-reviewer` after all steps complete
+4. Spawn `test-runner` for full validation
+
+**Investigating "how does X work":**
+1. Spawn `compiler-explorer` — it traces features through the full pipeline with file/line references
+
+**Fixing a self-hosting break:**
+1. Spawn `seed-stabilizer` to diagnose the root cause (Opus — these bugs are hard)
+2. If the fix is structural, spawn `compiler-architect` to validate the approach
+3. Implement the fix
+4. Run `make clean-build && make check` to fully validate
+
+### Approval Gates
+
+Workflows pause for user approval at these points:
+- **Design gate** (`/add-feature`): After the architect produces a plan, before any code is written
+- **Destructive operations**: Before `make clean-build`, force pushes, or branch deletions
+- All other phases proceed autonomously unless a failure occurs
+
+### When NOT to Use Agents
+
+Use direct tools (Read, Grep, Glob) instead of agents when:
+- You already know which file to read or edit
+- The search is a simple keyword lookup
+- The task is a one-line change with obvious correctness
+
+Agents add value for open-ended investigation, cross-cutting analysis, and tasks requiring deep reasoning. Don't spawn an agent for work you can do in one tool call.
+
+## Task Tracking
+
+The roadmap (`site/src/pages/roadmap.astro`, published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap)) is strategic — it lists epics, not session-sized work. Actual day-to-day work lives in **GitHub Issues**, scoped tightly enough that a single Claude session can take an issue from open to merged PR.
+
+### The flow
+
+```
+sailfin.dev/roadmap (epics)
+       │
+       │  /groom <epic>           — compiler-architect breaks epic into XS/S/M issues
+       ▼
+GitHub Issues (claude-ready)
+       │
+       │  /triage                 — auto-audits issue hygiene; releases stale work
+       ▼
+GitHub Issues (pickable)
+       │
+       │  /pickup [#N]            — claim, branch, work, PR (autonomous)
+       ▼
+PR opened, issue auto-closed on merge
+```
+
+### Issue contract
+
+Every `claude-ready` issue uses the template at `.github/ISSUE_TEMPLATE/claude-task.md` and contains:
+
+- **Goal** — one sentence
+- **Scope** — explicit `In:` and `Out:` lists (prevents scope creep)
+- **Acceptance Criteria** — verifiable, pass/fail items
+- **Files Affected** — every file the implementation touches
+- **Verification** — exact commands a reviewer can run
+- **Size** — XS (<1hr) / S (1-3hr) / M (3-6hr) — never L
+- **Type** — feature / bug / perf / refactor (determines workflow)
+- **Blocked by** — issue numbers that must close first
+
+If any section is missing or vague, the issue is not pickable.
+
+### Labels
+
+| Label | Meaning |
+|---|---|
+| `claude-ready` | Fully groomed, no blockers, ready for `/pickup` |
+| `needs-grooming` | Exists as a placeholder; needs scope/criteria filled in |
+| `in-progress` | Currently being worked; do not pick up |
+| `blocked` | Has open dependencies; recheck after blocker closes |
+| `type:feature` / `type:bug` / `type:perf` / `type:refactor` | Determines pickup workflow |
+| `size:xs` / `size:s` / `size:m` | Effort estimate (no `size:l` — L items must be groomed down) |
+| `priority:critical` / `priority:high` | Pickup priority overrides |
+
+### When to use what
+
+| Situation | Command |
+|---|---|
+| User requests a roadmap-sized initiative | `/groom <epic>` to break into issues, then work them |
+| User requests a specific small change | Skip the issue tracker — just do the work or use `/add-feature` directly |
+| Scheduled / autonomous session | `/pickup` (no args) — picks the highest-priority unblocked issue |
+| Working a specific known issue | `/pickup <N>` |
+| Issue queue feels stale | `/triage` |
+| Performance hot path identified | `/perf <subsystem>` (with or without an issue) |
+
+### Anti-patterns
+
+- **Don't pick up a `needs-grooming` issue.** Run `/groom` on it first to flesh out the contract, then pick it up.
+- **Don't expand scope mid-session.** If an issue's `In:` is wrong, comment on the issue and pause for human input.
+- **Don't bundle multiple issues into one PR** unless they're explicitly listed as a single issue. Issues were sized to be standalone.
+- **Don't use `/pickup` to pull from the roadmap directly.** The roadmap isn't pickable. Issues are.
+
 ## Common Development Patterns
 
 ### Adding a Language Feature
+
+Use `/add-feature <name>` for the full orchestrated workflow. The pipeline stages are:
 
 1. Update `compiler/src/parser.sfn` to recognize new syntax
 2. Add AST node(s) to `compiler/src/ast.sfn`
@@ -161,68 +287,91 @@ When uncertain about feature status or semantics:
 
 1. **`docs/status.md`** — What ships today (Stage0/1/2 breakdown)
 2. **`docs/spec.md`** — Language reference (Part A: bootstrap, Part B: planned)
-3. **`docs/roadmap.md`** — Active workstreams and sequencing
+3. **[sailfin.dev/roadmap](https://sailfin.dev/roadmap)** — Active workstreams and sequencing (source: `site/src/pages/roadmap.astro`)
 4. **`docs/runtime_audit.md`** — Python→Sailfin migration tracker
 
-**Examples are bootstrap-only** unless marked with future syntax comments (e.g., `|>` pipeline operator, currency literals like `$0.05`).
+**Examples are compiler-only** unless marked with future syntax comments (e.g., `|>` pipeline operator, currency literals like `$0.05`).
 
 ## Stabilization Goals (Pre-1.0)
 
 The project is marching toward a 1.0 release with a **pure Sailfin toolchain** — no Python, no C runtime, no downstream fixup scripts. All compiler improvements must target the compiler source code itself (`compiler/src/*.sfn`), not external workarounds.
 
-**Full stabilization guide:** See `SEED_STABILIZATION.md` for the complete fixup catalog, root cause analysis, and attack plan.
+**Full stabilization guide:** See `docs/build-performance.md` for the build performance analysis and optimization plan.
 
-### Seed Stabilization Strategy
+### Seed Strategy
 
-The v0.1.1 seed requires `scripts/selfhost_native.py` (Python build driver) with **~69 IR fixup passes** to produce a working binary. The goal is to fix these bugs in the compiler source so a new seed can build itself using `scripts/build.sh` (shell driver, zero fixups).
+The compiler self-hosts from a released seed binary using `scripts/build.sh` (pure shell, no fixups). The current seed (0.5.0-alpha.22+) produces clean LLVM IR — no Python post-processing required.
 
-**Approach:** Iterative seed promotion — fix bugs in `compiler/src/*.sfn`, remove the corresponding fixups from `selfhost_native.py`, cut a new seed when a batch is stable. See `SEED_STABILIZATION.md` for details.
-
-**Root cause categories (by fixup count):**
-1. **Cross-module type/ABI mismatches** (~15) — seed can't resolve cross-module function signatures
-2. **Double-encoded pointers** (~12) — pointers encoded as `double` via ptrtoint→sitofp
-3. **Missing/duplicate definitions** (~12) — dropped function bodies, duplicate globals/types
-4. **Phi node / SSA violations** (~8) — wrong placement, types, predecessor labels, duplicate names
-5. **Loop / control flow bugs** (~6) — unconditional loop headers, wrong continue targets
-6. **Linker / visibility** (~6) — symbol dedup and linkage issues
-
-**Recommended attack order:** Phi/SSA → Loops → Double-encoding → Missing defs → Cross-module ABI → Linker
+**Build flow:**
+1. Fetch a released seed: `make fetch-seed`
+2. Build the compiler from the seed: `make compile` (uses `build.sh`)
+3. Run tests: `make test`
+4. Validate self-hosting: `make check` (builds seedcheck from first-pass binary, runs tests on it)
 
 ### Build Driver Configuration
 
 ```bash
-# Default: Python driver (has fixups, works with current seed)
-make compile                    # BUILD_DRIVER=py by default
-
-# Explicit driver selection
-make rebuild BUILD_DRIVER=py    # Python with fixups
-make rebuild BUILD_DRIVER=sh    # Shell, no fixups (needs clean seed)
+make compile                    # Build from seed (uses scripts/build.sh)
+make rebuild                    # Force rebuild from seed
 ```
 
 ### Development Principles
 
-- **Fix the compiler, not the build script.** `scripts/selfhost_native.py` has ~69 post-processing fixup passes that patch generated LLVM IR. These are technical debt. Every fix should go into the compiler source (`compiler/src/*.sfn`) so the fixup passes can be removed.
-- **The seedcheck binary must be a fully functional standalone compiler.** `make check` validates that it can run `hello-world.sfn` and pass the test suite directly — no Python fallbacks, no fallback compilers.
-- **Build must be fast and deterministic.** Target: under 5 minutes, zero retries. If the build needs retries, the compiler has a bug to fix.
-- **Reduce complexity, don't add it.** The fixup pass count should decrease over time. Don't add new fixup passes — fix the root cause in the compiler source.
-- **Track progress by fixup count.** The number of active fixup functions in `selfhost_native.py` is the primary metric. When it reaches 0, `make check` should pass.
+- **Fix the compiler, not the build script.** All compiler improvements go into `compiler/src/*.sfn`. The build script (`scripts/build.sh`) is pure orchestration — no fixups, no post-processing.
+- **The seedcheck binary must be a fully functional standalone compiler.** `make check` validates that it can run `hello-world.sfn` and pass the test suite directly.
+- **Build must be fast and deterministic.** Current: ~13 min. Target: under 5 minutes. See `docs/build-performance.md` for the optimization plan.
+- **Reduce complexity, don't add it.** The build uses `scripts/build.sh` (pure shell, no fixups).
 
 ### `make check` Validation
 
 `make check` does:
-1. Builds the compiler from the seed using `BUILD_DRIVER` (default: Python with fixups)
-2. Runs the full test suite on the first-pass binary (early gate — if this fails, no point continuing)
-3. Builds seedcheck from the first-pass binary using `build.sh` (**always no fixups** — this is the graduation test)
-4. Validates the seedcheck can actually run `examples/basics/hello-world.sfn` (fails if it hangs)
-5. Runs the full test suite using the seedcheck binary directly (no fallbacks)
+1. Builds the compiler from the seed using `build.sh`
+2. Runs the full test suite on the first-pass binary (early gate)
+3. Builds seedcheck from the first-pass binary using `build.sh`
+4. Validates the seedcheck can actually run `examples/basics/hello-world.sfn`
+5. Runs the full test suite using the seedcheck binary directly
 
 If `make check` fails, it means the compiler has a bug. Fix the compiler.
+
+### Runtime Enablement Sequencing
+
+The 1.0 release requires a **pure Sailfin runtime** — no C source files. The
+compiler must ship specific language features before each phase of the runtime
+rewrite can begin. This is the critical path to 1.0:
+
+**Phase 1 — Systems primitives (unblocks basic runtime porting):**
+- `extern fn` with LLVM `declare` emission (90% done — type-checker registration missing)
+- `int` (i64) / `float` (f64) numeric types (fixes precision, enables sizes/indices/bitwise)
+- Raw pointer types (`*T`, `*const T`) enforced (needed for OS API handles: `*FILE`, `*DIR`)
+- `Result<T, E>` + `?` operator (every OS call can fail)
+- Bitwise operators on integers (`&`, `|`, `^`, `>>`, `<<`) (needed for SHA-256, Base64, flags)
+
+**Phase 2 — Containers & resources (unblocks typed collections and RAII):**
+- Closures with capture (needed for `map`/`filter`/`reduce`, spawn handlers)
+- Generic type constraints (`fn sort<T: Comparable>`) (needed for `Array<T>`, `HashMap<K, V>`)
+- Deterministic drop emission (compiler emits scope-exit drops for owned values)
+
+**Phase 3 — Runtime migration (depends on Phase 1 + 2):**
+- Port ~90 runtime ABI functions from C to Sailfin (strings, arrays, I/O, exceptions, crypto)
+- Replace `native_driver.c` with a Sailfin entry point
+- Remove `runtime/native/` entirely
+
+**Phase 4 — Structured concurrency (depends on Phase 1-2 + atomics):**
+- Atomic intrinsics (`atomic_add`, `atomic_cas`, fences)
+- `routine`/`await`/`channel`/`spawn` keywords
+- Task scheduler and work queue
+
+Effect system hardening (hierarchical effects, polymorphism, transitive enforcement)
+can progress **in parallel** with all phases — it doesn't block or depend on runtime work.
+
+See the [roadmap](https://sailfin.dev/roadmap) for the full breakdown and `docs/runtime_audit.md`
+for the migration tracker.
 
 ## Pre-1.0 Syntax Reform (Active)
 
 The following breaking syntax changes are planned before 1.0. All new code
 written by agents or humans should prefer the new forms where the parser already
-accepts them. See `docs/roadmap.md` §0 for the full plan and rationale.
+accepts them. See `docs/proposals/colon-type-annotations.md` and the roadmap at [sailfin.dev/roadmap](https://sailfin.dev/roadmap) for the full plan and rationale.
 
 1. **Type annotations: `:` not `->`** — Use `x: number` not `x -> number` for
    parameters, variables, and fields. Return types keep `->`. The parser already
@@ -246,14 +395,59 @@ When adding features or making design choices, apply these principles:
   syntax reduces error rates in generated code. Unusual choices cause systematic
   LLM failures.
 - **Pick 3 differentiators.** Sailfin's top 3 are: (1) effect system,
-  (2) capability-based security, (3) structured concurrency. Don't dilute these
-  with half-finished ownership, AI constructs, or GPU features.
+  (2) capability-based security, (3) structured concurrency. Everything else
+  is a library concern or a post-1.0 feature. Don't dilute the core with
+  half-finished ownership, AI syntax, or GPU features.
 - **Don't ship unfinished safety claims.** "Parsed but not enforced" is worse
   than not having the syntax at all — it teaches users to ignore the feature.
-- **Keywords are expensive.** A keyword can never become a variable name. Only
-  add keywords for constructs that can't be expressed as library functions.
-- **Fix the foundation first.** Integer types, `Result<T, E>`, and generic
-  constraints are prerequisites for everything else.
+  Ownership types, taint types, and AI constructs stay out of marketing until
+  they are enforced end-to-end.
+- **Libraries over keywords.** A keyword can never become a variable name.
+  Only add keywords for constructs that can't be expressed as library functions.
+  AI constructs (`model`, `prompt`, `tool`, `pipeline`) are being migrated from
+  language syntax to the `sfn/ai` capsule. The `![model]` effect stays as a
+  language-level capability gate.
+- **Fix the foundation first.** Integer types, `Result<T, E>`, generic
+  constraints, hierarchical effects, and effect polymorphism are prerequisites
+  for everything else.
+- **Chase timeless problems.** Effect types and capability security solve
+  problems that will matter in 20 years. AI API wrappers change every 6 months.
+  Language syntax is permanent; library APIs can iterate.
+
+## LLM & Agent Adoption Strategy
+
+Sailfin's long-term positioning is as a **verification layer for AI-generated code** — the
+language where capability surface and side effects are provable at compile time. This
+matters because as AI agents write more code, the bottleneck shifts from generation to
+verification.
+
+### Adoption Levers (in priority order)
+
+1. **Effect enforcement as compilation gate** — the #1 prerequisite. `validate_effects()`
+   exists in `effect_checker.sfn` but is NOT called from the compilation pipeline in
+   `main.sfn`. Until this ships, "compiler-enforced effects" is aspirational. This is the
+   top item in the Effect System Hardening track on the roadmap.
+
+2. **llms.txt** — a canonical single-file language reference at `llms.txt` (also served
+   at `sailfin.dev/llms.txt`) designed for LLM context windows. Update it with every
+   release. It covers syntax, effects, stdlib, what works, and what doesn't.
+
+3. **Structured diagnostics (`--json`)** — machine-readable compiler output that agents
+   can parse and act on. Unblocks the MCP server and any agentic compile-check-fix loop.
+   Not yet implemented.
+
+4. **MCP server** — wraps the compiler so any agent can compile, type-check, and iterate
+   Sailfin code as a tool call. Depends on `--json` diagnostics. Not yet implemented.
+
+5. **Training data presence** — Rosetta Code ports, algorithm examples, blog posts, and
+   technical content in scraper-visible locations. The more `.sfn` code exists publicly,
+   the more future models will natively understand the language.
+
+### What This Does NOT Change
+
+- The 1.0 critical path (runtime enablement, language semantics) is not deprioritized
+- sfn/ai remains post-1.0 — effects are the story, not AI libraries
+- No overclaiming — features are enforced or explicitly deferred, never "parsed but marketed"
 
 ## Important Constraints
 
@@ -261,10 +455,11 @@ When adding features or making design choices, apply these principles:
 
 - No pipeline operator (`|>`) — use function calls
 - No currency literals — use numeric literals with comments (`0.05 // USD`)
-- `Affine<T>`/`Linear<T>` parsed but not enforced
-- `PII<T>`/`Secret<T>` parsed but no runtime enforcement
-- `model` blocks emit metadata only (no `.call()` execution)
-- `prompt` blocks are parsed but don't send messages
+- `Affine<T>`/`Linear<T>` parsed but not enforced (deferred to post-1.0)
+- `PII<T>`/`Secret<T>` parsed but no runtime enforcement (deferred to post-1.0)
+- `model`/`prompt`/`tool`/`pipeline` blocks emit metadata only — these are
+  being migrated from language syntax to the `sfn/ai` library capsule
+- No concurrency runtime (`routine`, `spawn`, `channel`, `await` not yet implemented)
 
 ### Bootstrap (stage1) Readiness Checklist
 
@@ -320,7 +515,8 @@ The compiler must always compile itself. Breaking changes require:
 
 - **Semantic versioning:** `v0.5.0-alpha.22` format — `MAJOR.MINOR.PATCH[-channel.N]`
 - **Version source of truth:** `compiler/capsule.toml` (`[capsule] version`)
-- **Version mirror:** `compiler/src/version.sfn:__version__` (read by the compiler binary; kept in sync by the release workflow — TODO: read from capsule.toml at build time)
+- **Version resolution:** `compiler/src/version.sfn:resolve_compiler_version()` reads `capsule.toml` at runtime; falls back to `__version_fallback__` for installed binaries where `capsule.toml` is not on disk
+- **Dev build stamps:** `build.sh` writes `build/native/.build-stamp` with `<version>+dev.<hash>` — the resolver reads this first for local dev builds
 - **Release automation:** `.github/workflows/release.yml` — manually triggered via `workflow_dispatch`, pure bash, no Python dependencies
 - **Release notes:** `.github/workflows/release-notes.md` — agentic workflow that posts structured, categorized changelog comments on published releases (supplements the auto-generated notes from `gh release create`)
 - **Artifacts:** `dist/` is used for packaged artifacts; `release-tag.yml` builds and uploads platform binaries
@@ -360,10 +556,10 @@ gh workflow run release.yml -f channel=alpha -f bump=prerelease -f dry_run=true
 
 ## Key Terminology
 
-- **Capsule**: A Sailfin package with `capsule.toml` manifest
+- **Capsule**: A Sailfin package with `capsule.toml` manifest declaring capability requirements
 - **Workspace**: Multi-capsule project with shared `workspace.toml` policies
-- **Effect**: Capability annotation (`![io]`, `![net]`, etc.)
-- **Generation card**: Provenance metadata for model calls (input hashes, cost, latency, seed)
+- **Effect**: Capability annotation (`![io]`, `![net]`, etc.) — the language's core differentiator
+- **Capability enforcement**: Compile-time guarantee that code cannot exceed its declared effects
 - **Native IR**: `.sfn-asm` textual intermediate representation
 - **Prelude**: Core runtime library (`runtime/prelude.sfn`)
 - **Stage0/1/2**: Bootstrap (Python) / Self-hosted (Sailfin→Python) / Native (Sailfin→LLVM)

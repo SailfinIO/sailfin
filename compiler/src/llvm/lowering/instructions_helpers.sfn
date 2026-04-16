@@ -45,9 +45,9 @@ import {
     split_lines_local,
 } from "./lowering_text_utils";
 
-fn clone_local_bindings(values -> LocalBinding[]) -> LocalBinding[] {
-    let mut result -> LocalBinding[] = [];
-    let mut index -> number = 0;
+fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
+    let mut result: LocalBinding[] = [];
+    let mut index: number = 0;
     loop {
         if index >= values.length {
             break;
@@ -58,12 +58,12 @@ fn clone_local_bindings(values -> LocalBinding[]) -> LocalBinding[] {
     return result;
 }
 
-fn extend_lifetime_regions(values -> LifetimeRegionMetadata[], extras -> LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
+fn extend_lifetime_regions(values: LifetimeRegionMetadata[], extras: LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
     if extras.length == 0 {
         return values;
     }
     let mut out = values;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= extras.length {
             break;
@@ -74,12 +74,12 @@ fn extend_lifetime_regions(values -> LifetimeRegionMetadata[], extras -> Lifetim
     return out;
 }
 
-fn extend_mutations(values -> LocalMutation[], extras -> LocalMutation[]) -> LocalMutation[] {
+fn extend_mutations(values: LocalMutation[], extras: LocalMutation[]) -> LocalMutation[] {
     if extras.length == 0 {
         return values;
     }
     let mut out = values;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= extras.length {
             break;
@@ -90,14 +90,14 @@ fn extend_mutations(values -> LocalMutation[], extras -> LocalMutation[]) -> Loc
     return out;
 }
 
-fn insert_lines_before_index(lines -> string[], index -> number, insert_lines -> string[]) -> string[] {
+fn insert_lines_before_index(lines: string[], index: number, insert_lines: string[]) -> string[] {
     if insert_lines.length == 0 {
         return lines;
     }
 
-    let mut result -> string[] = [];
-    let mut line_idx -> number = 0;
-    let mut inserted -> boolean = false;
+    let mut result: string[] = [];
+    let mut line_idx: number = 0;
+    let mut inserted: boolean = false;
     loop {
         if line_idx >= lines.length {
             break;
@@ -120,50 +120,32 @@ fn insert_lines_before_index(lines -> string[], index -> number, insert_lines ->
 }
 
 fn _write_block_result_files(
-    lines -> string[],
-    allocas -> string[],
-    terminated -> boolean,
-    diagnostics -> string[],
-    string_constants -> StringConstant[],
-    temp_index -> number,
-    block_counter -> number,
-    next_local_id -> number,
-    next_lifetime_region_id -> number,
-    next_index -> number
+    lines: string[],
+    allocas: string[],
+    terminated: boolean,
+    diagnostics: string[],
+    string_constants: StringConstant[],
+    temp_index: number,
+    block_counter: number,
+    next_local_id: number,
+    next_lifetime_region_id: number,
+    next_index: number
 ) ![io] {
-    // Use fs.writeLines to avoid O(N²) string concatenation.
-    // fs.writeLines writes each element + "\n"; _split_by_newline handles trailing newlines.
-    fs.writeLines("build/sailfin/.block_result_lines", lines);
-    fs.writeLines("build/sailfin/.block_result_allocas", allocas);
-
-    let mut term_val -> string = "0";
+    // Only write the two IPC files that still have live readers.
+    let mut term_val: string = "0";
     if terminated {
         term_val = "1";
     }
     fs.writeFile("build/sailfin/.block_result_terminated", term_val);
 
-    fs.writeLines("build/sailfin/.block_result_diagnostics", diagnostics);
-
-    // Serialize string constants so emit_body can read them back.
-    // Format: one constant per line as "name\tcontent\tbyte_count".
-    let mut sc_lines -> string[] = [];
-    let mut si -> number = 0;
+    let mut sc_lines: string[] = [];
+    let mut si: number = 0;
     loop {
         if si >= string_constants.length { break; }
         sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count));
         si = si + 1;
     }
     fs.writeLines("build/sailfin/.block_result_string_constants", sc_lines);
-
-    // Scalar state fields needed by callers in other modules (instructions_match, instructions_loops).
-    fs.writeFile("build/sailfin/.block_result_temp_index", number_to_string(temp_index));
-    fs.writeFile("build/sailfin/.block_result_block_counter", number_to_string(block_counter));
-    fs.writeFile("build/sailfin/.block_result_next_local_id", number_to_string(next_local_id));
-    fs.writeFile("build/sailfin/.block_result_next_lifetime_region_id", number_to_string(next_lifetime_region_id));
-    fs.writeFile("build/sailfin/.block_result_next_index", number_to_string(next_index));
-    // Note: array fields (locals, bindings, mutations, lifetime_regions) are NOT written here
-    // because callers access them directly via the returned BlockLoweringResult pointer fields,
-    // which survive cross-module ABI corruption intact. Only scalar fields are corrupted.
 }
 
 // Read the block_result_terminated IPC file and return true only if the file
@@ -184,11 +166,11 @@ fn _read_ipc_terminated() -> boolean ![io] {
     return false;
 }
 
-fn _parse_int_from_string(text -> string) -> number {
+fn _parse_int_from_string(text: string) -> number {
     let len = text.length;
     if len == 0 { return 0; }
-    let mut result -> number = 0;
-    let mut i -> number = 0;
+    let mut result: number = 0;
+    let mut i: number = 0;
     let first_ch = grapheme_at(text, 0);
     if first_ch == "-" {
         i = 1;
@@ -214,7 +196,7 @@ fn _parse_int_from_string(text -> string) -> number {
 // Read an IPC integer from a file, returning at least `floor_value`.
 // This prevents temp_index resets to 0 when files are missing/empty/stale,
 // which otherwise causes duplicate SSA names (%tN) in LLVM IR.
-fn _read_ipc_int_min(path -> string, floor_value -> number) -> number ![io] {
+fn _read_ipc_int_min(path: string, floor_value: number) -> number ![io] {
     if !fs.exists(path) {
         return floor_value;
     }
@@ -231,8 +213,8 @@ fn _read_ipc_int_min(path -> string, floor_value -> number) -> number ![io] {
 
 // Write parameter bindings to files for statement.sfn to read.
 // Avoids ABI corruption of struct params across module boundaries.
-fn write_bindings_to_files(bindings -> ParameterBinding[]) ![io] {
-    let mut bc_i -> number = 0;
+fn write_bindings_to_files(bindings: ParameterBinding[]) ![io] {
+    let mut bc_i: number = 0;
     loop {
         let bc_prefix = "build/sailfin/.instr_binding_" + number_to_string(bc_i);
         if !fs.exists(bc_prefix + "_name") { break; }
@@ -242,7 +224,7 @@ fn write_bindings_to_files(bindings -> ParameterBinding[]) ![io] {
         fs.deleteFile(bc_prefix + "_type_annotation");
         bc_i += 1;
     }
-    let mut bw_i -> number = 0;
+    let mut bw_i: number = 0;
     loop {
         if bw_i >= bindings.length { break; }
         let bw_prefix = "build/sailfin/.instr_binding_" + number_to_string(bw_i);
@@ -255,8 +237,8 @@ fn write_bindings_to_files(bindings -> ParameterBinding[]) ![io] {
 }
 
 // Write local bindings to files for statement.sfn to read.
-fn write_locals_to_files(locals -> LocalBinding[]) ![io] {
-    let mut lc_i -> number = 0;
+fn write_locals_to_files(locals: LocalBinding[]) ![io] {
+    let mut lc_i: number = 0;
     loop {
         let lc_prefix = "build/sailfin/.instr_local_" + number_to_string(lc_i);
         if !fs.exists(lc_prefix + "_name") { break; }
@@ -268,7 +250,7 @@ fn write_locals_to_files(locals -> LocalBinding[]) ![io] {
         fs.deleteFile(lc_prefix + "_scope_depth");
         lc_i += 1;
     }
-    let mut lw_i -> number = 0;
+    let mut lw_i: number = 0;
     loop {
         if lw_i >= locals.length { break; }
         let lw_prefix = "build/sailfin/.instr_local_" + number_to_string(lw_i);
@@ -284,16 +266,16 @@ fn write_locals_to_files(locals -> LocalBinding[]) ![io] {
 
 // Read string constants from the block_result_string_constants file,
 // merging into existing. Used by if/loop/match/for/try handlers.
-fn read_block_result_string_constants(existing -> StringConstant[]) -> StringConstant[] ![io] {
+fn read_block_result_string_constants(existing: StringConstant[]) -> StringConstant[] ![io] {
     let mut result = existing;
     if fs.exists("build/sailfin/.block_result_string_constants") {
         let _raw = fs.readFile("build/sailfin/.block_result_string_constants");
         if _raw.length > 0 {
-            let mut _pos -> number = 0;
+            let mut _pos: number = 0;
             loop {
                 if _pos >= _raw.length { break; }
                 let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
-                let mut _line -> string = "";
+                let mut _line: string = "";
                 if _nl < 0 {
                     _line = substring(_raw, _pos, _raw.length);
                     _pos = _raw.length;
@@ -320,16 +302,16 @@ fn read_block_result_string_constants(existing -> StringConstant[]) -> StringCon
 
 // Read string constants from the expr_stmt_string_constants file,
 // merging into existing. Clears the file after reading.
-fn read_expr_string_constants(existing -> StringConstant[]) -> StringConstant[] ![io] {
+fn read_expr_string_constants(existing: StringConstant[]) -> StringConstant[] ![io] {
     let mut result = existing;
     if fs.exists("build/sailfin/.expr_stmt_string_constants") {
         let _raw = fs.readFile("build/sailfin/.expr_stmt_string_constants");
         if _raw.length > 0 {
-            let mut _pos -> number = 0;
+            let mut _pos: number = 0;
             loop {
                 if _pos >= _raw.length { break; }
                 let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
-                let mut _line -> string = "";
+                let mut _line: string = "";
                 if _nl < 0 {
                     _line = substring(_raw, _pos, _raw.length);
                     _pos = _raw.length;
@@ -357,16 +339,16 @@ fn read_expr_string_constants(existing -> StringConstant[]) -> StringConstant[] 
 
 // Read string constants from the let_result_string_constants file,
 // merging into existing. Used by let instruction handler.
-fn read_let_result_string_constants(existing -> StringConstant[]) -> StringConstant[] ![io] {
+fn read_let_result_string_constants(existing: StringConstant[]) -> StringConstant[] ![io] {
     let mut result = existing;
     if fs.exists("build/sailfin/.let_result_string_constants") {
         let _raw = fs.readFile("build/sailfin/.let_result_string_constants");
         if _raw.length > 0 {
-            let mut _pos -> number = 0;
+            let mut _pos: number = 0;
             loop {
                 if _pos >= _raw.length { break; }
                 let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
-                let mut _line -> string = "";
+                let mut _line: string = "";
                 if _nl < 0 {
                     _line = substring(_raw, _pos, _raw.length);
                     _pos = _raw.length;
@@ -395,12 +377,12 @@ fn read_let_result_string_constants(existing -> StringConstant[]) -> StringConst
 // Returns updated locals array.
 // Writes lines/allocas/scalar results to .let_ipc_* files for caller.
 fn read_let_result_from_files(
-    diagnostics -> string[],
-    current_locals -> LocalBinding[],
-    current_lines -> string[],
-    current_allocas -> string[],
-    scope_id -> string,
-    scope_depth -> number
+    diagnostics: string[],
+    current_locals: LocalBinding[],
+    current_lines: string[],
+    current_allocas: string[],
+    scope_id: string,
+    scope_depth: number
 ) -> LocalBinding[] ![io] {
     let mut result_locals = current_locals;
     if fs.exists("build/sailfin/.let_result_temp_index") {
@@ -408,7 +390,7 @@ fn read_let_result_from_files(
         let _diag_raw = fs.readFile("build/sailfin/.let_result_diagnostics");
         if _diag_raw.length > 0 {
             let _diag_lines = split_lines_local(_diag_raw);
-            let mut _di -> number = 0;
+            let mut _di: number = 0;
             loop {
                 if _di >= _diag_lines.length { break; }
                 diagnostics.push(_diag_lines[_di]);
@@ -417,7 +399,7 @@ fn read_let_result_from_files(
         }
         // Read lines from bulk file
         let _lines_raw = fs.readFile("build/sailfin/.let_result_lines");
-        let mut _new_lines -> string[] = [];
+        let mut _new_lines: string[] = [];
         if _lines_raw.length > 0 {
             _new_lines = split_lines_local(_lines_raw);
         }
@@ -425,7 +407,7 @@ fn read_let_result_from_files(
         fs.writeLines("build/sailfin/.let_ipc_lines", _new_lines);
         // Read allocas from bulk file
         let _allocas_raw = fs.readFile("build/sailfin/.let_result_allocas");
-        let mut _new_allocas -> string[] = [];
+        let mut _new_allocas: string[] = [];
         if _allocas_raw.length > 0 {
             _new_allocas = split_lines_local(_allocas_raw);
         }
@@ -452,10 +434,10 @@ fn read_let_result_from_files(
 }
 
 // Read mutations from expr_stmt file IPC.
-fn read_expr_mutations(existing -> LocalMutation[]) -> LocalMutation[] ![io] {
+fn read_expr_mutations(existing: LocalMutation[]) -> LocalMutation[] ![io] {
     let mut result = existing;
     let _mut_count = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_mut_count"));
-    let mut _mi -> number = 0;
+    let mut _mi: number = 0;
     loop {
         if _mi >= _mut_count { break; }
         let _mp = "build/sailfin/.expr_stmt_mut_" + number_to_string(_mi);
@@ -475,9 +457,9 @@ fn read_expr_mutations(existing -> LocalMutation[]) -> LocalMutation[] ![io] {
 // max(highest + 1, floor).  This provides a robust fallback when IPC
 // files carry stale temp counters (e.g. after cross-module expression
 // lowering where struct-return scalars are ABI-corrupted).
-fn recover_temp_from_lines(lines -> string[], floor -> number) -> number {
-    let mut result -> number = floor;
-    let mut ri -> number = 0;
+fn recover_temp_from_lines(lines: string[], floor: number) -> number {
+    let mut result: number = floor;
+    let mut ri: number = 0;
     loop {
         if ri >= lines.length { break; }
         let rl = lines[ri];
@@ -491,9 +473,9 @@ fn recover_temp_from_lines(lines -> string[], floor -> number) -> number {
                 if c1 == 32 {
                     if c2 == 37 {
                         if c3 == 116 {
-                            let mut rn -> number = 0;
-                            let mut rj -> number = 4;
-                            let mut rvalid -> boolean = false;
+                            let mut rn: number = 0;
+                            let mut rj: number = 4;
+                            let mut rvalid: boolean = false;
                             loop {
                                 if rj >= rl.length { break; }
                                 let rc = char_code(grapheme_at(rl, rj));

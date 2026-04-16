@@ -4,9 +4,9 @@
 
 // ── align_to (mirrors emit_native_layout.sfn) ───────────────────────
 
-fn _align_to(value -> number, alignment -> number) -> number {
+fn _align_to(value: number, alignment: number) -> number {
     if alignment <= 1 { return value; }
-    let mut remainder -> number = value;
+    let mut remainder: number = value;
     loop {
         if remainder < alignment { break; }
         remainder -= alignment;
@@ -19,11 +19,11 @@ fn _align_to(value -> number, alignment -> number) -> number {
 // Mirrors analyze_type_layout for primitive types.
 
 struct _TypeLayout {
-    size -> number;
-    align -> number;
+    size: number;
+    align: number;
 }
 
-fn _primitive_layout(type_name -> string) -> _TypeLayout {
+fn _primitive_layout(type_name: string) -> _TypeLayout {
     if type_name == "number" {
         return _TypeLayout { size: 8, align: 8 };
     }
@@ -53,33 +53,33 @@ fn _primitive_layout(type_name -> string) -> _TypeLayout {
 // Simplified version of calculate_record_layout.
 
 struct _FieldLayout {
-    name -> string;
-    offset -> number;
-    size -> number;
-    align -> number;
+    name: string;
+    offset: number;
+    size: number;
+    align: number;
 }
 
 struct _RecordLayout {
-    size -> number;
-    align -> number;
-    fields -> _FieldLayout[];
+    size: number;
+    align: number;
+    fields: _FieldLayout[];
 }
 
 struct _FieldInput {
-    name -> string;
-    type_name -> string;
+    name: string;
+    type_name: string;
 }
 
-fn _calculate_layout(inputs -> _FieldInput[]) -> _RecordLayout {
-    let mut fields -> _FieldLayout[] = [];
-    let mut offset -> number = 0;
-    let mut max_align -> number = 1;
-    let mut i -> number = 0;
+fn _calculate_layout(inputs: _FieldInput[]) -> _RecordLayout {
+    let mut fields: _FieldLayout[] = [];
+    let mut offset: number = 0;
+    let mut max_align: number = 1;
+    let mut i: number = 0;
     loop {
         if i >= inputs.length { break; }
         let input = inputs[i];
         let layout = _primitive_layout(input.type_name);
-        let mut field_align -> number = layout.align;
+        let mut field_align: number = layout.align;
         if field_align <= 0 { field_align = 1; }
         offset = _align_to(offset, field_align);
         fields.push(_FieldLayout {
@@ -92,9 +92,9 @@ fn _calculate_layout(inputs -> _FieldInput[]) -> _RecordLayout {
         if field_align > max_align { max_align = field_align; }
         i += 1;
     }
-    let mut final_align -> number = max_align;
+    let mut final_align: number = max_align;
     if inputs.length == 0 { final_align = 1; }
-    let mut total_size -> number = offset;
+    let mut total_size: number = offset;
     if final_align > 1 { total_size = _align_to(offset, final_align); }
     return _RecordLayout { size: total_size, align: final_align, fields: fields };
 }
@@ -177,7 +177,7 @@ test "layout: unknown defaults to pointer" {
 // ── Record layout tests ─────────────────────────────────────────────
 
 test "layout: empty record" {
-    let inputs -> _FieldInput[] = [];
+    let inputs: _FieldInput[] = [];
     let result = _calculate_layout(inputs);
     assert result.size == 0;
     assert result.align == 1;

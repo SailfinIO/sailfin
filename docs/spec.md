@@ -88,25 +88,12 @@ Variables default to immutability and are introduced with `let`. Add `mut` to
 allow reassignment.
 
 ```sfn
-let name -> string = "Sailfin";
-let mut counter -> number = 0;
+let name: string = "Sailfin";
+let mut counter: number = 0;
 ```
 
-> **Syntax reform (pre-1.0):** The `->` type annotation separator will be
-> replaced with `:` in variable declarations, parameters, and field
-> declarations. Function return types keep `->`. The parser currently accepts
-> `:` in all type-separator positions (including return types) because it
-> shares a single `TypeSep = "->" | ":"` rule. This is unintentional — `:` in
-> return-type position is discouraged and will become a parse error once the
-> grammar is split into separate annotation and return-type separators. New
-> code should use `:` for annotations and `->` for return types.
-> See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
->
-> ```sfn
-> // Preferred (new)
-> let name: string = "Sailfin";
-> let mut counter: number = 0;
-> ```
+Type annotations use `:`; function return types use `->`. The parser enforces
+`:` in annotation positions and `->` in return-type positions.
 
 Type annotations are optional; the current compiler performs limited
 inference. Initialisers may be omitted; the compiler emits `null` when a
@@ -118,19 +105,10 @@ binding lacks an explicit expression.
 values. Return types use `->`.
 
 ```sfn
-fn add(x -> number, y -> number) -> number {
+fn add(x: number, y: number) -> number {
     return x + y;
 }
 ```
-
-> **Syntax reform (pre-1.0):** Parameter type annotations will use `:` instead
-> of `->`. Return types keep `->`. New code should prefer the colon form:
->
-> ```sfn
-> fn add(x: number, y: number) -> number {
->     return x + y;
-> }
-> ```
 
 `async fn` enables `await` inside the body. Decorators (`@identifier`) are
 parsed and captured as metadata for later semantic passes.
@@ -205,8 +183,8 @@ interface Greeter {
 }
 
 struct User implements Greeter {
-    id -> number;
-    mut name -> string;
+    id: number;
+    mut name: string;
 
   fn greet(self) -> string {
     return "Hello, {{ self.name }}!";
@@ -234,7 +212,7 @@ analysis pipeline.
 ```sfn
 enum Response {
     Ok,
-    Error { message -> string },
+    Error { message: string },
 }
 ```
 
@@ -265,8 +243,8 @@ type Result<T> = Response | T;
 > `![model]` effect annotation is valuable and should remain a language feature,
 > but the declaration syntax could potentially be expressed as library types
 > (e.g., `sfn/model` capsule) without losing safety or expressiveness. This
-> question should be resolved before these features ship. See `docs/roadmap.md`
-> §Post-1.0 AI section for discussion.
+> question should be resolved before these features ship. See the
+> [roadmap](https://sailfin.dev/roadmap) Post-1.0 AI section for discussion.
 
 Models are first-class program artefacts. A `model` block declares metadata,
 versions, schemas, and evaluator suites, producing a `Model<Input, Output>`
@@ -426,7 +404,7 @@ adapter boundaries.
 > site with no compiler enforcement or propagation operator. Pre-1.0 will add
 > `Result<T, E>` to the type system and a `?` propagation operator. `try`/`catch`
 > remains for truly exceptional / unrecoverable errors.
-> See `docs/roadmap.md` §0.
+> See the [roadmap](https://sailfin.dev/roadmap) and `docs/proposals/colon-type-annotations.md`.
 
 ## 5. Concurrency and Performance
 
@@ -453,7 +431,7 @@ Planned syntax (not accepted by the current compiler):
 async fn main() ![io, model] {
   // Planned: `1s` time literal and `scope.with_timeout(...)` API.
   let scope = scope.with_timeout(1s);
-  let messages -> Channel<number> = channel(capacity: 32);
+  let messages: Channel<number> = channel(capacity: 32);
 
   routine scope {
     messages.send(42);
@@ -499,7 +477,7 @@ is limited to ergonomic runtime type guards.
 > `float` (64-bit IEEE 754). `number` will become an alias for `float`.
 > Integer literals will default to `int`; array indexing will require `int`.
 > This change also resolves the "double-encoded pointers" compiler fixup
-> category. See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
+> category. See the [roadmap](https://sailfin.dev/roadmap) and `docs/status.md` §Known Design Issues.
 
 Composite types include structs, enums, generics (e.g. `Vec<T>`, `Seq<T>`),
 optionals (`T?`), and unions (`A | B`). The array sugar `Type[]` is deprecated
@@ -619,9 +597,9 @@ Low-level interop lives behind an explicit `unsafe` capability. Unsafe declarati
 External functions from C libraries are declared using `unsafe extern fn`:
 
 ```sfn
-unsafe extern fn malloc(size -> usize) -> *u8;
-unsafe extern fn free(ptr -> *u8) -> void;
-unsafe extern fn memcpy(dest -> *u8, src -> *u8, n -> usize) -> *u8;
+unsafe extern fn malloc(size: usize) -> *u8;
+unsafe extern fn free(ptr: *u8) -> void;
+unsafe extern fn memcpy(dest: *u8, src: *u8, n: usize) -> *u8;
 ```
 
 Key properties:
@@ -653,7 +631,7 @@ Raw pointers differ from references:
 The `unsafe { ... }` block is a lexical scope where raw pointer operations are legal:
 
 ```sfn
-fn allocate_buffer(bytes -> usize) ![unsafe] -> *u8 {
+fn allocate_buffer(bytes: usize) ![unsafe] -> *u8 {
   unsafe {
     let ptr = malloc(bytes);
     // Dereferencing raw pointers is only legal inside this block.
@@ -679,13 +657,13 @@ The recommended pattern is to encapsulate unsafe operations behind safe abstract
 ```sfn
 // Unsafe internals wrapped in a safe API
 struct ManagedBuffer {
-    ptr -> *u8;
-    capacity -> usize;
-    length -> usize;
+    ptr: *u8;
+    capacity: usize;
+    length: usize;
 }
 
 // Safe allocation with Linear wrapper for cleanup enforcement
-fn allocate_buffer(size -> usize) ![unsafe] -> UnsafeResult<Linear<ManagedBuffer>> {
+fn allocate_buffer(size: usize) ![unsafe] -> UnsafeResult<Linear<ManagedBuffer>> {
     unsafe {
         let ptr = malloc(size);
         if ptr == null {
@@ -699,7 +677,7 @@ fn allocate_buffer(size -> usize) ![unsafe] -> UnsafeResult<Linear<ManagedBuffer
 }
 
 // Safe deallocation consuming the Linear wrapper
-fn free_buffer(buffer -> Linear<ManagedBuffer>) ![unsafe] -> void {
+fn free_buffer(buffer: Linear<ManagedBuffer>) ![unsafe] -> void {
     unsafe {
         let inner = consume(buffer);
         if inner.ptr != null {
@@ -795,11 +773,11 @@ When passing structs across FFI boundaries, layout must match C expectations:
 // Explicit layout annotation for C ABI compatibility
 @repr(C)
 struct Point {
-    x -> f64;
-    y -> f64;
+    x: f64;
+    y: f64;
 }
 
-unsafe extern fn distance(p1 -> *Point, p2 -> *Point) -> f64;
+unsafe extern fn distance(p1: *Point, p2: *Point) -> f64;
 ```
 
 The `@repr(C)` decorator ensures C-compatible field ordering and alignment.
@@ -810,14 +788,14 @@ Foreign functions typically signal errors via return codes or errno. Safe wrappe
 
 ```sfn
 enum PosixResult<T> {
-    Ok { value -> T },
-    Err { errno -> i32 },
+    Ok { value: T },
+    Err { errno: i32 },
 }
 
-unsafe extern fn c_open(path -> *u8, flags -> i32) -> i32;
+unsafe extern fn c_open(path: *u8, flags: i32) -> i32;
 unsafe extern fn c_errno() -> i32;
 
-fn open_file(path -> string, flags -> i32) ![unsafe, io] -> PosixResult<i32> {
+fn open_file(path: string, flags: i32) ![unsafe, io] -> PosixResult<i32> {
     unsafe {
         let fd = c_open(path.as_c_str(), flags);
         if fd < 0 {
@@ -986,7 +964,7 @@ each embedded expression directly.
 > `format!`. Using it for the opposite meaning guarantees confusion. LLMs
 > trained on billions of lines where `{{ }}` means "don't interpolate" will
 > produce systematically wrong code.
-> See `docs/roadmap.md` §0 and `docs/status.md` §Known Design Issues.
+> See the [roadmap](https://sailfin.dev/roadmap) and `docs/status.md` §Known Design Issues.
 
 ## 10. Runtime Semantics
 
@@ -1072,7 +1050,7 @@ sources receive the same behavior across runtime targets.
 ## Part B — Design Preview
 
 The sections below describe the direction of the compiler and adjacent tooling.
-They complement the roadmap (`docs/roadmap.md`) and proposals under
+They complement the [roadmap](https://sailfin.dev/roadmap) and proposals under
 `docs/proposals/`.
 
 ## 11. Roadmap

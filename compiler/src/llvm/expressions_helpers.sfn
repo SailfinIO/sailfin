@@ -10,7 +10,7 @@ import { trim_text, starts_with, sanitize_symbol, number_to_string } from "./uti
 // Identifier and Expression Helpers
 // =============================================================================
 
-fn is_simple_identifier(value -> string) -> boolean {
+fn is_simple_identifier(value: string) -> boolean {
     let trimmed = trim_text(value);
     if trimmed.length == 0 {
         return false;
@@ -28,8 +28,8 @@ fn is_simple_identifier(value -> string) -> boolean {
     return true;
 }
 
-fn is_effect_delimiter(ch -> string) -> boolean {
-    let mut _if171 -> boolean = false;
+fn is_effect_delimiter(ch: string) -> boolean {
+    let mut _if171: boolean = false;
     if ch == "!" { _if171 = true; }
     if ch == "?" { _if171 = true; }
     if _if171 {
@@ -38,19 +38,19 @@ fn is_effect_delimiter(ch -> string) -> boolean {
     return false;
 }
 
-fn strip_enclosing_parentheses(expression -> string) -> string {
+fn strip_enclosing_parentheses(expression: string) -> string {
     let trimmed = trim_text(expression);
     if trimmed.length < 2 {
         return trimmed;
     }
-    let mut _if172 -> boolean = false;
+    let mut _if172: boolean = false;
     if substring(trimmed, 0, 1) != "(" { _if172 = true; }
     if substring(trimmed, trimmed.length - 1, trimmed.length) != ")" { _if172 = true; }
     if _if172 {
         return trimmed;
     }
-    let mut depth -> number = 0;
-    let mut index -> number = 0;
+    let mut depth: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= trimmed.length {
             break;
@@ -73,7 +73,7 @@ fn strip_enclosing_parentheses(expression -> string) -> string {
     return trimmed;
 }
 
-fn strip_mut_prefix(value -> string) -> string {
+fn strip_mut_prefix(value: string) -> string {
     let trimmed = trim_text(value);
     if trimmed.length < 4 {
         return trimmed;
@@ -85,7 +85,7 @@ fn strip_mut_prefix(value -> string) -> string {
     return trimmed;
 }
 
-fn contains_text(haystack -> string, needle -> string) -> boolean {
+fn contains_text(haystack: string, needle: string) -> boolean {
     if needle.length == 0 {
         return true;
     }
@@ -93,7 +93,7 @@ fn contains_text(haystack -> string, needle -> string) -> boolean {
         return false;
     }
     let _search_limit = haystack.length - needle.length;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index > _search_limit {
             break;
@@ -111,14 +111,14 @@ fn contains_text(haystack -> string, needle -> string) -> boolean {
 // Type Helpers
 // =============================================================================
 
-fn ends_with_pointer_suffix(value -> string) -> boolean {
+fn ends_with_pointer_suffix(value: string) -> boolean {
     let trimmed = trim_text(value);
     if trimmed.length == 0 {
         return false;
     }
     // Fast-path: well-known primitives that are never pointers.
     // Avoids character-level indexing which is miscompiled by older seeds.
-    let mut _if175 -> boolean = false;
+    let mut _if175: boolean = false;
     if trimmed == "double" { _if175 = true; }
     if trimmed == "i1" { _if175 = true; }
     if trimmed == "i8" { _if175 = true; }
@@ -131,7 +131,7 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
         return false;
     }
     // Fast-path: well-known pointer types.
-    let mut _if176 -> boolean = false;
+    let mut _if176: boolean = false;
     if trimmed == "i8*" { _if176 = true; }
     if trimmed == "i8**" { _if176 = true; }
     if trimmed == "i32*" { _if176 = true; }
@@ -143,7 +143,7 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
     }
     // Fast-path: aggregate pointer types starting with { or % and ending with *.
     // Use starts_with (safe) instead of character indexing.
-    let mut _if177 -> boolean = false;
+    let mut _if177: boolean = false;
     if starts_with(trimmed, "{") { _if177 = true; }
     if starts_with(trimmed, "%") { _if177 = true; }
     if _if177 {
@@ -156,15 +156,15 @@ fn ends_with_pointer_suffix(value -> string) -> boolean {
     return substring(trimmed, trimmed.length - 1, trimmed.length) == "*";
 }
 
-fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
+fn is_copy_type(type_annotation: string, llvm_type: string) -> boolean {
     let trimmed = trim_text(type_annotation);
-    let mut _if173 -> boolean = false;
+    let mut _if173: boolean = false;
     if starts_with(trimmed, "Affine<") { _if173 = true; }
     if starts_with(trimmed, "Linear<") { _if173 = true; }
     if _if173 {
         return false;
     }
-    let mut _if174 -> boolean = false;
+    let mut _if174: boolean = false;
     if trimmed == "Affine" { _if174 = true; }
     if trimmed == "Linear" { _if174 = true; }
     if _if174 {
@@ -202,7 +202,7 @@ fn is_copy_type(type_annotation -> string, llvm_type -> string) -> boolean {
     return false;
 }
 
-fn default_return_literal(llvm_type -> string) -> string {
+fn default_return_literal(llvm_type: string) -> string {
     if llvm_type == "void" {
         return "";
     }
@@ -228,14 +228,14 @@ fn default_return_literal(llvm_type -> string) -> string {
 // LLVM Temp and Operand Formatting
 // =============================================================================
 
-fn format_temp_name(index -> number) -> string {
+fn format_temp_name(index: number) -> string {
     return "%t" + number_to_string(index);
 }
 
-fn format_local_pointer_name(index -> number) -> string {
+fn format_local_pointer_name(index: number) -> string {
     return "%l" + number_to_string(index);
 }
 
-fn format_typed_operand(operand -> LLVMOperand) -> string {
+fn format_typed_operand(operand: LLVMOperand) -> string {
     return operand.llvm_type + " " + operand.value;
 }

@@ -9,7 +9,7 @@ import { TypeContext } from "./types";
 import { join_with_separator, string_array_contains, sanitize_symbol, number_to_string } from "./utils";
 import { map_parameter_type, map_struct_type_annotation } from "./type_mapping";
 
-fn clamp_collection_length(value -> number, max -> number) -> number {
+fn clamp_collection_length(value: number, max: number) -> number {
     if value != value {
         return 0;
     }
@@ -26,9 +26,9 @@ fn clamp_collection_length(value -> number, max -> number) -> number {
 // Interface Type Definitions
 // =============================================================================
 
-fn render_interface_type_definitions(context -> TypeContext) -> string[] {
-    let mut lines -> string[] = [];
-    let mut index -> number = 0;
+fn render_interface_type_definitions(context: TypeContext) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: number = 0;
     let interface_count = clamp_collection_length(context.interfaces.length, 10000);
     loop {
         if index >= interface_count {
@@ -47,16 +47,16 @@ fn render_interface_type_definitions(context -> TypeContext) -> string[] {
 // VTable Type Definitions and Constants
 // =============================================================================
 
-fn render_vtable_type_definitions(context -> TypeContext) -> string[] {
-    let mut lines -> string[] = [];
-    let mut index -> number = 0;
+fn render_vtable_type_definitions(context: TypeContext) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= context.vtables.length {
             break;
         }
         let vtable = context.vtables[index];
-        let mut entry_types -> string[] = [];
-        let mut entry_index -> number = 0;
+        let mut entry_types: string[] = [];
+        let mut entry_index: number = 0;
         loop {
             if entry_index >= vtable.entries.length {
                 break;
@@ -64,7 +64,7 @@ fn render_vtable_type_definitions(context -> TypeContext) -> string[] {
             entry_types.push(vtable.entries[entry_index].function_pointer_type);
             entry_index += 1;
         }
-        let mut body -> string = "";
+        let mut body: string = "";
         if entry_types.length == 0 {
             body = "{}";
         } else {
@@ -76,16 +76,16 @@ fn render_vtable_type_definitions(context -> TypeContext) -> string[] {
     return lines;
 }
 
-fn render_vtable_constants(context -> TypeContext) -> string[] {
-    let mut lines -> string[] = [];
-    let mut index -> number = 0;
+fn render_vtable_constants(context: TypeContext) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= context.vtables.length {
             break;
         }
         let vtable = context.vtables[index];
-        let mut entry_values -> string[] = [];
-        let mut entry_index -> number = 0;
+        let mut entry_values: string[] = [];
+        let mut entry_index: number = 0;
         loop {
             if entry_index >= vtable.entries.length {
                 break;
@@ -98,7 +98,7 @@ fn render_vtable_constants(context -> TypeContext) -> string[] {
             entry_values.push(typed_value);
             entry_index += 1;
         }
-        let mut body -> string = "";
+        let mut body: string = "";
         if entry_values.length == 0 {
             body = "zeroinitializer";
         } else {
@@ -117,33 +117,54 @@ fn render_vtable_constants(context -> TypeContext) -> string[] {
 // Test Harness Rendering
 // =============================================================================
 
-fn _escape_llvm_string(text -> string) -> string {
-    let mut out -> string = "";
-    let mut i -> number = 0;
+fn _escape_llvm_string(text: string) -> string {
+    // Chunked: O(K) memory where K = number of escape chars, instead of
+    // O(N^2) per-character `out = out + ch` accumulation.
+    let mut chunks: string[] = [];
+    let mut chunk_start: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         let ch = substring(text, i, i + 1);
+        let mut esc: string = "";
         if ch == "\"" {
-            out = out + "\\22";
+            esc = "\\22";
         } else if ch == "\\" {
-            out = out + "\\5C";
-        } else {
-            out = out + ch;
+            esc = "\\5C";
+        }
+        if esc.length > 0 {
+            if i > chunk_start {
+                chunks.push(substring(text, chunk_start, i));
+            }
+            chunks.push(esc);
+            chunk_start = i + 1;
         }
         i += 1;
+    }
+    if chunk_start < text.length {
+        chunks.push(substring(text, chunk_start, text.length));
+    }
+    if chunks.length == 0 { return ""; }
+    if chunks.length == 1 { return chunks[0]; }
+    let mut out: string = chunks[0];
+    let mut j: number = 1;
+    loop {
+        if j >= chunks.length { break; }
+        out = out + chunks[j];
+        j += 1;
     }
     return out;
 }
 
-fn _test_label_from_name(raw_name -> string) -> string {
+fn _test_label_from_name(raw_name: string) -> string {
     let mut name = raw_name;
     if name.length >= 5 {
         if substring(name, 0, 5) == "test:" {
             name = substring(name, 5, name.length);
         }
     }
-    let mut cleaned -> string = "";
-    let mut i -> number = 0;
+    let mut cleaned: string = "";
+    let mut i: number = 0;
     loop {
         if i >= name.length { break; }
         let ch = substring(name, i, i + 1);
@@ -157,12 +178,12 @@ fn _test_label_from_name(raw_name -> string) -> string {
     return cleaned;
 }
 
-fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
-    let mut lines -> string[] = [];
+fn render_test_harness_main(tests: NativeFunction[]) -> string[] {
+    let mut lines: string[] = [];
     let test_count = tests.length;
 
     // String constants for test names and summary
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= test_count { break; }
         let label = _test_label_from_name(tests[index].name);
@@ -205,8 +226,8 @@ fn render_test_harness_main(tests -> NativeFunction[]) -> string[] {
 // Interface Signature Rendering
 // =============================================================================
 
-fn render_interface_signature(signature -> NativeInterfaceSignature) -> string {
-    let mut line -> string = "fn " + signature.name;
+fn render_interface_signature(signature: NativeInterfaceSignature) -> string {
+    let mut line: string = "fn " + signature.name;
     if signature.type_parameters.length > 0 {
         line = line + "<" + join_with_separator(signature.type_parameters, ", ") + ">";
     }
@@ -225,23 +246,23 @@ fn render_interface_signature(signature -> NativeInterfaceSignature) -> string {
     return line;
 }
 
-fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
+fn render_interface_parameters(parameters: NativeParameter[]) -> string {
     if parameters.length == 0 {
         return "";
     }
-    let mut rendered -> string[] = [];
-    let mut index -> number = 0;
+    let mut rendered: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= parameters.length {
             break;
         }
         let parameter = parameters[index];
-        let mut entry -> string = parameter.name;
+        let mut entry: string = parameter.name;
         if parameter.mutable {
             entry = "mut " + entry;
         }
         if parameter.type_annotation.length > 0 {
-            entry = entry + " -> " + parameter.type_annotation;
+            entry = entry + ": " + parameter.type_annotation;
         }
         if parameter.default_value != null {
             entry = entry + " = " + parameter.default_value;
@@ -256,14 +277,14 @@ fn render_interface_parameters(parameters -> NativeParameter[]) -> string {
 // Helper Functions
 // =============================================================================
 
-fn extract_struct_type_from_llvm(llvm_type -> string) -> string {
+fn extract_struct_type_from_llvm(llvm_type: string) -> string {
     // Extract struct type name from LLVM type like "%Token**" or "{ %Token**, i64 }*"
     // Returns empty string if no struct type found
     if llvm_type.length == 0 {
         return "";
     }
-    let mut result -> string = "";
-    let mut index -> number = 0;
+    let mut result: string = "";
+    let mut index: number = 0;
     loop {
         if index >= llvm_type.length {
             break;
@@ -271,14 +292,14 @@ fn extract_struct_type_from_llvm(llvm_type -> string) -> string {
         let ch = substring(llvm_type, index, index + 1);
         if ch == "%" {
             // Found a struct type reference, extract the name
-            let mut end_index -> number = index + 1;
+            let mut end_index: number = index + 1;
             loop {
                 if end_index >= llvm_type.length {
                     break;
                 }
                 let end_ch = substring(llvm_type, end_index, end_index + 1);
                 // Struct name ends at space, comma, *, }, or >
-                let mut _if288 -> boolean = false;
+                let mut _if288: boolean = false;
                 if end_ch == " " { _if288 = true; }
                 if end_ch == "," { _if288 = true; }
                 if end_ch == "*" { _if288 = true; }
@@ -300,9 +321,9 @@ fn extract_struct_type_from_llvm(llvm_type -> string) -> string {
     return result;
 }
 
-fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter[], function_name -> string) -> string[] {
-    let mut types -> string[] = [];
-    let mut index -> number = 0;
+fn collect_parameter_types(context: TypeContext, parameters: NativeParameter[], function_name: string) -> string[] {
+    let mut types: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= parameters.length {
             break;
@@ -331,8 +352,8 @@ fn collect_parameter_types(context -> TypeContext, parameters -> NativeParameter
     return types;
 }
 
-fn find_function_by_name(functions -> NativeFunction[], name -> string) -> NativeFunction? {
-    let mut index -> number = 0;
+fn find_function_by_name(functions: NativeFunction[], name: string) -> NativeFunction? {
+    let mut index: number = 0;
     loop {
         if index >= functions.length {
             break;
@@ -349,11 +370,11 @@ fn find_function_by_name(functions -> NativeFunction[], name -> string) -> Nativ
 // Symbol Visibility Helpers
 // =============================================================================
 
-fn is_entry_point(entry_points -> string[], function_name -> string) -> boolean {
+fn is_entry_point(entry_points: string[], function_name: string) -> boolean {
     if entry_points == null {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= entry_points.length {
             break;
@@ -366,15 +387,15 @@ fn is_entry_point(entry_points -> string[], function_name -> string) -> boolean 
     return false;
 }
 
-fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
+fn collect_exported_symbol_names(imports: NativeImport[]) -> string[] {
     if imports == null {
         return [];
     }
     if imports.length > 10000 {
         return [];
     }
-    let mut names -> string[] = [];
-    let mut index -> number = 0;
+    let mut names: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= imports.length {
             break;
@@ -390,7 +411,7 @@ fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
                 index += 1;
                 continue;
             }
-            let mut spec_index -> number = 0;
+            let mut spec_index: number = 0;
             loop {
                 if spec_index >= specifiers.length {
                     break;
@@ -414,8 +435,8 @@ fn collect_exported_symbol_names(imports -> NativeImport[]) -> string[] {
     return names;
 }
 
-fn is_exported_symbol(exported_symbols -> string[], function_name -> string) -> boolean {
-    let mut index -> number = 0;
+fn is_exported_symbol(exported_symbols: string[], function_name: string) -> boolean {
+    let mut index: number = 0;
     loop {
         if index >= exported_symbols.length {
             break;
@@ -428,7 +449,7 @@ fn is_exported_symbol(exported_symbols -> string[], function_name -> string) -> 
     return false;
 }
 
-fn should_internalize_function(function -> NativeFunction, entry_points -> string[], exported_symbols -> string[], imported_functions -> NativeFunction[]) -> boolean {
+fn should_internalize_function(function: NativeFunction, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[]) -> boolean {
     // Externs are emitted as declarations.
     if function.is_extern {
         return false;
@@ -446,55 +467,55 @@ fn should_internalize_function(function -> NativeFunction, entry_points -> strin
 
     // Preserve native driver API surface expected by selfhost/release linking.
     let sanitized = sanitize_symbol(function.name);
-    let mut _if289 -> boolean = false;
+    let mut _if289: boolean = false;
     if function.name == "compile_to_llvm" { _if289 = true; }
     if sanitized == "compile_to_llvm" { _if289 = true; }
     if _if289 {
         return false;
     }
-    let mut _if290 -> boolean = false;
+    let mut _if290: boolean = false;
     if function.name == "compile_to_sailfin" { _if290 = true; }
     if sanitized == "compile_to_sailfin" { _if290 = true; }
     if _if290 {
         return false;
     }
-    let mut _if291 -> boolean = false;
+    let mut _if291: boolean = false;
     if function.name == "cli_main" { _if291 = true; }
     if sanitized == "sailfin_cli_main__cli_main" { _if291 = true; }
     if _if291 {
         return false;
     }
-    let mut _if292 -> boolean = false;
+    let mut _if292: boolean = false;
     if function.name == "sailfin_cli_main" { _if292 = true; }
     if sanitized == "sailfin_cli_main" { _if292 = true; }
     if _if292 {
         return false;
     }
-    let mut _if293 -> boolean = false;
+    let mut _if293: boolean = false;
     if function.name == "native_cli_main" { _if293 = true; }
     if sanitized == "native_cli_main" { _if293 = true; }
     if _if293 {
         return false;
     }
-    let mut _if294 -> boolean = false;
+    let mut _if294: boolean = false;
     if function.name == "append_match_arm_mutations" { _if294 = true; }
     if sanitized == "append_match_arm_mutations" { _if294 = true; }
     if _if294 {
         return false;
     }
-    let mut _if295 -> boolean = false;
+    let mut _if295: boolean = false;
     if function.name == "append_match_arm_mutations_impl" { _if295 = true; }
     if sanitized == "append_match_arm_mutations_impl" { _if295 = true; }
     if _if295 {
         return false;
     }
-    let mut _if296 -> boolean = false;
+    let mut _if296: boolean = false;
     if function.name == "text_char_at" { _if296 = true; }
     if sanitized == "text_char_at" { _if296 = true; }
     if _if296 {
         return false;
     }
-    let mut _if297 -> boolean = false;
+    let mut _if297: boolean = false;
     if function.name == "string_char_at" { _if297 = true; }
     if sanitized == "string_char_at" { _if297 = true; }
     if _if297 {

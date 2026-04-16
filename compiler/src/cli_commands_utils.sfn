@@ -37,16 +37,16 @@ export {
     _string_list_contains_cmd,
 };
 
-fn _ends_with_cmd(value -> string, suffix -> string) -> boolean {
+fn _ends_with_cmd(value: string, suffix: string) -> boolean {
     if suffix.length == 0 { return true; }
     if value.length < suffix.length { return false; }
     let start = value.length - suffix.length;
     return substring(value, start, value.length) == suffix;
 }
 
-fn _dirname_cmd(path -> string) -> string {
-    let mut last_slash -> number = -1;
-    let mut i -> number = 0;
+fn _dirname_cmd(path: string) -> string {
+    let mut last_slash: number = -1;
+    let mut i: number = 0;
     loop {
         if i >= path.length { break; }
         if substring(path, i, i + 1) == "/" {
@@ -63,8 +63,8 @@ fn _dirname_cmd(path -> string) -> string {
     return substring(path, 0, last_slash);
 }
 
-fn find_char(text -> string, ch -> string, start -> number) -> number {
-    let mut i -> number = start;
+fn find_char(text: string, ch: string, start: number) -> number {
+    let mut i: number = start;
     loop {
         if i >= text.length { break; }
         if substring(text, i, i + 1) == ch {
@@ -75,13 +75,13 @@ fn find_char(text -> string, ch -> string, start -> number) -> number {
     return -1;
 }
 
-fn _toml_trim_cmd(text -> string) -> string {
-    let mut s -> number = 0;
-    let mut e -> number = text.length;
+fn _toml_trim_cmd(text: string) -> string {
+    let mut s: number = 0;
+    let mut e: number = text.length;
     loop {
         if s >= e { break; }
         let c = substring(text, s, s + 1);
-        let mut ws -> boolean = false;
+        let mut ws: boolean = false;
         if c == " " { ws = true; }
         if c == "\n" { ws = true; }
         if c == "\r" { ws = true; }
@@ -92,7 +92,7 @@ fn _toml_trim_cmd(text -> string) -> string {
     loop {
         if e <= s { break; }
         let c = substring(text, e - 1, e);
-        let mut ws -> boolean = false;
+        let mut ws: boolean = false;
         if c == " " { ws = true; }
         if c == "\n" { ws = true; }
         if c == "\r" { ws = true; }
@@ -103,7 +103,7 @@ fn _toml_trim_cmd(text -> string) -> string {
     return substring(text, s, e);
 }
 
-fn _shell_read_cmd(cmd -> string) -> string ![io] {
+fn _shell_read_cmd(cmd: string) -> string ![io] {
     let tmp = "/tmp/.sfn_shell_read_cmd_tmp";
     let rc = process.run(["sh", "-c", cmd + " > " + tmp + " 2>/dev/null"]);
     if rc != 0 {
@@ -117,7 +117,7 @@ fn _shell_read_cmd(cmd -> string) -> string ![io] {
     return _toml_trim_cmd(raw);
 }
 
-fn _get_env_cmd(name -> string) -> string ![io] {
+fn _get_env_cmd(name: string) -> string ![io] {
     return _shell_read_cmd("printf '%s' \"$" + name + "\"");
 }
 
@@ -125,25 +125,25 @@ fn _get_home_cmd() -> string ![io] {
     return _get_env_cmd("HOME");
 }
 
-fn _ensure_dir_cmd(path -> string) ![io] {
+fn _ensure_dir_cmd(path: string) ![io] {
     if !fs.exists(path) {
         process.run(["mkdir", "-p", path]);
     }
 }
 
-fn _ensure_dir_recursive_cmd(path -> string) -> void ![io] {
+fn _ensure_dir_recursive_cmd(path: string) -> void ![io] {
     if !fs.exists(path) {
         process.run(["mkdir", "-p", path]);
     }
 }
 
-fn _sanitize_filename_cmd(value -> string) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _sanitize_filename_cmd(value: string) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= value.length { break; }
         let ch = substring(value, i, i + 1);
-        let mut safe -> boolean = true;
+        let mut safe: boolean = true;
         if ch == "/" { safe = false; }
         if ch == " " { safe = false; }
         if ch == "." { safe = false; }
@@ -157,31 +157,31 @@ fn _sanitize_filename_cmd(value -> string) -> string {
     return result;
 }
 
-fn _write_text_cmd(path -> string, text -> string) ![io] {
+fn _write_text_cmd(path: string, text: string) ![io] {
     fs.writeFile(path, text);
 }
 
-fn _looks_like_test_file_cmd(name -> string) -> boolean {
+fn _looks_like_test_file_cmd(name: string) -> boolean {
     return _ends_with_cmd(name, "_test.sfn");
 }
 
-fn _collect_test_files_cmd(root -> string, max_depth -> number) -> string[] ![io] {
-    let mut results -> string[] = [];
+fn _collect_test_files_cmd(root: string, max_depth: number) -> string[] ![io] {
+    let mut results: string[] = [];
     if _ends_with_cmd(root, ".sfn") {
         return [root];
     }
-    let mut queue -> string[] = [root];
-    let mut depth -> number = 0;
+    let mut queue: string[] = [root];
+    let mut depth: number = 0;
     loop {
         if depth >= max_depth { break; }
         if queue.length == 0 { break; }
-        let mut next_queue -> string[] = [];
-        let mut qi -> number = 0;
+        let mut next_queue: string[] = [];
+        let mut qi: number = 0;
         loop {
             if qi >= queue.length { break; }
             let dir = queue[qi];
             let entries = fs.listDirectory(dir);
-            let mut ei -> number = 0;
+            let mut ei: number = 0;
             loop {
                 if ei >= entries.length { break; }
                 let entry = entries[ei];
@@ -204,24 +204,24 @@ fn _collect_test_files_cmd(root -> string, max_depth -> number) -> string[] ![io
     return results;
 }
 
-fn _collect_sfn_files_cmd(root -> string, max_depth -> number) -> string[] ![io] {
-    let mut results -> string[] = [];
+fn _collect_sfn_files_cmd(root: string, max_depth: number) -> string[] ![io] {
+    let mut results: string[] = [];
     if _ends_with_cmd(root, ".sfn") {
         return [root];
     }
-    let mut queue -> string[] = [root];
-    let mut depth -> number = 0;
+    let mut queue: string[] = [root];
+    let mut depth: number = 0;
     loop {
         if depth >= max_depth { break; }
         if queue.length == 0 { break; }
-        let mut next_queue -> string[] = [];
-        let mut qi -> number = 0;
+        let mut next_queue: string[] = [];
+        let mut qi: number = 0;
         loop {
             if qi >= queue.length { break; }
             let dir = queue[qi];
             if !fs.exists(dir) { qi += 1; continue; }
             let entries = fs.listDirectory(dir);
-            let mut ei -> number = 0;
+            let mut ei: number = 0;
             loop {
                 if ei >= entries.length { break; }
                 let entry = entries[ei];
@@ -244,7 +244,7 @@ fn _collect_sfn_files_cmd(root -> string, max_depth -> number) -> string[] ![io]
     return results;
 }
 
-fn _curl_post_json_cmd(url -> string, body_path -> string, auth_header -> string) -> string ![io] {
+fn _curl_post_json_cmd(url: string, body_path: string, auth_header: string) -> string ![io] {
     let tmp = "/tmp/.sfn_curl_response_cmd_tmp";
     let rc = process.run(["curl", "-sfS", "-X", "POST",
         "-H", "Content-Type: application/json",
@@ -260,16 +260,16 @@ fn _curl_post_json_cmd(url -> string, body_path -> string, auth_header -> string
     return response;
 }
 
-fn _curl_download_cmd(url -> string, output_path -> string) -> number ![io] {
+fn _curl_download_cmd(url: string, output_path: string) -> number ![io] {
     return process.run(["curl", "-sfSL", "-o", output_path, url]);
 }
 
-fn _sha256_of_file_cmd(file_path -> string) -> string ![io] {
+fn _sha256_of_file_cmd(file_path: string) -> string ![io] {
     return _shell_read_cmd("sha256sum '" + file_path + "' | cut -d' ' -f1");
 }
 
-fn _extract_sfnpkg_cmd(content -> string, dest_dir -> string) -> void ![io] {
-    let mut pos -> number = 0;
+fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
+    let mut pos: number = 0;
     let header = "SFNPKG/1\n";
     if content.length < header.length { return; }
     pos = header.length;
@@ -284,7 +284,7 @@ fn _extract_sfnpkg_cmd(content -> string, dest_dir -> string) -> void ![io] {
         if nl_idx < 0 { break; }
         let rel_path = substring(after_marker, 0, nl_idx);
         let body_start = pos + marker.length + nl_idx + 1;
-        let mut body_end -> number = content.length;
+        let mut body_end: number = content.length;
         let next_marker_search = substring(content, body_start, content.length);
         let next_idx = find_char(next_marker_search, "-", 0);
         if next_idx >= 0 {
@@ -303,7 +303,7 @@ fn _extract_sfnpkg_cmd(content -> string, dest_dir -> string) -> void ![io] {
     }
 }
 
-fn _is_stdlib_capsule_cmd(name -> string) -> boolean {
+fn _is_stdlib_capsule_cmd(name: string) -> boolean {
     if name == "http" { return true; }
     if name == "json" { return true; }
     if name == "test" { return true; }
@@ -317,17 +317,17 @@ fn _is_stdlib_capsule_cmd(name -> string) -> boolean {
     return false;
 }
 
-fn _has_slash_cmd(name -> string) -> boolean {
+fn _has_slash_cmd(name: string) -> boolean {
     return find_char(name, "/", 0) >= 0;
 }
 
-fn _resolve_capsule_name_cmd(name -> string) -> string {
+fn _resolve_capsule_name_cmd(name: string) -> string {
     if _has_slash_cmd(name) { return name; }
     if _is_stdlib_capsule_cmd(name) { return "sfn/" + name; }
     return name;
 }
 
-fn _display_capsule_name_cmd(name -> string) -> string {
+fn _display_capsule_name_cmd(name: string) -> string {
     if _has_slash_cmd(name) {
         let slash = find_char(name, "/", 0);
         let scope = substring(name, 0, slash);
@@ -338,9 +338,9 @@ fn _display_capsule_name_cmd(name -> string) -> string {
     return name;
 }
 
-fn _has_prefix_cmd(value -> string, prefix -> string) -> boolean {
+fn _has_prefix_cmd(value: string, prefix: string) -> boolean {
     if prefix.length > value.length { return false; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= prefix.length { break; }
         if value[i] != prefix[i] { return false; }
@@ -349,15 +349,15 @@ fn _has_prefix_cmd(value -> string, prefix -> string) -> boolean {
     return true;
 }
 
-fn _path_join_cmd(base -> string, name -> string) -> string {
+fn _path_join_cmd(base: string, name: string) -> string {
     if base.length == 0 { return name; }
     if base[base.length - 1] == "/" { return base + name; }
     return base + "/" + name;
 }
 
-fn _string_contains_cmd(haystack -> string, needle -> string) -> boolean {
+fn _string_contains_cmd(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= haystack.length { break; }
         if haystack[i] == needle { return true; }
@@ -366,19 +366,19 @@ fn _string_contains_cmd(haystack -> string, needle -> string) -> boolean {
     return false;
 }
 
-fn _is_ident_char_cmd(ch -> string) -> boolean {
+fn _is_ident_char_cmd(ch: string) -> boolean {
     let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
     return _string_contains_cmd(allowed, ch);
 }
 
-fn _byte_at_cmd(text -> string, index -> number) -> string {
+fn _byte_at_cmd(text: string, index: number) -> string {
     if text.length == 0 { return ""; }
     if index < 0 { return ""; }
     if index >= text.length { return ""; }
     return substring(text, index, index + 1);
 }
 
-fn _word_matches_cmd(source -> string, index -> number, word -> string) -> boolean {
+fn _word_matches_cmd(source: string, index: number, word: string) -> boolean {
     if word.length == 0 { return false; }
     if index < 0 { return false; }
     let end_pos = index + word.length;
@@ -393,8 +393,8 @@ fn _word_matches_cmd(source -> string, index -> number, word -> string) -> boole
     return true;
 }
 
-fn _string_list_contains_cmd(items -> string[], value -> string) -> boolean {
-    let mut i -> number = 0;
+fn _string_list_contains_cmd(items: string[], value: string) -> boolean {
+    let mut i: number = 0;
     loop {
         if i >= items.length { break; }
         if items[i] == value { return true; }

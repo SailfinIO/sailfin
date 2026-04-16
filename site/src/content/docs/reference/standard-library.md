@@ -757,7 +757,7 @@ First-class model invocation. `model` and `prompt` blocks are parsed and emit me
 // Planned — not yet implemented
 model MyModel {
     provider: "anthropic";
-    model_id: "claude-3-5-sonnet-20241022";
+    model_id: "claude-sonnet-4-20250514";
     max_tokens: 1024;
 }
 

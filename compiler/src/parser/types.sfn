@@ -34,8 +34,8 @@ import {
 // ============================================================================
 
 struct Parser {
-    tokens -> Token[];
-    index -> number;
+    tokens: Token[];
+    index: number;
 }
 
 // ============================================================================
@@ -43,19 +43,19 @@ struct Parser {
 // ============================================================================
 
 struct StatementParseResult {
-    parser -> Parser;
-    statement -> Statement;
+    parser: Parser;
+    statement: Statement;
 }
 
 struct BlockStatementParseResult {
-    parser -> Parser;
-    statement -> Statement?;
-    success -> boolean;
+    parser: Parser;
+    statement: Statement?;
+    success: boolean;
 }
 
 struct BlockParseResult {
-    parser -> Parser;
-    block -> Block;
+    parser: Parser;
+    block: Block;
 }
 
 // ============================================================================
@@ -63,69 +63,69 @@ struct BlockParseResult {
 // ============================================================================
 
 struct ParameterParseResult {
-    parser -> Parser;
-    parameter -> Parameter;
+    parser: Parser;
+    parameter: Parameter;
 }
 
 struct ParameterListParseResult {
-    parser -> Parser;
-    parameters -> Parameter[];
+    parser: Parser;
+    parameters: Parameter[];
 }
 
 struct StructFieldParseResult {
-    parser -> Parser;
-    field -> FieldDeclaration?;
-    success -> boolean;
+    parser: Parser;
+    field: FieldDeclaration?;
+    success: boolean;
 }
 
 struct ModelPropertyParseResult {
-    parser -> Parser;
-    property -> ModelProperty?;
-    success -> boolean;
+    parser: Parser;
+    property: ModelProperty?;
+    success: boolean;
 }
 
 struct MethodParseResult {
-    parser -> Parser;
-    method -> MethodDeclaration?;
-    success -> boolean;
+    parser: Parser;
+    method: MethodDeclaration?;
+    success: boolean;
 }
 
 struct InterfaceMemberParseResult {
-    parser -> Parser;
-    signature -> FunctionSignature?;
-    success -> boolean;
+    parser: Parser;
+    signature: FunctionSignature?;
+    success: boolean;
 }
 
 struct EnumVariantParseResult {
-    parser -> Parser;
-    variant -> EnumVariant?;
-    success -> boolean;
+    parser: Parser;
+    variant: EnumVariant?;
+    success: boolean;
 }
 
 struct TypeParameterParseResult {
-    parser -> Parser;
-    parameters -> TypeParameter[];
+    parser: Parser;
+    parameters: TypeParameter[];
 }
 
 struct ImplementsParseResult {
-    parser -> Parser;
-    types -> TypeAnnotation[];
-    found -> boolean;
+    parser: Parser;
+    types: TypeAnnotation[];
+    found: boolean;
 }
 
 struct DecoratorParseResult {
-    parser -> Parser;
-    decorators -> Decorator[];
+    parser: Parser;
+    decorators: Decorator[];
 }
 
 struct EffectParseResult {
-    parser -> Parser;
-    effects -> string[];
+    parser: Parser;
+    effects: string[];
 }
 
 struct TypeSeparatorParseResult {
-    parser -> Parser;
-    found -> boolean;
+    parser: Parser;
+    found: boolean;
 }
 
 // ============================================================================
@@ -133,13 +133,13 @@ struct TypeSeparatorParseResult {
 // ============================================================================
 
 struct SpecifierListParseResult {
-    parser -> Parser;
-    specifiers -> NamedSpecifier[];
+    parser: Parser;
+    specifiers: NamedSpecifier[];
 }
 
 struct NamedSpecifier {
-    name -> string;
-    alias -> string?;
+    name: string;
+    alias: string?;
 }
 
 // ============================================================================
@@ -147,20 +147,20 @@ struct NamedSpecifier {
 // ============================================================================
 
 struct CaptureResult {
-    parser -> Parser;
-    tokens -> Token[];
+    parser: Parser;
+    tokens: Token[];
 }
 
 struct ParenthesizedParseResult {
-    parser -> Parser;
-    tokens -> Token[];
-    success -> boolean;
+    parser: Parser;
+    tokens: Token[];
+    success: boolean;
 }
 
 struct PatternCaptureResult {
-    parser -> Parser;
-    tokens -> Token[];
-    success -> boolean;
+    parser: Parser;
+    tokens: Token[];
+    success: boolean;
 }
 
 // ============================================================================
@@ -168,21 +168,21 @@ struct PatternCaptureResult {
 // ============================================================================
 
 struct MatchCasesParseResult {
-    parser -> Parser;
-    cases -> MatchCase[];
-    success -> boolean;
+    parser: Parser;
+    cases: MatchCase[];
+    success: boolean;
 }
 
 struct MatchCaseParseResult {
-    parser -> Parser;
-    case -> MatchCase?;
-    success -> boolean;
+    parser: Parser;
+    case: MatchCase?;
+    success: boolean;
 }
 
 struct MatchCaseTokenSplit {
-    pattern_tokens -> Token[];
-    guard_tokens -> Token[];
-    has_guard -> boolean;
+    pattern_tokens: Token[];
+    guard_tokens: Token[];
+    has_guard: boolean;
 }
 
 // ============================================================================
@@ -190,32 +190,32 @@ struct MatchCaseTokenSplit {
 // ============================================================================
 
 struct ExpressionTokens {
-    tokens -> Token[];
-    index -> number;
+    tokens: Token[];
+    index: number;
 }
 
 struct ExpressionParseResult {
-    state -> ExpressionTokens;
-    expression -> Expression;
-    success -> boolean;
+    state: ExpressionTokens;
+    expression: Expression;
+    success: boolean;
 }
 
 struct ExpressionTypeSeparatorParseResult {
-    state -> ExpressionTokens;
-    used_separator -> string;
-    found -> boolean;
+    state: ExpressionTokens;
+    used_separator: string;
+    found: boolean;
 }
 
 struct ExpressionCollectResult {
-    state -> ExpressionTokens;
-    tokens -> Token[];
-    success -> boolean;
+    state: ExpressionTokens;
+    tokens: Token[];
+    success: boolean;
 }
 
 struct ExpressionBlockParseResult {
-    state -> ExpressionTokens;
-    tokens -> Token[];
-    success -> boolean;
+    state: ExpressionTokens;
+    tokens: Token[];
+    success: boolean;
 }
 
 // ============================================================================
@@ -223,15 +223,15 @@ struct ExpressionBlockParseResult {
 // ============================================================================
 
 struct LambdaParameterParseResult {
-    state -> ExpressionTokens;
-    parameter -> Parameter;
-    success -> boolean;
+    state: ExpressionTokens;
+    parameter: Parameter;
+    success: boolean;
 }
 
 struct LambdaParameterListParseResult {
-    state -> ExpressionTokens;
-    parameters -> Parameter[];
-    success -> boolean;
+    state: ExpressionTokens;
+    parameters: Parameter[];
+    success: boolean;
 }
 
 // ============================================================================
@@ -239,24 +239,24 @@ struct LambdaParameterListParseResult {
 // ============================================================================
 
 struct CallArgumentsParseResult {
-    state -> ExpressionTokens;
-    arguments -> Expression[];
-    success -> boolean;
+    state: ExpressionTokens;
+    arguments: Expression[];
+    success: boolean;
 }
 
 struct ArrayLiteralParseResult {
-    state -> ExpressionTokens;
-    elements -> Expression[];
-    success -> boolean;
+    state: ExpressionTokens;
+    elements: Expression[];
+    success: boolean;
 }
 
 struct ObjectLiteralParseResult {
-    state -> ExpressionTokens;
-    fields -> ObjectField[];
-    success -> boolean;
+    state: ExpressionTokens;
+    fields: ObjectField[];
+    success: boolean;
 }
 
 struct StructTypeNameResult {
-    parts -> string[];
-    success -> boolean;
+    parts: string[];
+    success: boolean;
 }

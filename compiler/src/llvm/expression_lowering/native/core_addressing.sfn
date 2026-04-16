@@ -31,7 +31,7 @@ import {
     find_parameter_binding,
 } from "./core_bindings";
 
-fn lower_raw_address_expression(parse -> RawAddressParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[]) -> ExpressionResult {
+fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[]) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {

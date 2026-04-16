@@ -11,7 +11,7 @@ import { trim_text } from "./utils";
 // =============================================================================
 
 fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
-    let mut descriptors -> RuntimeHelperDescriptor[] = [];
+    let mut descriptors: RuntimeHelperDescriptor[] = [];
     // Raw print: writes to stdout with no prefix, no decoration.
     // Used by the compiler itself for artifact output and CLI messages.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
@@ -561,6 +561,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
             effects: [],
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+            target: "string.append",
+            symbol: "sailfin_runtime_string_append",
+            return_type: "i8*",
+            parameter_types: ["i8*", "i8*"],
+            effects: [],
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
             target: "string.drop",
             symbol: "sailfin_runtime_string_drop",
             return_type: "void",
@@ -842,16 +849,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     return descriptors;
 }
 
-fn append_runtime_helper(values -> RuntimeHelperDescriptor[], value -> RuntimeHelperDescriptor) -> RuntimeHelperDescriptor[] {
+fn append_runtime_helper(values: RuntimeHelperDescriptor[], value: RuntimeHelperDescriptor) -> RuntimeHelperDescriptor[] {
     let mut out = values;
     out = out.push(value);
     return out;
 }
 
-fn find_runtime_helper(target -> string) -> RuntimeHelperDescriptor? {
+fn find_runtime_helper(target: string) -> RuntimeHelperDescriptor? {
     let descriptors = runtime_helper_descriptors();
     let trimmed = trim_text(target);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= descriptors.length {
             break;

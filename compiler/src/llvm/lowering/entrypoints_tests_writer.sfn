@@ -30,7 +30,7 @@ import { extend_string_lines, extend_string_lines_checked, ensure_intrinsic_decl
 // Stub: kept for import-graph compatibility (main.sfn imports this symbol).
 // The full implementation (~600 lines duplicating the entire lowering pipeline)
 // was removed to fix OOM during selfhost.
-fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) -> boolean ![io] {
+fn write_llvm_ir_for_tests(native_module: NativeModule, out_path: string) -> boolean ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null {
         print.err("test llvm writer: no text artifact found");
@@ -40,7 +40,7 @@ fn write_llvm_ir_for_tests(native_module -> NativeModule, out_path -> string) ->
 }
 
 // Build and write LLVM IR for tests from raw native text, avoiding NativeModule ABI issues.
-fn write_llvm_ir_for_tests_from_text(native_text -> string, module_name -> string, out_path -> string) -> boolean ![io] {
+fn write_llvm_ir_for_tests_from_text(native_text: string, module_name: string, out_path: string) -> boolean ![io] {
     if native_text.length == 0 {
         print.err("test llvm: empty native text");
         return false;

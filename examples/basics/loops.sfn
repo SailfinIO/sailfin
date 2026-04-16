@@ -8,7 +8,7 @@ fn main() ![io] {
         print("for value: {{number}}");
     }
 
-    let mut attempts -> number = 0;
+    let mut attempts: number = 0;
 
     loop {
         attempts += 1;

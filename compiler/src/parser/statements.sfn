@@ -51,9 +51,9 @@ import { expression_from_tokens } from "./expressions";
 
 // Forward declaration for decorators - will be imported from declarations
 // For now we provide a stub that returns empty decorators
-fn parse_decorators_stub(parser -> Parser) -> DecoratorParseResult {
+fn parse_decorators_stub(parser: Parser) -> DecoratorParseResult {
     let mut current = parser;
-    let mut decorators -> Decorator[] = [];
+    let mut decorators: Decorator[] = [];
 
     loop {
         current = skip_trivia(current);
@@ -79,7 +79,7 @@ fn parse_decorators_stub(parser -> Parser) -> DecoratorParseResult {
         // Skip arguments if present
         let after = parser_peek_raw(current);
         if symbol_matches(after, "(") {
-            let mut depth -> number = 1;
+            let mut depth: number = 1;
             current = parser_advance_raw(current);
             loop {
                 let tok = parser_peek_raw(current);
@@ -111,8 +111,8 @@ fn parse_decorators_stub(parser -> Parser) -> DecoratorParseResult {
 // Block Parsing
 // ============================================================================
 
-fn parse_block(initial_parser -> Parser) -> BlockParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_block(initial_parser: Parser) -> BlockParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
     if !symbol_matches(token, "{") {
@@ -124,8 +124,8 @@ fn parse_block(initial_parser -> Parser) -> BlockParseResult {
 
     let start_index = parser.index;
     let mut current = parser_advance_raw(parser);
-    let mut block_end_index -> number = start_index;
-    let mut statements -> Statement[] = [];
+    let mut block_end_index: number = start_index;
+    let mut statements: Statement[] = [];
 
     loop {
         current = skip_trivia(current);
@@ -171,10 +171,10 @@ fn parse_block(initial_parser -> Parser) -> BlockParseResult {
     return BlockParseResult { parser: skip_trivia(current), block: block };
 }
 
-fn trim_block_tokens_local(tokens -> Token[]) -> Token[] {
-    let mut depth -> number = 0;
-    let mut index -> number = 0;
-    let mut end -> number = tokens.length;
+fn trim_block_tokens_local(tokens: Token[]) -> Token[] {
+    let mut depth: number = 0;
+    let mut index: number = 0;
+    let mut end: number = tokens.length;
     loop {
         if index >= tokens.length {
             break;
@@ -203,7 +203,7 @@ fn trim_block_tokens_local(tokens -> Token[]) -> Token[] {
 // Block Statement Dispatch
 // ============================================================================
 
-fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
+fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
     let original = parser;
     let decorator_result = parse_decorators_stub(parser);
     let current = decorator_result.parser;
@@ -302,7 +302,7 @@ fn parse_block_statement(parser -> Parser) -> BlockStatementParseResult {
 // Control Flow Statements
 // ============================================================================
 
-fn parse_for_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+fn parse_for_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "for") {
@@ -324,7 +324,7 @@ fn parse_for_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStat
 
     let target_tokens = trim_token_edges(token_slice(clause_tokens, 0, in_index));
     let iterable_tokens = trim_token_edges(token_slice(clause_tokens, in_index + 1, clause_tokens.length));
-    let mut _if410 -> boolean = false;
+    let mut _if410: boolean = false;
     if target_tokens.length == 0 { _if410 = true; }
     if iterable_tokens.length == 0 { _if410 = true; }
     if _if410 {
@@ -365,7 +365,7 @@ fn parse_for_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStat
     };
 }
 
-fn parse_loop_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+fn parse_loop_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "loop") {
@@ -397,7 +397,7 @@ fn parse_loop_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSta
     };
 }
 
-fn parse_break_statement(parser -> Parser) -> BlockStatementParseResult {
+fn parse_break_statement(parser: Parser) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "break") {
@@ -418,7 +418,7 @@ fn parse_break_statement(parser -> Parser) -> BlockStatementParseResult {
     };
 }
 
-fn parse_continue_statement(parser -> Parser) -> BlockStatementParseResult {
+fn parse_continue_statement(parser: Parser) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "continue") {
@@ -439,7 +439,7 @@ fn parse_continue_statement(parser -> Parser) -> BlockStatementParseResult {
     };
 }
 
-fn parse_if_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+fn parse_if_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "if") {
@@ -463,7 +463,7 @@ fn parse_if_statement(parser -> Parser, decorators -> Decorator[]) -> BlockState
     let then_block = then_result.block;
 
     current = skip_trivia(current);
-    let mut else_branch -> ElseBranch? = null;
+    let mut else_branch: ElseBranch? = null;
     if identifier_matches(parser_peek_raw(current), "else") {
         current = consume_keyword(current, "else");
         current = skip_trivia(current);
@@ -512,7 +512,7 @@ fn parse_if_statement(parser -> Parser, decorators -> Decorator[]) -> BlockState
 // Match Statement
 // ============================================================================
 
-fn parse_match_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+fn parse_match_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "match") {
@@ -555,7 +555,7 @@ fn parse_match_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSt
     };
 }
 
-fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
+fn parse_match_cases(parser: Parser) -> MatchCasesParseResult {
     let mut current = skip_trivia(parser);
     current = advance_to_symbol_local(current, "{");
     let peek = parser_peek_raw(current);
@@ -564,7 +564,7 @@ fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
     }
     current = parser_advance_raw(current);
 
-    let mut cases -> MatchCase[] = [];
+    let mut cases: MatchCase[] = [];
 
     loop {
         current = skip_trivia(current);
@@ -578,7 +578,7 @@ fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
         }
 
         let case_result = parse_match_case(current);
-        let mut _if411 -> boolean = false;
+        let mut _if411: boolean = false;
         if !case_result.success { _if411 = true; }
         if case_result.case == null { _if411 = true; }
         if _if411 {
@@ -597,7 +597,7 @@ fn parse_match_cases(parser -> Parser) -> MatchCasesParseResult {
     return MatchCasesParseResult { parser: current, cases: cases, success: true };
 }
 
-fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
+fn parse_match_case(parser: Parser) -> MatchCaseParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
 
@@ -618,7 +618,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 
     let pattern_expression = expression_from_tokens(split_tokens.pattern_tokens);
 
-    let mut guard_expression -> Expression? = null;
+    let mut guard_expression: Expression? = null;
     if split_tokens.has_guard {
         if split_tokens.guard_tokens.length == 0 {
             return MatchCaseParseResult { parser: original, case: null, success: false };
@@ -629,7 +629,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
     current = skip_trivia(current);
     let next = parser_peek_raw(current);
 
-    let mut body -> Block? = null;
+    let mut body: Block? = null;
 
     if symbol_matches(next, "{") {
         let body_result = parse_block(current);
@@ -639,13 +639,13 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
         current = body_result.parser;
         body = body_result.block;
     } else if identifier_matches(next, "return") {
-        let mut block_tokens -> Token[] = [];
+        let mut block_tokens: Token[] = [];
 
         block_tokens = append_token(block_tokens, next);
         current = parser_advance_raw(current);
 
         let capture = collect_until(current, [";", ",", "}"]);
-        let mut index -> number = 0;
+        let mut index: number = 0;
         loop {
             if index >= capture.tokens.length {
                 break;
@@ -655,7 +655,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
         }
 
         let trimmed_expression_tokens = trim_token_edges(capture.tokens);
-        let mut return_expression -> Expression? = null;
+        let mut return_expression: Expression? = null;
         if trimmed_expression_tokens.length > 0 {
             return_expression = expression_from_tokens(trimmed_expression_tokens);
         } else if capture.tokens.length > 0 {
@@ -673,7 +673,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 
     let statement_span = source_span_from_tokens(block_tokens);
 
-    let mut statements -> Statement[] = [];
+    let mut statements: Statement[] = [];
     statements = append_statement(statements, Statement.ReturnStatement { expression: return_expression, span: statement_span });
         let text = trim_text(tokens_to_text(block_tokens));
         body = Block { tokens: block_tokens, text: text, statements: statements };
@@ -686,8 +686,8 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 
         let expression = expression_from_tokens(trimmed_expression_tokens);
 
-        let mut block_tokens -> Token[] = [];
-        let mut index -> number = 0;
+        let mut block_tokens: Token[] = [];
+        let mut index: number = 0;
         loop {
             if index >= capture.tokens.length {
                 break;
@@ -707,7 +707,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
 
     let statement_span = source_span_from_tokens(block_tokens);
 
-    let mut statements -> Statement[] = [];
+    let mut statements: Statement[] = [];
     statements = append_statement(statements, Statement.ExpressionStatement { expression: expression, span: statement_span });
         let text = trim_text(tokens_to_text(block_tokens));
         body = Block { tokens: block_tokens, text: text, statements: statements };
@@ -726,7 +726,7 @@ fn parse_match_case(parser -> Parser) -> MatchCaseParseResult {
     return MatchCaseParseResult { parser: current, case: case, success: true };
 }
 
-fn split_match_case_tokens(tokens -> Token[]) -> MatchCaseTokenSplit {
+fn split_match_case_tokens(tokens: Token[]) -> MatchCaseTokenSplit {
     let trimmed = trim_token_edges(tokens);
     if trimmed.length == 0 {
         return MatchCaseTokenSplit {
@@ -759,7 +759,7 @@ fn split_match_case_tokens(tokens -> Token[]) -> MatchCaseTokenSplit {
 // Special Statements (prompt, with)
 // ============================================================================
 
-fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+fn parse_prompt_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     let prompt_token = parser_peek_raw(current);
@@ -770,7 +770,7 @@ fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockS
 
     current = skip_trivia(current);
     let channel_token = parser_peek_raw(current);
-    let mut channel -> string = "";
+    let mut channel: string = "";
     if channel_token.kind.variant == "Identifier" {
         channel = identifier_text(channel_token);
         current = parser_advance_raw(current);
@@ -807,7 +807,7 @@ fn parse_prompt_statement(parser -> Parser, decorators -> Decorator[]) -> BlockS
     };
 }
 
-fn parse_with_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+fn parse_with_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "with") {
@@ -818,8 +818,8 @@ fn parse_with_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSta
     let clauses_capture = collect_until(skip_trivia(current), ["{"]);
     current = clauses_capture.parser;
     let clause_slices = split_token_slices_by_comma(clauses_capture.tokens);
-    let mut clauses -> WithClause[] = [];
-    let mut index -> number = 0;
+    let mut clauses: WithClause[] = [];
+    let mut index: number = 0;
     loop {
         if index >= clause_slices.length {
             break;
@@ -861,13 +861,13 @@ fn parse_with_statement(parser -> Parser, decorators -> Decorator[]) -> BlockSta
 // Return, Throw, Try/Catch, Assert
 // ============================================================================
 
-fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
+fn parse_return_statement(parser: Parser) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "return") {
         return BlockStatementParseResult { parser: original, statement: null, success: false };
     }
-    let mut statement_tokens -> Token[] = [];
+    let mut statement_tokens: Token[] = [];
     statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
     current = consume_keyword(current, "return");
 
@@ -875,14 +875,14 @@ fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
     current = capture.parser;
     let trimmed = trim_token_edges(capture.tokens);
 
-    let mut expression -> Expression? = null;
+    let mut expression: Expression? = null;
     if trimmed.length > 0 {
         expression = expression_from_tokens(trimmed);
     } else if capture.tokens.length > 0 {
         expression = expression_from_tokens(capture.tokens);
     }
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= capture.tokens.length {
             break;
@@ -908,14 +908,14 @@ fn parse_return_statement(parser -> Parser) -> BlockStatementParseResult {
     };
 }
 
-fn parse_throw_statement(parser -> Parser) -> BlockStatementParseResult {
+fn parse_throw_statement(parser: Parser) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "throw") {
         return BlockStatementParseResult { parser: original, statement: null, success: false };
     }
 
-    let mut statement_tokens -> Token[] = [];
+    let mut statement_tokens: Token[] = [];
     statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
     current = consume_keyword(current, "throw");
 
@@ -926,7 +926,7 @@ fn parse_throw_statement(parser -> Parser) -> BlockStatementParseResult {
         return BlockStatementParseResult { parser: original, statement: null, success: false };
     }
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= capture.tokens.length {
             break;
@@ -949,7 +949,7 @@ fn parse_throw_statement(parser -> Parser) -> BlockStatementParseResult {
     return BlockStatementParseResult { parser: current, statement: statement, success: true };
 }
 
-fn parse_try_statement(parser -> Parser) -> BlockStatementParseResult {
+fn parse_try_statement(parser: Parser) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "try") {
@@ -964,9 +964,9 @@ fn parse_try_statement(parser -> Parser) -> BlockStatementParseResult {
     }
     current = try_result.parser;
 
-    let mut catch_name -> string? = null;
-    let mut catch_name_token -> Token? = null;
-    let mut catch_block -> Block? = null;
+    let mut catch_name: string? = null;
+    let mut catch_name_token: Token? = null;
+    let mut catch_block: Block? = null;
 
     current = skip_trivia(current);
     if identifier_matches(parser_peek_raw(current), "catch") {
@@ -1000,7 +1000,7 @@ fn parse_try_statement(parser -> Parser) -> BlockStatementParseResult {
         current = catch_result.parser;
     }
 
-    let mut finally_block -> Block? = null;
+    let mut finally_block: Block? = null;
     current = skip_trivia(current);
     if identifier_matches(parser_peek_raw(current), "finally") {
         current = consume_keyword(current, "finally");
@@ -1029,14 +1029,14 @@ fn parse_try_statement(parser -> Parser) -> BlockStatementParseResult {
     return BlockStatementParseResult { parser: current, statement: statement, success: true };
 }
 
-fn parse_assert_statement(parser -> Parser) -> BlockStatementParseResult {
+fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "assert") {
         return BlockStatementParseResult { parser: original, statement: null, success: false };
     }
 
-    let mut statement_tokens -> Token[] = [];
+    let mut statement_tokens: Token[] = [];
     statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
     current = consume_keyword(current, "assert");
 
@@ -1047,7 +1047,7 @@ fn parse_assert_statement(parser -> Parser) -> BlockStatementParseResult {
         return BlockStatementParseResult { parser: original, statement: null, success: false };
     }
 
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= capture.tokens.length {
             break;
@@ -1093,7 +1093,7 @@ fn parse_assert_statement(parser -> Parser) -> BlockStatementParseResult {
 // Expression Statement
 // ============================================================================
 
-fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> BlockStatementParseResult {
+fn parse_expression_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     if decorators.length > 0 {
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
     }
@@ -1105,7 +1105,7 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
     }
     if start.kind.variant == "Symbol" {
         let sym = start.lexeme;
-        let mut _if412 -> boolean = false;
+        let mut _if412: boolean = false;
         if strings_equal(sym, "}") { _if412 = true; }
         if strings_equal(sym, "{") { _if412 = true; }
         if _if412 {
@@ -1121,8 +1121,8 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
         return BlockStatementParseResult { parser: parser, statement: null, success: false };
     }
 
-    let mut statement_tokens -> Token[] = [];
-    let mut token_index -> number = 0;
+    let mut statement_tokens: Token[] = [];
+    let mut token_index: number = 0;
     loop {
         if token_index >= capture.tokens.length {
             break;
@@ -1162,15 +1162,15 @@ fn parse_expression_statement(parser -> Parser, decorators -> Decorator[]) -> Bl
 // Unknown Statement (fallback)
 // ============================================================================
 
-fn parse_unknown_statement(initial_parser -> Parser) -> StatementParseResult {
-    let mut parser -> Parser = initial_parser;
+fn parse_unknown_statement(initial_parser: Parser) -> StatementParseResult {
+    let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
-    let mut tokens -> Token[] = [];
+    let mut tokens: Token[] = [];
     let mut current = parser;
-    let mut depth -> number = 0;
-    let iteration_limit -> number = 16384;
-    let mut iteration_count -> number = 0;
-    let mut truncated -> boolean = false;
+    let mut depth: number = 0;
+    let iteration_limit: number = 16384;
+    let mut iteration_count: number = 0;
+    let mut truncated: boolean = false;
 
     loop {
         if iteration_count >= iteration_limit {
@@ -1193,7 +1193,7 @@ fn parse_unknown_statement(initial_parser -> Parser) -> StatementParseResult {
                 break;
             }
         } else {
-            let mut _elif413 -> boolean = false;
+            let mut _elif413: boolean = false;
             if depth == 0 {
                 if symbol_matches(tok, ";") {
                     _elif413 = true;
@@ -1213,7 +1213,7 @@ fn parse_unknown_statement(initial_parser -> Parser) -> StatementParseResult {
         current = parser_advance_raw(current);
     }
 
-    let mut text -> string = tokens_to_text(tokens);
+    let mut text: string = tokens_to_text(tokens);
     if truncated {
         text = text + " /* parse_unknown truncated */";
     }
@@ -1222,14 +1222,14 @@ fn parse_unknown_statement(initial_parser -> Parser) -> StatementParseResult {
     return StatementParseResult { parser: parser, statement: block };
 }
 
-fn is_end_of_file_local(parser -> Parser, token -> Token) -> boolean {
+fn is_end_of_file_local(parser: Parser, token: Token) -> boolean {
     if parser.index + 1 >= parser.tokens.length {
         return token.lexeme.length == 0;
     }
     return false;
 }
 
-fn advance_to_symbol_local(parser -> Parser, symbol -> string) -> Parser {
+fn advance_to_symbol_local(parser: Parser, symbol: string) -> Parser {
     let mut current = parser;
     loop {
         current = skip_trivia(current);
@@ -1253,22 +1253,22 @@ fn advance_to_symbol_local(parser -> Parser, symbol -> string) -> Parser {
 // Append Helpers
 // ============================================================================
 
-fn append_statement(statements -> Statement[], statement -> Statement) -> Statement[] {
+fn append_statement(statements: Statement[], statement: Statement) -> Statement[] {
     statements.push(statement);
     return statements;
 }
 
-fn append_match_case(cases -> MatchCase[], case -> MatchCase) -> MatchCase[] {
+fn append_match_case(cases: MatchCase[], case: MatchCase) -> MatchCase[] {
     cases.push(case);
     return cases;
 }
 
-fn append_with_clause(clauses -> WithClause[], clause -> WithClause) -> WithClause[] {
+fn append_with_clause(clauses: WithClause[], clause: WithClause) -> WithClause[] {
     clauses.push(clause);
     return clauses;
 }
 
-fn append_decorator(decorators -> Decorator[], decorator -> Decorator) -> Decorator[] {
+fn append_decorator(decorators: Decorator[], decorator: Decorator) -> Decorator[] {
     decorators.push(decorator);
     return decorators;
 }

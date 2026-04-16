@@ -10,22 +10,29 @@ import {
     join_with_separator, quote_string, trim_text, collapse_whitespace,
 } from "./emitter_sailfin_utils";
 
-fn format_optional_expression(expression -> Expression?) -> string {
+fn format_optional_expression(expression: Expression?) -> string {
     if expression == null {
         return "";
     }
-    let value -> Expression = expression;
+    let value: Expression = expression;
     return format_expression(value);
 }
 
-fn format_type_annotation(annotation -> TypeAnnotation?) -> string {
+fn format_type_annotation(annotation: TypeAnnotation?) -> string {
+    if annotation == null {
+        return "";
+    }
+    return ": " + annotation.text;
+}
+
+fn format_return_type_annotation(annotation: TypeAnnotation?) -> string {
     if annotation == null {
         return "";
     }
     return " -> " + annotation.text;
 }
 
-fn format_initializer(initializer -> Expression?) -> string {
+fn format_initializer(initializer: Expression?) -> string {
     let value = format_optional_expression(initializer);
     if value.length == 0 {
         return "";
@@ -33,7 +40,7 @@ fn format_initializer(initializer -> Expression?) -> string {
     return " = " + value;
 }
 
-fn format_expression(expression -> Expression) -> string {
+fn format_expression(expression: Expression) -> string {
     if expression.variant == "Identifier" {
         return expression.name;
     }
@@ -67,8 +74,8 @@ fn format_expression(expression -> Expression) -> string {
         return format_expression(expression.object) + "." + expression.member;
     }
     if expression.variant == "Call" {
-        let mut rendered -> string[] = [];
-        let mut index -> number = 0;
+        let mut rendered: string[] = [];
+        let mut index: number = 0;
         loop {
             if index >= expression.arguments.length {
                 break;
@@ -85,8 +92,8 @@ fn format_expression(expression -> Expression) -> string {
         return target + "[" + offset + "]";
     }
     if expression.variant == "Array" {
-        let mut rendered -> string[] = [];
-        let mut index -> number = 0;
+        let mut rendered: string[] = [];
+        let mut index: number = 0;
         loop {
             if index >= expression.elements.length {
                 break;
@@ -98,8 +105,8 @@ fn format_expression(expression -> Expression) -> string {
         return "[" + contents + "]";
     }
     if expression.variant == "Object" {
-        let mut rendered -> string[] = [];
-        let mut index -> number = 0;
+        let mut rendered: string[] = [];
+        let mut index: number = 0;
         loop {
             if index >= expression.fields.length {
                 break;
@@ -114,8 +121,8 @@ fn format_expression(expression -> Expression) -> string {
     }
     if expression.variant == "Struct" {
         let type_name = join_with_separator(expression.type_name, ".");
-        let mut rendered -> string[] = [];
-        let mut index -> number = 0;
+        let mut rendered: string[] = [];
+        let mut index: number = 0;
         loop {
             if index >= expression.fields.length {
                 break;
@@ -143,24 +150,24 @@ fn format_expression(expression -> Expression) -> string {
     return "";
 }
 
-fn format_lambda_expression(expression -> Expression) -> string {
+fn format_lambda_expression(expression: Expression) -> string {
     let params = format_lambda_parameters(expression.parameters);
-    let mut header -> string = "fn " + params;
-    header = header + format_type_annotation(expression.return_type);
+    let mut header: string = "fn " + params;
+    header = header + format_return_type_annotation(expression.return_type);
 
     let body = format_lambda_body(expression.body);
     return header + " " + body;
 }
 
-fn format_lambda_parameters(parameters -> Parameter[]) -> string {
-    let mut rendered -> string[] = [];
-    let mut index -> number = 0;
+fn format_lambda_parameters(parameters: Parameter[]) -> string {
+    let mut rendered: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= parameters.length {
             break;
         }
         let param = parameters[index];
-        let mut entry -> string = param.name;
+        let mut entry: string = param.name;
         entry = entry + format_type_annotation(param.type_annotation);
         rendered.push(entry);
         index += 1;
@@ -169,12 +176,12 @@ fn format_lambda_parameters(parameters -> Parameter[]) -> string {
     return "(" + args + ")";
 }
 
-fn format_lambda_body(body -> Block) -> string {
-    let mut lines -> string[] = [];
+fn format_lambda_body(body: Block) -> string {
+    let mut lines: string[] = [];
     if body.statements.length == 0 {
         lines.push("// empty body");
     } else {
-        let mut index -> number = 0;
+        let mut index: number = 0;
         loop {
             if index >= body.statements.length {
                 break;
@@ -188,7 +195,7 @@ fn format_lambda_body(body -> Block) -> string {
     return "{\n" + join_with_separator(indented, "\n") + "\n}";
 }
 
-fn format_lambda_statement(statement -> Statement) -> string {
+fn format_lambda_statement(statement: Statement) -> string {
     if statement.variant == "ReturnStatement" {
         let rendered = format_optional_expression(statement.expression);
         if rendered.length == 0 {
@@ -200,7 +207,7 @@ fn format_lambda_statement(statement -> Statement) -> string {
         return format_expression(statement.expression) + ";";
     }
     if statement.variant == "VariableDeclaration" {
-        let mut line -> string = "let ";
+        let mut line: string = "let ";
         if statement.mutable {
             line = line + "mut ";
         }
@@ -215,15 +222,15 @@ fn format_lambda_statement(statement -> Statement) -> string {
     return "// TODO: unsupported lambda statement: " + statement.variant;
 }
 
-fn indent_lines(lines -> string[], depth -> number) -> string[] {
-    let mut result -> string[] = [];
-    let mut index -> number = 0;
+fn indent_lines(lines: string[], depth: number) -> string[] {
+    let mut result: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= lines.length {
             break;
         }
-        let mut prefix -> string = "";
-        let mut count -> number = 0;
+        let mut prefix: string = "";
+        let mut count: number = 0;
         loop {
             if count >= depth {
                 break;

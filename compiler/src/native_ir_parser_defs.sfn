@@ -56,7 +56,7 @@ import {
     parse_instruction,
 } from "./native_ir_parser_instructions";
 
-fn parse_source_span(text -> string) -> NativeSourceSpan? {
+fn parse_source_span(text: string) -> NativeSourceSpan? {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         return null;
@@ -89,7 +89,7 @@ fn parse_source_span(text -> string) -> NativeSourceSpan? {
     };
 }
 
-fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) -> NativeFunction {
+fn append_parameter(function: NativeFunction, parameter: NativeParameter) -> NativeFunction {
     let mut parameters = function.parameters;
     parameters.push(parameter);
     return NativeFunction {
@@ -104,7 +104,7 @@ fn append_parameter(function -> NativeFunction, parameter -> NativeParameter) ->
     };
 }
 
-fn append_instruction(function -> NativeFunction, instruction -> NativeInstruction) -> NativeFunction {
+fn append_instruction(function: NativeFunction, instruction: NativeInstruction) -> NativeFunction {
     let instructions = function.instructions;
     instructions.push(instruction);
     return NativeFunction {
@@ -119,7 +119,7 @@ fn append_instruction(function -> NativeFunction, instruction -> NativeInstructi
     };
 }
 
-fn apply_meta(function -> NativeFunction, entry -> string) -> NativeFunction {
+fn apply_meta(function: NativeFunction, entry: string) -> NativeFunction {
     let trimmed = trim_text(entry);
     if trimmed == "extern" {
         return NativeFunction {
@@ -148,7 +148,7 @@ fn apply_meta(function -> NativeFunction, entry -> string) -> NativeFunction {
     return function;
 }
 
-fn update_function_meta(function -> NativeFunction, return_type -> string, effects -> string[]) -> NativeFunction {
+fn update_function_meta(function: NativeFunction, return_type: string, effects: string[]) -> NativeFunction {
     return NativeFunction {
         name: function.name,
         is_async: function.is_async,
@@ -161,13 +161,13 @@ fn update_function_meta(function -> NativeFunction, return_type -> string, effec
     };
 }
 
-fn append_struct_layout_field(fields -> NativeStructLayoutField[], field -> NativeStructLayoutField) -> NativeStructLayoutField[] {
+fn append_struct_layout_field(fields: NativeStructLayoutField[], field: NativeStructLayoutField) -> NativeStructLayoutField[] {
     fields.push(field);
     return fields;
 }
 
-fn find_enum_variant_layout(variants -> NativeEnumVariantLayout[], name -> string) -> number {
-    let mut index -> number = 0;
+fn find_enum_variant_layout(variants: NativeEnumVariantLayout[], name: string) -> number {
+    let mut index: number = 0;
     loop {
         if index >= variants.length {
             break;
@@ -180,9 +180,9 @@ fn find_enum_variant_layout(variants -> NativeEnumVariantLayout[], name -> strin
     return -1;
 }
 
-fn update_enum_variant_fields(variants -> NativeEnumVariantLayout[], index -> number, field -> NativeStructLayoutField) -> NativeEnumVariantLayout[] {
-    let mut result -> NativeEnumVariantLayout[] = [];
-    let mut current_index -> number = 0;
+fn update_enum_variant_fields(variants: NativeEnumVariantLayout[], index: number, field: NativeStructLayoutField) -> NativeEnumVariantLayout[] {
+    let mut result: NativeEnumVariantLayout[] = [];
+    let mut current_index: number = 0;
     loop {
         if current_index >= variants.length {
             break;
@@ -206,12 +206,12 @@ fn update_enum_variant_fields(variants -> NativeEnumVariantLayout[], index -> nu
     return result;
 }
 
-fn parse_struct_definition(lines -> string[], start_index -> number, include_instructions -> boolean) -> StructParseResult {
-    let mut diagnostics -> string[] = [];
+fn parse_struct_definition(lines: string[], start_index: number, include_instructions: boolean) -> StructParseResult {
+    let mut diagnostics: string[] = [];
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".struct "));
     let header_parse = parse_struct_header(name_text);
-    let mut _ci -> number = 0;
+    let mut _ci: number = 0;
     loop {
         if _ci >= header_parse.diagnostics.length { break; }
         diagnostics.push(header_parse.diagnostics[_ci]);
@@ -224,22 +224,22 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
         return StructParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
     }
 
-    let mut fields -> NativeStructField[] = [];
-    let mut methods -> NativeFunction[] = [];
-    let mut current_method -> NativeFunction? = null;
-    let mut method_pending_span -> NativeSourceSpan? = null;
-    let mut method_pending_value_span -> NativeSourceSpan? = null;
-    let mut method_pending_decorators -> string[] = [];
-    let mut struct_layout_fields -> NativeStructLayoutField[] = [];
-    let mut struct_layout_size -> number = 0;
-    let mut struct_layout_align -> number = 0;
-    let mut struct_layout_header_success -> boolean = false;
-    let mut struct_layout_reported_missing_header -> boolean = false;
+    let mut fields: NativeStructField[] = [];
+    let mut methods: NativeFunction[] = [];
+    let mut current_method: NativeFunction? = null;
+    let mut method_pending_span: NativeSourceSpan? = null;
+    let mut method_pending_value_span: NativeSourceSpan? = null;
+    let mut method_pending_decorators: string[] = [];
+    let mut struct_layout_fields: NativeStructLayoutField[] = [];
+    let mut struct_layout_size: number = 0;
+    let mut struct_layout_align: number = 0;
+    let mut struct_layout_header_success: boolean = false;
+    let mut struct_layout_reported_missing_header: boolean = false;
     let mut index = start_index + 1;
     loop {
         if index >= lines.length {
             diagnostics.push("unterminated struct " + struct_name);
-            let mut struct_layout_value -> NativeStructLayout? = null;
+            let mut struct_layout_value: NativeStructLayout? = null;
             if struct_layout_header_success {
                 struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields };
             }
@@ -250,7 +250,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             };
         }
         let raw_line = trim_text(lines[index]);
-        let mut _if363 -> boolean = false;
+        let mut _if363: boolean = false;
         if raw_line.length == 0 { _if363 = true; }
         if starts_with(raw_line, ";") { _if363 = true; }
         if _if363 {
@@ -349,7 +349,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 diagnostics.push("unused initializer span metadata before: " + raw_line);
                 method_pending_value_span = null;
             }
-            let mut instruction_index -> number = 0;
+            let mut instruction_index: number = 0;
             loop {
                 if instruction_index >= method_instruction_result.instructions.length {
                     break;
@@ -364,7 +364,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             let body = strip_prefix(raw_line, ".layout ");
             if starts_with(body, "struct ") {
                 let header_result = parse_struct_layout_header(strip_prefix(body, "struct "));
-                let mut _ci -> number = 0;
+                let mut _ci: number = 0;
                 loop {
                     if _ci >= header_result.diagnostics.length { break; }
                     diagnostics.push(header_result.diagnostics[_ci]);
@@ -384,7 +384,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             }
             if starts_with(body, "field ") {
                 let tail = trim_text(strip_prefix(body, "field "));
-                let mut is_struct_header -> boolean = false;
+                let mut is_struct_header: boolean = false;
                 if starts_with(tail, "struct") {
                     if tail.length == 6 {
                         is_struct_header = true;
@@ -398,7 +398,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 if is_struct_header {
                     let header_text = trim_text(strip_prefix(tail, "struct"));
                     let header_result = parse_struct_layout_header(header_text);
-                    let mut _ci -> number = 0;
+                    let mut _ci: number = 0;
                     loop {
                         if _ci >= header_result.diagnostics.length { break; }
                         diagnostics.push(header_result.diagnostics[_ci]);
@@ -418,7 +418,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
                 }
 
                 let field_result = parse_struct_layout_field(tail, struct_name);
-                let mut _ci -> number = 0;
+                let mut _ci: number = 0;
                 loop {
                     if _ci >= field_result.diagnostics.length { break; }
                     diagnostics.push(field_result.diagnostics[_ci]);
@@ -474,7 +474,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
             }
             let header = strip_prefix(raw_line, ".method ");
             let trimmed = trim_text(header);
-            let mut is_async -> boolean = false;
+            let mut is_async: boolean = false;
             if starts_with(trimmed, "async ") {
                 is_async = true;
             }
@@ -499,7 +499,7 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
         index += 1;
     }
 
-    let mut struct_layout_value -> NativeStructLayout? = null;
+    let mut struct_layout_value: NativeStructLayout? = null;
     if struct_layout_header_success {
         struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields };
     }
@@ -511,11 +511,11 @@ fn parse_struct_definition(lines -> string[], start_index -> number, include_ins
     };
 }
 
-fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseResult {
-    let mut diagnostics -> string[] = [];
+fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResult {
+    let mut diagnostics: string[] = [];
     let header = trim_text(lines[start_index]);
     let name_text = trim_text(strip_prefix(header, ".enum "));
-    let mut enum_name -> string = name_text;
+    let mut enum_name: string = name_text;
     let space_index = index_of(enum_name, " ");
     if space_index >= 0 {
     enum_name = trim_text(substring(enum_name, 0, space_index));
@@ -526,20 +526,20 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
         return EnumParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
     }
 
-    let mut variants -> NativeEnumVariant[] = [];
-    let mut enum_layout_variants -> NativeEnumVariantLayout[] = [];
-    let mut enum_layout_size -> number = 0;
-    let mut enum_layout_align -> number = 0;
-    let mut enum_layout_tag_type -> string = "";
-    let mut enum_layout_tag_size -> number = 0;
-    let mut enum_layout_tag_align -> number = 0;
-    let mut enum_layout_header_success -> boolean = false;
-    let mut enum_layout_reported_missing_header -> boolean = false;
+    let mut variants: NativeEnumVariant[] = [];
+    let mut enum_layout_variants: NativeEnumVariantLayout[] = [];
+    let mut enum_layout_size: number = 0;
+    let mut enum_layout_align: number = 0;
+    let mut enum_layout_tag_type: string = "";
+    let mut enum_layout_tag_size: number = 0;
+    let mut enum_layout_tag_align: number = 0;
+    let mut enum_layout_header_success: boolean = false;
+    let mut enum_layout_reported_missing_header: boolean = false;
     let mut index = start_index + 1;
     loop {
         if index >= lines.length {
             diagnostics.push("unterminated enum " + enum_name);
-            let mut enum_layout_value -> NativeEnumLayout? = null;
+            let mut enum_layout_value: NativeEnumLayout? = null;
             if enum_layout_header_success {
                 enum_layout_value = NativeEnumLayout {
                     size: enum_layout_size,
@@ -557,7 +557,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
             };
         }
         let raw_line = trim_text(lines[index]);
-        let mut _if369 -> boolean = false;
+        let mut _if369: boolean = false;
         if raw_line.length == 0 { _if369 = true; }
         if starts_with(raw_line, ";") { _if369 = true; }
         if _if369 {
@@ -572,7 +572,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
             let body = strip_prefix(raw_line, ".layout ");
             if starts_with(body, "enum ") {
                 let header_result = parse_enum_layout_header(strip_prefix(body, "enum "));
-                let mut _ci -> number = 0;
+                let mut _ci: number = 0;
                 loop {
                     if _ci >= header_result.diagnostics.length { break; }
                     diagnostics.push(header_result.diagnostics[_ci]);
@@ -612,7 +612,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
                 }
 
                 let variant_result = parse_enum_variant_layout(variant_text, enum_name);
-                let mut _ci -> number = 0;
+                let mut _ci: number = 0;
                 loop {
                     if _ci >= variant_result.diagnostics.length { break; }
                     diagnostics.push(variant_result.diagnostics[_ci]);
@@ -637,7 +637,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
             }
             if starts_with(body, "payload ") {
                 let payload_result = parse_enum_payload_layout(strip_prefix(body, "payload "), enum_name);
-                let mut _ci -> number = 0;
+                let mut _ci: number = 0;
                 loop {
                     if _ci >= payload_result.diagnostics.length { break; }
                     diagnostics.push(payload_result.diagnostics[_ci]);
@@ -682,7 +682,7 @@ fn parse_enum_definition(lines -> string[], start_index -> number) -> EnumParseR
         index += 1;
     }
 
-    let mut enum_layout_value -> NativeEnumLayout? = null;
+    let mut enum_layout_value: NativeEnumLayout? = null;
     if enum_layout_header_success {
         enum_layout_value = NativeEnumLayout {
             size: enum_layout_size,

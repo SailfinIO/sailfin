@@ -8,10 +8,10 @@
 // ---------------------------------------------------------------------------
 
 test "scope: outer variable unchanged after inner shadow" {
-    let x -> number = 10;
-    let mut result -> number = 0;
+    let x: number = 10;
+    let mut result: number = 0;
     if true {
-        let x -> number = 20;
+        let x: number = 20;
         result = x;
     }
     // x in outer scope should still be 10
@@ -20,8 +20,8 @@ test "scope: outer variable unchanged after inner shadow" {
 }
 
 test "scope: loop variable doesn't leak" {
-    let mut sum -> number = 0;
-    let mut i -> number = 0;
+    let mut sum: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= 3 { break; }
         let val = i * 10;
@@ -36,11 +36,11 @@ test "scope: loop variable doesn't leak" {
 // ---------------------------------------------------------------------------
 
 test "scope: multiple variables independent" {
-    let a -> number = 1;
-    let b -> number = 2;
-    let c -> number = 3;
-    let d -> number = 4;
-    let e -> number = 5;
+    let a: number = 1;
+    let b: number = 2;
+    let c: number = 3;
+    let d: number = 4;
+    let e: number = 5;
     assert a + b + c + d + e == 15;
 }
 
@@ -48,8 +48,8 @@ test "scope: multiple variables independent" {
 // Mutable variable across nested scopes
 // ---------------------------------------------------------------------------
 
-fn _nested_scope_mutation(n -> number) -> number {
-    let mut result -> number = 0;
+fn _nested_scope_mutation(n: number) -> number {
+    let mut result: number = 0;
     if n > 0 {
         result = n;
         if n > 10 {
@@ -77,9 +77,9 @@ test "scope: nested mutation zero path" {
 // ---------------------------------------------------------------------------
 
 fn _double_loop_same_var_names() -> number {
-    let mut total -> number = 0;
+    let mut total: number = 0;
 
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= 3 { break; }
         total += 1;
@@ -87,7 +87,7 @@ fn _double_loop_same_var_names() -> number {
     }
 
     // Reuse i in second loop
-    let mut i2 -> number = 0;
+    let mut i2: number = 0;
     loop {
         if i2 >= 4 { break; }
         total += 10;
@@ -105,12 +105,12 @@ test "scope: variable reuse across loops" {
 // Function calls creating new scopes
 // ---------------------------------------------------------------------------
 
-fn _scope_a(x -> number) -> number {
+fn _scope_a(x: number) -> number {
     let local = x + 1;
     return local;
 }
 
-fn _scope_b(x -> number) -> number {
+fn _scope_b(x: number) -> number {
     let local = x * 2;
     return local;
 }
@@ -127,7 +127,7 @@ test "scope: same local names in different functions" {
 // Boolean conditions with short-circuit in branches
 // ---------------------------------------------------------------------------
 
-fn _complex_condition(a -> number, b -> number, c -> number) -> string {
+fn _complex_condition(a: number, b: number, c: number) -> string {
     if a > 0 && b > 0 {
         if c > 0 {
             return "all positive";
@@ -160,8 +160,8 @@ test "scope: complex condition none positive" {
 // Deep nesting with mutable state
 // ---------------------------------------------------------------------------
 
-fn _deeply_nested(n -> number) -> number {
-    let mut x -> number = n;
+fn _deeply_nested(n: number) -> number {
+    let mut x: number = n;
     if x > 0 {
         x += 1;
         if x > 5 {
@@ -186,8 +186,8 @@ test "scope: deeply nested all paths" {
 // ---------------------------------------------------------------------------
 
 test "scope: array mutation in loop" {
-    let mut arr -> number[] = [];
-    let mut i -> number = 0;
+    let mut arr: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= 5 { break; }
         arr.push(i * i);
@@ -202,7 +202,7 @@ test "scope: array mutation in loop" {
 }
 
 test "scope: string mutation in conditional" {
-    let mut msg -> string = "start";
+    let mut msg: string = "start";
     let flag = true;
     if flag {
         msg = msg + "-middle";

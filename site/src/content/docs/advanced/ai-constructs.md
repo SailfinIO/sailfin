@@ -5,7 +5,7 @@ section: advanced
 order: 3
 ---
 
-> See also: [AI Constructs (Learn)](/docs/learn/ai-constructs) for the basics.
+> See also: [AI Integration (Learn)](/docs/learn/ai-constructs) for the basics and the `![model]` effect.
 
 ## Engine System
 

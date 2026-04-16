@@ -4,13 +4,6 @@ inputs:
   target:
     description: "Packaging target label (e.g. linux-x86_64, macos-arm64)"
     required: true
-  max_attempts:
-    description: "Max attempts for selfhost rebuild (passed via BUILD_ARGS)"
-    required: true
-  build_jobs:
-    description: "Parallelism for build orchestrator"
-    required: false
-    default: "2"
   clang:
     description: "Clang executable"
     required: false
@@ -31,7 +24,7 @@ runs:
   using: "composite"
   steps:
     - name: Fetch released seed compiler
-      shell: bash -l {0}
+      shell: bash {0}
       run: |
         set -euo pipefail
         seed_version="${{ inputs.seed_version }}"
@@ -39,8 +32,7 @@ runs:
         if [ -z "$seed_version" ]; then
           seed_version="latest"
         fi
-        CONDA=$(which conda) \
-          make fetch-seed \
+        make fetch-seed \
             SEED_REPO="${{ inputs.seed_repo }}" \
             SEED_VERSION="$seed_version" \
             SEED_EXCLUDE_TAG="$seed_exclude_tag"
@@ -48,19 +40,14 @@ runs:
         build/seed/bin/sailfin version
 
     - name: Build native compiler (selfhost from released seed)
-      shell: bash -l {0}
+      shell: bash {0}
       env:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
-        # Use BUILD_DRIVER=py for the first-pass build (seed needs fixups).
-        CONDA=$(which conda) \
-          make rebuild \
-            BUILD_DRIVER=py \
-            CLANG="${{ inputs.clang }}" \
-            BUILD_JOBS="${{ inputs.build_jobs }}" \
-            BUILD_ARGS="--max-attempts ${{ inputs.max_attempts }} --max-total-seconds 1800" \
-            SEED_NATIVE="build/seed/bin/sailfin"
+        make rebuild \
+          CLANG="${{ inputs.clang }}" \
+          SEED_NATIVE="build/seed/bin/sailfin"
 
     - name: Prepare test artifacts
       shell: bash {0}
@@ -73,47 +60,6 @@ runs:
       run: |
         set -euo pipefail
         make test
-
-    - name: Build seedcheck (no Python fixups)
-      shell: bash {0}
-      run: |
-        set -euo pipefail
-        echo "[ci] building seedcheck with build.sh (zero fixups)..."
-        SEED="build/native/sailfin" \
-          OUT="build/native/sailfin-seedcheck" \
-          OPT="-O0" \
-          JOBS=1 \
-          CLANG="${{ inputs.clang }}" \
-          MAX_TOTAL=3600 \
-          bash scripts/build.sh
-        ls -lh build/native/sailfin-seedcheck
-        build/native/sailfin-seedcheck version || true
-
-    - name: Validate seedcheck (hello-world)
-      shell: bash {0}
-      run: |
-        set -euo pipefail
-        TMOUT="timeout"
-        if ! command -v timeout &>/dev/null; then
-          if command -v gtimeout &>/dev/null; then TMOUT="gtimeout"; else TMOUT=""; fi
-        fi
-        if [ -n "$TMOUT" ]; then
-          output=$($TMOUT 30 build/native/sailfin-seedcheck run examples/basics/hello-world.sfn 2>&1) || true
-        else
-          output=$(build/native/sailfin-seedcheck run examples/basics/hello-world.sfn 2>&1) || true
-        fi
-        if ! echo "$output" | grep -q "Hello, Sailfin!"; then
-          echo "[ci][FAIL] seedcheck cannot run hello-world.sfn"
-          echo "[ci][FAIL] got: $output"
-          exit 1
-        fi
-        echo "[ci] seedcheck runs hello-world.sfn OK"
-
-    - name: Run tests (seedcheck binary)
-      shell: bash {0}
-      run: |
-        set -euo pipefail
-        make test NATIVE_BIN=build/native/sailfin-seedcheck
 
     - name: Package artifacts
       shell: bash {0}

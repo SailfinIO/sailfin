@@ -56,12 +56,12 @@ import {
 // build_type_context recovery.  Format per line:
 //   name\t%LlvmName\tfield1:type1,field2:type2,...
 fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
-    let mut lines -> string[] = [];
-    let mut idx -> number = 0;
+    let mut lines: string[] = [];
+    let mut idx: number = 0;
     loop {
         if idx >= combined_structs.length { break; }
         let name = get_struct_name_at(combined_structs, idx);
-        let mut _if251 -> boolean = false;
+        let mut _if251: boolean = false;
         if name == null { _if251 = true; }
         if name.length == 0 { _if251 = true; }
         if _if251 {
@@ -70,7 +70,7 @@ fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
         }
         let llvm = "%" + sanitize_symbol(name);
         let mut line = name + "\t" + llvm + "\t";
-        let mut fi -> number = 0;
+        let mut fi: number = 0;
         let fields = get_struct_fields_at(combined_structs, idx);
         if fields != null {
             loop {
@@ -103,12 +103,12 @@ fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
 // build_type_context recovery.  Format per line:
 //   name\ttag_type\ttag_size\ttag_align\tsize\talign\tv0=0,v1=1,...
 fn serialize_enum_info(enums: NativeEnum[], _trace_enums: boolean) -> string ![io] {
-    let mut lines -> string[] = [];
-    let mut idx -> number = 0;
+    let mut lines: string[] = [];
+    let mut idx: number = 0;
     loop {
         if idx >= enums.length { break; }
         let name = get_enum_name_at(enums, idx);
-        let mut _if252 -> boolean = false;
+        let mut _if252: boolean = false;
         if name == null { _if252 = true; }
         if name.length == 0 { _if252 = true; }
         if _if252 {
@@ -124,7 +124,7 @@ fn serialize_enum_info(enums: NativeEnum[], _trace_enums: boolean) -> string ![i
         let mut line = name + "\t" + tag_type + "\t" + tag_size + "\t" + tag_align + "\t" + size + "\t" + align + "\t";
         let e = enums[idx];
         let variants = e.variants;
-        let mut vi -> number = 0;
+        let mut vi: number = 0;
         if variants != null {
             loop {
                 if vi >= variants.length { break; }
@@ -174,9 +174,9 @@ fn build_type_context_with_recovery(
     let type_build = build_type_context(combined_structs, fixed_enums_list, combined_interfaces);
     // Write type-context diagnostics to file so the orchestrator can merge them.
     // The `diagnostics` parameter is local — reassigning it here would be dropped.
-    let mut _tc_di -> number = 0;
+    let mut _tc_di: number = 0;
     let _tc_diags = type_build.diagnostics;
-    let mut _tc_diags_lines -> string[] = [];
+    let mut _tc_diags_lines: string[] = [];
     if _tc_diags != null {
         loop {
             if _tc_di >= _tc_diags.length { break; }
@@ -189,15 +189,15 @@ fn build_type_context_with_recovery(
 
     // Recover enum info from file if cross-module ABI corruption
     // caused enums to arrive empty or with empty names.
-    let mut _enum_names_empty -> boolean = false;
+    let mut _enum_names_empty: boolean = false;
     if type_context.enums.length > 0 {
-        let mut _asgn253 -> boolean = false;
+        let mut _asgn253: boolean = false;
         if type_context.enums[0].name == null { _asgn253 = true; }
         if type_context.enums[0].name.length == 0 { _asgn253 = true; }
         _enum_names_empty = _asgn253;
     }
-    let mut _needs_recovery -> boolean = false;
-    let mut _if263 -> boolean = false;
+    let mut _needs_recovery: boolean = false;
+    let mut _if263: boolean = false;
     if type_context.enums.length == 0 { _if263 = true; }
     if _enum_names_empty { _if263 = true; }
     if _if263 {
@@ -233,8 +233,8 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
         return [];
     }
     let lines = split_lines_local(raw);
-    let mut recovered -> EnumTypeInfo[] = [];
-    let mut eli -> number = 0;
+    let mut recovered: EnumTypeInfo[] = [];
+    let mut eli: number = 0;
     loop {
         if eli >= lines.length { break; }
         let el = lines[eli];
@@ -260,8 +260,8 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
         let esize = parse_number_local(substring(rest4, 0, tab5));
         let rest5 = substring(rest4, tab5 + 1, rest4.length);
         let tab6 = index_of(rest5, "\t");
-        let mut ealign -> number = 4;
-        let mut variants_str -> string = "";
+        let mut ealign: number = 4;
+        let mut variants_str: string = "";
         if tab6 >= 0 {
             ealign = parse_number_local(substring(rest5, 0, tab6));
             variants_str = substring(rest5, tab6 + 1, rest5.length);
@@ -273,7 +273,7 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
         let evariants = parse_enum_variants(variants_str);
 
         let ellvm = "%" + sanitize_symbol(ename);
-        let mut max_ps -> number = esize - etag_size;
+        let mut max_ps: number = esize - etag_size;
         if max_ps < 0 { max_ps = 0; }
         recovered.push(EnumTypeInfo {
                 name: ename,
@@ -298,21 +298,21 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
 
 // Parse enum variant string "v0=0,v1=1,..." into EnumVariantInfo[].
 fn parse_enum_variants(variants_str: string) -> EnumVariantInfo[] {
-    let mut result -> EnumVariantInfo[] = [];
+    let mut result: EnumVariantInfo[] = [];
     if variants_str.length == 0 {
         return result;
     }
-    let mut vpos -> number = 0;
-    let mut vtag -> number = 0;
+    let mut vpos: number = 0;
+    let mut vtag: number = 0;
     loop {
         let comma = index_of(substring(variants_str, vpos, variants_str.length), ",");
-        let mut vend -> number = variants_str.length;
+        let mut vend: number = variants_str.length;
         if comma >= 0 {
             vend = vpos + comma;
         }
         let vpair = substring(variants_str, vpos, vend);
         let eq = index_of(vpair, "=");
-        let mut vname -> string = vpair;
+        let mut vname: string = vpair;
         if eq >= 0 {
             vname = substring(vpair, 0, eq);
             vtag = parse_number_local(substring(vpair, eq + 1, vpair.length));
@@ -338,7 +338,7 @@ fn parse_enum_variants(variants_str: string) -> EnumVariantInfo[] {
 // call resolution can read clean data instead of ABI-corrupted params.
 fn serialize_context_functions(context_functions: NativeFunction[], debug_lowering: boolean) -> number ![io] {
     // Clean up stale files first.
-    let mut cfc_i -> number = 0;
+    let mut cfc_i: number = 0;
     loop {
         let cfc_prefix = "build/sailfin/.ctx_func_" + number_to_string(cfc_i);
         if !fs.exists(cfc_prefix + "_name") { break; }
@@ -346,7 +346,7 @@ fn serialize_context_functions(context_functions: NativeFunction[], debug_loweri
         fs.deleteFile(cfc_prefix + "_return_type");
         fs.deleteFile(cfc_prefix + "_is_async");
         fs.deleteFile(cfc_prefix + "_param_count");
-        let mut cfc_j -> number = 0;
+        let mut cfc_j: number = 0;
         loop {
             let cfc_pp = cfc_prefix + "_param_" + number_to_string(cfc_j);
             if !fs.exists(cfc_pp + "_name") { break; }
@@ -358,14 +358,14 @@ fn serialize_context_functions(context_functions: NativeFunction[], debug_loweri
     }
     // Write fresh function metadata
     fs.writeFile("build/sailfin/.ctx_func_count", number_to_string(context_functions.length));
-    let mut cfw_i -> number = 0;
+    let mut cfw_i: number = 0;
     loop {
         if cfw_i >= context_functions.length { break; }
         let cfw_fn = context_functions[cfw_i];
         let cfw_prefix = "build/sailfin/.ctx_func_" + number_to_string(cfw_i);
         fs.writeFile(cfw_prefix + "_name", cfw_fn.name);
         fs.writeFile(cfw_prefix + "_return_type", cfw_fn.return_type);
-        let mut cfw_async_flag -> string = "0";
+        let mut cfw_async_flag: string = "0";
         if cfw_fn.is_async {
             cfw_async_flag = "1";
         }
@@ -375,7 +375,7 @@ fn serialize_context_functions(context_functions: NativeFunction[], debug_loweri
             cfw_params = [];
         }
         fs.writeFile(cfw_prefix + "_param_count", number_to_string(cfw_params.length));
-        let mut cfw_j -> number = 0;
+        let mut cfw_j: number = 0;
         loop {
             if cfw_j >= cfw_params.length { break; }
             let cfw_pp = cfw_prefix + "_param_" + number_to_string(cfw_j);

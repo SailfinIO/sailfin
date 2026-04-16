@@ -4,27 +4,27 @@
 // so callers never need to allocate the SailToml struct across modules.
 
 struct SailToml {
-    name -> string;
-    version -> string;
-    description -> string;
-    entry -> string;
-    dependencies -> TomlDependency[];
-    dev_dependencies -> TomlDependency[];
-    capabilities -> string[];
+    name: string;
+    version: string;
+    description: string;
+    entry: string;
+    dependencies: TomlDependency[];
+    dev_dependencies: TomlDependency[];
+    capabilities: string[];
 }
 
 struct TomlDependency {
-    capsule -> string;
-    version -> string;
+    capsule: string;
+    version: string;
 }
 
-fn _toml_trim(text -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = text.length;
+fn _toml_trim(text: string) -> string {
+    let mut start: number = 0;
+    let mut end: number = text.length;
     loop {
         if start >= end { break; }
         let ch = text[start];
-        let mut _if434 -> boolean = false;
+        let mut _if434: boolean = false;
         if ch == " " { _if434 = true; }
         if ch == "\t" { _if434 = true; }
         if ch == "\r" { _if434 = true; }
@@ -35,7 +35,7 @@ fn _toml_trim(text -> string) -> string {
     loop {
         if end <= start { break; }
         let ch = text[end - 1];
-        let mut _if435 -> boolean = false;
+        let mut _if435: boolean = false;
         if ch == " " { _if435 = true; }
         if ch == "\t" { _if435 = true; }
         if ch == "\r" { _if435 = true; }
@@ -46,11 +46,11 @@ fn _toml_trim(text -> string) -> string {
     return substring(text, start, end);
 }
 
-fn _toml_strip_quotes(text -> string) -> string {
+fn _toml_strip_quotes(text: string) -> string {
     if text.length >= 2 {
         let first = text[0];
         let last = text[text.length - 1];
-        let mut _if436 -> boolean = false;
+        let mut _if436: boolean = false;
         if first == "\"" {
             if last == "\"" {
                 _if436 = true;
@@ -68,11 +68,11 @@ fn _toml_strip_quotes(text -> string) -> string {
     return text;
 }
 
-fn _toml_split_lines(text -> string) -> string[] {
-    let mut lines -> string[] = [];
-    let mut start -> number = 0;
+fn _toml_split_lines(text: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut start: number = 0;
     let len = text.length;
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= len { break; }
         if text[i] == "\n" {
@@ -87,18 +87,18 @@ fn _toml_split_lines(text -> string) -> string[] {
     return lines;
 }
 
-fn _toml_parse_string_array(value -> string) -> string[] {
-    let mut items -> string[] = [];
+fn _toml_parse_string_array(value: string) -> string[] {
+    let mut items: string[] = [];
     let trimmed = _toml_trim(value);
     if trimmed.length < 2 { return items; }
-    let mut _if437 -> boolean = false;
+    let mut _if437: boolean = false;
     if trimmed[0] != "[" { _if437 = true; }
     if trimmed[trimmed.length - 1] != "]" { _if437 = true; }
     if _if437 { return items; }
     let inner = _toml_trim(substring(trimmed, 1, trimmed.length - 1));
     if inner.length == 0 { return items; }
-    let mut start -> number = 0;
-    let mut i -> number = 0;
+    let mut start: number = 0;
+    let mut i: number = 0;
     let len = inner.length;
     loop {
         if i >= len { break; }
@@ -118,7 +118,7 @@ fn _toml_parse_string_array(value -> string) -> string[] {
 // Standard capsules can be referenced by bare name ("http") or full
 // registry name ("sfn/http"). These functions handle the mapping.
 
-fn _is_stdlib(name -> string) -> boolean {
+fn _is_stdlib(name: string) -> boolean {
     if strings_equal(name, "http") { return true; }
     if strings_equal(name, "fs") { return true; }
     if strings_equal(name, "os") { return true; }
@@ -139,10 +139,10 @@ fn _is_stdlib(name -> string) -> boolean {
     return false;
 }
 
-fn resolve_capsule_name(name -> string) -> string {
+fn resolve_capsule_name(name: string) -> string {
     // "http" → "sfn/http", "sfn/http" → "sfn/http", "acme/router" → "acme/router"
     // Check if it already has a scope (contains "/")
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= name.length { break; }
         if name[i] == "/" { return name; }
@@ -156,7 +156,7 @@ fn resolve_capsule_name(name -> string) -> string {
     return name;
 }
 
-fn display_capsule_name(name -> string) -> string {
+fn display_capsule_name(name: string) -> string {
     // "sfn/http" → "http" for stdlib, "acme/router" → "acme/router" for third-party
     if string_starts_with(name, "sfn/") {
         let short = substring(name, 4, name.length);
@@ -169,7 +169,7 @@ fn display_capsule_name(name -> string) -> string {
 
 // ---- Internal parse ----
 
-fn _parse_toml_internal(text -> string) -> SailToml {
+fn _parse_toml_internal(text: string) -> SailToml {
     let mut toml = SailToml {
         name: "",
         version: "0.1.0",
@@ -180,8 +180,8 @@ fn _parse_toml_internal(text -> string) -> SailToml {
         capabilities: [],
     };
     let lines = _toml_split_lines(text);
-    let mut section -> string = "";
-    let mut i -> number = 0;
+    let mut section: string = "";
+    let mut i: number = 0;
     loop {
         if i >= lines.length { break; }
         let raw_line = lines[i];
@@ -209,10 +209,10 @@ fn _parse_toml_internal(text -> string) -> SailToml {
             if strings_equal(stripped_key, "entry") { toml.entry = stripped_value; }
         }
         if strings_equal(section, "dependencies") {
-            toml.dependencies = toml.dependencies.concat([TomlDependency { capsule: stripped_key, version: stripped_value }]);
+            toml.dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
         }
         if strings_equal(section, "dev-dependencies") {
-            toml.dev_dependencies = toml.dev_dependencies.concat([TomlDependency { capsule: stripped_key, version: stripped_value }]);
+            toml.dev_dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
         }
         if strings_equal(section, "capabilities") {
             if strings_equal(stripped_key, "required") {
@@ -225,29 +225,45 @@ fn _parse_toml_internal(text -> string) -> SailToml {
 
 // ---- String-based public API (safe for cross-module use) ----
 
-fn toml_get_name(text -> string) -> string {
+fn toml_get_name(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.name;
 }
 
-fn toml_get_version(text -> string) -> string {
+fn toml_get_version(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.version;
 }
 
-fn toml_get_entry(text -> string) -> string {
+fn toml_get_entry(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.entry;
 }
 
-fn toml_get_description(text -> string) -> string {
+fn toml_get_description(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.description;
 }
 
+// Return dependencies as a newline-separated string of "capsule=version" pairs.
+// Callers can split on "\n" and "=" to recover individual entries without
+// needing the SailToml struct across module boundaries.
+fn toml_get_dependencies(text: string) -> string {
+    let t = _parse_toml_internal(text);
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= t.dependencies.length { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + t.dependencies[i].capsule + "=" + t.dependencies[i].version;
+        i += 1;
+    }
+    return out;
+}
+
 // Generate a capsule.toml string from individual fields
-fn toml_generate(name -> string, version -> string, description -> string, entry -> string) -> string {
-    let mut out -> string = "[capsule]\n";
+fn toml_generate(name: string, version: string, description: string, entry: string) -> string {
+    let mut out: string = "[capsule]\n";
     out = out + "name = \"" + name + "\"\n";
     out = out + "version = \"" + version + "\"\n";
     if description.length > 0 {
@@ -263,10 +279,10 @@ fn toml_generate(name -> string, version -> string, description -> string, entry
 
 // Add a dependency to an existing capsule.toml text and return the updated text.
 // If the dependency already exists, update its version.
-fn toml_add_dependency(toml_text -> string, capsule -> string, version -> string) -> string {
+fn toml_add_dependency(toml_text: string, capsule: string, version: string) -> string {
     let t = _parse_toml_internal(toml_text);
-    let mut found -> boolean = false;
-    let mut di -> number = 0;
+    let mut found: boolean = false;
+    let mut di: number = 0;
     loop {
         if di >= t.dependencies.length { break; }
         if strings_equal(t.dependencies[di].capsule, capsule) {
@@ -276,16 +292,16 @@ fn toml_add_dependency(toml_text -> string, capsule -> string, version -> string
         di += 1;
     }
     if !found {
-        t.dependencies = t.dependencies.concat([TomlDependency { capsule: capsule, version: version }]);
+        t.dependencies.push(TomlDependency { capsule: capsule, version: version });
     }
     return _write_toml(t);
 }
 
 // Add a dev dependency to an existing capsule.toml text and return the updated text.
-fn toml_add_dev_dependency(toml_text -> string, capsule -> string, version -> string) -> string {
+fn toml_add_dev_dependency(toml_text: string, capsule: string, version: string) -> string {
     let t = _parse_toml_internal(toml_text);
-    let mut found -> boolean = false;
-    let mut di -> number = 0;
+    let mut found: boolean = false;
+    let mut di: number = 0;
     loop {
         if di >= t.dev_dependencies.length { break; }
         if strings_equal(t.dev_dependencies[di].capsule, capsule) {
@@ -295,21 +311,21 @@ fn toml_add_dev_dependency(toml_text -> string, capsule -> string, version -> st
         di += 1;
     }
     if !found {
-        t.dev_dependencies = t.dev_dependencies.concat([TomlDependency { capsule: capsule, version: version }]);
+        t.dev_dependencies.push(TomlDependency { capsule: capsule, version: version });
     }
     return _write_toml(t);
 }
 
 // Write a SailToml back to string (internal)
-fn _write_toml(toml -> SailToml) -> string {
-    let mut out -> string = "[capsule]\n";
+fn _write_toml(toml: SailToml) -> string {
+    let mut out: string = "[capsule]\n";
     out = out + "name = \"" + toml.name + "\"\n";
     out = out + "version = \"" + toml.version + "\"\n";
     if toml.description.length > 0 {
         out = out + "description = \"" + toml.description + "\"\n";
     }
     out = out + "\n[dependencies]\n";
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= toml.dependencies.length { break; }
         let dep = toml.dependencies[i];
@@ -318,7 +334,7 @@ fn _write_toml(toml -> SailToml) -> string {
     }
     if toml.dev_dependencies.length > 0 {
         out = out + "\n[dev-dependencies]\n";
-        let mut j -> number = 0;
+        let mut j: number = 0;
         loop {
             if j >= toml.dev_dependencies.length { break; }
             let dep = toml.dev_dependencies[j];
@@ -328,7 +344,7 @@ fn _write_toml(toml -> SailToml) -> string {
     }
     out = out + "\n[capabilities]\n";
     out = out + "required = [";
-    let mut k -> number = 0;
+    let mut k: number = 0;
     loop {
         if k >= toml.capabilities.length { break; }
         if k > 0 { out = out + ", "; }

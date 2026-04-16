@@ -13,12 +13,12 @@
 // Pattern 1: Match on number literals
 // ===========================================================================
 
-fn _classify_number(n -> number) -> string {
+fn _classify_number(n: number) -> string {
     match n {
-        1 -> return "one",
-        2 -> return "two",
-        3 -> return "three",
-        _ -> return "other",
+        1: return "one",
+        2: return "two",
+        3: return "three",
+        _: return "other",
     }
 }
 
@@ -57,12 +57,12 @@ enum Direction {
     West,
 }
 
-fn _direction_name(d -> Direction) -> string {
+fn _direction_name(d: Direction) -> string {
     match d {
-        Direction.North -> return "north",
-        Direction.South -> return "south",
-        Direction.East  -> return "east",
-        Direction.West  -> return "west",
+        Direction.North: return "north",
+        Direction.South: return "south",
+        Direction.East: return "east",
+        Direction.West: return "west",
     }
 }
 
@@ -98,11 +98,11 @@ enum Season {
     Winter,
 }
 
-fn _is_warm_season(s -> Season) -> string {
+fn _is_warm_season(s: Season) -> string {
     match s {
-        Season.Summer -> return "yes",
-        Season.Spring -> return "maybe",
-        _ -> return "no",
+        Season.Summer: return "yes",
+        Season.Spring: return "maybe",
+        _: return "no",
     }
 }
 
@@ -126,16 +126,16 @@ test "match: enum with wildcard default for Winter" {
 // Pattern 5: Match with block bodies
 // ===========================================================================
 
-fn _match_with_block(n -> number) -> number {
-    let mut result -> number = 0;
+fn _match_with_block(n: number) -> number {
+    let mut result: number = 0;
     match n {
-        1 -> {
+        1: {
             result = 100;
         },
-        2 -> {
+        2: {
             result = 200;
         },
-        _ -> {
+        _: {
             result = -1;
         },
     }

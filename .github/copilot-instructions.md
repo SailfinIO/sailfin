@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Sailfin is an AI-native, systems-friendly programming language designed for precision, safety, and introspection. Its type system unifies deterministic computation, effect isolation, and capability-aware security to make large-scale model-driven software reliable by default.
+Sailfin is a compiled systems language with effect type annotations for capabilities. Every function declares what it can do (IO, network, clock, etc.); effect annotations are supported today, while full enforcement (compilation gating) is the top priority on the roadmap. The language targets LLVM, produces native single-binary executables, and is designed so that code capabilities are verifiable at compile time.
 
 **Primary toolchain:** The self-hosted native compiler (`compiler/src/`) targeting LLVM via a `.sfn-asm` intermediate representation. Release artifacts install as `sailfin`/`sfn`.
 
@@ -12,10 +12,15 @@ The runtime currently ships as C under `runtime/native/` and is planned to move 
 
 Key language features:
 
-- Effect types (`![io, net, model, gpu, rand, clock]`)
-- Ownership-aware linear/affine types
-- Capability-based security
-- First-class AI constructs (models, prompts, pipelines, tools)
+- Effect types (`![io, net, model, gpu, rand, clock]`) — the core differentiator
+- Capability-based security via capsule manifests
+- Self-hosted compiler targeting LLVM
+- Pragmatic TypeScript/Rust-like syntax
+
+Deferred features (parsed but not enforced, post-1.0):
+- Ownership types (`Affine<T>`, `Linear<T>`)
+- Taint tracking (`PII<T>`, `Secret<T>`)
+- AI constructs (`model`/`prompt`/`tool`/`pipeline`) — migrating to `sfn/ai` library capsule
 
 ## Repository Layout
 
@@ -32,12 +37,9 @@ Key language features:
 ## Build, Test, and Development Commands
 
 ```bash
-make env              # Create/update the 'sailfin' Conda environment
 make compile          # Build the compiler by self-hosting from a released seed (preferred)
 make install          # Install the built compiler into PREFIX/bin (default: /usr/local/bin)
 make rebuild          # Force a rebuild from a released seed
-make smoke            # Rebuild + run smoke tests
-make rebuild-asan     # Rebuild with AddressSanitizer (diagnostic)
 make check            # Compile (if needed) then run the full test suite
 make test             # Run unit + integration + e2e suites
 make test-unit        # Run Sailfin-native unit tests
@@ -46,7 +48,7 @@ make clean            # Remove dist/ artifacts
 make clean-build      # Remove build/* artifacts (keeps build/seed by default)
 ```
 
-For debugging, place scripts in `/scratch` (a conda environment — account for your path to the compiler). **Never use here-doc (`<<'PY'`) syntax — it will not work. Use scratch files instead.**
+For debugging, place scripts in `/scratch`.
 
 ## Compiler Pipeline
 
@@ -127,7 +129,7 @@ Update documents in this order when behaviour changes:
 
 1. `docs/status.md` — keep the feature matrix authoritative
 2. `docs/spec.md` — sync bootstrap reference (Part A shipped, Part B planned)
-3. `docs/roadmap.md` — adjust for sequencing changes
+3. `site/src/pages/roadmap.astro` — adjust the [roadmap](https://sailfin.dev/roadmap) for sequencing changes
 4. Relevant folder `README` (`compiler/README.md`, `runtime/README.md`, etc.)
 
 ## Commit & Pull Request Guidelines
@@ -135,7 +137,7 @@ Update documents in this order when behaviour changes:
 - Use Conventional Commit prefixes: `feat(compiler): …`, `fix(bootstrap): …`, etc.
 - Keep commits atomic; mention touched capsules; co-author doc changes in the same PR.
 - PRs must include: scope summary, verification commands (`make test`, targeted runs), and notes on doc updates.
-- `python-semantic-release` drives automated releases — use `fix:` or `feat:` prefixes when a new prerelease is expected.
+- Releases are manually triggered via `.github/workflows/release.yml` (pure bash) — use `fix:` or `feat:` prefixes in commit messages.
 
 ## Source of Truth Documents
 
@@ -143,7 +145,7 @@ Update documents in this order when behaviour changes:
 |---|---|
 | `docs/status.md` | What ships today (Stage0/1/2 breakdown) |
 | `docs/spec.md` | Language reference (Part A: bootstrap, Part B: planned) |
-| `docs/roadmap.md` | Active workstreams and sequencing |
+| [sailfin.dev/roadmap](https://sailfin.dev/roadmap) | Active workstreams and sequencing (source: `site/src/pages/roadmap.astro`) |
 | `docs/runtime_audit.md` | Python→Sailfin migration tracker |
 
 ## Important Constraints
@@ -169,10 +171,8 @@ Update documents in this order when behaviour changes:
 
 | Term | Meaning |
 |---|---|
-| Capsule | A Sailfin package with `sail.toml` manifest |
-| Fleet | Multi-capsule workspace with shared `fleet.toml` policies |
-| Effect | Capability annotation (`![io]`, `![net]`, etc.) |
-| Generation card | Provenance metadata for model calls (input hashes, cost, latency, seed) |
+| Capsule | A Sailfin package with `capsule.toml` manifest |
+| Workspace | Multi-capsule project with shared `workspace.toml` policies |
+| Effect | Capability annotation (`![io]`, `![net]`, etc.) — the language's core differentiator |
 | Native IR | `.sfn-asm` textual intermediate representation |
 | Prelude | Core runtime library (`runtime/prelude.sfn`) |
-| Stage0/1/2 | Bootstrap (Python) / Self-hosted (Sailfin→Python) / Native (Sailfin→LLVM) |
