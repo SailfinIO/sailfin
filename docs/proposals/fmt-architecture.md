@@ -146,7 +146,7 @@ struct FmtContext {
 
 ### Phase 1: Lex
 
-Call the existing `tokenize(source)` function from `lexer.sfn`. This
+Call the existing `lex(source)` function from `lexer.sfn`. This
 produces a `Token[]` containing all token kinds including `Whitespace`
 and `Comment`.
 
@@ -748,7 +748,7 @@ stays on one line with no space inside.
 
 | Dependency | Status | Notes |
 |---|---|---|
-| `compiler/src/lexer.sfn` | Stable | `tokenize()` function |
+| `compiler/src/lexer.sfn` | Stable | `lex()` function |
 | `compiler/src/token.sfn` | Stable | `Token`, `TokenKind` types |
 | `compiler/src/cli_main.sfn` | Stable | Subcommand dispatch |
 | `compiler/src/cli_commands.sfn` | Stable | Command handler pattern |

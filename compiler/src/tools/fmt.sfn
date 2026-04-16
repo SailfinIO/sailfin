@@ -200,13 +200,15 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
             // Check if this is a trailing comment (same line as previous structural token)
             if result.length > 0 {
                 if last_structural_line == token.line {
-                    // Trailing comment — attach to the previous FmtToken
+                    // Trailing comment — append to the previous FmtToken
                     let prev_idx = result.length - 1;
                     let prev_ft = result[prev_idx];
+                    let updated_trailing = prev_ft.trailing_comment;
+                    updated_trailing.push(token);
                     result[prev_idx] = FmtToken {
                         token: prev_ft.token,
                         leading_comments: prev_ft.leading_comments,
-                        trailing_comment: [token],
+                        trailing_comment: updated_trailing,
                         blank_lines_before: prev_ft.blank_lines_before,
                         role: prev_ft.role,
                     };
@@ -380,6 +382,9 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
         // ── Emit blank line ──
         if ft.blank_lines_before > 0 {
             if i > 0 {
+                if !at_line_start {
+                    out = out + "\n";
+                }
                 out = out + "\n";
                 at_line_start = true;
             }
@@ -448,10 +453,13 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             paren_depth += 1;
         }
 
-        // ── Emit trailing comment ──
-        if ft.trailing_comment.length > 0 {
-            let tc = ft.trailing_comment[0];
+        // ── Emit trailing comments ──
+        let mut tci = 0;
+        loop {
+            if tci >= ft.trailing_comment.length { break; }
+            let tc = ft.trailing_comment[tci];
             out = out + "  " + tc.lexeme;
+            tci += 1;
         }
 
         // ── Emit newline after statement-ending tokens ──
@@ -494,7 +502,18 @@ fn format_source(source: string) -> string {
     let tokens = lex(source);
     let fmt_tokens = strip_and_classify(tokens);
     if fmt_tokens.length == 0 {
-        return "";
+        // Comment-only file — emit comments directly
+        let mut out = "";
+        let mut ti = 0;
+        loop {
+            if ti >= tokens.length { break; }
+            let tk = tokens[ti];
+            if strings_equal(tk.kind.variant, "Comment") {
+                out = out + tk.lexeme + "\n";
+            }
+            ti += 1;
+        }
+        return out;
     }
     return emit_formatted(fmt_tokens);
 }
