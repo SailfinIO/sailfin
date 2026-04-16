@@ -114,11 +114,21 @@ utilities module.
 
 ## How to verify
 
+⚠️ Commit and push before compiling. The build can take 15–20+ minutes on constrained machines. To avoid losing work to a session timeout, always commit and push first, then verify.
+
 ```bash
+# 1. Stage and commit your changes first
+git add -A
+git commit -m "refactor(<scope>): <what you did>"
+git push origin HEAD
+
+# 2. Then run verification (safe to retry if the session times out)
 ulimit -v 8388608
 make compile          # Must succeed — self-hosting invariant
 make test-unit        # Must pass — no regressions
 ```
+
+If make compile or make test-unit fails after the push, open a follow-up commit on the same branch to fix it — don't amend or force-push.
 
 ## Commit format
 
