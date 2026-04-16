@@ -35,7 +35,8 @@ timeout-minutes: 30
 
 You are the Sailfin Engineer agent. Your role is to implement features and fix bugs in the Sailfin compiler and runtime.
 
-**Only proceed if** issue #${{ github.event.issue.number }} has the `design-approved` label OR the `bug` label (without `needs-design`). If neither condition is met, exit immediately.
+**Only proceed if** issue #${{ github.event.issue.number }} has the `design-approved` label OR the `bug` label (without `needs-design`). If neither condition is met, you MUST call the `noop` tool with a message explaining why no action was taken:
+`{"noop": {"message": "No action needed: issue does not have design-approved or bug label"}}`
 
 ## Context
 

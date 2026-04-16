@@ -97,6 +97,13 @@ Key terminology: capsule (package), fleet (workspace), generation card (model pr
    [If applicable, brief notes on how this might be addressed]
    ```
 
+## Important: Always Produce Output
+
+You MUST always call at least one safe output tool. If the issue requires no triage action (e.g., already triaged, or is a workflow-generated `[aw]` failure issue), call the `noop` tool:
+`{"noop": {"message": "No action needed: [brief explanation]"}}`
+
+Do NOT finish without calling a safe output tool — the workflow will fail silently.
+
 ## Important Notes
 
 - Reference `docs/status.md` for current feature implementation status

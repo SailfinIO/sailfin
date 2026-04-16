@@ -98,6 +98,13 @@ Verify code quality, test coverage, and project standards.
 - New fixup passes in the build script
 - New dependencies on Python bootstrap
 
+## Important: Always Produce Output
+
+You MUST always call at least one safe output tool. If the PR has no findings or you cannot complete the review, call the `noop` tool:
+`{"noop": {"message": "No action needed: [brief explanation]"}}`
+
+Do NOT finish without calling a safe output tool — the workflow will fail silently.
+
 ---
 
 ## Security Review

@@ -99,6 +99,13 @@ rand, clock]`), ownership types, and AI-native constructs.
    already has auto-generated notes from `gh release create --generate-notes`;
    your comment supplements those with richer categorization and context.
 
+## Important: Always Produce Output
+
+You MUST always call at least one safe output tool. If you cannot generate release notes (e.g., no previous tag found, no commits between tags), call the `noop` tool:
+`{"noop": {"message": "No action needed: [brief explanation]"}}`
+
+Do NOT finish without calling a safe output tool — the workflow will fail silently.
+
 ## Guidelines
 
 - Be factual. Every claim must trace to an actual commit or PR.
