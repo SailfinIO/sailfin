@@ -98,6 +98,17 @@ Verify code quality, test coverage, and project standards.
 - New fixup passes in the build script
 - New dependencies on Python bootstrap
 
+## Important: Always Produce Output
+
+You MUST always call at least one safe output tool.
+
+If the PR has no blocking issues, still submit a PR review with **Approve**.
+
+Only call the `noop` tool when you cannot complete the review or cannot produce a real review output:
+`{"noop": {"message": "No action needed: [brief explanation]"}}`
+
+Do NOT finish without calling a safe output tool — the workflow will fail with a `No Safe Outputs Generated` error.
+
 ---
 
 ## Security Review
