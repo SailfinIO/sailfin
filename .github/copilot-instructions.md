@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Sailfin is a compiled systems language with compile-time capability enforcement via effect types. Every function declares what it can do (IO, network, clock, etc.) and the compiler checks those declarations. The language targets LLVM, produces native single-binary executables, and is designed so that code capabilities are verifiable at compile time.
+Sailfin is a compiled systems language with effect type annotations for capabilities. Every function declares what it can do (IO, network, clock, etc.); effect annotations are supported today, while full enforcement (compilation gating) is the top priority on the roadmap. The language targets LLVM, produces native single-binary executables, and is designed so that code capabilities are verifiable at compile time.
 
 **Primary toolchain:** The self-hosted native compiler (`compiler/src/`) targeting LLVM via a `.sfn-asm` intermediate representation. Release artifacts install as `sailfin`/`sfn`.
 

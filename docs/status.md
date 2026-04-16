@@ -21,9 +21,10 @@ feature availability.
 - Pipeline: Lexer → Parser → Type Checker → Native Emitter
   (`.sfn-asm` IR) → LLVM Lowering.
 - **Effect checker status**: `validate_effects()` exists in `effect_checker.sfn`
-  and produces diagnostics, but it is **not wired into the compilation gate** —
-  effect violations do not block compilation. Wiring effect enforcement into the
-  build is the top priority in the Effect System Hardening track on the
+  but is **not invoked by the compiler or CLI during normal builds** — users will
+  not see effect diagnostics during compilation, and effect violations do not
+  block compilation. Wiring effect enforcement into the build is the top priority
+  in the Effect System Hardening track on the
   [roadmap](https://sailfin.dev/roadmap).
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
@@ -49,12 +50,12 @@ feature availability.
 | String interpolation (`{{ }}`) | Shipped | |
 | Pattern matching exhaustiveness | Partial | Runtime backstop via `match_exhaustive_failed` |
 | Effect annotations (`![...]`) | Shipped | Parsing and declaration |
-| Effect enforcement — `io` | Diagnostic only | `print.*`, `console.*`, `fs.*`, `@logExecution` — detected but does not block compilation |
-| Effect enforcement — `net` | Diagnostic only | `http.*`, `websocket.*`, `serve` — detected but does not block compilation |
-| Effect enforcement — `model` | Diagnostic only | Required for any `prompt` block — detected but does not block compilation |
-| Effect enforcement — `clock` | Diagnostic only | `sleep`/`runtime.sleep` checked; hierarchical names not enforced; does not block compilation |
-| Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; not validated |
-| Effect enforcement as compilation gate | **Not yet** | `validate_effects()` exists but is not called from the compilation pipeline; top priority |
+| Effect enforcement — `io` | Not enforced | Checker logic exists for `print.*`, `console.*`, `fs.*`, `@logExecution` but is not run during compilation |
+| Effect enforcement — `net` | Not enforced | Checker logic exists for `http.*`, `websocket.*`, `serve` but is not run during compilation |
+| Effect enforcement — `model` | Not enforced | Checker logic exists for `prompt` blocks but is not run during compilation |
+| Effect enforcement — `clock` | Not enforced | Checker logic exists for `sleep`/`runtime.sleep` but is not run during compilation |
+| Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; no checker logic |
+| Effect enforcement as compilation gate | **Not yet** | `validate_effects()` exists but is not invoked by the compiler; top priority |
 | Generic type inference | Partial | Type params captured; inference coverage is limited |
 | Interface conformance validation | Partial | Basic checks; variance not yet enforced |
 | `Affine<T>` / `Linear<T>` | Parsed only | Ownership wrappers accepted; move/consume rules not enforced |

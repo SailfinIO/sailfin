@@ -21,19 +21,17 @@ import BaseLayout from "../layouts/BaseLayout.astro";
         <p>
           Every function in Sailfin declares what it can do. A function that reads files declares
           <code>![io]</code>. A function that calls an API declares <code>![net]</code>. A function
-          that does neither declares nothing, and direct effect usage is checked against that
-          declaration at compile time.
+          that does neither declares nothing.
         </p>
-        <pre><code>// This won't compile — http.get requires ![net], but main only declares ![io]
+        <pre><code>// Missing ![net] — once effect enforcement ships, this will be a compile error
 fn main() ![io] {"{"}
-    let data = http.get("https://api.example.com").body;  // ERROR
+    let data = http.get("https://api.example.com").body;  // needs ![net]
 {"}"}</code></pre>
         <p>
           No other mainstream systems language offers this. Go, Rust, and Zig all rely on convention
-          and documentation to track side effects. Sailfin checks declared effects at compile time.
-          Compilation gating and transitive call-graph enforcement are on the
-          <a href="/roadmap">roadmap</a> — the effect checker detects violations today, and blocking
-          compilation on violations is the next milestone.
+          and documentation to track side effects. Sailfin's effect checker can detect these violations
+          today; wiring it into the compilation gate so violations block the build is the next milestone
+          on the <a href="/roadmap">roadmap</a>, followed by transitive call-graph enforcement.
         </p>
       </section>
 
@@ -46,9 +44,10 @@ fn main() ![io] {"{"}
         </p>
         <p>
           In most languages, you can't — not without reading every line. In Sailfin, the effect system
-          makes the answer visible in the function signature and checkable by the compiler. An agent that
-          generates a Sailfin function declaring <code>![io]</code> but calling <code>http.get</code>
-          gets a compile error, not a production incident.
+          makes the answer visible in the function signature. An agent that generates a Sailfin function
+          declaring <code>![io]</code> but calling <code>http.get</code> will have that mismatch
+          caught by the effect checker — and once enforcement ships as a compilation gate, it becomes
+          a build error rather than a production incident.
         </p>
         <p>
           This makes Sailfin a natural target for agentic workflows: generate code, compile to verify

@@ -17,7 +17,7 @@ The self-hosted native compiler (`build/native/sailfin`) supports:
 
 - Functions, structs, enums, interfaces, type aliases, and generics (parsed; inference is limited)
 - `let`/`let mut` variables, pattern matching (`match`), `if`/`else`, `for`, `while`, `try`/`catch`
-- Effect annotations (`![io, net, model, clock]`) — the effect checker detects capability violations (compilation gating on the [roadmap](https://sailfin.dev/roadmap))
+- Effect annotations (`![io, net, model, clock]`) — parsed and carried through to IR; effect enforcement is planned on the [roadmap](https://sailfin.dev/roadmap)
 - String interpolation (`{{ expression }}`), decorators, `async fn`
 - Standard library capsules: `fmt`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`, `time`, `cli`, `http` (partial)
 - Package registry at `registry.sailfin.dev` with dependency resolution (capability auditing planned)

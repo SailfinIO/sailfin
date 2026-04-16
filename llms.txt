@@ -10,8 +10,10 @@ runtime library exception.
 
 ## Core Differentiator: Effect Types
 
-Every function declares what capabilities it uses. The compiler checks these
-declarations against the function body.
+Every function declares what capabilities it uses. Effect annotations are
+supported today; the effect checker logic exists but is not yet invoked during
+normal compilation. Wiring it into the compilation gate (so violations block
+the build) is the top priority on the roadmap.
 
     fn read_config(path: string) -> string ![io] {
         return fs.readFile(path);
@@ -174,7 +176,7 @@ but not enforced. Monomorphization is not yet implemented.
 
 ### Imports and Modules
 
-    import { readFile } from "fs";
+    import { fs } from "fs";
     import { http } from "http";
     import { parse_program } from "./parser/mod";
 
@@ -242,11 +244,15 @@ Declares external C symbols for linking.
 | sfn/tensor| "tensor"    | gpu (planned) | Tensor ops, matmul, transpose (CPU)      |
 | sfn/losses| "losses"    | None          | MSE, MAE, Huber, hinge loss functions    |
 
-## Numeric Types (Current Limitation)
+## Numeric Types
 
-The sole numeric type today is `number` (64-bit float, f64). Integer types
-(`int` as i64, `float` as f64) are planned pre-1.0 to fix precision issues,
-enable bitwise operations, and support proper array indexing.
+The primary numeric type is `number` (64-bit float, f64). The compiler also
+recognizes `int` and `i64` annotations, which lower to 64-bit integers in LLVM
+IR. However, integer support is incomplete: there are no integer-specific
+operators, no integer literal syntax distinct from float, and stdlib APIs
+generally expect `number`. Broader integer/float ergonomics (bitwise operators,
+`int` as a first-class citizen with full operator and stdlib support) are
+pre-1.0 work.
 
 Bitwise operators (&, |, ^, >>, <<) are not yet implemented.
 
@@ -270,7 +276,7 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 
 ## What Is Parsed but Not Fully Implemented
 
-- Effect enforcement -- checker exists but does not block compilation (top priority)
+- Effect enforcement -- checker logic exists but is not invoked during compilation (top priority)
 - Closures with capture -- lambdas parse but don't capture enclosing scope
 - Generic constraints (<T: Bound>) -- parsed as text, not enforced
 - Affine<T> / Linear<T> ownership -- parsed, transparent (no enforcement)
