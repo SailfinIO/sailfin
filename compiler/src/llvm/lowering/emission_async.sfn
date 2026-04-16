@@ -4,67 +4,36 @@
 // emit_llvm_function under ~500 .sfn-asm instructions (avoids seed OOM).
 //
 // NOTE: Mutual import with emission.sfn — see comment there for rationale.
-
 import { NativeFunction } from "../../native_ir";
-
 import {
-    TypeContext,
-    LocalBinding,
-    ParameterBinding,
-    LoweredLLVMFunction,
+    future_pointer_type_for_return_type,
+    spawn_ctx_symbol_for_return_type,
+    spawn_symbol_for_return_type,
+} from "../expression_lowering/native/statement_suspension";
+import { format_temp_name, } from "../expressions_helpers";
+import { empty_string_constant_set, merge_string_constants, } from "../strings";
+import { map_return_type, } from "../type_mapping";
+import {
     LLVMOperand,
-    StringConstant,
-    ParameterPreparation,
     LifetimeRegionMetadata,
+    LocalBinding,
+    LoweredLLVMFunction,
+    ParameterBinding,
+    ParameterPreparation,
+    StringConstant,
+    TypeContext,
 } from "../types";
-
 import {
     extend_string_array,
     join_with_separator,
-    sanitize_symbol,
     number_to_string,
+    sanitize_symbol,
 } from "../utils";
-
-import {
-    empty_string_constant_set,
-    merge_string_constants,
-} from "../strings";
-
-import {
-    format_temp_name,
-} from "../expressions_helpers";
-
-import {
-    future_pointer_type_for_return_type,
-    spawn_symbol_for_return_type,
-    spawn_ctx_symbol_for_return_type,
-} from "../expression_lowering/native/statement_suspension";
-
-import {
-    map_return_type,
-} from "../type_mapping";
-
 import { emit_llvm_function } from "./emission";
-
 import { prepare_parameters_from_files } from "./emission";
 
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.
-fn emit_async_function(
-    fn_name: string,
-    fn_return_type: string,
-    fn_param_count: number,
-    function_name_hint: string,
-    functions: NativeFunction[],
-    effects: string[],
-    context: TypeContext,
-    module_name: string,
-    entry_points: string[],
-    exported_symbols: string[],
-    imported_functions: NativeFunction[],
-    module_globals: LocalBinding[],
-    module_init_symbol: string,
-    needs_module_init_call: boolean
-) -> LoweredLLVMFunction ![io] {
+fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: number, function_name_hint: string, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {
     let mut diagnostics: string[] = [];
     let future_return = future_pointer_type_for_return_type(fn_return_type);
     let mut impl_return = map_return_type(context, fn_return_type);
@@ -74,7 +43,12 @@ fn emit_async_function(
     if _if205 {
         diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
         let empty_constants = empty_string_constant_set();
-        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+        return LoweredLLVMFunction {
+            lines: [],
+            diagnostics: diagnostics,
+            lifetime_regions: [],
+            string_constants: empty_constants
+        };
     }
 
     let mut impl_return_type_annotation: string = fn_return_type;
@@ -87,19 +61,7 @@ fn emit_async_function(
     fs.writeFile("build/sailfin/.fn_name", impl_name);
     fs.writeFile("build/sailfin/.fn_return_type", impl_return_type_annotation);
     fs.writeFile("build/sailfin/.fn_is_async", "0");
-    let impl_lowered = emit_llvm_function(
-        function_name_hint,
-        functions,
-        effects,
-        context,
-        module_name,
-        entry_points,
-        exported_symbols,
-        imported_functions,
-        module_globals,
-        module_init_symbol,
-        needs_module_init_call
-    );
+    let impl_lowered = emit_llvm_function(function_name_hint, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call);
 
     diagnostics = extend_string_array(diagnostics, impl_lowered.diagnostics);
 
@@ -112,16 +74,19 @@ fn emit_async_function(
     let wrapper_symbol = sanitize_symbol(fn_name);
     let impl_symbol = sanitize_symbol(impl_name);
     let mut signature: string = join_with_separator(preparation.signature, ", ");
-    if signature.length == 0 {
-        signature = "";
-    }
+    if signature.length == 0 { signature = ""; }
 
     if fn_param_count == 0 {
         let spawn_symbol = spawn_symbol_for_return_type(fn_return_type);
         if spawn_symbol.length == 0 {
             diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
             let empty_constants = empty_string_constant_set();
-                    return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+            return LoweredLLVMFunction {
+                lines: [],
+                diagnostics: diagnostics,
+                lifetime_regions: [],
+                string_constants: empty_constants
+            };
         }
         wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
         wrapper_lines.push("block.entry:");
@@ -134,7 +99,12 @@ fn emit_async_function(
         if spawn_symbol.length == 0 {
             diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
             let empty_constants = empty_string_constant_set();
-                    return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+            return LoweredLLVMFunction {
+                lines: [],
+                diagnostics: diagnostics,
+                lifetime_regions: [],
+                string_constants: empty_constants
+            };
         }
 
         let ctx_type = "%SailfinAsyncCtx." + wrapper_symbol;

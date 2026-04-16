@@ -8,33 +8,22 @@
 // `Decorator[]` invalid in LLVM (requires a sized element type). Keep this
 // module free of `Decorator` indexing so self-host-from-release-seed remains
 // reliable.
-
 fn infer_effects(existing: string[], decorator_names: string[]) -> string[] {
     let mut effects = clone_effects(existing);
     let mut requires_io: boolean = contains_effect(effects, "io");
 
     let mut index: number = 0;
     loop {
-        if index >= decorator_names.length {
-            break;
-        }
+        if index >= decorator_names.length { break; }
         let name = decorator_names[index];
-        if name == "trace" {
-            requires_io = true;
-        }
-        if name == "logExecution" {
-            requires_io = true;
-        }
-        if name == "logexecution" {
-            requires_io = true;
-        }
+        if name == "trace" { requires_io = true; }
+        if name == "logExecution" { requires_io = true; }
+        if name == "logexecution" { requires_io = true; }
         index += 1;
     }
 
     if requires_io {
-        if !contains_effect(effects, "io") {
-            effects.push("io");
-        }
+        if !contains_effect(effects, "io") { effects.push("io"); }
     }
 
     return effects;
@@ -49,9 +38,7 @@ fn clone_effects(effects: string[]) -> string[] {
     let mut clone: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= effects.length {
-            break;
-        }
+        if index >= effects.length { break; }
         clone.push(effects[index]);
         index += 1;
     }
@@ -61,15 +48,9 @@ fn clone_effects(effects: string[]) -> string[] {
 fn contains_effect(effects: string[], effect: string) -> boolean {
     let mut index: number = 0;
     loop {
-        if index >= effects.length {
-            break;
-        }
-        if effects[index] == effect {
-            return true;
-        }
+        if index >= effects.length { break; }
+        if effects[index] == effect { return true; }
         index += 1;
     }
     return false;
 }
-
-

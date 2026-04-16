@@ -12,149 +12,117 @@
 //   lowering_text_utils.sfn     — text processing and structured data parsers
 //   lowering_recovery.sfn       — light recovery parsers for functions/structs/imports
 //   lowering_io.sfn             — string array ops, file I/O, intrinsics
-
 import { NativeModule } from "../../emit_native";
 import { NativeArtifact } from "../../emit_native_layout";
 import {
-    NativeImport,
+    LayoutManifest,
+    NativeBinding,
+    NativeEnum,
     NativeFunction,
-    NativeParameter,
+    NativeImport,
     NativeInstruction,
     NativeInterface,
+    NativeParameter,
     NativeStruct,
     NativeStructField,
-    NativeEnum,
-    LayoutManifest,
     ParseNativeResult,
-    NativeBinding,
 } from "../../native_ir";
 import {
+    parse_native_bindings_from_text,
     parse_native_function_count_from_text,
     parse_native_functions_from_text,
-    parse_native_bindings_from_text,
     parse_native_structs_for_import,
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
-
 import {
-    TypeContext,
-    TraitMetadata,
-    LoweredLLVMLinesResult,
+    append_unique_effect,
+    collect_direct_function_effects,
+    collect_function_call_graph,
+    collect_runtime_helper_targets,
+    propagate_function_effects,
+} from "../effects";
+import {
+    apply_layout_manifest_to_module,
+    collect_imported_module_context_for_module,
+} from "../imports";
+import { collect_exported_symbol_names, } from "../rendering_helpers";
+import { empty_string_constant_set, escape_string_for_llvm, } from "../strings";
+import {
     FunctionEffectEntry,
     LifetimeRegionMetadata,
-    StringConstant,
     LocalBinding,
+    LoweredLLVMLinesResult,
+    StringConstant,
+    TraitMetadata,
+    TypeContext,
 } from "../types";
-
 import {
+    index_of,
     number_to_string,
     sanitize_symbol,
     string_array_contains,
-    index_of,
 } from "../utils";
-
 import {
-    empty_string_constant_set,
-    escape_string_for_llvm,
-} from "../strings";
-
-import {
-    collect_direct_function_effects,
-    collect_function_call_graph,
-    propagate_function_effects,
-    collect_runtime_helper_targets,
-    append_unique_effect,
-} from "../effects";
-
-import {
-    collect_exported_symbol_names,
-} from "../rendering_helpers";
-
-import {
-    collect_imported_module_context_for_module,
-    apply_layout_manifest_to_module,
-} from "../imports";
-
-import {
-    lower_module_bindings_to_globals,
-} from "./module_globals";
-
-import {
-    extend_native_structs,
+    collect_defined_function_symbols,
     extend_native_enums,
-    extend_native_interfaces,
     extend_native_functions,
+    extend_native_interfaces,
+    extend_native_structs,
     is_test_module_slug,
     render_test_harness_main_for_module,
-    collect_defined_function_symbols,
 } from "./lowering_helpers";
-
 import {
     apply_module_symbol_mangling,
     build_trait_metadata,
     concat_native_functions,
+    empty_capability_manifest,
     extend_native_functions_inplace,
     flatten_struct_methods,
-    empty_capability_manifest,
 } from "./lowering_helpers_mangling";
-
 import {
-    split_lines_local,
-    _parse_lowered_fn_string_constants,
-    _parse_module_globals_locals,
-} from "./lowering_text_utils";
-
-import {
-    recover_native_functions_light,
-    recover_native_imports_light,
-    recover_native_structs_light,
-    recover_native_enums_light,
-    recover_functions_for_lowering,
-} from "./lowering_recovery";
-
-import {
+    append_string_lines,
     extend_string_lines,
     extend_string_lines_checked,
-    append_string_lines,
-    write_llvm_lines_chunked,
     module_source_filename,
+    write_llvm_lines_chunked,
 } from "./lowering_io";
-
+import { lower_all_functions, } from "./lowering_phase_functions";
+import {
+    extract_import_struct_methods,
+    parse_single_import_functions,
+    parse_single_import_interfaces,
+} from "./lowering_phase_imports";
+import { render_llvm_preamble, } from "./lowering_phase_render";
 // Phase modules
 import {
-    sanitize_lowering_inputs,
-    sanitize_imported_manifests,
-    sanitize_imported_native_texts,
-    sanitize_diagnostics,
-    sanitize_entry_points,
-    sanitize_imports,
-    sanitize_structs,
-    sanitize_enums,
-    sanitize_interfaces,
-    sanitize_functions,
     recover_safe_functions,
     recover_structs_if_corrupt,
     sanitize_bindings,
+    sanitize_diagnostics,
+    sanitize_entry_points,
+    sanitize_enums,
+    sanitize_functions,
+    sanitize_imported_manifests,
+    sanitize_imported_native_texts,
+    sanitize_imports,
+    sanitize_interfaces,
+    sanitize_lowering_inputs,
+    sanitize_structs,
 } from "./lowering_phase_sanitize";
-
+import { build_type_context_with_recovery, serialize_context_functions, } from "./lowering_phase_types";
 import {
-    parse_single_import_interfaces,
-    parse_single_import_functions,
-    extract_import_struct_methods,
-} from "./lowering_phase_imports";
-
+    recover_functions_for_lowering,
+    recover_native_enums_light,
+    recover_native_functions_light,
+    recover_native_imports_light,
+    recover_native_structs_light,
+} from "./lowering_recovery";
 import {
-    build_type_context_with_recovery,
-    serialize_context_functions,
-} from "./lowering_phase_types";
-
-import {
-    render_llvm_preamble,
-} from "./lowering_phase_render";
-
-import {
-    lower_all_functions,
-} from "./lowering_phase_functions";
+    _parse_lowered_fn_string_constants,
+    _parse_module_globals_locals,
+    split_lines_local,
+} from "./lowering_text_utils";
+import { lower_module_bindings_to_globals, } from "./module_globals";
 
 // Consolidated: parse all structure from native text using light recovery.
 // Kept in lowering_core to preserve cross-module symbol mangling compatibility
@@ -177,21 +145,15 @@ fn build_parse_result_from_text(native_text: string) -> ParseNativeResult {
 
 fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
     let base = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, false, "");
-    if base.lines.length == 0 {
-        return base;
-    }
+    if base.lines.length == 0 { return base; }
 
     let mut test_count: number = 0;
     let mut has_main: boolean = false;
 
     let mut index: number = 0;
     loop {
-        if index >= parse.functions.length {
-            break;
-        }
-        if parse.functions[index].name == "main" {
-            has_main = true;
-        }
+        if index >= parse.functions.length { break; }
+        if parse.functions[index].name == "main" { has_main = true; }
         if parse.functions[index].name.length >= 5 {
             if substring(parse.functions[index].name, 0, 5) == "test:" {
                 test_count += 1;
@@ -200,9 +162,7 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         index += 1;
     }
 
-    if test_count == 0 {
-        return base;
-    }
+    if test_count == 0 { return base; }
 
     if has_main {
         let mut updated = base;
@@ -228,14 +188,8 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
                 let idx_s = number_to_string(test_idx);
                 let msg_arr_len = number_to_string(msg.length + 1);
                 let escaped = escape_string_for_llvm(msg);
-                harness_globals = extend_string_lines(harness_globals, [
-                    "@.tname." + idx_s + " = private unnamed_addr constant [" + msg_arr_len + " x i8] c\"" + escaped + "\\00\"",
-                ]);
-                harness = extend_string_lines(harness, [
-                    "  %tn" + idx_s + " = getelementptr [" + msg_arr_len + " x i8], [" + msg_arr_len + " x i8]* @.tname." + idx_s + ", i64 0, i64 0",
-                    "  call void @sailfin_runtime_print_err(i8* %tn" + idx_s + ")",
-                    "  call void @" + sym + "()",
-                ]);
+                harness_globals = extend_string_lines(harness_globals, ["@.tname." + idx_s + " = private unnamed_addr constant [" + msg_arr_len + " x i8] c\"" + escaped + "\\00\"",]);
+                harness = extend_string_lines(harness, ["  %tn" + idx_s + " = getelementptr [" + msg_arr_len + " x i8], [" + msg_arr_len + " x i8]* @.tname." + idx_s + ", i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tn" + idx_s + ")", "  call void @" + sym + "()",]);
                 test_idx += 1;
             }
         }
@@ -244,15 +198,8 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     let pass_msg = "  PASS  (all " + number_to_string(test_idx) + " tests passed)";
     let pass_escaped = escape_string_for_llvm(pass_msg);
     let pass_len_s = number_to_string(pass_msg.length + 1);
-    harness_globals = extend_string_lines(harness_globals, [
-        "@.tpass = private unnamed_addr constant [" + pass_len_s + " x i8] c\"" + pass_escaped + "\\00\"",
-    ]);
-    harness = extend_string_lines(harness, [
-        "  %tp = getelementptr [" + pass_len_s + " x i8], [" + pass_len_s + " x i8]* @.tpass, i64 0, i64 0",
-        "  call void @sailfin_runtime_print_err(i8* %tp)",
-        "  ret i32 0",
-        "}",
-    ]);
+    harness_globals = extend_string_lines(harness_globals, ["@.tpass = private unnamed_addr constant [" + pass_len_s + " x i8] c\"" + pass_escaped + "\\00\"",]);
+    harness = extend_string_lines(harness, ["  %tp = getelementptr [" + pass_len_s + " x i8], [" + pass_len_s + " x i8]* @.tpass, i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tp)", "  ret i32 0", "}",]);
 
     let mut updated = base;
     if updated.lines.length > 0 {
@@ -267,7 +214,9 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
 fn make_native_module_for_emit(module_name: string, native_text: string) -> NativeModule {
     return NativeModule {
         module_name: module_name,
-        artifacts: [NativeArtifact { name: module_name, format: "sailfin-native-text", contents: native_text }],
+        artifacts: [NativeArtifact {
+            name: module_name, format: "sailfin-native-text", contents: native_text
+        }],
         entry_points: [],
         symbol_count: 0,
     };
@@ -288,15 +237,7 @@ fn compile_native_text_to_llvm_file(native_text_path: string, module_name: strin
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     let import_context = collect_imported_module_context_for_module(raw_imports, module_name);
     let dummy_module = make_native_module_for_emit(module_name, native_text);
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context(
-        dummy_module,
-        parse,
-        import_context.manifests,
-        import_context.native_texts,
-        import_context.diagnostics,
-        true,
-        native_text
-    );
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
     if lowered_lines.lines == null {
         print.err("emit-llvm: lowered lines null");
         return false;
@@ -304,9 +245,7 @@ fn compile_native_text_to_llvm_file(native_text_path: string, module_name: strin
     let lowered_count = lowered_lines.lines.length;
     if lowered_count > 0 {
         let defined = collect_defined_function_symbols(lowered_lines.lines);
-        if defined.length == 0 {
-            return false;
-        }
+        if defined.length == 0 { return false; }
     }
     let lines = lowered_lines.lines;
     let mut _if247: boolean = false;
@@ -316,17 +255,13 @@ fn compile_native_text_to_llvm_file(native_text_path: string, module_name: strin
         print.err("emit-llvm: lowering produced no output lines");
         return false;
     }
-    if fs.exists(out_path) {
-        fs.deleteFile(out_path);
-    }
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
     return write_llvm_lines_chunked(out_path, lines);
 }
 
 fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path: string) -> LoweredLLVMLinesResult ![io] {
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
-    if debug_lowering {
-        print.err("emit-llvm: phase=start");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=start"); }
     if debug_lowering {
         let mut artifact_count: number = 0;
         if native_module.artifacts != null {
@@ -373,14 +308,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
                     import_spec_count = first_import.specifiers.length;
                 }
                 print.err("emit-llvm: safe_imports[0].kind=" + import_kind + " module=" + import_module + " specs=" + number_to_string(import_spec_count));
-            } else {
-                print.err("emit-llvm: safe_imports[0]=<null>");
-            }
+            } else { print.err("emit-llvm: safe_imports[0]=<null>"); }
         }
     }
-    if is_test_module {
-        safe_imports = [];
-    }
+    if is_test_module { safe_imports = []; }
     let mut safe_structs = sanitize_structs(parse.structs, diagnostics);
     let safe_enums = sanitize_enums(parse.enums, diagnostics, _trace_enums);
     let safe_interfaces = sanitize_interfaces(parse.interfaces, diagnostics);
@@ -399,17 +330,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     let safe_bindings = sanitize_bindings(parse.bindings, diagnostics);
 
     let mut safe_parse_diagnostics = parse.diagnostics;
-    if safe_parse_diagnostics == null {
-        safe_parse_diagnostics = [];
-    }
+    if safe_parse_diagnostics == null { safe_parse_diagnostics = []; }
     diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
 
     // ── Trace/timing setup ──────────────────────────────────────────
     let mut _let250: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") {
-            _let250 = true;
-        }
+        if fs.exists("build/sailfin/.test_runner_active") { _let250 = true; }
     }
     let trace = _let250;
     let timing = fs.exists("build/sailfin/.test_runner_active");
@@ -432,16 +359,10 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         let manifest_application = apply_layout_manifest_to_module(safe_structs, safe_enums, module_manifest);
         diagnostics = extend_string_lines_checked(diagnostics, manifest_application.diagnostics, "layout application");
         module_structs = manifest_application.structs;
-        if module_structs == null {
-            module_structs = [];
-        }
+        if module_structs == null { module_structs = []; }
         module_enums = manifest_application.enums;
-        if module_enums == null {
-            module_enums = [];
-        }
-        if debug_lowering {
-            print.err("emit-llvm: phase=manifest");
-        }
+        if module_enums == null { module_enums = []; }
+        if debug_lowering { print.err("emit-llvm: phase=manifest"); }
     }
     if timing {
         print.err("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
@@ -456,9 +377,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     let manifest_count = safe_imported_manifests.length;
     let mut text_index: number = 0;
     loop {
-        if text_index >= safe_imported_native_texts.length {
-            break;
-        }
+        if text_index >= safe_imported_native_texts.length { break; }
         let native_text = safe_imported_native_texts[text_index];
         let mut manifest_for_module: LayoutManifest? = null;
         if text_index < manifest_count {
@@ -478,13 +397,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         let imported_enums_safe = recover_native_enums_light(native_text);
         let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
         let mut applied_structs = applied_import.structs;
-        if applied_structs == null {
-            applied_structs = [];
-        }
+        if applied_structs == null { applied_structs = []; }
         let mut applied_enums = applied_import.enums;
-        if applied_enums == null {
-            applied_enums = [];
-        }
+        if applied_enums == null { applied_enums = []; }
         let applied_interfaces = parse_single_import_interfaces(native_text);
         let applied_functions = parse_single_import_functions(native_text);
         imported_structs = extend_native_structs(imported_structs, applied_structs);
@@ -499,9 +414,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     if safe_imported_native_texts.length < manifest_count {
         let mut manifest_index: number = safe_imported_native_texts.length;
         loop {
-            if manifest_index >= manifest_count {
-                break;
-            }
+            if manifest_index >= manifest_count { break; }
             let leftover_manifest = safe_imported_manifests[manifest_index];
             imported_structs = extend_native_structs(imported_structs, leftover_manifest.structs);
             imported_enums = extend_native_enums(imported_enums, leftover_manifest.enums);
@@ -509,9 +422,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         }
     }
 
-    if debug_lowering {
-        print.err("emit-llvm: phase=imports");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=imports"); }
 
     // ── Phase 3: Combine types, build type context ──────────────────
     let combined_structs = extend_native_structs(module_structs, imported_structs);
@@ -524,33 +435,20 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         }
     }
 
-    if trace {
-        print.err("test llvm: trait metadata start");
-    }
+    if trace { print.err("test llvm: trait metadata start"); }
     let trait_metadata = build_trait_metadata(combined_interfaces, combined_structs);
-    if debug_lowering {
-        print.err("emit-llvm: phase=trait_metadata");
-    }
-    if trace {
-        print.err("test llvm: enum layout fixup start");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=trait_metadata"); }
+    if trace { print.err("test llvm: enum layout fixup start"); }
 
-    if trace {
-        print.err("test llvm: type context build start");
-    }
-    let type_context = build_type_context_with_recovery(
-        combined_structs, combined_enums, combined_interfaces,
-        diagnostics, _trace_enums, debug_lowering
-    );
+    if trace { print.err("test llvm: type context build start"); }
+    let type_context = build_type_context_with_recovery(combined_structs, combined_enums, combined_interfaces, diagnostics, _trace_enums, debug_lowering);
     // Merge type-context diagnostics written by build_type_context_with_recovery
     let _tc_diags_raw = fs.readFile("build/sailfin/.phase_types_diagnostics");
     if _tc_diags_raw.length > 0 {
         let _tc_diags = split_lines_local(_tc_diags_raw);
         diagnostics = extend_string_lines_checked(diagnostics, _tc_diags, "type context");
     }
-    if trace {
-        print.err("test llvm: type context built");
-    }
+    if trace { print.err("test llvm: type context built"); }
     if timing {
         print.err("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
     }
@@ -566,9 +464,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     // Site 1 — safe in-place extend: safe_functions is not read after this
     // line; local_functions aliases safe_functions and is read downstream.
     let local_functions = extend_native_functions_inplace(safe_functions, module_struct_methods);
-    if debug_lowering {
-        print.err("emit-llvm: phase=local_functions");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=local_functions"); }
     // Site 2 — must stay copying: local_functions is reused by
     // collect_runtime_helper_targets, render_llvm_preamble, and
     // lower_all_functions below, so context_functions must be a distinct
@@ -577,9 +473,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     // Site 3 — safe in-place extend: context_functions is a fresh array from
     // site 2, no prior snapshot is aliased.
     context_functions = extend_native_functions_inplace(context_functions, imported_struct_methods);
-    if debug_lowering {
-        print.err("emit-llvm: phase=context_functions");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=context_functions"); }
 
     serialize_context_functions(context_functions, debug_lowering);
 
@@ -588,18 +482,12 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     let mut runtime_helpers: string[] = [];
     let mut _if255: boolean = false;
     if !is_test_module {
-        if !skip_effects {
-            _if255 = true;
-        }
+        if !skip_effects { _if255 = true; }
     }
     if _if255 {
-        if debug_lowering {
-            print.err("emit-llvm: phase=helpers_start");
-        }
+        if debug_lowering { print.err("emit-llvm: phase=helpers_start"); }
         runtime_helpers = collect_runtime_helper_targets(local_functions);
-        if debug_lowering {
-            print.err("emit-llvm: phase=helpers_done");
-        }
+        if debug_lowering { print.err("emit-llvm: phase=helpers_done"); }
     } else if trace {
         print.err("test llvm: skipping runtime helper collection for inlined tests");
     }
@@ -686,9 +574,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     let mut direct_effects: FunctionEffectEntry[] = [];
     let mut aggregated_effects: FunctionEffectEntry[] = [];
     if !skip_effects {
-        if debug_lowering {
-            print.err("emit-llvm: phase=direct_effects");
-        }
+        if debug_lowering { print.err("emit-llvm: phase=direct_effects"); }
         direct_effects = collect_direct_function_effects(context_functions);
         aggregated_effects = direct_effects;
         if !is_test_module {
@@ -698,27 +584,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
             print.err("test llvm: skipping effect propagation for inlined tests");
         }
     }
-    if trace {
-        print.err("test llvm: runtime helpers collected");
-    }
+    if trace { print.err("test llvm: runtime helpers collected"); }
     if timing {
         print.err("test llvm: phase=effects ms=" + number_to_string(monotonic_millis() - start_ms));
     }
-    if debug_lowering {
-        print.err("emit-llvm: phase=effects");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=effects"); }
 
     // ── Phase 4: Render LLVM IR preamble ────────────────────────────
-    let mut lines = render_llvm_preamble(
-        native_module.module_name,
-        type_context,
-        trait_metadata,
-        context_functions,
-        local_functions,
-        imported_functions,
-        runtime_helpers,
-        debug_lowering
-    );
+    let mut lines = render_llvm_preamble(native_module.module_name, type_context, trait_metadata, context_functions, local_functions, imported_functions, runtime_helpers, debug_lowering);
 
     // ── Module globals ──────────────────────────────────────────────
     if debug_lowering {
@@ -772,30 +645,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         lines = extend_string_lines(lines, module_init_lines);
         lines = extend_string_lines(lines, [""]);
     }
-    if trace {
-        print.err("test llvm: module globals lowered");
-    }
+    if trace { print.err("test llvm: module globals lowered"); }
     if timing {
         print.err("test llvm: phase=globals ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
     // ── Phase 5: Lower all functions ────────────────────────────────
-    let function_lines = lower_all_functions(
-        local_functions,
-        context_functions,
-        aggregated_effects,
-        type_context,
-        native_module.module_name,
-        safe_entry_points,
-        exported_symbols,
-        imported_functions,
-        module_global_locals,
-        module_init_symbol,
-        module_globals_needs_init_call,
-        module_string_constants,
-        trace,
-        debug_lowering
-    );
+    let function_lines = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering);
     lines = extend_string_lines(lines, function_lines);
 
     // Read function phase diagnostics
@@ -826,12 +682,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         }
         lines = mangled.lines;
     }
-    if debug_lowering {
-        print.err("emit-llvm: phase=mangle");
-    }
-    if trace {
-        print.err("test llvm: mangling stage done");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=mangle"); }
+    if trace { print.err("test llvm: mangling stage done"); }
     if timing {
         print.err("test llvm: phase=finalize ms=" + number_to_string(monotonic_millis() - start_ms));
     }
@@ -847,44 +699,23 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         let mut first_len: number = 0;
         let mut i: number = 0;
         loop {
-            if i >= lines.length {
-                break;
-            }
+            if i >= lines.length { break; }
             if lines[i].length > 0 {
                 nonempty += 1;
-                if first_len == 0 {
-                    first_len = lines[i].length;
-                }
+                if first_len == 0 { first_len = lines[i].length; }
             }
             i += 1;
         }
-        print.err(
-            "test llvm: lowered lines=" + number_to_string(lines.length)
-            + " nonempty=" + number_to_string(nonempty)
-            + " first_len=" + number_to_string(first_len)
-            + " diagnostics=" + number_to_string(diagnostics.length)
-        );
+        print.err("test llvm: lowered lines=" + number_to_string(lines.length) + " nonempty=" + number_to_string(nonempty) + " first_len=" + number_to_string(first_len) + " diagnostics=" + number_to_string(diagnostics.length));
         let mut diag_index: number = 0;
         loop {
-            if diag_index >= diagnostics.length {
-                break;
-            }
+            if diag_index >= diagnostics.length { break; }
             print.err("test llvm: diagnostic " + diagnostics[diag_index]);
             diag_index += 1;
         }
     }
     if lines.length == 0 {
-        print.err(
-            "emit-llvm: lowering produced no lines (functions="
-            + number_to_string(local_functions.length)
-            + " structs="
-            + number_to_string(module_structs.length)
-            + " enums="
-            + number_to_string(module_enums.length)
-            + " diagnostics="
-            + number_to_string(diagnostics.length)
-            + ")"
-        );
+        print.err("emit-llvm: lowering produced no lines (functions=" + number_to_string(local_functions.length) + " structs=" + number_to_string(module_structs.length) + " enums=" + number_to_string(module_enums.length) + " diagnostics=" + number_to_string(diagnostics.length) + ")");
     }
     if debug_lowering {
         print.err("emit-llvm: phase=end lines=" + number_to_string(lines.length));
@@ -899,4 +730,3 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         string_constants: all_string_constants,
     };
 }
-

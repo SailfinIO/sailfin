@@ -3,47 +3,57 @@
 // TypeContext building functions. Constructs type metadata from
 // NativeStruct/NativeEnum/NativeInterface definitions. Lookup and
 // query functions live in type_context_queries.sfn.
-
-import { NativeStruct, NativeEnum, NativeEnumLayout, NativeEnumVariantLayout, NativeInterface, NativeFunction, NativeInterfaceSignature } from "../native_ir";
+import {
+    NativeEnum,
+    NativeEnumLayout,
+    NativeEnumVariantLayout,
+    NativeFunction,
+    NativeInterface,
+    NativeInterfaceSignature,
+    NativeStruct
+} from "../native_ir";
 import { substring } from "../string_utils";
 import {
-    TypeContext,
-    TypeContextBuild,
-    StructTypeInfo,
-    StructFieldInfo,
+    join_with_separator,
+    struct_declares_interface,
+    struct_satisfies_interface_structurally
+} from "./type_context_queries";
+import {
+    ends_with_pointer_suffix,
+    layout_annotation_base_type,
+    layout_annotation_represents_user_value,
+    map_struct_field_annotation,
+    map_type_annotation,
+    strip_pointer_suffix
+} from "./type_mapping";
+import {
     EnumTypeInfo,
     EnumVariantInfo,
     InterfaceTypeInfo,
-    VTableInfo,
-    VTableEntry,
-    TypeAllocationInfo,
+    LocalBinding,
     ParameterBinding,
-    LocalBinding
+    StructFieldInfo,
+    StructTypeInfo,
+    TypeAllocationInfo,
+    TypeContext,
+    TypeContextBuild,
+    VTableEntry,
+    VTableInfo
 } from "./types";
 import {
-    trim_text,
     append_string,
-    sanitize_symbol,
-    is_simple_identifier,
     find_last_index_of_char,
     index_of,
+    is_simple_identifier,
+    number_to_string,
+    sanitize_symbol,
     string_array_contains,
-    number_to_string
+    trim_text
 } from "./utils";
-import {
-    map_type_annotation,
-    map_struct_field_annotation,
-    ends_with_pointer_suffix,
-    strip_pointer_suffix,
-    layout_annotation_base_type,
-    layout_annotation_represents_user_value
-} from "./type_mapping";
-import { struct_declares_interface, struct_satisfies_interface_structurally, join_with_separator } from "./type_context_queries";
 
 // =============================================================================
 // Enum Layout Fixups
 // =============================================================================
-
 struct EnumLayoutFixupResult {
     enums: NativeEnum[];
     diagnostics: string[];
@@ -52,13 +62,9 @@ struct EnumLayoutFixupResult {
 fn is_unit_enum(enum_def: NativeEnum) -> boolean {
     let mut index: number = 0;
     loop {
-        if index >= enum_def.variants.length {
-            break;
-        }
+        if index >= enum_def.variants.length { break; }
         let variant = enum_def.variants[index];
-        if variant.fields.length > 0 {
-            return false;
-        }
+        if variant.fields.length > 0 { return false; }
         index += 1;
     }
     return true;
@@ -70,17 +76,10 @@ fn synthesize_unit_enum_layout(enum_def: NativeEnum) -> NativeEnumLayout {
     let mut layouts: NativeEnumVariantLayout[] = [];
     let mut index: number = 0;
     loop {
-        if index >= enum_def.variants.length {
-            break;
-        }
+        if index >= enum_def.variants.length { break; }
         let variant = enum_def.variants[index];
         layouts.push(NativeEnumVariantLayout {
-                name: variant.name,
-                tag: index,
-                offset: 0,
-                size: tag_size,
-                align: tag_align,
-                fields: [],
+            name: variant.name, tag: index, offset: 0, size: tag_size, align: tag_align, fields: [],
         });
         index += 1;
     }
@@ -95,30 +94,22 @@ fn synthesize_unit_enum_layout(enum_def: NativeEnum) -> NativeEnumLayout {
 }
 
 fn enum_layout_matches_variants(enum_def: NativeEnum, layout: NativeEnumLayout) -> boolean {
-    if layout.variants.length != enum_def.variants.length {
-        return false;
-    }
+    if layout.variants.length != enum_def.variants.length { return false; }
     let mut index: number = 0;
     loop {
-        if index >= enum_def.variants.length {
-            break;
-        }
+        if index >= enum_def.variants.length { break; }
         let expected = enum_def.variants[index].name;
         let mut found: boolean = false;
         let mut layout_index: number = 0;
         loop {
-            if layout_index >= layout.variants.length {
-                break;
-            }
+            if layout_index >= layout.variants.length { break; }
             if layout.variants[layout_index].name == expected {
                 found = true;
                 break;
             }
             layout_index += 1;
         }
-        if !found {
-            return false;
-        }
+        if !found { return false; }
         index += 1;
     }
     return true;
@@ -135,15 +126,17 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
     let mut updated: NativeEnum[] = [];
     let mut index: number = 0;
     loop {
-        if index >= enums.length {
-            break;
-        }
+        if index >= enums.length { break; }
         let enum_def = enums[index];
         let mut fixed = enum_def;
 
         if enum_def.layout == null {
             if is_unit_enum(enum_def) {
-                fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
+                fixed = NativeEnum {
+                    name: enum_def.name,
+                    variants: enum_def.variants,
+                    layout: synthesize_unit_enum_layout(enum_def)
+                };
                 diagnostics.push("llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout");
             }
             updated.push(fixed);
@@ -154,7 +147,11 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
         let layout = enum_def.layout;
         if !enum_layout_matches_variants(enum_def, layout) {
             if is_unit_enum(enum_def) {
-                fixed = NativeEnum { name: enum_def.name, variants: enum_def.variants, layout: synthesize_unit_enum_layout(enum_def) };
+                fixed = NativeEnum {
+                    name: enum_def.name,
+                    variants: enum_def.variants,
+                    layout: synthesize_unit_enum_layout(enum_def)
+                };
                 diagnostics.push("llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout");
             } else {
                 diagnostics.push("llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata");
@@ -171,9 +168,13 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
 // =============================================================================
 // TypeContext Construction
 // =============================================================================
-
 fn empty_type_context() -> TypeContext {
-    return TypeContext { structs: [], enums: [], interfaces: [], vtables: [] };
+    return TypeContext {
+        structs: [],
+        enums: [],
+        interfaces: [],
+        vtables: []
+    };
 }
 
 fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: NativeInterface[]) -> TypeContextBuild {
@@ -189,24 +190,14 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
     if _if300 {
         return TypeContextBuild {
             context: empty_type_context(),
-            diagnostics: [
-                "llvm lowering: type context build skipped (counts structs="
-                + number_to_string(structs.length)
-                + " enums="
-                + number_to_string(enums.length)
-                + " interfaces="
-                + number_to_string(interfaces.length)
-                + ")",
-            ],
+            diagnostics: ["llvm lowering: type context build skipped (counts structs=" + number_to_string(structs.length) + " enums=" + number_to_string(enums.length) + " interfaces=" + number_to_string(interfaces.length) + ")",],
         };
     }
     let mut diagnostics: string[] = [];
     let mut struct_entries: StructTypeInfo[] = [];
     let mut index: number = 0;
     loop {
-        if index >= structs.length {
-            break;
-        }
+        if index >= structs.length { break; }
         let definition = structs[index];
         if definition.layout == null {
             diagnostics.push("llvm lowering: struct `" + definition.name + "` missing layout metadata; skipping type emission");
@@ -219,9 +210,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         let mut fields: StructFieldInfo[] = [];
         let mut field_index: number = 0;
         loop {
-            if field_index >= layout.fields.length {
-                break;
-            }
+            if field_index >= layout.fields.length { break; }
             let layout_field = layout.fields[field_index];
             let mapped = map_struct_field_annotation(layout_field.type_annotation);
             let mut llvm_field_type: string = mapped;
@@ -234,29 +223,27 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                 if layout_annotation_represents_user_value(layout_field.type_annotation) {
                     if !references_self_type {
                         let stripped = strip_pointer_suffix(llvm_field_type);
-                        if stripped.length > 0 {
-                            llvm_field_type = stripped;
-                        }
+                        if stripped.length > 0 { llvm_field_type = stripped; }
                     }
                 }
             }
-            fields = append_struct_field_info(fields, StructFieldInfo { name: layout_field.name, llvm_type: llvm_field_type, type_annotation: layout_field.type_annotation, index: field_index, offset: layout_field.offset });
+            fields = append_struct_field_info(fields, StructFieldInfo {
+                name: layout_field.name, llvm_type: llvm_field_type, type_annotation: layout_field.type_annotation, index: field_index, offset: layout_field.offset
+            });
             field_index += 1;
         }
         let mut align_value: number = layout.align;
-        if align_value <= 0 {
-            align_value = 1;
-        }
-        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo { name: definition.name, llvm_name: llvm_name, fields: fields, size: layout.size, align: align_value });
+        if align_value <= 0 { align_value = 1; }
+        struct_entries = append_struct_type_info(struct_entries, StructTypeInfo {
+            name: definition.name, llvm_name: llvm_name, fields: fields, size: layout.size, align: align_value
+        });
         index += 1;
     }
 
     let mut enum_entries: EnumTypeInfo[] = [];
     let mut enum_index: number = 0;
     loop {
-        if enum_index >= enums.length {
-            break;
-        }
+        if enum_index >= enums.length { break; }
         let enum_def = enums[enum_index];
         if enum_def.layout == null {
             diagnostics.push("llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission");
@@ -269,9 +256,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         let mut variants: EnumVariantInfo[] = [];
         let mut variant_index: number = 0;
         loop {
-            if variant_index >= enum_layout.variants.length {
-                break;
-            }
+            if variant_index >= enum_layout.variants.length { break; }
             let variant_layout = enum_layout.variants[variant_index];
             let mut variant_fields: StructFieldInfo[] = [];
             let mut variant_field_index: number = 0;
@@ -297,29 +282,22 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                         }
                     }
                 }
-                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo { name: variant_field.name, llvm_type: llvm_variant_field_type, type_annotation: variant_field.type_annotation, index: variant_field_index, offset: variant_field.offset });
+                variant_fields = append_struct_field_info(variant_fields, StructFieldInfo {
+                    name: variant_field.name, llvm_type: llvm_variant_field_type, type_annotation: variant_field.type_annotation, index: variant_field_index, offset: variant_field.offset
+                });
                 variant_field_index += 1;
             }
             variants = append_enum_variant_info(variants, EnumVariantInfo {
-                    name: variant_layout.name,
-                    tag: variant_layout.tag,
-                    offset: variant_layout.offset,
-                    size: variant_layout.size,
-                    align: variant_layout.align,
-                    fields: variant_fields,
+                name: variant_layout.name, tag: variant_layout.tag, offset: variant_layout.offset, size: variant_layout.size, align: variant_layout.align, fields: variant_fields,
             });
             variant_index += 1;
         }
         let mut enum_align_value: number = enum_layout.align;
-        if enum_align_value <= 0 {
-            enum_align_value = 1;
-        }
+        if enum_align_value <= 0 { enum_align_value = 1; }
         let mut max_payload_size: number = 0;
         let mut payload_scan: number = 0;
         loop {
-            if payload_scan >= variants.length {
-                break;
-            }
+            if payload_scan >= variants.length { break; }
             let variant = variants[payload_scan];
             if variant.size > max_payload_size {
                 max_payload_size = variant.size;
@@ -327,15 +305,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             payload_scan += 1;
         }
         enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo {
-                name: enum_def.name,
-                llvm_name: llvm_enum_name,
-                tag_type: enum_layout.tag_type,
-                tag_size: enum_layout.tag_size,
-                tag_align: enum_layout.tag_align,
-                max_payload_size: max_payload_size,
-                size: enum_layout.size,
-                align: enum_align_value,
-                variants: variants,
+            name: enum_def.name, llvm_name: llvm_enum_name, tag_type: enum_layout.tag_type, tag_size: enum_layout.tag_size, tag_align: enum_layout.tag_align, max_payload_size: max_payload_size, size: enum_layout.size, align: enum_align_value, variants: variants,
         });
         enum_index += 1;
     }
@@ -344,17 +314,12 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
     let mut interface_entries: InterfaceTypeInfo[] = [];
     let mut interface_index: number = 0;
     loop {
-        if interface_index >= interfaces.length {
-            break;
-        }
+        if interface_index >= interfaces.length { break; }
         let interface_def = interfaces[interface_index];
         let sanitized_interface = sanitize_symbol(interface_def.name);
         let llvm_interface_name = "%trait." + sanitized_interface;
         interface_entries = append_interface_type_info(interface_entries, InterfaceTypeInfo {
-                name: interface_def.name,
-                llvm_name: llvm_interface_name,
-                type_parameters: interface_def.type_parameters,
-                signatures: interface_def.signatures,
+            name: interface_def.name, llvm_name: llvm_interface_name, type_parameters: interface_def.type_parameters, signatures: interface_def.signatures,
         });
         interface_index += 1;
     }
@@ -363,27 +328,19 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
     let mut vtable_entries: VTableInfo[] = [];
     let mut struct_vtable_index: number = 0;
     loop {
-        if struct_vtable_index >= structs.length {
-            break;
-        }
+        if struct_vtable_index >= structs.length { break; }
         let struct_def = structs[struct_vtable_index];
         let mut implements = struct_def.implements;
-        if implements == null {
-            implements = [];
-        }
+        if implements == null { implements = []; }
         let mut implements_index: number = 0;
         loop {
-            if implements_index >= implements.length {
-                break;
-            }
+            if implements_index >= implements.length { break; }
             let interface_name = implements[implements_index];
             // Find the interface definition
             let mut interface_def_opt: NativeInterface? = null;
             let mut search_idx: number = 0;
             loop {
-                if search_idx >= interfaces.length {
-                    break;
-                }
+                if search_idx >= interfaces.length { break; }
                 if interfaces[search_idx].name == interface_name {
                     interface_def_opt = interfaces[search_idx];
                     break;
@@ -407,17 +364,13 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             let mut vtable_method_entries: VTableEntry[] = [];
             let mut sig_index: number = 0;
             loop {
-                if sig_index >= interface_def.signatures.length {
-                    break;
-                }
+                if sig_index >= interface_def.signatures.length { break; }
                 let signature = interface_def.signatures[sig_index];
                 // Build function pointer type: return_type (param_types...)*
                 let mut param_types: string[] = ["i8*"];  // First param is always self as i8*
                 let mut param_idx: number = 1;  // Skip self since we already added it
                 loop {
-                    if param_idx >= signature.parameters.length {
-                        break;
-                    }
+                    if param_idx >= signature.parameters.length { break; }
                     let param = signature.parameters[param_idx];
                     let mapped_type = map_type_annotation(param.type_annotation);
                     param_types.push(mapped_type);
@@ -427,19 +380,13 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                 let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
 
                 vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
-                        method_name: struct_def.name + signature.name,
-                        interface_method_name: signature.name,
-                        function_pointer_type: func_ptr_type,
+                    method_name: struct_def.name + signature.name, interface_method_name: signature.name, function_pointer_type: func_ptr_type,
                 });
                 sig_index += 1;
             }
 
             vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
-                    struct_name: struct_def.name,
-                    interface_name: interface_name,
-                    llvm_type_name: vtable_type_name,
-                    llvm_global_name: vtable_global_name,
-                    entries: vtable_method_entries,
+                struct_name: struct_def.name, interface_name: interface_name, llvm_type_name: vtable_type_name, llvm_global_name: vtable_global_name, entries: vtable_method_entries,
             });
             implements_index += 1;
         }
@@ -448,9 +395,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         // but does provide compatible methods, synthesize a vtable anyway.
         let mut interface_scan: number = 0;
         loop {
-            if interface_scan >= interfaces.length {
-                break;
-            }
+            if interface_scan >= interfaces.length { break; }
             let interface_def = interfaces[interface_scan];
             if !struct_declares_interface(struct_def, interface_def.name) {
                 if struct_satisfies_interface_structurally(struct_def, interface_def) {
@@ -481,19 +426,13 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                         let return_type = map_type_annotation(signature.return_type);
                         let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
                         vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
-                                method_name: struct_def.name + signature.name,
-                                interface_method_name: signature.name,
-                                function_pointer_type: func_ptr_type,
+                            method_name: struct_def.name + signature.name, interface_method_name: signature.name, function_pointer_type: func_ptr_type,
                         });
                         sig_index += 1;
                     }
 
                     vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
-                            struct_name: struct_def.name,
-                            interface_name: interface_name,
-                            llvm_type_name: vtable_type_name,
-                            llvm_global_name: vtable_global_name,
-                            entries: vtable_method_entries,
+                        struct_name: struct_def.name, interface_name: interface_name, llvm_type_name: vtable_type_name, llvm_global_name: vtable_global_name, entries: vtable_method_entries,
                     });
                 }
             }
@@ -502,13 +441,20 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         struct_vtable_index += 1;
     }
 
-    return TypeContextBuild { context: TypeContext { structs: struct_entries, enums: enum_entries, interfaces: interface_entries, vtables: vtable_entries }, diagnostics: diagnostics };
+    return TypeContextBuild {
+        context: TypeContext {
+            structs: struct_entries,
+            enums: enum_entries,
+            interfaces: interface_entries,
+            vtables: vtable_entries
+        },
+        diagnostics: diagnostics
+    };
 }
 
 // =============================================================================
 // Append Helpers
 // =============================================================================
-
 fn append_struct_type_info(values: StructTypeInfo[], value: StructTypeInfo) -> StructTypeInfo[] {
     let mut out = values;
     out = out.push(value);
@@ -550,4 +496,3 @@ fn append_vtable_entry(values: VTableEntry[], value: VTableEntry) -> VTableEntry
     out = out.push(value);
     return out;
 }
-

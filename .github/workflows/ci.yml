@@ -2,10 +2,9 @@ name: CI (PR)
 
 env:
   # Pinned seed used for self-host bootstrap in CI.
-  # 0.5.2-alpha.1: Phase 1 accumulator sweep (in-place extend_string_lines,
-  # .concat([x]) → push([x])); includes 220c8b7 aliasing revert for
-  # concat_native_functions / append_local_binding.
-  SEED_VERSION: 0.5.2-alpha.1
+  # 0.5.3-alpha.1: Step-5 formatter changes (unary ops, optional suffix,
+  # declaration inlining guard, import specifier sorting).
+  SEED_VERSION: 0.5.3-alpha.1
 
 permissions:
   contents: read
@@ -82,6 +81,25 @@ jobs:
           ls -lh build/native/sailfin
           (file build/native/sailfin || true)
           build/native/sailfin version || build/native/sailfin --version || true
+
+      - name: Check formatting (sfn fmt --check)
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          fail=0
+          # Per-file loop to avoid OOM on bulk --check
+          while IFS= read -r f; do
+            if ! build/native/sailfin fmt --check "$f" > /dev/null 2>&1; then
+              echo "[fmt] needs formatting: $f"
+              fail=$((fail + 1))
+            fi
+          done < <(find compiler/src runtime -name '*.sfn' -print | sort)
+          if [ "$fail" -gt 0 ]; then
+            echo ""
+            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/"
+            exit 1
+          fi
+          echo "[fmt] all files formatted"
 
       - name: Enable test runner trace (macOS)
         if: runner.os == 'macOS'

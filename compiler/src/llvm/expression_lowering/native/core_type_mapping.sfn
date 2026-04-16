@@ -1,57 +1,39 @@
 // compiler/src/llvm/expression_lowering/native/core_type_mapping.sfn
 //
 // Expression lowering type-mapping helpers extracted from core.sfn.
-
 import { substring } from "../../../string_utils";
-
+import { find_interface_info_by_name, find_struct_info_by_name, } from "../../type_context_queries";
 import {
-    TypeContext,
-} from "../../types";
-
-import {
-    trim_text,
-    starts_with,
-    index_of,
-    append_string,
-    join_with_separator,
-} from "../../utils";
-
-import {
-    map_type_annotation,
-    ends_with_pointer_suffix,
-    strip_pointer_suffix,
     annotation_is_array,
-    layout_annotation_represents_user_value,
     array_struct_type_for_element,
+    ends_with_pointer_suffix,
+    layout_annotation_represents_user_value,
+    map_type_annotation,
+    strip_pointer_suffix,
 } from "../../type_mapping";
-
+import { TypeContext, } from "../../types";
 import {
-    find_struct_info_by_name,
-    find_interface_info_by_name,
-} from "../../type_context_queries";
+    append_string,
+    index_of,
+    join_with_separator,
+    starts_with,
+    trim_text,
+} from "../../utils";
 
 fn map_struct_type_annotation_ctx(context: TypeContext, annotation: string) -> string {
     let info = find_struct_info_by_name(context, annotation);
-    if info != null {
-        return info.llvm_name;
-    }
+    if info != null { return info.llvm_name; }
     return "";
 }
 
 fn map_enum_type_annotation(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return "";
-    }
+    if trimmed.length == 0 { return ""; }
     let mut index: number = 0;
     loop {
-        if index >= context.enums.length {
-            break;
-        }
+        if index >= context.enums.length { break; }
         let enum_info = context.enums[index];
-        if enum_info.name == trimmed {
-            return enum_info.llvm_name;
-        }
+        if enum_info.name == trimmed { return enum_info.llvm_name; }
         index += 1;
     }
     return "";
@@ -59,73 +41,45 @@ fn map_enum_type_annotation(context: TypeContext, annotation: string) -> string 
 
 fn map_interface_type_annotation(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return "";
-    }
+    if trimmed.length == 0 { return ""; }
     let interface_info = find_interface_info_by_name(context, trimmed);
-    if interface_info != null {
-        return interface_info.llvm_name;
-    }
+    if interface_info != null { return interface_info.llvm_name; }
     return "";
 }
 
 fn map_primitive_type(context: TypeContext, annotation: string) -> string {
-    if annotation == "number" {
-        return "double";
-    }
+    if annotation == "number" { return "double"; }
     let mut _if130: boolean = false;
     if annotation == "boolean" { _if130 = true; }
     if annotation == "bool" { _if130 = true; }
-    if _if130 {
-        return "i1";
-    }
-    if annotation == "usize" {
-        return "i64";
-    }
+    if _if130 { return "i1"; }
+    if annotation == "usize" { return "i64"; }
     let mut _if131: boolean = false;
     if annotation == "int" { _if131 = true; }
     if annotation == "i64" { _if131 = true; }
-    if _if131 {
-        return "i64";
-    }
-    if annotation == "i32" {
-        return "i32";
-    }
-    if annotation == "u8" {
-        return "i8";
-    }
+    if _if131 { return "i64"; }
+    if annotation == "i32" { return "i32"; }
+    if annotation == "u8" { return "i8"; }
     let struct_type = map_struct_type_annotation_ctx(context, annotation);
-    if struct_type.length > 0 {
-        return struct_type;
-    }
+    if struct_type.length > 0 { return struct_type; }
     let enum_type = map_enum_type_annotation(context, annotation);
-    if enum_type.length > 0 {
-        return enum_type;
-    }
+    if enum_type.length > 0 { return enum_type; }
     let interface_type = map_interface_type_annotation(context, annotation);
-    if interface_type.length > 0 {
-        return interface_type;
-    }
-    if annotation == "string" {
-        return "i8*";
-    }
+    if interface_type.length > 0 { return interface_type; }
+    if annotation == "string" { return "i8*"; }
     return "";
 }
 
 fn map_optional_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return "";
-    }
+    if trimmed.length == 0 { return ""; }
     // Check if this is an optional type (ends with ?)
     if substring(trimmed, trimmed.length - 1, trimmed.length) != "?" {
         return "";
     }
     // Extract the inner type (everything before the ?)
     let inner_annotation = trim_text(substring(trimmed, 0, trimmed.length - 1));
-    if inner_annotation.length == 0 {
-        return "";
-    }
+    if inner_annotation.length == 0 { return ""; }
     // For optional types, try the context-aware mapping first for structs/enums
     let struct_type = map_struct_type_annotation_ctx(context, inner_annotation);
     if struct_type.length > 0 {
@@ -133,21 +87,15 @@ fn map_optional_type(context: TypeContext, annotation: string) -> string {
         return struct_type + "*";
     }
     let enum_type = map_enum_type_annotation(context, inner_annotation);
-    if enum_type.length > 0 {
-        return enum_type + "*";
-    }
+    if enum_type.length > 0 { return enum_type + "*"; }
     let interface_type = map_interface_type_annotation(context, inner_annotation);
-    if interface_type.length > 0 {
-        return interface_type + "*";
-    }
+    if interface_type.length > 0 { return interface_type + "*"; }
     // For primitive types and others, use the simple mapper
     let inner_type = map_type_annotation(inner_annotation);
     let mut _if132: boolean = false;
     if inner_type.length == 0 { _if132 = true; }
     if inner_type == "void" { _if132 = true; }
-    if _if132 {
-        return "i8*";
-    }
+    if _if132 { return "i8*"; }
     // If already a pointer, return as-is, otherwise make it a pointer
     if substring(inner_type, inner_type.length - 1, inner_type.length) == "*" {
         return inner_type;
@@ -157,60 +105,40 @@ fn map_optional_type(context: TypeContext, annotation: string) -> string {
 
 fn map_reference_inner_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return "";
-    }
+    if trimmed.length == 0 { return ""; }
     let nested_reference = map_reference_type(context, trimmed);
-    if nested_reference.length > 0 {
-        return nested_reference;
-    }
+    if nested_reference.length > 0 { return nested_reference; }
     let array_type = map_array_pointer_type(context, trimmed);
-    if array_type.length > 0 {
-        return array_type;
-    }
+    if array_type.length > 0 { return array_type; }
     return map_primitive_type(context, trimmed);
 }
 
 fn map_reference_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return "";
-    }
-    if !starts_with(trimmed, "&") {
-        return "";
-    }
-    if starts_with(trimmed, "&&") {
-        return "";
-    }
+    if trimmed.length == 0 { return ""; }
+    if !starts_with(trimmed, "&") { return ""; }
+    if starts_with(trimmed, "&&") { return ""; }
     let mut remainder: string = trim_text(substring(trimmed, 1, trimmed.length));
     if starts_with(remainder, "mut") {
         let after_mut = substring(remainder, 3, remainder.length);
         remainder = trim_text(after_mut);
     }
-    if remainder.length == 0 {
-        return "";
-    }
+    if remainder.length == 0 { return ""; }
     if substring(remainder, 0, 1) == "(" {
         if substring(remainder, remainder.length - 1, remainder.length) == ")" {
             remainder = trim_text(substring(remainder, 1, remainder.length - 1));
         }
     }
     let inner_type = map_reference_inner_type(context, remainder);
-    if inner_type.length == 0 {
-        return "";
-    }
+    if inner_type.length == 0 { return ""; }
     return inner_type + "*";
 }
 
 fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed.length < 3 {
-        return "";
-    }
+    if trimmed.length < 3 { return ""; }
     let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
-    if suffix != "[]" {
-        return "";
-    }
+    if suffix != "[]" { return ""; }
     let element_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
     let mut element_type = map_primitive_type(context, element_annotation);
     if element_type.length == 0 {
@@ -235,9 +163,7 @@ fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
 
 fn unwrap_move_wrapper(annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return trimmed;
-    }
+    if trimmed.length == 0 { return trimmed; }
     let mut _if133: boolean = false;
     if starts_with(trimmed, "Affine<") { _if133 = true; }
     if starts_with(trimmed, "Linear<") { _if133 = true; }
@@ -263,35 +189,21 @@ fn find_top_level_union_separator(text: string) -> number {
     let mut escape: boolean = false;
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
         if in_double {
-            if escape {
-                escape = false;
-            } else {
-                if ch == "\\" {
-                    escape = true;
-                } else {
-                    if ch == "\"" {
-                        in_double = false;
-                    }
+            if escape { escape = false; } else {
+                if ch == "\\" { escape = true; } else {
+                    if ch == "\"" { in_double = false; }
                 }
             }
             index += 1;
             continue;
         }
         if in_single {
-            if escape {
-                escape = false;
-            } else {
-                if ch == "\\" {
-                    escape = true;
-                } else {
-                    if ch == "'" {
-                        in_single = false;
-                    }
+            if escape { escape = false; } else {
+                if ch == "\\" { escape = true; } else {
+                    if ch == "'" { in_single = false; }
                 }
             }
             index += 1;
@@ -315,9 +227,7 @@ fn find_top_level_union_separator(text: string) -> number {
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -327,9 +237,7 @@ fn find_top_level_union_separator(text: string) -> number {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -339,9 +247,7 @@ fn find_top_level_union_separator(text: string) -> number {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -351,9 +257,7 @@ fn find_top_level_union_separator(text: string) -> number {
             continue;
         }
         if ch == ">" {
-            if angle_depth > 0 {
-                angle_depth -= 1;
-            }
+            if angle_depth > 0 { angle_depth -= 1; }
             index += 1;
             continue;
         }
@@ -362,9 +266,7 @@ fn find_top_level_union_separator(text: string) -> number {
             if brace_depth == 0 {
                 if bracket_depth == 0 {
                     if angle_depth == 0 {
-                        if ch == "|" {
-                            return index;
-                        }
+                        if ch == "|" { return index; }
                     }
                 }
             }
@@ -381,15 +283,11 @@ fn split_union_annotations(text: string) -> string[] {
         let index = find_top_level_union_separator(remaining);
         if index < 0 {
             let tail = trim_text(remaining);
-            if tail.length > 0 {
-                result.push(tail);
-            }
+            if tail.length > 0 { result.push(tail); }
             break;
         }
         let left = trim_text(substring(remaining, 0, index));
-        if left.length > 0 {
-            result.push(left);
-        }
+        if left.length > 0 { result.push(left); }
         remaining = trim_text(substring(remaining, index + 1, remaining.length));
     }
     return result;
@@ -397,38 +295,26 @@ fn split_union_annotations(text: string) -> string[] {
 
 fn is_union_annotation(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     return find_top_level_union_separator(trimmed) >= 0;
 }
 
 fn map_union_type(context: TypeContext, annotation: string) -> string {
     let normalized = unwrap_move_wrapper(trim_text(annotation));
-    if !is_union_annotation(normalized) {
-        return "";
-    }
+    if !is_union_annotation(normalized) { return ""; }
     let parts = split_union_annotations(normalized);
-    if parts.length < 2 {
-        return "";
-    }
+    if parts.length < 2 { return ""; }
     let mut llvm_parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= parts.length {
-            break;
-        }
+        if index >= parts.length { break; }
         let part = trim_text(parts[index]);
-        if part.length == 0 {
-            return "";
-        }
+        if part.length == 0 { return ""; }
         let mapped = map_type_annotation(part);
         let mut _if134: boolean = false;
         if mapped.length == 0 { _if134 = true; }
         if mapped == "void" { _if134 = true; }
-        if _if134 {
-            return "";
-        }
+        if _if134 { return ""; }
         llvm_parts.push(mapped);
         index += 1;
     }
@@ -442,9 +328,7 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     let mut _if135: boolean = false;
     if trimmed.length == 0 { _if135 = true; }
     if trimmed == "void" { _if135 = true; }
-    if _if135 {
-        return "void";
-    }
+    if _if135 { return "void"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
@@ -456,43 +340,27 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
         let mut _if136: boolean = false;
         if remainder == "opaque" { _if136 = true; }
         if remainder.length == 0 { _if136 = true; }
-        if _if136 {
-            return "i8*";
-        }
+        if _if136 { return "i8*"; }
         let inner = map_return_type(context, remainder);
-        if ends_with_pointer_suffix(inner) {
-            return inner;
-        }
+        if ends_with_pointer_suffix(inner) { return inner; }
         let mut _if137: boolean = false;
         if inner.length == 0 { _if137 = true; }
         if inner == "void" { _if137 = true; }
-        if _if137 {
-            return "i8*";
-        }
+        if _if137 { return "i8*"; }
         return inner + "*";
     }
 
     let union_type = map_union_type(context, normalized);
-    if union_type.length > 0 {
-        return union_type;
-    }
+    if union_type.length > 0 { return union_type; }
     // Try optional type first
     let optional_type = map_optional_type(context, normalized);
-    if optional_type.length > 0 {
-        return optional_type;
-    }
+    if optional_type.length > 0 { return optional_type; }
     let reference_type = map_reference_type(context, normalized);
-    if reference_type.length > 0 {
-        return reference_type;
-    }
+    if reference_type.length > 0 { return reference_type; }
     let array_type = map_array_pointer_type(context, normalized);
-    if array_type.length > 0 {
-        return array_type;
-    }
+    if array_type.length > 0 { return array_type; }
     let primitive_type = map_primitive_type(context, normalized);
-    if primitive_type.length > 0 {
-        return primitive_type;
-    }
+    if primitive_type.length > 0 { return primitive_type; }
     // Fallback to opaque pointer for unrecognised return types (`any`, user structs, etc.)
     return "i8*";
 }
@@ -502,22 +370,14 @@ fn future_pointer_type_for_return_type(return_type: string) -> string {
     let mut _if138: boolean = false;
     if trimmed.length == 0 { _if138 = true; }
     if trimmed == "void" { _if138 = true; }
-    if _if138 {
-        return "%SailfinFutureVoid*";
-    }
+    if _if138 { return "%SailfinFutureVoid*"; }
     let normalized = unwrap_move_wrapper(trimmed);
-    if normalized == "number" {
-        return "%SailfinFutureNumber*";
-    }
+    if normalized == "number" { return "%SailfinFutureNumber*"; }
     let mut _if139: boolean = false;
     if normalized == "boolean" { _if139 = true; }
     if normalized == "bool" { _if139 = true; }
-    if _if139 {
-        return "%SailfinFutureBool*";
-    }
-    if normalized == "string" {
-        return "%SailfinFutureString*";
-    }
+    if _if139 { return "%SailfinFutureBool*"; }
+    if normalized == "string" { return "%SailfinFutureString*"; }
     // Default: treat unknown/user types as an opaque pointer.
     return "%SailfinFuturePtr*";
 }
@@ -543,9 +403,7 @@ fn await_symbol_for_future_pointer_type(future_ptr_type: string) -> string {
 
 fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
     let trimmed = trim_text(parameter_type);
-    if trimmed.length == 0 {
-        return "double";
-    }
+    if trimmed.length == 0 { return "double"; }
     let normalized = unwrap_move_wrapper(trimmed);
 
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
@@ -557,40 +415,24 @@ fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
         let mut _if140: boolean = false;
         if remainder == "opaque" { _if140 = true; }
         if remainder.length == 0 { _if140 = true; }
-        if _if140 {
-            return "i8*";
-        }
+        if _if140 { return "i8*"; }
         let inner = map_parameter_type(context, remainder);
-        if ends_with_pointer_suffix(inner) {
-            return inner;
-        }
-        if inner.length == 0 {
-            return "i8*";
-        }
+        if ends_with_pointer_suffix(inner) { return inner; }
+        if inner.length == 0 { return "i8*"; }
         return inner + "*";
     }
 
     let union_type = map_union_type(context, normalized);
-    if union_type.length > 0 {
-        return union_type;
-    }
+    if union_type.length > 0 { return union_type; }
     // Try optional type first
     let optional_type = map_optional_type(context, normalized);
-    if optional_type.length > 0 {
-        return optional_type;
-    }
+    if optional_type.length > 0 { return optional_type; }
     let reference_type = map_reference_type(context, normalized);
-    if reference_type.length > 0 {
-        return reference_type;
-    }
+    if reference_type.length > 0 { return reference_type; }
     let array_type = map_array_pointer_type(context, normalized);
-    if array_type.length > 0 {
-        return array_type;
-    }
+    if array_type.length > 0 { return array_type; }
     let primitive_type = map_primitive_type(context, normalized);
-    if primitive_type.length > 0 {
-        return primitive_type;
-    }
+    if primitive_type.length > 0 { return primitive_type; }
     // Fallback to generic pointer for unresolved types (e.g., imported structs/enums not in type context)
     return "i8*";
 }

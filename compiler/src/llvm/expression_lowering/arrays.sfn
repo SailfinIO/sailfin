@@ -5,31 +5,16 @@
 // Implements LLVM IR generation for array operations: concatenation
 // (`lower_struct_array_concat`), element type extraction from array pointer
 // types, and array struct type mapping.
-
 import { substring } from "../../string_utils";
-
+import { format_temp_name, } from "../expressions_helpers";
+import { strip_pointer_suffix, } from "../type_mapping";
+import { array_struct_type_for_element, } from "../type_mapping";
+import { ExpressionResult, LLVMOperand, } from "../types";
 import {
-    LLVMOperand,
-    ExpressionResult,
-} from "../types";
-
-import {
-    trim_text,
     append_string,
     ends_with,
+    trim_text,
 } from "../utils";
-
-import {
-    strip_pointer_suffix,
-} from "../type_mapping";
-
-import {
-    format_temp_name,
-} from "../expressions_helpers";
-
-import {
-    array_struct_type_for_element,
-} from "../type_mapping";
 
 fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: number) -> ExpressionResult {
     let mut current_lines = lines;
@@ -37,13 +22,25 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     let mut diagnostics: string[] = [];
     if element_type.length == 0 {
         diagnostics.push("llvm lowering: concat requires a concrete element type");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
     }
 
     let array_struct_type = array_struct_type_for_element(element_type);
     if array_struct_type.length == 0 {
         diagnostics.push("llvm lowering: unsupported concat element type `" + element_type + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
     }
 
     let data_pointer_type = element_type + "*";
@@ -143,8 +140,17 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     current_lines.push("  " + new_len_field + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + new_struct_ptr + ", i32 0, i32 1");
     current_lines.push("  store i64 " + total_length + ", i64* " + new_len_field);
 
-    let result_operand = LLVMOperand { llvm_type: lhs.llvm_type, value: new_struct_ptr };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
+    let result_operand = LLVMOperand {
+        llvm_type: lhs.llvm_type,
+        value: new_struct_ptr
+    };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: result_operand,
+        diagnostics: diagnostics,
+        string_constants: []
+    };
 }
 
 fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_type: string, lines: string[], temp_index: number) -> ExpressionResult {
@@ -153,7 +159,13 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
     let mut diagnostics: string[] = [];
     if element_type.length == 0 {
         diagnostics.push("llvm lowering: push requires a concrete element type");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
     }
 
     // IMPORTANT: `i8*` arrays are the runtime's "string array" ABI and are
@@ -166,14 +178,29 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
         // NOTE: Do not embed `{ ... }` literally in Sailfin strings; braces are
         // treated as interpolation markers. Use `array.llvm_type` instead.
         current_lines.push("  " + pushed + " = call " + array.llvm_type + " @sailfin_runtime_append_string(" + array.llvm_type + " " + array.value + ", i8* " + value.value + ")");
-        let result_operand = LLVMOperand { llvm_type: array.llvm_type, value: pushed };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: diagnostics, string_constants: [] };
+        let result_operand = LLVMOperand {
+            llvm_type: array.llvm_type,
+            value: pushed
+        };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: result_operand,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
     }
 
     let array_struct_type = array_struct_type_for_element(element_type);
     if array_struct_type.length == 0 {
         diagnostics.push("llvm lowering: unsupported push element type `" + element_type + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: [] };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
     }
 
     let data_pointer_type = element_type + "*";
@@ -224,7 +251,13 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
     }
     current_lines.push("  store " + element_type + " " + store_value + ", " + element_type + "* " + slot_typed);
 
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: array, diagnostics: diagnostics, string_constants: [] };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: array,
+        diagnostics: diagnostics,
+        string_constants: []
+    };
 }
 
 // Find the top-level comma in an LLVM type string, respecting nested braces.
@@ -234,9 +267,7 @@ fn find_top_level_comma_in_llvm_type(text: string) -> number {
     let mut brace_depth: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
         if ch == "{" {
             brace_depth += 1;
@@ -244,16 +275,12 @@ fn find_top_level_comma_in_llvm_type(text: string) -> number {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
         if ch == "," {
-            if brace_depth == 0 {
-                return index;
-            }
+            if brace_depth == 0 { return index; }
         }
         index += 1;
     }
@@ -262,40 +289,26 @@ fn find_top_level_comma_in_llvm_type(text: string) -> number {
 
 fn array_pointer_element_type(llvm_type: string) -> string {
     let trimmed = trim_text(llvm_type);
-    if trimmed.length == 0 {
-        return "";
-    }
+    if trimmed.length == 0 { return ""; }
     if substring(trimmed, trimmed.length - 1, trimmed.length) != "*" {
         return "";
     }
     let without_pointer = trim_text(substring(trimmed, 0, trimmed.length - 1));
-    if without_pointer.length < 2 {
-        return "";
-    }
-    if substring(without_pointer, 0, 1) != "{" {
-        return "";
-    }
+    if without_pointer.length < 2 { return ""; }
+    if substring(without_pointer, 0, 1) != "{" { return ""; }
     if substring(without_pointer, without_pointer.length - 1, without_pointer.length) != "}" {
         return "";
     }
     let inner = trim_text(substring(without_pointer, 1, without_pointer.length - 1));
-    if inner.length == 0 {
-        return "";
-    }
+    if inner.length == 0 { return ""; }
     let comma_index = find_top_level_comma_in_llvm_type(inner);
-    if comma_index < 0 {
-        return "";
-    }
+    if comma_index < 0 { return ""; }
     let first_segment = trim_text(substring(inner, 0, comma_index));
-    if first_segment.length == 0 {
-        return "";
-    }
+    if first_segment.length == 0 { return ""; }
     if substring(first_segment, first_segment.length - 1, first_segment.length) != "*" {
         return "";
     }
     let element = trim_text(substring(first_segment, 0, first_segment.length - 1));
-    if element.length == 0 {
-        return "";
-    }
+    if element.length == 0 { return ""; }
     return element;
 }

@@ -2,9 +2,6 @@
 //
 // IR definition and instruction parsing utilities: imports, cases, decorators,
 // interfaces, structs, enums, bindings, parameters, and effects.
-
-import { substring } from "./string_utils";
-
 import {
     BindingComponents,
     CaseComponents,
@@ -24,7 +21,6 @@ import {
     NativeStructField,
     StructHeaderParse,
 } from "./native_ir";
-
 import {
     find_matching_angle,
     find_matching_paren,
@@ -40,6 +36,7 @@ import {
     trim_text,
     trim_trailing_delimiters,
 } from "./native_ir_utils_text";
+import { substring } from "./string_utils";
 
 export {
     parse_case_instruction,
@@ -73,7 +70,10 @@ export {
 fn parse_case_instruction(line: string) -> NativeInstruction {
     let body = trim_text(strip_prefix(line, ".case "));
     let split = split_case_components(body);
-    return NativeInstruction.Case { pattern: split.pattern, guard: split.guard };
+    return NativeInstruction.Case {
+        pattern: split.pattern,
+        guard: split.guard
+    };
 }
 
 fn parse_inline_case_instruction(line: string) -> NativeInstruction[] {
@@ -86,7 +86,9 @@ fn parse_inline_case_instruction(line: string) -> NativeInstruction[] {
     let remainder = trim_trailing_delimiters(trim_text(substring(trimmed, arrow_index + 2, trimmed.length)));
     let split = split_case_components(head);
     let mut instructions: NativeInstruction[] = [];
-    instructions.push(NativeInstruction.Case { pattern: split.pattern, guard: split.guard });
+    instructions.push(NativeInstruction.Case {
+        pattern: split.pattern, guard: split.guard
+    });
     if remainder.length == 0 {
         instructions.push(NativeInstruction.Noop());
         return instructions;
@@ -103,7 +105,10 @@ fn parse_inline_case_body_instruction(body: string) -> NativeInstruction {
         return NativeInstruction.Return { expression: value, span: null };
     }
     if starts_with(lowered, "eval ") {
-        return NativeInstruction.Expression { expression: trim_trailing_delimiters(trim_text(strip_prefix(lowered, "eval "))), span: null };
+        return NativeInstruction.Expression {
+            expression: trim_trailing_delimiters(trim_text(strip_prefix(lowered, "eval "))),
+            span: null
+        };
     }
     return NativeInstruction.Expression { expression: lowered, span: null };
 }
@@ -128,9 +133,7 @@ fn split_case_components(text: string) -> CaseComponents {
 
 fn parse_import_entry(kind: string, entry: string) -> NativeImport? {
     let trimmed = trim_text(entry);
-    if trimmed.length == 0 {
-        return null;
-    }
+    if trimmed.length == 0 { return null; }
     let mut module_text: string = trimmed;
     let mut specifiers: NativeImportSpecifier[] = [];
     let brace_index = index_of(trimmed, "{");
@@ -139,33 +142,29 @@ fn parse_import_entry(kind: string, entry: string) -> NativeImport? {
         let mut _if362: boolean = false;
         if close_index < 0 { _if362 = true; }
         if close_index <= brace_index { _if362 = true; }
-        if _if362 {
-            return null;
-        }
+        if _if362 { return null; }
         module_text = trim_text(substring(trimmed, 0, brace_index));
         let names_segment = substring(trimmed, brace_index + 1, close_index);
         specifiers = parse_import_specifiers(names_segment);
     }
     module_text = strip_quotes(trim_text(module_text));
-    return NativeImport { kind: kind, module: module_text, specifiers: specifiers };
+    return NativeImport {
+        kind: kind,
+        module: module_text,
+        specifiers: specifiers
+    };
 }
 
 fn parse_import_specifiers(text: string) -> NativeImportSpecifier[] {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return [];
-    }
+    if trimmed.length == 0 { return []; }
     let entries = split_comma_separated(trimmed);
     let mut specifiers: NativeImportSpecifier[] = [];
     let mut index: number = 0;
     loop {
-        if index >= entries.length {
-            break;
-        }
+        if index >= entries.length { break; }
         let parsed = parse_single_specifier(entries[index]);
-        if parsed.name.length > 0 {
-            specifiers.push(parsed);
-        }
+        if parsed.name.length > 0 { specifiers.push(parsed); }
         index += 1;
     }
     return specifiers;
@@ -191,34 +190,20 @@ fn parse_single_specifier(entry: string) -> NativeImportSpecifier {
 
 fn parse_decorator_name(line: string) -> string? {
     let trimmed = trim_text(line);
-    if !starts_with(trimmed, ".decorator") {
-        return null;
-    }
+    if !starts_with(trimmed, ".decorator") { return null; }
     let tail = trim_text(strip_prefix(trimmed, ".decorator"));
-    if tail.length == 0 {
-        return null;
-    }
-    if tail[0] != "@" {
-        return null;
-    }
+    if tail.length == 0 { return null; }
+    if tail[0] != "@" { return null; }
     let mut index: number = 1;
     loop {
-        if index >= tail.length {
-            break;
-        }
+        if index >= tail.length { break; }
         let ch = tail[index];
-        if ch == "(" {
-            break;
-        }
-        if is_trim_char(ch) {
-            break;
-        }
+        if ch == "(" { break; }
+        if is_trim_char(ch) { break; }
         index += 1;
     }
     let name = trim_text(substring(tail, 1, index));
-    if name.length == 0 {
-        return null;
-    }
+    if name.length == 0 { return null; }
     return name;
 }
 
@@ -236,7 +221,11 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
     let interface_name = header_parse.name;
     if interface_name.length == 0 {
         diagnostics.push("unable to parse interface header: " + header);
-        return InterfaceParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
+        return InterfaceParseResult {
+            definition: null,
+            next_index: start_index + 1,
+            diagnostics: diagnostics
+        };
     }
 
     let mut signatures: NativeInterfaceSignature[] = [];
@@ -245,7 +234,11 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
         if index >= lines.length {
             diagnostics.push("unterminated interface " + interface_name);
             return InterfaceParseResult {
-                definition: NativeInterface { name: interface_name, type_parameters: header_parse.type_parameters, signatures: signatures },
+                definition: NativeInterface {
+                    name: interface_name,
+                    type_parameters: header_parse.type_parameters,
+                    signatures: signatures
+                },
                 next_index: index,
                 diagnostics: diagnostics,
             };
@@ -285,7 +278,11 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
     }
 
     return InterfaceParseResult {
-        definition: NativeInterface { name: interface_name, type_parameters: header_parse.type_parameters, signatures: signatures },
+        definition: NativeInterface {
+            name: interface_name,
+            type_parameters: header_parse.type_parameters,
+            signatures: signatures
+        },
         next_index: index,
         diagnostics: diagnostics,
     };
@@ -300,14 +297,16 @@ fn parse_struct_header(text: string) -> StructHeaderParse {
             let list_text = trim_text(strip_prefix(base.remainder, "implements "));
             if list_text.length == 0 {
                 diagnostics.push("struct " + base.name + " header missing implements list");
-            } else {
-                implements = parse_implements_list(list_text);
-            }
+            } else { implements = parse_implements_list(list_text); }
         } else {
             diagnostics.push("struct " + base.name + " header has unsupported segment `" + base.remainder + "`");
         }
     }
-    return StructHeaderParse { name: base.name, implements: implements, diagnostics: diagnostics };
+    return StructHeaderParse {
+        name: base.name,
+        implements: implements,
+        diagnostics: diagnostics
+    };
 }
 
 fn parse_interface_header(text: string) -> InterfaceHeaderParse {
@@ -316,7 +315,11 @@ fn parse_interface_header(text: string) -> InterfaceHeaderParse {
     if base.remainder.length > 0 {
         diagnostics.push("interface " + base.name + " header has unsupported segment `" + base.remainder + "`");
     }
-    return InterfaceHeaderParse { name: base.name, type_parameters: base.type_parameters, diagnostics: diagnostics };
+    return InterfaceHeaderParse {
+        name: base.name,
+        type_parameters: base.type_parameters,
+        diagnostics: diagnostics
+    };
 }
 
 fn parse_interface_signature(text: string, interface_name: string) -> InterfaceSignatureParse {
@@ -333,7 +336,11 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
     let trimmed = trim_trailing_delimiters(trim_text(text));
     if trimmed.length == 0 {
         diagnostics.push("interface " + interface_name + " signature missing content");
-        return InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics };
+        return InterfaceSignatureParse {
+            success: false,
+            signature: default_signature,
+            diagnostics: diagnostics
+        };
     }
 
     let mut remainder: string = trimmed;
@@ -346,13 +353,21 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
     let paren_index = index_of(remainder, "(");
     if paren_index < 0 {
         diagnostics.push("interface " + interface_name + " signature missing parameter list: " + trimmed);
-        return InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics };
+        return InterfaceSignatureParse {
+            success: false,
+            signature: default_signature,
+            diagnostics: diagnostics
+        };
     }
 
     let close_index = find_matching_paren(remainder, paren_index);
     if close_index < 0 {
         diagnostics.push("interface " + interface_name + " signature has unterminated parameter list: " + trimmed);
-        return InterfaceSignatureParse { success: false, signature: default_signature, diagnostics: diagnostics };
+        return InterfaceSignatureParse {
+            success: false,
+            signature: default_signature,
+            diagnostics: diagnostics
+        };
     }
 
     let head = trim_text(substring(remainder, 0, paren_index));
@@ -378,15 +393,11 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
         let entries = split_parameter_entries(parameter_text);
         let mut entry_index: number = 0;
         loop {
-            if entry_index >= entries.length {
-                break;
-            }
+            if entry_index >= entries.length { break; }
             let parsed = parse_parameter_entry(entries[entry_index], null);
             if parsed == null {
                 diagnostics.push("interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`");
-            } else {
-                parameters.push(parsed);
-            }
+            } else { parameters.push(parsed); }
             entry_index += 1;
         }
     }
@@ -404,9 +415,7 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
         if suffix.length > 0 {
             if starts_with(suffix, "->") {
                 let type_text = trim_text(strip_prefix(suffix, "->"));
-                if type_text.length > 0 {
-                    return_type = type_text;
-                }
+                if type_text.length > 0 { return_type = type_text; }
             } else {
                 diagnostics.push("interface " + interface_name + " signature `" + method_name + "` has unsupported suffix `" + suffix + "`");
             }
@@ -437,19 +446,26 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
     };
     let mut _let366: boolean = false;
     if method_name.length > 0 {
-        if diagnostics.length == 0 {
-            _let366 = true;
-        }
+        if diagnostics.length == 0 { _let366 = true; }
     }
     let success = _let366;
-    return InterfaceSignatureParse { success: success, signature: signature, diagnostics: diagnostics };
+    return InterfaceSignatureParse {
+        success: success,
+        signature: signature,
+        diagnostics: diagnostics
+    };
 }
 
 fn parse_header_name_and_remainder(text: string) -> HeaderNameParse {
     let mut diagnostics: string[] = [];
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
-        return HeaderNameParse { name: "", type_parameters: [], remainder: "", diagnostics: diagnostics };
+        return HeaderNameParse {
+            name: "",
+            type_parameters: [],
+            remainder: "",
+            diagnostics: diagnostics
+        };
     }
     let mut name: string = trimmed;
     let mut remainder: string = "";
@@ -460,7 +476,12 @@ fn parse_header_name_and_remainder(text: string) -> HeaderNameParse {
         if close_index < 0 {
             diagnostics.push("header `" + text + "` missing closing `>`");
             name = strip_generics(trimmed);
-            return HeaderNameParse { name: name, type_parameters: type_parameters, remainder: remainder, diagnostics: diagnostics };
+            return HeaderNameParse {
+                name: name,
+                type_parameters: type_parameters,
+                remainder: remainder,
+                diagnostics: diagnostics
+            };
         }
         name = trim_text(substring(trimmed, 0, generics_index));
         let generics_text = substring(trimmed, generics_index + 1, close_index);
@@ -474,62 +495,56 @@ fn parse_header_name_and_remainder(text: string) -> HeaderNameParse {
         }
     }
     name = strip_generics(name);
-    return HeaderNameParse { name: name, type_parameters: type_parameters, remainder: remainder, diagnostics: diagnostics };
+    return HeaderNameParse {
+        name: name,
+        type_parameters: type_parameters,
+        remainder: remainder,
+        diagnostics: diagnostics
+    };
 }
 
 fn parse_type_parameter_entries(text: string) -> string[] {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return [];
-    }
+    if trimmed.length == 0 { return []; }
     return split_top_level_commas(trimmed);
 }
 
 fn parse_implements_list(text: string) -> string[] {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return [];
-    }
+    if trimmed.length == 0 { return []; }
     return split_top_level_commas(trimmed);
 }
 
 fn parse_enum_variant_line(text: string) -> NativeEnumVariant? {
     let trimmed = trim_trailing_delimiters(trim_text(text));
-    if trimmed.length == 0 {
-        return null;
-    }
+    if trimmed.length == 0 { return null; }
     let brace_index = index_of(trimmed, "{");
     if brace_index < 0 {
-        return NativeEnumVariant { name: strip_generics(trimmed), fields: [] };
+        return NativeEnumVariant {
+            name: strip_generics(trimmed),
+            fields: []
+        };
     }
     let close_index = last_index_of(trimmed, "}");
     let mut _if370: boolean = false;
     if close_index < 0 { _if370 = true; }
     if close_index <= brace_index { _if370 = true; }
-    if _if370 {
-        return null;
-    }
+    if _if370 { return null; }
     let name_text = strip_generics(trim_text(substring(trimmed, 0, brace_index)));
-    if name_text.length == 0 {
-        return null;
-    }
+    if name_text.length == 0 { return null; }
     let fields_segment = substring(trimmed, brace_index + 1, close_index);
     let entries = split_enum_field_entries(fields_segment);
     let mut fields: NativeEnumVariantField[] = [];
     let mut index: number = 0;
     loop {
-        if index >= entries.length {
-            break;
-        }
+        if index >= entries.length { break; }
         let entry = trim_trailing_delimiters(trim_text(entries[index]));
         if entry.length == 0 {
             index += 1;
             continue;
         }
         let parsed_field = parse_enum_variant_field(entry);
-        if parsed_field == null {
-            return null;
-        }
+        if parsed_field == null { return null; }
         fields.push(parsed_field);
         index += 1;
     }
@@ -542,52 +557,38 @@ fn split_enum_field_entries(text: string) -> string[] {
     let mut depth: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = text[index];
         let mut _if371: boolean = false;
         if ch == "{" { _if371 = true; }
         if ch == "[" { _if371 = true; }
         if ch == "(" { _if371 = true; }
-        if _if371 {
-            depth += 1;
-        } else {
+        if _if371 { depth += 1; } else {
             let mut _elif393: boolean = false;
             if ch == "}" { _elif393 = true; }
             if ch == "]" { _elif393 = true; }
             if ch == ")" { _elif393 = true; }
             if _elif393 {
-                if depth > 0 {
-                    depth -= 1;
-                }
+                if depth > 0 { depth -= 1; }
             }
         }
         let mut _if372: boolean = false;
         if ch == ";" {
-            if depth == 0 {
-                _if372 = true;
-            }
+            if depth == 0 { _if372 = true; }
         }
         if _if372 {
             entries.push(current);
             current = "";
-        } else {
-            current = current + ch;
-        }
+        } else { current = current + ch; }
         index += 1;
     }
-    if current.length > 0 {
-        entries.push(current);
-    }
+    if current.length > 0 { entries.push(current); }
     return entries;
 }
 
 fn parse_enum_variant_field(text: string) -> NativeEnumVariantField? {
     let mut trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return null;
-    }
+    if trimmed.length == 0 { return null; }
     let mut is_mutable: boolean = false;
     if starts_with(trimmed, "mut ") {
         is_mutable = true;
@@ -612,22 +613,20 @@ fn parse_enum_variant_field(text: string) -> NativeEnumVariantField? {
             sep_len = 4;
         }
     }
-    if arrow_index < 0 {
-        return null;
-    }
+    if arrow_index < 0 { return null; }
     let name = trim_text(substring(trimmed, 0, arrow_index));
-    if name.length == 0 {
-        return null;
-    }
+    if name.length == 0 { return null; }
     let type_text = trim_text(substring(trimmed, arrow_index + sep_len, trimmed.length));
-    return NativeEnumVariantField { name: name, type_annotation: type_text, mutable: is_mutable };
+    return NativeEnumVariantField {
+        name: name,
+        type_annotation: type_text,
+        mutable: is_mutable
+    };
 }
 
 fn parse_struct_field_line(text: string) -> NativeStructField? {
     let mut trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return null;
-    }
+    if trimmed.length == 0 { return null; }
     let mut is_mutable: boolean = false;
     if starts_with(trimmed, "mut ") {
         is_mutable = true;
@@ -652,15 +651,15 @@ fn parse_struct_field_line(text: string) -> NativeStructField? {
             sep_len = 4;
         }
     }
-    if arrow_index < 0 {
-        return null;
-    }
+    if arrow_index < 0 { return null; }
     let name = trim_text(substring(trimmed, 0, arrow_index));
-    if name.length == 0 {
-        return null;
-    }
+    if name.length == 0 { return null; }
     let type_text = trim_text(substring(trimmed, arrow_index + sep_len, trimmed.length));
-    return NativeStructField { name: name, type_annotation: type_text, mutable: is_mutable };
+    return NativeStructField {
+        name: name,
+        type_annotation: type_text,
+        mutable: is_mutable
+    };
 }
 
 fn parse_let_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSourceSpan?) -> NativeInstruction {
@@ -686,17 +685,13 @@ fn parse_binding_components(text: string) -> BindingComponents {
     let mut name: string = "";
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = text[index];
         let mut _if380: boolean = false;
         if ch == " " { _if380 = true; }
         if ch == ":" { _if380 = true; }
         if ch == "=" { _if380 = true; }
-        if _if380 {
-            break;
-        }
+        if _if380 { break; }
         name = name + ch;
         index += 1;
     }
@@ -711,35 +706,29 @@ fn parse_binding_components(text: string) -> BindingComponents {
             if assign_index >= 0 {
                 type_annotation = trim_text(substring(remainder, 0, assign_index));
                 let value_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
-                if value_text.length > 0 {
-                    value = value_text;
-                }
-            } else {
-                type_annotation = trim_text(remainder);
-            }
+                if value_text.length > 0 { value = value_text; }
+            } else { type_annotation = trim_text(remainder); }
         } else if starts_with(remainder, ":") {
             remainder = trim_text(strip_prefix(remainder, ":"));
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
                 type_annotation = trim_text(substring(remainder, 0, assign_index));
                 let value_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
-                if value_text.length > 0 {
-                    value = value_text;
-                }
-            } else {
-                type_annotation = trim_text(remainder);
-            }
+                if value_text.length > 0 { value = value_text; }
+            } else { type_annotation = trim_text(remainder); }
         } else if starts_with(remainder, "=") {
             let value_text = trim_text(strip_prefix(remainder, "="));
-            if value_text.length > 0 {
-                value = value_text;
-            }
+            if value_text.length > 0 { value = value_text; }
         } else {
             // Fallback: treat the remainder as an initializer without prefix.
             value = remainder;
         }
     }
-    return BindingComponents { name: name, type_annotation: type_annotation, value: value };
+    return BindingComponents {
+        name: name,
+        type_annotation: type_annotation,
+        value: value
+    };
 }
 
 fn parse_function_name(header: string) -> string {
@@ -761,9 +750,7 @@ fn parse_function_name(header: string) -> string {
 
 fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParameter? {
     let mut trimmed = trim_text(body);
-    if trimmed.length == 0 {
-        return null;
-    }
+    if trimmed.length == 0 { return null; }
     let mut is_mutable: boolean = false;
     if starts_with(trimmed, "mut ") {
         is_mutable = true;
@@ -772,25 +759,19 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
     let mut name: string = "";
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = trimmed[index];
         let mut _if381: boolean = false;
         if ch == " " { _if381 = true; }
         if ch == "-" { _if381 = true; }
         if ch == "=" { _if381 = true; }
         if ch == ":" { _if381 = true; }
-        if _if381 {
-            break;
-        }
+        if _if381 { break; }
         name = name + ch;
         index += 1;
     }
     name = trim_text(name);
-    if name.length == 0 {
-        return null;
-    }
+    if name.length == 0 { return null; }
     let mut type_annotation: string = "";
     let mut default_value: string? = null;
     let mut remainder = trim_text(substring(trimmed, index, trimmed.length));
@@ -801,29 +782,19 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
             if assign_index >= 0 {
                 type_annotation = trim_text(substring(remainder, 0, assign_index));
                 let default_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
-                if default_text.length > 0 {
-                    default_value = default_text;
-                }
-            } else {
-                type_annotation = trim_text(remainder);
-            }
+                if default_text.length > 0 { default_value = default_text; }
+            } else { type_annotation = trim_text(remainder); }
         } else if starts_with(remainder, "->") {
             remainder = trim_text(strip_prefix(remainder, "->"));
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
                 type_annotation = trim_text(substring(remainder, 0, assign_index));
                 let default_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
-                if default_text.length > 0 {
-                    default_value = default_text;
-                }
-            } else {
-                type_annotation = trim_text(remainder);
-            }
+                if default_text.length > 0 { default_value = default_text; }
+            } else { type_annotation = trim_text(remainder); }
         } else if starts_with(remainder, "=") {
             let default_text = trim_text(strip_prefix(remainder, "="));
-            if default_text.length > 0 {
-                default_value = default_text;
-            }
+            if default_text.length > 0 { default_value = default_text; }
         }
     }
     return NativeParameter {
@@ -837,65 +808,39 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
 
 fn line_looks_like_parameter_entry(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return false;
-    }
-    if starts_with(trimmed, ".") {
-        return false;
-    }
-    if starts_with(trimmed, ";") {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
+    if starts_with(trimmed, ".") { return false; }
+    if starts_with(trimmed, ";") { return false; }
     let arrow_index = index_of(trimmed, "->");
     let colon_index = index_of(trimmed, ":");
     let mut sep_index: number = -1;
-    if colon_index >= 0 {
-        sep_index = colon_index;
-    }
+    if colon_index >= 0 { sep_index = colon_index; }
     if arrow_index >= 0 {
-        if sep_index < 0 {
-            sep_index = arrow_index;
-        } else if arrow_index < sep_index {
+        if sep_index < 0 { sep_index = arrow_index; } else if arrow_index < sep_index {
             sep_index = arrow_index;
         }
     }
     if sep_index >= 0 {
         let mut head = trim_text(substring(trimmed, 0, sep_index));
-        if head.length == 0 {
-            return false;
-        }
+        if head.length == 0 { return false; }
         if starts_with(head, "mut ") {
             head = trim_text(strip_prefix(head, "mut "));
         }
-        if head.length == 0 {
-            return false;
-        }
-        if index_of(head, " ") >= 0 {
-            return false;
-        }
-        if index_of(head, "\t") >= 0 {
-            return false;
-        }
+        if head.length == 0 { return false; }
+        if index_of(head, " ") >= 0 { return false; }
+        if index_of(head, "\t") >= 0 { return false; }
         return true;
     }
     let assign_index = index_of(trimmed, "=");
     if assign_index >= 0 {
         let mut head = trim_text(substring(trimmed, 0, assign_index));
-        if head.length == 0 {
-            return false;
-        }
+        if head.length == 0 { return false; }
         if starts_with(head, "mut ") {
             head = trim_text(strip_prefix(head, "mut "));
         }
-        if head.length == 0 {
-            return false;
-        }
-        if index_of(head, " ") >= 0 {
-            return false;
-        }
-        if index_of(head, "\t") >= 0 {
-            return false;
-        }
+        if head.length == 0 { return false; }
+        if index_of(head, " ") >= 0 { return false; }
+        if index_of(head, "\t") >= 0 { return false; }
         return true;
     }
     return false;
@@ -909,9 +854,7 @@ fn split_parameter_entries(body: string) -> string[] {
     let mut quote: string = "";
 
     loop {
-        if index >= body.length {
-            break;
-        }
+        if index >= body.length { break; }
         let ch = body[index];
 
         if quote.length > 0 {
@@ -924,9 +867,7 @@ fn split_parameter_entries(body: string) -> string[] {
                     continue;
                 }
             }
-            if ch == quote {
-                quote = "";
-            }
+            if ch == quote { quote = ""; }
             index += 1;
             continue;
         }
@@ -957,9 +898,7 @@ fn split_parameter_entries(body: string) -> string[] {
         if ch == "]" { _if384 = true; }
         if ch == "}" { _if384 = true; }
         if _if384 {
-            if depth > 0 {
-                depth -= 1;
-            }
+            if depth > 0 { depth -= 1; }
             current = current + ch;
             index += 1;
             continue;
@@ -968,9 +907,7 @@ fn split_parameter_entries(body: string) -> string[] {
         if ch == "," {
             if depth == 0 {
                 let segment = trim_text(current);
-                if segment.length > 0 {
-                    entries.push(segment);
-                }
+                if segment.length > 0 { entries.push(segment); }
                 current = "";
                 index += 1;
                 continue;
@@ -982,17 +919,13 @@ fn split_parameter_entries(body: string) -> string[] {
     }
 
     let segment = trim_text(current);
-    if segment.length > 0 {
-        entries.push(segment);
-    }
+    if segment.length > 0 { entries.push(segment); }
 
     return entries;
 }
 
 fn parse_effect_list(text: string) -> string[] {
     let trimmed = trim_text(text);
-    if trimmed == "none" {
-        return [];
-    }
+    if trimmed == "none" { return []; }
     return split_comma_separated(trimmed);
 }

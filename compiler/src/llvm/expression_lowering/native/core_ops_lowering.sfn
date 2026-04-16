@@ -1,56 +1,44 @@
 // compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn
 //
 // Lowering for operators and control-flow expressions (ternary, logical, arithmetic).
-
 import { NativeFunction } from "../../../native_ir";
-
+import { substring } from "../../../string_utils";
+import { default_return_literal, format_temp_name } from "../../expressions_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../../strings";
+import { find_enum_info_by_llvm_type } from "../../type_context_queries";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
-    TypeContext,
-    ParameterBinding,
-    LocalBinding,
-    OperatorMatch,
-    TernaryParseResult,
     ExpressionResult,
     LLVMOperand,
+    LocalBinding,
+    OperatorMatch,
+    ParameterBinding,
     StringConstant,
+    TernaryParseResult,
+    TypeContext,
 } from "../../types";
-
 import {
-    trim_text,
     append_string,
-    number_to_string,
-    starts_with,
-    ends_with,
-    char_code_at_text,
     char_code,
+    char_code_at_text,
     contains_text,
+    ends_with,
     extend_string_array,
     join_with_separator,
+    number_to_string,
+    starts_with,
     string_array_contains,
+    trim_text,
 } from "../../utils";
-
-import { substring } from "../../../string_utils";
-
-import { empty_string_constant_set, merge_string_constants } from "../../strings";
-
-import { format_temp_name, default_return_literal } from "../../expressions_helpers";
-
-import { strip_pointer_suffix, ends_with_pointer_suffix } from "../../type_mapping";
-
-import { find_enum_info_by_llvm_type } from "../../type_context_queries";
-
-import {
-    coerce_operand_to_type,
-    harmonise_operands,
-    emit_comparison_instruction,
-} from "./core_operands";
-
-import { strip_enclosing_parentheses, lines_end_with_terminator } from "./core_operators";
-
-import { operation_name_for_symbol } from "./core_helpers";
-
 // NOTE: this module imports lower_expression from core.sfn; this is mutually recursive.
 import { lower_expression } from "./core";
+import { operation_name_for_symbol } from "./core_helpers";
+import {
+    coerce_operand_to_type,
+    emit_comparison_instruction,
+    harmonise_operands,
+} from "./core_operands";
+import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_operators";
 
 fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines);
@@ -68,10 +56,25 @@ fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: number, line
         let result_temp = format_temp_name(current_temp);
         current_lines.push("  " + result_temp + " = xor i1 " + bool_operand.value + ", 1");
         current_temp += 1;
-        let result_operand = LLVMOperand { llvm_type: "i1", value: result_temp };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: result_operand, diagnostics: current_diagnostics, string_constants: string_constants };
+        let result_operand = LLVMOperand {
+            llvm_type: "i1",
+            value: result_temp
+        };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: result_operand,
+            diagnostics: current_diagnostics,
+            string_constants: string_constants
+        };
     }
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: current_diagnostics, string_constants: string_constants };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: null,
+        diagnostics: current_diagnostics,
+        string_constants: string_constants
+    };
 }
 
 fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult {
@@ -83,7 +86,13 @@ fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]
         _ci0 += 1;
     }
     if result.operand == null {
-        return ExpressionResult { lines: result.lines, temp_index: result.temp_index, operand: null, diagnostics: combined, string_constants: result.string_constants };
+        return ExpressionResult {
+            lines: result.lines,
+            temp_index: result.temp_index,
+            operand: null,
+            diagnostics: combined,
+            string_constants: result.string_constants
+        };
     }
     return lower_logical_not_with_operand(result.operand, result.temp_index, result.lines, combined, result.string_constants);
 }
@@ -104,13 +113,25 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     diagnostics = extend_string_array(diagnostics, cond_result.diagnostics);
     string_constants = cond_result.string_constants;
     if cond_result.operand == null {
-        return ExpressionResult { lines: cond_result.lines, temp_index: cond_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: cond_result.lines,
+            temp_index: cond_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let cond_bool = coerce_operand_to_type(cond_result.operand, "i1", cond_result.temp_index, cond_result.lines);
     diagnostics = extend_string_array(diagnostics, cond_bool.diagnostics);
     if cond_bool.operand == null {
-        return ExpressionResult { lines: cond_bool.lines, temp_index: cond_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: cond_bool.lines,
+            temp_index: cond_bool.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let mut current_lines = cond_bool.lines;
@@ -125,7 +146,13 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     diagnostics = extend_string_array(diagnostics, then_result.diagnostics);
     string_constants = merge_string_constants(string_constants, then_result.string_constants);
     if then_result.operand == null {
-        return ExpressionResult { lines: then_result.lines, temp_index: then_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: then_result.lines,
+            temp_index: then_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let then_end_label = "ternary_then_end_" + label_id;
@@ -141,7 +168,13 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     diagnostics = extend_string_array(diagnostics, else_result.diagnostics);
     string_constants = merge_string_constants(string_constants, else_result.string_constants);
     if else_result.operand == null {
-        return ExpressionResult { lines: else_result.lines, temp_index: else_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: else_result.lines,
+            temp_index: else_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let else_end_label = "ternary_else_end_" + label_id;
@@ -156,7 +189,13 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
 
     if then_result.operand.llvm_type != else_result.operand.llvm_type {
         diagnostics.push("llvm lowering: ternary expression branches have incompatible types: `" + then_result.operand.llvm_type + "` vs `" + else_result.operand.llvm_type + "`");
-        return ExpressionResult { lines: current_lines, temp_index: else_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: else_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let result_temp = format_temp_name(else_result.temp_index);
@@ -164,7 +203,13 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
     current_lines.push("  " + result_temp + " = phi " + result_type + " [ " + then_result.operand.value + ", %" + then_end_label + " ], [ " + else_result.operand.value + ", %" + else_end_label + " ]");
 
     let operand = LLVMOperand { llvm_type: result_type, value: result_temp };
-    return ExpressionResult { lines: current_lines, temp_index: else_result.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: else_result.temp_index + 1,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: string_constants
+    };
 }
 
 fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
@@ -177,21 +222,39 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     if _if95 {
         diagnostics.push("llvm lowering: malformed binary expression `" + expression + "`");
         let empty_constants = empty_string_constant_set();
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
 
     let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
     let mut string_constants: StringConstant[] = left_result.string_constants;
     if left_result.operand == null {
-        return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: left_result.lines,
+            temp_index: left_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
-        return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: right_result.lines,
+            temp_index: right_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     if match.symbol == "+" {
@@ -206,8 +269,17 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
                 current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + rhs.value + ")");
-                let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+                let operand = LLVMOperand {
+                    llvm_type: "i8*",
+                    value: concat_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: operand,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
             }
         }
         if lhs_type == "i8*" {
@@ -219,15 +291,30 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
                 if coerced.operand == null {
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: string_constants
+                    };
                 }
 
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
                 current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + coerced.operand.value + ")");
 
-                let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+                let operand = LLVMOperand {
+                    llvm_type: "i8*",
+                    value: concat_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: operand,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
             }
         }
         if lhs_type == "i8" {
@@ -239,15 +326,30 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
                 if coerced.operand == null {
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: string_constants
+                    };
                 }
 
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
                 current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + coerced.operand.value + ", i8* " + rhs.value + ")");
 
-                let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+                let operand = LLVMOperand {
+                    llvm_type: "i8*",
+                    value: concat_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: operand,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
             }
         }
 
@@ -261,7 +363,13 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 current_lines = lhs_coerced.lines;
                 current_temp = lhs_coerced.temp_index;
                 if lhs_coerced.operand == null {
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: string_constants
+                    };
                 }
 
                 let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
@@ -269,15 +377,30 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 current_lines = rhs_coerced.lines;
                 current_temp = rhs_coerced.temp_index;
                 if rhs_coerced.operand == null {
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: string_constants
+                    };
                 }
 
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
                 current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")");
 
-                let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+                let operand = LLVMOperand {
+                    llvm_type: "i8*",
+                    value: concat_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: operand,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
             }
         }
 
@@ -293,7 +416,13 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             current_lines = lhs_coerced.lines;
             current_temp = lhs_coerced.temp_index;
             if lhs_coerced.operand == null {
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: null,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
             }
 
             let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
@@ -301,14 +430,29 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             current_lines = rhs_coerced.lines;
             current_temp = rhs_coerced.temp_index;
             if rhs_coerced.operand == null {
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: null,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
             }
 
             let concat_name = format_temp_name(current_temp);
             current_temp += 1;
             current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")");
-            let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
-            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+            let operand = LLVMOperand {
+                llvm_type: "i8*",
+                value: concat_name
+            };
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: operand,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
         }
     }
 
@@ -326,28 +470,49 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             if rhs_type == "i8*" {
                 let mut current_lines = right_result.lines;
                 let mut current_temp = right_result.temp_index;
-    
+
                 let lhs_coerced = coerce_operand_to_type(lhs, "double", current_temp, current_lines);
                 diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics);
                 current_lines = lhs_coerced.lines;
                 current_temp = lhs_coerced.temp_index;
                 if lhs_coerced.operand == null {
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: string_constants
+                    };
                 }
-    
+
                 let rhs_coerced = coerce_operand_to_type(rhs, "double", current_temp, current_lines);
                 diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics);
                 current_lines = rhs_coerced.lines;
                 current_temp = rhs_coerced.temp_index;
                 if rhs_coerced.operand == null {
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: null,
+                        diagnostics: diagnostics,
+                        string_constants: string_constants
+                    };
                 }
-    
+
                 let operation = operation_name_for_symbol(match.symbol, "double");
                 let temp_name = format_temp_name(current_temp);
                 current_lines.push("  " + temp_name + " = " + operation + " double " + lhs_coerced.operand.value + ", " + rhs_coerced.operand.value);
-                let operand = LLVMOperand { llvm_type: "double", value: temp_name };
-                return ExpressionResult { lines: current_lines, temp_index: current_temp + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+                let operand = LLVMOperand {
+                    llvm_type: "double",
+                    value: temp_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp + 1,
+                    operand: operand,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
             }
         }
     }
@@ -368,9 +533,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 if rhs_type == "int" { _if110 = true; }
                 if _if110 {
                     if rhs_type != "i8" {
-                        if rhs_type != "i1" {
-                            _if108 = true;
-                        }
+                        if rhs_type != "i1" { _if108 = true; }
                     }
                 }
                 if _if108 {
@@ -383,7 +546,13 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
                         if coerced.operand == null {
-                            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                            return ExpressionResult {
+                                lines: current_lines,
+                                temp_index: current_temp,
+                                operand: null,
+                                diagnostics: diagnostics,
+                                string_constants: string_constants
+                            };
                         }
                         rhs_i64 = coerced.operand;
                     }
@@ -400,8 +569,17 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     let gep_name = format_temp_name(current_temp);
                     current_temp += 1;
                     current_lines.push("  " + gep_name + " = getelementptr " + element_type + ", " + left_type + " " + left_result.operand.value + ", i64 " + index_value);
-                    let operand = LLVMOperand { llvm_type: left_type, value: gep_name };
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+                    let operand = LLVMOperand {
+                        llvm_type: left_type,
+                        value: gep_name
+                    };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: operand,
+                        diagnostics: diagnostics,
+                        string_constants: string_constants
+                    };
                 }
             }
         }
@@ -413,7 +591,13 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     if harmonised.left == null { _if99 = true; }
     if harmonised.right == null { _if99 = true; }
     if _if99 {
-        return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: harmonised.lines,
+            temp_index: harmonised.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let left_aligned = harmonised.left;
@@ -425,7 +609,13 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let line = "  " + temp_name + " = call i8* @sailfin_runtime_string_concat(i8* " + left_aligned.value + ", i8* " + right_aligned.value + ")";
             let updated_lines = append_string(harmonised.lines, line);
             let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
-            return ExpressionResult { lines: updated_lines, temp_index: harmonised.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+            return ExpressionResult {
+                lines: updated_lines,
+                temp_index: harmonised.temp_index + 1,
+                operand: operand,
+                diagnostics: diagnostics,
+                string_constants: string_constants
+            };
         }
     }
     let operation = operation_name_for_symbol(match.symbol, result_type);
@@ -433,7 +623,13 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     let line = "  " + temp_name + " = " + operation + " " + result_type + " " + left_aligned.value + ", " + right_aligned.value;
     let updated_lines = append_string(harmonised.lines, line);
     let operand = LLVMOperand { llvm_type: result_type, value: temp_name };
-    return ExpressionResult { lines: updated_lines, temp_index: harmonised.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+    return ExpressionResult {
+        lines: updated_lines,
+        temp_index: harmonised.temp_index + 1,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: string_constants
+    };
 }
 
 fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
@@ -444,7 +640,13 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if _if100 {
         diagnostics.push("llvm lowering: empty comparison expression");
         let empty_constants = empty_string_constant_set();
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
     let mut _if101: boolean = false;
     if match.symbol == null { _if101 = true; }
@@ -452,7 +654,13 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if _if101 {
         diagnostics.push("llvm lowering: comparison operator missing in `" + expression + "`");
         let empty_constants = empty_string_constant_set();
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
     let mut _if102: boolean = false;
     if match.index < 0 { _if102 = true; }
@@ -460,7 +668,13 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if _if102 {
         diagnostics.push("llvm lowering: comparison operator index out of bounds in `" + expression + "`");
         let empty_constants = empty_string_constant_set();
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
 
     let operator_length = match.symbol.length;
@@ -472,21 +686,39 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if _if103 {
         diagnostics.push("llvm lowering: malformed comparison expression `" + expression + "`");
         let empty_constants = empty_string_constant_set();
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
 
     let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
     let mut string_constants: StringConstant[] = left_result.string_constants;
     if left_result.operand == null {
-        return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: left_result.lines,
+            temp_index: left_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
-        return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: right_result.lines,
+            temp_index: right_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let mut alignment_lines: string[] = right_result.lines;
@@ -497,9 +729,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     let mut _if104: boolean = false;
     if match.symbol == "==" { _if104 = true; }
     if match.symbol == "!=" { _if104 = true; }
-    if _if104 {
-        is_equality = true;
-    }
+    if _if104 { is_equality = true; }
 
     if is_equality {
         if left_operand != null {
@@ -509,9 +739,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                     let enum_info = find_enum_info_by_llvm_type(context, left_operand.llvm_type);
                     if enum_info != null {
                         let mut tag_llvm_type: string = "i32";
-                        if enum_info.tag_type == "i8" {
-                            tag_llvm_type = "i8";
-                        }
+                        if enum_info.tag_type == "i8" { tag_llvm_type = "i8"; }
                         if enum_info.tag_type == "i16" {
                             tag_llvm_type = "i16";
                         }
@@ -521,42 +749,53 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                         if enum_info.tag_type == "i64" {
                             tag_llvm_type = "i64";
                         }
-        
+
                         let left_tag_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
                         alignment_lines.push("  " + left_tag_temp + " = extractvalue " + left_operand.llvm_type + " " + left_operand.value + ", 0");
-        
+
                         let right_tag_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
                         alignment_lines.push("  " + right_tag_temp + " = extractvalue " + right_operand.llvm_type + " " + right_operand.value + ", 0");
-        
+
                         let compare_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
                         let mut predicate: string = "icmp eq";
-                        if match.symbol == "!=" {
-                            predicate = "icmp ne";
-                        }
+                        if match.symbol == "!=" { predicate = "icmp ne"; }
                         alignment_lines.push("  " + compare_temp + " = " + predicate + " " + tag_llvm_type + " " + left_tag_temp + ", " + right_tag_temp);
-                        let operand = LLVMOperand { llvm_type: "i1", value: compare_temp };
-                        return ExpressionResult { lines: alignment_lines, temp_index: alignment_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+                        let operand = LLVMOperand {
+                            llvm_type: "i1",
+                            value: compare_temp
+                        };
+                        return ExpressionResult {
+                            lines: alignment_lines,
+                            temp_index: alignment_temp,
+                            operand: operand,
+                            diagnostics: diagnostics,
+                            string_constants: string_constants
+                        };
                     }
                 }
-        
+
                 let left_is_char = left_operand.llvm_type == "i8";
                 let right_is_char = right_operand.llvm_type == "i8";
                 let left_is_pointer = ends_with_pointer_suffix(left_operand.llvm_type);
                 let right_is_pointer = ends_with_pointer_suffix(right_operand.llvm_type);
                 let mut _if109: boolean = false;
                 if left_is_char {
-                    if right_is_pointer {
-                        _if109 = true;
-                    }
+                    if right_is_pointer { _if109 = true; }
                 }
                 if _if109 {
                     let coercion = coerce_operand_to_type(right_operand, "i8", alignment_temp, alignment_lines);
                     diagnostics = extend_string_array(diagnostics, coercion.diagnostics);
                     if coercion.operand == null {
-                        return ExpressionResult { lines: coercion.lines, temp_index: coercion.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                        return ExpressionResult {
+                            lines: coercion.lines,
+                            temp_index: coercion.temp_index,
+                            operand: null,
+                            diagnostics: diagnostics,
+                            string_constants: string_constants
+                        };
                     }
                     right_operand = coercion.operand;
                     alignment_lines = coercion.lines;
@@ -564,15 +803,19 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                 } else {
                     let mut _elif111: boolean = false;
                     if right_is_char {
-                        if left_is_pointer {
-                            _elif111 = true;
-                        }
+                        if left_is_pointer { _elif111 = true; }
                     }
                     if _elif111 {
                         let coercion = coerce_operand_to_type(left_operand, "i8", alignment_temp, alignment_lines);
                         diagnostics = extend_string_array(diagnostics, coercion.diagnostics);
                         if coercion.operand == null {
-                            return ExpressionResult { lines: coercion.lines, temp_index: coercion.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+                            return ExpressionResult {
+                                lines: coercion.lines,
+                                temp_index: coercion.temp_index,
+                                operand: null,
+                                diagnostics: diagnostics,
+                                string_constants: string_constants
+                            };
                         }
                         left_operand = coercion.operand;
                         alignment_lines = coercion.lines;
@@ -589,16 +832,34 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if harmonised.left == null { _if105 = true; }
     if harmonised.right == null { _if105 = true; }
     if _if105 {
-        return ExpressionResult { lines: harmonised.lines, temp_index: harmonised.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: harmonised.lines,
+            temp_index: harmonised.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let comparison = emit_comparison_instruction(match.symbol, harmonised.left, harmonised.right, harmonised.temp_index, harmonised.lines);
     diagnostics = extend_string_array(diagnostics, comparison.diagnostics);
     if comparison.operand == null {
-        return ExpressionResult { lines: comparison.lines, temp_index: comparison.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: comparison.lines,
+            temp_index: comparison.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
-    return ExpressionResult { lines: comparison.lines, temp_index: comparison.temp_index, operand: comparison.operand, diagnostics: diagnostics, string_constants: string_constants };
+    return ExpressionResult {
+        lines: comparison.lines,
+        temp_index: comparison.temp_index,
+        operand: comparison.operand,
+        diagnostics: diagnostics,
+        string_constants: string_constants
+    };
 }
 
 fn lower_logical_and(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
@@ -612,7 +873,13 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     if right_text.length == 0 { _if106 = true; }
     if _if106 {
         diagnostics.push("llvm lowering: malformed && expression `" + expression + "`");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let label_id = number_to_string(temp_index);
@@ -627,14 +894,26 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
     string_constants = left_result.string_constants;
     if left_result.operand == null {
-        return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: left_result.lines,
+            temp_index: left_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines);
     diagnostics = extend_string_array(diagnostics, left_bool.diagnostics);
     string_constants = merge_string_constants(string_constants, left_result.string_constants);
     if left_bool.operand == null {
-        return ExpressionResult { lines: left_bool.lines, temp_index: left_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: left_bool.lines,
+            temp_index: left_bool.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let mut current_lines = left_bool.lines;
@@ -659,14 +938,26 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
         fallback_lines.push("");
         fallback_lines.push(merge_label + ":");
         let operand = LLVMOperand { llvm_type: "i1", value: "false" };
-        return ExpressionResult { lines: fallback_lines, temp_index: right_result.temp_index, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: fallback_lines,
+            temp_index: right_result.temp_index,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines);
     diagnostics = extend_string_array(diagnostics, right_bool.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_bool.operand == null {
-        return ExpressionResult { lines: right_bool.lines, temp_index: right_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: right_bool.lines,
+            temp_index: right_bool.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     current_lines = right_bool.lines;
@@ -682,7 +973,13 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
     current_lines.push("  " + result_temp + " = phi i1 [ false, %" + entry_label + " ], [ " + right_bool.operand.value + ", %" + right_end_label + " ]");
 
     let operand = LLVMOperand { llvm_type: "i1", value: result_temp };
-    return ExpressionResult { lines: current_lines, temp_index: right_bool.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: right_bool.temp_index + 1,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: string_constants
+    };
 }
 
 fn lower_logical_or(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
@@ -696,7 +993,13 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
     if right_text.length == 0 { _if107 = true; }
     if _if107 {
         diagnostics.push("llvm lowering: malformed || expression `" + expression + "`");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let label_id = number_to_string(temp_index);
@@ -711,14 +1014,26 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
     string_constants = left_result.string_constants;
     if left_result.operand == null {
-        return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: left_result.lines,
+            temp_index: left_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines);
     diagnostics = extend_string_array(diagnostics, left_bool.diagnostics);
     string_constants = merge_string_constants(string_constants, left_result.string_constants);
     if left_bool.operand == null {
-        return ExpressionResult { lines: left_bool.lines, temp_index: left_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: left_bool.lines,
+            temp_index: left_bool.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let mut current_lines = left_bool.lines;
@@ -742,15 +1057,30 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
         }
         fallback_lines.push("");
         fallback_lines.push(merge_label + ":");
-        let operand = LLVMOperand { llvm_type: "i1", value: left_bool.operand.value };
-        return ExpressionResult { lines: fallback_lines, temp_index: right_result.temp_index, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+        let operand = LLVMOperand {
+            llvm_type: "i1",
+            value: left_bool.operand.value
+        };
+        return ExpressionResult {
+            lines: fallback_lines,
+            temp_index: right_result.temp_index,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines);
     diagnostics = extend_string_array(diagnostics, right_bool.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_bool.operand == null {
-        return ExpressionResult { lines: right_bool.lines, temp_index: right_bool.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
+        return ExpressionResult {
+            lines: right_bool.lines,
+            temp_index: right_bool.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: string_constants
+        };
     }
 
     current_lines = right_bool.lines;
@@ -766,7 +1096,13 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
     current_lines.push("  " + result_temp + " = phi i1 [ true, %" + entry_label + " ], [ " + right_bool.operand.value + ", %" + right_end_label + " ]");
 
     let operand = LLVMOperand { llvm_type: "i1", value: result_temp };
-    return ExpressionResult { lines: current_lines, temp_index: right_bool.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: right_bool.temp_index + 1,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: string_constants
+    };
 }
 
 export {

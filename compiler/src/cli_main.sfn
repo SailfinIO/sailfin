@@ -1,112 +1,69 @@
 // compiler/src/cli_main.sfn
 //
 // Sailfin-native CLI entrypoint invoked by the native C shim.
-
 import {
-    compile_to_llvm_with_module,
-    compile_to_llvm_with_module_timed,
-    compile_to_llvm_file_with_module,
-    compile_to_native_text_with_module,
-    write_native_text_file_with_module,
-    compile_to_sailfin,
-    number_to_string,
-    module_name_from_path,
-} from "./main";
-import {
-    handle_test_command,
-    handle_publish_command,
     handle_add_command,
+    handle_fmt_command,
+    handle_guillermo_command,
     handle_init_command,
     handle_login_command,
-    handle_guillermo_command,
-    handle_fmt_command,
+    handle_publish_command,
+    handle_test_command,
     inline_imports_for_source,
 } from "./cli_commands";
+import {
+    compile_to_llvm_file_with_module,
+    compile_to_llvm_with_module,
+    compile_to_llvm_with_module_timed,
+    compile_to_native_text_with_module,
+    compile_to_sailfin,
+    module_name_from_path,
+    number_to_string,
+    write_native_text_file_with_module,
+} from "./main";
 import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
-    return "usage:\n" +
-    "  sfn --version\n" +
-    "  sfn version\n" +
-    "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n" +
-    "  sfn build [-o OUTPUT] <file.sfn>\n" +
-    "  sfn run <file.sfn>\n" +
-    "  sfn run <exe>\n" +
-    "  sfn test [path]\n" +
-    "  sfn fmt [--check] [--write] [path...]\n" +
-    "  sfn init\n" +
-    "  sfn publish [path]\n" +
-    "  sfn add [--dev] <capsule>\n" +
-    "  sfn login [token]\n" +
-    "\n" +
-    "examples:\n" +
-    "  sfn emit llvm examples/basics/hello-world.sfn\n" +
-    "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n" +
-    "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" +
-    "  sfn run examples/basics/hello-world.sfn\n" +
-    "  sfn run build/native/examples/hello\n" +
-    "  sfn test .\n" +
-    "  sfn init\n" +
-    "  sfn publish [path]\n" +
-    "  sfn add http\n" +
-    "  sfn add --dev test\n" +
-    "  sfn add acme/router\n" +
-    "  sfn login\n";
+    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "  sfn fmt [--check] [--write] [path...]\n" + "  sfn init\n" + "  sfn publish [path]\n" + "  sfn add [--dev] <capsule>\n" + "  sfn login [token]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n" + "  sfn init\n" + "  sfn publish [path]\n" + "  sfn add http\n" + "  sfn add --dev test\n" + "  sfn add acme/router\n" + "  sfn login\n";
 }
 
 fn _ends_with(value: string, suffix: string) -> boolean {
-    if suffix.length == 0 {
-        return true;
-    }
-    if value.length < suffix.length {
-        return false;
-    }
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
     let start = value.length - suffix.length;
     return substring(value, start, value.length) == suffix;
 }
 
 fn _path_join(base: string, name: string) -> string {
-    if base.length == 0 {
-        return name;
-    }
-    if base[base.length - 1] == "/" {
-        return base + name;
-    }
+    if base.length == 0 { return name; }
+    if base[base.length - 1] == "/" { return base + name; }
     return base + "/" + name;
 }
 
 fn _emit_llvm_text_via_file(source: string, module_name: string) -> string ![io] {
     let out_path = "build/sailfin/emit-llvm.tmp";
-    if fs.exists(out_path) {
-        fs.deleteFile(out_path);
-    }
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
     // Call file-based emit. The return value may be corrupted across module
     // boundaries in the seedcheck binary, so we ignore it and just check
     // whether the output file was created.
     compile_to_llvm_file_with_module(source, module_name, out_path);
     if fs.exists(out_path) {
         let content = fs.readFile(out_path);
-        if content.length > 0 {
-            return content;
-        }
+        if content.length > 0 { return content; }
     }
     return compile_to_llvm_with_module(source, module_name);
 }
 
 fn _emit_native_text_via_file(source: string, module_name: string) -> string ![io] {
     let out_path = "build/sailfin/emit-native.tmp";
-    if fs.exists(out_path) {
-        fs.deleteFile(out_path);
-    }
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
     // Call file-based emit. The return value may be corrupted across module
     // boundaries in the seedcheck binary, so we ignore it and just check
     // whether the output file was created.
     write_native_text_file_with_module(source, module_name, out_path);
     if fs.exists(out_path) {
         let content = fs.readFile(out_path);
-        if content.length > 0 {
-            return content;
-        }
+        if content.length > 0 { return content; }
     }
     return compile_to_native_text_with_module(source, module_name);
 }
@@ -115,20 +72,12 @@ fn _dirname(path: string) -> string {
     let mut last_slash: number = -1;
     let mut index: number = 0;
     loop {
-        if index >= path.length {
-            break;
-        }
-        if path[index] == "/" {
-            last_slash = index;
-        }
+        if index >= path.length { break; }
+        if path[index] == "/" { last_slash = index; }
         index += 1;
     }
-    if last_slash < 0 {
-        return ".";
-    }
-    if last_slash == 0 {
-        return "/";
-    }
+    if last_slash < 0 { return "."; }
+    if last_slash == 0 { return "/"; }
     return substring(path, 0, last_slash);
 }
 
@@ -145,9 +94,7 @@ fn _ensure_dir(path: string) ![io] {
 }
 
 fn _runtime_bundle_exists(root: string) -> boolean ![io] {
-    if root.length == 0 {
-        return false;
-    }
+    if root.length == 0 { return false; }
     let include_dir = _path_join(root, "native/include");
     let runtime_src = _path_join(root, "native/src/sailfin_runtime.c");
     let runtime_ir = _path_join(root, "native/ir/runtime_globals.ll");
@@ -156,9 +103,7 @@ fn _runtime_bundle_exists(root: string) -> boolean ![io] {
     if fs.exists(include_dir) {
         if fs.exists(runtime_src) {
             if fs.exists(runtime_ir) {
-                if prelude_obj.length > 0 {
-                    _bundle_ok = true;
-                }
+                if prelude_obj.length > 0 { _bundle_ok = true; }
             }
         }
     }
@@ -167,42 +112,26 @@ fn _runtime_bundle_exists(root: string) -> boolean ![io] {
 
 fn _runtime_prelude_path(root: string) -> string ![io] {
     let bundled = _path_join(root, "native/obj/prelude.o");
-    if fs.exists(bundled) {
-        return bundled;
-    }
+    if fs.exists(bundled) { return bundled; }
     let bundled_nested = _path_join(root, "native/obj/runtime/prelude.o");
-    if fs.exists(bundled_nested) {
-        return bundled_nested;
-    }
+    if fs.exists(bundled_nested) { return bundled_nested; }
     let parent = _dirname(root);
     let fallback = _path_join(parent, "build/native/obj/prelude.o");
-    if fs.exists(fallback) {
-        return fallback;
-    }
+    if fs.exists(fallback) { return fallback; }
     let fallback_nested = _path_join(parent, "build/native/obj/runtime/prelude.o");
-    if fs.exists(fallback_nested) {
-        return fallback_nested;
-    }
+    if fs.exists(fallback_nested) { return fallback_nested; }
     let selfhost_fallback = _path_join(parent, "build/selfhost/native/obj/prelude.o");
-    if fs.exists(selfhost_fallback) {
-        return selfhost_fallback;
-    }
+    if fs.exists(selfhost_fallback) { return selfhost_fallback; }
     let selfhost_fallback_nested = _path_join(parent, "build/selfhost/native/obj/runtime/prelude.o");
-    if fs.exists(selfhost_fallback_nested) {
-        return selfhost_fallback_nested;
-    }
+    if fs.exists(selfhost_fallback_nested) { return selfhost_fallback_nested; }
     return "";
 }
 
 fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_flag: string) -> string[] ![io] {
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
-    if runtime_root.length == 0 {
-        return ["", "", ""];
-    }
-    if !_runtime_bundle_exists(runtime_root) {
-        return ["", "", ""];
-    }
+    if runtime_root.length == 0 { return ["", "", ""]; }
+    if !_runtime_bundle_exists(runtime_root) { return ["", "", ""]; }
 
     let include_dir = _path_join(runtime_root, "native/include");
     let runtime_src = _path_join(runtime_root, "native/src/sailfin_runtime.c");
@@ -213,34 +142,13 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     let globals_obj = _path_join(out_dir, "runtime_globals" + opt_flag + ".o");
 
     if !fs.exists(runtime_obj) {
-        let rc = process.run([
-                "clang",
-                opt_flag,
-                "-Wno-override-module",
-                "-I" + include_dir,
-                "-c",
-                runtime_src,
-                "-o",
-                runtime_obj,
-        ]);
-        if rc != 0 {
-            return ["", "", ""];
-        }
+        let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I" + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
+        if rc != 0 { return ["", "", ""]; }
     }
 
     if !fs.exists(globals_obj) {
-        let rc2 = process.run([
-                "clang",
-                opt_flag,
-                "-Wno-override-module",
-                "-c",
-                runtime_ir,
-                "-o",
-                globals_obj,
-        ]);
-        if rc2 != 0 {
-            return ["", "", ""];
-        }
+        let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
+        if rc2 != 0 { return ["", "", ""]; }
     }
 
     return [runtime_obj, globals_obj, prelude_obj];
@@ -276,18 +184,7 @@ fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string,
         return 1;
     }
 
-    let args: string[] = [
-        "clang",
-        opt_flag,
-        "-Wno-override-module",
-        runtime_obj,
-        globals_obj,
-        prelude_obj,
-        ll_path,
-        "-o",
-        out_path,
-        "-lm",
-    ];
+    let args: string[] = ["clang", opt_flag, "-Wno-override-module", runtime_obj, globals_obj, prelude_obj, ll_path, "-o", out_path, "-lm",];
     return process.run(args);
 }
 
@@ -302,9 +199,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         print.err("cli: argv.len=" + number_to_string(argv.length));
         let mut trace_index: number = 0;
         loop {
-            if trace_index >= argv.length {
-                break;
-            }
+            if trace_index >= argv.length { break; }
             print.err("cli: argv[" + number_to_string(trace_index) + "]=" + argv[trace_index]);
             trace_index += 1;
         }
@@ -327,17 +222,13 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         print.err("cli: start_index=" + number_to_string(start_index));
     }
     if runtime_root.length == 0 {
-        if _runtime_bundle_exists("runtime") {
-            runtime_root = "runtime";
-        }
+        if _runtime_bundle_exists("runtime") { runtime_root = "runtime"; }
     }
 
     let mut args: string[] = [];
     let mut arg_index: number = start_index;
     loop {
-        if arg_index >= argv.length {
-            break;
-        }
+        if arg_index >= argv.length { break; }
         args.push(argv[arg_index]);
         arg_index += 1;
     }
@@ -349,9 +240,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         print.err("cli: args.len=" + number_to_string(args.length));
         let mut arg_index_trace: number = 0;
         loop {
-            if arg_index_trace >= args.length {
-                break;
-            }
+            if arg_index_trace >= args.length { break; }
             print.err("cli: args[" + number_to_string(arg_index_trace) + "]=" + args[arg_index_trace]);
             arg_index_trace += 1;
         }
@@ -359,14 +248,10 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
             let cmd_check = args[0];
             let eq_emit = strings_equal(cmd_check, "emit");
             let eq_version = strings_equal(cmd_check, "version");
-            if eq_emit {
-                print.err("cli: eq_emit=true");
-            } else {
+            if eq_emit { print.err("cli: eq_emit=true"); } else {
                 print.err("cli: eq_emit=false");
             }
-            if eq_version {
-                print.err("cli: eq_version=true");
-            } else {
+            if eq_version { print.err("cli: eq_version=true"); } else {
                 print.err("cli: eq_version=false");
             }
         }
@@ -401,12 +286,8 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     let is_login = strings_equal(cmd, "login");
     let is_fmt = strings_equal(cmd, "fmt");
     if trace_argv {
-        if is_emit {
-            print.err("cli: cmd_is_emit=true");
-        }
-        if is_version {
-            print.err("cli: cmd_is_version=true");
-        }
+        if is_emit { print.err("cli: cmd_is_emit=true"); }
+        if is_version { print.err("cli: cmd_is_version=true"); }
     }
 
     if is_version {
@@ -472,9 +353,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
                     _write_llvm_text(out_path, llvm);
                 } else {
                     let ok = compile_to_llvm_file_with_module(source, module_name, out_path);
-                    if !ok {
-                        return 1;
-                    }
+                    if !ok { return 1; }
                 }
             } else {
                 if timing {
@@ -488,17 +367,13 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         if strings_equal(mode, "sailfin") {
             if has_out {
                 fs.writeFile(out_path, compile_to_sailfin(source));
-            } else {
-                print(compile_to_sailfin(source));
-            }
+            } else { print(compile_to_sailfin(source)); }
             return 0;
         }
         if strings_equal(mode, "native") {
             if has_out {
                 let ok = write_native_text_file_with_module(source, module_name, out_path);
-                if !ok {
-                    return 1;
-                }
+                if !ok { return 1; }
             } else {
                 print(_emit_native_text_via_file(source, module_name));
             }
@@ -605,9 +480,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
             print("run: native link failed; attempting seed fallback via `sfn run`");
 
             let fallback_rc = process.run(["sfn", "run", input_path]);
-            if fallback_rc == 0 {
-                return 0;
-            }
+            if fallback_rc == 0 { return 0; }
             return link_rc;
         }
 
@@ -615,9 +488,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         return run_rc;
     }
 
-    if is_test {
-        return handle_test_command(args, runtime_root);
-    }
+    if is_test { return handle_test_command(args, runtime_root); }
 
     if is_help {
         print(_usage());
@@ -625,30 +496,17 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     }
 
     // ---- Package management commands ----
+    if is_init { return handle_init_command(args); }
 
-    if is_init {
-        return handle_init_command(args);
-    }
+    if is_publish { return handle_publish_command(args); }
 
-    if is_publish {
-        return handle_publish_command(args);
-    }
+    if is_add { return handle_add_command(args); }
 
-    if is_add {
-        return handle_add_command(args);
-    }
+    if is_login { return handle_login_command(args); }
 
-    if is_login {
-        return handle_login_command(args);
-    }
+    if is_fmt { return handle_fmt_command(args); }
 
-    if is_fmt {
-        return handle_fmt_command(args);
-    }
-
-    if strings_equal(cmd, "guillermo") {
-        return handle_guillermo_command();
-    }
+    if strings_equal(cmd, "guillermo") { return handle_guillermo_command(); }
 
     print("unknown command: " + cmd);
     print(_usage());
@@ -660,4 +518,3 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
 fn native_cli_main(argv: string[]) -> number ![io] {
     return sailfin_cli_main(argv);
 }
-

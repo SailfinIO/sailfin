@@ -1,38 +1,29 @@
 // compiler/src/llvm/expression_lowering/native/core_index_lowering.sfn
 //
 // Indexing expression lowering extracted from core.sfn.
-
 import { NativeFunction } from "../../../native_ir";
-
+import { substring } from "../../../string_utils";
+import { format_temp_name } from "../../expressions_helpers";
+import { merge_string_constants } from "../../strings";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
-    TypeContext,
-    ParameterBinding,
-    LocalBinding,
-    IndexExpressionParse,
     ExpressionResult,
+    IndexExpressionParse,
     LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
     StringConstant,
+    TypeContext,
 } from "../../types";
-
 import {
-    trim_text,
     append_string,
     number_to_string,
     starts_with,
+    trim_text,
 } from "../../utils";
-
-import { substring } from "../../../string_utils";
-
-import { merge_string_constants } from "../../strings";
-
-import { format_temp_name } from "../../expressions_helpers";
-
-import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
-
-import { coerce_operand_to_type } from "./core_operands";
-
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
+import { coerce_operand_to_type } from "./core_operands";
 
 fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
@@ -40,7 +31,13 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     let mut collected_string_constants: StringConstant[] = base_result.string_constants;
 
     if base_result.operand == null {
-        return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult {
+            lines: base_result.lines,
+            temp_index: base_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     let mut current_lines: string[] = base_result.lines;
@@ -60,7 +57,13 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
 
     if index_result.operand == null {
         diagnostics.push("llvm lowering: index expression produced no value");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     let index_operand = index_result.operand;
@@ -76,7 +79,13 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     current_temp = index_coercion.temp_index;
     if index_coercion.operand == null {
         diagnostics.push("llvm lowering: unable to coerce index expression to i64");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
     let coerced_index = index_coercion.operand;
 
@@ -95,7 +104,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
             if inner_type.length > 0 {
                 if substring(inner_type, inner_type.length - 1, inner_type.length) == "}" {
                     let struct_inner = trim_text(substring(inner_type, 1, inner_type.length - 1));
-        
+
                     let mut comma_pos: number = -1;
                     let mut brace_depth: number = 0;
                     let mut bracket_depth: number = 0;
@@ -103,34 +112,16 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
                     let mut angle_depth: number = 0;
                     let mut i: number = 0;
                     loop {
-                        if i >= struct_inner.length {
-                            break;
-                        }
+                        if i >= struct_inner.length { break; }
                         let ch = substring(struct_inner, i, i + 1);
-                        if ch == "{" {
-                            brace_depth += 1;
-                        } else if ch == "}" {
-                            if brace_depth > 0 {
-                                brace_depth -= 1;
-                            }
-                        } else if ch == "[" {
-                            bracket_depth += 1;
-                        } else if ch == "]" {
-                            if bracket_depth > 0 {
-                                bracket_depth -= 1;
-                            }
-                        } else if ch == "(" {
-                            paren_depth += 1;
-                        } else if ch == ")" {
-                            if paren_depth > 0 {
-                                paren_depth -= 1;
-                            }
-                        } else if ch == "<" {
-                            angle_depth += 1;
-                        } else if ch == ">" {
-                            if angle_depth > 0 {
-                                angle_depth -= 1;
-                            }
+                        if ch == "{" { brace_depth += 1; } else if ch == "}" {
+                            if brace_depth > 0 { brace_depth -= 1; }
+                        } else if ch == "[" { bracket_depth += 1; } else if ch == "]" {
+                            if bracket_depth > 0 { bracket_depth -= 1; }
+                        } else if ch == "(" { paren_depth += 1; } else if ch == ")" {
+                            if paren_depth > 0 { paren_depth -= 1; }
+                        } else if ch == "<" { angle_depth += 1; } else if ch == ">" {
+                            if angle_depth > 0 { angle_depth -= 1; }
                         } else if ch == "," {
                             if brace_depth == 0 {
                                 if bracket_depth == 0 {
@@ -145,7 +136,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
                         }
                         i += 1;
                     }
-        
+
                     if comma_pos >= 0 {
                         let first_field = trim_text(substring(struct_inner, 0, comma_pos));
                         if ends_with_pointer_suffix(first_field) {
@@ -160,7 +151,13 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
 
     if element_type.length == 0 {
         diagnostics.push("llvm lowering: unable to determine element type for array indexing on type `" + array_type + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     if is_string {
@@ -175,17 +172,26 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         current_temp = index_as_double.temp_index;
         if index_as_double.operand == null {
             diagnostics.push("llvm lowering: unable to coerce string index expression to double");
-            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
         }
 
         let call_temp = format_temp_name(current_temp);
-        current_lines = append_string(
-            current_lines,
-            "  " + call_temp + " = call i8* @sailfin_runtime_grapheme_at(i8* " + base_operand.value + ", double " + index_as_double.operand.value + ")"
-        );
+        current_lines = append_string(current_lines, "  " + call_temp + " = call i8* @sailfin_runtime_grapheme_at(i8* " + base_operand.value + ", double " + index_as_double.operand.value + ")");
         current_temp += 1;
         let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     if is_heap_array {
@@ -221,12 +227,27 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         current_lines.push("  " + element_value + " = load " + element_type + ", " + element_type + "* " + element_ptr);
         current_temp += 1;
 
-        let operand = LLVMOperand { llvm_type: element_type, value: element_value };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        let operand = LLVMOperand {
+            llvm_type: element_type,
+            value: element_value
+        };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     diagnostics.push("llvm lowering: unsupported array type for indexing: `" + array_type + "`");
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: collected_string_constants
+    };
 }
 
 export { lower_index_expression };

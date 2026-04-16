@@ -1,50 +1,29 @@
 // compiler/src/llvm/expression_lowering/native/core_operators.sfn
 //
 // Operator and expression-shape helpers extracted from core.sfn.
-
-import { substring, char_at, char_code } from "../../../string_utils";
-
+import { char_at, char_code, substring } from "../../../string_utils";
+import { OperatorMatch, } from "../../types";
 import {
-    OperatorMatch,
-} from "../../types";
-
-import {
-    trim_text,
-    starts_with,
     contains_text,
+    starts_with,
+    trim_text,
 } from "../../utils";
-
-import {
-    char_code_at_text,
-    is_trim_char,
-} from "./core_text";
+import { char_code_at_text, is_trim_char, } from "./core_text";
 
 fn lines_end_with_terminator(lines: string[]) -> boolean {
     let mut index: number = lines.length - 1;
     loop {
-        if lines.length == 0 {
-            return false;
-        }
-        if index < 0 {
-            break;
-        }
+        if lines.length == 0 { return false; }
+        if index < 0 { break; }
         let line = trim_text(lines[index]);
         if line.length == 0 {
             index -= 1;
             continue;
         }
-        if starts_with(line, "ret") {
-            return true;
-        }
-        if starts_with(line, "br ") {
-            return true;
-        }
-        if starts_with(line, "switch ") {
-            return true;
-        }
-        if line == "unreachable" {
-            return true;
-        }
+        if starts_with(line, "ret") { return true; }
+        if starts_with(line, "br ") { return true; }
+        if starts_with(line, "switch ") { return true; }
+        if line == "unreachable" { return true; }
         return false;
     }
     return false;
@@ -52,25 +31,19 @@ fn lines_end_with_terminator(lines: string[]) -> boolean {
 
 fn strip_enclosing_parentheses(expression: string) -> string {
     let trimmed = trim_text(expression);
-    if trimmed.length < 2 {
-        return trimmed;
-    }
+    if trimmed.length < 2 { return trimmed; }
     let mut _if90: boolean = false;
     if substring(trimmed, 0, 1) != "(" { _if90 = true; }
-    if substring(trimmed, trimmed.length - 1, trimmed.length) != ")" { _if90 = true; }
-    if _if90 {
-        return trimmed;
+    if substring(trimmed, trimmed.length - 1, trimmed.length) != ")" {
+        _if90 = true;
     }
+    if _if90 { return trimmed; }
     let mut depth: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
-        if ch == "(" {
-            depth += 1;
-        } else if ch == ")" {
+        if ch == "(" { depth += 1; } else if ch == ")" {
             depth -= 1;
             if depth == 0 {
                 if index == trimmed.length - 1 {
@@ -97,9 +70,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
     let mut candidate_symbol: string = "";
     let mut index: number = 0;
     loop {
-        if index >= expression.length {
-            break;
-        }
+        if index >= expression.length { break; }
         let ch = char_at(expression, index);
         if in_double {
             if escape_next {
@@ -112,9 +83,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_double = false;
-            }
+            if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
@@ -129,9 +98,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
                 index += 1;
                 continue;
             }
-            if ch == "'" {
-                in_single = false;
-            }
+            if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -151,9 +118,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -163,9 +128,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -175,9 +138,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -187,9 +148,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             continue;
         }
         if ch == ">" {
-            if angle_depth > 0 {
-                angle_depth -= 1;
-            }
+            if angle_depth > 0 { angle_depth -= 1; }
             index += 1;
             continue;
         }
@@ -220,7 +179,11 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
         index += 1;
     }
     if candidate_index >= 0 {
-        return OperatorMatch { index: candidate_index, symbol: candidate_symbol, success: true };
+        return OperatorMatch {
+            index: candidate_index,
+            symbol: candidate_symbol,
+            success: true
+        };
     }
     return OperatorMatch { index: -1, symbol: "", success: false };
 }
@@ -233,9 +196,7 @@ fn find_comparison_operator(expression: string) -> OperatorMatch {
     let mut in_string: boolean = false;
     let mut escape_next: boolean = false;
     loop {
-        if index >= expression.length {
-            break;
-        }
+        if index >= expression.length { break; }
         let ch = substring(expression, index, index + 1);
         if in_string {
             if escape_next {
@@ -248,9 +209,7 @@ fn find_comparison_operator(expression: string) -> OperatorMatch {
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_string = false;
-            }
+            if ch == "\"" { in_string = false; }
             index += 1;
             continue;
         }
@@ -265,9 +224,7 @@ fn find_comparison_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == ")" {
-            if depth > 0 {
-                depth -= 1;
-            }
+            if depth > 0 { depth -= 1; }
             index += 1;
             continue;
         }
@@ -277,9 +234,7 @@ fn find_comparison_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -289,9 +244,7 @@ fn find_comparison_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -314,23 +267,47 @@ fn find_comparison_operator(expression: string) -> OperatorMatch {
         if _co_next < expression.length {
             let two_char = substring(expression, index, _co_next2);
             if two_char == "==" {
-                return OperatorMatch { index: index, symbol: "==", success: true };
+                return OperatorMatch {
+                    index: index,
+                    symbol: "==",
+                    success: true
+                };
             }
             if two_char == "!=" {
-                return OperatorMatch { index: index, symbol: "!=", success: true };
+                return OperatorMatch {
+                    index: index,
+                    symbol: "!=",
+                    success: true
+                };
             }
             if two_char == "<=" {
-                return OperatorMatch { index: index, symbol: "<=", success: true };
+                return OperatorMatch {
+                    index: index,
+                    symbol: "<=",
+                    success: true
+                };
             }
             if two_char == ">=" {
-                return OperatorMatch { index: index, symbol: ">=", success: true };
+                return OperatorMatch {
+                    index: index,
+                    symbol: ">=",
+                    success: true
+                };
             }
         }
         if ch == "<" {
-            return OperatorMatch { index: index, symbol: "<", success: true };
+            return OperatorMatch {
+                index: index,
+                symbol: "<",
+                success: true
+            };
         }
         if ch == ">" {
-            return OperatorMatch { index: index, symbol: ">", success: true };
+            return OperatorMatch {
+                index: index,
+                symbol: ">",
+                success: true
+            };
         }
         index += 1;
     }
@@ -347,9 +324,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
 
     let _lo_limit = expression.length - 1;
     loop {
-        if index >= _lo_limit {
-            break;
-        }
+        if index >= _lo_limit { break; }
         let _lo_next = index + 1;
         let ch = substring(expression, index, _lo_next);
         if in_string {
@@ -363,9 +338,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_string = false;
-            }
+            if ch == "\"" { in_string = false; }
             index += 1;
             continue;
         }
@@ -380,9 +353,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == ")" {
-            if depth > 0 {
-                depth -= 1;
-            }
+            if depth > 0 { depth -= 1; }
             index += 1;
             continue;
         }
@@ -392,9 +363,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -404,9 +373,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -416,7 +383,11 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
                     let _lo_next2 = index + 2;
                     let two = substring(expression, index, _lo_next2);
                     if two == "||" {
-                        return OperatorMatch { index: index, symbol: "||", success: true };
+                        return OperatorMatch {
+                            index: index,
+                            symbol: "||",
+                            success: true
+                        };
                     }
                 }
             }
@@ -431,9 +402,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
     in_string = false;
     escape_next = false;
     loop {
-        if index >= _lo_limit {
-            break;
-        }
+        if index >= _lo_limit { break; }
         let _lo2_next = index + 1;
         let ch = substring(expression, index, _lo2_next);
         if in_string {
@@ -447,9 +416,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_string = false;
-            }
+            if ch == "\"" { in_string = false; }
             index += 1;
             continue;
         }
@@ -464,9 +431,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == ")" {
-            if depth > 0 {
-                depth -= 1;
-            }
+            if depth > 0 { depth -= 1; }
             index += 1;
             continue;
         }
@@ -476,9 +441,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -488,9 +451,7 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -500,7 +461,11 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
                     let _lo2_next2 = index + 2;
                     let two = substring(expression, index, _lo2_next2);
                     if two == "&&" {
-                        return OperatorMatch { index: index, symbol: "&&", success: true };
+                        return OperatorMatch {
+                            index: index,
+                            symbol: "&&",
+                            success: true
+                        };
                     }
                 }
             }
@@ -511,18 +476,12 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
 }
 
 fn contains_char(set: string, ch: string) -> boolean {
-    if ch.length == 0 {
-        return false;
-    }
+    if ch.length == 0 { return false; }
     let mut index: number = 0;
     loop {
-        if index >= set.length {
-            break;
-        }
+        if index >= set.length { break; }
         let set_ch = substring(set, index, index + 1);
-        if set_ch == ch {
-            return true;
-        }
+        if set_ch == ch { return true; }
         index += 1;
     }
     return false;
@@ -531,9 +490,7 @@ fn contains_char(set: string, ch: string) -> boolean {
 fn is_binary_minus(expression: string, index: number) -> boolean {
     let previous = find_previous_non_space_char(expression, index);
     let next = find_next_non_space_char(expression, index);
-    if previous == null {
-        return false;
-    }
+    if previous == null { return false; }
     let prev_char = previous;
     let mut _if91: boolean = false;
     if prev_char == "+" { _if91 = true; }
@@ -542,12 +499,8 @@ fn is_binary_minus(expression: string, index: number) -> boolean {
     if prev_char == "/" { _if91 = true; }
     if prev_char == "(" { _if91 = true; }
     if prev_char == "," { _if91 = true; }
-    if _if91 {
-        return false;
-    }
-    if next == null {
-        return false;
-    }
+    if _if91 { return false; }
+    if next == null { return false; }
     let next_char = next;
     let mut _if92: boolean = false;
     if next_char == "+" { _if92 = true; }
@@ -556,18 +509,14 @@ fn is_binary_minus(expression: string, index: number) -> boolean {
     if next_char == "/" { _if92 = true; }
     if next_char == ")" { _if92 = true; }
     if next_char == "," { _if92 = true; }
-    if _if92 {
-        return false;
-    }
+    if _if92 { return false; }
     return true;
 }
 
 fn is_binary_star(expression: string, index: number) -> boolean {
     let previous = find_previous_non_space_char(expression, index);
     let next = find_next_non_space_char(expression, index);
-    if previous == null {
-        return false;
-    }
+    if previous == null { return false; }
     let prev_char = previous;
     let mut _if93: boolean = false;
     if prev_char == "+" { _if93 = true; }
@@ -576,12 +525,8 @@ fn is_binary_star(expression: string, index: number) -> boolean {
     if prev_char == "/" { _if93 = true; }
     if prev_char == "(" { _if93 = true; }
     if prev_char == "," { _if93 = true; }
-    if _if93 {
-        return false;
-    }
-    if next == null {
-        return false;
-    }
+    if _if93 { return false; }
+    if next == null { return false; }
     let next_char = next;
     let mut _if94: boolean = false;
     if next_char == "+" { _if94 = true; }
@@ -590,23 +535,17 @@ fn is_binary_star(expression: string, index: number) -> boolean {
     if next_char == "/" { _if94 = true; }
     if next_char == ")" { _if94 = true; }
     if next_char == "," { _if94 = true; }
-    if _if94 {
-        return false;
-    }
+    if _if94 { return false; }
     return true;
 }
 
 fn find_previous_non_space_char(value: string, index: number) -> string? {
     let mut position: number = index;
     loop {
-        if position <= 0 {
-            break;
-        }
+        if position <= 0 { break; }
         position -= 1;
         let ch = char_at(value, position);
-        if !is_trim_char(ch) {
-            return ch;
-        }
+        if !is_trim_char(ch) { return ch; }
     }
     return null;
 }
@@ -614,13 +553,9 @@ fn find_previous_non_space_char(value: string, index: number) -> string? {
 fn find_next_non_space_char(value: string, index: number) -> string? {
     let mut position: number = index + 1;
     loop {
-        if position >= value.length {
-            break;
-        }
+        if position >= value.length { break; }
         let ch = char_at(value, position);
-        if !is_trim_char(ch) {
-            return ch;
-        }
+        if !is_trim_char(ch) { return ch; }
         position += 1;
     }
     return null;

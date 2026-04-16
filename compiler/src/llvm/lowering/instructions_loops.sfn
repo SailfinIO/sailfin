@@ -1,96 +1,55 @@
 // compiler/src/llvm/lowering/instructions_loops.sfn
 //
 // Control flow handler: loop instruction lowering (infinite loops with break/continue).
-
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { substring, char_code, grapheme_at } from "../../string_utils";
-
+import { char_code, grapheme_at, substring } from "../../string_utils";
+import { lower_expression, } from "../expression_lowering/native/core";
+import { find_local_binding, } from "../expressions_bindings";
+import { format_temp_name, } from "../expressions_helpers";
+import { make_child_scope_id, } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants, } from "../strings";
 import {
-    TypeContext,
-    LocalBinding,
-    ParameterBinding,
-    LLVMOperand,
     BlockLoweringResult,
-    LoopContext,
+    LLVMOperand,
     LifetimeRegionMetadata,
+    LocalBinding,
     LocalMutation,
-    StringConstant,
+    LoopContext,
     LoopStructure,
+    ParameterBinding,
+    StringConstant,
+    TypeContext,
 } from "../types";
-
 import {
-    trim_text,
     extend_string_array,
     number_to_string,
+    trim_text,
 } from "../utils";
-
-import {
-    empty_string_constant_set,
-    merge_string_constants,
-} from "../strings";
-
-import {
-    find_local_binding,
-} from "../expressions_bindings";
-
-import {
-    format_temp_name,
-} from "../expressions_helpers";
-
-import {
-    lower_expression,
-} from "../expression_lowering/native/core";
-
-import {
-    make_child_scope_id,
-} from "../lifetime";
-
-import {
-    find_mutation_for_name,
-    collect_mutation_names,
-} from "./phi";
-
-import {
-    lower_instruction_range,
-} from "./instructions";
-
-import {
-    extend_lifetime_regions,
-    extend_mutations,
-    _parse_int_from_string,
-} from "./instructions_helpers";
-
+import { lower_instruction_range, } from "./instructions";
 import {
     allocate_block_label,
     lower_condition_to_i1,
     sanitize_if_condition_text,
 } from "./instructions_condition";
-
 import {
-    get_instruction_tag,
-    get_instruction_condition,
-} from "./lowering_native_helpers";
+    _parse_int_from_string,
+    extend_lifetime_regions,
+    extend_mutations,
+} from "./instructions_helpers";
+import { get_instruction_condition, get_instruction_tag, } from "./lowering_native_helpers";
+import { collect_mutation_names, find_mutation_for_name, } from "./phi";
 
-fn collect_loop_structure(
-    instructions: NativeInstruction[],
-    start_index: number,
-    end: number,
-    function_name: string
-) -> LoopStructure {
+fn collect_loop_structure(instructions: NativeInstruction[], start_index: number, end: number, function_name: string) -> LoopStructure {
     let mut diagnostics: string[] = [];
     let body_start = start_index + 1;
     let mut body_end = end;
     let mut depth: number = 0;
     let mut index: number = body_start;
     let mut limit: number = end;
-    if limit > instructions.length {
-        limit = instructions.length;
-    }
+    if limit > instructions.length { limit = instructions.length; }
     loop {
         if index >= limit {
-            if limit <= 0 {
-                limit = 0;
-            }
+            if limit <= 0 { limit = 0; }
             diagnostics.push("llvm lowering: unterminated `.loop` in `" + function_name + "`");
             return LoopStructure {
                 body_start: body_start,
@@ -121,9 +80,7 @@ fn collect_loop_structure(
                     diagnostics: diagnostics,
                 };
             }
-            if depth > 0 {
-                depth -= 1;
-            }
+            if depth > 0 { depth -= 1; }
             index += 1;
             continue;
         }
@@ -160,26 +117,7 @@ fn last_loop_context(values: LoopContext[]) -> LoopContext {
     return values[index];
 }
 
-fn lower_loop_instruction(
-    function: NativeFunction,
-    start_index: number,
-    llvm_return: string,
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    allocas: string[],
-    lines: string[],
-    temp_index: number,
-    block_counter: number,
-    next_local_id: number,
-    next_region_id: number,
-    functions: NativeFunction[],
-    loop_stack: LoopContext[],
-    end: number,
-    context: TypeContext,
-    scope_id: string,
-    scope_depth: number,
-    current_label: string
-) -> BlockLoweringResult {
+fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, block_counter: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], loop_stack: LoopContext[], end: number, context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -239,9 +177,7 @@ fn lower_loop_instruction(
     let mut preloaded_locals: string[] = [];
     let mut preload_index: number = 0;
     loop {
-        if preload_index >= current_locals.length {
-            break;
-        }
+        if preload_index >= current_locals.length { break; }
         let local = current_locals[preload_index];
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
@@ -273,7 +209,10 @@ fn lower_loop_instruction(
     current_lines.push(header_label + ":");
 
     // Update loop context: break goes to exit, continue goes to latch
-    let loop_context = LoopContext { break_label: exit_label, continue_label: latch_label };
+    let loop_context = LoopContext {
+        break_label: exit_label,
+        continue_label: latch_label
+    };
     let stacked = append_loop_context(loop_stack, loop_context);
 
     let base_locals = current_locals;
@@ -320,26 +259,7 @@ fn lower_loop_instruction(
         if _body_cursor >= structure.body_end { break; }
         if _body_terminated { break; }
         if _body_resume_iters > 20 { break; }
-        let _seg_result = lower_instruction_range(
-            function,
-            _body_cursor,
-            structure.body_end,
-            llvm_return,
-            _body_bindings,
-            _body_locals,
-            _body_allocas,
-            [],
-            _body_temp,
-            _body_blkctr,
-            _body_nextloc,
-            _body_nextreg,
-            functions,
-            stacked,
-            context,
-            body_scope_id,
-            scope_depth + 1,
-            _body_active_label
-        );
+        let _seg_result = lower_instruction_range(function, _body_cursor, structure.body_end, llvm_return, _body_bindings, _body_locals, _body_allocas, [], _body_temp, _body_blkctr, _body_nextloc, _body_nextreg, functions, stacked, context, body_scope_id, scope_depth + 1, _body_active_label);
         // Merge segment results
         _body_lines = extend_string_array(_body_lines, _seg_result.lines);
         _body_allocas = _seg_result.allocas;
@@ -385,9 +305,7 @@ fn lower_loop_instruction(
                         }
                         if _skip_i < structure.body_end {
                             _body_cursor = _skip_i + 1;
-                        } else {
-                            _body_cursor = structure.body_end;
-                        }
+                        } else { _body_cursor = structure.body_end; }
                     } else {
                         // Other terminator (EndLoop, EndMatch, EndFor) — stop
                         _body_cursor = structure.body_end;
@@ -449,43 +367,27 @@ fn lower_loop_instruction(
     let mut mutated_names: string[] = [];
     let mut mut_idx: number = 0;
     loop {
-        if mut_idx >= body_result.mutations.length {
-            break;
-        }
+        if mut_idx >= body_result.mutations.length { break; }
         let mutation = body_result.mutations[mut_idx];
         let mut already_added: boolean = false;
         let mut check_idx: number = 0;
         loop {
-            if check_idx >= mutated_names.length {
-                break;
-            }
+            if check_idx >= mutated_names.length { break; }
             if mutated_names[check_idx] == mutation.name {
                 already_added = true;
                 break;
             }
             check_idx += 1;
         }
-        if !already_added {
-            mutated_names.push(mutation.name);
-        }
+        if !already_added { mutated_names.push(mutation.name); }
         mut_idx += 1;
     }
 
     // Note: We'll generate phi nodes after we know the latch load values
-
     // Emit header branch: conditional if we detected an exit condition at the
     // top of the loop body, otherwise fall back to unconditional (original behavior).
     if loop_exit_condition.length > 0 {
-        let header_cond = lower_condition_to_i1(
-            function.name,
-            loop_exit_condition,
-            bindings,
-            current_locals,
-            current_temp,
-            current_lines,
-            functions,
-            context
-        );
+        let header_cond = lower_condition_to_i1(function.name, loop_exit_condition, bindings, current_locals, current_temp, current_lines, functions, context);
         current_lines = header_cond.lines;
         current_temp = header_cond.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, header_cond.string_constants);
@@ -523,9 +425,7 @@ fn lower_loop_instruction(
     let mut latch_loads: string[] = [];
     let mut load_idx: number = 0;
     loop {
-        if load_idx >= mutated_names.length {
-            break;
-        }
+        if load_idx >= mutated_names.length { break; }
         let name = mutated_names[load_idx];
         let local = find_local_binding(base_locals, name);
 
@@ -535,9 +435,7 @@ fn lower_loop_instruction(
             let load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
             current_lines.push(load_line);
             latch_loads.push(load_temp);
-        } else {
-            latch_loads.push("");
-        }
+        } else { latch_loads.push(""); }
 
         load_idx += 1;
     }
@@ -547,9 +445,7 @@ fn lower_loop_instruction(
     // Generate phi nodes using the latch load values.
     let mut name_idx: number = 0;
     loop {
-        if name_idx >= mutated_names.length {
-            break;
-        }
+        if name_idx >= mutated_names.length { break; }
         let name = mutated_names[name_idx];
         let local = find_local_binding(base_locals, name);
 
@@ -562,9 +458,7 @@ fn lower_loop_instruction(
                     let mut preload_value: string = "";
                     let mut local_idx: number = 0;
                     loop {
-                        if local_idx >= base_locals.length {
-                            break;
-                        }
+                        if local_idx >= base_locals.length { break; }
                         if base_locals[local_idx].name == name {
                             if local_idx < preloaded_locals.length {
                                 preload_value = preloaded_locals[local_idx];
@@ -597,9 +491,7 @@ fn lower_loop_instruction(
     let mut line_idx: number = 0;
     let mut found_header: boolean = false;
     loop {
-        if line_idx >= current_lines.length {
-            break;
-        }
+        if line_idx >= current_lines.length { break; }
         let line = current_lines[line_idx];
         final_lines.push(line);
 
@@ -625,9 +517,7 @@ fn lower_loop_instruction(
     let mut exit_loads: string[] = [];
     let mut exit_load_idx: number = 0;
     loop {
-        if exit_load_idx >= mutated_names.length {
-            break;
-        }
+        if exit_load_idx >= mutated_names.length { break; }
         let name = mutated_names[exit_load_idx];
         let local = find_local_binding(base_locals, name);
         if local != null {
@@ -635,18 +525,14 @@ fn lower_loop_instruction(
             current_temp += 1;
             current_lines.push("  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
             exit_loads.push(exit_load_temp);
-        } else {
-            exit_loads.push("");
-        }
+        } else { exit_loads.push(""); }
         exit_load_idx += 1;
     }
 
     let mut exit_mutations: LocalMutation[] = [];
     let mut name_idx: number = 0;
     loop {
-        if name_idx >= mutated_names.length {
-            break;
-        }
+        if name_idx >= mutated_names.length { break; }
         let name = mutated_names[name_idx];
         let mut exit_value: string = "";
         if name_idx < exit_loads.length {
@@ -662,13 +548,9 @@ fn lower_loop_instruction(
             }
             if llvm_type.length == 0 {
                 let local = find_local_binding(base_locals, name);
-                if local != null {
-                    llvm_type = local.llvm_type;
-                }
+                if local != null { llvm_type = local.llvm_type; }
             }
-            if llvm_type.length == 0 {
-                llvm_type = "double";
-            }
+            if llvm_type.length == 0 { llvm_type = "double"; }
             let exit_mutation = LocalMutation {
                 name: name,
                 llvm_type: llvm_type,
@@ -687,26 +569,20 @@ fn lower_loop_instruction(
     let mut body_scoped_mutations: LocalMutation[] = [];
     let mut body_mut_idx: number = 0;
     loop {
-        if body_mut_idx >= body_result.mutations.length {
-            break;
-        }
+        if body_mut_idx >= body_result.mutations.length { break; }
         let mutation = body_result.mutations[body_mut_idx];
         if find_local_binding(base_locals, mutation.name) == null {
             let mut already_added: boolean = false;
             let mut seen_idx: number = 0;
             loop {
-                if seen_idx >= body_scoped_mutations.length {
-                    break;
-                }
+                if seen_idx >= body_scoped_mutations.length { break; }
                 if body_scoped_mutations[seen_idx].name == mutation.name {
                     already_added = true;
                     break;
                 }
                 seen_idx += 1;
             }
-            if !already_added {
-                body_scoped_mutations.push(mutation);
-            }
+            if !already_added { body_scoped_mutations.push(mutation); }
         }
         body_mut_idx += 1;
     }

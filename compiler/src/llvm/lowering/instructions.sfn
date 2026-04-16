@@ -7,116 +7,55 @@
 // _parse_int_from_string) live in instructions_helpers.sfn so that
 // lower_instruction_range is at source position 1 — within the v0.1.1
 // seed's per-module streaming emission limit.
-
 import { NativeFunction, NativeInstruction } from "../../native_ir";
 import { substring } from "../../string_utils";
-
+import { append_local_binding, } from "../expression_lowering/native/core_scopes";
+import { lower_expression_statement, lower_return_instruction, } from "../expression_lowering/native/statement";
+import { parse_inline_let_expression, } from "../expression_lowering/native/statement_parsing";
+import { apply_lifetime_release_events, } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants, } from "../strings";
 import {
-    TypeContext,
-    LocalBinding,
-    ParameterBinding,
-    LLVMOperand,
     BlockLoweringResult,
+    LLVMOperand,
     LetLoweringResult,
-    LoopContext,
     LifetimeRegionMetadata,
+    LocalBinding,
     LocalMutation,
+    LoopContext,
+    ParameterBinding,
     StringConstant,
+    TypeContext,
 } from "../types";
-
 import {
-    trim_text,
     append_string,
     extend_string_array,
-    number_to_string,
     index_of,
+    number_to_string,
+    trim_text,
 } from "../utils";
-
+import { lower_for_instruction, } from "./instructions_for";
 import {
+    _parse_int_from_string,
     extend_lifetime_regions,
     extend_mutations,
-    _parse_int_from_string,
 } from "./instructions_helpers";
-
-import {
-    empty_string_constant_set,
-    merge_string_constants,
-} from "../strings";
-
-import {
-    append_local_binding,
-} from "../expression_lowering/native/core_scopes";
-
-import {
-    lower_expression_statement,
-    lower_return_instruction,
-} from "../expression_lowering/native/statement";
-
-import {
-    parse_inline_let_expression,
-} from "../expression_lowering/native/statement_parsing";
-
-import {
-    apply_lifetime_release_events,
-} from "../lifetime";
-
-import {
-    find_last_label,
-} from "./phi";
-
+import { lower_if_instruction, } from "./instructions_if";
+import { lower_let_instruction, } from "./instructions_let";
 import {
     append_loop_context,
     last_loop_context,
     lower_loop_instruction,
 } from "./instructions_loops";
-
+import { lower_match_instruction, } from "./instructions_match";
+import { lower_throw_instruction, lower_try_instruction, } from "./instructions_try";
 import {
-    lower_for_instruction,
-} from "./instructions_for";
-
-import {
-    lower_throw_instruction,
-    lower_try_instruction,
-} from "./instructions_try";
-
-import {
-    lower_match_instruction,
-} from "./instructions_match";
-
-import {
-    lower_if_instruction,
-} from "./instructions_if";
-
-import {
-    lower_let_instruction,
-} from "./instructions_let";
-
-import {
+    get_instruction_condition,
     get_instruction_tag,
     get_instruction_text,
-    get_instruction_condition,
 } from "./lowering_native_helpers";
+import { find_last_label, } from "./phi";
 
-fn lower_instruction_range(
-    function: NativeFunction,
-    start_index: number,
-    end: number,
-    llvm_return: string,
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    allocas: string[],
-    lines: string[],
-    temp_index: number,
-    block_counter: number,
-    next_local_id: number,
-    next_region_id: number,
-    functions: NativeFunction[],
-    loop_stack: LoopContext[],
-    context: TypeContext,
-    scope_id: string,
-    scope_depth: number,
-    current_label: string
-) -> BlockLoweringResult ![io] {
+fn lower_instruction_range(function: NativeFunction, start_index: number, end: number, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, block_counter: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], loop_stack: LoopContext[], context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -142,36 +81,20 @@ fn lower_instruction_range(
     }
     let mut _let220: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") {
-            _let220 = true;
-        }
+        if fs.exists("build/sailfin/.test_runner_active") { _let220 = true; }
     }
     let trace = _let220;
     if trace {
         if start_index == 0 {
             if scope_depth == 0 {
-                print.err(
-                    "test llvm: lower_instruction_range start "
-                    + function.name
-                    + " end="
-                    + number_to_string(end)
-                );
+                print.err("test llvm: lower_instruction_range start " + function.name + " end=" + number_to_string(end));
                 let mut preview_index: number = start_index;
                 let mut preview_limit: number = start_index + 5;
-                if preview_limit > end {
-                    preview_limit = end;
-                }
+                if preview_limit > end { preview_limit = end; }
                 loop {
-                    if preview_index >= preview_limit {
-                        break;
-                    }
+                    if preview_index >= preview_limit { break; }
                     let _preview_tag = get_instruction_tag(function.instructions, preview_index);
-                    print.err(
-                        "test llvm: instr "
-                        + number_to_string(preview_index)
-                        + " tag="
-                        + number_to_string(_preview_tag)
-                    );
+                    print.err("test llvm: instr " + number_to_string(preview_index) + " tag=" + number_to_string(_preview_tag));
                     preview_index += 1;
                 }
             }
@@ -205,16 +128,9 @@ fn lower_instruction_range(
             };
         }
         if guard > max_guard {
-            diagnostics = append_string(
-                diagnostics,
-                "llvm lowering: instruction loop exceeded limit in `" + function.name + "` (index=" + number_to_string(index) + ")"
-            );
+            diagnostics = append_string(diagnostics, "llvm lowering: instruction loop exceeded limit in `" + function.name + "` (index=" + number_to_string(index) + ")");
             if trace {
-                print.err(
-                    "test llvm: instruction loop exceeded limit in " + function.name
-                    + " index=" + number_to_string(index)
-                    + " end=" + number_to_string(end)
-                );
+                print.err("test llvm: instruction loop exceeded limit in " + function.name + " index=" + number_to_string(index) + " end=" + number_to_string(end));
             }
             // Return directly (same loop-break workaround as index>=end case)
             return BlockLoweringResult {
@@ -546,7 +462,9 @@ fn lower_instruction_range(
                 // Detect return instructions that the tag couldn't distinguish
                 let mut _is_ret_21: boolean = false;
                 if trimmed_21.length >= 4 {
-                    if substring(trimmed_21, 0, 4) == "ret " { _is_ret_21 = true; }
+                    if substring(trimmed_21, 0, 4) == "ret " {
+                        _is_ret_21 = true;
+                    }
                 }
                 if trimmed_21 == "ret" { _is_ret_21 = true; }
                 if _is_ret_21 {
@@ -636,9 +554,7 @@ fn lower_instruction_range(
                 string_constants: collected_string_constants,
             };
         }
-        if !_tag_handled {
-            index += 1;
-        }
+        if !_tag_handled { index += 1; }
     }
 
     if debug_lowering {
@@ -648,19 +564,8 @@ fn lower_instruction_range(
         if start_index == 0 {
             if scope_depth == 0 {
                 let mut term_label: string = "false";
-                if terminated {
-                    term_label = "true";
-                }
-                print.err(
-                    "test llvm: lower_instruction_range done "
-                    + function.name
-                    + " lines="
-                    + number_to_string(current_lines.length)
-                    + " allocas="
-                    + number_to_string(current_allocas.length)
-                    + " terminated="
-                    + term_label
-                );
+                if terminated { term_label = "true"; }
+                print.err("test llvm: lower_instruction_range done " + function.name + " lines=" + number_to_string(current_lines.length) + " allocas=" + number_to_string(current_allocas.length) + " terminated=" + term_label);
             }
         }
     }

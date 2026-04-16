@@ -3,55 +3,41 @@
 // Shared helper utilities extracted from instructions.sfn so that
 // lower_instruction_range occupies position 1 in its module -- within
 // the v0.1.1 seed's per-module streaming emission limit.
-
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { substring, char_code, grapheme_at } from "../../string_utils";
-
+import { char_code, grapheme_at, substring } from "../../string_utils";
+import { append_local_binding, } from "../expression_lowering/native/core_scopes";
+import { merge_string_constants, } from "../strings";
 import {
-    TypeContext,
-    LocalBinding,
-    ParameterBinding,
-    LLVMOperand,
     BlockLoweringResult,
+    LLVMOperand,
     LetLoweringResult,
-    LoopContext,
     LifetimeRegionMetadata,
     LifetimeReleaseEvent,
-    OwnershipInfo,
-    OwnershipConsumption,
-    ScopeMetadata,
+    LocalBinding,
     LocalMutation,
+    LoopContext,
+    OwnershipConsumption,
+    OwnershipInfo,
+    ParameterBinding,
+    ScopeMetadata,
     StringConstant,
+    TypeContext,
 } from "../types";
-
 import {
-    trim_text,
     append_string,
     extend_string_array,
-    number_to_string,
     index_of,
+    number_to_string,
     starts_with,
+    trim_text,
 } from "../utils";
-
-import {
-    merge_string_constants,
-} from "../strings";
-
-import {
-    append_local_binding,
-} from "../expression_lowering/native/core_scopes";
-
-import {
-    split_lines_local,
-} from "./lowering_text_utils";
+import { split_lines_local, } from "./lowering_text_utils";
 
 fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
+        if index >= values.length { break; }
         result.push(values[index]);
         index += 1;
     }
@@ -59,15 +45,11 @@ fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
 }
 
 fn extend_lifetime_regions(values: LifetimeRegionMetadata[], extras: LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
-    if extras.length == 0 {
-        return values;
-    }
+    if extras.length == 0 { return values; }
     let mut out = values;
     let mut index: number = 0;
     loop {
-        if index >= extras.length {
-            break;
-        }
+        if index >= extras.length { break; }
         out = out.push(extras[index]);
         index += 1;
     }
@@ -75,15 +57,11 @@ fn extend_lifetime_regions(values: LifetimeRegionMetadata[], extras: LifetimeReg
 }
 
 fn extend_mutations(values: LocalMutation[], extras: LocalMutation[]) -> LocalMutation[] {
-    if extras.length == 0 {
-        return values;
-    }
+    if extras.length == 0 { return values; }
     let mut out = values;
     let mut index: number = 0;
     loop {
-        if index >= extras.length {
-            break;
-        }
+        if index >= extras.length { break; }
         out = out.push(extras[index]);
         index += 1;
     }
@@ -91,17 +69,13 @@ fn extend_mutations(values: LocalMutation[], extras: LocalMutation[]) -> LocalMu
 }
 
 fn insert_lines_before_index(lines: string[], index: number, insert_lines: string[]) -> string[] {
-    if insert_lines.length == 0 {
-        return lines;
-    }
+    if insert_lines.length == 0 { return lines; }
 
     let mut result: string[] = [];
     let mut line_idx: number = 0;
     let mut inserted: boolean = false;
     loop {
-        if line_idx >= lines.length {
-            break;
-        }
+        if line_idx >= lines.length { break; }
         if !inserted {
             if line_idx == index {
                 result = extend_string_array(result, insert_lines);
@@ -112,30 +86,15 @@ fn insert_lines_before_index(lines: string[], index: number, insert_lines: strin
         line_idx += 1;
     }
 
-    if !inserted {
-        result = extend_string_array(result, insert_lines);
-    }
+    if !inserted { result = extend_string_array(result, insert_lines); }
 
     return result;
 }
 
-fn _write_block_result_files(
-    lines: string[],
-    allocas: string[],
-    terminated: boolean,
-    diagnostics: string[],
-    string_constants: StringConstant[],
-    temp_index: number,
-    block_counter: number,
-    next_local_id: number,
-    next_lifetime_region_id: number,
-    next_index: number
-) ![io] {
+fn _write_block_result_files(lines: string[], allocas: string[], terminated: boolean, diagnostics: string[], string_constants: StringConstant[], temp_index: number, block_counter: number, next_local_id: number, next_lifetime_region_id: number, next_index: number) ![io] {
     // Only write the two IPC files that still have live readers.
     let mut term_val: string = "0";
-    if terminated {
-        term_val = "1";
-    }
+    if terminated { term_val = "1"; }
     fs.writeFile("build/sailfin/.block_result_terminated", term_val);
 
     let mut sc_lines: string[] = [];
@@ -156,13 +115,9 @@ fn _write_block_result_files(
 // corruption entirely.
 fn _read_ipc_terminated() -> boolean ![io] {
     let content = fs.readFile("build/sailfin/.block_result_terminated");
-    if content.length == 0 {
-        return false;
-    }
+    if content.length == 0 { return false; }
     let first_char = grapheme_at(content, 0);
-    if first_char == "1" {
-        return true;
-    }
+    if first_char == "1" { return true; }
     return false;
 }
 
@@ -172,24 +127,18 @@ fn _parse_int_from_string(text: string) -> number {
     let mut result: number = 0;
     let mut i: number = 0;
     let first_ch = grapheme_at(text, 0);
-    if first_ch == "-" {
-        i = 1;
-    }
+    if first_ch == "-" { i = 1; }
     loop {
         if i >= len { break; }
         let ch = grapheme_at(text, i);
         if ch == "." { break; }
         let code = char_code(ch);
         if code >= 48 {
-            if code <= 57 {
-                result = result * 10 + (code - 48);
-            }
+            if code <= 57 { result = result * 10 + (code - 48); }
         }
         i = i + 1;
     }
-    if first_ch == "-" {
-        return 0 - result;
-    }
+    if first_ch == "-" { return 0 - result; }
     return result;
 }
 
@@ -197,17 +146,11 @@ fn _parse_int_from_string(text: string) -> number {
 // This prevents temp_index resets to 0 when files are missing/empty/stale,
 // which otherwise causes duplicate SSA names (%tN) in LLVM IR.
 fn _read_ipc_int_min(path: string, floor_value: number) -> number ![io] {
-    if !fs.exists(path) {
-        return floor_value;
-    }
+    if !fs.exists(path) { return floor_value; }
     let text = fs.readFile(path);
-    if text.length == 0 {
-        return floor_value;
-    }
+    if text.length == 0 { return floor_value; }
     let parsed = _parse_int_from_string(text);
-    if parsed > floor_value {
-        return parsed;
-    }
+    if parsed > floor_value { return parsed; }
     return floor_value;
 }
 
@@ -293,7 +236,9 @@ fn read_block_result_string_constants(existing: StringConstant[]) -> StringConst
                 let _ct = substring(_r2, 0, _t2);
                 let _bct = substring(_r2, _t2 + 1, _r2.length);
                 let _bc = _parse_int_from_string(_bct);
-                result = merge_string_constants(result, [StringConstant { name: _nm, content: _ct, byte_count: _bc }]);
+                result = merge_string_constants(result, [StringConstant {
+                    name: _nm, content: _ct, byte_count: _bc
+                }]);
             }
         }
     }
@@ -329,7 +274,9 @@ fn read_expr_string_constants(existing: StringConstant[]) -> StringConstant[] ![
                 let _ct = substring(_r2, 0, _t2);
                 let _bct = substring(_r2, _t2 + 1, _r2.length);
                 let _bc = _parse_int_from_string(_bct);
-                result = merge_string_constants(result, [StringConstant { name: _nm, content: _ct, byte_count: _bc }]);
+                result = merge_string_constants(result, [StringConstant {
+                    name: _nm, content: _ct, byte_count: _bc
+                }]);
             }
         }
         fs.writeFile("build/sailfin/.expr_stmt_string_constants", "");
@@ -366,7 +313,9 @@ fn read_let_result_string_constants(existing: StringConstant[]) -> StringConstan
                 let _ct = substring(_r2, 0, _t2);
                 let _bct = substring(_r2, _t2 + 1, _r2.length);
                 let _bc = _parse_int_from_string(_bct);
-                result = merge_string_constants(result, [StringConstant { name: _nm, content: _ct, byte_count: _bc }]);
+                result = merge_string_constants(result, [StringConstant {
+                    name: _nm, content: _ct, byte_count: _bc
+                }]);
             }
         }
     }
@@ -376,14 +325,7 @@ fn read_let_result_string_constants(existing: StringConstant[]) -> StringConstan
 // Read let-lowering result from file IPC and update state.
 // Returns updated locals array.
 // Writes lines/allocas/scalar results to .let_ipc_* files for caller.
-fn read_let_result_from_files(
-    diagnostics: string[],
-    current_locals: LocalBinding[],
-    current_lines: string[],
-    current_allocas: string[],
-    scope_id: string,
-    scope_depth: number
-) -> LocalBinding[] ![io] {
+fn read_let_result_from_files(diagnostics: string[], current_locals: LocalBinding[], current_lines: string[], current_allocas: string[], scope_id: string, scope_depth: number) -> LocalBinding[] ![io] {
     let mut result_locals = current_locals;
     if fs.exists("build/sailfin/.let_result_temp_index") {
         // Read diagnostics from bulk file
@@ -421,15 +363,15 @@ fn read_let_result_from_files(
             let _pointer = fs.readFile("build/sailfin/.let_result_local_pointer");
             let _type = fs.readFile("build/sailfin/.let_result_local_llvm_type");
             let _ann = fs.readFile("build/sailfin/.let_result_local_type_ann");
-            result_locals = append_local_binding(result_locals, LocalBinding { name: _name, pointer: _pointer, llvm_type: _type, type_annotation: _ann, ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth });
+            result_locals = append_local_binding(result_locals, LocalBinding {
+                name: _name, pointer: _pointer, llvm_type: _type, type_annotation: _ann, ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth
+            });
         }
         fs.deleteFile("build/sailfin/.let_result_temp_index");
         if fs.exists("build/sailfin/.let_result_local_name") {
             fs.deleteFile("build/sailfin/.let_result_local_name");
         }
-    } else {
-        fs.writeFile("build/sailfin/.let_ipc_used", "0");
-    }
+    } else { fs.writeFile("build/sailfin/.let_ipc_used", "0"); }
     return result_locals;
 }
 
@@ -446,7 +388,7 @@ fn read_expr_mutations(existing: LocalMutation[]) -> LocalMutation[] ![io] {
         let _mv = fs.readFile(_mp + "_value");
         let _ml = fs.readFile(_mp + "_label");
         result = extend_mutations(result, [LocalMutation {
-                    name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
+            name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
         }]);
         _mi += 1;
     }
@@ -486,9 +428,7 @@ fn recover_temp_from_lines(lines: string[], floor: number) -> number {
                                 rj += 1;
                             }
                             if rvalid {
-                                if rn >= result {
-                                    result = rn + 1;
-                                }
+                                if rn >= result { result = rn + 1; }
                             }
                         }
                     }

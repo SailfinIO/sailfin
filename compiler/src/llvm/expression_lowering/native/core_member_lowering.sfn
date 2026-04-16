@@ -1,66 +1,55 @@
 // compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn
 //
 // Member access lowering extracted from core.sfn.
-
 import { NativeFunction } from "../../../native_ir";
-
+import { index_of, substring } from "../../../string_utils";
+import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import {
-    TypeContext,
-    StructTypeInfo,
-    StructFieldInfo,
-    EnumTypeInfo,
-    EnumVariantInfo,
-    ParameterBinding,
-    LocalBinding,
-    MemberAccessParse,
-    ExpressionResult,
-    LLVMOperand,
-    StringConstant,
-    StringPointerResult,
-} from "../../types";
-
-import {
-    trim_text,
-    append_string,
-    starts_with,
-    contains_text,
-    number_to_string,
-} from "../../utils";
-
-import { substring, index_of } from "../../../string_utils";
-
-import {
-    empty_string_constant_set,
     append_string_constant,
+    empty_string_constant_set,
     find_string_constant_by_name,
 } from "../../strings";
-
+import {
+    find_enum_info_by_llvm_type,
+    find_interface_info_by_name,
+    find_struct_field_info,
+    find_struct_info_by_llvm_type,
+    find_struct_info_by_name,
+    find_variant_field_info,
+    resolve_enum_info_for_literal,
+} from "../../type_context_queries";
 import {
     ends_with_pointer_suffix,
-    strip_pointer_suffix,
     layout_annotation_base_type,
     layout_annotation_represents_user_value,
     map_type_annotation,
+    strip_pointer_suffix,
 } from "../../type_mapping";
-
 import {
-    find_struct_info_by_llvm_type,
-    find_struct_field_info,
-    find_enum_info_by_llvm_type,
-    resolve_enum_info_for_literal,
-    find_struct_info_by_name,
-    find_interface_info_by_name,
-    find_variant_field_info,
-} from "../../type_context_queries";
-
-import { format_temp_name, default_return_literal } from "../../expressions_helpers";
-
-import { sanitize_symbol } from "./core_text";
-
-import { lower_inline_gep_field_access } from "./core_member_helpers";
-
+    EnumTypeInfo,
+    EnumVariantInfo,
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    MemberAccessParse,
+    ParameterBinding,
+    StringConstant,
+    StringPointerResult,
+    StructFieldInfo,
+    StructTypeInfo,
+    TypeContext,
+} from "../../types";
+import {
+    append_string,
+    contains_text,
+    number_to_string,
+    starts_with,
+    trim_text,
+} from "../../utils";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
+import { lower_inline_gep_field_access } from "./core_member_helpers";
+import { sanitize_symbol } from "./core_text";
 
 fn make_expression_result(lines: string[], temp_index: number, operand: LLVMOperand?, diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     return ExpressionResult {
@@ -78,7 +67,11 @@ fn emit_string_constant_pointer(constant: StringConstant, temp_index: number, li
     let array_type = "[" + number_to_string(array_length) + " x i8]";
     let temp_name = format_temp_name(temp_index);
     current_lines.push("  " + temp_name + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + constant.name + ", i32 0, i32 0");
-    return StringPointerResult { lines: current_lines, temp_index: temp_index + 1, pointer: temp_name };
+    return StringPointerResult {
+        lines: current_lines,
+        temp_index: temp_index + 1,
+        pointer: temp_name
+    };
 }
 
 fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
@@ -92,10 +85,12 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     let _rf_prefix = "@.runtime" + ".field.";
     let constant_name = _rf_prefix + sanitized_field;
     let existing_constant = find_string_constant_by_name(dynamic_string_constants, constant_name);
-    let mut field_constant: StringConstant = StringConstant { name: constant_name, content: field, byte_count: field.length };
-    if existing_constant != null {
-        field_constant = existing_constant;
-    } else {
+    let mut field_constant: StringConstant = StringConstant {
+        name: constant_name,
+        content: field,
+        byte_count: field.length
+    };
+    if existing_constant != null { field_constant = existing_constant; } else {
         dynamic_string_constants = append_string_constant(dynamic_string_constants, field_constant);
     }
 
@@ -137,7 +132,13 @@ fn lower_runtime_global_reference(temp_index: number, lines: string[]) -> Expres
     current_lines.push("  " + runtime_temp + " = load i8*, i8** @runtime");
     let operand = LLVMOperand { llvm_type: "i8*", value: runtime_temp };
     let empty_constants = empty_string_constant_set();
-    return ExpressionResult { lines: current_lines, temp_index: temp_index + 1, operand: operand, diagnostics: [], string_constants: empty_constants };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: temp_index + 1,
+        operand: operand,
+        diagnostics: [],
+        string_constants: empty_constants
+    };
 }
 
 fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, base_operand: LLVMOperand, pointer_available: boolean, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[], expected_type: string) -> ExpressionResult {
@@ -146,7 +147,10 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     let mut enum_string_constants: StringConstant[] = string_constants;
     let mut messages: string[] = diagnostics;
 
-    let mut tag_operand: LLVMOperand = LLVMOperand { llvm_type: enum_info.tag_type, value: "" };
+    let mut tag_operand: LLVMOperand = LLVMOperand {
+        llvm_type: enum_info.tag_type,
+        value: ""
+    };
     if pointer_available {
         let tag_ptr = format_temp_name(current_temp);
         current_lines.push("  " + tag_ptr + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + base_operand.value + ", i32 0, i32 0");
@@ -154,23 +158,35 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         let tag_temp = format_temp_name(current_temp);
         current_lines.push("  " + tag_temp + " = load " + enum_info.tag_type + ", " + enum_info.tag_type + "* " + tag_ptr);
         current_temp += 1;
-        tag_operand = LLVMOperand { llvm_type: enum_info.tag_type, value: tag_temp };
+        tag_operand = LLVMOperand {
+            llvm_type: enum_info.tag_type,
+            value: tag_temp
+        };
     } else {
         let tag_temp = format_temp_name(current_temp);
         current_lines.push("  " + tag_temp + " = extractvalue " + enum_info.llvm_name + " " + base_operand.value + ", 0");
         current_temp += 1;
-        tag_operand = LLVMOperand { llvm_type: enum_info.tag_type, value: tag_temp };
+        tag_operand = LLVMOperand {
+            llvm_type: enum_info.tag_type,
+            value: tag_temp
+        };
     }
 
     if parse.field == "variant" {
         let sanitized_enum = sanitize_symbol(enum_info.name);
         let default_constant_name = "@.enum." + sanitized_enum + ".variant.default";
         let existing_default = find_string_constant_by_name(enum_string_constants, default_constant_name);
-        let mut default_constant: StringConstant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
-        if existing_default != null {
-            default_constant = existing_default;
-        } else {
-            default_constant = StringConstant { name: default_constant_name, content: "", byte_count: 0 };
+        let mut default_constant: StringConstant = StringConstant {
+            name: default_constant_name,
+            content: "",
+            byte_count: 0
+        };
+        if existing_default != null { default_constant = existing_default; } else {
+            default_constant = StringConstant {
+                name: default_constant_name,
+                content: "",
+                byte_count: 0
+            };
             enum_string_constants = append_string_constant(enum_string_constants, default_constant);
         }
 
@@ -181,18 +197,22 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
 
         let mut variant_index: number = 0;
         loop {
-            if variant_index >= enum_info.variants.length {
-                break;
-            }
+            if variant_index >= enum_info.variants.length { break; }
             let variant_info = enum_info.variants[variant_index];
             let sanitized_variant = sanitize_symbol(variant_info.name);
             let constant_name = "@.enum." + sanitized_enum + "." + sanitized_variant + ".variant";
             let existing_variant = find_string_constant_by_name(enum_string_constants, constant_name);
-            let mut variant_constant: StringConstant = StringConstant { name: constant_name, content: "", byte_count: 0 };
-            if existing_variant != null {
-                variant_constant = existing_variant;
-            } else {
-                variant_constant = StringConstant { name: constant_name, content: variant_info.name, byte_count: variant_info.name.length };
+            let mut variant_constant: StringConstant = StringConstant {
+                name: constant_name,
+                content: "",
+                byte_count: 0
+            };
+            if existing_variant != null { variant_constant = existing_variant; } else {
+                variant_constant = StringConstant {
+                    name: constant_name,
+                    content: variant_info.name,
+                    byte_count: variant_info.name.length
+                };
                 enum_string_constants = append_string_constant(enum_string_constants, variant_constant);
             }
 
@@ -213,7 +233,10 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             variant_index += 1;
         }
 
-        let operand = LLVMOperand { llvm_type: "i8*", value: current_pointer };
+        let operand = LLVMOperand {
+            llvm_type: "i8*",
+            value: current_pointer
+        };
         return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
     }
 
@@ -221,27 +244,19 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     let mut matched_fields: StructFieldInfo[] = [];
     let mut variant_check_index: number = 0;
     loop {
-        if variant_check_index >= enum_info.variants.length {
-            break;
-        }
+        if variant_check_index >= enum_info.variants.length { break; }
         let candidate_variant = enum_info.variants[variant_check_index];
         let candidate_field = find_variant_field_info(candidate_variant, parse.field);
         if candidate_field != null {
             let mut resolved_field = candidate_field;
             if resolved_field.llvm_type.length == 0 {
                 let mut mapped = map_type_annotation(resolved_field.type_annotation);
-                if mapped == "void" {
-                    mapped = "";
-                }
-                if mapped.length == 0 {
-                    mapped = "i8*";
-                }
+                if mapped == "void" { mapped = ""; }
+                if mapped.length == 0 { mapped = "i8*"; }
                 if layout_annotation_represents_user_value(resolved_field.type_annotation) {
                     if ends_with_pointer_suffix(mapped) {
                         let stripped = strip_pointer_suffix(mapped);
-                        if stripped.length > 0 {
-                            mapped = stripped;
-                        }
+                        if stripped.length > 0 { mapped = stripped; }
                     }
                 }
                 resolved_field = StructFieldInfo {
@@ -271,9 +286,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         let mut filtered_fields: StructFieldInfo[] = [];
         let mut selection_index: number = 0;
         loop {
-            if selection_index >= matched_fields.length {
-                break;
-            }
+            if selection_index >= matched_fields.length { break; }
             let candidate_field = matched_fields[selection_index];
             if candidate_field.llvm_type == expected_type {
                 filtered_variants.push(matched_variants[selection_index]);
@@ -300,9 +313,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     let mut base_type: string = first_type;
     let mut first_pointer_depth: number = 0;
     loop {
-        if !ends_with_pointer_suffix(base_type) {
-            break;
-        }
+        if !ends_with_pointer_suffix(base_type) { break; }
         base_type = strip_pointer_suffix(base_type);
         first_pointer_depth += 1;
     }
@@ -313,16 +324,12 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     let mut pointer_depth_mismatch: boolean = false;
     let mut type_index: number = 1;
     loop {
-        if type_index >= selected_fields.length {
-            break;
-        }
+        if type_index >= selected_fields.length { break; }
         let candidate_type = selected_fields[type_index].llvm_type;
         let mut candidate_base: string = candidate_type;
         let mut candidate_depth: number = 0;
         loop {
-            if !ends_with_pointer_suffix(candidate_base) {
-                break;
-            }
+            if !ends_with_pointer_suffix(candidate_base) { break; }
             candidate_base = strip_pointer_suffix(candidate_base);
             candidate_depth += 1;
         }
@@ -350,18 +357,12 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     let mut field_type: string = selected_fields[0].llvm_type;
     if field_type.length == 0 {
         let mut mapped = map_type_annotation(selected_fields[0].type_annotation);
-        if mapped == "void" {
-            mapped = "";
-        }
-        if mapped.length == 0 {
-            mapped = "i8*";
-        }
+        if mapped == "void" { mapped = ""; }
+        if mapped.length == 0 { mapped = "i8*"; }
         if layout_annotation_represents_user_value(selected_fields[0].type_annotation) {
             if ends_with_pointer_suffix(mapped) {
                 let stripped = strip_pointer_suffix(mapped);
-                if stripped.length > 0 {
-                    mapped = stripped;
-                }
+                if stripped.length > 0 { mapped = stripped; }
             }
         }
         field_type = mapped;
@@ -371,9 +372,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         let mut _if71: boolean = false;
         if max_pointer_depth - min_pointer_depth == 1 {
             if base_type.length > 0 {
-                if substring(base_type, 0, 1) == "%" {
-                    _if71 = true;
-                }
+                if substring(base_type, 0, 1) == "%" { _if71 = true; }
             }
         }
         if _if71 {
@@ -398,18 +397,14 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     let mut current_value_text: string = default_literal;
     let mut match_index: number = 0;
     loop {
-        if match_index >= selected_variants.length {
-            break;
-        }
+        if match_index >= selected_variants.length { break; }
         let variant_info = selected_variants[match_index];
         let field_info = selected_fields[match_index];
 
         let payload_ptr_temp = format_temp_name(current_temp);
         let mut payload_field_index: number = 1;
         if enum_info.max_payload_size > 0 {
-            if enum_info.align > enum_info.tag_size {
-                payload_field_index = 2;
-            }
+            if enum_info.align > enum_info.tag_size { payload_field_index = 2; }
         }
         current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 " + number_to_string(payload_field_index));
         current_temp += 1;
@@ -430,18 +425,12 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         let mut storage_type = field_info.llvm_type;
         if storage_type.length == 0 {
             let mut mapped = map_type_annotation(field_info.type_annotation);
-            if mapped == "void" {
-                mapped = "";
-            }
-            if mapped.length == 0 {
-                mapped = "i8*";
-            }
+            if mapped == "void" { mapped = ""; }
+            if mapped.length == 0 { mapped = "i8*"; }
             if layout_annotation_represents_user_value(field_info.type_annotation) {
                 if ends_with_pointer_suffix(mapped) {
                     let stripped = strip_pointer_suffix(mapped);
-                    if stripped.length > 0 {
-                        mapped = stripped;
-                    }
+                    if stripped.length > 0 { mapped = stripped; }
                 }
             }
             storage_type = mapped;
@@ -475,7 +464,10 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         match_index += 1;
     }
 
-    let operand = LLVMOperand { llvm_type: field_type, value: current_value_text };
+    let operand = LLVMOperand {
+        llvm_type: field_type,
+        value: current_value_text
+    };
     return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
 }
 
@@ -484,7 +476,13 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     let mut diagnostics: string[] = base_result.diagnostics;
     let mut collected_string_constants: StringConstant[] = base_result.string_constants;
     if base_result.operand == null {
-        return ExpressionResult { lines: base_result.lines, temp_index: base_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult {
+            lines: base_result.lines,
+            temp_index: base_result.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     let mut current_lines: string[] = base_result.lines;
@@ -502,13 +500,22 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                             let loaded_array = format_temp_name(current_temp);
                             current_lines.push("  " + loaded_array + " = load " + inner_type + ", " + base_operand.llvm_type + " " + base_operand.value);
                             current_temp += 1;
-            
+
                             let length_temp = format_temp_name(current_temp);
                             current_lines.push("  " + length_temp + " = extractvalue " + inner_type + " " + loaded_array + ", 1");
                             current_temp += 1;
-            
-                            let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
-                            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+
+                            let operand = LLVMOperand {
+                                llvm_type: "i64",
+                                value: length_temp
+                            };
+                            return ExpressionResult {
+                                lines: current_lines,
+                                temp_index: current_temp,
+                                operand: operand,
+                                diagnostics: diagnostics,
+                                string_constants: collected_string_constants
+                            };
                         }
                     }
                 }
@@ -521,8 +528,17 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             let length_temp = format_temp_name(current_temp);
             current_lines.push("  " + length_temp + " = call i64 @sailfin_runtime_string_length(i8* " + base_operand.value + ")");
             current_temp += 1;
-            let operand = LLVMOperand { llvm_type: "i64", value: length_temp };
-            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+            let operand = LLVMOperand {
+                llvm_type: "i64",
+                value: length_temp
+            };
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: operand,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
         }
     }
 
@@ -531,9 +547,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     let pointer_operand = base_operand;
     let mut base_type_trimmed: string = base_operand.llvm_type;
     loop {
-        if !starts_with(base_type_trimmed, " ") {
-            break;
-        }
+        if !starts_with(base_type_trimmed, " ") { break; }
         base_type_trimmed = substring(base_type_trimmed, 1, base_type_trimmed.length);
     }
 
@@ -547,9 +561,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             }
             if base_type_trimmed == "i8*" {
                 let _igep_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, current_temp, current_lines, diagnostics, collected_string_constants);
-                if _igep_result != null {
-                    return _igep_result;
-                }
+                if _igep_result != null { return _igep_result; }
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
 
@@ -558,7 +570,13 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                     diagnostics.push("llvm lowering: member access base `" + base_type_trimmed + "` lacks struct metadata");
                 }
             }
-            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
         }
         pointer_available = true;
     } else {
@@ -570,9 +588,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             }
             if base_type_trimmed == "i8*" {
                 let _igep2_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, current_temp, current_lines, diagnostics, collected_string_constants);
-                if _igep2_result != null {
-                    return _igep2_result;
-                }
+                if _igep2_result != null { return _igep2_result; }
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
             if base_type_trimmed != "double" {
@@ -580,7 +596,13 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                     diagnostics.push("llvm lowering: member access base `" + base_type_trimmed + "` lacks struct metadata");
                 }
             }
-            return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
         }
     }
 
@@ -588,7 +610,13 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     let field_info = find_struct_field_info(info, parse.field);
     if field_info == null {
         diagnostics.push("llvm lowering: struct `" + info.name + "` has no field `" + parse.field + "`");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     if pointer_available {
@@ -608,23 +636,50 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                     let cast_name = format_temp_name(current_temp);
                     current_lines.push("  " + cast_name + " = bitcast i8* " + load_name + " to " + enum_info.llvm_name + "*");
                     current_temp += 1;
-                    let typed_operand = LLVMOperand { llvm_type: enum_info.llvm_name + "*", value: cast_name };
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+                    let typed_operand = LLVMOperand {
+                        llvm_type: enum_info.llvm_name + "*",
+                        value: cast_name
+                    };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: typed_operand,
+                        diagnostics: diagnostics,
+                        string_constants: collected_string_constants
+                    };
                 }
-    
+
                 let struct_info_candidate = find_struct_info_by_name(context, base_type);
                 if struct_info_candidate != null {
                     let cast_name = format_temp_name(current_temp);
                     current_lines.push("  " + cast_name + " = bitcast i8* " + load_name + " to " + struct_info_candidate.llvm_name + "*");
                     current_temp += 1;
-                    let typed_operand = LLVMOperand { llvm_type: struct_info_candidate.llvm_name + "*", value: cast_name };
-                    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+                    let typed_operand = LLVMOperand {
+                        llvm_type: struct_info_candidate.llvm_name + "*",
+                        value: cast_name
+                    };
+                    return ExpressionResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        operand: typed_operand,
+                        diagnostics: diagnostics,
+                        string_constants: collected_string_constants
+                    };
                 }
             }
         }
 
-        let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: load_name };
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+        let operand = LLVMOperand {
+            llvm_type: field_info.llvm_type,
+            value: load_name
+        };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     let extract_name = format_temp_name(current_temp);
@@ -639,23 +694,50 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 let cast_name = format_temp_name(current_temp);
                 current_lines.push("  " + cast_name + " = bitcast i8* " + extract_name + " to " + enum_info.llvm_name + "*");
                 current_temp += 1;
-                let typed_operand = LLVMOperand { llvm_type: enum_info.llvm_name + "*", value: cast_name };
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+                let typed_operand = LLVMOperand {
+                    llvm_type: enum_info.llvm_name + "*",
+                    value: cast_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: typed_operand,
+                    diagnostics: diagnostics,
+                    string_constants: collected_string_constants
+                };
             }
-    
+
             let struct_info_candidate = find_struct_info_by_name(context, base_type);
             if struct_info_candidate != null {
                 let cast_name = format_temp_name(current_temp);
                 current_lines.push("  " + cast_name + " = bitcast i8* " + extract_name + " to " + struct_info_candidate.llvm_name + "*");
                 current_temp += 1;
-                let typed_operand = LLVMOperand { llvm_type: struct_info_candidate.llvm_name + "*", value: cast_name };
-                return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: typed_operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+                let typed_operand = LLVMOperand {
+                    llvm_type: struct_info_candidate.llvm_name + "*",
+                    value: cast_name
+                };
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: typed_operand,
+                    diagnostics: diagnostics,
+                    string_constants: collected_string_constants
+                };
             }
         }
     }
 
-    let operand = LLVMOperand { llvm_type: field_info.llvm_type, value: extract_name };
-    return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: collected_string_constants };
+    let operand = LLVMOperand {
+        llvm_type: field_info.llvm_type,
+        value: extract_name
+    };
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: collected_string_constants
+    };
 }
 
 // File-based struct field access: when the TypeContext is corrupted (v0.1.1 seed ABI),
@@ -663,10 +745,14 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
 // instead of sailfin_runtime_get_field.
 fn try_file_based_struct_field_access(base_name: string, field_name: string, base_operand: LLVMOperand, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult ![io] {
     let empty_constants = empty_string_constant_set();
-    let null_result = ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
-    if !fs.exists("build/sailfin/.struct_info") {
-        return null_result;
-    }
+    let null_result = ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: string_constants
+    };
+    if !fs.exists("build/sailfin/.struct_info") { return null_result; }
     // Find the struct type annotation for this base from bindings or locals.
     let mut struct_type_ann: string = "";
     let trimmed_base = trim_text(base_name);
@@ -750,14 +836,10 @@ fn try_file_based_struct_field_access(base_name: string, field_name: string, bas
             }
         }
     }
-    if struct_type_ann.length == 0 {
-        return null_result;
-    }
+    if struct_type_ann.length == 0 { return null_result; }
     // Look up struct in .struct_info
     let _si_raw = fs.readFile("build/sailfin/.struct_info");
-    if _si_raw.length == 0 {
-        return null_result;
-    }
+    if _si_raw.length == 0 { return null_result; }
     let mut _si_llvm: string = "";
     let mut _si_field_idx: number = -1;
     let mut _si_field_type: string = "";
@@ -798,7 +880,10 @@ fn try_file_based_struct_field_access(base_name: string, field_name: string, bas
                 _fpos = _fpos + _fcomma + 1;
             }
             let _fcolon = index_of(_fentry, ":");
-            if _fcolon < 0 { _fi += 1; continue; }
+            if _fcolon < 0 {
+                _fi += 1;
+                continue;
+            }
             let _fname = substring(_fentry, 0, _fcolon);
             let _ftype = substring(_fentry, _fcolon + 1, _fentry.length);
             if _fname == field_name {
@@ -814,9 +899,7 @@ fn try_file_based_struct_field_access(base_name: string, field_name: string, bas
     if _si_llvm.length == 0 { _if72 = true; }
     if _si_field_idx < 0 { _if72 = true; }
     if _si_field_type.length == 0 { _if72 = true; }
-    if _if72 {
-        return null_result;
-    }
+    if _if72 { return null_result; }
     // Emit: bitcast i8* to %Struct*, then GEP, then load
     let mut _out_lines = lines;
     let mut _out_temp = temp_index;
@@ -831,7 +914,13 @@ fn try_file_based_struct_field_access(base_name: string, field_name: string, bas
     _out_lines.push("  " + load_temp + " = load " + _si_field_type + ", " + field_ptr_type + " " + gep_temp);
     _out_temp += 1;
     let operand = LLVMOperand { llvm_type: _si_field_type, value: load_temp };
-    return ExpressionResult { lines: _out_lines, temp_index: _out_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
+    return ExpressionResult {
+        lines: _out_lines,
+        temp_index: _out_temp,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: string_constants
+    };
 }
 
 export {

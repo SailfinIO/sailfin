@@ -5,29 +5,100 @@
 // Dead function bodies were removed to fix OOM during selfhost.
 // Imports are preserved — the seed linker needs the full import graph
 // for correct cross-module symbol resolution.
-
 import { NativeArtifact, NativeModule } from "../../emit_native";
-import { NativeFunction, NativeStruct, NativeEnum, NativeInterface, LayoutManifest, ParseNativeResult } from "../../native_ir";
-import { select_text_artifact, parse_native_structs_for_import, parse_native_interfaces_for_import, parse_native_enums_for_import, parse_native_functions_for_import } from "../../native_ir_api";
+import {
+    LayoutManifest,
+    NativeEnum,
+    NativeFunction,
+    NativeInterface,
+    NativeStruct,
+    ParseNativeResult
+} from "../../native_ir";
+import {
+    parse_native_enums_for_import,
+    parse_native_functions_for_import,
+    parse_native_interfaces_for_import,
+    parse_native_structs_for_import,
+    select_text_artifact
+} from "../../native_ir_api";
 import { split_lines } from "../../native_ir_utils_text";
 import { substring } from "../../string_utils";
-import { TypeContext, TraitMetadata, LoweredLLVMResult, LoweredLLVMLinesResult, FunctionEffectEntry, LifetimeRegionMetadata, StringConstant } from "../types";
-import { append_string, join_with_separator, number_to_string, sanitize_symbol, string_array_contains, index_of } from "../utils";
-import { empty_string_constant_set, merge_string_constants, render_string_constants } from "../strings";
-import { collect_direct_function_effects, collect_function_call_graph, propagate_function_effects, collect_runtime_helper_targets, append_unique_effect, find_function_effect_entry, append_function_effect_entry } from "../effects";
-import { render_struct_type_definitions, render_enum_type_definitions, render_trait_metadata_comments, render_runtime_helper_declarations, render_imported_function_declarations } from "../rendering";
-import { render_test_harness_main_for_module } from "./lowering_helpers";
-import { collect_exported_symbol_names, render_interface_type_definitions, render_vtable_type_definitions, render_vtable_constants, find_function_by_name } from "../rendering_helpers";
-import { fixup_enum_layouts, build_type_context } from "../type_context";
-import { collect_imported_module_context_for_module, apply_layout_manifest_to_module } from "../imports";
-import { lower_module_bindings_to_globals } from "./module_globals";
+import {
+    append_function_effect_entry,
+    append_unique_effect,
+    collect_direct_function_effects,
+    collect_function_call_graph,
+    collect_runtime_helper_targets,
+    find_function_effect_entry,
+    propagate_function_effects
+} from "../effects";
+import {
+    apply_layout_manifest_to_module,
+    collect_imported_module_context_for_module
+} from "../imports";
+import {
+    render_enum_type_definitions,
+    render_imported_function_declarations,
+    render_runtime_helper_declarations,
+    render_struct_type_definitions,
+    render_trait_metadata_comments
+} from "../rendering";
+import {
+    collect_exported_symbol_names,
+    find_function_by_name,
+    render_interface_type_definitions,
+    render_vtable_constants,
+    render_vtable_type_definitions
+} from "../rendering_helpers";
+import {
+    empty_string_constant_set,
+    merge_string_constants,
+    render_string_constants
+} from "../strings";
+import { build_type_context, fixup_enum_layouts } from "../type_context";
+import {
+    FunctionEffectEntry,
+    LifetimeRegionMetadata,
+    LoweredLLVMLinesResult,
+    LoweredLLVMResult,
+    StringConstant,
+    TraitMetadata,
+    TypeContext
+} from "../types";
+import {
+    append_string,
+    index_of,
+    join_with_separator,
+    number_to_string,
+    sanitize_symbol,
+    string_array_contains
+} from "../utils";
 import { emit_llvm_function } from "./emission";
-import { empty_trait_metadata, is_test_module_slug, extend_native_structs, extend_native_enums, extend_native_interfaces, extend_native_functions } from "./lowering_helpers";
-import { empty_capability_manifest, _join_llvm_lines_linear, concat_native_functions, flatten_struct_methods } from "./lowering_helpers_mangling";
-import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core";
-import { parse_native_artifact_safe } from "./lowering_recovery";
-import { extend_string_lines, extend_string_lines_checked, ensure_intrinsic_declarations, module_source_filename } from "./lowering_io";
 import { lower_to_llvm_with_context, lower_to_llvm_with_parsed_context } from "./entrypoints";
+import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core";
+import { render_test_harness_main_for_module } from "./lowering_helpers";
+import {
+    empty_trait_metadata,
+    extend_native_enums,
+    extend_native_functions,
+    extend_native_interfaces,
+    extend_native_structs,
+    is_test_module_slug
+} from "./lowering_helpers";
+import {
+    _join_llvm_lines_linear,
+    concat_native_functions,
+    empty_capability_manifest,
+    flatten_struct_methods
+} from "./lowering_helpers_mangling";
+import {
+    ensure_intrinsic_declarations,
+    extend_string_lines,
+    extend_string_lines_checked,
+    module_source_filename
+} from "./lowering_io";
+import { parse_native_artifact_safe } from "./lowering_recovery";
+import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Stub: kept for import-graph compatibility (main.sfn imports this symbol).
 fn lower_to_llvm_for_tests(native_module: NativeModule) -> LoweredLLVMResult ![io] {
@@ -48,4 +119,3 @@ fn lower_to_llvm_for_tests(native_module: NativeModule) -> LoweredLLVMResult ![i
     let base = lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics);
     return base;
 }
-

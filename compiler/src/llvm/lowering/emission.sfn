@@ -10,93 +10,52 @@
 // at link time via symbol mangling. This cycle is intentional: async emission
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
-
 import { NativeFunction } from "../../native_ir";
-import { substring, find_char } from "../../string_utils";
-
+import { find_char, substring } from "../../string_utils";
+import { lower_expression, } from "../expression_lowering/native/core";
+import { append_llvm_operand, } from "../expression_lowering/native/core_scopes";
+import { make_string_constant_name_for_module, } from "../expression_lowering/native/core_text";
+import { prepare_parameters, } from "../expression_lowering/native/statement";
+import { default_return_literal, format_temp_name, } from "../expressions_helpers";
+import { format_root_scope_id, validate_borrow_lifetimes, } from "../lifetime";
+import { should_internalize_function, } from "../rendering_helpers";
 import {
-    TypeContext,
-    LocalBinding,
-    ParameterBinding,
-    LoweredLLVMFunction,
-    StringConstant,
-    BodyResult,
-    ParameterPreparation,
-    LifetimeRegionMetadata,
-} from "../types";
-
-import {
-    append_string,
-    extend_string_array,
-    join_with_separator,
-    sanitize_symbol,
-    number_to_string,
-    matches_case_insensitive,
-    index_of,
-    trim_text,
-    starts_with,
-    append_parameter_binding,
-    string_array_contains,
-} from "../utils";
-
-import {
-    empty_string_constant_set,
     append_string_constant,
+    empty_string_constant_set,
     merge_string_constants,
 } from "../strings";
-
+import { map_return_type, } from "../type_mapping";
 import {
-    map_return_type,
-} from "../type_mapping";
-
+    BodyResult,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LoweredLLVMFunction,
+    ParameterBinding,
+    ParameterPreparation,
+    StringConstant,
+    TypeContext,
+} from "../types";
 import {
-    should_internalize_function,
-} from "../rendering_helpers";
-
-import {
-    prepare_parameters,
-} from "../expression_lowering/native/statement";
-
-import {
-    append_llvm_operand,
-} from "../expression_lowering/native/core_scopes";
-
-import {
-    lower_expression,
-} from "../expression_lowering/native/core";
-
-import {
-    make_string_constant_name_for_module,
-} from "../expression_lowering/native/core_text";
-
-
-import {
-    default_return_literal,
-    format_temp_name,
-} from "../expressions_helpers";
-
-import {
-    validate_borrow_lifetimes,
-    format_root_scope_id,
-} from "../lifetime";
-
+    append_parameter_binding,
+    append_string,
+    extend_string_array,
+    index_of,
+    join_with_separator,
+    matches_case_insensitive,
+    number_to_string,
+    sanitize_symbol,
+    starts_with,
+    string_array_contains,
+    trim_text,
+} from "../utils";
 import { emit_async_function } from "./emission_async";
-
 import { build_define_header_line } from "./emission_header";
-
-import {
-    lower_instruction_range,
-} from "./instructions";
-
-import {
-    module_user_main_symbol,
-} from "./module_globals";
+import { lower_instruction_range, } from "./instructions";
+import { module_user_main_symbol, } from "./module_globals";
 
 fn _split_by_newline(content: string) -> string[] {
     let mut result: string[] = [];
-    if content.length == 0 {
-        return result;
-    }
+    if content.length == 0 { return result; }
     let mut start: number = 0;
     loop {
         if start >= content.length { break; }
@@ -112,16 +71,12 @@ fn _split_by_newline(content: string) -> string[] {
 }
 
 fn is_safe_llvm_type_text(value: string) -> boolean {
-    if value == null {
-        return false;
-    }
+    if value == null { return false; }
     let trimmed = trim_text(value);
     let mut _if194: boolean = false;
     if trimmed.length == 0 { _if194 = true; }
     if trimmed.length > 256 { _if194 = true; }
-    if _if194 {
-        return false;
-    }
+    if _if194 { return false; }
     // Fast-path for well-known primitive types.
     // The character-level check below relies on single-char indexing + index_of
     // which can be miscompiled by older seeds. These explicit checks bypass the
@@ -136,27 +91,19 @@ fn is_safe_llvm_type_text(value: string) -> boolean {
     if trimmed == "i8" { _if195 = true; }
     if trimmed == "i16" { _if195 = true; }
     if trimmed == "float" { _if195 = true; }
-    if _if195 {
-        return true;
-    }
+    if _if195 { return true; }
     // Also accept pointer-to-named-struct patterns (%Foo*) and common aggregate
     // syntax so that complex return types are not rejected.
     let mut _if196: boolean = false;
     if starts_with(trimmed, "%") { _if196 = true; }
     if starts_with(trimmed, "{") { _if196 = true; }
-    if _if196 {
-        return true;
-    }
+    if _if196 { return true; }
     let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_%*{}[],(). x-";
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
-        if index_of(allowed, ch) < 0 {
-            return false;
-        }
+        if index_of(allowed, ch) < 0 { return false; }
         index += 1;
     }
     return true;
@@ -166,9 +113,7 @@ fn parse_simple_integer(text: string) -> number {
     let mut result: number = 0;
     let mut i: number = 0;
     loop {
-        if i >= text.length {
-            break;
-        }
+        if i >= text.length { break; }
         let ch = substring(text, i, i + 1);
         let mut digit: number = -1;
         if ch == "0" { digit = 0; }
@@ -181,9 +126,7 @@ fn parse_simple_integer(text: string) -> number {
         if ch == "7" { digit = 7; }
         if ch == "8" { digit = 8; }
         if ch == "9" { digit = 9; }
-        if digit >= 0 {
-            result = result * 10 + digit;
-        }
+        if digit >= 0 { result = result * 10 + digit; }
         i += 1;
     }
     return result;
@@ -198,9 +141,7 @@ fn _reorder_phis_to_block_start(lines: string[]) -> string[] {
     let mut in_block: boolean = false;
     let mut i: number = 0;
     loop {
-        if i >= lines.length {
-            break;
-        }
+        if i >= lines.length { break; }
         let line = lines[i];
         let trimmed = trim_text(line);
         // Detect block label: non-empty, ends with ":", not indented (not a store/instruction).
@@ -211,9 +152,7 @@ fn _reorder_phis_to_block_start(lines: string[]) -> string[] {
                 // Labels are not indented; indented lines ending with : are not labels.
                 if line.length > 0 {
                     let first_ch = substring(line, 0, 1);
-                    if first_ch != " " {
-                        is_label = true;
-                    }
+                    if first_ch != " " { is_label = true; }
                 }
             }
         }
@@ -247,18 +186,12 @@ fn _reorder_phis_to_block_start(lines: string[]) -> string[] {
                 if starts_with(trimmed, "%") {
                     // Pattern: %tN = phi ...
                     let eq_pos = index_of(trimmed, "= phi ");
-                    if eq_pos > 0 {
-                        is_phi = true;
-                    }
+                    if eq_pos > 0 { is_phi = true; }
                 }
-                if is_phi {
-                    block_phi_lines = block_phi_lines.push(line);
-                } else {
+                if is_phi { block_phi_lines = block_phi_lines.push(line); } else {
                     block_other_lines = block_other_lines.push(line);
                 }
-            } else {
-                out = out.push(line);
-            }
+            } else { out = out.push(line); }
             i += 1;
         }
     }
@@ -305,9 +238,7 @@ fn prepare_parameters_from_files(fn_name: string, fn_param_count: number, contex
     let mut seen_names: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= fn_param_count {
-            break;
-        }
+        if index >= fn_param_count { break; }
         let param_name = fs.readFile("build/sailfin/.fn_param_" + number_to_string(index) + "_name");
         let raw_param_type = fs.readFile("build/sailfin/.fn_param_" + number_to_string(index) + "_type");
         // Strip default value from type annotations like "number = 0".
@@ -320,13 +251,9 @@ fn prepare_parameters_from_files(fn_name: string, fn_param_count: number, contex
             param_type = trim_text(substring(raw_param_type, 0, eq_idx));
         }
         let mut llvm_type = map_return_type(context, param_type);
-        if llvm_type == "void" {
-            llvm_type = "";
-        }
+        if llvm_type == "void" { llvm_type = ""; }
         // Default empty types to i8* so LLVM IR is parseable.
-        if llvm_type.length == 0 {
-            llvm_type = "i8*";
-        }
+        if llvm_type.length == 0 { llvm_type = "i8*"; }
         if param_type.length == 0 {
             let param_diag = "llvm lowering: parameter `" + param_name + "` missing type annotation; defaulting to `" + llvm_type + "`";
             diagnostics = append_string(diagnostics, param_diag);
@@ -337,9 +264,7 @@ fn prepare_parameters_from_files(fn_name: string, fn_param_count: number, contex
         let mut llvm_name = "%" + sanitized;
         let mut dedup_count: number = 1;
         loop {
-            if !string_array_contains(seen_names, llvm_name) {
-                break;
-            }
+            if !string_array_contains(seen_names, llvm_name) { break; }
             dedup_count += 1;
             llvm_name = "%" + sanitized + "_" + number_to_string(dedup_count);
         }
@@ -348,22 +273,14 @@ fn prepare_parameters_from_files(fn_name: string, fn_param_count: number, contex
         bindings = append_parameter_binding(bindings, _emit_make_parameter_binding(param_name, llvm_name, llvm_type, param_type));
         index += 1;
     }
-    return ParameterPreparation { signature: signature, bindings: bindings, diagnostics: diagnostics };
+    return ParameterPreparation {
+        signature: signature,
+        bindings: bindings,
+        diagnostics: diagnostics
+    };
 }
 
-fn emit_llvm_function(
-    function_name_hint: string,
-    functions: NativeFunction[],
-    effects: string[],
-    context: TypeContext,
-    module_name: string,
-    entry_points: string[],
-    exported_symbols: string[],
-    imported_functions: NativeFunction[],
-    module_globals: LocalBinding[],
-    module_init_symbol: string,
-    needs_module_init_call: boolean
-) -> LoweredLLVMFunction ![io] {
+fn emit_llvm_function(function_name_hint: string, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {
     let mut diagnostics: string[] = [];
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
 
@@ -388,13 +305,7 @@ fn emit_llvm_function(
     if fn_is_async {
         if !fn_is_extern {
             if fn_name != "main" {
-                return emit_async_function(
-                    fn_name, fn_return_type, fn_param_count,
-                    function_name_hint, functions, effects, context,
-                    module_name, entry_points, exported_symbols,
-                    imported_functions, module_globals,
-                    module_init_symbol, needs_module_init_call
-                );
+                return emit_async_function(fn_name, fn_return_type, fn_param_count, function_name_hint, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call);
             }
         }
     }
@@ -420,9 +331,7 @@ fn emit_llvm_function(
     let safe_check = is_safe_llvm_type_text(llvm_return);
     if debug_lowering {
         let mut safe_text = "false";
-        if safe_check {
-            safe_text = "true";
-        }
+        if safe_check { safe_text = "true"; }
         print.err("emit-llvm: ret_type safe_check=" + safe_text + " llvm_return=" + llvm_return + " fn=" + fn_name);
     }
     if !safe_check {
@@ -434,7 +343,12 @@ fn emit_llvm_function(
         let unsupported_diag = "llvm lowering: unsupported return type `" + fn_return_type + "` in " + fn_name;
         diagnostics = append_string(diagnostics, unsupported_diag);
         let empty_constants = empty_string_constant_set();
-        return LoweredLLVMFunction { lines: [], diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+        return LoweredLLVMFunction {
+            lines: [],
+            diagnostics: diagnostics,
+            lifetime_regions: [],
+            string_constants: empty_constants
+        };
     }
 
     if !fn_is_extern {
@@ -454,28 +368,24 @@ fn emit_llvm_function(
 
     if fn_is_extern {
         let mut signature: string = join_with_separator(preparation.signature, ", ");
-        if signature.length == 0 {
-            signature = "";
-        }
+        if signature.length == 0 { signature = ""; }
         let empty_constants = empty_string_constant_set();
         let lines: string[] = ["declare " + llvm_return + " @" + sanitized + "(" + signature + ")"];
-        return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: [], string_constants: empty_constants };
+        return LoweredLLVMFunction {
+            lines: lines,
+            diagnostics: diagnostics,
+            lifetime_regions: [],
+            string_constants: empty_constants
+        };
     }
 
     let mut _let198: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") {
-            _let198 = true;
-        }
+        if fs.exists("build/sailfin/.test_runner_active") { _let198 = true; }
     }
     let trace = _let198;
     if trace {
-        print.err(
-            "test llvm: emit_llvm_function preview "
-            + fn_name
-            + " instrs="
-            + number_to_string(fn_instr_count)
-        );
+        print.err("test llvm: emit_llvm_function preview " + fn_name + " instrs=" + number_to_string(fn_instr_count));
     }
 
     let mut lines: string[] = [];
@@ -484,21 +394,15 @@ fn emit_llvm_function(
         lines = append_string(lines, effects_comment);
     }
     let mut signature: string = join_with_separator(preparation.signature, ", ");
-    if signature.length == 0 {
-        signature = "";
-    }
+    if signature.length == 0 { signature = ""; }
 
     let entry_label: string = "block.entry";
     let mut linkage: string = "";
     let internalize = should_internalize_function(function, entry_points, exported_symbols, imported_functions);
-    if internalize {
-        linkage = "internal ";
-    }
+    if internalize { linkage = "internal "; }
     if debug_lowering {
         let mut internalize_text = "false";
-        if internalize {
-            internalize_text = "true";
-        }
+        if internalize { internalize_text = "true"; }
         print.err("emit-llvm: emit_fn phase=internalize_check name=" + fn_name + " internal=" + internalize_text);
         print.err("emit-llvm: emit_fn phase=define_header name=" + fn_name);
     }
@@ -520,18 +424,24 @@ fn emit_llvm_function(
     }
     let mut decorator_index: number = 0;
     loop {
-        if decorator_index >= fn_decorator_count {
-            break;
-        }
+        if decorator_index >= fn_decorator_count { break; }
         let decorator_name = fs.readFile("build/sailfin/.fn_decorator_" + number_to_string(decorator_index));
         let mut _if199: boolean = false;
-        if matches_case_insensitive(decorator_name, "logExecution") { _if199 = true; }
-        if matches_case_insensitive(decorator_name, "logexecution") { _if199 = true; }
+        if matches_case_insensitive(decorator_name, "logExecution") {
+            _if199 = true;
+        }
+        if matches_case_insensitive(decorator_name, "logexecution") {
+            _if199 = true;
+        }
         if matches_case_insensitive(decorator_name, "trace") { _if199 = true; }
         if _if199 {
             let content = fn_name;
             let constant_name = make_string_constant_name_for_module(module_name, content);
-            let constant = StringConstant { name: constant_name, content: content, byte_count: content.length };
+            let constant = StringConstant {
+                name: constant_name,
+                content: content,
+                byte_count: content.length
+            };
             decorator_string_constants = append_string_constant(decorator_string_constants, constant);
             let array_length = content.length + 1;
             let array_type = "[" + number_to_string(array_length) + " x i8]";
@@ -577,29 +487,15 @@ fn emit_llvm_function(
         lines = append_string(lines, "}");
         let empty_constants = empty_string_constant_set();
         let _empty_lifetime_regions: LifetimeRegionMetadata[] = [];
-        return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: empty_constants };
+        return LoweredLLVMFunction {
+            lines: lines,
+            diagnostics: diagnostics,
+            lifetime_regions: _empty_lifetime_regions,
+            string_constants: empty_constants
+        };
     }
     let _eb_function = functions[_eb_fn_index];
-    let _eb_result = lower_instruction_range(
-        _eb_function,
-        0,
-        fn_instr_count,
-        llvm_return,
-        preparation.bindings,
-        module_globals,
-        [],
-        [],
-        0,
-        0,
-        0,
-        0,
-        functions,
-        [],
-        context,
-        format_root_scope_id(fn_name),
-        0,
-        entry_label
-    );
+    let _eb_result = lower_instruction_range(_eb_function, 0, fn_instr_count, llvm_return, preparation.bindings, module_globals, [], [], 0, 0, 0, 0, functions, [], context, format_root_scope_id(fn_name), 0, entry_label);
 
     let _eb_body_lines = _eb_result.lines;
     let _eb_allocas = _eb_result.allocas;
@@ -660,50 +556,31 @@ fn emit_llvm_function(
 
     if emit_main_wrapper {
         // C ABI wrapper. Always returns 0 (success) after invoking the Sailfin main.
-        lines = extend_string_array(lines, [
-            "",
-            "define i32 @main(i32 %argc, i8** %argv) {",
-            "entry:",
-            "  call void @" + sanitized + "()",
-            "  ret i32 0",
-            "}",
-        ]);
+        lines = extend_string_array(lines, ["", "define i32 @main(i32 %argc, i8** %argv) {", "entry:", "  call void @" + sanitized + "()", "  ret i32 0", "}",]);
     }
 
     let merged_constants = merge_string_constants(_eb_string_constants, decorator_string_constants);
     let _empty_lifetime_regions: LifetimeRegionMetadata[] = [];
-    return LoweredLLVMFunction { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: merged_constants };
+    return LoweredLLVMFunction {
+        lines: lines,
+        diagnostics: diagnostics,
+        lifetime_regions: _empty_lifetime_regions,
+        string_constants: merged_constants
+    };
 }
 
-fn emit_body(
-    function_unused: string,
-    fn_name: string,
-    fn_instr_count: number,
-    llvm_return: string,
-    bindings: ParameterBinding[],
-    module_globals: LocalBinding[],
-    functions: NativeFunction[],
-    context: TypeContext,
-    entry_label: string
-) -> BodyResult ![io] {
+fn emit_body(function_unused: string, fn_name: string, fn_instr_count: number, llvm_return: string, bindings: ParameterBinding[], module_globals: LocalBinding[], functions: NativeFunction[], context: TypeContext, entry_label: string) -> BodyResult ![io] {
     let debug_body = fs.exists("build/sailfin/.trace_lowering");
     if debug_body {
         print.err("emit-llvm: emit_body start fn=" + fn_name + " llvm_return=" + llvm_return + " bindings_len=" + number_to_string(bindings.length));
     }
     let mut _let202: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") {
-            _let202 = true;
-        }
+        if fs.exists("build/sailfin/.test_runner_active") { _let202 = true; }
     }
     let trace = _let202;
     if trace {
-        print.err(
-            "test llvm: emit_body start "
-            + fn_name
-            + " instrs="
-            + number_to_string(fn_instr_count)
-        );
+        print.err("test llvm: emit_body start " + fn_name + " instrs=" + number_to_string(fn_instr_count));
     }
     // Load the NativeFunction from the functions array by index,
     // avoiding the cross-module ABI issue where NativeFunction is
@@ -711,45 +588,15 @@ fn emit_body(
     let fn_index_text = fs.readFile("build/sailfin/.fn_index");
     let fn_index = parse_simple_integer(fn_index_text);
     let function = functions[fn_index];
-    let lowered = lower_instruction_range(
-        function,
-        0,
-        fn_instr_count,
-        llvm_return,
-        bindings,
-        module_globals,
-        [],
-        [],
-        0,
-        0,
-        0,
-        0,
-        functions,
-        [],
-        context,
-        format_root_scope_id(fn_name),
-        0,
-        entry_label
-    );
+    let lowered = lower_instruction_range(function, 0, fn_instr_count, llvm_return, bindings, module_globals, [], [], 0, 0, 0, 0, functions, [], context, format_root_scope_id(fn_name), 0, entry_label);
 
     let _blk_body_lines = lowered.lines;
     let _blk_allocas = lowered.allocas;
     let _blk_terminated = lowered.terminated;
     if trace {
         let mut term_label: string = "false";
-        if _blk_terminated {
-            term_label = "true";
-        }
-        print.err(
-            "test llvm: emit_body lowered "
-            + fn_name
-            + " lines="
-            + number_to_string(_blk_body_lines.length)
-            + " allocas="
-            + number_to_string(_blk_allocas.length)
-            + " terminated="
-            + term_label
-        );
+        if _blk_terminated { term_label = "true"; }
+        print.err("test llvm: emit_body lowered " + fn_name + " lines=" + number_to_string(_blk_body_lines.length) + " allocas=" + number_to_string(_blk_allocas.length) + " terminated=" + term_label);
     }
     let mut diagnostics: string[] = lowered.diagnostics;
     let mut lines: string[] = [];
@@ -759,9 +606,7 @@ fn emit_body(
     let mut has_terminator: boolean = false;
     let mut terminator_index: number = 0;
     loop {
-        if terminator_index >= lines.length {
-            break;
-        }
+        if terminator_index >= lines.length { break; }
         let trimmed_line = trim_text(lines[terminator_index]);
         let mut _if203: boolean = false;
         if starts_with(trimmed_line, "ret ") { _if203 = true; }
@@ -791,9 +636,13 @@ fn emit_body(
     }
 
     let _empty_lifetime_regions: LifetimeRegionMetadata[] = [];
-    return BodyResult { lines: lines, diagnostics: diagnostics, lifetime_regions: _empty_lifetime_regions, string_constants: lowered.string_constants };
+    return BodyResult {
+        lines: lines,
+        diagnostics: diagnostics,
+        lifetime_regions: _empty_lifetime_regions,
+        string_constants: lowered.string_constants
+    };
 }
-
 
 // Parse serialized string constants from the file written by _write_block_result_files.
 // Format: one constant per line as "name\tcontent\tbyte_count".
@@ -802,9 +651,7 @@ fn _parse_string_constants_from_file(raw: string) -> StringConstant[] {
     let lines = _split_by_newline(raw);
     let mut i: number = 0;
     loop {
-        if i >= lines.length {
-            break;
-        }
+        if i >= lines.length { break; }
         let line = lines[i];
         if line.length == 0 {
             i += 1;
@@ -826,9 +673,7 @@ fn _parse_string_constants_from_file(raw: string) -> StringConstant[] {
         let byte_count_text = substring(rest, tab2 + 1, rest.length);
         let byte_count = parse_simple_integer(byte_count_text);
         result = append_string_constant(result, StringConstant {
-            name: name,
-            content: content,
-            byte_count: byte_count,
+            name: name, content: content, byte_count: byte_count,
         });
         i += 1;
     }

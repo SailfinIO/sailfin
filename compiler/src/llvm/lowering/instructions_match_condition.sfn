@@ -1,38 +1,43 @@
 // compiler/src/llvm/lowering/instructions_match_condition.sfn
 //
 // Match case condition lowering (split from instructions_match.sfn).
-
 import { NativeFunction } from "../../native_ir";
-
-import {
-    TypeContext, LocalBinding, ParameterBinding, LLVMOperand,
-    MatchCaseStructure, MatchCaseCondition, MatchFieldBinding,
-    MatchStructFieldBinding, EnumTypeInfo, EnumVariantInfo,
-    StructTypeInfo, StructFieldInfo, StringConstant,
-} from "../types";
-
-import { trim_text, number_to_string } from "../utils";
-import { merge_string_constants, empty_string_constant_set } from "../strings";
-import { find_struct_info_by_name, resolve_enum_info_for_literal, resolve_enum_variant_info } from "../type_context_queries";
-import { ends_with_pointer_suffix, strip_pointer_suffix, layout_annotation_represents_user_value, map_struct_field_annotation } from "../type_mapping";
-import { format_temp_name } from "../expressions_helpers";
 import { lower_expression } from "../expression_lowering/native/core";
 import { emit_boolean_and, emit_comparison_instruction, harmonise_operands } from "../expression_lowering/native/core_operands";
 import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
 import { is_union_llvm_type, parse_union_payload_types } from "../expression_lowering/native/core_text";
+import { format_temp_name } from "../expressions_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import {
+    find_struct_info_by_name,
+    resolve_enum_info_for_literal,
+    resolve_enum_variant_info
+} from "../type_context_queries";
+import {
+    ends_with_pointer_suffix,
+    layout_annotation_represents_user_value,
+    map_struct_field_annotation,
+    strip_pointer_suffix
+} from "../type_mapping";
+import {
+    EnumTypeInfo,
+    EnumVariantInfo,
+    LLVMOperand,
+    LocalBinding,
+    MatchCaseCondition,
+    MatchCaseStructure,
+    MatchFieldBinding,
+    MatchStructFieldBinding,
+    ParameterBinding,
+    StringConstant,
+    StructFieldInfo,
+    StructTypeInfo,
+    TypeContext,
+} from "../types";
+import { number_to_string, trim_text } from "../utils";
 import { lower_condition_to_i1 } from "./instructions_condition";
 
-fn lower_match_case_condition(
-    function_name: string,
-    subject_operand: LLVMOperand,
-    case: MatchCaseStructure,
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    temp_index: number,
-    lines: string[],
-    functions: NativeFunction[],
-    context: TypeContext
-) -> MatchCaseCondition {
+fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperand, case: MatchCaseStructure, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> MatchCaseCondition {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: number = temp_index;
@@ -51,9 +56,7 @@ fn lower_match_case_condition(
 
         let mut _if225: boolean = false;
         if enum_parse.recognized {
-            if enum_parse.success {
-                _if225 = true;
-            }
+            if enum_parse.success { _if225 = true; }
         }
         if _if225 {
             // This is an enum pattern - extract tag and compare
@@ -67,18 +70,10 @@ fn lower_match_case_condition(
                 } else {
                     // Map tag type to LLVM integer type
                     let mut tag_llvm_type: string = "i32";
-                    if enum_info.tag_type == "i8" {
-                        tag_llvm_type = "i8";
-                    }
-                    if enum_info.tag_type == "i16" {
-                        tag_llvm_type = "i16";
-                    }
-                    if enum_info.tag_type == "i32" {
-                        tag_llvm_type = "i32";
-                    }
-                    if enum_info.tag_type == "i64" {
-                        tag_llvm_type = "i64";
-                    }
+                    if enum_info.tag_type == "i8" { tag_llvm_type = "i8"; }
+                    if enum_info.tag_type == "i16" { tag_llvm_type = "i16"; }
+                    if enum_info.tag_type == "i32" { tag_llvm_type = "i32"; }
+                    if enum_info.tag_type == "i64" { tag_llvm_type = "i64"; }
 
                     // Extract the tag from the subject enum value using extractvalue
                     let tag_temp = format_temp_name(current_temp);
@@ -86,8 +81,14 @@ fn lower_match_case_condition(
                     current_lines.push("  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
 
                     // Compare the extracted tag with the variant's tag
-                    let tag_operand = LLVMOperand { llvm_type: tag_llvm_type, value: tag_temp };
-                    let variant_tag_operand = LLVMOperand { llvm_type: tag_llvm_type, value: number_to_string(variant_info.tag) };
+                    let tag_operand = LLVMOperand {
+                        llvm_type: tag_llvm_type,
+                        value: tag_temp
+                    };
+                    let variant_tag_operand = LLVMOperand {
+                        llvm_type: tag_llvm_type,
+                        value: number_to_string(variant_info.tag)
+                    };
 
                     let comparison = emit_comparison_instruction("==", tag_operand, variant_tag_operand, current_temp, current_lines);
                     let mut _ci4: number = 0;
@@ -104,9 +105,7 @@ fn lower_match_case_condition(
                     if variant_info.fields.length > 0 {
                         let mut field_idx: number = 0;
                         loop {
-                            if field_idx >= enum_parse.fields.length {
-                                break;
-                            }
+                            if field_idx >= enum_parse.fields.length { break; }
                             let pattern_field = enum_parse.fields[field_idx];
                             let mut variant_field_idx: number = 0;
                             let mut found_field: StructFieldInfo? = null;
@@ -139,9 +138,7 @@ fn lower_match_case_condition(
                                 }
                                 let mut updated_fields = field_bindings;
                                 updated_fields = updated_fields.push(MatchFieldBinding {
-                                    field_name: pattern_field.name,
-                                    field_type: llvm_field_type,
-                                    field_offset: found_field.offset,
+                                    field_name: pattern_field.name, field_type: llvm_field_type, field_offset: found_field.offset,
                                 });
                                 field_bindings = updated_fields;
                             } else {
@@ -170,12 +167,12 @@ fn lower_match_case_condition(
                             let mut idx: number = 0;
                             let mut found_index: number = -1;
                             loop {
-                                if idx >= union_parts.length {
-                                    break;
-                                }
+                                if idx >= union_parts.length { break; }
                                 let part = union_parts[idx];
                                 let mut _if234: boolean = false;
-                                if part == info.llvm_name + "*" { _if234 = true; }
+                                if part == info.llvm_name + "*" {
+                                    _if234 = true;
+                                }
                                 if part == info.llvm_name { _if234 = true; }
                                 if _if234 {
                                     found_index = idx;
@@ -188,12 +185,20 @@ fn lower_match_case_condition(
                                 let tag_temp = format_temp_name(current_temp);
                                 current_temp += 1;
                                 current_lines.push("  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
-                                let tag_operand = LLVMOperand { llvm_type: "i32", value: tag_temp };
-                                let expected_tag = LLVMOperand { llvm_type: "i32", value: number_to_string(found_index) };
+                                let tag_operand = LLVMOperand {
+                                    llvm_type: "i32",
+                                    value: tag_temp
+                                };
+                                let expected_tag = LLVMOperand {
+                                    llvm_type: "i32",
+                                    value: number_to_string(found_index)
+                                };
                                 let comparison = emit_comparison_instruction("==", tag_operand, expected_tag, current_temp, current_lines);
                                 let mut _ci5: number = 0;
                                 loop {
-                                    if _ci5 >= comparison.diagnostics.length { break; }
+                                    if _ci5 >= comparison.diagnostics.length {
+                                        break;
+                                    }
                                     diagnostics.push(comparison.diagnostics[_ci5]);
                                     _ci5 += 1;
                                 }
@@ -224,9 +229,7 @@ fn lower_match_case_condition(
                                         if field_info != null {
                                             let mut updated_structs = union_struct_bindings;
                                             updated_structs = updated_structs.push(MatchStructFieldBinding {
-                                                field_name: pattern_field.name,
-                                                field_type: field_info.llvm_type,
-                                                field_index: field_info.index,
+                                                field_name: pattern_field.name, field_type: field_info.llvm_type, field_index: field_info.index,
                                             });
                                             union_struct_bindings = updated_structs;
                                         } else {
@@ -272,9 +275,7 @@ fn lower_match_case_condition(
                     }
                     let mut _if231: boolean = false;
                     if harmonised.left != null {
-                        if harmonised.right != null {
-                            _if231 = true;
-                        }
+                        if harmonised.right != null { _if231 = true; }
                     }
                     if _if231 {
                         current_lines = harmonised.lines;
@@ -336,13 +337,9 @@ fn lower_match_case_condition(
 
     let mut is_unconditional_default: boolean = false;
     if case.is_default {
-        if case.guard == null {
-            is_unconditional_default = true;
-        } else {
+        if case.guard == null { is_unconditional_default = true; } else {
             let guard_trimmed = trim_text(case.guard);
-            if guard_trimmed.length == 0 {
-                is_unconditional_default = true;
-            }
+            if guard_trimmed.length == 0 { is_unconditional_default = true; }
         }
     }
 
@@ -358,6 +355,6 @@ fn lower_match_case_condition(
         union_variant_index: union_variant_index,
         union_struct_info: union_struct_info,
         union_struct_bindings: union_struct_bindings,
-    string_constants: collected_string_constants,
+        string_constants: collected_string_constants,
     };
 }

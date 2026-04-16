@@ -7,7 +7,6 @@
 //
 // This module re-exports the stable surface area used by the rest of the
 // compiler.
-
 export {
     // Statement + entrypoint helpers
     lower_expression_statement,
@@ -40,7 +39,6 @@ export {
     // Ownership/borrow analysis helpers used across lowering
     analyze_value_ownership,
     detect_borrow_conflicts,
-
 } from "./core";
 
 export {

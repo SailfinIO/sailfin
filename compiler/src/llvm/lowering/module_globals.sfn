@@ -6,53 +6,32 @@
 // AND at the end of loop bodies (places it in the afterloop block).
 // Therefore, every function with a loop MUST NOT have significant code
 // after the loop or at the end of the loop body.
-
 import { NativeBinding, NativeFunction } from "../../native_ir";
-
-import {
-    TypeContext,
-    LocalBinding,
-    ParameterBinding,
-    ModuleGlobalLoweringResult,
-    StringConstant,
-} from "../types";
-
-import {
-    append_string,
-    trim_text,
-    number_to_string,
-    matches_case_insensitive,
-    is_number_literal,
-    is_integer_literal,
-    is_boolean_literal,
-    sanitize_symbol,
-} from "../utils";
-
-import {
-    is_string_literal,
-    normalise_number_literal,
-} from "../expressions_literals";
-
-import {
-    default_return_literal,
-} from "../expressions_helpers";
-
-import {
-    empty_string_constant_set,
-    merge_string_constants,
-} from "../strings";
-
-import {
-    map_local_type,
-} from "../type_mapping";
-
 import { lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { append_local_binding, find_local_binding } from "../expression_lowering/native/core_scopes";
-
+import { default_return_literal, } from "../expressions_helpers";
+import { is_string_literal, normalise_number_literal, } from "../expressions_literals";
+import { format_root_scope_id, } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants, } from "../strings";
+import { map_local_type, } from "../type_mapping";
 import {
-    format_root_scope_id,
-} from "../lifetime";
+    LocalBinding,
+    ModuleGlobalLoweringResult,
+    ParameterBinding,
+    StringConstant,
+    TypeContext,
+} from "../types";
+import {
+    append_string,
+    is_boolean_literal,
+    is_integer_literal,
+    is_number_literal,
+    matches_case_insensitive,
+    number_to_string,
+    sanitize_symbol,
+    trim_text,
+} from "../utils";
 
 fn module_global_symbol(name: string) -> string {
     return "@global." + sanitize_symbol(name);
@@ -68,24 +47,18 @@ fn module_user_main_symbol(module_name: string) -> string {
 
 // Strip surrounding quotes from a string literal (e.g., `"hello"` -> `hello`).
 fn _strip_string_quotes(s: string) -> string {
-    if s.length < 2 {
-        return s;
-    }
+    if s.length < 2 { return s; }
     let first = s[0];
     let last = s[s.length - 1];
     let mut _is_quoted: boolean = false;
     if first == "\"" {
-        if last == "\"" {
-            _is_quoted = true;
-        }
+        if last == "\"" { _is_quoted = true; }
     }
     if _is_quoted {
         let mut result: string = "";
         let mut i: number = 1;
         loop {
-            if i >= s.length - 1 {
-                break;
-            }
+            if i >= s.length - 1 { break; }
             result = result + s[i];
             i += 1;
         }
@@ -99,20 +72,12 @@ fn _strip_string_quotes(s: string) -> string {
 // It appends preamble lines and local entries to accumulation files.
 // Returns "init" if the binding needs runtime initialization, "" otherwise.
 fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string) -> string ![io] {
-    if binding == null {
-        return "";
-    }
+    if binding == null { return ""; }
     let mut name = binding.name;
-    if name == null {
-        return "";
-    }
-    if name.length == 0 {
-        return "";
-    }
+    if name == null { return ""; }
+    if name.length == 0 { return ""; }
     let mut raw_type_annotation = binding.type_annotation;
-    if raw_type_annotation == null {
-        raw_type_annotation = "";
-    }
+    if raw_type_annotation == null { raw_type_annotation = ""; }
     let mut type_annotation = trim_text(raw_type_annotation);
     let mut effective_type_annotation = raw_type_annotation;
     if type_annotation.length == 0 {
@@ -124,30 +89,20 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
             }
         }
     }
-    if type_annotation.length == 0 {
-        return "";
-    }
+    if type_annotation.length == 0 { return ""; }
     let global_name = module_global_symbol(name);
     let mut llvm_type: string = "";
     // Fast-path common primitive types
-    if type_annotation == "string" {
-        llvm_type = "i8*";
-    } else if type_annotation == "number" {
+    if type_annotation == "string" { llvm_type = "i8*"; } else if type_annotation == "number" {
         llvm_type = "double";
-    } else if type_annotation == "boolean" {
+    } else if type_annotation == "boolean" { llvm_type = "i1"; } else if type_annotation == "bool" {
         llvm_type = "i1";
-    } else if type_annotation == "bool" {
-        llvm_type = "i1";
-    } else if type_annotation == "i64" {
-        llvm_type = "i64";
-    } else if type_annotation == "i32" {
+    } else if type_annotation == "i64" { llvm_type = "i64"; } else if type_annotation == "i32" {
         llvm_type = "i32";
     } else if type_annotation.length > 0 {
         llvm_type = map_local_type(context, type_annotation);
     }
-    if llvm_type.length == 0 {
-        llvm_type = "double";
-    }
+    if llvm_type.length == 0 { llvm_type = "double"; }
 
     // Build preamble line(s) and append to accumulation file
     let mut needs_init_result: string = "";
@@ -169,9 +124,7 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
         }
         if !string_handled {
             _append_to_file("build/sailfin/.module_globals_preamble", global_name + " = internal global i8* null");
-            if binding.value != null {
-                needs_init_result = "init";
-            }
+            if binding.value != null { needs_init_result = "init"; }
         }
     } else {
         let mut initializer_text: string = default_return_literal(llvm_type);
@@ -205,9 +158,7 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
                     is_const = true;
                 }
             }
-            if !is_const {
-                needs_init_result = "init";
-            }
+            if !is_const { needs_init_result = "init"; }
         }
         _append_to_file("build/sailfin/.module_globals_preamble", global_name + " = internal global " + llvm_type + " " + initializer_text);
     }
@@ -222,12 +173,8 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
 // Append a line to a file (read existing content, append newline + new line).
 fn _append_to_file(path: string, line: string) ![io] {
     let mut existing: string = "";
-    if fs.exists(path) {
-        existing = fs.readFile(path);
-    }
-    if existing.length == 0 {
-        fs.writeFile(path, line);
-    } else {
+    if fs.exists(path) { existing = fs.readFile(path); }
+    if existing.length == 0 { fs.writeFile(path, line); } else {
         fs.writeFile(path, existing + "\n" + line);
     }
 }
@@ -280,9 +227,7 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
         let binding = bindings[index];
         index += 1;
         let result = _process_one_binding(binding, context, scope_id);
-        if result == "init" {
-            needs_init = true;
-        }
+        if result == "init" { needs_init = true; }
     }
 
     // NOTE: Code below is UNREACHABLE when compiled by the v0.1.1 seed.

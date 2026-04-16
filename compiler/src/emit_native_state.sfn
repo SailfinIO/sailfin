@@ -3,12 +3,10 @@
 // State management, text builder, and shared utility functions for the
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
-
 import { TypeAnnotation } from "./ast";
 import { substring } from "./string_utils";
 
 // ── Data structures ──────────────────────────────────────────────────
-
 struct TextBuilder {
     lines: string[];
     indent: number;
@@ -53,7 +51,6 @@ struct LayoutEnumDefinition {
 }
 
 // ── Builder functions ────────────────────────────────────────────────
-
 fn builder_new() -> TextBuilder {
     return TextBuilder { lines: [], indent: 0 };
 }
@@ -62,9 +59,7 @@ fn builder_emit_line(builder: TextBuilder, line: string) -> TextBuilder {
     let mut prefix: string = "";
     let mut count: number = 0;
     loop {
-        if count >= builder.indent {
-            break;
-        }
+        if count >= builder.indent { break; }
         prefix = prefix + "    ";
         count += 1;
     }
@@ -79,32 +74,32 @@ fn builder_emit_blank(builder: TextBuilder) -> TextBuilder {
 }
 
 fn builder_push_indent(builder: TextBuilder) -> TextBuilder {
-    return TextBuilder { lines: builder.lines, indent: builder.indent + 1 };
+    return TextBuilder {
+        lines: builder.lines,
+        indent: builder.indent + 1
+    };
 }
 
 fn builder_pop_indent(builder: TextBuilder) -> TextBuilder {
     let mut indent = builder.indent;
-    if indent > 0 {
-        indent -= 1;
-    }
+    if indent > 0 { indent -= 1; }
     return TextBuilder { lines: builder.lines, indent: indent };
 }
 
 fn builder_to_string(builder: TextBuilder) -> string {
-    if builder.lines == null {
-        return "";
-    }
+    if builder.lines == null { return ""; }
     let content = join_with_separator(builder.lines, "\n");
-    if content.length == 0 {
-        return "";
-    }
+    if content.length == 0 { return ""; }
     return content + "\n";
 }
 
 // ── State functions ──────────────────────────────────────────────────
-
 fn state_new(context: LayoutContext) -> NativeState {
-    return NativeState { builder: builder_new(), diagnostics: [], layout_context: context };
+    return NativeState {
+        builder: builder_new(),
+        diagnostics: [],
+        layout_context: context
+    };
 }
 
 fn state_emit_line(state: NativeState, line: string) -> NativeState {
@@ -149,30 +144,27 @@ fn state_add_diagnostic(state: NativeState, message: string) -> NativeState {
 }
 
 fn state_merge_diagnostics(state: NativeState, entries: string[]) -> NativeState {
-    if entries.length == 0 {
-        return state;
-    }
+    if entries.length == 0 { return state; }
     let mut combined: string[] = state.diagnostics;
     let mut index: number = 0;
     loop {
-        if index >= entries.length {
-            break;
-        }
+        if index >= entries.length { break; }
         combined.push(entries[index]);
         index += 1;
     }
-    return NativeState { builder: state.builder, diagnostics: combined, layout_context: state.layout_context };
+    return NativeState {
+        builder: state.builder,
+        diagnostics: combined,
+        layout_context: state.layout_context
+    };
 }
 
 // ── String / array utility functions ─────────────────────────────────
-
 fn trim_text(value: string) -> string {
     let mut start: number = 0;
     let mut end: number = value.length;
     loop {
-        if start >= end {
-            break;
-        }
+        if start >= end { break; }
         let ch = value[start];
         if is_trim_char(ch) {
             start += 1;
@@ -181,9 +173,7 @@ fn trim_text(value: string) -> string {
         break;
     }
     loop {
-        if end <= start {
-            break;
-        }
+        if end <= start { break; }
         let ch = value[end - 1];
         if is_trim_char(ch) {
             end -= 1;
@@ -191,12 +181,10 @@ fn trim_text(value: string) -> string {
         }
         break;
     }
-        if start == 0 {
-            if end == value.length {
-                return value;
-            }
-        }
-        return substring(value, start, end);
+    if start == 0 {
+        if end == value.length { return value; }
+    }
+    return substring(value, start, end);
 }
 
 fn is_trim_char(ch: string) -> boolean {
@@ -211,9 +199,7 @@ fn is_trim_char(ch: string) -> boolean {
 fn trim_right(value: string) -> string {
     let mut end: number = value.length;
     loop {
-        if end <= 0 {
-            break;
-        }
+        if end <= 0 { break; }
         let ch = value[end - 1];
         let mut _if25: boolean = false;
         if ch == " " { _if25 = true; }
@@ -224,51 +210,35 @@ fn trim_right(value: string) -> string {
         }
         break;
     }
-    if end == value.length {
-        return value;
-    }
+    if end == value.length { return value; }
     return substring(value, 0, end);
 }
 
 fn ends_with(value: string, suffix: string) -> boolean {
-    if suffix.length == 0 {
-        return true;
-    }
-    if value.length < suffix.length {
-        return false;
-    }
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
     let start = value.length - suffix.length;
     let mut index: number = 0;
     loop {
-        if index >= suffix.length {
-            break;
-        }
+        if index >= suffix.length { break; }
         let _cmp_pos = start + index;
-        if value[_cmp_pos] != suffix[index] {
-            return false;
-        }
+        if value[_cmp_pos] != suffix[index] { return false; }
         index += 1;
     }
     return true;
 }
 
 fn number_to_string(value: number) -> string {
-    if value == 0 {
-        return "0";
-    }
+    if value == 0 { return "0"; }
     let mut remaining: number = value;
     let mut output: string = "";
     let digits = "0123456789";
     loop {
-        if remaining <= 0 {
-            break;
-        }
+        if remaining <= 0 { break; }
         let mut temp: number = remaining;
         let mut quotient: number = 0;
         loop {
-            if temp < 10 {
-                break;
-            }
+            if temp < 10 { break; }
             temp -= 10;
             quotient += 1;
         }
@@ -290,20 +260,12 @@ fn quote_string(value: string) -> string {
     let mut chunk_start: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= value.length {
-            break;
-        }
+        if index >= value.length { break; }
         let ch = substring(value, index, index + 1);
         let mut esc: string = "";
-        if ch == "\"" {
-            esc = "\\\"";
-        } else if ch == "\\" {
-            esc = "\\\\";
-        } else if ch == "\n" {
+        if ch == "\"" { esc = "\\\""; } else if ch == "\\" { esc = "\\\\"; } else if ch == "\n" {
             esc = "\\n";
-        } else if ch == "\r" {
-            esc = "\\r";
-        } else if ch == "\t" {
+        } else if ch == "\r" { esc = "\\r"; } else if ch == "\t" {
             esc = "\\t";
         }
         if esc.length > 0 {
@@ -322,9 +284,7 @@ fn quote_string(value: string) -> string {
     let mut result: string = chunks[0];
     let mut i: number = 1;
     loop {
-        if i >= chunks.length {
-            break;
-        }
+        if i >= chunks.length { break; }
         result = result + chunks[i];
         i += 1;
     }
@@ -332,46 +292,28 @@ fn quote_string(value: string) -> string {
 }
 
 fn escape_string_char(ch: string) -> string {
-    if ch == "\"" {
-        return "\\\"";
-    }
-    if ch == "\\" {
-        return "\\\\";
-    }
-    if ch == "\n" {
-        return "\\n";
-    }
-    if ch == "\r" {
-        return "\\r";
-    }
-    if ch == "\t" {
-        return "\\t";
-    }
+    if ch == "\"" { return "\\\""; }
+    if ch == "\\" { return "\\\\"; }
+    if ch == "\n" { return "\\n"; }
+    if ch == "\r" { return "\\r"; }
+    if ch == "\t" { return "\\t"; }
     return ch;
 }
 
 fn append_string(values: string[], value: string) -> string[] {
     let mut out = values;
-    if out == null {
-        out = [];
-    }
+    if out == null { out = []; }
     out.push(value);
     return out;
 }
 
 fn join_with_separator(values: string[], separator: string) -> string {
-    if values == null {
-        return "";
-    }
-    if values.length == 0 {
-        return "";
-    }
+    if values == null { return ""; }
+    if values.length == 0 { return ""; }
     let mut result: string = values[0];
     let mut index: number = 1;
     loop {
-        if index >= values.length {
-            break;
-        }
+        if index >= values.length { break; }
         result = result + separator + values[index];
         index += 1;
     }
@@ -379,15 +321,11 @@ fn join_with_separator(values: string[], separator: string) -> string {
 }
 
 fn join_type_annotations(values: TypeAnnotation[]) -> string {
-    if values.length == 0 {
-        return "";
-    }
+    if values.length == 0 { return ""; }
     let mut parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
+        if index >= values.length { break; }
         parts.push(values[index].text);
         index += 1;
     }
@@ -397,21 +335,15 @@ fn join_type_annotations(values: TypeAnnotation[]) -> string {
 fn contains_string(values: string[], target: string) -> boolean {
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
-        if values[index] == target {
-            return true;
-        }
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
         index += 1;
     }
     return false;
 }
 
 fn append_unique(values: string[], value: string) -> string[] {
-    if contains_string(values, value) {
-        return values;
-    }
+    if contains_string(values, value) { return values; }
     return append_string(values, value);
 }
 
@@ -424,8 +356,6 @@ fn is_optional_annotation(type_annotation: string) -> boolean {
 }
 
 fn strip_optional_suffix(type_annotation: string) -> string {
-    if type_annotation.length == 0 {
-        return type_annotation;
-    }
+    if type_annotation.length == 0 { return type_annotation; }
     return substring(type_annotation, 0, type_annotation.length - 1);
 }

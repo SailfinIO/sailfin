@@ -5,63 +5,58 @@
 // code. The intent is to make the self-hosted compiler capable of emitting
 // Sailfin that can be re-ingested by the bootstrap stage0 toolchain while we
 // close the bootstrap loop.
-
 import {
     Block,
     Decorator,
     DecoratorArgument,
+    ElseBranch,
     EnumVariant,
+    ExportSpecifier,
     Expression,
     FieldDeclaration,
     ForClause,
     FunctionSignature,
+    ImportSpecifier,
     MatchCase,
     MethodDeclaration,
     ModelProperty,
     Parameter,
     Program,
     Statement,
-    ImportSpecifier,
-    ExportSpecifier,
     TypeAnnotation,
     TypeParameter,
     WithClause,
-    ElseBranch,
 } from "./ast";
-import { Token } from "./token";
+import {
+    format_expression,
+    format_initializer,
+    format_optional_expression,
+    format_type_annotation,
+} from "./emitter_sailfin_expr";
 import {
     TextBuilder,
-    builder_new,
-    builder_emit_line,
     builder_emit_blank,
-    builder_push_indent,
+    builder_emit_line,
+    builder_new,
     builder_pop_indent,
+    builder_push_indent,
     builder_to_string,
-    join_with_separator,
-    format_test_name,
-    trim_block_body,
     collapse_whitespace,
+    format_test_name,
+    join_with_separator,
     tokens_to_source,
+    trim_block_body,
 } from "./emitter_sailfin_utils";
-import {
-    format_expression, format_optional_expression,
-    format_type_annotation, format_initializer,
-} from "./emitter_sailfin_expr";
+import { Token } from "./token";
 
 fn is_import_like(statement: Statement) -> boolean {
-    if statement.variant == "ImportDeclaration" {
-        return true;
-    }
-    if statement.variant == "ExportDeclaration" {
-        return true;
-    }
+    if statement.variant == "ImportDeclaration" { return true; }
+    if statement.variant == "ExportDeclaration" { return true; }
     return false;
 }
 
 fn maybe_emit_blank(builder: TextBuilder, should_emit: boolean) -> TextBuilder {
-    if should_emit {
-        return builder_emit_blank(builder);
-    }
+    if should_emit { return builder_emit_blank(builder); }
     return builder;
 }
 
@@ -75,9 +70,7 @@ fn emit_program(program: Program) -> string {
     let mut has_runtime_import: boolean = false;
     let mut scan: number = 0;
     loop {
-        if scan >= program.statements.length {
-            break;
-        }
+        if scan >= program.statements.length { break; }
         let statement = program.statements[scan];
         if statement.variant == "ImportDeclaration" {
             if statement.source == "sailfin/runtime" {
@@ -97,9 +90,7 @@ fn emit_program(program: Program) -> string {
 
     let mut index: number = 0;
     loop {
-        if index >= program.statements.length {
-            break;
-        }
+        if index >= program.statements.length { break; }
 
         let statement = program.statements[index];
         let is_import = is_import_like(statement);
@@ -113,9 +104,7 @@ fn emit_program(program: Program) -> string {
         let already_emitted_something = _let26;
         let mut _let27: boolean = false;
         if already_emitted_something {
-            if !last_emitted_was_import {
-                _let27 = true;
-            } else if !is_import {
+            if !last_emitted_was_import { _let27 = true; } else if !is_import {
                 _let27 = true;
             }
         }
@@ -194,33 +183,20 @@ fn emit_export(builder: TextBuilder, specifiers: ExportSpecifier[], source: stri
 
 fn emit_variable(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut prefix: string = "let ";
-    if statement.mutable {
-        prefix = prefix + "mut ";
-    }
+    if statement.mutable { prefix = prefix + "mut "; }
     prefix = prefix + statement.name;
     prefix = prefix + format_type_annotation(statement.type_annotation);
     prefix = prefix + format_initializer(statement.initializer);
     return builder_emit_line(builder, prefix + ";");
 }
 
-fn emit_function(
-    builder: TextBuilder,
-    signature: FunctionSignature,
-    body: Block,
-    decorators: Decorator[]
-) -> TextBuilder {
+fn emit_function(builder: TextBuilder, signature: FunctionSignature, body: Block, decorators: Decorator[]) -> TextBuilder {
     let mut current = emit_decorators(builder, decorators);
     let header = format_function_header(signature);
     return emit_block_with_header(current, header, body);
 }
 
-fn emit_callable(
-    builder: TextBuilder,
-    keyword: string,
-    signature: FunctionSignature,
-    body: Block,
-    decorators: Decorator[]
-) -> TextBuilder {
+fn emit_callable(builder: TextBuilder, keyword: string, signature: FunctionSignature, body: Block, decorators: Decorator[]) -> TextBuilder {
     let mut current = emit_decorators(builder, decorators);
     let header = format_callable_header(keyword, signature);
     return emit_block_with_header(current, header, body);
@@ -231,9 +207,7 @@ fn emit_test(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let name = format_test_name(statement.name);
     let effects = format_effects(statement.effects);
     let mut header: string = "test " + name;
-    if effects.length > 0 {
-        header = header + " " + effects;
-    }
+    if effects.length > 0 { header = header + " " + effects; }
     return emit_block_with_header(current, header, statement.body);
 }
 
@@ -241,15 +215,11 @@ fn emit_model(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let mut header: string = "model " + statement.name + " : " + statement.model_type.text;
     let effects = format_effects(statement.effects);
-    if effects.length > 0 {
-        header = header + " " + effects;
-    }
+    if effects.length > 0 { header = header + " " + effects; }
     current = emit_block_header(current, header);
     let mut index: number = 0;
     loop {
-        if index >= statement.properties.length {
-            break;
-        }
+        if index >= statement.properties.length { break; }
         let property = statement.properties[index];
         let line = property.name + " = " + format_expression(property.value) + ";";
         current = builder_emit_line(current, line);
@@ -266,9 +236,7 @@ fn format_import_specifiers(specifiers: ImportSpecifier[]) -> string {
     let mut parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= specifiers.length {
-            break;
-        }
+        if index >= specifiers.length { break; }
         let entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias);
         parts.push(entry);
         index += 1;
@@ -280,9 +248,7 @@ fn format_export_specifiers(specifiers: ExportSpecifier[]) -> string {
     let mut parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= specifiers.length {
-            break;
-        }
+        if index >= specifiers.length { break; }
         let entry = format_specifier_entry(specifiers[index].name, specifiers[index].alias);
         parts.push(entry);
         index += 1;
@@ -294,9 +260,7 @@ fn format_specifier_entry(name: string, alias: string?) -> string {
     let mut _if28: boolean = false;
     if alias == null { _if28 = true; }
     if alias.length == 0 { _if28 = true; }
-    if _if28 {
-        return name;
-    }
+    if _if28 { return name; }
     return name + " as " + alias;
 }
 
@@ -315,9 +279,7 @@ fn emit_interface(builder: TextBuilder, statement: Statement) -> TextBuilder {
     current = emit_block_start(current);
     let mut index: number = 0;
     loop {
-        if index >= statement.members.length {
-            break;
-        }
+        if index >= statement.members.length { break; }
         let signature = statement.members[index];
         let line = format_signature_line("fn", signature) + ";";
         current = builder_emit_line(current, line);
@@ -334,9 +296,7 @@ fn emit_enum(builder: TextBuilder, statement: Statement) -> TextBuilder {
     current = emit_block_header(current, header);
     let mut index: number = 0;
     loop {
-        if index >= statement.variants.length {
-            break;
-        }
+        if index >= statement.variants.length { break; }
         let variant = statement.variants[index];
         current = builder_emit_line(current, format_enum_variant(variant) + ";");
         index += 1;
@@ -356,18 +316,14 @@ fn emit_struct(builder: TextBuilder, statement: Statement) -> TextBuilder {
 
     let mut field_index: number = 0;
     loop {
-        if field_index >= statement.fields.length {
-            break;
-        }
+        if field_index >= statement.fields.length { break; }
         current = builder_emit_line(current, format_field(statement.fields[field_index]) + ";");
         field_index += 1;
     }
 
     let mut method_index: number = 0;
     loop {
-        if method_index >= statement.methods.length {
-            break;
-        }
+        if method_index >= statement.methods.length { break; }
         let method = statement.methods[method_index];
         current = emit_decorators(current, method.decorators);
         current = emit_block_with_header(current, format_method_header(method.signature), method.body);
@@ -407,9 +363,7 @@ fn emit_block_body(builder: TextBuilder, block: Block) -> TextBuilder {
     let mut current = builder;
     let mut index: number = 0;
     loop {
-        if index >= block.statements.length {
-            break;
-        }
+        if index >= block.statements.length { break; }
         current = emit_block_statement(current, block.statements[index]);
         index += 1;
     }
@@ -483,12 +437,8 @@ fn emit_with(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut line: string = "with ";
     let mut index: number = 0;
     loop {
-        if index >= statement.clauses.length {
-            break;
-        }
-        if index > 0 {
-            line = line + ", ";
-        }
+        if index >= statement.clauses.length { break; }
+        if index > 0 { line = line + ", "; }
         line = line + format_expression(statement.clauses[index].expression);
         index += 1;
     }
@@ -501,9 +451,7 @@ fn emit_if(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let line = "if " + format_expression(statement.condition);
     current = emit_block_with_header(current, line, statement.then_block);
     let else_branch = statement.else_branch;
-    if else_branch == null {
-        return current;
-    }
+    if else_branch == null { return current; }
     return emit_else_branch(current, else_branch);
 }
 
@@ -511,15 +459,11 @@ fn emit_else_branch(builder: TextBuilder, branch: ElseBranch) -> TextBuilder {
     let body = branch.body;
     if body == null {
         let nested = branch.statement;
-        if nested == null {
-            return builder;
-        }
+        if nested == null { return builder; }
         if nested.variant == "IfStatement" {
             let after = emit_block_with_header(builder, "else if " + format_expression(nested.condition), nested.then_block);
             let nested_else = nested.else_branch;
-            if nested_else == null {
-                return after;
-            }
+            if nested_else == null { return after; }
             return emit_else_branch(after, nested_else);
         }
         let current = builder_emit_line(builder, "else");
@@ -540,9 +484,7 @@ fn emit_match(builder: TextBuilder, statement: Statement) -> TextBuilder {
     current = emit_block_header(current, header);
     let mut index: number = 0;
     loop {
-        if index >= statement.cases.length {
-            break;
-        }
+        if index >= statement.cases.length { break; }
         current = emit_match_case(current, statement.cases[index]);
         index += 1;
     }
@@ -552,9 +494,7 @@ fn emit_match(builder: TextBuilder, statement: Statement) -> TextBuilder {
 fn emit_match_case(builder: TextBuilder, case: MatchCase) -> TextBuilder {
     let mut line: string = "case " + format_expression(case.pattern);
     let guard = case.guard;
-    if guard == null {
-        line = line + " => {";
-    } else {
+    if guard == null { line = line + " => {"; } else {
         line = line + " if " + format_optional_expression(guard) + " => {";
     }
     let mut current = builder_emit_line(builder, line);
@@ -597,9 +537,7 @@ fn emit_decorators(builder: TextBuilder, decorators: Decorator[]) -> TextBuilder
     let mut current = builder;
     let mut index: number = 0;
     loop {
-        if index >= decorators.length {
-            break;
-        }
+        if index >= decorators.length { break; }
         current = builder_emit_line(current, format_decorator(decorators[index]));
         index += 1;
     }
@@ -608,15 +546,11 @@ fn emit_decorators(builder: TextBuilder, decorators: Decorator[]) -> TextBuilder
 
 fn format_decorator(decorator: Decorator) -> string {
     let mut line: string = "@" + decorator.name;
-    if decorator.arguments.length == 0 {
-        return line;
-    }
+    if decorator.arguments.length == 0 { return line; }
     let mut parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= decorator.arguments.length {
-            break;
-        }
+        if index >= decorator.arguments.length { break; }
         parts.push(format_decorator_argument(decorator.arguments[index]));
         index += 1;
     }
@@ -625,9 +559,7 @@ fn format_decorator(decorator: Decorator) -> string {
 
 fn format_decorator_argument(argument: DecoratorArgument) -> string {
     let value = format_expression(argument.expression);
-    if argument.name == null {
-        return value;
-    }
+    if argument.name == null { return value; }
     return argument.name + ": " + value;
 }
 
@@ -637,9 +569,7 @@ fn format_for_clause(clause: ForClause) -> string {
     let mut _if29: boolean = false;
     if target.length == 0 { _if29 = true; }
     if iterable.length == 0 { _if29 = true; }
-    if _if29 {
-        return tokens_to_source(clause.tokens);
-    }
+    if _if29 { return tokens_to_source(clause.tokens); }
     return target + " in " + iterable;
 }
 
@@ -657,9 +587,7 @@ fn format_callable_header(keyword: string, signature: FunctionSignature) -> stri
 
 fn format_signature_line(keyword: string, signature: FunctionSignature) -> string {
     let mut prefix: string = "";
-    if signature.is_async {
-        prefix = "async ";
-    }
+    if signature.is_async { prefix = "async "; }
     let mut line: string = prefix + keyword + " " + signature.name;
     line = line + format_type_parameters(signature.type_parameters);
     line = line + "(" + format_parameters(signature.parameters) + ")";
@@ -667,32 +595,24 @@ fn format_signature_line(keyword: string, signature: FunctionSignature) -> strin
         line = line + " -> " + signature.return_type.text;
     }
     let effects = format_effects(signature.effects);
-    if effects.length > 0 {
-        line = line + " " + effects;
-    }
+    if effects.length > 0 { line = line + " " + effects; }
     return line;
 }
 
 fn format_field(field: FieldDeclaration) -> string {
     let mut line: string = "";
-    if field.mutable {
-        line = line + "mut ";
-    }
+    if field.mutable { line = line + "mut "; }
     line = line + field.name;
     line = line + ": " + field.type_annotation.text;
     return line;
 }
 
 fn format_enum_variant(variant: EnumVariant) -> string {
-    if variant.fields.length == 0 {
-        return variant.name;
-    }
+    if variant.fields.length == 0 { return variant.name; }
     let mut parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= variant.fields.length {
-            break;
-        }
+        if index >= variant.fields.length { break; }
         parts.push(format_field(variant.fields[index]));
         index += 1;
     }
@@ -700,15 +620,11 @@ fn format_enum_variant(variant: EnumVariant) -> string {
 }
 
 fn format_parameters(parameters: Parameter[]) -> string {
-    if parameters.length == 0 {
-        return "";
-    }
+    if parameters.length == 0 { return ""; }
     let mut parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= parameters.length {
-            break;
-        }
+        if index >= parameters.length { break; }
         parts.push(format_parameter(parameters[index]));
         index += 1;
     }
@@ -717,9 +633,7 @@ fn format_parameters(parameters: Parameter[]) -> string {
 
 fn format_parameter(parameter: Parameter) -> string {
     let mut line: string = "";
-    if parameter.mutable {
-        line = "mut " + parameter.name;
-    } else {
+    if parameter.mutable { line = "mut " + parameter.name; } else {
         line = parameter.name;
     }
     if parameter.type_annotation != null {
@@ -732,15 +646,11 @@ fn format_parameter(parameter: Parameter) -> string {
 }
 
 fn format_type_parameters(parameters: TypeParameter[]) -> string {
-    if parameters.length == 0 {
-        return "";
-    }
+    if parameters.length == 0 { return ""; }
     let mut names: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= parameters.length {
-            break;
-        }
+        if index >= parameters.length { break; }
         let parameter = parameters[index];
         let mut part: string = parameter.name;
         if parameter.bound != null {
@@ -753,25 +663,18 @@ fn format_type_parameters(parameters: TypeParameter[]) -> string {
 }
 
 fn format_effects(effects: string[]) -> string {
-    if effects.length == 0 {
-        return "";
-    }
+    if effects.length == 0 { return ""; }
     return "![" + join_with_separator(effects, ", ") + "]";
 }
 
 fn join_type_annotations(values: TypeAnnotation[]) -> string {
-    if values.length == 0 {
-        return "";
-    }
+    if values.length == 0 { return ""; }
     let mut parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
+        if index >= values.length { break; }
         parts.push(values[index].text);
         index += 1;
     }
     return join_with_separator(parts, ", ");
 }
-

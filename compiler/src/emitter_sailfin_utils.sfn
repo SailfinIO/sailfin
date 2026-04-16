@@ -2,7 +2,6 @@
 //
 // Text utilities and TextBuilder for the Sailfin-to-Sailfin code emitter.
 // Extracted from emitter_sailfin.sfn to keep modules focused and under size.
-
 export {
     TextBuilder,
     builder_new,
@@ -23,8 +22,8 @@ export {
     tokens_to_source,
 };
 
+import { char_at, substring } from "./string_utils";
 import { Token } from "./token";
-import { substring, char_at } from "./string_utils";
 
 struct TextBuilder {
     lines: string[];
@@ -35,9 +34,7 @@ fn quote_string(value: string) -> string {
     let mut result: string = "\"";
     let mut index: number = 0;
     loop {
-        if index >= value.length {
-            break;
-        }
+        if index >= value.length { break; }
         result = result + escape_string_char(char_at(value, index));
         index += 1;
     }
@@ -46,33 +43,19 @@ fn quote_string(value: string) -> string {
 }
 
 fn escape_string_char(ch: string) -> string {
-    if ch == "\"" {
-        return "\\\"";
-    }
-    if ch == "\\" {
-        return "\\\\";
-    }
-    if ch == "\n" {
-        return "\\n";
-    }
-    if ch == "\r" {
-        return "\\r";
-    }
-    if ch == "\t" {
-        return "\\t";
-    }
+    if ch == "\"" { return "\\\""; }
+    if ch == "\\" { return "\\\\"; }
+    if ch == "\n" { return "\\n"; }
+    if ch == "\r" { return "\\r"; }
+    if ch == "\t" { return "\\t"; }
     return ch;
 }
 
-fn format_test_name(name: string) -> string {
-    return quote_string(name);
-}
+fn format_test_name(name: string) -> string { return quote_string(name); }
 
 fn trim_block_body(text: string) -> string {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return trimmed;
-    }
+    if trimmed.length == 0 { return trimmed; }
     if char_at(trimmed, 0) == "{" {
         if char_at(trimmed, trimmed.length - 1) == "}" {
             return trim_text(substring(trimmed, 1, trimmed.length - 1));
@@ -86,9 +69,7 @@ fn collapse_whitespace(value: string) -> string {
     let mut index: number = 0;
     let mut last_space: boolean = false;
     loop {
-        if index >= value.length {
-            break;
-        }
+        if index >= value.length { break; }
         let ch = char_at(value, index);
         let mut _let32: boolean = false;
         if ch == " " { _let32 = true; }
@@ -111,15 +92,11 @@ fn collapse_whitespace(value: string) -> string {
 }
 
 fn tokens_to_source(tokens: Token[]) -> string {
-    if tokens.length == 0 {
-        return "";
-    }
+    if tokens.length == 0 { return ""; }
     let mut parts: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         parts.push(tokens[index].lexeme);
         index += 1;
     }
@@ -134,9 +111,7 @@ fn builder_emit_line(builder: TextBuilder, line: string) -> TextBuilder {
     let mut prefix: string = "";
     let mut count: number = 0;
     loop {
-        if count >= builder.indent {
-            break;
-        }
+        if count >= builder.indent { break; }
         prefix = prefix + "    ";
         count += 1;
     }
@@ -153,31 +128,28 @@ fn builder_emit_blank(builder: TextBuilder) -> TextBuilder {
 }
 
 fn builder_push_indent(builder: TextBuilder) -> TextBuilder {
-    return TextBuilder { lines: builder.lines, indent: builder.indent + 1 };
+    return TextBuilder {
+        lines: builder.lines,
+        indent: builder.indent + 1
+    };
 }
 
 fn builder_pop_indent(builder: TextBuilder) -> TextBuilder {
     let mut indent = builder.indent;
-    if indent > 0 {
-        indent -= 1;
-    }
+    if indent > 0 { indent -= 1; }
     return TextBuilder { lines: builder.lines, indent: indent };
 }
 
 fn builder_to_string(builder: TextBuilder) -> string {
     let content = join_with_separator(builder.lines, "\n");
-    if content.length == 0 {
-        return "";
-    }
+    if content.length == 0 { return ""; }
     return content + "\n";
 }
 
 fn trim_right(value: string) -> string {
     let mut end: number = value.length;
     loop {
-        if end <= 0 {
-            break;
-        }
+        if end <= 0 { break; }
         let ch = char_at(value, end - 1);
         let mut _if33: boolean = false;
         if ch == " " { _if33 = true; }
@@ -188,22 +160,16 @@ fn trim_right(value: string) -> string {
         }
         break;
     }
-    if end == value.length {
-        return value;
-    }
+    if end == value.length { return value; }
     return substring(value, 0, end);
 }
 
 fn join_with_separator(values: string[], separator: string) -> string {
-    if values.length == 0 {
-        return "";
-    }
+    if values.length == 0 { return ""; }
     let mut result: string = values[0];
     let mut index: number = 1;
     loop {
-        if index >= values.length {
-            break;
-        }
+        if index >= values.length { break; }
         result = result + separator + values[index];
         index += 1;
     }
@@ -214,9 +180,7 @@ fn trim_text(value: string) -> string {
     let mut start: number = 0;
     let mut end: number = value.length;
     loop {
-        if start >= end {
-            break;
-        }
+        if start >= end { break; }
         let ch = char_at(value, start);
         if is_trim_char(ch) {
             start += 1;
@@ -225,9 +189,7 @@ fn trim_text(value: string) -> string {
         break;
     }
     loop {
-        if end <= start {
-            break;
-        }
+        if end <= start { break; }
         let ch = char_at(value, end - 1);
         if is_trim_char(ch) {
             end -= 1;
@@ -236,9 +198,7 @@ fn trim_text(value: string) -> string {
         break;
     }
     if start == 0 {
-        if end == value.length {
-            return value;
-        }
+        if end == value.length { return value; }
     }
     return substring(value, start, end);
 }

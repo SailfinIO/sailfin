@@ -9,7 +9,6 @@
 //   - expressions_helpers.sfn:   Identifier helpers, type helpers, operand formatting
 //   - expressions_operators.sfn: Operator finding, range/union separators
 //   - expressions_parsing.sfn:   Expression parsing (member access, index, assignment, etc.)
-
 // --- Binding lookup and mutation ---
 export {
     find_local_binding,

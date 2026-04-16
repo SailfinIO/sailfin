@@ -10,7 +10,6 @@
 //   emit_native_state.sfn  — TextBuilder, NativeState, shared utilities
 //   emit_native_format.sfn — expression/signature/specifier formatting
 //   emit_native_layout.sfn — struct/enum layout computation & manifest
-
 import {
     Block,
     Decorator,
@@ -22,54 +21,53 @@ import {
     MethodDeclaration,
     Parameter,
     Program,
+    SourceSpan,
     Statement,
     TypeAnnotation,
-    SourceSpan,
 } from "./ast";
-import { char_code } from "./string_utils";
 import {
-    LayoutContext,
-    NativeState,
-    StatementDispatchResult,
-    state_new,
-    state_emit_line,
-    state_emit_blank,
-    state_push_indent,
-    state_pop_indent,
-    state_add_diagnostic,
-    state_merge_diagnostics,
-    builder_to_string,
-    append_unique,
-    join_with_separator,
-    join_type_annotations,
-} from "./emit_native_state";
-import {
-    format_expression,
-    format_optional_expression,
-    format_function_signature,
-    format_type_parameters,
-    format_field,
-    format_enum_variant,
-    format_decorator,
-    format_span,
-    render_native_specifiers,
-    render_export_specifiers,
-    append_optional_type_annotation,
     append_optional_initializer,
-    format_match_case_head,
+    append_optional_type_annotation,
+    format_decorator,
+    format_enum_variant,
+    format_expression,
+    format_field,
+    format_function_signature,
     format_inline_case_body,
+    format_match_case_head,
+    format_optional_expression,
+    format_span,
+    format_type_parameters,
+    render_export_specifiers,
+    render_native_specifiers,
 } from "./emit_native_format";
 import {
     NativeArtifact,
     build_layout_context,
-    compute_struct_layout_lines,
     compute_enum_layout_lines,
+    compute_struct_layout_lines,
     emit_layout_lines,
     generate_layout_manifest,
 } from "./emit_native_layout";
+import {
+    LayoutContext,
+    NativeState,
+    StatementDispatchResult,
+    append_unique,
+    builder_to_string,
+    join_type_annotations,
+    join_with_separator,
+    state_add_diagnostic,
+    state_emit_blank,
+    state_emit_line,
+    state_merge_diagnostics,
+    state_new,
+    state_pop_indent,
+    state_push_indent,
+} from "./emit_native_state";
+import { char_code } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
-
 struct NativeModule {
     module_name: string;
     artifacts: NativeArtifact[];
@@ -83,7 +81,6 @@ struct EmitNativeResult {
 }
 
 // ── Entry points ─────────────────────────────────────────────────────
-
 fn emit_native(program: Program) -> EmitNativeResult {
     return emit_native_with_module_name(program, "main");
 }
@@ -93,21 +90,15 @@ fn emit_native_with_module_name(program: Program, module_name: string) -> EmitNa
     let mut state: NativeState = state_new(layout_context);
     state = state_emit_line(state, "; Sailfin Native Prototype");
     let mut module_line = ".module ";
-    if module_name.length == 0 {
-        module_line = module_line + "main";
-    } else {
+    if module_name.length == 0 { module_line = module_line + "main"; } else {
         module_line = module_line + module_name;
     }
     state = state_emit_line(state, module_line);
-    if program.statements.length > 0 {
-        state = state_emit_blank(state);
-    }
+    if program.statements.length > 0 { state = state_emit_blank(state); }
 
     let mut index: number = 0;
     loop {
-        if index >= program.statements.length {
-            break;
-        }
+        if index >= program.statements.length { break; }
         state = emit_statement(state, program.statements[index]);
         let _next_stmt = index + 1;
         if _next_stmt < program.statements.length {
@@ -143,21 +134,15 @@ fn emit_native_text_with_module_name(program: Program, module_name: string) -> s
     let mut state: NativeState = state_new(layout_context);
     state = state_emit_line(state, "; Sailfin Native Prototype");
     let mut module_line = ".module ";
-    if module_name.length == 0 {
-        module_line = module_line + "main";
-    } else {
+    if module_name.length == 0 { module_line = module_line + "main"; } else {
         module_line = module_line + module_name;
     }
     state = state_emit_line(state, module_line);
-    if program.statements.length > 0 {
-        state = state_emit_blank(state);
-    }
+    if program.statements.length > 0 { state = state_emit_blank(state); }
 
     let mut index: number = 0;
     loop {
-        if index >= program.statements.length {
-            break;
-        }
+        if index >= program.statements.length { break; }
         state = emit_statement(state, program.statements[index]);
         let _next_stmt2 = index + 1;
         if _next_stmt2 < program.statements.length {
@@ -166,21 +151,15 @@ fn emit_native_text_with_module_name(program: Program, module_name: string) -> s
         index += 1;
     }
     let text = builder_to_string(state.builder);
-    if text == null {
-        return "";
-    }
+    if text == null { return ""; }
     return text;
 }
 
 // Emit native text directly to a file to avoid returning large strings across ABI boundaries.
 fn emit_native_text_to_file_with_module_name(program: Program, module_name: string, out_path: string) -> boolean ![io] {
     let text = emit_native_text_with_module_name(program, module_name);
-    if text.length == 0 {
-        return false;
-    }
-    if fs.exists(out_path) {
-        fs.deleteFile(out_path);
-    }
+    if text.length == 0 { return false; }
+    if fs.exists(out_path) { fs.deleteFile(out_path); }
     fs.writeFile(out_path, text);
     return fs.exists(out_path);
 }
@@ -191,18 +170,13 @@ fn emit_native_module_with_module_name(program: Program, module_name: string) ->
 }
 
 // ── Statement dispatch ───────────────────────────────────────────────
-
 fn emit_statement(state: NativeState, statement: Statement) -> NativeState {
     // Split into smaller dispatch functions so the first-pass binary
     // can compile each successfully (large if-chains get truncated).
     let result_decl = emit_statement_declarations(state, statement);
-    if result_decl.handled {
-        return result_decl.state;
-    }
+    if result_decl.handled { return result_decl.state; }
     let result_type = emit_statement_type_decls(result_decl.state, statement);
-    if result_type.handled {
-        return result_type.state;
-    }
+    if result_type.handled { return result_type.state; }
     return emit_statement_control_flow(result_type.state, statement);
 }
 
@@ -210,70 +184,120 @@ fn emit_statement_declarations(state: NativeState, statement: Statement) -> Stat
     if statement.variant == "ImportDeclaration" {
         let mut line: string = ".import \"" + statement.source + "\"";
         let rendered = render_native_specifiers(statement.import_specifiers);
-        if rendered.length > 0 {
-            line = line + " { " + rendered + " }";
-        }
-        return StatementDispatchResult { state: state_emit_line(state, line), handled: true };
+        if rendered.length > 0 { line = line + " { " + rendered + " }"; }
+        return StatementDispatchResult {
+            state: state_emit_line(state, line),
+            handled: true
+        };
     }
     if statement.variant == "ExportDeclaration" {
         let mut line: string = ".export \"" + statement.source + "\"";
         let rendered = render_export_specifiers(statement.export_specifiers);
-        if rendered.length > 0 {
-            line = line + " { " + rendered + " }";
-        }
-        return StatementDispatchResult { state: state_emit_line(state, line), handled: true };
+        if rendered.length > 0 { line = line + " { " + rendered + " }"; }
+        return StatementDispatchResult {
+            state: state_emit_line(state, line),
+            handled: true
+        };
     }
     if statement.variant == "VariableDeclaration" {
-        return StatementDispatchResult { state: emit_variable(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_variable(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "FunctionDeclaration" {
-        return StatementDispatchResult { state: emit_function(state, statement.signature, statement.body, statement.decorators), handled: true };
+        return StatementDispatchResult {
+            state: emit_function(state, statement.signature, statement.body, statement.decorators),
+            handled: true
+        };
     }
     if statement.variant == "ExternFunctionDeclaration" {
-        return StatementDispatchResult { state: emit_extern_function(state, statement.signature, statement.unsafe, statement.decorators), handled: true };
+        return StatementDispatchResult {
+            state: emit_extern_function(state, statement.signature, statement.unsafe, statement.decorators),
+            handled: true
+        };
     }
     if statement.variant == "StructDeclaration" {
-        return StatementDispatchResult { state: emit_struct(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_struct(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "PipelineDeclaration" {
-        return StatementDispatchResult { state: emit_pipeline(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_pipeline(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "ToolDeclaration" {
-        return StatementDispatchResult { state: emit_tool(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_tool(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "TestDeclaration" {
-        return StatementDispatchResult { state: emit_test(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_test(state, statement),
+            handled: true
+        };
     }
     return StatementDispatchResult { state: state, handled: false };
 }
 
 fn emit_statement_type_decls(state: NativeState, statement: Statement) -> StatementDispatchResult {
     if statement.variant == "ModelDeclaration" {
-        return StatementDispatchResult { state: emit_model(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_model(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "TypeAliasDeclaration" {
-        return StatementDispatchResult { state: emit_type_alias(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_type_alias(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "InterfaceDeclaration" {
-        return StatementDispatchResult { state: emit_interface(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_interface(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "EnumDeclaration" {
-        return StatementDispatchResult { state: emit_enum(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_enum(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "PromptStatement" {
-        return StatementDispatchResult { state: emit_prompt(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_prompt(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "WithStatement" {
-        return StatementDispatchResult { state: emit_with(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_with(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "ForStatement" {
-        return StatementDispatchResult { state: emit_for(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_for(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "MatchStatement" {
-        return StatementDispatchResult { state: emit_match(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_match(state, statement),
+            handled: true
+        };
     }
     if statement.variant == "LoopStatement" {
-        return StatementDispatchResult { state: emit_loop(state, statement), handled: true };
+        return StatementDispatchResult {
+            state: emit_loop(state, statement),
+            handled: true
+        };
     }
     return StatementDispatchResult { state: state, handled: false };
 }
@@ -312,18 +336,10 @@ fn emit_statement_control_flow(state: NativeState, statement: Statement) -> Nati
 }
 
 // ── Statement emitters ───────────────────────────────────────────────
-
-fn emit_extern_function(
-    state: NativeState,
-    signature: FunctionSignature,
-    unsafe_flag: boolean,
-    decorators: Decorator[]
-) -> NativeState {
+fn emit_extern_function(state: NativeState, signature: FunctionSignature, unsafe_flag: boolean, decorators: Decorator[]) -> NativeState {
     let mut current = emit_decorators(state, decorators);
     current = state_emit_line(current, ".fn " + format_function_signature(signature));
-    if unsafe_flag {
-        current = state_emit_line(current, ".meta unsafe");
-    }
+    if unsafe_flag { current = state_emit_line(current, ".meta unsafe"); }
     current = state_emit_line(current, ".meta extern");
     current = emit_signature_metadata(current, signature);
     current = emit_parameter_metadata(current, signature.parameters);
@@ -365,16 +381,12 @@ fn emit_try(state: NativeState, statement: Statement) -> NativeState {
 }
 
 fn emit_span_if_present(state: NativeState, span: SourceSpan?) -> NativeState {
-    if span == null {
-        return state;
-    }
+    if span == null { return state; }
     return state_emit_line(state, ".span " + format_span(span));
 }
 
 fn emit_initializer_span_if_present(state: NativeState, span: SourceSpan?) -> NativeState {
-    if span == null {
-        return state;
-    }
+    if span == null { return state; }
     return state_emit_line(state, ".init-span " + format_span(span));
 }
 
@@ -383,21 +395,14 @@ fn emit_variable(state: NativeState, statement: Statement) -> NativeState {
     current = emit_initializer_span_if_present(current, statement.initializer_span);
 
     let mut line: string = ".let ";
-    if statement.mutable {
-        line = line + "mut ";
-    }
+    if statement.mutable { line = line + "mut "; }
     line = line + statement.name;
     line = append_optional_type_annotation(line, statement.type_annotation);
     line = append_optional_initializer(line, statement.initializer);
     return state_emit_line(current, line);
 }
 
-fn emit_function(
-    state: NativeState,
-    signature: FunctionSignature,
-    body: Block,
-    decorators: Decorator[]
-) -> NativeState {
+fn emit_function(state: NativeState, signature: FunctionSignature, body: Block, decorators: Decorator[]) -> NativeState {
     let mut current = emit_decorators(state, decorators);
     current = state_emit_line(current, ".fn " + format_function_signature(signature));
     current = emit_signature_metadata(current, signature);
@@ -438,20 +443,9 @@ fn emit_test(state: NativeState, statement: Statement) -> NativeState {
     // directives in the native IR parser, causing tests to be dropped before
     // LLVM lowering and resulting in missing `main` at link time.
     let test_symbol = test_function_symbol(statement.name);
-    return emit_function(
-        state,
-        FunctionSignature {
-            name: test_symbol,
-            is_async: false,
-            parameters: [],
-            return_type: null,
-            effects: statement.effects,
-            type_parameters: [],
-            name_span: statement.name_span,
-        },
-        statement.body,
-        statement.decorators
-    );
+    return emit_function(state, FunctionSignature {
+        name: test_symbol, is_async: false, parameters: [], return_type: null, effects: statement.effects, type_parameters: [], name_span: statement.name_span,
+    }, statement.body, statement.decorators);
 }
 
 fn emit_model(state: NativeState, statement: Statement) -> NativeState {
@@ -464,9 +458,7 @@ fn emit_model(state: NativeState, statement: Statement) -> NativeState {
     current = state_push_indent(current);
     let mut index: number = 0;
     loop {
-        if index >= statement.properties.length {
-            break;
-        }
+        if index >= statement.properties.length { break; }
         let property = statement.properties[index];
         let line = ".property " + property.name + " = " + format_expression(property.value);
         current = state_emit_line(current, line);
@@ -498,9 +490,7 @@ fn emit_interface(state: NativeState, statement: Statement) -> NativeState {
     current = state_push_indent(current);
     let mut index: number = 0;
     loop {
-        if index >= statement.members.length {
-            break;
-        }
+        if index >= statement.members.length { break; }
         let signature = statement.members[index];
         current = state_emit_line(current, ".sig " + format_function_signature(signature));
         index += 1;
@@ -523,9 +513,7 @@ fn emit_enum(state: NativeState, statement: Statement) -> NativeState {
     current = state_merge_diagnostics(current, enum_layout.diagnostics);
     let mut index: number = 0;
     loop {
-        if index >= statement.variants.length {
-            break;
-        }
+        if index >= statement.variants.length { break; }
         current = state_emit_line(current, ".variant " + format_enum_variant(statement.variants[index]));
         index += 1;
     }
@@ -551,18 +539,14 @@ fn emit_struct(state: NativeState, statement: Statement) -> NativeState {
 
     let mut index: number = 0;
     loop {
-        if index >= statement.fields.length {
-            break;
-        }
+        if index >= statement.fields.length { break; }
         current = state_emit_line(current, ".field " + format_field(statement.fields[index]));
         index += 1;
     }
 
     let mut method_index: number = 0;
     loop {
-        if method_index >= statement.methods.length {
-            break;
-        }
+        if method_index >= statement.methods.length { break; }
         current = emit_method(current, statement.methods[method_index]);
         method_index += 1;
     }
@@ -602,12 +586,8 @@ fn emit_with(state: NativeState, statement: Statement) -> NativeState {
     let mut line: string = ".with ";
     let mut index: number = 0;
     loop {
-        if index >= statement.clauses.length {
-            break;
-        }
-        if index > 0 {
-            line = line + ", ";
-        }
+        if index >= statement.clauses.length { break; }
+        if index > 0 { line = line + ", "; }
         line = line + format_expression(statement.clauses[index].expression);
         index += 1;
     }
@@ -643,9 +623,7 @@ fn emit_match(state: NativeState, statement: Statement) -> NativeState {
     current = state_push_indent(current);
     let mut index: number = 0;
     loop {
-        if index >= statement.cases.length {
-            break;
-        }
+        if index >= statement.cases.length { break; }
         current = emit_match_case(current, statement.cases[index]);
         index += 1;
     }
@@ -670,16 +648,10 @@ fn emit_match_case(state: NativeState, case: MatchCase) -> NativeState {
 }
 
 fn select_inline_match_case_statement(block: Block) -> Statement? {
-    if block.statements.length != 1 {
-        return null;
-    }
+    if block.statements.length != 1 { return null; }
     let statement = block.statements[0];
-    if statement.variant == "ExpressionStatement" {
-        return statement;
-    }
-    if statement.variant == "ReturnStatement" {
-        return statement;
-    }
+    if statement.variant == "ExpressionStatement" { return statement; }
+    if statement.variant == "ReturnStatement" { return statement; }
     return null;
 }
 
@@ -695,9 +667,7 @@ fn emit_if(state: NativeState, statement: Statement) -> NativeState {
     current = emit_block(current, statement.then_block);
     current = state_pop_indent(current);
     let else_branch = statement.else_branch;
-    if else_branch == null {
-        return state_emit_line(current, ".endif");
-    }
+    if else_branch == null { return state_emit_line(current, ".endif"); }
     current = emit_else_branch(current, else_branch);
     return state_emit_line(current, ".endif");
 }
@@ -708,14 +678,10 @@ fn emit_else_branch(state: NativeState, branch: ElseBranch) -> NativeState {
     let body = branch.body;
     if body == null {
         let nested = branch.statement;
-        if nested == null {
-            current = state_emit_line(current, "noop");
-        } else {
+        if nested == null { current = state_emit_line(current, "noop"); } else {
             current = emit_statement(current, nested);
         }
-    } else {
-        current = emit_block(current, body);
-    }
+    } else { current = emit_block(current, body); }
     current = state_pop_indent(current);
     return current;
 }
@@ -723,9 +689,7 @@ fn emit_else_branch(state: NativeState, branch: ElseBranch) -> NativeState {
 fn emit_return(state: NativeState, statement: Statement) -> NativeState {
     let mut current = emit_span_if_present(state, statement.span);
     let rendered = format_optional_expression(statement.expression);
-    if rendered.length == 0 {
-        return state_emit_line(current, "ret");
-    }
+    if rendered.length == 0 { return state_emit_line(current, "ret"); }
     return state_emit_line(current, "ret " + rendered);
 }
 
@@ -741,9 +705,7 @@ fn emit_block(state: NativeState, block: Block) -> NativeState {
     let mut current = state;
     let mut index: number = 0;
     loop {
-        if index >= block.statements.length {
-            break;
-        }
+        if index >= block.statements.length { break; }
         current = emit_statement(current, block.statements[index]);
         index += 1;
     }
@@ -754,9 +716,7 @@ fn emit_decorators(state: NativeState, decorators: Decorator[]) -> NativeState {
     let mut current = state;
     let mut index: number = 0;
     loop {
-        if index >= decorators.length {
-            break;
-        }
+        if index >= decorators.length { break; }
         current = state_emit_line(current, ".decorator " + format_decorator(decorators[index]));
         index += 1;
     }
@@ -767,14 +727,10 @@ fn emit_signature_metadata(state: NativeState, signature: FunctionSignature) -> 
     let mut current = state;
     if signature.return_type != null {
         current = state_emit_line(current, ".meta return " + signature.return_type.text);
-    } else {
-        current = state_emit_line(current, ".meta return void");
-    }
+    } else { current = state_emit_line(current, ".meta return void"); }
     if signature.effects.length > 0 {
         current = state_emit_line(current, ".meta effects " + join_with_separator(signature.effects, ", "));
-    } else {
-        current = state_emit_line(current, ".meta effects none");
-    }
+    } else { current = state_emit_line(current, ".meta effects none"); }
     if signature.type_parameters.length > 0 {
         current = state_emit_line(current, ".meta generics " + format_type_parameters(signature.type_parameters));
     }
@@ -785,15 +741,11 @@ fn emit_parameter_metadata(state: NativeState, parameters: Parameter[]) -> Nativ
     let mut current = state;
     let mut index: number = 0;
     loop {
-        if index >= parameters.length {
-            break;
-        }
+        if index >= parameters.length { break; }
         let parameter = parameters[index];
         current = emit_span_if_present(current, parameter.span);
         let mut line: string = ".param ";
-        if parameter.mutable {
-            line = line + "mut ";
-        }
+        if parameter.mutable { line = line + "mut "; }
         line = line + parameter.name;
         if parameter.type_annotation != null {
             line = line + ": " + parameter.type_annotation.text;
@@ -808,14 +760,11 @@ fn emit_parameter_metadata(state: NativeState, parameters: Parameter[]) -> Nativ
 }
 
 // ── Symbol helpers ───────────────────────────────────────────────────
-
 fn collect_entry_points(program: Program) -> string[] {
     let mut entries: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= program.statements.length {
-            break;
-        }
+        if index >= program.statements.length { break; }
         let statement = program.statements[index];
         if statement.variant == "FunctionDeclaration" {
             entries = append_unique(entries, statement.signature.name);
@@ -829,63 +778,43 @@ fn collect_entry_points(program: Program) -> string[] {
 }
 
 fn is_test_symbol_char(ch: string) -> boolean {
-    if ch.length == 0 {
-        return false;
-    }
-    if ch == "_" {
-        return true;
-    }
+    if ch.length == 0 { return false; }
+    if ch == "_" { return true; }
     let code = char_code(ch);
     let lower_a = char_code("a");
     let lower_z = char_code("z");
     if code >= lower_a {
-        if code <= lower_z {
-            return true;
-        }
+        if code <= lower_z { return true; }
     }
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
     if code >= upper_a {
-        if code <= upper_z {
-            return true;
-        }
+        if code <= upper_z { return true; }
     }
     let zero = char_code("0");
     let nine = char_code("9");
     if code >= zero {
-        if code <= nine {
-            return true;
-        }
+        if code <= nine { return true; }
     }
     return false;
 }
 
 fn sanitize_test_name_for_symbol(name: string) -> string {
-    if name.length == 0 {
-        return "unnamed";
-    }
+    if name.length == 0 { return "unnamed"; }
     let mut out: string = "";
     let mut index: number = 0;
     loop {
-        if index >= name.length {
-            break;
-        }
+        if index >= name.length { break; }
         let ch = name[index];
-        if is_test_symbol_char(ch) {
-            out = out + ch;
-        }
+        if is_test_symbol_char(ch) { out = out + ch; }
         index += 1;
     }
-    if out.length == 0 {
-        return "unnamed";
-    }
+    if out.length == 0 { return "unnamed"; }
     // Ensure the name is not purely numeric / doesn't start with a digit.
     let first = out[0];
     let code = char_code(first);
     if code >= char_code("0") {
-        if code <= char_code("9") {
-            return "_" + out;
-        }
+        if code <= char_code("9") { return "_" + out; }
     }
     return out;
 }
@@ -900,9 +829,7 @@ fn count_exported_symbols(program: Program) -> number {
     let mut count: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= program.statements.length {
-            break;
-        }
+        if index >= program.statements.length { break; }
         let stmt = program.statements[index];
         let mut _if24: boolean = false;
         if stmt.variant == "FunctionDeclaration" { _if24 = true; }
@@ -914,9 +841,7 @@ fn count_exported_symbols(program: Program) -> number {
         if stmt.variant == "TestDeclaration" { _if24 = true; }
         if stmt.variant == "TypeAliasDeclaration" { _if24 = true; }
         if stmt.variant == "InterfaceDeclaration" { _if24 = true; }
-        if _if24 {
-            count += 1;
-        }
+        if _if24 { count += 1; }
         index += 1;
     }
     return count;

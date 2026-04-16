@@ -15,7 +15,6 @@
 //   - rendering.sfn:      LLVM IR rendering (types, declarations, metadata)
 //   - lifetime.sfn:       Lifetime/borrow tracking and validation
 //   - expressions.sfn:    Expression parsing and lowering helpers
-
 // Re-export all public types
 export {
     // Core types
@@ -132,10 +131,7 @@ export {
 } from "./type_mapping";
 
 // Re-export TypeContext building functions
-export {
-    build_type_context,
-    empty_type_context,
-} from "./type_context";
+export { build_type_context, empty_type_context, } from "./type_context";
 
 // Re-export TypeContext query/lookup functions
 export {

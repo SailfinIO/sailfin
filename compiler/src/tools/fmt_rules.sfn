@@ -2,13 +2,11 @@
 //
 // Formatting rule tables for sfn fmt. Spacing, blank-line, and
 // classification lookups used by the emit phase in fmt.sfn.
-
 import { strings_equal, substring } from "../string_utils";
 
 // ═══════════════════════════════════════════════════════════════════
 // Spacing rules
 // ═══════════════════════════════════════════════════════════════════
-
 // Returns "space", "none", or "newline" for the gap between two tokens
 // based on their roles.
 fn get_spacing_rule(left_role: string, right_role: string) -> string {
@@ -76,7 +74,6 @@ fn get_spacing_rule(left_role: string, right_role: string) -> string {
 // ═══════════════════════════════════════════════════════════════════
 // Blank-line rules
 // ═══════════════════════════════════════════════════════════════════
-
 // Returns the number of blank lines required for a context transition.
 // context values: "top_level", "after_imports", "in_block"
 fn get_blank_line_rule(context: string) -> number {
@@ -88,7 +85,6 @@ fn get_blank_line_rule(context: string) -> number {
 // ═══════════════════════════════════════════════════════════════════
 // Classification helpers
 // ═══════════════════════════════════════════════════════════════════
-
 fn opens_block(lexeme: string) -> boolean {
     if strings_equal(lexeme, "fn") { return true; }
     if strings_equal(lexeme, "struct") { return true; }
@@ -147,9 +143,7 @@ fn is_binary_operator(lexeme: string) -> boolean {
 // assignment, keyword, or at expression start.
 fn is_unary_prefix(lexeme: string, prev_role: string) -> boolean {
     if !strings_equal(lexeme, "-") {
-        if !strings_equal(lexeme, "!") {
-            return false;
-        }
+        if !strings_equal(lexeme, "!") { return false; }
     }
     // After these roles, - and ! are unary prefix
     if strings_equal(prev_role, "") { return true; }
@@ -174,4 +168,13 @@ fn import_group(path: string) -> number {
     return 1;
 }
 
-export { get_spacing_rule, get_blank_line_rule, opens_block, closes_statement, wraps_at_threshold, is_binary_operator, is_unary_prefix, import_group };
+export {
+    get_spacing_rule,
+    get_blank_line_rule,
+    opens_block,
+    closes_statement,
+    wraps_at_threshold,
+    is_binary_operator,
+    is_unary_prefix,
+    import_group
+};

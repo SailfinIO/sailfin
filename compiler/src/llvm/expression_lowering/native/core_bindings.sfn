@@ -1,13 +1,11 @@
 // compiler/src/llvm/expression_lowering/native/core_bindings.sfn
 //
 // Small Stage2-specific binding helpers extracted from core.sfn.
-
-import { LocalBinding, ParameterBinding, OwnershipInfo } from "../../types";
-
+import { LocalBinding, OwnershipInfo, ParameterBinding } from "../../types";
 import {
     bindings_find_parameter_binding,
-    bindings_mark_parameter_consumed,
     bindings_mark_local_consumed,
+    bindings_mark_parameter_consumed,
     bindings_reset_local_consumption,
     bindings_update_local_ownership,
 } from "../bindings";

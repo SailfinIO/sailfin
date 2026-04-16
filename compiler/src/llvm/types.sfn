@@ -3,13 +3,18 @@
 // Struct definitions for the LLVM lowering pass. These types represent
 // intermediate data structures used during the translation from .sfn-asm
 // to LLVM IR.
-
-import { NativeFunction, NativeInterfaceSignature, NativeSourceSpan, NativeEnum, NativeStruct, LayoutManifest } from "../native_ir";
+import {
+    NativeFunction,
+    NativeInterfaceSignature,
+    NativeSourceSpan,
+    NativeEnum,
+    NativeStruct,
+    LayoutManifest
+} from "../native_ir";
 
 // =============================================================================
 // Enum Layout Fixup
 // =============================================================================
-
 struct EnumLayoutFixupResult {
     enums: NativeEnum[];
     diagnostics: string[];
@@ -18,7 +23,6 @@ struct EnumLayoutFixupResult {
 // =============================================================================
 // Trait/Interface Metadata
 // =============================================================================
-
 struct TraitImplementationDescriptor {
     struct_name: string;
     interfaces: string[];
@@ -38,7 +42,6 @@ struct TraitMetadata {
 // =============================================================================
 // Effect System
 // =============================================================================
-
 struct FunctionEffectEntry {
     name: string;
     effects: string[];
@@ -61,7 +64,6 @@ struct FunctionCallEntry {
 // =============================================================================
 // Runtime Helpers
 // =============================================================================
-
 struct RuntimeHelperDescriptor {
     target: string;
     symbol: string;
@@ -73,7 +75,6 @@ struct RuntimeHelperDescriptor {
 // =============================================================================
 // String Constants
 // =============================================================================
-
 struct StringConstant {
     name: string;
     content: string;
@@ -95,7 +96,6 @@ struct InterpolatedTemplateParse {
 // =============================================================================
 // Lowering Results
 // =============================================================================
-
 struct LoweredLLVMResult {
     ir: string;
     diagnostics: string[];
@@ -145,7 +145,6 @@ struct BodyResult {
 // =============================================================================
 // Parameter/Local Bindings
 // =============================================================================
-
 struct ParameterBinding {
     name: string;
     llvm_name: string;
@@ -185,7 +184,6 @@ struct ModuleGlobalLoweringResult {
 // =============================================================================
 // LLVM Operands and Expression Results
 // =============================================================================
-
 struct LLVMOperand {
     llvm_type: string;
     value: string;
@@ -207,7 +205,6 @@ struct ArrayLiteralMetadata {
 // =============================================================================
 // Ownership and Lifetime Tracking
 // =============================================================================
-
 struct OwnershipInfo {
     variant: string;
     base: string;
@@ -256,7 +253,6 @@ struct OwnershipAnalysis {
 // =============================================================================
 // Type Context (struct/enum/interface metadata)
 // =============================================================================
-
 struct StructFieldInfo {
     name: string;
     llvm_type: string;
@@ -336,7 +332,6 @@ struct TypeAllocationInfo {
 // =============================================================================
 // Heap/Allocation Helpers
 // =============================================================================
-
 struct HeapBoxResult {
     lines: string[];
     temp_index: number;
@@ -347,7 +342,6 @@ struct HeapBoxResult {
 // =============================================================================
 // Literal Parsing
 // =============================================================================
-
 struct StructLiteralField {
     name: string;
     value: string;
@@ -385,7 +379,6 @@ struct IndexExpressionParse {
 // =============================================================================
 // Mutation Tracking
 // =============================================================================
-
 struct LocalMutation {
     name: string;
     llvm_type: string;
@@ -397,7 +390,6 @@ struct LocalMutation {
 // =============================================================================
 // Operator/Expression Parsing
 // =============================================================================
-
 struct OperatorMatch {
     index: number;
     symbol: string;
@@ -451,7 +443,6 @@ struct TernaryParseResult {
 // =============================================================================
 // Statement/Instruction Lowering Results
 // =============================================================================
-
 struct ExpressionStatementResult {
     lines: string[];
     temp_index: number;
@@ -492,7 +483,6 @@ struct InlineLetParseResult {
 // =============================================================================
 // Control Flow Structures
 // =============================================================================
-
 struct BlockLabelResult {
     label: string;
     next_counter: number;
@@ -546,7 +536,6 @@ struct RangeIterableParse {
 // =============================================================================
 // Match Expression Structures
 // =============================================================================
-
 struct MatchCaseStructure {
     pattern: string;
     guard: string?;
@@ -591,7 +580,6 @@ struct MatchCaseCondition {
 // =============================================================================
 // Condition/Comparison Helpers
 // =============================================================================
-
 struct ConditionConversion {
     lines: string[];
     temp_index: number;
@@ -626,7 +614,6 @@ struct BinaryAlignmentResult {
 // =============================================================================
 // Block Lowering Result
 // =============================================================================
-
 struct BlockLoweringResult {
     lines: string[];
     allocas: string[];
@@ -647,7 +634,6 @@ struct BlockLoweringResult {
 // =============================================================================
 // Throw/Exception Handling
 // =============================================================================
-
 struct ThrowLoweringResult {
     lines: string[];
     temp_index: number;
@@ -659,7 +645,6 @@ struct ThrowLoweringResult {
 // =============================================================================
 // PHI Node Merging
 // =============================================================================
-
 struct PhiMergeResult {
     lines: string[];
     temp_index: number;
@@ -690,7 +675,6 @@ struct MatchArmMutations {
 // =============================================================================
 // Local Loading
 // =============================================================================
-
 struct LoadLocalResult {
     lines: string[];
     temp_index: number;
@@ -701,7 +685,6 @@ struct LoadLocalResult {
 // =============================================================================
 // Call Resolution (split from core_call_lowering for OOM avoidance)
 // =============================================================================
-
 struct CallTargetResolution {
     trimmed_target: string;
     method_operand: LLVMOperand?;

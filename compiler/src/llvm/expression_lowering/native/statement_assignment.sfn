@@ -2,66 +2,58 @@
 //
 // Assignment handling extracted from statement.sfn to keep each function
 // under ~500 .sfn-asm instructions (avoids seed OOM).
-
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../../native_ir";
-import { substring, index_of } from "../../../string_utils";
-
-import { lower_expression, analyze_value_ownership } from "./core";
-import { coerce_operand_to_type } from "./core_operands";
-import { parse_member_access, parse_index_expression } from "./core_parse";
+import { index_of, substring } from "../../../string_utils";
 import {
-    find_local_binding,
-    infer_borrow_base_scope,
-    append_lifetime_region,
-    append_lifetime_release_event,
-    make_lifetime_region_metadata,
-} from "./core_scopes";
-
-import {
-    TypeContext, LocalBinding, ParameterBinding,
-    OwnershipInfo, LifetimeRegionMetadata,
-    LifetimeReleaseEvent, LLVMOperand, ExpressionResult,
-    AssignmentParseResult, StringConstant, LocalMutation,
-    ExpressionStatementResult,
-} from "../../types";
-
-import {
-    trim_text, starts_with, number_to_string,
-    append_parameter_binding, find_parameter_binding,
-} from "../../utils";
-
-import {
-    empty_string_constant_set, merge_string_constants,
-} from "../../strings";
-
-import {
-    format_temp_name,
     default_return_literal,
+    format_temp_name,
     is_simple_identifier,
 } from "../../expressions_helpers";
-
+import { empty_string_constant_set, merge_string_constants, } from "../../strings";
+import { find_struct_field_index, find_struct_info_by_llvm_type, } from "../../type_context_queries";
 import {
-    ends_with_pointer_suffix, strip_pointer_suffix,
     array_struct_type_for_element,
+    ends_with_pointer_suffix,
+    strip_pointer_suffix,
 } from "../../type_mapping";
-
 import {
-    find_struct_info_by_llvm_type,
-    find_struct_field_index,
-} from "../../type_context_queries";
-
-
-
+    AssignmentParseResult,
+    ExpressionResult,
+    ExpressionStatementResult,
+    LLVMOperand,
+    LifetimeRegionMetadata,
+    LifetimeReleaseEvent,
+    LocalBinding,
+    LocalMutation,
+    OwnershipInfo,
+    ParameterBinding,
+    StringConstant,
+    TypeContext,
+} from "../../types";
 import {
-    array_pointer_element_type,
-} from "../arrays";
-
+    append_parameter_binding,
+    find_parameter_binding,
+    number_to_string,
+    starts_with,
+    trim_text,
+} from "../../utils";
+import { array_pointer_element_type, } from "../arrays";
 import {
-    bindings_mark_parameter_consumed,
     bindings_mark_local_consumed,
+    bindings_mark_parameter_consumed,
     bindings_reset_local_consumption,
     bindings_update_local_ownership,
 } from "../bindings";
+import { analyze_value_ownership, lower_expression } from "./core";
+import { coerce_operand_to_type } from "./core_operands";
+import { parse_index_expression, parse_member_access } from "./core_parse";
+import {
+    append_lifetime_region,
+    append_lifetime_release_event,
+    find_local_binding,
+    infer_borrow_base_scope,
+    make_lifetime_region_metadata,
+} from "./core_scopes";
 
 // Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
 // when returned from cross-module calls. Scan lines for the highest %tN
@@ -78,9 +70,7 @@ fn _recover_assign_temp(lines: string[], floor: number) -> number {
             if space > 0 {
                 let num_str = substring(after_t, 0, space);
                 let rn = _assign_parse_int(num_str);
-                if rn >= result {
-                    result = rn + 1;
-                }
+                if rn >= result { result = rn + 1; }
             }
         }
         ri += 1;
@@ -114,14 +104,7 @@ fn _assign_parse_int(text: string) -> number {
     return result;
 }
 
-fn _write_assign_result_files(
-    pre_lines_count: number,
-    lines: string[],
-    temp_index: number,
-    mutations: LocalMutation[],
-    next_region_id: number,
-    string_constants: StringConstant[]
-) ![io] {
+fn _write_assign_result_files(pre_lines_count: number, lines: string[], temp_index: number, mutations: LocalMutation[], next_region_id: number, string_constants: StringConstant[]) ![io] {
     let new_count = lines.length - pre_lines_count;
     fs.writeFile("build/sailfin/.call_result_lines_count", number_to_string(lines.length));
     // Write all lines as bulk array
@@ -137,22 +120,7 @@ fn _write_assign_result_files(
 
 // Handles deref (*ptr = value), member access (obj.field = value), and
 // array index (arr[i] = value) assignments. Returns ExpressionStatementResult.
-fn lower_lvalue_assignment_stmt(
-    assign_target: string,
-    assign_value: string,
-    assign_operator: string,
-    current_bindings: ParameterBinding[],
-    current_locals: LocalBinding[],
-    temp_index: number,
-    lines: string[],
-    pre_lines_count: number,
-    next_region_id: number,
-    scope_id: string,
-    scope_depth: number,
-    functions: NativeFunction[],
-    context: TypeContext,
-    current_label: string
-) -> ExpressionStatementResult ![io] {
+fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, assign_operator: string, current_bindings: ParameterBinding[], current_locals: LocalBinding[], temp_index: number, lines: string[], pre_lines_count: number, next_region_id: number, scope_id: string, scope_depth: number, functions: NativeFunction[], context: TypeContext, current_label: string) -> ExpressionStatementResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_temp: number = temp_index;
@@ -184,13 +152,35 @@ fn lower_lvalue_assignment_stmt(
         if lowered_value.operand == null {
             diagnostics.push("llvm lowering: failed to lower assignment value for deref target `" + assign_target + "`");
             _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-            return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+            return ExpressionStatementResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                locals: current_locals,
+                bindings: current_bindings,
+                diagnostics: diagnostics,
+                lifetime_regions: lifetime_regions,
+                lifetime_releases: lifetime_releases,
+                next_region_id: current_next_region,
+                mutations: mutations,
+                string_constants: string_constants
+            };
         }
         let pointer_text = trim_text(substring(trimmed_target, 1, trimmed_target.length));
         if pointer_text.length == 0 {
             diagnostics.push("llvm lowering: deref assignment missing pointer operand");
             _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-            return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+            return ExpressionStatementResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                locals: current_locals,
+                bindings: current_bindings,
+                diagnostics: diagnostics,
+                lifetime_regions: lifetime_regions,
+                lifetime_releases: lifetime_releases,
+                next_region_id: current_next_region,
+                mutations: mutations,
+                string_constants: string_constants
+            };
         }
         let lowered_ptr = lower_expression(pointer_text, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
         let mut _ci1: number = 0;
@@ -205,12 +195,34 @@ fn lower_lvalue_assignment_stmt(
         if lowered_ptr.operand == null {
             diagnostics.push("llvm lowering: deref assignment pointer `" + pointer_text + "` produced no value");
             _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-            return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+            return ExpressionStatementResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                locals: current_locals,
+                bindings: current_bindings,
+                diagnostics: diagnostics,
+                lifetime_regions: lifetime_regions,
+                lifetime_releases: lifetime_releases,
+                next_region_id: current_next_region,
+                mutations: mutations,
+                string_constants: string_constants
+            };
         }
         if !ends_with_pointer_suffix(lowered_ptr.operand.llvm_type) {
             diagnostics.push("llvm lowering: deref assignment target is not a pointer (got `" + lowered_ptr.operand.llvm_type + "`)");
             _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-            return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+            return ExpressionStatementResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                locals: current_locals,
+                bindings: current_bindings,
+                diagnostics: diagnostics,
+                lifetime_regions: lifetime_regions,
+                lifetime_releases: lifetime_releases,
+                next_region_id: current_next_region,
+                mutations: mutations,
+                string_constants: string_constants
+            };
         }
         let element_type = strip_pointer_suffix(lowered_ptr.operand.llvm_type);
         let coerced = coerce_operand_to_type(lowered_value.operand, element_type, current_temp, current_lines);
@@ -226,11 +238,33 @@ fn lower_lvalue_assignment_stmt(
         if coerced.operand == null {
             diagnostics.push("llvm lowering: unable to coerce deref assignment value to `" + element_type + "`");
             _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-            return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+            return ExpressionStatementResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                locals: current_locals,
+                bindings: current_bindings,
+                diagnostics: diagnostics,
+                lifetime_regions: lifetime_regions,
+                lifetime_releases: lifetime_releases,
+                next_region_id: current_next_region,
+                mutations: mutations,
+                string_constants: string_constants
+            };
         }
         current_lines.push("  store " + element_type + " " + coerced.operand.value + ", " + element_type + "* " + lowered_ptr.operand.value);
         _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+        return ExpressionStatementResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            locals: current_locals,
+            bindings: current_bindings,
+            diagnostics: diagnostics,
+            lifetime_regions: lifetime_regions,
+            lifetime_releases: lifetime_releases,
+            next_region_id: current_next_region,
+            mutations: mutations,
+            string_constants: string_constants
+        };
     }
 
     // Member access assignment: base.field = value
@@ -291,7 +325,18 @@ fn lower_lvalue_assignment_stmt(
                 if !ends_with_pointer_suffix(base_pointer_type) {
                     diagnostics.push("llvm lowering: member access assignment base `" + member_parse.base + "` is not addressable");
                     _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-                    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+                    return ExpressionStatementResult {
+                        lines: current_lines,
+                        temp_index: current_temp,
+                        locals: current_locals,
+                        bindings: current_bindings,
+                        diagnostics: diagnostics,
+                        lifetime_regions: lifetime_regions,
+                        lifetime_releases: lifetime_releases,
+                        next_region_id: current_next_region,
+                        mutations: mutations,
+                        string_constants: string_constants
+                    };
                 }
                 let struct_llvm_name = strip_pointer_suffix(base_pointer_type);
                 let struct_info = find_struct_info_by_llvm_type(context, struct_llvm_name);
@@ -324,7 +369,18 @@ fn lower_lvalue_assignment_stmt(
             }
         }
         _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+        return ExpressionStatementResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            locals: current_locals,
+            bindings: current_bindings,
+            diagnostics: diagnostics,
+            lifetime_regions: lifetime_regions,
+            lifetime_releases: lifetime_releases,
+            next_region_id: current_next_region,
+            mutations: mutations,
+            string_constants: string_constants
+        };
     }
 
     // Array index assignment: arr[i] = value
@@ -392,7 +448,9 @@ fn lower_lvalue_assignment_stmt(
                             let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines);
                             let mut _ci10: number = 0;
                             loop {
-                                if _ci10 >= coerced_index.diagnostics.length { break; }
+                                if _ci10 >= coerced_index.diagnostics.length {
+                                    break;
+                                }
                                 diagnostics.push(coerced_index.diagnostics[_ci10]);
                                 _ci10 += 1;
                             }
@@ -402,7 +460,18 @@ fn lower_lvalue_assignment_stmt(
                             if coerced_index.operand == null {
                                 diagnostics.push("llvm lowering: unable to coerce array index to i64 for `" + assign_target + "`");
                                 _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-                                return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+                                return ExpressionStatementResult {
+                                    lines: current_lines,
+                                    temp_index: current_temp,
+                                    locals: current_locals,
+                                    bindings: current_bindings,
+                                    diagnostics: diagnostics,
+                                    lifetime_regions: lifetime_regions,
+                                    lifetime_releases: lifetime_releases,
+                                    next_region_id: current_next_region,
+                                    mutations: mutations,
+                                    string_constants: string_constants
+                                };
                             }
                             let data_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
@@ -420,12 +489,34 @@ fn lower_lvalue_assignment_stmt(
             }
         }
         _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-        return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+        return ExpressionStatementResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            locals: current_locals,
+            bindings: current_bindings,
+            diagnostics: diagnostics,
+            lifetime_regions: lifetime_regions,
+            lifetime_releases: lifetime_releases,
+            next_region_id: current_next_region,
+            mutations: mutations,
+            string_constants: string_constants
+        };
     }
 
     // Not a complex lvalue — should not reach here; caller dispatches simple local separately.
     _write_assign_result_files(pre_lines_count, current_lines, current_temp, mutations, current_next_region, string_constants);
-    return ExpressionStatementResult { lines: current_lines, temp_index: current_temp, locals: current_locals, bindings: current_bindings, diagnostics: diagnostics, lifetime_regions: lifetime_regions, lifetime_releases: lifetime_releases, next_region_id: current_next_region, mutations: mutations, string_constants: string_constants };
+    return ExpressionStatementResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        locals: current_locals,
+        bindings: current_bindings,
+        diagnostics: diagnostics,
+        lifetime_regions: lifetime_regions,
+        lifetime_releases: lifetime_releases,
+        next_region_id: current_next_region,
+        mutations: mutations,
+        string_constants: string_constants
+    };
 }
 
 // Pre-process self.field patterns in return expressions: emit GEP instructions
@@ -433,11 +524,7 @@ fn lower_lvalue_assignment_stmt(
 // lower_return_instruction to keep it under ~500 instructions.
 // Writes result to build/sailfin/.self_field_expr and .self_field_temp files,
 // and appends GEP lines to the provided lines array.
-fn preprocess_self_field_access(
-    expression: string,
-    current_temp: number,
-    current_lines: string[]
-) ![io] {
+fn preprocess_self_field_access(expression: string, current_temp: number, current_lines: string[]) ![io] {
     let mut result_expr: string = expression;
     let mut result_temp: number = current_temp;
     let mut result_lines: string[] = current_lines;
@@ -471,8 +558,13 @@ fn preprocess_self_field_access(
         if _ret_sp >= _ret_si.length { break; }
         let _ret_nl = index_of(substring(_ret_si, _ret_sp, _ret_si.length), "\n");
         let mut _ret_ln: string = "";
-        if _ret_nl < 0 { _ret_ln = substring(_ret_si, _ret_sp, _ret_si.length); _ret_sp = _ret_si.length; }
-        else { _ret_ln = substring(_ret_si, _ret_sp, _ret_sp + _ret_nl); _ret_sp = _ret_sp + _ret_nl + 1; }
+        if _ret_nl < 0 {
+            _ret_ln = substring(_ret_si, _ret_sp, _ret_si.length);
+            _ret_sp = _ret_si.length;
+        } else {
+            _ret_ln = substring(_ret_si, _ret_sp, _ret_sp + _ret_nl);
+            _ret_sp = _ret_sp + _ret_nl + 1;
+        }
         if _ret_ln.length == 0 { continue; }
         let _ret_t1 = index_of(_ret_ln, "\t");
         if _ret_t1 < 0 { continue; }
@@ -517,28 +609,33 @@ fn preprocess_self_field_access(
             let _ret_ch = substring(result_expr, _ret_end, _ret_end + 1);
             if _ret_ch >= "a" {
                 if _ret_ch <= "z" { _ret_end += 1; }
-            }
-            else if _ret_ch >= "A" {
+            } else if _ret_ch >= "A" {
                 if _ret_ch <= "Z" { _ret_end += 1; }
-            }
-            else if _ret_ch >= "0" {
+            } else if _ret_ch >= "0" {
                 if _ret_ch <= "9" { _ret_end += 1; }
-            }
-            else if _ret_ch == "_" { _ret_end += 1; }
-            else { break; }
+            } else if _ret_ch == "_" { _ret_end += 1; } else { break; }
         }
-        if _ret_end <= _ret_after { _ret_scan = _ret_end + 1; continue; }
+        if _ret_end <= _ret_after {
+            _ret_scan = _ret_end + 1;
+            continue;
+        }
         let _ret_field = substring(result_expr, _ret_after, _ret_end);
         let mut _ret_is_call: boolean = false;
         let mut _ret_peek: number = _ret_end;
         loop {
             if _ret_peek >= result_expr.length { break; }
             let _ret_pk = substring(result_expr, _ret_peek, _ret_peek + 1);
-            if _ret_pk == " " { _ret_peek += 1; continue; }
+            if _ret_pk == " " {
+                _ret_peek += 1;
+                continue;
+            }
             if _ret_pk == "(" { _ret_is_call = true; }
             break;
         }
-        if _ret_is_call { _ret_scan = _ret_end + 1; continue; }
+        if _ret_is_call {
+            _ret_scan = _ret_end + 1;
+            continue;
+        }
         let mut _ret_fidx: number = -1;
         let mut _ret_ftype: string = "";
         let mut _ret_fi: number = 0;
@@ -547,10 +644,18 @@ fn preprocess_self_field_access(
             if _ret_fp >= _ret_sfields.length { break; }
             let _ret_fc = index_of(substring(_ret_sfields, _ret_fp, _ret_sfields.length), ",");
             let mut _ret_fe: string = "";
-            if _ret_fc < 0 { _ret_fe = substring(_ret_sfields, _ret_fp, _ret_sfields.length); _ret_fp = _ret_sfields.length; }
-            else { _ret_fe = substring(_ret_sfields, _ret_fp, _ret_fp + _ret_fc); _ret_fp = _ret_fp + _ret_fc + 1; }
+            if _ret_fc < 0 {
+                _ret_fe = substring(_ret_sfields, _ret_fp, _ret_sfields.length);
+                _ret_fp = _ret_sfields.length;
+            } else {
+                _ret_fe = substring(_ret_sfields, _ret_fp, _ret_fp + _ret_fc);
+                _ret_fp = _ret_fp + _ret_fc + 1;
+            }
             let _ret_fk = index_of(_ret_fe, ":");
-            if _ret_fk < 0 { _ret_fi += 1; continue; }
+            if _ret_fk < 0 {
+                _ret_fi += 1;
+                continue;
+            }
             if substring(_ret_fe, 0, _ret_fk) == _ret_field {
                 _ret_fidx = _ret_fi;
                 _ret_ftype = substring(_ret_fe, _ret_fk + 1, _ret_fe.length);
@@ -558,7 +663,10 @@ fn preprocess_self_field_access(
             }
             _ret_fi += 1;
         }
-        if _ret_fidx < 0 { _ret_scan = _ret_end + 1; continue; }
+        if _ret_fidx < 0 {
+            _ret_scan = _ret_end + 1;
+            continue;
+        }
         let _ret_ct1 = format_temp_name(result_temp);
         result_lines.push("  " + _ret_ct1 + " = bitcast i8* %self to " + _ret_sllvm + "*");
         result_temp += 1;

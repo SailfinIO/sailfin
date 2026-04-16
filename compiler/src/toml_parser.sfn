@@ -2,7 +2,6 @@
 //
 // Minimal TOML parser for capsule.toml manifests. Provides a string-based API
 // so callers never need to allocate the SailToml struct across modules.
-
 struct SailToml {
     name: string;
     version: string;
@@ -28,9 +27,7 @@ fn _toml_trim(text: string) -> string {
         if ch == " " { _if434 = true; }
         if ch == "\t" { _if434 = true; }
         if ch == "\r" { _if434 = true; }
-        if _if434 {
-            start += 1;
-        } else { break; }
+        if _if434 { start += 1; } else { break; }
     }
     loop {
         if end <= start { break; }
@@ -39,9 +36,7 @@ fn _toml_trim(text: string) -> string {
         if ch == " " { _if435 = true; }
         if ch == "\t" { _if435 = true; }
         if ch == "\r" { _if435 = true; }
-        if _if435 {
-            end -= 1;
-        } else { break; }
+        if _if435 { end -= 1; } else { break; }
     }
     return substring(text, start, end);
 }
@@ -52,18 +47,12 @@ fn _toml_strip_quotes(text: string) -> string {
         let last = text[text.length - 1];
         let mut _if436: boolean = false;
         if first == "\"" {
-            if last == "\"" {
-                _if436 = true;
-            }
+            if last == "\"" { _if436 = true; }
         }
         if first == "'" {
-            if last == "'" {
-                _if436 = true;
-            }
+            if last == "'" { _if436 = true; }
         }
-        if _if436 {
-            return substring(text, 1, text.length - 1);
-        }
+        if _if436 { return substring(text, 1, text.length - 1); }
     }
     return text;
 }
@@ -81,9 +70,7 @@ fn _toml_split_lines(text: string) -> string[] {
         }
         i += 1;
     }
-    if start <= len {
-        lines.push(substring(text, start, len));
-    }
+    if start <= len { lines.push(substring(text, start, len)); }
     return lines;
 }
 
@@ -110,14 +97,15 @@ fn _toml_parse_string_array(value: string) -> string[] {
         i += 1;
     }
     let last_item = _toml_trim(substring(inner, start, len));
-    if last_item.length > 0 { items.push(_toml_strip_quotes(last_item)); }
+    if last_item.length > 0 {
+        items.push(_toml_strip_quotes(last_item));
+    }
     return items;
 }
 
 // ---- Stdlib resolution ----
 // Standard capsules can be referenced by bare name ("http") or full
 // registry name ("sfn/http"). These functions handle the mapping.
-
 fn _is_stdlib(name: string) -> boolean {
     if strings_equal(name, "http") { return true; }
     if strings_equal(name, "fs") { return true; }
@@ -149,9 +137,7 @@ fn resolve_capsule_name(name: string) -> string {
         i += 1;
     }
     // Bare name — check if it's a stdlib capsule
-    if _is_stdlib(name) {
-        return "sfn/" + name;
-    }
+    if _is_stdlib(name) { return "sfn/" + name; }
     // Unknown bare name — return as-is (will fail at download if not found)
     return name;
 }
@@ -160,15 +146,12 @@ fn display_capsule_name(name: string) -> string {
     // "sfn/http" → "http" for stdlib, "acme/router" → "acme/router" for third-party
     if string_starts_with(name, "sfn/") {
         let short = substring(name, 4, name.length);
-        if _is_stdlib(short) {
-            return short;
-        }
+        if _is_stdlib(short) { return short; }
     }
     return name;
 }
 
 // ---- Internal parse ----
-
 fn _parse_toml_internal(text: string) -> SailToml {
     let mut toml = SailToml {
         name: "",
@@ -191,7 +174,9 @@ fn _parse_toml_internal(text: string) -> SailToml {
         if line[0] == "#" { continue; }
         if line[0] == "[" {
             let close = find_char(line, "]", 0);
-            if close > 0 { section = _toml_trim(substring(line, 1, close)); }
+            if close > 0 {
+                section = _toml_trim(substring(line, 1, close));
+            }
             continue;
         }
         let eq_pos = find_char(line, "=", 0);
@@ -201,18 +186,30 @@ fn _parse_toml_internal(text: string) -> SailToml {
         let stripped_key = _toml_strip_quotes(key);
         let stripped_value = _toml_strip_quotes(value);
         if strings_equal(section, "capsule") {
-            if strings_equal(stripped_key, "name") { toml.name = stripped_value; }
-            if strings_equal(stripped_key, "version") { toml.version = stripped_value; }
-            if strings_equal(stripped_key, "description") { toml.description = stripped_value; }
+            if strings_equal(stripped_key, "name") {
+                toml.name = stripped_value;
+            }
+            if strings_equal(stripped_key, "version") {
+                toml.version = stripped_value;
+            }
+            if strings_equal(stripped_key, "description") {
+                toml.description = stripped_value;
+            }
         }
         if strings_equal(section, "build") {
-            if strings_equal(stripped_key, "entry") { toml.entry = stripped_value; }
+            if strings_equal(stripped_key, "entry") {
+                toml.entry = stripped_value;
+            }
         }
         if strings_equal(section, "dependencies") {
-            toml.dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
+            toml.dependencies.push(TomlDependency {
+                capsule: stripped_key, version: stripped_value
+            });
         }
         if strings_equal(section, "dev-dependencies") {
-            toml.dev_dependencies.push(TomlDependency { capsule: stripped_key, version: stripped_value });
+            toml.dev_dependencies.push(TomlDependency {
+                capsule: stripped_key, version: stripped_value
+            });
         }
         if strings_equal(section, "capabilities") {
             if strings_equal(stripped_key, "required") {
@@ -224,7 +221,6 @@ fn _parse_toml_internal(text: string) -> SailToml {
 }
 
 // ---- String-based public API (safe for cross-module use) ----
-
 fn toml_get_name(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.name;
@@ -292,7 +288,9 @@ fn toml_add_dependency(toml_text: string, capsule: string, version: string) -> s
         di += 1;
     }
     if !found {
-        t.dependencies.push(TomlDependency { capsule: capsule, version: version });
+        t.dependencies.push(TomlDependency {
+            capsule: capsule, version: version
+        });
     }
     return _write_toml(t);
 }
@@ -311,7 +309,9 @@ fn toml_add_dev_dependency(toml_text: string, capsule: string, version: string) 
         di += 1;
     }
     if !found {
-        t.dev_dependencies.push(TomlDependency { capsule: capsule, version: version });
+        t.dev_dependencies.push(TomlDependency {
+            capsule: capsule, version: version
+        });
     }
     return _write_toml(t);
 }

@@ -2,41 +2,43 @@
 //
 // Effect system analysis for LLVM lowering. Collects and propagates effects
 // through the function call graph to build capability manifests.
-
 import { NativeFunction, NativeInstruction } from "../native_ir";
-import { substring, char_at } from "../string_utils";
-import { FunctionEffectEntry, FunctionCallEntry, CapabilityManifest, CapabilityManifestEntry, RuntimeHelperDescriptor } from "./types";
+import { char_at, substring } from "../string_utils";
+import { find_runtime_helper } from "./runtime_helpers";
 import {
-    trim_text,
+    CapabilityManifest,
+    CapabilityManifestEntry,
+    FunctionCallEntry,
+    FunctionEffectEntry,
+    RuntimeHelperDescriptor
+} from "./types";
+import {
     append_string,
     copy_string_array,
-    string_array_contains,
-    string_arrays_equal,
-    number_to_string,
-    is_identifier_start_char,
-    is_identifier_part_char,
-    is_trim_char,
-    is_effect_prefix_char,
-    is_effect_delimiter,
-    index_of,
     find_last_index_of_char,
+    index_of,
+    is_effect_delimiter,
+    is_effect_prefix_char,
+    is_identifier_part_char,
+    is_identifier_start_char,
+    is_trim_char,
     matches_case_insensitive,
     matches_keyword,
-    skip_string_literal
+    number_to_string,
+    skip_string_literal,
+    string_array_contains,
+    string_arrays_equal,
+    trim_text
 } from "./utils";
-import { find_runtime_helper } from "./runtime_helpers";
 
 // =============================================================================
 // Effect Collection
 // =============================================================================
-
 fn collect_direct_function_effects(functions: NativeFunction[]) -> FunctionEffectEntry[] {
     let mut entries: FunctionEffectEntry[] = [];
     let mut index: number = 0;
     loop {
-        if index >= functions.length {
-            break;
-        }
+        if index >= functions.length { break; }
         let fun = functions[index];
         if fun != null {
             let entry = collect_function_effect_entry(fun);
@@ -66,33 +68,23 @@ fn append_function_effect_entry(values: FunctionEffectEntry[], entry: FunctionEf
 
 fn merge_effect_lists(base: string[], extras: string[]) -> string[] {
     if base == null {
-        if extras == null {
-            return [];
-        }
+        if extras == null { return []; }
     }
-    if base == null {
-        return copy_string_array(extras);
-    }
-    if extras == null {
-        return copy_string_array(base);
-    }
+    if base == null { return copy_string_array(extras); }
+    if extras == null { return copy_string_array(base); }
     let mut result: string[] = [];
 
     // Copy existing effects first so we preserve order before appending extras.
     let mut index: number = 0;
     loop {
-        if index >= base.length {
-            break;
-        }
+        if index >= base.length { break; }
         result = append_unique_effect(result, base[index]);
         index += 1;
     }
 
     index = 0;
     loop {
-        if index >= extras.length {
-            break;
-        }
+        if index >= extras.length { break; }
         result = append_unique_effect(result, extras[index]);
         index += 1;
     }
@@ -101,15 +93,9 @@ fn merge_effect_lists(base: string[], extras: string[]) -> string[] {
 }
 
 fn append_unique_effect(effects: string[], effect: string) -> string[] {
-    if effect == null {
-        return effects;
-    }
-    if effect.length == 0 {
-        return effects;
-    }
-    if string_array_contains(effects, effect) {
-        return effects;
-    }
+    if effect == null { return effects; }
+    if effect.length == 0 { return effects; }
+    if string_array_contains(effects, effect) { return effects; }
     effects.push(effect);
     return effects;
 }
@@ -117,21 +103,14 @@ fn append_unique_effect(effects: string[], effect: string) -> string[] {
 // =============================================================================
 // Borrow Effect Collection
 // =============================================================================
-
 fn collect_function_borrow_effects(function: NativeFunction) -> string[] {
     let mut effects: string[] = [];
     let mut instructions = function.instructions;
-    if instructions == null {
-        return effects;
-    }
-    if instructions.length > 1000000 {
-        return effects;
-    }
+    if instructions == null { return effects; }
+    if instructions.length > 1000000 { return effects; }
     let mut index: number = 0;
     loop {
-        if index >= instructions.length {
-            break;
-        }
+        if index >= instructions.length { break; }
         let instruction = instructions[index];
         if instruction == null {
             index += 1;
@@ -160,15 +139,11 @@ fn collect_function_borrow_effects(function: NativeFunction) -> string[] {
 
 fn collect_expression_borrow_effects(expression: string) -> string[] {
     let trimmed = trim_text(expression);
-    if trimmed.length == 0 {
-        return [];
-    }
+    if trimmed.length == 0 { return []; }
     let mut effects: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         if ch == "\"" {
             index = skip_string_literal(trimmed, index + 1);
@@ -200,7 +175,9 @@ fn collect_expression_borrow_effects(expression: string) -> string[] {
                     let _after_mut_next = after_mut_index + 1;
                     let mut _if44: boolean = false;
                     if after_mut_index >= trimmed.length { _if44 = true; }
-                    if is_effect_delimiter(substring(trimmed, after_mut_index, _after_mut_next)) { _if44 = true; }
+                    if is_effect_delimiter(substring(trimmed, after_mut_index, _after_mut_next)) {
+                        _if44 = true;
+                    }
                     if _if44 {
                         mutable_flag = true;
                         cursor = after_mut_index;
@@ -208,13 +185,9 @@ fn collect_expression_borrow_effects(expression: string) -> string[] {
                 }
             }
             loop {
-                if cursor >= trimmed.length {
-                    break;
-                }
+                if cursor >= trimmed.length { break; }
                 let current = substring(trimmed, cursor, cursor + 1);
-                if !is_trim_char(current) {
-                    break;
-                }
+                if !is_trim_char(current) { break; }
                 cursor += 1;
             }
             if cursor < trimmed.length {
@@ -236,7 +209,9 @@ fn collect_expression_borrow_effects(expression: string) -> string[] {
                 let _before_next = before_index + 1;
                 let mut _if45: boolean = false;
                 if before_index < 0 { _if45 = true; }
-                if is_effect_prefix_char(substring(trimmed, before_index, _before_next)) { _if45 = true; }
+                if is_effect_prefix_char(substring(trimmed, before_index, _before_next)) {
+                    _if45 = true;
+                }
                 if _if45 {
                     effects = append_unique_effect(effects, "read");
                     index += 6;
@@ -252,15 +227,12 @@ fn collect_expression_borrow_effects(expression: string) -> string[] {
 // =============================================================================
 // Call Graph Construction
 // =============================================================================
-
 fn collect_function_call_graph(functions: NativeFunction[]) -> FunctionCallEntry[] {
     let mut entries: FunctionCallEntry[] = [];
     let function_names = collect_function_names(functions);
     let mut index: number = 0;
     loop {
-        if index >= functions.length {
-            break;
-        }
+        if index >= functions.length { break; }
         let call_entry = collect_function_call_entry(functions[index], function_names);
         entries = append_function_call_entry(entries, call_entry);
         index += 1;
@@ -279,9 +251,7 @@ fn collect_function_call_entry(function: NativeFunction, function_names: string[
     }
     let mut index: number = 0;
     loop {
-        if index >= instructions.length {
-            break;
-        }
+        if index >= instructions.length { break; }
         let instruction = instructions[index];
         if instruction == null {
             index += 1;
@@ -297,13 +267,9 @@ fn collect_function_names(functions: NativeFunction[]) -> string[] {
     let mut names: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= functions.length {
-            break;
-        }
+        if index >= functions.length { break; }
         let mut name = functions[index].name;
-        if name == null {
-            name = "";
-        }
+        if name == null { name = ""; }
         names.push(name);
         index += 1;
     }
@@ -318,7 +284,6 @@ fn append_function_call_entry(entries: FunctionCallEntry[], entry: FunctionCallE
 // =============================================================================
 // Instruction Call Collection
 // =============================================================================
-
 fn collect_instruction_calls(instruction: NativeInstruction, function_names: string[]) -> string[] {
     let mut callees: string[] = [];
     if instruction.variant == "Let" {
@@ -367,14 +332,10 @@ fn collect_instruction_calls(instruction: NativeInstruction, function_names: str
 fn extract_call_targets(expression: string, function_names: string[]) -> string[] {
     let mut results: string[] = [];
     let expression_len = expression.length;
-    if expression_len == 0 {
-        return results;
-    }
+    if expression_len == 0 { return results; }
     let mut index: number = 0;
     loop {
-        if index >= expression_len {
-            break;
-        }
+        if index >= expression_len { break; }
         let ch = substring(expression, index, index + 1);
         if ch == "\"" {
             index = skip_string_literal(expression, index + 1);
@@ -384,9 +345,7 @@ fn extract_call_targets(expression: string, function_names: string[]) -> string[
             let start_index = index;
             index += 1;
             loop {
-                if index >= expression_len {
-                    break;
-                }
+                if index >= expression_len { break; }
                 let current = substring(expression, index, index + 1);
                 if is_identifier_part_char(current) {
                     index += 1;
@@ -402,16 +361,12 @@ fn extract_call_targets(expression: string, function_names: string[]) -> string[
             if candidate.length > 0 {
                 loop {
                     let dot_index = index_of(candidate, ".");
-                    if dot_index == -1 {
-                        break;
-                    }
+                    if dot_index == -1 { break; }
                     candidate = substring(candidate, dot_index + 1, candidate.length);
                 }
                 let mut cursor: number = index;
                 loop {
-                    if cursor >= expression_len {
-                        break;
-                    }
+                    if cursor >= expression_len { break; }
                     let next = substring(expression, cursor, cursor + 1);
                     if is_trim_char(next) {
                         cursor += 1;
@@ -435,14 +390,10 @@ fn extract_call_targets(expression: string, function_names: string[]) -> string[
 fn extract_all_call_targets(expression: string) -> string[] {
     let mut results: string[] = [];
     let expression_len = expression.length;
-    if expression_len == 0 {
-        return results;
-    }
+    if expression_len == 0 { return results; }
     let mut index: number = 0;
     loop {
-        if index >= expression_len {
-            break;
-        }
+        if index >= expression_len { break; }
         let ch = substring(expression, index, index + 1);
         if ch == "\"" {
             index = skip_string_literal(expression, index + 1);
@@ -452,9 +403,7 @@ fn extract_all_call_targets(expression: string) -> string[] {
             let start_index = index;
             index += 1;
             loop {
-                if index >= expression_len {
-                    break;
-                }
+                if index >= expression_len { break; }
                 let current = substring(expression, index, index + 1);
                 if is_identifier_part_char(current) {
                     index += 1;
@@ -473,9 +422,7 @@ fn extract_all_call_targets(expression: string) -> string[] {
             if candidate.length > 0 {
                 let mut cursor: number = index;
                 loop {
-                    if cursor >= expression_len {
-                        break;
-                    }
+                    if cursor >= expression_len { break; }
                     let next = substring(expression, cursor, cursor + 1);
                     if is_trim_char(next) {
                         cursor += 1;
@@ -497,17 +444,12 @@ fn extract_all_call_targets(expression: string) -> string[] {
 // =============================================================================
 // Runtime Helper Target Collection
 // =============================================================================
-
 fn collect_runtime_helper_targets(functions: NativeFunction[]) -> string[] {
-    if functions.length > 100000 {
-        return [];
-    }
+    if functions.length > 100000 { return []; }
     let mut used: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= functions.length {
-            break;
-        }
+        if index >= functions.length { break; }
         let helpers = collect_function_runtime_helper_targets(functions[index]);
         used = merge_effect_lists(used, helpers);
         index += 1;
@@ -520,21 +462,19 @@ fn collect_function_runtime_helper_targets(function: NativeFunction) -> string[]
 
     // Decorator-driven runtime hooks.
     let mut decorators = function.decorators;
-    if decorators == null {
-        decorators = [];
-    }
-    if decorators.length > 100000 {
-        return used;
-    }
+    if decorators == null { decorators = []; }
+    if decorators.length > 100000 { return used; }
     let mut decorator_index: number = 0;
     loop {
-        if decorator_index >= decorators.length {
-            break;
-        }
+        if decorator_index >= decorators.length { break; }
         let decorator_name = decorators[decorator_index];
         let mut _if47: boolean = false;
-        if matches_case_insensitive(decorator_name, "logExecution") { _if47 = true; }
-        if matches_case_insensitive(decorator_name, "logexecution") { _if47 = true; }
+        if matches_case_insensitive(decorator_name, "logExecution") {
+            _if47 = true;
+        }
+        if matches_case_insensitive(decorator_name, "logexecution") {
+            _if47 = true;
+        }
         if matches_case_insensitive(decorator_name, "trace") { _if47 = true; }
         if _if47 {
             used = append_unique_effect(used, "runtime_log_execution_fn");
@@ -543,17 +483,11 @@ fn collect_function_runtime_helper_targets(function: NativeFunction) -> string[]
     }
 
     let mut instructions = function.instructions;
-    if instructions == null {
-        instructions = [];
-    }
-    if instructions.length > 1000000 {
-        return used;
-    }
+    if instructions == null { instructions = []; }
+    if instructions.length > 1000000 { return used; }
     let mut index: number = 0;
     loop {
-        if index >= instructions.length {
-            break;
-        }
+        if index >= instructions.length { break; }
         let instruction = instructions[index];
         let instruction_helpers = collect_instruction_runtime_helper_targets(instruction);
         used = merge_effect_lists(used, instruction_helpers);
@@ -614,9 +548,7 @@ fn collect_instruction_runtime_helper_targets(instruction: NativeInstruction) ->
     if instruction.variant == "Try" {
         return ["clear_exception", "has_exception", "take_exception"];
     }
-    if instruction.variant == "Throw" {
-        return ["set_exception"];
-    }
+    if instruction.variant == "Throw" { return ["set_exception"]; }
     return [];
 }
 
@@ -624,9 +556,7 @@ fn filter_runtime_helper_targets(targets: string[]) -> string[] {
     let mut results: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= targets.length {
-            break;
-        }
+        if index >= targets.length { break; }
         let trimmed = trim_text(targets[index]);
         let mut helper = find_runtime_helper(trimmed);
         if helper == null {
@@ -680,9 +610,7 @@ fn filter_runtime_helper_targets(targets: string[]) -> string[] {
 
 fn collect_runtime_property_targets(expression: string) -> string[] {
     let trimmed = trim_text(expression);
-    if trimmed.length == 0 {
-        return [];
-    }
+    if trimmed.length == 0 { return []; }
     let mut results: string[] = [];
     if contains_dot_property(trimmed, "length") {
         results = append_unique_effect(results, "string.length");
@@ -696,37 +624,25 @@ fn contains_dot_property(expression: string, name: string) -> boolean {
     let mut _if48: boolean = false;
     if suffix_length == 0 { _if48 = true; }
     if expression.length < suffix_length { _if48 = true; }
-    if _if48 {
-        return false;
-    }
+    if _if48 { return false; }
     let mut index: number = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape_next: boolean = false;
     loop {
-        if index >= expression.length {
-            break;
-        }
+        if index >= expression.length { break; }
         let ch = substring(expression, index, index + 1);
         if in_double {
-            if escape_next {
-                escape_next = false;
-            } else if ch == "\\" {
+            if escape_next { escape_next = false; } else if ch == "\\" {
                 escape_next = true;
-            } else if ch == "\"" {
-                in_double = false;
-            }
+            } else if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
         if in_single {
-            if escape_next {
-                escape_next = false;
-            } else if ch == "\\" {
+            if escape_next { escape_next = false; } else if ch == "\\" {
                 escape_next = true;
-            } else if ch == "'" {
-                in_single = false;
-            }
+            } else if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -745,9 +661,7 @@ fn contains_dot_property(expression: string, name: string) -> boolean {
             let mut match_index: number = 0;
             let mut matches: boolean = true;
             loop {
-                if match_index >= suffix_length {
-                    break;
-                }
+                if match_index >= suffix_length { break; }
                 let _expr_pos = index + match_index;
                 let expr_char = char_at(expression, _expr_pos);
                 let suffix_char = char_at(suffix, match_index);
@@ -764,12 +678,8 @@ fn contains_dot_property(expression: string, name: string) -> boolean {
             if matches {
                 let after_index = _sfx_end;
                 let after_char = char_at(expression, after_index);
-                if after_char.length == 0 {
-                    return true;
-                }
-                if !is_identifier_part_char(after_char) {
-                    return true;
-                }
+                if after_char.length == 0 { return true; }
+                if !is_identifier_part_char(after_char) { return true; }
             }
         }
         index += 1;
@@ -780,23 +690,20 @@ fn contains_dot_property(expression: string, name: string) -> boolean {
 // =============================================================================
 // Effect Propagation
 // =============================================================================
-
 fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph: FunctionCallEntry[]) -> FunctionEffectEntry[] ![io] {
     let mut aggregated: FunctionEffectEntry[] = [];
     let mut index: number = 0;
     loop {
-        if index >= direct_effects.length {
-            break;
-        }
-        aggregated.push(FunctionEffectEntry { name: direct_effects[index].name, effects: copy_string_array(direct_effects[index].effects) });
+        if index >= direct_effects.length { break; }
+        aggregated.push(FunctionEffectEntry {
+            name: direct_effects[index].name, effects: copy_string_array(direct_effects[index].effects)
+        });
         index += 1;
     }
 
     let mut _let50: boolean = false;
     if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") {
-            _let50 = true;
-        }
+        if fs.exists("build/sailfin/.test_runner_active") { _let50 = true; }
     }
     let trace = _let50;
     let mut iteration: number = 0;
@@ -808,18 +715,14 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
     let mut call_callee_indices: number[][] = [];
     let mut call_index: number = 0;
     loop {
-        if call_index >= call_graph.length {
-            break;
-        }
+        if call_index >= call_graph.length { break; }
         let call_entry = call_graph[call_index];
         call_targets.push(find_function_effect_entry_index(aggregated, call_entry.name));
 
         let mut callees: number[] = [];
         let mut callee_index: number = 0;
         loop {
-            if callee_index >= call_entry.callees.length {
-                break;
-            }
+            if callee_index >= call_entry.callees.length { break; }
             callees.push(find_function_effect_entry_index(aggregated, call_entry.callees[callee_index]));
             callee_index += 1;
         }
@@ -829,9 +732,7 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
 
     let mut changed: boolean = true;
     loop {
-        if !changed {
-            break;
-        }
+        if !changed { break; }
         if iteration > max_iterations {
             if trace {
                 print.err("llvm effects: propagation cap reached (max=" + number_to_string(max_iterations) + ")");
@@ -842,9 +743,7 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
         changed = false;
         call_index = 0;
         loop {
-            if call_index >= call_graph.length {
-                break;
-            }
+            if call_index >= call_graph.length { break; }
             let target_index = call_targets[call_index];
             if target_index >= 0 {
                 let target_entry = aggregated[target_index];
@@ -853,9 +752,7 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
                 let callees = call_callee_indices[call_index];
                 let mut callee_index: number = 0;
                 loop {
-                    if callee_index >= callees.length {
-                        break;
-                    }
+                    if callee_index >= callees.length { break; }
                     let callee_pos = callees[callee_index];
                     if callee_pos >= 0 {
                         let callee_entry = aggregated[callee_pos];
@@ -872,7 +769,10 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
                 }
 
                 if !string_arrays_equal(merged, target_entry.effects) {
-                    aggregated[target_index] = FunctionEffectEntry { name: target_entry.name, effects: merged };
+                    aggregated[target_index] = FunctionEffectEntry {
+                        name: target_entry.name,
+                        effects: merged
+                    };
                     changed = true;
                 }
             }
@@ -886,12 +786,8 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
 fn find_function_effect_entry_index(entries: FunctionEffectEntry[], name: string) -> number {
     let mut index: number = 0;
     loop {
-        if index >= entries.length {
-            break;
-        }
-        if entries[index].name == name {
-            return index;
-        }
+        if index >= entries.length { break; }
+        if entries[index].name == name { return index; }
         index += 1;
     }
     return -1;
@@ -899,9 +795,7 @@ fn find_function_effect_entry_index(entries: FunctionEffectEntry[], name: string
 
 fn find_function_effect_entry(entries: FunctionEffectEntry[], name: string) -> FunctionEffectEntry? {
     let index = find_function_effect_entry_index(entries, name);
-    if index >= 0 {
-        return entries[index];
-    }
+    if index >= 0 { return entries[index]; }
     return null;
 }
 
@@ -909,12 +803,8 @@ fn replace_function_effect_entry(entries: FunctionEffectEntry[], position: numbe
     let mut result: FunctionEffectEntry[] = [];
     let mut index: number = 0;
     loop {
-        if index >= entries.length {
-            break;
-        }
-        if index == position {
-            result.push(entry);
-        } else {
+        if index >= entries.length { break; }
+        if index == position { result.push(entry); } else {
             result.push(entries[index]);
         }
         index += 1;
@@ -925,21 +815,18 @@ fn replace_function_effect_entry(entries: FunctionEffectEntry[], position: numbe
 // =============================================================================
 // Capability Manifest Building
 // =============================================================================
-
 fn build_capability_manifest(entry_points: string[], function_effects: FunctionEffectEntry[]) -> CapabilityManifest {
     let mut entries: CapabilityManifestEntry[] = [];
     let mut index: number = 0;
     loop {
-        if index >= entry_points.length {
-            break;
-        }
+        if index >= entry_points.length { break; }
         let symbol = entry_points[index];
         let effect_entry = find_function_effect_entry(function_effects, symbol);
         let mut effects: string[] = [];
-        if effect_entry != null {
-            effects = effect_entry.effects;
-        }
-        entries = append_manifest_entry(entries, CapabilityManifestEntry { symbol: symbol, effects: effects });
+        if effect_entry != null { effects = effect_entry.effects; }
+        entries = append_manifest_entry(entries, CapabilityManifestEntry {
+            symbol: symbol, effects: effects
+        });
         index += 1;
     }
     return CapabilityManifest { entries: entries };

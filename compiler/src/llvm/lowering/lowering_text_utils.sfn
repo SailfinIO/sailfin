@@ -3,13 +3,11 @@
 // Text processing utilities and structured data parsers used by the
 // LLVM lowering recovery code.  Extracted from lowering_core.sfn to
 // reduce per-file memory footprint during self-hosting compilation.
-
-import { substring, char_code } from "../../string_utils";
+import { char_code, substring } from "../../string_utils";
+import { LocalBinding, StringConstant } from "../types";
 import { index_of } from "../utils";
-import { StringConstant, LocalBinding } from "../types";
 
 // ── Character / string utilities ─────────────────────────────────────
-
 fn is_trim_char_local(ch: string) -> boolean {
     let code = char_code(ch);
     let mut _ret236: boolean = false;
@@ -21,67 +19,41 @@ fn is_trim_char_local(ch: string) -> boolean {
 }
 
 fn trim_text_local(value: string) -> string {
-    if value.length == 0 {
-        return "";
-    }
+    if value.length == 0 { return ""; }
     let mut start: number = 0;
     let mut end = value.length;
     loop {
-        if start >= end {
-            break;
-        }
-        if !is_trim_char_local(value[start]) {
-            break;
-        }
+        if start >= end { break; }
+        if !is_trim_char_local(value[start]) { break; }
         start += 1;
     }
     loop {
-        if end <= start {
-            break;
-        }
-        if !is_trim_char_local(value[end - 1]) {
-            break;
-        }
+        if end <= start { break; }
+        if !is_trim_char_local(value[end - 1]) { break; }
         end -= 1;
     }
-    if end <= start {
-        return "";
-    }
+    if end <= start { return ""; }
     return substring(value, start, end);
 }
 
 fn starts_with_local(value: string, prefix: string) -> boolean {
-    if prefix.length == 0 {
-        return true;
-    }
-    if value.length < prefix.length {
-        return false;
-    }
+    if prefix.length == 0 { return true; }
+    if value.length < prefix.length { return false; }
     let mut index: number = 0;
     loop {
-        if index >= prefix.length {
-            break;
-        }
-        if value[index] != prefix[index] {
-            return false;
-        }
+        if index >= prefix.length { break; }
+        if value[index] != prefix[index] { return false; }
         index += 1;
     }
     return true;
 }
 
 fn index_of_char_local(value: string, needle: string) -> number {
-    if needle.length == 0 {
-        return 0;
-    }
+    if needle.length == 0 { return 0; }
     let mut index: number = 0;
     loop {
-        if index >= value.length {
-            break;
-        }
-        if value[index] == needle {
-            return index;
-        }
+        if index >= value.length { break; }
+        if value[index] == needle { return index; }
         index += 1;
     }
     return -1;
@@ -93,9 +65,7 @@ fn split_lines_local(value: string) -> string[] {
     let mut start: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= value_len {
-            break;
-        }
+        if index >= value_len { break; }
         let ch = value[index];
         if ch == "\n" {
             lines = lines.push(substring(value, start, index));
@@ -108,27 +78,20 @@ fn split_lines_local(value: string) -> string[] {
 }
 
 // ── Number / key-value parsing ───────────────────────────────────────
-
 fn parse_number_local(text: string) -> number {
     let trimmed = trim_text_local(text);
-    if trimmed.length == 0 {
-        return 0;
-    }
+    if trimmed.length == 0 { return 0; }
     let mut result: number = 0;
     let mut i: number = 0;
     loop {
-        if i >= trimmed.length {
-            break;
-        }
+        if i >= trimmed.length { break; }
         let ch = trimmed[i];
         let code = char_code(ch);
         let digit = code - char_code("0");
         let mut _if244: boolean = false;
         if digit < 0 { _if244 = true; }
         if digit > 9 { _if244 = true; }
-        if _if244 {
-            break;
-        }
+        if _if244 { break; }
         result = result * 10 + digit;
         i += 1;
     }
@@ -139,50 +102,37 @@ fn parse_number_local(text: string) -> number {
 // key_prefix is e.g. "size=", prefix_len is its length (e.g. 5).
 fn extract_kv_number(text: string, key_prefix: string, prefix_len: number) -> number {
     let key_idx = index_of(text, key_prefix);
-    if key_idx < 0 {
-        return 0;
-    }
+    if key_idx < 0 { return 0; }
     let val_start = key_idx + prefix_len;
     let rest = substring(text, val_start, text.length);
     let space_idx = index_of(rest, " ");
     let val_text_no_space = substring(text, val_start, text.length);
     let val_text_with_space = substring(text, val_start, val_start + space_idx);
-    if space_idx < 0 {
-        return parse_number_local(val_text_no_space);
-    }
+    if space_idx < 0 { return parse_number_local(val_text_no_space); }
     return parse_number_local(val_text_with_space);
 }
 
 // Extract a string value from "key=value" pattern in text.
 fn extract_kv_string(text: string, key_prefix: string, prefix_len: number) -> string {
     let key_idx = index_of(text, key_prefix);
-    if key_idx < 0 {
-        return "";
-    }
+    if key_idx < 0 { return ""; }
     let val_start = key_idx + prefix_len;
     let rest = substring(text, val_start, text.length);
     let space_idx = index_of(rest, " ");
-    if space_idx < 0 {
-        return substring(text, val_start, text.length);
-    }
+    if space_idx < 0 { return substring(text, val_start, text.length); }
     return substring(text, val_start, val_start + space_idx);
 }
 
 // ── Structured data parsers ──────────────────────────────────────────
-
 // Parse the tab-separated string constants file written by _write_lowered_function_files.
 // Format: one constant per line as "name\tcontent\tbyte_count".
 fn _parse_lowered_fn_string_constants(raw: string) -> StringConstant[] {
     let mut result: StringConstant[] = [];
-    if raw.length == 0 {
-        return result;
-    }
+    if raw.length == 0 { return result; }
     let file_lines = split_lines_local(raw);
     let mut i: number = 0;
     loop {
-        if i >= file_lines.length {
-            break;
-        }
+        if i >= file_lines.length { break; }
         let line = file_lines[i];
         if line.length == 0 {
             i += 1;
@@ -203,7 +153,9 @@ fn _parse_lowered_fn_string_constants(raw: string) -> StringConstant[] {
         let content = substring(rest, 0, tab2);
         let byte_text = substring(rest, tab2 + 1, rest.length);
         let byte_count = parse_number_local(byte_text);
-        result = result.push(StringConstant { name: name, content: content, byte_count: byte_count });
+        result = result.push(StringConstant {
+            name: name, content: content, byte_count: byte_count
+        });
         i += 1;
     }
     return result;
@@ -213,42 +165,28 @@ fn _parse_lowered_fn_string_constants(raw: string) -> StringConstant[] {
 // Format: name\tpointer\tllvm_type\ttype_annotation\tscope_id
 fn _parse_module_globals_locals(raw: string) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
-    if raw.length == 0 {
-        return result;
-    }
+    if raw.length == 0 { return result; }
     let file_lines = split_lines_local(raw);
     let mut i: number = 0;
     loop {
-        if i >= file_lines.length {
-            break;
-        }
+        if i >= file_lines.length { break; }
         let line = file_lines[i];
         i += 1;
-        if line.length == 0 {
-            continue;
-        }
+        if line.length == 0 { continue; }
         let tab1 = index_of_char_local(line, "\t");
-        if tab1 < 0 {
-            continue;
-        }
+        if tab1 < 0 { continue; }
         let name = substring(line, 0, tab1);
         let rest1 = substring(line, tab1 + 1, line.length);
         let tab2 = index_of_char_local(rest1, "\t");
-        if tab2 < 0 {
-            continue;
-        }
+        if tab2 < 0 { continue; }
         let pointer = substring(rest1, 0, tab2);
         let rest2 = substring(rest1, tab2 + 1, rest1.length);
         let tab3 = index_of_char_local(rest2, "\t");
-        if tab3 < 0 {
-            continue;
-        }
+        if tab3 < 0 { continue; }
         let llvm_type = substring(rest2, 0, tab3);
         let rest3 = substring(rest2, tab3 + 1, rest2.length);
         let tab4 = index_of_char_local(rest3, "\t");
-        if tab4 < 0 {
-            continue;
-        }
+        if tab4 < 0 { continue; }
         let type_annotation = substring(rest3, 0, tab4);
         let scope_id = substring(rest3, tab4 + 1, rest3.length);
         let binding = LocalBinding {
@@ -267,7 +205,6 @@ fn _parse_module_globals_locals(raw: string) -> LocalBinding[] {
 }
 
 // ── Quote-aware brace counting ───────────────────────────────────────
-
 // Return the net brace depth of `text` counting only `{` and `}` that
 // appear outside of double-quoted string literals.  For example:
 //   `collect_until(p, ["!", "{"])` → 0  (the `{` is inside quotes)
@@ -302,26 +239,19 @@ fn net_unquoted_brace_depth(text: string) -> number {
 }
 
 // ── Header recovery helpers ──────────────────────────────────────────
-
 fn recover_function_name_from_header(line: string) -> string {
-    if !starts_with_local(line, ".fn ") {
-        return "";
-    }
+    if !starts_with_local(line, ".fn ") { return ""; }
     let mut header = trim_text_local(substring(line, 4, line.length));
     if starts_with_local(header, "async ") {
         header = trim_text_local(substring(header, 6, header.length));
     }
     let open_paren = index_of_char_local(header, "(");
-    if open_paren < 0 {
-        return header;
-    }
+    if open_paren < 0 { return header; }
     return trim_text_local(substring(header, 0, open_paren));
 }
 
 fn recover_function_is_async_from_header(line: string) -> boolean {
-    if !starts_with_local(line, ".fn ") {
-        return false;
-    }
+    if !starts_with_local(line, ".fn ") { return false; }
     let header = trim_text_local(substring(line, 4, line.length));
     return starts_with_local(header, "async ");
 }
