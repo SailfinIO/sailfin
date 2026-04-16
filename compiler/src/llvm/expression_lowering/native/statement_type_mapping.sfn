@@ -33,12 +33,12 @@ import { substring } from "../../../string_utils";
 // Ownership wrapper stripping
 // ---------------------------------------------------------------------------
 
-fn unwrap_move_wrapper(annotation -> string) -> string {
+fn unwrap_move_wrapper(annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return trimmed;
     }
-    let mut _if152 -> boolean = false;
+    let mut _if152: boolean = false;
     if starts_with(trimmed, "Affine<") { _if152 = true; }
     if starts_with(trimmed, "Linear<") { _if152 = true; }
     if _if152 {
@@ -58,7 +58,7 @@ fn unwrap_move_wrapper(annotation -> string) -> string {
 // Primitive / named type helpers
 // ---------------------------------------------------------------------------
 
-fn map_struct_type_annotation(context -> TypeContext, annotation -> string) -> string {
+fn map_struct_type_annotation(context: TypeContext, annotation: string) -> string {
     let info = find_struct_info_by_name(context, annotation);
     if info != null {
         return info.llvm_name;
@@ -66,12 +66,12 @@ fn map_struct_type_annotation(context -> TypeContext, annotation -> string) -> s
     return "";
 }
 
-fn map_enum_type_annotation(context -> TypeContext, annotation -> string) -> string {
+fn map_enum_type_annotation(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= context.enums.length {
             break;
@@ -85,7 +85,7 @@ fn map_enum_type_annotation(context -> TypeContext, annotation -> string) -> str
     return "";
 }
 
-fn map_interface_type_annotation(context -> TypeContext, annotation -> string) -> string {
+fn map_interface_type_annotation(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -97,11 +97,11 @@ fn map_interface_type_annotation(context -> TypeContext, annotation -> string) -
     return "";
 }
 
-fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
+fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     if annotation == "number" {
         return "double";
     }
-    let mut _if149 -> boolean = false;
+    let mut _if149: boolean = false;
     if annotation == "boolean" { _if149 = true; }
     if annotation == "bool" { _if149 = true; }
     if _if149 {
@@ -110,7 +110,7 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
     if annotation == "usize" {
         return "i64";
     }
-    let mut _if150 -> boolean = false;
+    let mut _if150: boolean = false;
     if annotation == "int" { _if150 = true; }
     if annotation == "i64" { _if150 = true; }
     if _if150 {
@@ -145,7 +145,7 @@ fn map_primitive_type(context -> TypeContext, annotation -> string) -> string {
 // Optional types
 // ---------------------------------------------------------------------------
 
-fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
+fn map_optional_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -175,7 +175,7 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
     }
     // For primitive types and others, use the simple mapper
     let inner_type = map_type_annotation(inner_annotation);
-    let mut _if151 -> boolean = false;
+    let mut _if151: boolean = false;
     if inner_type.length == 0 { _if151 = true; }
     if inner_type == "void" { _if151 = true; }
     if _if151 {
@@ -193,7 +193,7 @@ fn map_optional_type(context -> TypeContext, annotation -> string) -> string {
 // Reference types
 // ---------------------------------------------------------------------------
 
-fn map_reference_inner_type(context -> TypeContext, annotation -> string) -> string {
+fn map_reference_inner_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -209,7 +209,7 @@ fn map_reference_inner_type(context -> TypeContext, annotation -> string) -> str
     return map_primitive_type(context, trimmed);
 }
 
-fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
+fn map_reference_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return "";
@@ -220,7 +220,7 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
     if starts_with(trimmed, "&&") {
         return "";
     }
-    let mut remainder -> string = trim_text(substring(trimmed, 1, trimmed.length));
+    let mut remainder: string = trim_text(substring(trimmed, 1, trimmed.length));
     if starts_with(remainder, "mut") {
         let after_mut = substring(remainder, 3, remainder.length);
         remainder = trim_text(after_mut);
@@ -245,7 +245,7 @@ fn map_reference_type(context -> TypeContext, annotation -> string) -> string {
 // Array pointer types
 // ---------------------------------------------------------------------------
 
-fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> string {
+fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed.length < 3 {
         return "";
@@ -281,15 +281,15 @@ fn map_array_pointer_type(context -> TypeContext, annotation -> string) -> strin
 // Union types
 // ---------------------------------------------------------------------------
 
-fn find_top_level_union_separator(text -> string) -> number {
-    let mut paren_depth -> number = 0;
-    let mut brace_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut angle_depth -> number = 0;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
-    let mut index -> number = 0;
+fn find_top_level_union_separator(text: string) -> number {
+    let mut paren_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut angle_depth: number = 0;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
+    let mut index: number = 0;
     loop {
         if index >= text.length {
             break;
@@ -402,8 +402,8 @@ fn find_top_level_union_separator(text -> string) -> number {
     return -1;
 }
 
-fn split_union_annotations(text -> string) -> string[] {
-    let mut result -> string[] = [];
+fn split_union_annotations(text: string) -> string[] {
+    let mut result: string[] = [];
     let mut remaining = text;
     loop {
         let index = find_top_level_union_separator(remaining);
@@ -423,7 +423,7 @@ fn split_union_annotations(text -> string) -> string[] {
     return result;
 }
 
-fn is_union_annotation(annotation -> string) -> boolean {
+fn is_union_annotation(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return false;
@@ -431,7 +431,7 @@ fn is_union_annotation(annotation -> string) -> boolean {
     return find_top_level_union_separator(trimmed) >= 0;
 }
 
-fn map_union_type(context -> TypeContext, annotation -> string) -> string {
+fn map_union_type(context: TypeContext, annotation: string) -> string {
     let normalized = unwrap_move_wrapper(trim_text(annotation));
     if !is_union_annotation(normalized) {
         return "";
@@ -440,8 +440,8 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
     if parts.length < 2 {
         return "";
     }
-    let mut llvm_parts -> string[] = [];
-    let mut index -> number = 0;
+    let mut llvm_parts: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= parts.length {
             break;
@@ -451,7 +451,7 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
             return "";
         }
         let mapped = map_type_annotation(part);
-        let mut _if153 -> boolean = false;
+        let mut _if153: boolean = false;
         if mapped.length == 0 { _if153 = true; }
         if mapped == "void" { _if153 = true; }
         if _if153 {
@@ -473,14 +473,14 @@ fn map_union_type(context -> TypeContext, annotation -> string) -> string {
 // Internal: maps a normalised annotation using context-aware lookups in the
 // standard precedence order (union → optional → reference → array → primitive).
 // Returns "" when the annotation cannot be resolved.
-fn _map_type_core(context -> TypeContext, normalized -> string) -> string {
+fn _map_type_core(context: TypeContext, normalized: string) -> string {
     // Raw pointer types: `*T`, `*mut T`, `*opaque`.
     if starts_with(normalized, "*") {
         let mut remainder = trim_text(substring(normalized, 1, normalized.length));
         if starts_with(remainder, "mut") {
             remainder = trim_text(substring(remainder, 3, remainder.length));
         }
-        let mut _if_raw -> boolean = false;
+        let mut _if_raw: boolean = false;
         if remainder == "opaque" { _if_raw = true; }
         if remainder.length == 0 { _if_raw = true; }
         if _if_raw {
@@ -524,9 +524,9 @@ fn _map_type_core(context -> TypeContext, normalized -> string) -> string {
 // Public type mappers
 // ---------------------------------------------------------------------------
 
-fn map_return_type(context -> TypeContext, return_type -> string) -> string {
+fn map_return_type(context: TypeContext, return_type: string) -> string {
     let trimmed = trim_text(return_type);
-    let mut _if154 -> boolean = false;
+    let mut _if154: boolean = false;
     if trimmed.length == 0 { _if154 = true; }
     if trimmed == "void" { _if154 = true; }
     if _if154 {
@@ -541,7 +541,7 @@ fn map_return_type(context -> TypeContext, return_type -> string) -> string {
     return "i8*";
 }
 
-fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> string {
+fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
     let trimmed = trim_text(parameter_type);
     if trimmed.length == 0 {
         return "double";
@@ -555,7 +555,7 @@ fn map_parameter_type(context -> TypeContext, parameter_type -> string) -> strin
     return "i8*";
 }
 
-fn map_local_type(context -> TypeContext, type_annotation -> string) -> string {
+fn map_local_type(context: TypeContext, type_annotation: string) -> string {
     let trimmed = trim_text(type_annotation);
     if trimmed.length == 0 {
         return "double";

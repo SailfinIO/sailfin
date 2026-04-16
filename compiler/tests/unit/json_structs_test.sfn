@@ -3,30 +3,30 @@
 // Does not test stringify_pretty (requires number_to_string from prelude).
 
 struct JsonValue {
-    kind -> string;
-    string_value -> string;
-    number_value -> number;
-    bool_value -> boolean;
-    items -> JsonValue[];
-    keys -> string[];
-    values -> JsonValue[];
+    kind: string;
+    string_value: string;
+    number_value: number;
+    bool_value: boolean;
+    items: JsonValue[];
+    keys: string[];
+    values: JsonValue[];
 }
 
-fn _string_val(value -> string) -> JsonValue {
+fn _string_val(value: string) -> JsonValue {
     return JsonValue {
         kind: "string", string_value: value, number_value: 0,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn _number_val(value -> number) -> JsonValue {
+fn _number_val(value: number) -> JsonValue {
     return JsonValue {
         kind: "number", string_value: "", number_value: value,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn _bool_val(value -> boolean) -> JsonValue {
+fn _bool_val(value: boolean) -> JsonValue {
     return JsonValue {
         kind: "boolean", string_value: "", number_value: 0,
         bool_value: value, items: [], keys: [], values: [],
@@ -40,14 +40,14 @@ fn _null_val() -> JsonValue {
     };
 }
 
-fn _array_val(items -> JsonValue[]) -> JsonValue {
+fn _array_val(items: JsonValue[]) -> JsonValue {
     return JsonValue {
         kind: "array", string_value: "", number_value: 0,
         bool_value: false, items: items, keys: [], values: [],
     };
 }
 
-fn _object_val(keys -> string[], values -> JsonValue[]) -> JsonValue {
+fn _object_val(keys: string[], values: JsonValue[]) -> JsonValue {
     return JsonValue {
         kind: "object", string_value: "", number_value: 0,
         bool_value: false, items: [], keys: keys, values: values,
@@ -56,9 +56,9 @@ fn _object_val(keys -> string[], values -> JsonValue[]) -> JsonValue {
 
 // -- New accessor functions --
 
-fn _has_key(obj -> JsonValue, key -> string) -> boolean {
+fn _has_key(obj: JsonValue, key: string) -> boolean {
     if !strings_equal(obj.kind, "object") { return false; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) { return true; }
@@ -67,9 +67,9 @@ fn _has_key(obj -> JsonValue, key -> string) -> boolean {
     return false;
 }
 
-fn _get_bool(obj -> JsonValue, key -> string) -> boolean {
+fn _get_bool(obj: JsonValue, key: string) -> boolean {
     if !strings_equal(obj.kind, "object") { return false; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) {
@@ -80,9 +80,9 @@ fn _get_bool(obj -> JsonValue, key -> string) -> boolean {
     return false;
 }
 
-fn _get_value(obj -> JsonValue, key -> string) -> JsonValue {
+fn _get_value(obj: JsonValue, key: string) -> JsonValue {
     if !strings_equal(obj.kind, "object") { return _null_val(); }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= obj.keys.length { break; }
         if strings_equal(obj.keys[i], key) {
@@ -93,12 +93,12 @@ fn _get_value(obj -> JsonValue, key -> string) -> JsonValue {
     return _null_val();
 }
 
-fn _array_length(value -> JsonValue) -> number {
+fn _array_length(value: JsonValue) -> number {
     if !strings_equal(value.kind, "array") { return 0; }
     return value.items.length;
 }
 
-fn _array_at(value -> JsonValue, index -> number) -> JsonValue {
+fn _array_at(value: JsonValue, index: number) -> JsonValue {
     if !strings_equal(value.kind, "array") { return _null_val(); }
     if index < 0 || index >= value.items.length { return _null_val(); }
     return value.items[index];

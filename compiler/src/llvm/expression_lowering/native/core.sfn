@@ -321,25 +321,25 @@ import {
     try_lower_interpolated_string_literal,
 } from "./core_literals_lowering";
 
-fn analyze_value_ownership(initializer -> string?, span -> NativeSourceSpan?, locals -> LocalBinding[], bindings -> ParameterBinding[]) -> OwnershipAnalysis {
+fn analyze_value_ownership(initializer: string?, span: NativeSourceSpan?, locals: LocalBinding[], bindings: ParameterBinding[]) -> OwnershipAnalysis {
     return analyze_value_ownership_impl(initializer, span, locals, bindings);
 }
 
-fn detect_borrow_conflicts(ownership -> OwnershipInfo?, locals -> LocalBinding[], binding_name -> string, function_name -> string) -> string[] {
+fn detect_borrow_conflicts(ownership: OwnershipInfo?, locals: LocalBinding[], binding_name: string, function_name: string) -> string[] {
     return detect_borrow_conflicts_impl(ownership, locals, binding_name, function_name);
 }
 
-fn format_suspension_location(keyword -> string, borrow_span -> NativeSourceSpan?, suspension_span -> NativeSourceSpan?) -> string {
+fn format_suspension_location(keyword: string, borrow_span: NativeSourceSpan?, suspension_span: NativeSourceSpan?) -> string {
     return format_suspension_location_impl(keyword, borrow_span, suspension_span);
 }
 
-fn resolve_borrow_base(target -> string, locals -> LocalBinding[]) -> string {
+fn resolve_borrow_base(target: string, locals: LocalBinding[]) -> string {
     return resolve_borrow_base_impl(target, locals);
 }
 
-fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
+fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let trimmed = trim_text(expression);
-    let mut diagnostics -> string[] = [];
+    let mut diagnostics: string[] = [];
     let empty_constants = empty_string_constant_set();
     let dbg_expr = fs.exists("build/sailfin/.trace_lowering");
     if dbg_expr {
@@ -377,8 +377,8 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     }
     if is_number_literal(stripped) {
         let trimmed_expected = trim_text(expected_type);
-        let mut _if51 -> boolean = false;
-        let mut _if53 -> boolean = false;
+        let mut _if51: boolean = false;
+        let mut _if53: boolean = false;
         if trimmed_expected == "i64" { _if53 = true; }
         if trimmed_expected == "i32" { _if53 = true; }
         if _if53 {
@@ -413,7 +413,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
         }
         let next = char_at(stripped, 5);
-        let mut _if52 -> boolean = false;
+        let mut _if52: boolean = false;
         if next == " " { _if52 = true; }
         if next == "\t" { _if52 = true; }
         if next == "(" { _if52 = true; }
@@ -424,7 +424,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                 return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
             }
             let lowered = lower_expression(remainder, bindings, locals, temp_index, lines, functions, context, expected_type);
-            let mut _ci0 -> number = 0;
+            let mut _ci0: number = 0;
             loop {
                 if _ci0 >= lowered.diagnostics.length { break; }
                 diagnostics.push(lowered.diagnostics[_ci0]);
@@ -451,7 +451,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                 return ExpressionResult { lines: awaited_lines, temp_index: lowered.temp_index, operand: out_operand, diagnostics: diagnostics, string_constants: lowered.string_constants };
             }
 
-            let mut result_type -> string = "i8*";
+            let mut result_type: string = "i8*";
             if future_operand.llvm_type == "%SailfinFutureNumber*" {
                 result_type = "double";
             } else if future_operand.llvm_type == "%SailfinFutureBool*" {
@@ -586,7 +586,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                 return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
             }
             let lowered_ptr = lower_expression(operand_text, bindings, locals, temp_index, lines, functions, context, "");
-            let mut _ci1 -> number = 0;
+            let mut _ci1: number = 0;
             loop {
                 if _ci1 >= lowered_ptr.diagnostics.length { break; }
                 diagnostics.push(lowered_ptr.diagnostics[_ci1]);
@@ -627,8 +627,8 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                             let element_type = array_pointer_element_type(local.llvm_type);
                             // Only rewrite string array concats; the generic runtime helper only supports i8* elements.
                             if element_type == "i8*" {
-                                let mut rewritten_args -> string[] = [member_target.base];
-                                let mut arg_index -> number = 0;
+                                let mut rewritten_args: string[] = [member_target.base];
+                                let mut arg_index: number = 0;
                                 loop {
                                     if arg_index >= argument_entries.length {
                                         break;
@@ -643,8 +643,8 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
                             if param != null {
                                 let element_type = array_pointer_element_type(param.llvm_type);
                                 if element_type == "i8*" {
-                                    let mut rewritten_args -> string[] = [member_target.base];
-                                    let mut arg_index -> number = 0;
+                                    let mut rewritten_args: string[] = [member_target.base];
+                                    let mut arg_index: number = 0;
                                     loop {
                                         if arg_index >= argument_entries.length {
                                             break;
@@ -682,7 +682,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             let enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name);
             if enum_info != null {
                 let lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
-                let mut _ci2 -> number = 0;
+                let mut _ci2: number = 0;
                 loop {
                     if _ci2 >= lowered_enum.diagnostics.length { break; }
                     diagnostics.push(lowered_enum.diagnostics[_ci2]);
@@ -696,7 +696,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let struct_parse = parse_struct_literal(stripped);
     if struct_parse.recognized {
         if !struct_parse.success {
-            let mut _ci3 -> number = 0;
+            let mut _ci3: number = 0;
             loop {
                 if _ci3 >= struct_parse.diagnostics.length { break; }
                 diagnostics.push(struct_parse.diagnostics[_ci3]);
@@ -705,7 +705,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
             return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
         }
         let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
-        let mut _ci4 -> number = 0;
+        let mut _ci4: number = 0;
         loop {
             if _ci4 >= lowered_struct.diagnostics.length { break; }
             diagnostics.push(lowered_struct.diagnostics[_ci4]);
@@ -742,7 +742,7 @@ fn lower_expression(expression -> string, bindings -> ParameterBinding[], locals
     let local = find_local_binding(locals, stripped);
     if local != null {
         let load_result = load_local_operand(local, temp_index, lines);
-        let mut _ci5 -> number = 0;
+        let mut _ci5: number = 0;
         loop {
             if _ci5 >= load_result.diagnostics.length { break; }
             diagnostics.push(load_result.diagnostics[_ci5]);

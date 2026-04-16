@@ -8,7 +8,7 @@ enum Color {
     Blue,
 }
 
-fn _color_name(c -> Color) -> string {
+fn _color_name(c: Color) -> string {
     if c == Color.Red { return "red"; }
     if c == Color.Green { return "green"; }
     if c == Color.Blue { return "blue"; }
@@ -16,15 +16,15 @@ fn _color_name(c -> Color) -> string {
 }
 
 struct Pixel {
-    x -> number;
-    y -> number;
-    color -> Color;
+    x: number;
+    y: number;
+    color: Color;
 
-    fn move_to(self, nx -> number, ny -> number) -> Pixel {
+    fn move_to(self, nx: number, ny: number) -> Pixel {
         return Pixel { x: nx, y: ny, color: self.color };
     }
 
-    fn recolor(self, new_color -> Color) -> Pixel {
+    fn recolor(self, new_color: Color) -> Pixel {
         return Pixel { x: self.x, y: self.y, color: new_color };
     }
 
@@ -33,16 +33,16 @@ struct Pixel {
     }
 }
 
-fn _num(n -> number) -> string {
+fn _num(n: number) -> string {
     if n == 0 { return "0"; }
-    let mut result -> string = "";
-    let mut remaining -> number = n;
+    let mut result: string = "";
+    let mut remaining: number = n;
     if remaining < 0 { remaining = 0 - remaining; }
     let digits = "0123456789";
     loop {
         if remaining <= 0 { break; }
-        let mut temp -> number = remaining;
-        let mut quotient -> number = 0;
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -89,10 +89,10 @@ test "composition: enum through function produces correct string" {
 // ---------------------------------------------------------------------------
 
 struct Bounds {
-    min_x -> number;
-    min_y -> number;
-    max_x -> number;
-    max_y -> number;
+    min_x: number;
+    min_y: number;
+    max_x: number;
+    max_y: number;
 
     fn width(self) -> number {
         return self.max_x - self.min_x;
@@ -106,7 +106,7 @@ struct Bounds {
         return self.width() * self.height();
     }
 
-    fn contains_point(self, px -> number, py -> number) -> boolean {
+    fn contains_point(self, px: number, py: number) -> boolean {
         if px < self.min_x { return false; }
         if px > self.max_x { return false; }
         if py < self.min_y { return false; }
@@ -115,15 +115,15 @@ struct Bounds {
     }
 }
 
-fn _compute_bounds(pixels -> Pixel[]) -> Bounds {
+fn _compute_bounds(pixels: Pixel[]) -> Bounds {
     if pixels.length == 0 {
         return Bounds { min_x: 0, min_y: 0, max_x: 0, max_y: 0 };
     }
-    let mut min_x -> number = pixels[0].x;
-    let mut min_y -> number = pixels[0].y;
-    let mut max_x -> number = pixels[0].x;
-    let mut max_y -> number = pixels[0].y;
-    let mut i -> number = 1;
+    let mut min_x: number = pixels[0].x;
+    let mut min_y: number = pixels[0].y;
+    let mut max_x: number = pixels[0].x;
+    let mut max_y: number = pixels[0].y;
+    let mut i: number = 1;
     loop {
         if i >= pixels.length { break; }
         let p = pixels[i];
@@ -137,7 +137,7 @@ fn _compute_bounds(pixels -> Pixel[]) -> Bounds {
 }
 
 test "composition: compute bounds from pixel array" {
-    let mut pixels -> Pixel[] = [];
+    let mut pixels: Pixel[] = [];
     pixels.push(Pixel { x: 5, y: 3, color: Color.Red });
     pixels.push(Pixel { x: 1, y: 8, color: Color.Green });
     pixels.push(Pixel { x: 9, y: 1, color: Color.Blue });
@@ -174,17 +174,17 @@ enum Op {
     Mul,
 }
 
-fn _apply_op(op -> Op, a -> number, b -> number) -> number {
+fn _apply_op(op: Op, a: number, b: number) -> number {
     if op == Op.Add { return a + b; }
     if op == Op.Sub { return a - b; }
     if op == Op.Mul { return a * b; }
     return 0;
 }
 
-fn _apply_ops_to_array(ops -> Op[], values -> number[]) -> number {
+fn _apply_ops_to_array(ops: Op[], values: number[]) -> number {
     if values.length == 0 { return 0; }
-    let mut result -> number = values[0];
-    let mut i -> number = 0;
+    let mut result: number = values[0];
+    let mut i: number = 0;
     loop {
         if i >= ops.length { break; }
         if i + 1 >= values.length { break; }
@@ -201,7 +201,7 @@ test "composition: enum dispatch with ops" {
 }
 
 test "composition: sequential ops on array" {
-    let mut ops -> Op[] = [];
+    let mut ops: Op[] = [];
     ops.push(Op.Add);
     ops.push(Op.Mul);
     ops.push(Op.Sub);

@@ -3,38 +3,38 @@
 // Provides typed access to the local filesystem. All operations require
 // the `io` effect and are synchronous in the current runtime.
 
-fn read(path -> string) -> string ![io] {
+fn read(path: string) -> string ![io] {
     // Read the entire contents of a file as a UTF-8 string.
     return fs.readFile(path);
 }
 
-fn write(path -> string, content -> string) -> void ![io] {
+fn write(path: string, content: string) -> void ![io] {
     // Write content to a file, creating it if it doesn't exist
     // or truncating it if it does.
     fs.writeFile(path, content);
 }
 
-fn append(path -> string, content -> string) -> void ![io] {
+fn append(path: string, content: string) -> void ![io] {
     // Append content to the end of a file.
     fs.appendFile(path, content);
 }
 
-fn exists(path -> string) -> boolean ![io] {
+fn exists(path: string) -> boolean ![io] {
     // Returns true if the path exists on disk.
     return fs.exists(path);
 }
 
-fn remove(path -> string) -> boolean ![io] {
+fn remove(path: string) -> boolean ![io] {
     // Delete a file. Returns true if the file was removed.
     return fs.deleteFile(path);
 }
 
-fn mkdir(path -> string) -> void ![io] {
+fn mkdir(path: string) -> void ![io] {
     // Create a directory and any necessary parent directories.
     fs.createDirectory(path, true);
 }
 
-fn read_dir(path -> string) -> string[] ![io] {
+fn read_dir(path: string) -> string[] ![io] {
     // List the entries in a directory.
     return fs.listDirectory(path);
 }

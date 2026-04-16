@@ -17,7 +17,6 @@ cd sailfin
 2. Set up the development environment:
 
 ```bash
-make env       # Create Conda environment
 make compile   # Build the compiler from seed
 make test      # Verify everything works
 ```
@@ -25,7 +24,7 @@ make test      # Verify everything works
 3. Create a feature branch:
 
 ```bash
-git checkout -b feature/my-feature alpha
+git checkout -b feature/my-feature main
 ```
 
 ## Development Workflow
@@ -58,9 +57,9 @@ make test      # Full test suite
 
 ## Branch Strategy
 
-- **`main`** — Stable releases
-- **`alpha`** — Prerelease builds (`-alpha` suffix)
-- Feature branches merge to `alpha`
+- **`main`** — Primary development branch; all feature work merges here
+- **`beta`** / **`rc`** — Short-lived branches cut from `main` for beta and release candidate cycles
+- Feature branches merge to `main`
 
 ## Principles
 
@@ -71,7 +70,7 @@ make test      # Full test suite
 ## Submitting Changes
 
 1. Ensure `make check` and `make test` pass
-2. Open a PR against the `alpha` branch
+2. Open a PR against the `main` branch
 3. Include test coverage for new features or bug fixes
 4. Update documentation if the change affects language behavior
 

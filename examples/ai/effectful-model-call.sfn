@@ -1,16 +1,16 @@
 // examples/ai/effectful-model-call.sfn
 
-fn call_model(name -> string, input -> string) -> string ![model] {
+fn call_model(name: string, input: string) -> string ![model] {
     return "{{name}}::{{input}}";
 }
 
-fn redact(text -> string) -> string {
+fn redact(text: string) -> string {
     return "[redacted] " + text;
 }
 
-fn summarize_invoice(invoice -> string) -> string ![model, io] {
-    let payload -> string = redact(invoice);
-    let summary -> string = call_model("summarizer", payload);
+fn summarize_invoice(invoice: string) -> string ![model, io] {
+    let payload: string = redact(invoice);
+    let summary: string = call_model("summarizer", payload);
     print(summary);
     return summary;
 }

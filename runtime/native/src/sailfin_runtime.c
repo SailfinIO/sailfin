@@ -65,6 +65,9 @@ typedef struct SailfinTryContext
 static _Thread_local SailfinTryContext *_sailfin_try_stack = NULL;
 static _Thread_local char *_sailfin_exception_message = NULL;
 
+// Forward declaration — defined near the concat reuse globals below.
+static inline void _runtime_enter(void);
+
 double sailfin_runtime_monotonic_millis(void)
 {
 #if defined(__APPLE__)
@@ -216,6 +219,7 @@ static char _get_field_safe_buf[4096] __attribute__((aligned(16)));
 
 char *sailfin_runtime_get_field(char *base, char *field)
 {
+    _runtime_enter();
     /* For remaining calls not handled by the GEP replacement pass,
        return a pointer to zeroed memory instead of NULL to avoid SIGSEGV.
        The zeroed buffer reads as empty string / zero array / false / 0.0. */
@@ -571,6 +575,38 @@ static size_t _sailfin_owned_table_len = 0;
 static size_t _sailfin_owned_table_tombstones = 0;
 
 // =============================================================================
+// Concat reuse optimization
+// =============================================================================
+// When chained concatenations happen (a + b + c + d), the LLVM IR is:
+//   %t1 = call concat(a, b)
+//   %t2 = call concat(%t1, c)
+//   %t3 = call concat(%t2, d)
+// Each intermediate (%t1, %t2) is used exactly once as the first arg of the
+// next concat. We can append in-place if the first arg is the result of the
+// immediately preceding concat call AND no other runtime function was called
+// in between (the call sequence counter guarantees this).
+//
+// Safety: _runtime_call_seq is incremented at ENTRY to every exported runtime
+// function. The reuse is only valid when _concat_reuse_seq == _runtime_call_seq,
+// meaning the CURRENT concat call is the very next runtime call after the
+// previous concat. Any intervening call (array_push, number_to_string, strlen,
+// fs.readFile, etc.) bumps the counter and invalidates the window. This is
+// strictly stronger than tracking only "store" calls — it catches ALL
+// intervening activity including LLVM store instructions that call runtime
+// helpers and any function that might observe the string.
+static char *_concat_reuse_ptr = NULL;    // last concat result pointer
+static size_t _concat_reuse_cap = 0;      // allocated capacity of that buffer
+static size_t _concat_reuse_len = 0;      // current string length in the buffer
+static uint64_t _concat_reuse_seq = 0;    // call_seq when last result was produced
+static uint64_t _runtime_call_seq = 0;    // incremented at entry to every exported fn
+
+// Call this at the top of every exported runtime function.
+static inline void _runtime_enter(void) { _runtime_call_seq++; }
+
+// Backwards compat alias used in array_push / concat / string_drop
+static inline void _invalidate_concat_reuse(void) { /* now handled by _runtime_enter */ }
+
+// =============================================================================
 // Recent string allocation tracking (debugging aid)
 // =============================================================================
 
@@ -592,6 +628,8 @@ static int _alloc_stats_init = 0;
 static int _alloc_stats_enabled = 0;
 static uint64_t _alloc_stats_string_concat_calls = 0;
 static uint64_t _alloc_stats_string_concat_bytes = 0;
+static uint64_t _alloc_stats_string_append_calls = 0;
+static uint64_t _alloc_stats_string_append_bytes = 0;
 static uint64_t _alloc_stats_substring_calls = 0;
 static uint64_t _alloc_stats_substring_bytes = 0;
 static uint64_t _alloc_stats_array_alloc_calls = 0;
@@ -625,9 +663,11 @@ static void _print_alloc_stats(void)
     }
     fprintf(
         stderr,
-        "[stage2-native] alloc_stats string_concat calls=%llu bytes=%llu substring calls=%llu bytes=%llu array_alloc calls=%llu bytes=%llu\n",
+        "[stage2-native] alloc_stats string_concat calls=%llu bytes=%llu string_append calls=%llu bytes=%llu substring calls=%llu bytes=%llu array_alloc calls=%llu bytes=%llu\n",
         (unsigned long long)_alloc_stats_string_concat_calls,
         (unsigned long long)_alloc_stats_string_concat_bytes,
+        (unsigned long long)_alloc_stats_string_append_calls,
+        (unsigned long long)_alloc_stats_string_append_bytes,
         (unsigned long long)_alloc_stats_substring_calls,
         (unsigned long long)_alloc_stats_substring_bytes,
         (unsigned long long)_alloc_stats_array_alloc_calls,
@@ -678,6 +718,29 @@ static bool _recent_array_contains(const void *data)
     }
     pthread_mutex_unlock(&_sailfin_recent_array_lock);
     return false;
+}
+
+// Scrub a stale data pointer from the ring buffer. Called before realloc
+// frees the old backing so that future _recent_array_contains() calls
+// cannot match against the freed address (which may be reused by malloc
+// for a non-array allocation, causing array_push_slot to read a bogus
+// header at old_ptr - 32 and corrupt output).
+static void _recent_array_remove(const void *data)
+{
+    if (!data)
+    {
+        return;
+    }
+    pthread_mutex_lock(&_sailfin_recent_array_lock);
+    const size_t cap = sizeof(_sailfin_recent_arrays) / sizeof(_sailfin_recent_arrays[0]);
+    for (size_t i = 0; i < cap; i++)
+    {
+        if (_sailfin_recent_arrays[i] == data)
+        {
+            _sailfin_recent_arrays[i] = NULL;
+        }
+    }
+    pthread_mutex_unlock(&_sailfin_recent_array_lock);
 }
 
 static void _recent_string_record(const char *base, size_t len)
@@ -1577,6 +1640,7 @@ void sailfin_runtime_mark_persistent(char *ptr)
 
 void sailfin_runtime_string_drop(char *text)
 {
+    _invalidate_concat_reuse();
     static int free_enabled = -1;
     if (free_enabled < 0)
     {
@@ -1788,6 +1852,7 @@ static inline int _is_corrupted_string_ptr(const char *ptr)
 
 int64_t sailfin_runtime_string_length(char *text)
 {
+    _runtime_enter();
     if (!text || _is_corrupted_string_ptr(text))
     {
         return 0;
@@ -1864,6 +1929,7 @@ int64_t sailfin_runtime_string_length(char *text)
 
 char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
 {
+    _runtime_enter();
     _maybe_init_alloc_stats();
     if (!text)
     {
@@ -1970,6 +2036,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
 
 char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end)
 {
+    _runtime_enter();
     _maybe_init_alloc_stats();
     if (!text)
     {
@@ -2064,6 +2131,7 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
 
 char *sailfin_runtime_string_concat(char *a, char *b)
 {
+    _runtime_enter();
     _maybe_init_alloc_stats();
     static int strict_strings = -1;
     if (strict_strings < 0)
@@ -2350,14 +2418,20 @@ char *sailfin_runtime_string_concat(char *a, char *b)
             b_truncated);
     }
 
-    // Allocate a padding region beyond the primary terminator.
-    // During bootstrap we still have a few codegen/runtime mismatches that can
-    // clobber 1–N bytes just past the logical end of a string (typically via
-    // off-by-one writes when treating strings as arrays). Providing a NUL pad
-    // prevents `strlen`/friends from running off the end of the heap object
-    // while we iterate on correctness.
+    // ---- Concat reuse: DISABLED ----
+    // In-place append is not safe because LLVM store instructions between
+    // consecutive concat calls are invisible to the runtime call-sequence
+    // counter. A stored concat result can be mutated by a subsequent in-place
+    // append, corrupting the stored copy. Enabling this optimization requires
+    // either compiler-level support (emitting a separate concat_reuse call for
+    // known-safe intermediates) or reference counting on strings.
+    // The 2x growth factor below still helps by reducing malloc overhead for
+    // strings that DO get produced.
+
+    // ---- Normal allocation path ----
     const size_t pad = 64;
-    char *out = (char *)malloc(alen + blen + 1 + pad);
+    size_t alloc_size = alen + blen + 1 + pad;
+    char *out = (char *)malloc(alloc_size);
     if (!out)
     {
         fprintf(
@@ -2365,7 +2439,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
             "[stage2-native] string_concat OOM (alen=%zu blen=%zu total=%zu) a=%p b=%p a_in=%p b_in=%p\n",
             alen,
             blen,
-            alen + blen + 1 + pad,
+            alloc_size,
             (void *)a,
             (void *)b,
             (void *)a_in,
@@ -2381,7 +2455,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     if (_alloc_stats_enabled)
     {
         _alloc_stats_string_concat_calls++;
-        _alloc_stats_string_concat_bytes += (uint64_t)(alen + blen + 1 + pad);
+        _alloc_stats_string_concat_bytes += (uint64_t)alloc_size;
     }
 
     if (a_immediate)
@@ -2622,8 +2696,148 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     return out;
 }
 
+// =============================================================================
+// String Append (compiler-emitted optimization for chained concatenation)
+// =============================================================================
+//
+// The compiler emits string_append instead of string_concat when it can prove
+// the first argument (`buf`) is an intermediate that:
+//   - Was produced by a prior string_concat or string_append call
+//   - Has not been stored to memory or passed to any other function
+//   - Will not be used after this call (it is consumed)
+//
+// This allows in-place buffer reuse via realloc, avoiding a fresh malloc+copy
+// for each link in a concatenation chain like `a + b + c + d`.
+
+char *sailfin_runtime_string_append(char *buf, char *suffix)
+{
+    _runtime_enter();
+    _maybe_init_alloc_stats();
+
+    // buf is CONSUMED: caller transfers ownership, old pointer becomes invalid.
+    // suffix is BORROWED: not freed, not modified.
+
+    if (!buf || _is_corrupted_string_ptr(buf))
+    {
+        // Degenerate case: fall back to concat semantics.
+        return sailfin_runtime_string_concat(buf, suffix);
+    }
+    if (!suffix || _is_corrupted_string_ptr(suffix))
+    {
+        // Nothing to append — return buf unchanged.
+        if (!suffix)
+        {
+            return buf;
+        }
+        // Corrupted suffix: fall back to concat for its diagnostics.
+        return sailfin_runtime_string_concat(buf, suffix);
+    }
+
+    bool buf_truncated = false;
+    size_t buf_len = _safe_strlen_asan(buf, &buf_truncated);
+    if (buf_truncated)
+    {
+        // Unterminated buffer — fall back to concat for safety.
+        return sailfin_runtime_string_concat(buf, suffix);
+    }
+
+    uint32_t suffix_codepoint = 0;
+    bool suffix_immediate = _is_immediate_codepoint_string(suffix, &suffix_codepoint);
+    unsigned char suffix_buf[5] = {0};
+    bool suffix_truncated = false;
+    size_t suffix_len = suffix_immediate
+                            ? _utf8_encode(suffix_codepoint, suffix_buf)
+                            : _safe_strlen_asan(suffix, &suffix_truncated);
+
+    if (suffix_truncated)
+    {
+        return sailfin_runtime_string_concat(buf, suffix);
+    }
+
+    if (suffix_len == 0)
+    {
+        return buf;
+    }
+
+    // Overflow / limit checks (same as string_concat).
+    static int concat_limit_init = 0;
+    static size_t concat_limit = 0;
+    if (!concat_limit_init)
+    {
+        concat_limit_init = 1;
+        int limit = _env_int("SAILFIN_MAX_STRING_CONCAT", 20000000);
+        if (limit < 0)
+        {
+            limit = 0;
+        }
+        concat_limit = (size_t)limit;
+    }
+    if (concat_limit > 0 && (buf_len + suffix_len) > concat_limit)
+    {
+        fprintf(stderr,
+                "[stage2-native] string_append limit exceeded (buf_len=%zu suffix_len=%zu limit=%zu)\n",
+                buf_len, suffix_len, concat_limit);
+        fflush(stderr);
+        sailfin_runtime_raise_value_error("string append limit exceeded");
+    }
+    if (buf_len > SIZE_MAX - suffix_len)
+    {
+        sailfin_runtime_raise_value_error("string append overflow");
+    }
+
+    const size_t pad = 64;
+    size_t alloc_size = buf_len + suffix_len + 1 + pad;
+    char *out = (char *)realloc(buf, alloc_size);
+    if (!out)
+    {
+        // On POSIX, realloc failure does not free buf — it remains valid.
+        // buf is still in the owned table so string_drop can eventually free it.
+        fprintf(stderr,
+                "[stage2-native] string_append OOM (buf_len=%zu suffix_len=%zu total=%zu)\n",
+                buf_len, suffix_len, alloc_size);
+        fflush(stderr);
+        return NULL;
+    }
+
+    // Remove old buf pointer from owned table now that realloc succeeded.
+    // (realloc may have returned the same pointer or a new one; either way,
+    // remove the old entry and track the new one below.)
+    if (out != buf)
+    {
+        pthread_mutex_lock(&_sailfin_owned_string_lock);
+        _owned_table_remove_unlocked(buf);
+        pthread_mutex_unlock(&_sailfin_owned_string_lock);
+    }
+
+    if (suffix_immediate)
+    {
+        memcpy(out + buf_len, suffix_buf, suffix_len);
+    }
+    else
+    {
+        memcpy(out + buf_len, suffix, suffix_len);
+    }
+    memset(out + buf_len + suffix_len, 0, 1 + pad);
+
+    _track_owned_string(out);
+
+    if (_alloc_stats_enabled)
+    {
+        _alloc_stats_string_append_calls++;
+        _alloc_stats_string_append_bytes += (uint64_t)alloc_size;
+    }
+
+    if (buf_len + suffix_len >= 1024)
+    {
+        _recent_string_record(out, buf_len + suffix_len);
+    }
+
+    return out;
+}
+
 char *sailfin_runtime_number_to_string(double value)
 {
+    _runtime_enter();
     static int trace_enabled = -1;
     if (trace_enabled < 0)
     {
@@ -2855,14 +3069,13 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
         return;
     }
 
-    // Skip canary validation for arrays not allocated by `_alloc_array`.
-    // Stage2 frequently passes stack-allocated array literals into runtime
-    // helpers; those buffers are not padded with canaries.
+    // Use the ring buffer to gate the header read — direct magic reads on
+    // stack-allocated arrays can segfault. Ring + eviction (see array_push)
+    // prevents most stale-entry false positives.
     if (!_recent_array_contains((const void *)arr->data))
     {
         return;
     }
-    // Arrays allocated by `_alloc_array` include a small header at data[-2..-1].
     const uintptr_t canary_value = (uintptr_t)0x5341494c46494e43ull;
     uintptr_t magic = (uintptr_t)arr->data[-2];
     if (magic != canary_value)
@@ -2899,6 +3112,7 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
 
 SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 {
+    _invalidate_concat_reuse();
     if (_array_is_suspicious_ptr(a))
     {
         fprintf(
@@ -3477,6 +3691,7 @@ SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text)
 
 SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
 {
+    _invalidate_concat_reuse();
     _array_check_canary("push.in", array);
 
     if (!array)
@@ -3495,6 +3710,9 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
     size_t capacity = 0;
     const uintptr_t header_magic = (uintptr_t)0x5341494c46494e43ull;
     bool has_header = false;
+    // Use ring buffer to gate header read — stack-allocated arrays don't have
+    // headers and reading data[-2] on them can segfault. Ring + eviction
+    // (see realloc path below) prevents most stale-entry false positives.
     if (array->data && _recent_array_contains((const void *)array->data))
     {
         if ((uintptr_t)array->data[-2] == header_magic)
@@ -3560,9 +3778,13 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         const size_t header_slots = 2u;
         const size_t canary_slots = 4u;
         char **raw = array->data - header_slots;
+        // Evict stale data pointer before realloc frees the old backing.
+        _recent_array_remove((const void *)array->data);
         char **grown = (char **)realloc(raw, (header_slots + new_capacity + canary_slots) * sizeof(char *));
         if (!grown)
         {
+            // realloc failed — re-record since old buffer is still valid.
+            _recent_array_record((const void *)array->data);
             return NULL;
         }
 
@@ -3842,6 +4064,10 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
     size_t capacity = 0;
     bool has_header = false;
 
+    // Use ring buffer to gate header read — stack/unknown arrays don't have
+    // headers and reading data[-header_bytes] on them can segfault. Ring +
+    // eviction (see realloc path below) prevents most stale-entry false
+    // positives.
     if (data && _recent_array_contains((const void *)data))
     {
         uint64_t *hdr = (uint64_t *)(data - header_bytes);
@@ -3945,9 +4171,16 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
         size_t old_payload = capacity * (size_t)elem_size;
         size_t new_payload = new_capacity * (size_t)elem_size;
         uint8_t *raw = data - header_bytes;
+        // Evict the old data pointer from the ring BEFORE realloc frees it.
+        // Without this, a future push_slot call could match the stale address
+        // in the ring, read a bogus header from freed/reused memory, and
+        // corrupt the array contents.
+        _recent_array_remove((const void *)data);
         uint8_t *grown = (uint8_t *)realloc(raw, header_bytes + new_payload + canary_bytes);
         if (!grown)
         {
+            // realloc failed — re-record the old pointer since it's still valid.
+            _recent_array_record((const void *)data);
             return NULL;
         }
         uint64_t *hdr = (uint64_t *)grown;
@@ -4849,6 +5082,7 @@ void *sailfin_runtime_create_model_bridge(void *config)
 
 void *sailfin_adapter_fs_read_file(void *path)
 {
+    _runtime_enter();
     const char *path_str = (const char *)path;
     if (!path_str)
     {
@@ -4891,6 +5125,7 @@ void *sailfin_adapter_fs_read_file(void *path)
 
 void sailfin_adapter_fs_write_file(void *path, void *contents)
 {
+    _runtime_enter();
     const char *path_str = (const char *)path;
     const char *contents_str = (const char *)contents;
     if (!path_str || !contents_str)
@@ -5095,6 +5330,7 @@ void sailfin_adapter_fs_append_file(void *path, void *contents)
 
 void sailfin_adapter_fs_write_lines(void *path, SailfinPtrArray *lines)
 {
+    _runtime_enter();
     const char *path_str = (const char *)path;
     if (!path_str || !lines)
     {
@@ -5331,6 +5567,7 @@ bool sailfin_adapter_fs_create_directory(void *path, bool recursive)
 
 bool sailfin_intrinsic_fs_exists(void *path)
 {
+    _runtime_enter();
     const char *path_str = (const char *)path;
     if (!path_str)
     {

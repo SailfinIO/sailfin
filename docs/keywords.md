@@ -96,5 +96,5 @@ The following keywords cannot be reused as identifiers in the compiler.
 - Future keywords discussed in proposals (e.g., `training`) remain unimplemented
   until they appear in `docs/status.md`.
 
-Track additions or removals through `docs/roadmap.md` and update this file when
+Track additions or removals through the [roadmap](https://sailfin.dev/roadmap) and update this file when
 new keywords land.

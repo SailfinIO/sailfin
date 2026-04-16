@@ -46,6 +46,10 @@ extern "C"
     // `end` is an absolute index (like Python slicing), not a length.
     char *sailfin_runtime_substring(char *text, int64_t start, int64_t end);
     char *sailfin_runtime_string_concat(char *a, char *b);
+    // Append suffix to buf in-place (realloc). buf is consumed (ownership
+    // transferred); suffix is borrowed. Only emitted by the compiler when buf
+    // is a provably-unaliased intermediate from a prior concat/append.
+    char *sailfin_runtime_string_append(char *buf, char *suffix);
     // Drop/free a runtime-owned string (no-op for non-owned/persistent values).
     void sailfin_runtime_string_drop(char *text);
     double sailfin_runtime_string_to_number(char *text);

@@ -26,8 +26,8 @@ export {
     split_whitespace,
 };
 
-fn is_trim_char(ch -> string) -> boolean {
-    let mut _ret388 -> boolean = false;
+fn is_trim_char(ch: string) -> boolean {
+    let mut _ret388: boolean = false;
     if ch == " " { _ret388 = true; }
     if ch == "\n" { _ret388 = true; }
     if ch == "\r" { _ret388 = true; }
@@ -35,9 +35,9 @@ fn is_trim_char(ch -> string) -> boolean {
     return _ret388;
 }
 
-fn trim_text(value -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = value.length;
+fn trim_text(value: string) -> string {
+    let mut start: number = 0;
+    let mut end: number = value.length;
     loop {
         if start >= end {
             break;
@@ -66,11 +66,11 @@ fn trim_text(value -> string) -> string {
     return substring(value, start, end);
 }
 
-fn starts_with(value -> string, prefix -> string) -> boolean {
+fn starts_with(value: string, prefix: string) -> boolean {
     if prefix.length > value.length {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= prefix.length {
             break;
@@ -83,14 +83,14 @@ fn starts_with(value -> string, prefix -> string) -> boolean {
     return true;
 }
 
-fn strip_prefix(value -> string, prefix -> string) -> string {
+fn strip_prefix(value: string, prefix: string) -> string {
     if starts_with(value, prefix) {
         return substring(value, prefix.length, value.length);
     }
     return value;
 }
 
-fn index_of(value -> string, target -> string) -> number {
+fn index_of(value: string, target: string) -> number {
     if target.length == 0 {
         return 0;
     }
@@ -98,13 +98,13 @@ fn index_of(value -> string, target -> string) -> number {
         return -1;
     }
     let limit = value.length - target.length;
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index > limit {
             break;
         }
-        let mut match_index -> number = 0;
-        let mut matches -> boolean = true;
+        let mut match_index: number = 0;
+        let mut matches: boolean = true;
         loop {
             if match_index >= target.length {
                 break;
@@ -124,13 +124,13 @@ fn index_of(value -> string, target -> string) -> number {
     return -1;
 }
 
-fn strip_quotes(value -> string) -> string {
+fn strip_quotes(value: string) -> string {
     if value.length < 2 {
         return value;
     }
     let first = value[0];
     let last = value[value.length - 1];
-    let mut _if360 -> boolean = false;
+    let mut _if360: boolean = false;
     if first == "\"" {
         if last == "\"" {
             _if360 = true;
@@ -139,7 +139,7 @@ fn strip_quotes(value -> string) -> string {
     if _if360 {
         return substring(value, 1, value.length - 1);
     }
-    let mut _if361 -> boolean = false;
+    let mut _if361: boolean = false;
     if first == "'" {
         if last == "'" {
             _if361 = true;
@@ -151,11 +151,11 @@ fn strip_quotes(value -> string) -> string {
     return value;
 }
 
-fn split_lines(value -> string) -> string[] {
+fn split_lines(value: string) -> string[] {
     let value_len = value.length;
-    let mut lines -> string[] = [];
-    let mut start -> number = 0;
-    let mut index -> number = 0;
+    let mut lines: string[] = [];
+    let mut start: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= value_len {
             break;
@@ -171,10 +171,10 @@ fn split_lines(value -> string) -> string[] {
     return lines;
 }
 
-fn strip_generics(name -> string) -> string {
-    let mut result -> string = "";
-    let mut depth -> number = 0;
-    let mut index -> number = 0;
+fn strip_generics(name: string) -> string {
+    let mut result: string = "";
+    let mut depth: number = 0;
+    let mut index: number = 0;
     loop {
         if index >= name.length {
             break;
@@ -200,17 +200,17 @@ fn strip_generics(name -> string) -> string {
     return trim_text(result);
 }
 
-fn last_index_of(value -> string, target -> string) -> number {
+fn last_index_of(value: string, target: string) -> number {
     if target.length == 0 {
         return value.length;
     }
-    let mut index -> number = value.length - target.length;
+    let mut index: number = value.length - target.length;
     loop {
         if index < 0 {
             break;
         }
-        let mut match_index -> number = 0;
-        let mut matches -> boolean = true;
+        let mut match_index: number = 0;
+        let mut matches: boolean = true;
         loop {
             if match_index >= target.length {
                 break;
@@ -230,13 +230,13 @@ fn last_index_of(value -> string, target -> string) -> number {
     return -1;
 }
 
-fn split_text(value -> string, delimiter -> string) -> string[] {
+fn split_text(value: string, delimiter: string) -> string[] {
     if delimiter.length == 0 {
         return [value];
     }
-    let mut parts -> string[] = [];
-    let mut start -> number = 0;
-    let mut index -> number = 0;
+    let mut parts: string[] = [];
+    let mut start: number = 0;
+    let mut index: number = 0;
 
     loop {
         if index >= value.length {
@@ -261,11 +261,11 @@ fn split_text(value -> string, delimiter -> string) -> string[] {
     return parts;
 }
 
-fn split_comma_separated(value -> string) -> string[] {
+fn split_comma_separated(value: string) -> string[] {
     let value_len = value.length;
-    let mut results -> string[] = [];
-    let mut current -> string = "";
-    let mut index -> number = 0;
+    let mut results: string[] = [];
+    let mut current: string = "";
+    let mut index: number = 0;
     loop {
         if index >= value_len {
             break;
@@ -282,7 +282,7 @@ fn split_comma_separated(value -> string) -> string[] {
     if current.length > 0 {
         results.push(trim_text(current));
     }
-    let mut filtered -> string[] = [];
+    let mut filtered: string[] = [];
     index = 0;
     loop {
         if index >= results.length {
@@ -297,7 +297,7 @@ fn split_comma_separated(value -> string) -> string[] {
     return filtered;
 }
 
-fn text_char_at(value -> string, index -> number) -> string {
+fn text_char_at(value: string, index: number) -> string {
     if index < 0 {
         return "";
     }
@@ -307,14 +307,14 @@ fn text_char_at(value -> string, index -> number) -> string {
     return value[index];
 }
 
-fn trim_trailing_delimiters(text -> string) -> string {
-    let mut end -> number = text.length;
+fn trim_trailing_delimiters(text: string) -> string {
+    let mut end: number = text.length;
     loop {
         if end <= 0 {
             break;
         }
         let ch = text_char_at(text, end - 1);
-        let mut _if373 -> boolean = false;
+        let mut _if373: boolean = false;
         if ch == "," { _if373 = true; }
         if ch == ";" { _if373 = true; }
         if _if373 {
@@ -329,7 +329,7 @@ fn trim_trailing_delimiters(text -> string) -> string {
     return substring(text, 0, end);
 }
 
-fn maybe_trim_trailing(value -> string?) -> string? {
+fn maybe_trim_trailing(value: string?) -> string? {
     if value == null {
         return null;
     }
@@ -337,15 +337,15 @@ fn maybe_trim_trailing(value -> string?) -> string? {
     return trimmed;
 }
 
-fn split_top_level_commas(text -> string) -> string[] {
-    let mut entries -> string[] = [];
-    let mut current -> string = "";
-    let mut index -> number = 0;
-    let mut quote -> string = "";
-    let mut angle_depth -> number = 0;
-    let mut paren_depth -> number = 0;
-    let mut bracket_depth -> number = 0;
-    let mut brace_depth -> number = 0;
+fn split_top_level_commas(text: string) -> string[] {
+    let mut entries: string[] = [];
+    let mut current: string = "";
+    let mut index: number = 0;
+    let mut quote: string = "";
+    let mut angle_depth: number = 0;
+    let mut paren_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut brace_depth: number = 0;
     loop {
         if index >= text.length {
             break;
@@ -367,7 +367,7 @@ fn split_top_level_commas(text -> string) -> string[] {
             index += 1;
             continue;
         }
-        let mut _if367 -> boolean = false;
+        let mut _if367: boolean = false;
         if ch == "\"" { _if367 = true; }
         if ch == "'" { _if367 = true; }
         if _if367 {
@@ -459,9 +459,9 @@ fn split_top_level_commas(text -> string) -> string[] {
     return entries;
 }
 
-fn find_matching_angle(text -> string, start_index -> number) -> number {
-    let mut depth -> number = 0;
-    let mut index -> number = start_index;
+fn find_matching_angle(text: string, start_index: number) -> number {
+    let mut depth: number = 0;
+    let mut index: number = start_index;
     loop {
         if index >= text.length {
             break;
@@ -484,15 +484,15 @@ fn find_matching_angle(text -> string, start_index -> number) -> number {
     return -1;
 }
 
-fn find_matching_paren(text -> string, start_index -> number) -> number {
-    let mut depth -> number = 0;
-    let mut index -> number = start_index;
+fn find_matching_paren(text: string, start_index: number) -> number {
+    let mut depth: number = 0;
+    let mut index: number = start_index;
     loop {
         if index >= text.length {
             break;
         }
         let ch = text[index];
-        let mut _if368 -> boolean = false;
+        let mut _if368: boolean = false;
         if ch == "\"" { _if368 = true; }
         if ch == "'" { _if368 = true; }
         if _if368 {
@@ -529,19 +529,19 @@ fn find_matching_paren(text -> string, start_index -> number) -> number {
     return -1;
 }
 
-fn split_whitespace(value -> string) -> string[] {
-    let mut parts -> string[] = [];
+fn split_whitespace(value: string) -> string[] {
+    let mut parts: string[] = [];
     if value.length == 0 {
         return parts;
     }
-    let mut start -> number = -1;
-    let mut index -> number = 0;
+    let mut start: number = -1;
+    let mut index: number = 0;
     loop {
         if index >= value.length {
             break;
         }
         let ch = text_char_at(value, index);
-        let mut _let385 -> boolean = false;
+        let mut _let385: boolean = false;
         if ch == " " { _let385 = true; }
         if ch == "\t" { _let385 = true; }
         if ch == "\n" { _let385 = true; }

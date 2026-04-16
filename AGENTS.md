@@ -3,24 +3,18 @@
 ## Project Structure & Module Organization
 
 - `compiler/src/` carries the Sailfin-native compiler sources; the **self-hosted native compiler** (legacy name: stage2) is the primary toolchain.
-- `docs/` now has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), roadmap (`docs/roadmap.md`), bootstrap spec (`docs/spec.md`), grammar, and keyword references. Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
+- `docs/` now has a navigation guide (`docs/README.md`), the canonical status matrix (`docs/status.md`), bootstrap spec (`docs/spec.md`), grammar, and keyword references. The roadmap lives at [sailfin.dev/roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`). Update the status doc first whenever behaviour changes, then adjust the spec/roadmap accordingly.
 - `docs/proposals/` holds future-facing designs (e.g., package management); leave implementation notes there until the status page marks them shipped.
 - `runtime/native/` hosts the current C runtime implementation; the runtime is planned to move into Sailfin for the 1.0 release.
 
 ## Build, Test, and Development Commands
 
-- `make env` provisions or updates the `sailfin` Conda env defined in `environment.yml`.
 - `make test` runs all test cases (using an already compiled build).
 - `make compile` builds the compiler by self-hosting from the latest released seed.
 - `make check` compiles (if needed) and runs the full test suite.
 - `make install` installs the built compiler binary into `PREFIX/bin` (default: `~/.local/bin`).
 - `make clean` removes packaged artifacts (`dist/`).
-- if you need to do some debugging, use the /scratch directory and run/place scripts there. This is a conda environment so you may have to account for your path to the compiler when running scripts.
-- Do not under any circumstances use here-doc (<<'PY') commands. They WILL NOT WORK in your environment. Use scratch files instead.
-
-## Coding Style & Naming Conventions
-
-- Python modules observe PEP 8 with four-space indentation, `snake_case` functions, and narrow compiler passes; share helpers instead of duplicating parsing logic.
+- If you need to do some debugging, use the /scratch directory and run/place scripts there.
 - Sailfin files spell effects explicitly (`fn foo() -> Bar ![io, model]`), keep lists ordered by impact, and use `CamelCase` for models or capsules while locals remain `snake_case`.
 - Align terminology with `docs/spec.md` (capsule, fleet, provenance card) and note currency or latency literals as comments until syntax support arrives.
 

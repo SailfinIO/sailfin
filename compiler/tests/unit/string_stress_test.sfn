@@ -8,9 +8,9 @@
 // String concatenation in a loop
 // ---------------------------------------------------------------------------
 
-fn _concat_n(base -> string, n -> number) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _concat_n(base: string, n: number) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         result = result + base;
@@ -37,9 +37,9 @@ test "string_stress: concat zero times" {
 // String building with conditional parts
 // ---------------------------------------------------------------------------
 
-fn _build_list(items -> string[], separator -> string) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _build_list(items: string[], separator: string) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= items.length { break; }
         if i > 0 {
@@ -52,7 +52,7 @@ fn _build_list(items -> string[], separator -> string) -> string {
 }
 
 test "string_stress: join with comma" {
-    let mut items -> string[] = [];
+    let mut items: string[] = [];
     items.push("alpha");
     items.push("beta");
     items.push("gamma");
@@ -60,13 +60,13 @@ test "string_stress: join with comma" {
 }
 
 test "string_stress: join single item" {
-    let mut items -> string[] = [];
+    let mut items: string[] = [];
     items.push("only");
     assert _build_list(items, ", ") == "only";
 }
 
 test "string_stress: join empty" {
-    let mut items -> string[] = [];
+    let mut items: string[] = [];
     assert _build_list(items, ", ") == "";
 }
 
@@ -74,17 +74,17 @@ test "string_stress: join empty" {
 // Number to string conversion (critical for LLVM IR generation)
 // ---------------------------------------------------------------------------
 
-fn _num_to_str(n -> number) -> string {
+fn _num_to_str(n: number) -> string {
     if n == 0 { return "0"; }
-    let mut result -> string = "";
-    let mut remaining -> number = n;
+    let mut result: string = "";
+    let mut remaining: number = n;
     let is_neg = remaining < 0;
     if is_neg { remaining = 0 - remaining; }
     let digits = "0123456789";
     loop {
         if remaining <= 0 { break; }
-        let mut temp -> number = remaining;
-        let mut quotient -> number = 0;
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -118,9 +118,9 @@ test "string_stress: num to str negative" {
 // String comparison operations
 // ---------------------------------------------------------------------------
 
-fn _count_occurrences(haystack -> string, needle -> string) -> number {
-    let mut count -> number = 0;
-    let mut i -> number = 0;
+fn _count_occurrences(haystack: string, needle: string) -> number {
+    let mut count: number = 0;
+    let mut i: number = 0;
     let h_len = haystack.length;
     let n_len = needle.length;
     loop {
@@ -150,9 +150,9 @@ test "string_stress: count occurrences none" {
 // String character iteration and transformation
 // ---------------------------------------------------------------------------
 
-fn _to_upper_simple(s -> string) -> string {
-    let mut result -> string = "";
-    let mut i -> number = 0;
+fn _to_upper_simple(s: string) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
     loop {
         if i >= s.length { break; }
         let ch = substring(s, i, i + 1);
@@ -183,10 +183,10 @@ test "string_stress: upper transform empty" {
 // String contains check
 // ---------------------------------------------------------------------------
 
-fn _contains(haystack -> string, needle -> string) -> boolean {
+fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
     if needle.length > haystack.length { return false; }
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i + needle.length > haystack.length { break; }
         let sub = substring(haystack, i, i + needle.length);
@@ -220,15 +220,15 @@ test "string_stress: contains needle longer than haystack" {
 // Multi-step string transformation pipeline
 // ---------------------------------------------------------------------------
 
-fn _wrap_in_parens(s -> string) -> string {
+fn _wrap_in_parens(s: string) -> string {
     return "(" + s + ")";
 }
 
-fn _prefix_with(prefix -> string, s -> string) -> string {
+fn _prefix_with(prefix: string, s: string) -> string {
     return prefix + s;
 }
 
-fn _suffix_with(s -> string, suffix -> string) -> string {
+fn _suffix_with(s: string, suffix: string) -> string {
     return s + suffix;
 }
 
@@ -249,11 +249,11 @@ test "string_stress: nested wrapping" {
 // String equality across function boundaries
 // ---------------------------------------------------------------------------
 
-fn _make_greeting(name -> string) -> string {
+fn _make_greeting(name: string) -> string {
     return "Hello, " + name + "!";
 }
 
-fn _check_greeting(greeting -> string, name -> string) -> boolean {
+fn _check_greeting(greeting: string, name: string) -> boolean {
     let expected = _make_greeting(name);
     return greeting == expected;
 }

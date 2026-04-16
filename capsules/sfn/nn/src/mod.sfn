@@ -14,16 +14,16 @@
 
 // ---- Activation functions ----
 
-fn relu(x -> number) -> number {
+fn relu(x: number) -> number {
     // Rectified linear unit: max(0, x).
     if x > 0 { return x; }
     return 0;
 }
 
-fn relu_array(input -> number[]) -> number[] {
+fn relu_array(input: number[]) -> number[] {
     // Apply ReLU element-wise.
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= input.length { break; }
         out.push(relu(input[i]));
@@ -32,7 +32,7 @@ fn relu_array(input -> number[]) -> number[] {
     return out;
 }
 
-fn leaky_relu(x -> number, alpha -> number = 0.01) -> number {
+fn leaky_relu(x: number, alpha: number = 0.01) -> number {
     // Leaky ReLU: x if x > 0, else alpha * x.
     if x > 0 { return x; }
     return alpha * x;
@@ -45,7 +45,7 @@ fn leaky_relu(x -> number, alpha -> number = 0.01) -> number {
 // unsuitable as an activation function — it would produce incorrect
 // gradients and misleading outputs.
 
-fn step(x -> number) -> number {
+fn step(x: number) -> number {
     // Heaviside step function.
     if x >= 0 { return 1; }
     return 0;
@@ -53,12 +53,12 @@ fn step(x -> number) -> number {
 
 // ---- Normalization ----
 
-fn normalize(input -> number[]) -> number[] {
+fn normalize(input: number[]) -> number[] {
     // Min-max normalization to [0, 1] range.
     if input.length == 0 { return []; }
-    let mut min_v -> number = input[0];
-    let mut max_v -> number = input[0];
-    let mut i -> number = 1;
+    let mut min_v: number = input[0];
+    let mut max_v: number = input[0];
+    let mut i: number = 1;
     loop {
         if i >= input.length { break; }
         if input[i] < min_v { min_v = input[i]; }
@@ -67,7 +67,7 @@ fn normalize(input -> number[]) -> number[] {
     }
     let range = max_v - min_v;
     if range == 0 { return input; }
-    let mut out -> number[] = [];
+    let mut out: number[] = [];
     i = 0;
     loop {
         if i >= input.length { break; }
@@ -77,11 +77,11 @@ fn normalize(input -> number[]) -> number[] {
     return out;
 }
 
-fn standardize(input -> number[], mean_val -> number, std_val -> number) -> number[] {
+fn standardize(input: number[], mean_val: number, std_val: number) -> number[] {
     // Z-score standardization: (x - mean) / std.
     if std_val == 0 { return input; }
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= input.length { break; }
         out.push((input[i] - mean_val) / std_val);
@@ -92,12 +92,12 @@ fn standardize(input -> number[], mean_val -> number, std_val -> number) -> numb
 
 // ---- Utility ----
 
-fn argmax(input -> number[]) -> number {
+fn argmax(input: number[]) -> number {
     // Index of the maximum value.
     if input.length == 0 { return -1; }
-    let mut best_idx -> number = 0;
-    let mut best_val -> number = input[0];
-    let mut i -> number = 1;
+    let mut best_idx: number = 0;
+    let mut best_val: number = input[0];
+    let mut i: number = 1;
     loop {
         if i >= input.length { break; }
         if input[i] > best_val {
@@ -109,12 +109,12 @@ fn argmax(input -> number[]) -> number {
     return best_idx;
 }
 
-fn argmin(input -> number[]) -> number {
+fn argmin(input: number[]) -> number {
     // Index of the minimum value.
     if input.length == 0 { return -1; }
-    let mut best_idx -> number = 0;
-    let mut best_val -> number = input[0];
-    let mut i -> number = 1;
+    let mut best_idx: number = 0;
+    let mut best_val: number = input[0];
+    let mut i: number = 1;
     loop {
         if i >= input.length { break; }
         if input[i] < best_val {
@@ -126,10 +126,10 @@ fn argmin(input -> number[]) -> number {
     return best_idx;
 }
 
-fn one_hot(index -> number, size -> number) -> number[] {
+fn one_hot(index: number, size: number) -> number[] {
     // Create a one-hot encoded vector.
-    let mut out -> number[] = [];
-    let mut i -> number = 0;
+    let mut out: number[] = [];
+    let mut i: number = 0;
     loop {
         if i >= size { break; }
         if i == index {
@@ -142,7 +142,7 @@ fn one_hot(index -> number, size -> number) -> number[] {
     return out;
 }
 
-fn clip(x -> number, lo -> number, hi -> number) -> number {
+fn clip(x: number, lo: number, hi: number) -> number {
     // Clip a value to [lo, hi].
     if x < lo { return lo; }
     if x > hi { return hi; }

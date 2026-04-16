@@ -52,10 +52,10 @@ import { operation_name_for_symbol } from "./core_helpers";
 // NOTE: this module imports lower_expression from core.sfn; this is mutually recursive.
 import { lower_expression } from "./core";
 
-fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, lines -> string[], diagnostics -> string[], string_constants -> StringConstant[]) -> ExpressionResult {
+fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
     let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines);
-    let mut current_diagnostics -> string[] = diagnostics;
-    let mut _ci0 -> number = 0;
+    let mut current_diagnostics: string[] = diagnostics;
+    let mut _ci0: number = 0;
     loop {
         if _ci0 >= coerced.diagnostics.length { break; }
         current_diagnostics.push(coerced.diagnostics[_ci0]);
@@ -74,9 +74,9 @@ fn lower_logical_not_with_operand(operand -> LLVMOperand, temp_index -> number, 
     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: current_diagnostics, string_constants: string_constants };
 }
 
-fn lower_logical_not_result(result -> ExpressionResult, base_diagnostics -> string[]) -> ExpressionResult {
-    let mut combined -> string[] = base_diagnostics;
-    let mut _ci0 -> number = 0;
+fn lower_logical_not_result(result: ExpressionResult, base_diagnostics: string[]) -> ExpressionResult {
+    let mut combined: string[] = base_diagnostics;
+    let mut _ci0: number = 0;
     loop {
         if _ci0 >= result.diagnostics.length { break; }
         combined.push(result.diagnostics[_ci0]);
@@ -88,9 +88,9 @@ fn lower_logical_not_result(result -> ExpressionResult, base_diagnostics -> stri
     return lower_logical_not_with_operand(result.operand, result.temp_index, result.lines, combined, result.string_constants);
 }
 
-fn lower_ternary_expression(parse -> TernaryParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext, expected_type -> string) -> ExpressionResult {
-    let mut diagnostics -> string[] = parse.diagnostics;
-    let mut string_constants -> StringConstant[] = empty_string_constant_set();
+fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+    let mut diagnostics: string[] = parse.diagnostics;
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
 
     let label_id = number_to_string(temp_index);
     let cond_label = "ternary_cond_" + label_id;
@@ -98,7 +98,7 @@ fn lower_ternary_expression(parse -> TernaryParseResult, bindings -> ParameterBi
     let else_label = "ternary_else_" + label_id;
     let merge_label = "ternary_merge_" + label_id;
 
-    let label_temp_offset -> number = temp_index + 1;
+    let label_temp_offset: number = temp_index + 1;
 
     let cond_result = lower_expression(parse.condition, bindings, locals, label_temp_offset, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, cond_result.diagnostics);
@@ -167,11 +167,11 @@ fn lower_ternary_expression(parse -> TernaryParseResult, bindings -> ParameterBi
     return ExpressionResult { lines: current_lines, temp_index: else_result.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
 }
 
-fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 1, expression.length));
-    let mut diagnostics -> string[] = [];
-    let mut _if95 -> boolean = false;
+    let mut diagnostics: string[] = [];
+    let mut _if95: boolean = false;
     if left_text.length == 0 { _if95 = true; }
     if right_text.length == 0 { _if95 = true; }
     if _if95 {
@@ -182,7 +182,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
 
     let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
-    let mut string_constants -> StringConstant[] = left_result.string_constants;
+    let mut string_constants: StringConstant[] = left_result.string_constants;
     if left_result.operand == null {
         return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
@@ -221,11 +221,11 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 if coerced.operand == null {
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
                 }
-    
+
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
                 current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs.value + ", i8* " + coerced.operand.value + ")");
-    
+
                 let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
             }
@@ -241,11 +241,11 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 if coerced.operand == null {
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
                 }
-    
+
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
                 current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + coerced.operand.value + ", i8* " + rhs.value + ")");
-    
+
                 let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
             }
@@ -255,7 +255,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
             if rhs_type == "i8" {
                 let mut current_lines = right_result.lines;
                 let mut current_temp = right_result.temp_index;
-    
+
                 let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines);
                 diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics);
                 current_lines = lhs_coerced.lines;
@@ -263,7 +263,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 if lhs_coerced.operand == null {
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
                 }
-    
+
                 let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
                 diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics);
                 current_lines = rhs_coerced.lines;
@@ -271,17 +271,17 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
                 if rhs_coerced.operand == null {
                     return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: string_constants };
                 }
-    
+
                 let concat_name = format_temp_name(current_temp);
                 current_temp += 1;
                 current_lines.push("  " + concat_name + " = call i8* @sailfin_runtime_string_concat(i8* " + lhs_coerced.operand.value + ", i8* " + rhs_coerced.operand.value + ")");
-    
+
                 let operand = LLVMOperand { llvm_type: "i8*", value: concat_name };
                 return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
             }
         }
 
-        let mut _if96 -> boolean = false;
+        let mut _if96: boolean = false;
         if lhs_type == "i8*" { _if96 = true; }
         if rhs_type == "i8*" { _if96 = true; }
         if _if96 {
@@ -312,7 +312,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
         }
     }
 
-    let mut _if97 -> boolean = false;
+    let mut _if97: boolean = false;
     if match.symbol == "-" { _if97 = true; }
     if match.symbol == "*" { _if97 = true; }
     if match.symbol == "/" { _if97 = true; }
@@ -352,7 +352,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
         }
     }
 
-    let mut _if98 -> boolean = false;
+    let mut _if98: boolean = false;
     if match.symbol == "+" { _if98 = true; }
     if match.symbol == "-" { _if98 = true; }
     if _if98 {
@@ -361,8 +361,8 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
             let rhs = right_result.operand;
             let rhs_type = trim_text(rhs.llvm_type);
             if !ends_with_pointer_suffix(rhs_type) {
-                let mut _if108 -> boolean = false;
-                let mut _if110 -> boolean = false;
+                let mut _if108: boolean = false;
+                let mut _if110: boolean = false;
                 if rhs_type == "double" { _if110 = true; }
                 if starts_with(rhs_type, "i") { _if110 = true; }
                 if rhs_type == "int" { _if110 = true; }
@@ -409,7 +409,7 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
 
     let harmonised = harmonise_operands(left_result.operand, right_result.operand, right_result.temp_index, right_result.lines);
     diagnostics = extend_string_array(diagnostics, harmonised.diagnostics);
-    let mut _if99 -> boolean = false;
+    let mut _if99: boolean = false;
     if harmonised.left == null { _if99 = true; }
     if harmonised.right == null { _if99 = true; }
     if _if99 {
@@ -436,9 +436,9 @@ fn lower_binary_operation(expression -> string, match -> OperatorMatch, bindings
     return ExpressionResult { lines: updated_lines, temp_index: harmonised.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
 }
 
-fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
-    let mut diagnostics -> string[] = [];
-    let mut _if100 -> boolean = false;
+fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+    let mut diagnostics: string[] = [];
+    let mut _if100: boolean = false;
     if expression == null { _if100 = true; }
     if expression.length == 0 { _if100 = true; }
     if _if100 {
@@ -446,7 +446,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
         let empty_constants = empty_string_constant_set();
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
-    let mut _if101 -> boolean = false;
+    let mut _if101: boolean = false;
     if match.symbol == null { _if101 = true; }
     if match.symbol.length == 0 { _if101 = true; }
     if _if101 {
@@ -454,7 +454,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
         let empty_constants = empty_string_constant_set();
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
     }
-    let mut _if102 -> boolean = false;
+    let mut _if102: boolean = false;
     if match.index < 0 { _if102 = true; }
     if match.index >= expression.length { _if102 = true; }
     if _if102 {
@@ -466,7 +466,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
     let operator_length = match.symbol.length;
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + operator_length, expression.length));
-    let mut _if103 -> boolean = false;
+    let mut _if103: boolean = false;
     if left_text.length == 0 { _if103 = true; }
     if right_text.length == 0 { _if103 = true; }
     if _if103 {
@@ -477,7 +477,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
 
     let left_result = lower_expression(left_text, bindings, locals, temp_index, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
-    let mut string_constants -> StringConstant[] = left_result.string_constants;
+    let mut string_constants: StringConstant[] = left_result.string_constants;
     if left_result.operand == null {
         return ExpressionResult { lines: left_result.lines, temp_index: left_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
@@ -489,12 +489,12 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
         return ExpressionResult { lines: right_result.lines, temp_index: right_result.temp_index, operand: null, diagnostics: diagnostics, string_constants: string_constants };
     }
 
-    let mut alignment_lines -> string[] = right_result.lines;
-    let mut alignment_temp -> number = right_result.temp_index;
+    let mut alignment_lines: string[] = right_result.lines;
+    let mut alignment_temp: number = right_result.temp_index;
     let mut left_operand = left_result.operand;
     let mut right_operand = right_result.operand;
-    let mut is_equality -> boolean = false;
-    let mut _if104 -> boolean = false;
+    let mut is_equality: boolean = false;
+    let mut _if104: boolean = false;
     if match.symbol == "==" { _if104 = true; }
     if match.symbol == "!=" { _if104 = true; }
     if _if104 {
@@ -508,7 +508,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
                 if left_operand.llvm_type == right_operand.llvm_type {
                     let enum_info = find_enum_info_by_llvm_type(context, left_operand.llvm_type);
                     if enum_info != null {
-                        let mut tag_llvm_type -> string = "i32";
+                        let mut tag_llvm_type: string = "i32";
                         if enum_info.tag_type == "i8" {
                             tag_llvm_type = "i8";
                         }
@@ -532,7 +532,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
         
                         let compare_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
-                        let mut predicate -> string = "icmp eq";
+                        let mut predicate: string = "icmp eq";
                         if match.symbol == "!=" {
                             predicate = "icmp ne";
                         }
@@ -546,7 +546,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
                 let right_is_char = right_operand.llvm_type == "i8";
                 let left_is_pointer = ends_with_pointer_suffix(left_operand.llvm_type);
                 let right_is_pointer = ends_with_pointer_suffix(right_operand.llvm_type);
-                let mut _if109 -> boolean = false;
+                let mut _if109: boolean = false;
                 if left_is_char {
                     if right_is_pointer {
                         _if109 = true;
@@ -562,7 +562,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
                     alignment_lines = coercion.lines;
                     alignment_temp = coercion.temp_index;
                 } else {
-                    let mut _elif111 -> boolean = false;
+                    let mut _elif111: boolean = false;
                     if right_is_char {
                         if left_is_pointer {
                             _elif111 = true;
@@ -585,7 +585,7 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
 
     let harmonised = harmonise_operands(left_operand, right_operand, alignment_temp, alignment_lines);
     diagnostics = extend_string_array(diagnostics, harmonised.diagnostics);
-    let mut _if105 -> boolean = false;
+    let mut _if105: boolean = false;
     if harmonised.left == null { _if105 = true; }
     if harmonised.right == null { _if105 = true; }
     if _if105 {
@@ -601,13 +601,13 @@ fn lower_comparison_operation(expression -> string, match -> OperatorMatch, bind
     return ExpressionResult { lines: comparison.lines, temp_index: comparison.temp_index, operand: comparison.operand, diagnostics: diagnostics, string_constants: string_constants };
 }
 
-fn lower_logical_and(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+fn lower_logical_and(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
-    let mut diagnostics -> string[] = [];
-    let mut string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut diagnostics: string[] = [];
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
 
-    let mut _if106 -> boolean = false;
+    let mut _if106: boolean = false;
     if left_text.length == 0 { _if106 = true; }
     if right_text.length == 0 { _if106 = true; }
     if _if106 {
@@ -621,7 +621,7 @@ fn lower_logical_and(expression -> string, match -> OperatorMatch, bindings -> P
     let right_end_label = "logical_and_right_end_" + label_id;
     let merge_label = "logical_and_merge_" + label_id;
 
-    let label_temp_offset -> number = temp_index + 1;
+    let label_temp_offset: number = temp_index + 1;
 
     let left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);
@@ -685,13 +685,13 @@ fn lower_logical_and(expression -> string, match -> OperatorMatch, bindings -> P
     return ExpressionResult { lines: current_lines, temp_index: right_bool.temp_index + 1, operand: operand, diagnostics: diagnostics, string_constants: string_constants };
 }
 
-fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[], functions -> NativeFunction[], context -> TypeContext) -> ExpressionResult {
+fn lower_logical_or(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let left_text = trim_text(substring(expression, 0, match.index));
     let right_text = trim_text(substring(expression, match.index + 2, expression.length));
-    let mut diagnostics -> string[] = [];
-    let mut string_constants -> StringConstant[] = empty_string_constant_set();
+    let mut diagnostics: string[] = [];
+    let mut string_constants: StringConstant[] = empty_string_constant_set();
 
-    let mut _if107 -> boolean = false;
+    let mut _if107: boolean = false;
     if left_text.length == 0 { _if107 = true; }
     if right_text.length == 0 { _if107 = true; }
     if _if107 {
@@ -705,7 +705,7 @@ fn lower_logical_or(expression -> string, match -> OperatorMatch, bindings -> Pa
     let right_end_label = "logical_or_right_end_" + label_id;
     let merge_label = "logical_or_merge_" + label_id;
 
-    let label_temp_offset -> number = temp_index + 1;
+    let label_temp_offset: number = temp_index + 1;
 
     let left_result = lower_expression(left_text, bindings, locals, label_temp_offset, lines, functions, context, "");
     diagnostics = extend_string_array(diagnostics, left_result.diagnostics);

@@ -15,7 +15,11 @@
       "Bash(gh run *)",
       "Bash(gh api *)",
       "Bash(ls *)",
-      "Bash(wc *)"
+      "Bash(wc *)",
+      "Bash(timeout 120 valgrind --tool=memcheck --track-origins=yes --error-exitcode=0 build/native/sailfin-seedcheck test compiler/tests/unit/function_signatures_test.sfn)"
     ]
+  },
+  "env": {
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   }
 }

@@ -4,7 +4,7 @@ import { Channel, channel } from "sync";
 import { sleep } from "time";
 
 fn main() ![clock, io] {
-    let buffer -> Channel<number> = channel(10); // bounded buffer
+    let buffer: Channel<number> = channel(10); // bounded buffer
 
     routine {
         for i in 1..20 {

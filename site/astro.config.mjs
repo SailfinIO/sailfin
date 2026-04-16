@@ -7,6 +7,10 @@ export default defineConfig({
   integrations: [mdx(), sitemap()],
   output: "static",
 
+  redirects: {
+    "/docs/contributing/roadmap": "/roadmap",
+  },
+
   markdown: {
     shikiConfig: {
       theme: "github-dark",

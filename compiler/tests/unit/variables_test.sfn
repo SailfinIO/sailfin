@@ -1,33 +1,33 @@
 test "variables: immutable let binding holds initial value" {
-    let x -> number = 42;
+    let x: number = 42;
     assert x == 42;
 }
 
 test "variables: mutable let binding can be reassigned" {
-    let mut counter -> number = 0;
+    let mut counter: number = 0;
     counter = 10;
     assert counter == 10;
 }
 
 test "variables: mutable binding can be incremented" {
-    let mut n -> number = 5;
+    let mut n: number = 5;
     n += 3;
     assert n == 8;
 }
 
 test "variables: string binding holds value" {
-    let greeting -> string = "hello";
+    let greeting: string = "hello";
     assert greeting == "hello";
     assert greeting.length == 5;
 }
 
 test "variables: boolean binding true" {
-    let flag -> boolean = true;
+    let flag: boolean = true;
     assert flag == true;
 }
 
 test "variables: boolean binding false" {
-    let flag -> boolean = false;
+    let flag: boolean = false;
     assert flag == false;
 }
 
@@ -42,20 +42,20 @@ test "variables: untyped let infers string" {
 }
 
 test "variables: multiple bindings in scope" {
-    let a -> number = 1;
-    let b -> number = 2;
-    let c -> number = a + b;
+    let a: number = 1;
+    let b: number = 2;
+    let c: number = a + b;
     assert c == 3;
 }
 
 test "variables: mutable binding decremented" {
-    let mut n -> number = 10;
+    let mut n: number = 10;
     n -= 4;
     assert n == 6;
 }
 
 test "variables: mutable binding multiplied" {
-    let mut n -> number = 3;
+    let mut n: number = 3;
     n *= 4;
     assert n == 12;
 }

@@ -1,0 +1,9 @@
+import { greeter_hello, greeter_add } from "./fixtures/greeter";
+
+test "directory_import: resolves ./dir to dir/mod.sfn" {
+    assert greeter_hello() == "hello from mod";
+}
+
+test "directory_import: multiple functions from directory module" {
+    assert greeter_add(17, 25) == 42;
+}

@@ -6,303 +6,303 @@
 
 enum NativeInstruction {
     Return {
-        expression -> string;
-        span -> NativeSourceSpan?;
+        expression: string;
+        span: NativeSourceSpan?;
     },
     Expression {
-        expression -> string;
-        span -> NativeSourceSpan?;
+        expression: string;
+        span: NativeSourceSpan?;
     },
     Let {
-        name -> string;
-        mutable -> boolean;
-        type_annotation -> string;
-        value -> string?;
-        span -> NativeSourceSpan?;
-        value_span -> NativeSourceSpan?;
+        name: string;
+        mutable: boolean;
+        type_annotation: string;
+        value: string?;
+        span: NativeSourceSpan?;
+        value_span: NativeSourceSpan?;
     },
-    If { condition -> string },
+    If { condition: string },
     Else,
     EndIf,
     For {
-        target -> string;
-        iterable -> string;
+        target: string;
+        iterable: string;
     },
     EndFor,
     Loop,
     EndLoop,
     Break,
     Continue,
-    Match { expression -> string },
+    Match { expression: string },
     Case {
-        pattern -> string;
-        guard -> string?;
+        pattern: string;
+        guard: string?;
     },
     EndMatch,
     Try,
     Catch {
-        name -> string;
+        name: string;
     },
     Finally,
     EndTry,
     Throw {
-        expression -> string;
-        span -> NativeSourceSpan?;
+        expression: string;
+        span: NativeSourceSpan?;
     },
     Noop,
-    Unknown { text -> string },
+    Unknown { text: string },
 }
 
 struct NativeSourceSpan {
-    start_line -> number;
-    start_column -> number;
-    end_line -> number;
-    end_column -> number;
+    start_line: number;
+    start_column: number;
+    end_line: number;
+    end_column: number;
 }
 
 struct NativeParameter {
-    name -> string;
-    type_annotation -> string;
-    mutable -> boolean;
-    default_value -> string?;
-    span -> NativeSourceSpan?;
+    name: string;
+    type_annotation: string;
+    mutable: boolean;
+    default_value: string?;
+    span: NativeSourceSpan?;
 }
 
 struct NativeFunction {
-    name -> string;
-    is_async -> boolean;
-    parameters -> NativeParameter[];
-    return_type -> string;
-    effects -> string[];
-    decorators -> string[];
-    is_extern -> boolean;
-    instructions -> NativeInstruction[];
+    name: string;
+    is_async: boolean;
+    parameters: NativeParameter[];
+    return_type: string;
+    effects: string[];
+    decorators: string[];
+    is_extern: boolean;
+    instructions: NativeInstruction[];
 }
 
 struct NativeImportSpecifier {
-    name -> string;
-    alias -> string?;
+    name: string;
+    alias: string?;
 }
 
 struct NativeImport {
-    kind -> string;
-    module -> string;
-    specifiers -> NativeImportSpecifier[];
+    kind: string;
+    module: string;
+    specifiers: NativeImportSpecifier[];
 }
 
 struct NativeStructField {
-    name -> string;
-    type_annotation -> string;
-    mutable -> boolean;
+    name: string;
+    type_annotation: string;
+    mutable: boolean;
 }
 
 struct NativeStructLayoutField {
-    name -> string;
-    type_annotation -> string;
-    offset -> number;
-    size -> number;
-    align -> number;
+    name: string;
+    type_annotation: string;
+    offset: number;
+    size: number;
+    align: number;
 }
 
 struct NativeStructLayout {
-    size -> number;
-    align -> number;
-    fields -> NativeStructLayoutField[];
+    size: number;
+    align: number;
+    fields: NativeStructLayoutField[];
 }
 
 struct NativeStruct {
-    name -> string;
-    fields -> NativeStructField[];
-    methods -> NativeFunction[];
-    implements -> string[];
-    layout -> NativeStructLayout?;
+    name: string;
+    fields: NativeStructField[];
+    methods: NativeFunction[];
+    implements: string[];
+    layout: NativeStructLayout?;
 }
 
 struct NativeInterfaceSignature {
-    name -> string;
-    is_async -> boolean;
-    type_parameters -> string[];
-    parameters -> NativeParameter[];
-    return_type -> string;
-    effects -> string[];
+    name: string;
+    is_async: boolean;
+    type_parameters: string[];
+    parameters: NativeParameter[];
+    return_type: string;
+    effects: string[];
 }
 
 struct NativeInterface {
-    name -> string;
-    type_parameters -> string[];
-    signatures -> NativeInterfaceSignature[];
+    name: string;
+    type_parameters: string[];
+    signatures: NativeInterfaceSignature[];
 }
 
 struct NativeEnumVariantField {
-    name -> string;
-    type_annotation -> string;
-    mutable -> boolean;
+    name: string;
+    type_annotation: string;
+    mutable: boolean;
 }
 
 struct NativeEnumVariant {
-    name -> string;
-    fields -> NativeEnumVariantField[];
+    name: string;
+    fields: NativeEnumVariantField[];
 }
 
 struct NativeEnumVariantLayout {
-    name -> string;
-    tag -> number;
-    offset -> number;
-    size -> number;
-    align -> number;
-    fields -> NativeStructLayoutField[];
+    name: string;
+    tag: number;
+    offset: number;
+    size: number;
+    align: number;
+    fields: NativeStructLayoutField[];
 }
 
 struct NativeEnumLayout {
-    size -> number;
-    align -> number;
-    tag_type -> string;
-    tag_size -> number;
-    tag_align -> number;
-    variants -> NativeEnumVariantLayout[];
+    size: number;
+    align: number;
+    tag_type: string;
+    tag_size: number;
+    tag_align: number;
+    variants: NativeEnumVariantLayout[];
 }
 
 struct NativeEnum {
-    name -> string;
-    variants -> NativeEnumVariant[];
-    layout -> NativeEnumLayout?;
+    name: string;
+    variants: NativeEnumVariant[];
+    layout: NativeEnumLayout?;
 }
 
 struct NativeBinding {
-    name -> string;
-    mutable -> boolean;
-    type_annotation -> string;
-    value -> string?;
+    name: string;
+    mutable: boolean;
+    type_annotation: string;
+    value: string?;
 }
 
 struct EnumParseResult {
-    definition -> NativeEnum?;
-    next_index -> number;
-    diagnostics -> string[];
+    definition: NativeEnum?;
+    next_index: number;
+    diagnostics: string[];
 }
 
 struct CaseComponents {
-    pattern -> string;
-    guard -> string?;
+    pattern: string;
+    guard: string?;
 }
 
 struct InstructionParseResult {
-    instructions -> NativeInstruction[];
-    span_consumed -> boolean;
-    value_span_consumed -> boolean;
+    instructions: NativeInstruction[];
+    span_consumed: boolean;
+    value_span_consumed: boolean;
 }
 
 struct InstructionGatherResult {
-    text -> string;
-    lines_consumed -> number;
+    text: string;
+    lines_consumed: number;
 }
 
 struct InstructionDepthState {
-    paren_depth -> number;
-    bracket_depth -> number;
-    brace_depth -> number;
-    in_string -> boolean;
-    escaping -> boolean;
+    paren_depth: number;
+    bracket_depth: number;
+    brace_depth: number;
+    in_string: boolean;
+    escaping: boolean;
 }
 
 struct StructParseResult {
-    definition -> NativeStruct?;
-    next_index -> number;
-    diagnostics -> string[];
+    definition: NativeStruct?;
+    next_index: number;
+    diagnostics: string[];
 }
 
 struct InterfaceParseResult {
-    definition -> NativeInterface?;
-    next_index -> number;
-    diagnostics -> string[];
+    definition: NativeInterface?;
+    next_index: number;
+    diagnostics: string[];
 }
 
 struct InterfaceSignatureParse {
-    success -> boolean;
-    signature -> NativeInterfaceSignature;
-    diagnostics -> string[];
+    success: boolean;
+    signature: NativeInterfaceSignature;
+    diagnostics: string[];
 }
 
 struct StructHeaderParse {
-    name -> string;
-    implements -> string[];
-    diagnostics -> string[];
+    name: string;
+    implements: string[];
+    diagnostics: string[];
 }
 
 struct InterfaceHeaderParse {
-    name -> string;
-    type_parameters -> string[];
-    diagnostics -> string[];
+    name: string;
+    type_parameters: string[];
+    diagnostics: string[];
 }
 
 struct HeaderNameParse {
-    name -> string;
-    type_parameters -> string[];
-    remainder -> string;
-    diagnostics -> string[];
+    name: string;
+    type_parameters: string[];
+    remainder: string;
+    diagnostics: string[];
 }
 
 struct StructLayoutHeaderParse {
-    success -> boolean;
-    name -> string;
-    size -> number;
-    align -> number;
-    diagnostics -> string[];
+    success: boolean;
+    name: string;
+    size: number;
+    align: number;
+    diagnostics: string[];
 }
 
 struct StructLayoutFieldParse {
-    success -> boolean;
-    field -> NativeStructLayoutField;
-    diagnostics -> string[];
+    success: boolean;
+    field: NativeStructLayoutField;
+    diagnostics: string[];
 }
 
 struct ParseNativeResult {
-    functions -> NativeFunction[];
-    imports -> NativeImport[];
-    structs -> NativeStruct[];
-    interfaces -> NativeInterface[];
-    enums -> NativeEnum[];
-    bindings -> NativeBinding[];
-    diagnostics -> string[];
+    functions: NativeFunction[];
+    imports: NativeImport[];
+    structs: NativeStruct[];
+    interfaces: NativeInterface[];
+    enums: NativeEnum[];
+    bindings: NativeBinding[];
+    diagnostics: string[];
 }
 
 struct EnumLayoutHeaderParse {
-    success -> boolean;
-    name -> string;
-    size -> number;
-    align -> number;
-    tag_type -> string;
-    tag_size -> number;
-    tag_align -> number;
-    diagnostics -> string[];
+    success: boolean;
+    name: string;
+    size: number;
+    align: number;
+    tag_type: string;
+    tag_size: number;
+    tag_align: number;
+    diagnostics: string[];
 }
 
 struct EnumLayoutVariantParse {
-    success -> boolean;
-    variant -> NativeEnumVariantLayout;
-    diagnostics -> string[];
+    success: boolean;
+    variant: NativeEnumVariantLayout;
+    diagnostics: string[];
 }
 
 struct EnumLayoutPayloadParse {
-    success -> boolean;
-    variant_name -> string;
-    field -> NativeStructLayoutField;
-    diagnostics -> string[];
+    success: boolean;
+    variant_name: string;
+    field: NativeStructLayoutField;
+    diagnostics: string[];
 }
 
 struct NumberParseResult {
-    success -> boolean;
-    value -> number;
+    success: boolean;
+    value: number;
 }
 
 struct LayoutManifest {
-    structs -> NativeStruct[];
-    enums -> NativeEnum[];
-    diagnostics -> string[];
+    structs: NativeStruct[];
+    enums: NativeEnum[];
+    diagnostics: string[];
 }
 
 struct BindingComponents {
-    name -> string;
-    type_annotation -> string;
-    value -> string?;
+    name: string;
+    type_annotation: string;
+    value: string?;
 }

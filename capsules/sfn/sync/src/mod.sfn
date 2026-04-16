@@ -3,13 +3,13 @@
 // Provides channels for inter-task communication, parallel execution,
 // and task spawning. All operations require the `io` effect.
 
-fn channel(capacity -> number = 0) -> any ![io] {
+fn channel(capacity: number = 0) -> any ![io] {
     // Create a bounded channel for inter-task communication.
     // Capacity of 0 means unbuffered (synchronous handoff).
     return runtime.channel(capacity);
 }
 
-fn parallel(tasks -> any[]) -> any[] ![io] {
+fn parallel(tasks: any[]) -> any[] ![io] {
     // Run multiple tasks concurrently and collect results.
     // Returns an array of results in the same order as the input tasks.
     // Each task is a zero-argument function.
@@ -22,7 +22,7 @@ fn parallel(tasks -> any[]) -> any[] ![io] {
     return runtime.parallel(tasks);
 }
 
-fn spawn(task -> any, name -> string = "") -> void ![io] {
+fn spawn(task: any, name: string = "") -> void ![io] {
     // Spawn a task to run concurrently in the background.
     // The task runs on the runtime's task scheduler.
     // Use channels to communicate results back.

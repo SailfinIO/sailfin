@@ -3,12 +3,12 @@
 import { Channel, channel } from "sync";
 
 async fn main() ![io] {
-    let messages -> Channel<number> = channel();
+    let messages: Channel<number> = channel();
 
     routine {
         messages.send(42);
     }
 
-    let result -> number = await messages.receive();
+    let result: number = await messages.receive();
     print("Received: {{result}}");
 }

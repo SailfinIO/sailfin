@@ -1,0 +1,53 @@
+// compiler/src/tools/fmt_rules.sfn
+//
+// Formatting rule tables for sfn fmt. Spacing, blank-line, and
+// classification lookups used by the emit phase in fmt.sfn.
+
+// ═══════════════════════════════════════════════════════════════════
+// Spacing rules
+// ═══════════════════════════════════════════════════════════════════
+
+fn get_spacing_rule(left_role: string, right_role: string) -> string {
+    // Stub — will return "space", "none", or "newline"
+    return "space";
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Blank-line rules
+// ═══════════════════════════════════════════════════════════════════
+
+fn get_blank_line_rule(context: string) -> number {
+    return 0;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Classification helpers
+// ═══════════════════════════════════════════════════════════════════
+
+fn opens_block(lexeme: string) -> boolean {
+    return false;
+}
+
+fn closes_statement(lexeme: string) -> boolean {
+    return false;
+}
+
+fn wraps_at_threshold(items: number, line_length: number) -> boolean {
+    if items > 3 { return true; }
+    if line_length > 80 { return true; }
+    return false;
+}
+
+fn is_binary_operator(lexeme: string) -> boolean {
+    return false;
+}
+
+fn is_unary_prefix(lexeme: string, prev_role: string) -> boolean {
+    return false;
+}
+
+fn import_group(path: string) -> number {
+    return 0;
+}
+
+export { get_spacing_rule, get_blank_line_rule, opens_block, closes_statement, wraps_at_threshold, is_binary_operator, is_unary_prefix, import_group };

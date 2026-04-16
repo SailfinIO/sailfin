@@ -13,60 +13,60 @@
 // ---- Types ----
 
 struct TomlValue {
-    kind -> string;         // "string", "integer", "float", "boolean", "array", "table", "datetime"
-    string_value -> string;
-    number_value -> number;
-    bool_value -> boolean;
-    items -> TomlValue[];   // for arrays
-    keys -> string[];       // for tables
-    values -> TomlValue[];  // for tables (parallel with keys)
+    kind: string;         // "string", "integer", "float", "boolean", "array", "table", "datetime"
+    string_value: string;
+    number_value: number;
+    bool_value: boolean;
+    items: TomlValue[];   // for arrays
+    keys: string[];       // for tables
+    values: TomlValue[];  // for tables (parallel with keys)
 }
 
 // ---- Value constructors ----
 
-fn string_val(value -> string) -> TomlValue {
+fn string_val(value: string) -> TomlValue {
     return TomlValue {
         kind: "string", string_value: value, number_value: 0,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn integer_val(value -> number) -> TomlValue {
+fn integer_val(value: number) -> TomlValue {
     return TomlValue {
         kind: "integer", string_value: "", number_value: value,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn float_val(value -> number) -> TomlValue {
+fn float_val(value: number) -> TomlValue {
     return TomlValue {
         kind: "float", string_value: "", number_value: value,
         bool_value: false, items: [], keys: [], values: [],
     };
 }
 
-fn bool_val(value -> boolean) -> TomlValue {
+fn bool_val(value: boolean) -> TomlValue {
     return TomlValue {
         kind: "boolean", string_value: "", number_value: 0,
         bool_value: value, items: [], keys: [], values: [],
     };
 }
 
-fn array_val(items -> TomlValue[]) -> TomlValue {
+fn array_val(items: TomlValue[]) -> TomlValue {
     return TomlValue {
         kind: "array", string_value: "", number_value: 0,
         bool_value: false, items: items, keys: [], values: [],
     };
 }
 
-fn table_val(keys -> string[], values -> TomlValue[]) -> TomlValue {
+fn table_val(keys: string[], values: TomlValue[]) -> TomlValue {
     return TomlValue {
         kind: "table", string_value: "", number_value: 0,
         bool_value: false, items: [], keys: keys, values: values,
     };
 }
 
-fn datetime_val(value -> string) -> TomlValue {
+fn datetime_val(value: string) -> TomlValue {
     // Stores datetime as its original string representation.
     return TomlValue {
         kind: "datetime", string_value: value, number_value: 0,
@@ -76,23 +76,23 @@ fn datetime_val(value -> string) -> TomlValue {
 
 // ---- Parser ----
 
-fn parse(text -> string) -> TomlValue {
+fn parse(text: string) -> TomlValue {
     // Parse a TOML document into a TomlValue tree.
     // The root is always a table.
     let lines = _split_lines(text);
-    let mut root_keys -> string[] = [];
-    let mut root_values -> TomlValue[] = [];
+    let mut root_keys: string[] = [];
+    let mut root_values: TomlValue[] = [];
 
     // Current table path and accumulation.
-    let mut current_path -> string = "";
-    let mut is_array_table -> boolean = false;
+    let mut current_path: string = "";
+    let mut is_array_table: boolean = false;
 
     // We collect all key-value pairs grouped by table path,
     // then assemble the tree at the end.
-    let mut table_paths -> string[] = [];
-    let mut table_key_lists -> string[][] = [];
-    let mut table_value_lists -> TomlValue[][] = [];
-    let mut table_is_array -> boolean[] = [];
+    let mut table_paths: string[] = [];
+    let mut table_key_lists: string[][] = [];
+    let mut table_value_lists: TomlValue[][] = [];
+    let mut table_is_array: boolean[] = [];
 
     // Start with the root table.
     table_paths.push("");
@@ -100,9 +100,9 @@ fn parse(text -> string) -> TomlValue {
     table_value_lists.push([]);
     table_is_array.push(false);
 
-    let mut current_idx -> number = 0;
+    let mut current_idx: number = 0;
 
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= lines.length { break; }
         let line = _trim(lines[i]);
@@ -115,8 +115,8 @@ fn parse(text -> string) -> TomlValue {
         // Table header: [table] or [[array-of-tables]]
         if line[0] == "[" {
             let is_arr = line.length >= 2 && line[1] == "[";
-            let mut header_start -> number = 1;
-            let mut header_end -> number = line.length - 1;
+            let mut header_start: number = 1;
+            let mut header_end: number = line.length - 1;
             if is_arr {
                 header_start = 2;
                 header_end = line.length - 2;
@@ -124,9 +124,9 @@ fn parse(text -> string) -> TomlValue {
             let path = _trim(substring(line, header_start, header_end));
 
             // Check if this table path already exists.
-            let mut found -> number = -1;
+            let mut found: number = -1;
             if !is_arr {
-                let mut fi -> number = 0;
+                let mut fi: number = 0;
                 loop {
                     if fi >= table_paths.length { break; }
                     if strings_equal(table_paths[fi], path) && !table_is_array[fi] {
@@ -167,7 +167,7 @@ fn parse(text -> string) -> TomlValue {
     root_values = table_value_lists[0];
 
     // Insert nested tables into the root tree.
-    let mut ti -> number = 1;
+    let mut ti: number = 1;
     loop {
         if ti >= table_paths.length { break; }
         let path = table_paths[ti];
@@ -187,7 +187,7 @@ fn parse(text -> string) -> TomlValue {
 
 // ---- Value parsing ----
 
-fn _parse_value(raw -> string) -> TomlValue {
+fn _parse_value(raw: string) -> TomlValue {
     if raw.length == 0 { return string_val(""); }
 
     // Strip inline comments (only outside of strings).
@@ -219,9 +219,9 @@ fn _parse_value(raw -> string) -> TomlValue {
     // Datetime detection: date-only (YYYY-MM-DD), datetime (contains T or :),
     // or any digit-starting value with dashes in date position.
     if value.length >= 10 && _is_digit(value[0]) {
-        let mut has_time_sep -> boolean = false;
-        let mut dash_count -> number = 0;
-        let mut ci -> number = 0;
+        let mut has_time_sep: boolean = false;
+        let mut dash_count: number = 0;
+        let mut ci: number = 0;
         loop {
             if ci >= value.length { break; }
             if value[ci] == "T" || value[ci] == ":" { has_time_sep = true; }
@@ -239,11 +239,11 @@ fn _parse_value(raw -> string) -> TomlValue {
     return _parse_number(value);
 }
 
-fn _parse_basic_string(raw -> string) -> string {
+fn _parse_basic_string(raw: string) -> string {
     // Parse a TOML basic string (double-quoted, with escape sequences).
     if raw.length < 2 { return ""; }
-    let mut out -> string = "";
-    let mut i -> number = 1;
+    let mut out: string = "";
+    let mut i: number = 1;
     let end = raw.length - 1;
     loop {
         if i >= end { break; }
@@ -266,15 +266,15 @@ fn _parse_basic_string(raw -> string) -> string {
     return out;
 }
 
-fn _parse_literal_string(raw -> string) -> string {
+fn _parse_literal_string(raw: string) -> string {
     // Parse a TOML literal string (single-quoted, no escapes).
     if raw.length < 2 { return ""; }
     return substring(raw, 1, raw.length - 1);
 }
 
-fn _parse_number(value -> string) -> TomlValue {
-    let mut has_dot -> boolean = false;
-    let mut i -> number = 0;
+fn _parse_number(value: string) -> TomlValue {
+    let mut has_dot: boolean = false;
+    let mut i: number = 0;
     loop {
         if i >= value.length { break; }
         if value[i] == "." { has_dot = true; }
@@ -282,10 +282,10 @@ fn _parse_number(value -> string) -> TomlValue {
     }
 
     // Parse the numeric value.
-    let mut result -> number = 0;
-    let mut negative -> boolean = false;
-    let mut decimal_place -> number = 0;
-    let mut j -> number = 0;
+    let mut result: number = 0;
+    let mut negative: boolean = false;
+    let mut decimal_place: number = 0;
+    let mut j: number = 0;
     if value.length > 0 && value[0] == "-" {
         negative = true;
         j = 1;
@@ -306,8 +306,8 @@ fn _parse_number(value -> string) -> TomlValue {
         } else {
             let digit = char_code(ch) - 48;
             if decimal_place > 0 {
-                let mut divisor -> number = 1;
-                let mut d -> number = 0;
+                let mut divisor: number = 1;
+                let mut d: number = 0;
                 loop {
                     if d >= decimal_place { break; }
                     divisor = divisor * 10;
@@ -327,18 +327,18 @@ fn _parse_number(value -> string) -> TomlValue {
     return integer_val(result);
 }
 
-fn _parse_array(raw -> string) -> TomlValue {
-    let mut items -> TomlValue[] = [];
+fn _parse_array(raw: string) -> TomlValue {
+    let mut items: TomlValue[] = [];
     if raw.length < 2 { return array_val(items); }
     let inner = _trim(substring(raw, 1, raw.length - 1));
     if inner.length == 0 { return array_val(items); }
 
     // Split on commas (respecting nesting and strings).
-    let mut depth -> number = 0;
-    let mut in_string -> boolean = false;
-    let mut str_char -> string = "";
-    let mut start -> number = 0;
-    let mut i -> number = 0;
+    let mut depth: number = 0;
+    let mut in_string: boolean = false;
+    let mut str_char: string = "";
+    let mut start: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= inner.length { break; }
         let ch = inner[i];
@@ -362,19 +362,19 @@ fn _parse_array(raw -> string) -> TomlValue {
     return array_val(items);
 }
 
-fn _parse_inline_table(raw -> string) -> TomlValue {
-    let mut keys -> string[] = [];
-    let mut values -> TomlValue[] = [];
+fn _parse_inline_table(raw: string) -> TomlValue {
+    let mut keys: string[] = [];
+    let mut values: TomlValue[] = [];
     if raw.length < 2 { return table_val(keys, values); }
     let inner = _trim(substring(raw, 1, raw.length - 1));
     if inner.length == 0 { return table_val(keys, values); }
 
     // Split on commas (respecting nesting and strings).
-    let mut start -> number = 0;
-    let mut i -> number = 0;
-    let mut depth -> number = 0;
-    let mut in_string -> boolean = false;
-    let mut str_char -> string = "";
+    let mut start: number = 0;
+    let mut i: number = 0;
+    let mut depth: number = 0;
+    let mut in_string: boolean = false;
+    let mut str_char: string = "";
     loop {
         if i >= inner.length { break; }
         let ch = inner[i];
@@ -398,7 +398,7 @@ fn _parse_inline_table(raw -> string) -> TomlValue {
     return table_val(keys, values);
 }
 
-fn _parse_kv_pair(pair -> string, keys -> string[], values -> TomlValue[]) -> void {
+fn _parse_kv_pair(pair: string, keys: string[], values: TomlValue[]) -> void {
     let eq = _find_equals(pair);
     if eq < 0 { return; }
     let key = _strip_quotes(_trim(substring(pair, 0, eq)));
@@ -409,22 +409,22 @@ fn _parse_kv_pair(pair -> string, keys -> string[], values -> TomlValue[]) -> vo
 
 // ---- Tree assembly helpers ----
 
-fn _insert_table(root_keys -> string[], root_values -> TomlValue[], path -> string, sub -> TomlValue) -> void {
+fn _insert_table(root_keys: string[], root_values: TomlValue[], path: string, sub: TomlValue) -> void {
     // Insert a sub-table at a dotted path like "package" or "tool.settings".
     // Splits on "." and walks/creates intermediate tables.
     let segments = _split_dotted(path);
     if segments.length == 0 { return; }
 
-    let mut cur_keys -> string[] = root_keys;
-    let mut cur_values -> TomlValue[] = root_values;
+    let mut cur_keys: string[] = root_keys;
+    let mut cur_values: TomlValue[] = root_values;
 
     // Walk/create intermediate tables for all but the last segment.
-    let mut depth -> number = 0;
+    let mut depth: number = 0;
     loop {
         if depth >= segments.length - 1 { break; }
         let seg = segments[depth];
-        let mut idx -> number = -1;
-        let mut fi -> number = 0;
+        let mut idx: number = -1;
+        let mut fi: number = 0;
         loop {
             if fi >= cur_keys.length { break; }
             if strings_equal(cur_keys[fi], seg) { idx = fi; break; }
@@ -432,8 +432,8 @@ fn _insert_table(root_keys -> string[], root_values -> TomlValue[], path -> stri
         }
         if idx < 0 {
             // Create a new empty table at this segment.
-            let mut new_keys -> string[] = [];
-            let mut new_values -> TomlValue[] = [];
+            let mut new_keys: string[] = [];
+            let mut new_values: TomlValue[] = [];
             cur_keys.push(seg);
             cur_values.push(table_val(new_keys, new_values));
             idx = cur_values.length - 1;
@@ -446,8 +446,8 @@ fn _insert_table(root_keys -> string[], root_values -> TomlValue[], path -> stri
 
     // Insert the final segment.
     let leaf = segments[segments.length - 1];
-    let mut leaf_idx -> number = -1;
-    let mut li -> number = 0;
+    let mut leaf_idx: number = -1;
+    let mut li: number = 0;
     loop {
         if li >= cur_keys.length { break; }
         if strings_equal(cur_keys[li], leaf) { leaf_idx = li; break; }
@@ -461,10 +461,10 @@ fn _insert_table(root_keys -> string[], root_values -> TomlValue[], path -> stri
     }
 }
 
-fn _split_dotted(path -> string) -> string[] {
-    let mut segments -> string[] = [];
-    let mut start -> number = 0;
-    let mut i -> number = 0;
+fn _split_dotted(path: string) -> string[] {
+    let mut segments: string[] = [];
+    let mut start: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= path.length { break; }
         if path[i] == "." {
@@ -477,30 +477,30 @@ fn _split_dotted(path -> string) -> string[] {
     return segments;
 }
 
-fn _insert_array_table(root_keys -> string[], root_values -> TomlValue[], path -> string, sub -> TomlValue) -> void {
+fn _insert_array_table(root_keys: string[], root_values: TomlValue[], path: string, sub: TomlValue) -> void {
     // Array of tables: [[path]] appends to an array at the leaf key.
     // Walks dotted paths like _insert_table to find the right parent.
     let segments = _split_dotted(path);
     if segments.length == 0 { return; }
 
-    let mut cur_keys -> string[] = root_keys;
-    let mut cur_values -> TomlValue[] = root_values;
+    let mut cur_keys: string[] = root_keys;
+    let mut cur_values: TomlValue[] = root_values;
 
     // Walk to the parent table.
-    let mut depth -> number = 0;
+    let mut depth: number = 0;
     loop {
         if depth >= segments.length - 1 { break; }
         let seg = segments[depth];
-        let mut idx -> number = -1;
-        let mut fi -> number = 0;
+        let mut idx: number = -1;
+        let mut fi: number = 0;
         loop {
             if fi >= cur_keys.length { break; }
             if strings_equal(cur_keys[fi], seg) { idx = fi; break; }
             fi += 1;
         }
         if idx < 0 {
-            let mut new_keys -> string[] = [];
-            let mut new_values -> TomlValue[] = [];
+            let mut new_keys: string[] = [];
+            let mut new_values: TomlValue[] = [];
             cur_keys.push(seg);
             cur_values.push(table_val(new_keys, new_values));
             idx = cur_values.length - 1;
@@ -511,8 +511,8 @@ fn _insert_array_table(root_keys -> string[], root_values -> TomlValue[], path -
     }
 
     let leaf = segments[segments.length - 1];
-    let mut found -> number = -1;
-    let mut fi -> number = 0;
+    let mut found: number = -1;
+    let mut fi: number = 0;
     loop {
         if fi >= cur_keys.length { break; }
         if strings_equal(cur_keys[fi], leaf) { found = fi; break; }
@@ -523,7 +523,7 @@ fn _insert_array_table(root_keys -> string[], root_values -> TomlValue[], path -
             cur_values[found].items.push(sub);
         }
     } else {
-        let mut items -> TomlValue[] = [];
+        let mut items: TomlValue[] = [];
         items.push(sub);
         cur_keys.push(leaf);
         cur_values.push(array_val(items));
@@ -532,41 +532,41 @@ fn _insert_array_table(root_keys -> string[], root_values -> TomlValue[], path -
 
 // ---- Accessors ----
 
-fn get_string(root -> TomlValue, key -> string) -> string {
+fn get_string(root: TomlValue, key: string) -> string {
     // Get a string value by key. Supports dotted paths like "package.name".
     let val = _resolve_path(root, key);
     return val.string_value;
 }
 
-fn get_number(root -> TomlValue, key -> string) -> number {
+fn get_number(root: TomlValue, key: string) -> number {
     let val = _resolve_path(root, key);
     return val.number_value;
 }
 
-fn get_bool(root -> TomlValue, key -> string) -> boolean {
+fn get_bool(root: TomlValue, key: string) -> boolean {
     let val = _resolve_path(root, key);
     return val.bool_value;
 }
 
-fn get_table(root -> TomlValue, key -> string) -> TomlValue {
+fn get_table(root: TomlValue, key: string) -> TomlValue {
     return _resolve_path(root, key);
 }
 
-fn get_array(root -> TomlValue, key -> string) -> TomlValue[] {
+fn get_array(root: TomlValue, key: string) -> TomlValue[] {
     let val = _resolve_path(root, key);
     return val.items;
 }
 
-fn has_key(root -> TomlValue, key -> string) -> boolean {
+fn has_key(root: TomlValue, key: string) -> boolean {
     let val = _resolve_path(root, key);
     return !strings_equal(val.kind, "");
 }
 
-fn get_value(root -> TomlValue, key -> string) -> TomlValue {
+fn get_value(root: TomlValue, key: string) -> TomlValue {
     return _resolve_path(root, key);
 }
 
-fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
+fn _resolve_path(root: TomlValue, path: string) -> TomlValue {
     // Resolve a dotted path like "package.name" through nested tables.
     // First try the full path as a single key (for table headers like [package]).
     if !strings_equal(root.kind, "table") {
@@ -577,9 +577,9 @@ fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
     }
 
     // Split path on ".".
-    let mut segments -> string[] = [];
-    let mut start -> number = 0;
-    let mut i -> number = 0;
+    let mut segments: string[] = [];
+    let mut start: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= path.length { break; }
         if path[i] == "." {
@@ -591,13 +591,13 @@ fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
     segments.push(substring(path, start, path.length));
 
     // Walk the tree.
-    let mut current -> TomlValue = root;
-    let mut si -> number = 0;
+    let mut current: TomlValue = root;
+    let mut si: number = 0;
     loop {
         if si >= segments.length { break; }
         let seg = segments[si];
-        let mut found -> boolean = false;
-        let mut ki -> number = 0;
+        let mut found: boolean = false;
+        let mut ki: number = 0;
         loop {
             if ki >= current.keys.length { break; }
             if strings_equal(current.keys[ki], seg) {
@@ -609,14 +609,14 @@ fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
         }
         if !found {
             // Try the remaining path as a single key (table headers).
-            let mut remaining -> string = seg;
-            let mut ri -> number = si + 1;
+            let mut remaining: string = seg;
+            let mut ri: number = si + 1;
             loop {
                 if ri >= segments.length { break; }
                 remaining = remaining + "." + segments[ri];
                 ri += 1;
             }
-            let mut ki2 -> number = 0;
+            let mut ki2: number = 0;
             loop {
                 if ki2 >= current.keys.length { break; }
                 if strings_equal(current.keys[ki2], remaining) {
@@ -636,7 +636,7 @@ fn _resolve_path(root -> TomlValue, path -> string) -> TomlValue {
 
 // ---- Serialization ----
 
-fn stringify(value -> TomlValue) -> string {
+fn stringify(value: TomlValue) -> string {
     // Serialize a TomlValue tree back to a TOML string.
     if !strings_equal(value.kind, "table") {
         return _stringify_value(value);
@@ -644,10 +644,10 @@ fn stringify(value -> TomlValue) -> string {
     return _stringify_table(value, "");
 }
 
-fn _stringify_table(table -> TomlValue, prefix -> string) -> string {
-    let mut out -> string = "";
+fn _stringify_table(table: TomlValue, prefix: string) -> string {
+    let mut out: string = "";
     // First pass: emit simple key-value pairs.
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= table.keys.length { break; }
         let val = table.values[i];
@@ -666,7 +666,7 @@ fn _stringify_table(table -> TomlValue, prefix -> string) -> string {
         if i >= table.keys.length { break; }
         let val = table.values[i];
         let key = table.keys[i];
-        let mut full_key -> string = key;
+        let mut full_key: string = key;
         if prefix.length > 0 {
             full_key = prefix + "." + key;
         }
@@ -676,7 +676,7 @@ fn _stringify_table(table -> TomlValue, prefix -> string) -> string {
         }
         // Array of tables
         if strings_equal(val.kind, "array") && val.items.length > 0 && strings_equal(val.items[0].kind, "table") {
-            let mut ai -> number = 0;
+            let mut ai: number = 0;
             loop {
                 if ai >= val.items.length { break; }
                 out = out + "\n[[" + full_key + "]]\n";
@@ -690,7 +690,7 @@ fn _stringify_table(table -> TomlValue, prefix -> string) -> string {
     return out;
 }
 
-fn _stringify_value(value -> TomlValue) -> string {
+fn _stringify_value(value: TomlValue) -> string {
     if strings_equal(value.kind, "string") {
         return "\"" + _escape_string(value.string_value) + "\"";
     }
@@ -708,8 +708,8 @@ fn _stringify_value(value -> TomlValue) -> string {
         return value.string_value;
     }
     if strings_equal(value.kind, "array") {
-        let mut out -> string = "[";
-        let mut i -> number = 0;
+        let mut out: string = "[";
+        let mut i: number = 0;
         loop {
             if i >= value.items.length { break; }
             if i > 0 { out = out + ", "; }
@@ -720,8 +720,8 @@ fn _stringify_value(value -> TomlValue) -> string {
     }
     if strings_equal(value.kind, "table") {
         // Inline table format.
-        let mut out -> string = "{";
-        let mut i -> number = 0;
+        let mut out: string = "{";
+        let mut i: number = 0;
         loop {
             if i >= value.keys.length { break; }
             if i > 0 { out = out + ", "; }
@@ -735,9 +735,9 @@ fn _stringify_value(value -> TomlValue) -> string {
 
 // ---- String helpers ----
 
-fn _trim(text -> string) -> string {
-    let mut start -> number = 0;
-    let mut end -> number = text.length;
+fn _trim(text: string) -> string {
+    let mut start: number = 0;
+    let mut end: number = text.length;
     loop {
         if start >= end { break; }
         let ch = text[start];
@@ -755,7 +755,7 @@ fn _trim(text -> string) -> string {
     return substring(text, start, end);
 }
 
-fn _strip_quotes(text -> string) -> string {
+fn _strip_quotes(text: string) -> string {
     if text.length >= 2 {
         let first = text[0];
         let last = text[text.length - 1];
@@ -769,10 +769,10 @@ fn _strip_quotes(text -> string) -> string {
     return text;
 }
 
-fn _split_lines(text -> string) -> string[] {
-    let mut lines -> string[] = [];
-    let mut start -> number = 0;
-    let mut i -> number = 0;
+fn _split_lines(text: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut start: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= text.length { break; }
         if text[i] == "\n" {
@@ -787,11 +787,11 @@ fn _split_lines(text -> string) -> string[] {
     return lines;
 }
 
-fn _find_equals(line -> string) -> number {
+fn _find_equals(line: string) -> number {
     // Find the first '=' not inside a string.
-    let mut in_string -> boolean = false;
-    let mut quote_char -> string = "";
-    let mut i -> number = 0;
+    let mut in_string: boolean = false;
+    let mut quote_char: string = "";
+    let mut i: number = 0;
     loop {
         if i >= line.length { break; }
         let ch = line[i];
@@ -810,11 +810,11 @@ fn _find_equals(line -> string) -> number {
     return -1;
 }
 
-fn _strip_inline_comment(raw -> string) -> string {
+fn _strip_inline_comment(raw: string) -> string {
     // Remove trailing # comments (only outside strings).
-    let mut in_string -> boolean = false;
-    let mut quote_char -> string = "";
-    let mut i -> number = 0;
+    let mut in_string: boolean = false;
+    let mut quote_char: string = "";
+    let mut i: number = 0;
     loop {
         if i >= raw.length { break; }
         let ch = raw[i];
@@ -835,9 +835,9 @@ fn _strip_inline_comment(raw -> string) -> string {
     return raw;
 }
 
-fn _escape_string(s -> string) -> string {
-    let mut out -> string = "";
-    let mut i -> number = 0;
+fn _escape_string(s: string) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
     loop {
         if i >= s.length { break; }
         let ch = s[i];
@@ -852,7 +852,7 @@ fn _escape_string(s -> string) -> string {
     return out;
 }
 
-fn _is_digit(ch -> string) -> boolean {
+fn _is_digit(ch: string) -> boolean {
     let code = char_code(ch);
     return code >= 48 && code <= 57;
 }

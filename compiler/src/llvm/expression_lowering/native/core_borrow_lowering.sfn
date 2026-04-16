@@ -13,8 +13,8 @@ import { empty_string_constant_set } from "../../strings";
 import { find_parameter_binding } from "./core_bindings";
 import { find_local_binding } from "./core_scopes";
 
-fn lower_borrow_expression(parse -> BorrowParseResult, bindings -> ParameterBinding[], locals -> LocalBinding[], temp_index -> number, lines -> string[]) -> ExpressionResult {
-    let mut diagnostics -> string[] = parse.diagnostics;
+fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[]) -> ExpressionResult {
+    let mut diagnostics: string[] = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
         return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };

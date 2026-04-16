@@ -54,34 +54,34 @@ import {
     format_root_scope_id,
 } from "../lifetime";
 
-fn module_global_symbol(name -> string) -> string {
+fn module_global_symbol(name: string) -> string {
     return "@global." + sanitize_symbol(name);
 }
 
-fn module_init_symbol(module_name -> string) -> string {
+fn module_init_symbol(module_name: string) -> string {
     return "@sailfin_module_init__" + sanitize_symbol(module_name);
 }
 
-fn module_user_main_symbol(module_name -> string) -> string {
+fn module_user_main_symbol(module_name: string) -> string {
     return "sailfin_user_main__" + sanitize_symbol(module_name);
 }
 
 // Strip surrounding quotes from a string literal (e.g., `"hello"` -> `hello`).
-fn _strip_string_quotes(s -> string) -> string {
+fn _strip_string_quotes(s: string) -> string {
     if s.length < 2 {
         return s;
     }
     let first = s[0];
     let last = s[s.length - 1];
-    let mut _is_quoted -> boolean = false;
+    let mut _is_quoted: boolean = false;
     if first == "\"" {
         if last == "\"" {
             _is_quoted = true;
         }
     }
     if _is_quoted {
-        let mut result -> string = "";
-        let mut i -> number = 1;
+        let mut result: string = "";
+        let mut i: number = 1;
         loop {
             if i >= s.length - 1 {
                 break;
@@ -98,7 +98,7 @@ fn _strip_string_quotes(s -> string) -> string {
 // This function is called from the loop body to keep the body minimal.
 // It appends preamble lines and local entries to accumulation files.
 // Returns "init" if the binding needs runtime initialization, "" otherwise.
-fn _process_one_binding(binding -> NativeBinding, context -> TypeContext, scope_id -> string) -> string ![io] {
+fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string) -> string ![io] {
     if binding == null {
         return "";
     }
@@ -128,7 +128,7 @@ fn _process_one_binding(binding -> NativeBinding, context -> TypeContext, scope_
         return "";
     }
     let global_name = module_global_symbol(name);
-    let mut llvm_type -> string = "";
+    let mut llvm_type: string = "";
     // Fast-path common primitive types
     if type_annotation == "string" {
         llvm_type = "i8*";
@@ -150,10 +150,10 @@ fn _process_one_binding(binding -> NativeBinding, context -> TypeContext, scope_
     }
 
     // Build preamble line(s) and append to accumulation file
-    let mut needs_init_result -> string = "";
+    let mut needs_init_result: string = "";
 
     if llvm_type == "i8*" {
-        let mut string_handled -> boolean = false;
+        let mut string_handled: boolean = false;
         if binding.value != null {
             let str_val = trim_text(binding.value);
             if is_string_literal(str_val) {
@@ -174,10 +174,10 @@ fn _process_one_binding(binding -> NativeBinding, context -> TypeContext, scope_
             }
         }
     } else {
-        let mut initializer_text -> string = default_return_literal(llvm_type);
+        let mut initializer_text: string = default_return_literal(llvm_type);
         if binding.value != null {
             let init_expr = trim_text(binding.value);
-            let mut is_const -> boolean = false;
+            let mut is_const: boolean = false;
             if llvm_type == "double" {
                 if is_number_literal(init_expr) {
                     initializer_text = normalise_number_literal(init_expr);
@@ -220,8 +220,8 @@ fn _process_one_binding(binding -> NativeBinding, context -> TypeContext, scope_
 }
 
 // Append a line to a file (read existing content, append newline + new line).
-fn _append_to_file(path -> string, line -> string) ![io] {
-    let mut existing -> string = "";
+fn _append_to_file(path: string, line: string) ![io] {
+    let mut existing: string = "";
     if fs.exists(path) {
         existing = fs.readFile(path);
     }
@@ -232,7 +232,7 @@ fn _append_to_file(path -> string, line -> string) ![io] {
     }
 }
 
-fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> TypeContext, module_name -> string) -> ModuleGlobalLoweringResult ![io] {
+fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeContext, module_name: string) -> ModuleGlobalLoweringResult ![io] {
     let init_symbol = module_init_symbol(module_name);
 
     if bindings.length == 0 {
@@ -254,7 +254,7 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
     }
 
     let scope_id = format_root_scope_id("module");
-    let mut needs_init -> boolean = false;
+    let mut needs_init: boolean = false;
 
     // Clear accumulation files before starting
     fs.writeFile("build/sailfin/.module_globals_preamble", "");
@@ -266,7 +266,7 @@ fn lower_module_bindings_to_globals(bindings -> NativeBinding[], context -> Type
     // Process each binding via helper function.
     // The helper writes preamble and locals to files (append mode).
     // Keep loop body minimal — the seed drops end-of-body code.
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= bindings.length {
             // Write needs_init at exit (inside loop, before break)

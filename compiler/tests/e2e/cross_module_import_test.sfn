@@ -1,0 +1,11 @@
+import { helper_answer } from "./fixtures/inlining_helper";
+import { shared_add, shared_greet } from "./fixtures/cross_module_shared";
+
+test "cross_module: import function from another module" {
+    assert helper_answer() == 42;
+}
+
+test "cross_module: import multiple functions from a module" {
+    assert shared_add(10, 32) == 42;
+    assert shared_greet("world") == "hello, world";
+}

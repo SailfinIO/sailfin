@@ -4,17 +4,17 @@
 // corrupting the array argument.
 
 fn _make_array() -> string[] {
-    let mut arr -> string[] = [];
+    let mut arr: string[] = [];
     arr.push("alpha");
     arr.push("beta");
     arr.push("gamma");
     return arr;
 }
 
-fn _join_local(values -> string[], sep -> string) -> string {
+fn _join_local(values: string[], sep: string) -> string {
     if values.length == 0 { return ""; }
-    let mut result -> string = values[0];
-    let mut i -> number = 1;
+    let mut result: string = values[0];
+    let mut i: number = 1;
     loop {
         if i >= values.length { break; }
         result = result + sep + values[i];
@@ -23,11 +23,11 @@ fn _join_local(values -> string[], sep -> string) -> string {
     return result;
 }
 
-fn _pass_through(arr -> string[]) -> string[] {
+fn _pass_through(arr: string[]) -> string[] {
     return arr;
 }
 
-fn _count_elements(arr -> string[]) -> number {
+fn _count_elements(arr: string[]) -> number {
     return arr.length;
 }
 
@@ -54,13 +54,13 @@ test "cross-module: array join after pass-through" {
 }
 
 test "cross-module: empty array pass-through" {
-    let empty -> string[] = [];
+    let empty: string[] = [];
     let passed = _pass_through(empty);
     assert passed.length == 0;
 }
 
 test "cross-module: single element array" {
-    let mut arr -> string[] = [];
+    let mut arr: string[] = [];
     arr.push("only");
     let passed = _pass_through(arr);
     assert passed.length == 1;

@@ -27,14 +27,14 @@ import { unwrap_move_wrapper } from "./statement_type_mapping";
 // Keyword scanning
 // ---------------------------------------------------------------------------
 
-fn contains_keyword_outside_strings(value -> string, keyword -> string) -> boolean {
+fn contains_keyword_outside_strings(value: string, keyword: string) -> boolean {
     if value.length == 0 {
         return false;
     }
-    let mut index -> number = 0;
-    let mut in_single -> boolean = false;
-    let mut in_double -> boolean = false;
-    let mut escape -> boolean = false;
+    let mut index: number = 0;
+    let mut in_single: boolean = false;
+    let mut in_double: boolean = false;
+    let mut escape: boolean = false;
     loop {
         if index >= value.length {
             break;
@@ -89,7 +89,7 @@ fn contains_keyword_outside_strings(value -> string, keyword -> string) -> boole
     return false;
 }
 
-fn find_suspension_keyword(expression -> string) -> string {
+fn find_suspension_keyword(expression: string) -> string {
     if contains_keyword_outside_strings(expression, "await") {
         return "await";
     }
@@ -104,7 +104,7 @@ fn find_suspension_keyword(expression -> string) -> string {
 // Borrow annotation helpers
 // ---------------------------------------------------------------------------
 
-fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
+fn is_mutable_borrow_annotation(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
     if trimmed.length == 0 {
         return false;
@@ -126,7 +126,7 @@ fn is_mutable_borrow_annotation(annotation -> string) -> boolean {
     return false;
 }
 
-fn normalise_borrow_base(raw_base -> string) -> string {
+fn normalise_borrow_base(raw_base: string) -> string {
     let mut trimmed = trim_text(raw_base);
     loop {
         if trimmed.length == 0 {
@@ -156,9 +156,9 @@ fn normalise_borrow_base(raw_base -> string) -> string {
 // Suspension conflict detection
 // ---------------------------------------------------------------------------
 
-fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string, suspension_span -> NativeSourceSpan?) -> string[] {
-    let mut diagnostics -> string[] = [];
-    let mut index -> number = 0;
+fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
+    let mut diagnostics: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= locals.length {
             break;
@@ -178,7 +178,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
         }
         index += 1;
     }
-    let mut parameter_index -> number = 0;
+    let mut parameter_index: number = 0;
     loop {
         if parameter_index >= bindings.length {
             break;
@@ -195,7 +195,7 @@ fn collect_suspension_conflicts(keyword -> string, locals -> LocalBinding[], bin
     return diagnostics;
 }
 
-fn detect_suspension_conflicts(expression -> string?, locals -> LocalBinding[], bindings -> ParameterBinding[], function_name -> string, suspension_span -> NativeSourceSpan?) -> string[] {
+fn detect_suspension_conflicts(expression: string?, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
     if expression == null {
         return [];
     }
@@ -215,9 +215,9 @@ fn detect_suspension_conflicts(expression -> string?, locals -> LocalBinding[], 
 // Async ABI helpers
 // ---------------------------------------------------------------------------
 
-fn future_pointer_type_for_return_type(return_type -> string) -> string {
+fn future_pointer_type_for_return_type(return_type: string) -> string {
     let trimmed = trim_text(return_type);
-    let mut _if157 -> boolean = false;
+    let mut _if157: boolean = false;
     if trimmed.length == 0 { _if157 = true; }
     if trimmed == "void" { _if157 = true; }
     if _if157 {
@@ -227,7 +227,7 @@ fn future_pointer_type_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "%SailfinFutureNumber*";
     }
-    let mut _if158 -> boolean = false;
+    let mut _if158: boolean = false;
     if normalized == "boolean" { _if158 = true; }
     if normalized == "bool" { _if158 = true; }
     if _if158 {
@@ -240,9 +240,9 @@ fn future_pointer_type_for_return_type(return_type -> string) -> string {
     return "%SailfinFuturePtr*";
 }
 
-fn spawn_symbol_for_return_type(return_type -> string) -> string {
+fn spawn_symbol_for_return_type(return_type: string) -> string {
     let trimmed = trim_text(return_type);
-    let mut _if159 -> boolean = false;
+    let mut _if159: boolean = false;
     if trimmed.length == 0 { _if159 = true; }
     if trimmed == "void" { _if159 = true; }
     if _if159 {
@@ -252,7 +252,7 @@ fn spawn_symbol_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number";
     }
-    let mut _if160 -> boolean = false;
+    let mut _if160: boolean = false;
     if normalized == "boolean" { _if160 = true; }
     if normalized == "bool" { _if160 = true; }
     if _if160 {
@@ -264,9 +264,9 @@ fn spawn_symbol_for_return_type(return_type -> string) -> string {
     return "sailfin_runtime_spawn_ptr";
 }
 
-fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
+fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
     let trimmed = trim_text(return_type);
-    let mut _if161 -> boolean = false;
+    let mut _if161: boolean = false;
     if trimmed.length == 0 { _if161 = true; }
     if trimmed == "void" { _if161 = true; }
     if _if161 {
@@ -276,7 +276,7 @@ fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
     if normalized == "number" {
         return "sailfin_runtime_spawn_number_ctx";
     }
-    let mut _if162 -> boolean = false;
+    let mut _if162: boolean = false;
     if normalized == "boolean" { _if162 = true; }
     if normalized == "bool" { _if162 = true; }
     if _if162 {
@@ -288,7 +288,7 @@ fn spawn_ctx_symbol_for_return_type(return_type -> string) -> string {
     return "sailfin_runtime_spawn_ptr_ctx";
 }
 
-fn await_symbol_for_future_pointer_type(future_ptr_type -> string) -> string {
+fn await_symbol_for_future_pointer_type(future_ptr_type: string) -> string {
     if future_ptr_type == "%SailfinFutureNumber*" {
         return "sailfin_runtime_await_number";
     }

@@ -102,7 +102,7 @@ import { parse_expression } from "./parser/mod";
 ## Documentation Alignment
 
 - Update `docs/status.md` first whenever behavior changes.
-- Follow up with `docs/spec.md` and `docs/roadmap.md` as needed.
+- Follow up with `docs/spec.md` and the [roadmap](https://sailfin.dev/roadmap) (`site/src/pages/roadmap.astro`) as needed.
 - Add or adjust proposal docs under `docs/proposals/` for future work.
 
 ## Sailfin Language Style
@@ -114,23 +114,17 @@ import { parse_expression } from "./parser/mod";
 
 ### Syntax Reform (Pre-1.0)
 
-The following syntax changes are active. See `docs/roadmap.md` §0 for rationale.
+The following syntax changes are active. See `docs/proposals/colon-type-annotations.md` and the [roadmap](https://sailfin.dev/roadmap) for rationale.
 
-- **Type annotations**: Use `:` (colon), not `->` (arrow), for parameter types,
-  variable types, and struct field types. The parser currently accepts both in
-  all positions (including return types) because it shares a single `TypeSep`
-  rule. However, `:` in return-type position is unintentional, discouraged, and
-  will become a parse error once the grammar is split. New code should use `:`
-  for annotations and `->` for return types.
+- **Type annotations**: Use `:` (colon) for parameter, variable, and struct
+  field types. Function return types use `->`. The parser still accepts `->`
+  in annotation positions for backward compatibility, but the in-tree codebase
+  has been migrated and new code should use `:` exclusively.
 
   ```sfn
-  // Preferred
   fn add(x: number, y: number) -> number { return x + y; }
   let name: string = "Sailfin";
   struct User { id: number; name: string; }
-
-  // Deprecated (still accepted)
-  fn add(x -> number, y -> number) -> number { return x + y; }
   ```
 
 - **String interpolation**: Current syntax is `{{ expr }}`. This will change to

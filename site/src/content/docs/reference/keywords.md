@@ -216,12 +216,12 @@ unsafe fn write_raw(ptr: any, value: Int) -> void {
 
 **Status: Parsed + IR**
 
-Declare a first-class AI model artifact with metadata (provider, model identifier, parameters). The compiler emits a `.model` directive in `.sfn-asm` IR. Model execution via `.call()` is not yet implemented.
+Declare a model artifact with metadata (provider, model identifier, parameters). The compiler emits a `.model` directive in `.sfn-asm` IR. Model execution via `.call()` is not yet implemented. This construct is being migrated to the `sfn/ai` library capsule.
 
 ```sfn
 model Summarizer {
     provider: "anthropic";
-    model_id: "claude-3-5-sonnet-20241022";
+    model_id: "claude-sonnet-4-20250514";
     max_tokens: 512;
 }
 ```

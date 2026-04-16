@@ -51,10 +51,10 @@ if [[ ! -x "$COMPILER_BIN" ]]; then
     exit 1
 fi
 
-# Extract version from compiler/src/version.sfn
-VERSION="$(sed -n 's/.*__version__.*=.*"\([^"]*\)".*/\1/p' compiler/src/version.sfn)"
+# Extract version from capsule.toml (canonical source of truth)
+VERSION="$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml)"
 if [[ -z "$VERSION" ]]; then
-    echo "[package] error: could not extract version from compiler/src/version.sfn" >&2
+    echo "[package] error: could not extract version from compiler/capsule.toml" >&2
     exit 1
 fi
 

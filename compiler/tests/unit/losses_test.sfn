@@ -2,12 +2,12 @@
 
 // -- Helpers copied from sfn/losses --
 
-fn _mse(predictions -> number[], targets -> number[]) -> number {
+fn _mse(predictions: number[], targets: number[]) -> number {
     if predictions.length == 0 || targets.length == 0 { return 0; }
     let n = predictions.length;
     if targets.length < n { return 0; }
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         let diff = predictions[i] - targets[i];
@@ -17,12 +17,12 @@ fn _mse(predictions -> number[], targets -> number[]) -> number {
     return total / predictions.length;
 }
 
-fn _mae(predictions -> number[], targets -> number[]) -> number {
+fn _mae(predictions: number[], targets: number[]) -> number {
     if predictions.length == 0 || targets.length == 0 { return 0; }
     let n = predictions.length;
     if targets.length < n { return 0; }
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         let diff = predictions[i] - targets[i];
@@ -36,16 +36,16 @@ fn _mae(predictions -> number[], targets -> number[]) -> number {
     return total / predictions.length;
 }
 
-fn _huber(predictions -> number[], targets -> number[], delta -> number) -> number {
+fn _huber(predictions: number[], targets: number[], delta: number) -> number {
     if predictions.length == 0 || targets.length == 0 { return 0; }
     let n = predictions.length;
     if targets.length < n { return 0; }
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         let diff = predictions[i] - targets[i];
-        let mut a -> number = diff;
+        let mut a: number = diff;
         if a < 0 { a = 0 - a; }
         if a <= delta {
             total = total + 0.5 * diff * diff;
@@ -57,12 +57,12 @@ fn _huber(predictions -> number[], targets -> number[], delta -> number) -> numb
     return total / predictions.length;
 }
 
-fn _hinge(predictions -> number[], targets -> number[]) -> number {
+fn _hinge(predictions: number[], targets: number[]) -> number {
     if predictions.length == 0 || targets.length == 0 { return 0; }
     let n = predictions.length;
     if targets.length < n { return 0; }
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= n { break; }
         let margin = 1 - targets[i] * predictions[i];
@@ -74,12 +74,12 @@ fn _hinge(predictions -> number[], targets -> number[]) -> number {
     return total / predictions.length;
 }
 
-fn _squared_error(prediction -> number, target -> number) -> number {
+fn _squared_error(prediction: number, target: number) -> number {
     let diff = prediction - target;
     return diff * diff;
 }
 
-fn _absolute_error(prediction -> number, target -> number) -> number {
+fn _absolute_error(prediction: number, target: number) -> number {
     let diff = prediction - target;
     if diff < 0 { return 0 - diff; }
     return diff;

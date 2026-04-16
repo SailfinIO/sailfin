@@ -22,9 +22,10 @@ import {
 import { split_lines } from "./native_ir_utils_text";
 import { substring } from "./string_utils";
 import { Token } from "./token";
+import { toml_get_dependencies } from "./toml_parser";
 import { typecheck_diagnostics, typecheck_has_errors } from "./typecheck";
 
-fn _ms_since(start_ms -> number) -> number {
+fn _ms_since(start_ms: number) -> number {
     let end_ms = monotonic_millis();
     let delta = end_ms - start_ms;
     if delta < 0 {
@@ -33,14 +34,14 @@ fn _ms_since(start_ms -> number) -> number {
     return delta;
 }
 
-fn _timing_line(module_name -> string, phase -> string, elapsed_ms -> number) -> string {
+fn _timing_line(module_name: string, phase: string, elapsed_ms: number) -> string {
     // Format is stable and grep/awk-friendly.
     // Emitted to stderr via print.err by the caller.
     return "[timing] module=" + module_name + " phase=" + phase + " ms=" + number_to_string(elapsed_ms);
 }
 
-fn compile_to_sailfin(source -> string) -> string ![io] {
-    let program -> Program = parse_program(source);
+fn compile_to_sailfin(source: string) -> string ![io] {
+    let program: Program = parse_program(source);
     if typecheck_has_errors(program) {
         let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
@@ -49,14 +50,14 @@ fn compile_to_sailfin(source -> string) -> string ![io] {
     return emit_program(program);
 }
 
-fn module_name_from_path(source_path -> string) -> string {
+fn module_name_from_path(source_path: string) -> string {
     if source_path.length == 0 {
         return "main";
     }
 
     // Normalize path separators so we can reason about prefixes.
-    let mut normalized -> string = "";
-    let mut index -> number = 0;
+    let mut normalized: string = "";
+    let mut index: number = 0;
     loop {
         if index >= source_path.length {
             break;
@@ -75,9 +76,9 @@ fn module_name_from_path(source_path -> string) -> string {
     // - .../runtime/prelude.sfn         -> runtime/prelude
     let compiler_prefix = "compiler/src/";
     let runtime_prefix = "runtime/";
-    let mut start -> number = 0;
+    let mut start: number = 0;
 
-    let mut last_compiler -> number = -1;
+    let mut last_compiler: number = -1;
     let compiler_search_limit = normalized.length - compiler_prefix.length;
     index = 0;
     loop {
@@ -92,7 +93,7 @@ fn module_name_from_path(source_path -> string) -> string {
     if last_compiler >= 0 {
         start = last_compiler + compiler_prefix.length;
     } else {
-        let mut last_runtime -> number = -1;
+        let mut last_runtime: number = -1;
         let runtime_search_limit = normalized.length - runtime_prefix.length;
         index = 0;
         loop {
@@ -112,7 +113,7 @@ fn module_name_from_path(source_path -> string) -> string {
 
     // Find the end of the module name by stripping the extension from the last
     // path segment.
-    let mut last_slash -> number = -1;
+    let mut last_slash: number = -1;
     index = start;
     loop {
         if index >= normalized.length {
@@ -123,8 +124,8 @@ fn module_name_from_path(source_path -> string) -> string {
         }
         index += 1;
     }
-    let mut end -> number = normalized.length;
-    let mut dot_index -> number = -1;
+    let mut end: number = normalized.length;
+    let mut dot_index: number = -1;
     index = normalized.length;
     let dot_limit = last_slash + 1;
     loop {
@@ -151,8 +152,8 @@ fn module_name_from_path(source_path -> string) -> string {
     return base;
 }
 
-fn compile_to_llvm(source -> string) -> string ![io] {
-    let program -> Program = parse_program(source);
+fn compile_to_llvm(source: string) -> string ![io] {
+    let program: Program = parse_program(source);
     if typecheck_has_errors(program) {
         let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
@@ -190,8 +191,8 @@ fn compile_to_llvm(source -> string) -> string ![io] {
     return ir;
 }
 
-fn compile_to_llvm_with_module(source -> string, module_name -> string) -> string ![io] {
-    let program -> Program = parse_program(source);
+fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![io] {
+    let program: Program = parse_program(source);
     let skip_typecheck = fs.exists("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
         if typecheck_has_errors(program) {
@@ -211,7 +212,7 @@ fn compile_to_llvm_with_module(source -> string, module_name -> string) -> strin
             print.err("emit-llvm: wrote build/sailfin/debug-emit-native.sfn-asm");
         }
     }
-    let mut ir -> string = "";
+    let mut ir: string = "";
     if native_text.length > 0 {
         ir = lower_to_llvm_ir_from_text(native_text, module_name);
         if ir.length == 0 {
@@ -232,14 +233,14 @@ fn compile_to_llvm_with_module(source -> string, module_name -> string) -> strin
     return ir;
 }
 
-fn compile_to_llvm_with_module_timed(source -> string, module_name -> string) -> string ![io, clock] {
+fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> string ![io, clock] {
     let t0 = monotonic_millis();
-    let program -> Program = parse_program(source);
+    let program: Program = parse_program(source);
     let t_parse = _ms_since(t0);
 
     let t1 = monotonic_millis();
     let skip_typecheck = fs.exists("build/sailfin/.skip_typecheck");
-    let mut t_typecheck -> number = 0;
+    let mut t_typecheck: number = 0;
     if !skip_typecheck {
         t_typecheck = _ms_since(t1);
         if typecheck_has_errors(program) {
@@ -291,28 +292,28 @@ fn compile_to_llvm_with_module_timed(source -> string, module_name -> string) ->
     return ir;
 }
 
-fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> string, out_path -> string) -> boolean ![io] {
+fn compile_tests_to_llvm_file_with_module(source: string, module_name: string, out_path: string) -> boolean ![io] {
     let trace_file = fs.exists("build/sailfin/.trace_test_runner");
     let active_file = fs.exists("build/sailfin/.test_runner_active");
-    let mut _let345 -> boolean = false;
+    let mut _let345: boolean = false;
     if trace_file {
         if active_file {
             _let345 = true;
         }
     }
     let trace = _let345;
-    let mut _if346 -> boolean = false;
+    let mut _if346: boolean = false;
     if trace_file { _if346 = true; }
     if active_file { _if346 = true; }
     if _if346 {
         if trace {
             print.err("test compiler: trace enabled (trace_file=true, active_file=true)");
         } else {
-            let mut trace_text -> string = "false";
+            let mut trace_text: string = "false";
             if trace_file {
                 trace_text = "true";
             }
-            let mut active_text -> string = "false";
+            let mut active_text: string = "false";
             if active_file {
                 active_text = "true";
             }
@@ -328,7 +329,7 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
     if trace {
         print.err("test compiler: parse_program start");
     }
-    let program -> Program = parse_program(source);
+    let program: Program = parse_program(source);
     if typecheck_has_errors(program) {
         let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
@@ -369,8 +370,8 @@ fn compile_tests_to_llvm_file_with_module(source -> string, module_name -> strin
     return true;
 }
 
-fn compile_to_native_text_with_module(source -> string, module_name -> string) -> string ![io] {
-    let program -> Program = parse_program(source);
+fn compile_to_native_text_with_module(source: string, module_name: string) -> string ![io] {
+    let program: Program = parse_program(source);
     if typecheck_has_errors(program) {
         let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
@@ -389,8 +390,8 @@ fn compile_to_native_text_with_module(source -> string, module_name -> string) -
 }
 
 // Write native text directly to a file to avoid returning large strings across ABI boundaries.
-fn write_native_text_file_with_module(source -> string, module_name -> string, out_path -> string) -> boolean ![io] {
-    let program -> Program = parse_program(source);
+fn write_native_text_file_with_module(source: string, module_name: string, out_path: string) -> boolean ![io] {
+    let program: Program = parse_program(source);
     if typecheck_has_errors(program) {
         let diagnostics = typecheck_diagnostics(program);
         report_typecheck_errors(diagnostics, source);
@@ -399,11 +400,11 @@ fn write_native_text_file_with_module(source -> string, module_name -> string, o
     return emit_native_text_to_file_with_module_name(program, module_name, out_path);
 }
 
-fn _has_prefix(value -> string, prefix -> string) -> boolean {
+fn _has_prefix(value: string, prefix: string) -> boolean {
     if prefix.length > value.length {
         return false;
     }
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= prefix.length {
             break;
@@ -416,11 +417,11 @@ fn _has_prefix(value -> string, prefix -> string) -> boolean {
     return true;
 }
 
-fn _find_first_nonblank_line(text -> string) -> string {
+fn _find_first_nonblank_line(text: string) -> string {
     let lines = split_lines(text);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
-        let mut _if348 -> boolean = false;
+        let mut _if348: boolean = false;
         if index >= lines.length { _if348 = true; }
         if index >= 128 { _if348 = true; }
         if _if348 {
@@ -435,14 +436,14 @@ fn _find_first_nonblank_line(text -> string) -> string {
     return "";
 }
 
-fn _looks_like_llvm_text(text -> string) -> boolean {
+fn _looks_like_llvm_text(text: string) -> boolean {
     if text.length < 16 {
         return false;
     }
     let lines = split_lines(text);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
-        let mut _if349 -> boolean = false;
+        let mut _if349: boolean = false;
         if index >= lines.length { _if349 = true; }
         if index >= 128 { _if349 = true; }
         if _if349 {
@@ -453,7 +454,7 @@ fn _looks_like_llvm_text(text -> string) -> boolean {
             index += 1;
             continue;
         }
-        let mut _if350 -> boolean = false;
+        let mut _if350: boolean = false;
         if line[0] == " " { _if350 = true; }
         if line[0] == "\t" { _if350 = true; }
         if _if350 {
@@ -465,14 +466,14 @@ fn _looks_like_llvm_text(text -> string) -> boolean {
         if _has_prefix(line, "; ModuleID =") {
             return true;
         }
-        let mut _if351 -> boolean = false;
+        let mut _if351: boolean = false;
         if _has_prefix(line, "target ") { _if351 = true; }
         if _has_prefix(line, "declare ") { _if351 = true; }
         if _has_prefix(line, "define ") { _if351 = true; }
         if _if351 {
             return true;
         }
-        let mut _if352 -> boolean = false;
+        let mut _if352: boolean = false;
         if line[0] == "%" { _if352 = true; }
         if line[0] == "@" { _if352 = true; }
         if line[0] == "!" { _if352 = true; }
@@ -486,8 +487,8 @@ fn _looks_like_llvm_text(text -> string) -> boolean {
 }
 
 // Compile and write LLVM IR directly, avoiding large return values.
-fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out_path -> string) -> boolean ![io] {
-    let program -> Program = parse_program(source);
+fn compile_to_llvm_file_with_module(source: string, module_name: string, out_path: string) -> boolean ![io] {
+    let program: Program = parse_program(source);
     let skip_typecheck = fs.exists("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
         if typecheck_has_errors(program) {
@@ -535,7 +536,7 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
         fs.deleteFile(out_path);
     }
     let ok = write_llvm_ir_from_native_text_file(native_text_path, module_name, out_path);
-    let mut output_valid -> boolean = false;
+    let mut output_valid: boolean = false;
     // Check file content regardless of return value — the boolean return from
     // cross-module calls can be corrupted by ABI issues in the seed compiler.
     let _file_exists = fs.exists(out_path);
@@ -553,9 +554,9 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
             // If it starts with garbage (e.g. mid-instruction due to array offset corruption),
             // do NOT prepend a header — let the selfhost script's recovery handle it.
             let _first_nonblank = _find_first_nonblank_line(written);
-            let mut _if353 -> boolean = false;
+            let mut _if353: boolean = false;
             if _first_nonblank.length > 0 {
-                let mut _if355 -> boolean = false;
+                let mut _if355: boolean = false;
                 if _first_nonblank[0] == "%" { _if355 = true; }
                 if _first_nonblank[0] == "@" { _if355 = true; }
                 if _has_prefix(_first_nonblank, "declare ") { _if355 = true; }
@@ -595,14 +596,14 @@ fn compile_to_llvm_file_with_module(source -> string, module_name -> string, out
     return true;
 }
 
-fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> string[] {
+fn format_typecheck_diagnostics(entries: Diagnostic[], source: string) -> string[] {
     let lines = split_source_lines(source);
-    let mut padding_width -> number = number_to_string(lines.length).length;
+    let mut padding_width: number = number_to_string(lines.length).length;
     if padding_width < 1 {
         padding_width = 1;
     }
-    let mut messages -> string[] = [];
-    let mut index -> number = 0;
+    let mut messages: string[] = [];
+    let mut index: number = 0;
     loop {
         if index >= entries.length {
             break;
@@ -614,11 +615,11 @@ fn format_typecheck_diagnostics(entries -> Diagnostic[], source -> string) -> st
     return messages;
 }
 
-fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
+fn report_typecheck_errors(entries: Diagnostic[], source: string) ![io] {
     let formatted = format_typecheck_diagnostics(entries, source);
     let prefix = "[typecheck] ";
     let padding = repeat_character(" ", prefix.length);
-    let mut index -> number = 0;
+    let mut index: number = 0;
     loop {
         if index >= formatted.length {
             break;
@@ -630,7 +631,7 @@ fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
             index += 1;
             continue;
         }
-        let mut line_index -> number = 0;
+        let mut line_index: number = 0;
         loop {
             if line_index >= lines.length {
                 break;
@@ -646,18 +647,18 @@ fn report_typecheck_errors(entries -> Diagnostic[], source -> string) ![io] {
     }
 }
 
-fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], line_padding -> number) -> string {
+fn format_typecheck_diagnostic(entry: Diagnostic, source_lines: string[], line_padding: number) -> string {
     if entry.primary == null {
         return entry.message;
     }
-    let mut parts -> string[] = [];
+    let mut parts: string[] = [];
     parts.push(entry.message);
-    let token -> Token? = entry.primary;
+    let token: Token? = entry.primary;
     let line_number = token.line;
     let column_number = token.column;
     let location = "  --> line " + number_to_string(line_number) + ", column " + number_to_string(column_number);
     parts.push(location);
-    let mut _if354 -> boolean = false;
+    let mut _if354: boolean = false;
     if line_number < 1 { _if354 = true; }
     if line_number > source_lines.length { _if354 = true; }
     if _if354 {
@@ -667,8 +668,8 @@ fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], li
     let gutter_spaces = repeat_character(" ", line_padding);
     parts.push(" " + gutter_spaces + " |");
     let line_number_text = number_to_string(line_number);
-    let mut prefix_padding -> string = "";
-    let mut pad_count -> number = line_padding - line_number_text.length;
+    let mut prefix_padding: string = "";
+    let mut pad_count: number = line_padding - line_number_text.length;
     if pad_count < 0 {
         pad_count = 0;
     }
@@ -681,10 +682,10 @@ fn format_typecheck_diagnostic(entry -> Diagnostic, source_lines -> string[], li
     return join_lines(parts);
 }
 
-fn split_source_lines(source -> string) -> string[] {
-    let mut lines -> string[] = [];
-    let mut current -> string = "";
-    let mut index -> number = 0;
+fn split_source_lines(source: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut current: string = "";
+    let mut index: number = 0;
     loop {
         if index >= source.length {
             break;
@@ -718,19 +719,19 @@ fn split_source_lines(source -> string) -> string[] {
     return lines;
 }
 
-fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -> string {
+fn build_pointer_line(column: number, lexeme: string, line_text: string) -> string {
     if line_text.length == 0 {
         return "^";
     }
-    let mut start_column -> number = column;
+    let mut start_column: number = column;
     if start_column < 1 {
         start_column = 1;
     }
     if start_column > line_text.length {
         start_column = line_text.length;
     }
-    let mut pointer -> string = "";
-    let mut index -> number = 1;
+    let mut pointer: string = "";
+    let mut index: number = 1;
     loop {
         if index >= start_column {
             break;
@@ -747,18 +748,18 @@ fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -
         }
         index += 1;
     }
-    let mut highlight_length -> number = lexeme.length;
+    let mut highlight_length: number = lexeme.length;
     if highlight_length <= 0 {
         highlight_length = 1;
     }
-    let mut remaining -> number = line_text.length - (start_column - 1);
+    let mut remaining: number = line_text.length - (start_column - 1);
     if remaining <= 0 {
         remaining = 1;
     }
     if highlight_length > remaining {
         highlight_length = remaining;
     }
-    let mut highlight_index -> number = 0;
+    let mut highlight_index: number = 0;
     loop {
         if highlight_index >= highlight_length {
             break;
@@ -769,12 +770,12 @@ fn build_pointer_line(column -> number, lexeme -> string, line_text -> string) -
     return pointer;
 }
 
-fn join_lines(lines -> string[]) -> string {
+fn join_lines(lines: string[]) -> string {
     if lines.length == 0 {
         return "";
     }
-    let mut result -> string = lines[0];
-    let mut index -> number = 1;
+    let mut result: string = lines[0];
+    let mut index: number = 1;
     loop {
         if index >= lines.length {
             break;
@@ -785,25 +786,25 @@ fn join_lines(lines -> string[]) -> string {
     return result;
 }
 
-fn number_to_string(value -> number) -> string {
+fn number_to_string(value: number) -> string {
     if value == 0 {
         return "0";
     }
-    let mut working -> number = value;
-    let mut negative -> boolean = false;
+    let mut working: number = value;
+    let mut negative: boolean = false;
     if working < 0 {
         negative = true;
         working = 0 - working;
     }
     let digits = "0123456789";
-    let mut remaining -> number = working;
-    let mut output -> string = "";
+    let mut remaining: number = working;
+    let mut output: string = "";
     loop {
         if remaining <= 0 {
             break;
         }
-        let mut temp -> number = remaining;
-        let mut quotient -> number = 0;
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
         loop {
             if temp < 10 {
                 break;
@@ -821,12 +822,12 @@ fn number_to_string(value -> number) -> string {
     return output;
 }
 
-fn repeat_character(ch -> string, count -> number) -> string {
+fn repeat_character(ch: string, count: number) -> string {
     if count <= 0 {
         return "";
     }
-    let mut index -> number = 0;
-    let mut result -> string = "";
+    let mut index: number = 0;
+    let mut result: string = "";
     loop {
         if index >= count {
             break;
@@ -835,5 +836,16 @@ fn repeat_character(ch -> string, count -> number) -> string {
         index += 1;
     }
     return result;
+}
+
+// Read the project's capsule.toml and return dependencies as a
+// newline-separated "name=version" string. Returns "" if no capsule.toml
+// is found in the current directory.
+fn read_project_dependencies() -> string ![io] {
+    if !fs.exists("capsule.toml") {
+        return "";
+    }
+    let text = fs.readFile("capsule.toml");
+    return toml_get_dependencies(text);
 }
 

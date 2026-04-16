@@ -14,37 +14,30 @@ The primary compiler is the self-hosted native compiler (legacy name: stage2). T
 
 To get started with the Sailfin project, please refer to the [README.md](README.md) for a project overview and the [docs/README.md](docs/README.md) for the documentation navigation map.
 
-Before you begin, ensure you have the `sailfin` Conda environment set up:
-
-```bash
-make env
-```
+Prerequisites: `clang`, `bash`, and LLVM tools required by the native build scripts (notably `llvm-link`). `jq` is also useful for `make fetch-seed`. No Conda or Python is required.
 
 ## Development Workflow
 
 The primary workflow for development is as follows:
 
-1.  **Select a Task**: Choose a task from the [roadmap.md](docs/roadmap.md).
+1.  **Select a Task**: Choose a task from the [roadmap](https://sailfin.dev/roadmap).
 2.  **Implement the Task**: Make the necessary code changes to complete the task.
 3.  **Compile and Test**: Re-compile the language and run the test suite to ensure that your changes have not introduced any regressions.
     ```bash
     make check
     ```
-4.  **Update Documentation**: Update the [roadmap.md](docs/roadmap.md), [docs/status.md](docs/status.md), and any other relevant documentation to reflect the changes you have made.
-5.  **Add New Tasks**: If you discover any new tasks during the development process, add them to the [roadmap.md](docs/roadmap.md).
+4.  **Update Documentation**: Update the [roadmap](https://sailfin.dev/roadmap), [docs/status.md](docs/status.md), and any other relevant documentation to reflect the changes you have made.
+5.  **Add New Tasks**: If you discover any new tasks during the development process, add them to the [roadmap](https://sailfin.dev/roadmap).
 
 ### Development Commands
 
 The following commands are available for development:
 
-- `make env`: Create or update the Conda environment used for the compiler.
+- `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
 - `make install`: Install the built compiler into `PREFIX/bin` (default: `~/.local/bin`).
 - `make test`: Run the full suite.
-- `make compile`: Build the native compiler by self-hosting from a released seed (preferred).
 - `make check`: Compile (if needed) then run the full test suite.
 - `make rebuild`: Force rebuild the compiler from a released seed.
-- `make smoke`: Rebuild + run smoke tests.
-- `make rebuild-asan`: Rebuild with AddressSanitizer instrumentation (diagnostic).
 - `make clean`: Remove packaged artifacts (`dist/`).
 
 ## Documentation
@@ -53,7 +46,7 @@ The `docs` folder is a critical part of the Sailfin project. It contains the pro
 
 Key documents include:
 
-- [docs/roadmap.md](docs/roadmap.md): The project's roadmap, which tracks tasks and future development.
+- [sailfin.dev/roadmap](https://sailfin.dev/roadmap): The project's roadmap, which tracks tasks and future development (source: `site/src/pages/roadmap.astro`).
 - [docs/status.md](docs/status.md): The source of truth for what ships today (native compiler primary; legacy name stage2) versus what is still in progress.
 - [docs/spec.md](docs/spec.md): The bootstrap language reference with design-preview callouts.
 

@@ -8,14 +8,14 @@
 // ---------------------------------------------------------------------------
 
 struct Config {
-    width -> number;
-    height -> number;
-    depth -> number;
-    scale -> number;
-    offset_x -> number;
-    offset_y -> number;
-    rotation -> number;
-    opacity -> number;
+    width: number;
+    height: number;
+    depth: number;
+    scale: number;
+    offset_x: number;
+    offset_y: number;
+    rotation: number;
+    opacity: number;
 
     fn total_pixels(self) -> number {
         return self.width * self.height * self.depth;
@@ -81,32 +81,32 @@ test "struct_large: method returning 8-field struct" {
 // ---------------------------------------------------------------------------
 
 struct Vec3 {
-    x -> number;
-    y -> number;
-    z -> number;
+    x: number;
+    y: number;
+    z: number;
 
     fn length_squared(self) -> number {
         return self.x * self.x + self.y * self.y + self.z * self.z;
     }
 
-    fn add(self, other -> Vec3) -> Vec3 {
+    fn add(self, other: Vec3) -> Vec3 {
         return Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z };
     }
 
-    fn scale(self, s -> number) -> Vec3 {
+    fn scale(self, s: number) -> Vec3 {
         return Vec3 { x: self.x * s, y: self.y * s, z: self.z * s };
     }
 }
 
-fn _make_vec(a -> number, b -> number, c -> number) -> Vec3 {
+fn _make_vec(a: number, b: number, c: number) -> Vec3 {
     return Vec3 { x: a, y: b, z: c };
 }
 
-fn _dot_product(a -> Vec3, b -> Vec3) -> number {
+fn _dot_product(a: Vec3, b: Vec3) -> number {
     return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-fn _cross_product(a -> Vec3, b -> Vec3) -> Vec3 {
+fn _cross_product(a: Vec3, b: Vec3) -> Vec3 {
     return Vec3 {
         x: a.y * b.z - a.z * b.y,
         y: a.z * b.x - a.x * b.z,
@@ -142,8 +142,8 @@ test "struct_large: method chaining with struct returns" {
 // ---------------------------------------------------------------------------
 
 struct AABB {
-    min -> Vec3;
-    max -> Vec3;
+    min: Vec3;
+    max: Vec3;
 
     fn width(self) -> number {
         return self.max.x - self.min.x;
@@ -170,7 +170,7 @@ struct AABB {
     }
 }
 
-fn _make_aabb(x1 -> number, y1 -> number, z1 -> number, x2 -> number, y2 -> number, z2 -> number) -> AABB {
+fn _make_aabb(x1: number, y1: number, z1: number, x2: number, y2: number, z2: number) -> AABB {
     return AABB {
         min: Vec3 { x: x1, y: y1, z: z1 },
         max: Vec3 { x: x2, y: y2, z: z2 },
@@ -201,9 +201,9 @@ test "struct_large: nested struct returns struct" {
 // Array of structs with aggregation
 // ---------------------------------------------------------------------------
 
-fn _sum_vectors(vecs -> Vec3[]) -> Vec3 {
+fn _sum_vectors(vecs: Vec3[]) -> Vec3 {
     let mut total = Vec3 { x: 0, y: 0, z: 0 };
-    let mut i -> number = 0;
+    let mut i: number = 0;
     loop {
         if i >= vecs.length { break; }
         total = total.add(vecs[i]);
@@ -213,7 +213,7 @@ fn _sum_vectors(vecs -> Vec3[]) -> Vec3 {
 }
 
 test "struct_large: array of structs aggregation" {
-    let mut vecs -> Vec3[] = [];
+    let mut vecs: Vec3[] = [];
     vecs.push(Vec3 { x: 1, y: 2, z: 3 });
     vecs.push(Vec3 { x: 4, y: 5, z: 6 });
     vecs.push(Vec3 { x: 7, y: 8, z: 9 });
@@ -227,7 +227,7 @@ test "struct_large: array of structs aggregation" {
 // Struct as both parameter and return value (round-trip)
 // ---------------------------------------------------------------------------
 
-fn _transform_config(cfg -> Config, new_scale -> number) -> Config {
+fn _transform_config(cfg: Config, new_scale: number) -> Config {
     return Config {
         width: cfg.width,
         height: cfg.height,

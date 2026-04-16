@@ -1,17 +1,17 @@
 struct Person {
-    name -> string;
+    name: string;
 
     fn greet(self) -> string {
         return "Hello, {{self.name}}!";
     }
 }
 
-async fn make_person(name -> string) -> Person {
+async fn make_person(name: string) -> Person {
     return Person { name: name };
 }
 
 test "async: struct return" {
     let fut = make_person("Sailfin");
-    let person -> Person = await fut;
+    let person: Person = await fut;
     assert person.greet() == "Hello, Sailfin!";
 }

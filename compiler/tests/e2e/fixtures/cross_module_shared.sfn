@@ -1,0 +1,9 @@
+fn shared_add(a: number, b: number) -> number {
+    return a + b;
+}
+
+fn shared_greet(name: string) -> string {
+    return "hello, " + name;
+}
+
+export { shared_add, shared_greet };

@@ -8,15 +8,15 @@
 // Functions with many parameters
 // ---------------------------------------------------------------------------
 
-fn _add5(a -> number, b -> number, c -> number, d -> number, e -> number) -> number {
+fn _add5(a: number, b: number, c: number, d: number, e: number) -> number {
     return a + b + c + d + e;
 }
 
-fn _add6(a -> number, b -> number, c -> number, d -> number, e -> number, f -> number) -> number {
+fn _add6(a: number, b: number, c: number, d: number, e: number, f: number) -> number {
     return a + b + c + d + e + f;
 }
 
-fn _weighted6(a -> number, b -> number, c -> number, d -> number, e -> number, f -> number) -> number {
+fn _weighted6(a: number, b: number, c: number, d: number, e: number, f: number) -> number {
     return a * 1 + b * 2 + c * 3 + d * 4 + e * 5 + f * 6;
 }
 
@@ -36,17 +36,17 @@ test "fn_sig: six parameter weighted sum" {
 // Mixed parameter types (number, string, boolean)
 // ---------------------------------------------------------------------------
 
-fn _format_entry(name -> string, value -> number, active -> boolean) -> string {
-    let mut result -> string = name + "=";
+fn _format_entry(name: string, value: number, active: boolean) -> string {
+    let mut result: string = name + "=";
     if active {
-        let mut remaining -> number = value;
+        let mut remaining: number = value;
         if remaining == 0 { return result + "0*"; }
         let digits = "0123456789";
-        let mut num_str -> string = "";
+        let mut num_str: string = "";
         loop {
             if remaining <= 0 { break; }
-            let mut temp -> number = remaining;
-            let mut quotient -> number = 0;
+            let mut temp: number = remaining;
+            let mut quotient: number = 0;
             loop {
                 if temp < 10 { break; }
                 temp -= 10;
@@ -78,13 +78,13 @@ test "fn_sig: mixed types zero active" {
 // Functions returning boolean
 // ---------------------------------------------------------------------------
 
-fn _in_range(val -> number, min -> number, max -> number) -> boolean {
+fn _in_range(val: number, min: number, max: number) -> boolean {
     if val < min { return false; }
     if val > max { return false; }
     return true;
 }
 
-fn _all_positive(a -> number, b -> number, c -> number) -> boolean {
+fn _all_positive(a: number, b: number, c: number) -> boolean {
     if a <= 0 { return false; }
     if b <= 0 { return false; }
     if c <= 0 { return false; }
@@ -110,30 +110,30 @@ test "fn_sig: boolean return all positive" {
 // Functions calling functions with different signatures
 // ---------------------------------------------------------------------------
 
-fn _compute_score(base -> number, multiplier -> number) -> number {
+fn _compute_score(base: number, multiplier: number) -> number {
     return base * multiplier;
 }
 
-fn _apply_bonus(score -> number, has_bonus -> boolean) -> number {
+fn _apply_bonus(score: number, has_bonus: boolean) -> number {
     if has_bonus {
         return score + 100;
     }
     return score;
 }
 
-fn _format_score(label -> string, score -> number) -> string {
+fn _format_score(label: string, score: number) -> string {
     return label + ": " + _num_str(score);
 }
 
-fn _num_str(n -> number) -> string {
+fn _num_str(n: number) -> string {
     if n == 0 { return "0"; }
-    let mut result -> string = "";
-    let mut rem -> number = n;
+    let mut result: string = "";
+    let mut rem: number = n;
     let digits = "0123456789";
     loop {
         if rem <= 0 { break; }
-        let mut temp -> number = rem;
-        let mut q -> number = 0;
+        let mut temp: number = rem;
+        let mut q: number = 0;
         loop {
             if temp < 10 { break; }
             temp -= 10;
@@ -145,7 +145,7 @@ fn _num_str(n -> number) -> string {
     return result;
 }
 
-fn _full_pipeline(name -> string, base -> number, mult -> number, bonus -> boolean) -> string {
+fn _full_pipeline(name: string, base: number, mult: number, bonus: boolean) -> string {
     let score = _compute_score(base, mult);
     let final_score = _apply_bonus(score, bonus);
     return _format_score(name, final_score);
@@ -163,9 +163,9 @@ test "fn_sig: multi-function pipeline without bonus" {
 // Function with array parameter and number return
 // ---------------------------------------------------------------------------
 
-fn _array_stats_sum(arr -> number[]) -> number {
-    let mut total -> number = 0;
-    let mut i -> number = 0;
+fn _array_stats_sum(arr: number[]) -> number {
+    let mut total: number = 0;
+    let mut i: number = 0;
     loop {
         if i >= arr.length { break; }
         total += arr[i];
@@ -174,10 +174,10 @@ fn _array_stats_sum(arr -> number[]) -> number {
     return total;
 }
 
-fn _array_stats_max(arr -> number[]) -> number {
+fn _array_stats_max(arr: number[]) -> number {
     if arr.length == 0 { return 0; }
-    let mut best -> number = arr[0];
-    let mut i -> number = 1;
+    let mut best: number = arr[0];
+    let mut i: number = 1;
     loop {
         if i >= arr.length { break; }
         if arr[i] > best {
@@ -188,10 +188,10 @@ fn _array_stats_max(arr -> number[]) -> number {
     return best;
 }
 
-fn _array_stats_min(arr -> number[]) -> number {
+fn _array_stats_min(arr: number[]) -> number {
     if arr.length == 0 { return 0; }
-    let mut best -> number = arr[0];
-    let mut i -> number = 1;
+    let mut best: number = arr[0];
+    let mut i: number = 1;
     loop {
         if i >= arr.length { break; }
         if arr[i] < best {
@@ -232,10 +232,10 @@ test "fn_sig: array stats combined" {
 // Function with string array parameter
 // ---------------------------------------------------------------------------
 
-fn _longest_string(arr -> string[]) -> string {
+fn _longest_string(arr: string[]) -> string {
     if arr.length == 0 { return ""; }
-    let mut best -> string = arr[0];
-    let mut i -> number = 1;
+    let mut best: string = arr[0];
+    let mut i: number = 1;
     loop {
         if i >= arr.length { break; }
         if arr[i].length > best.length {
@@ -247,7 +247,7 @@ fn _longest_string(arr -> string[]) -> string {
 }
 
 test "fn_sig: longest string in array" {
-    let mut words -> string[] = [];
+    let mut words: string[] = [];
     words.push("hi");
     words.push("hello");
     words.push("hey");
@@ -255,7 +255,7 @@ test "fn_sig: longest string in array" {
 }
 
 test "fn_sig: longest string single element" {
-    let mut words -> string[] = [];
+    let mut words: string[] = [];
     words.push("only");
     assert _longest_string(words) == "only";
 }

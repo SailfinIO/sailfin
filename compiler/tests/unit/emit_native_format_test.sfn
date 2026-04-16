@@ -4,10 +4,10 @@
 
 // ── Minimal helpers ──────────────────────────────────────────────────
 
-fn _join(values -> string[], sep -> string) -> string {
+fn _join(values: string[], sep: string) -> string {
     if values.length == 0 { return ""; }
-    let mut result -> string = values[0];
-    let mut i -> number = 1;
+    let mut result: string = values[0];
+    let mut i: number = 1;
     loop {
         if i >= values.length { break; }
         result = result + sep + values[i];
@@ -16,9 +16,9 @@ fn _join(values -> string[], sep -> string) -> string {
     return result;
 }
 
-fn _quote(value -> string) -> string {
-    let mut result -> string = "\"";
-    let mut i -> number = 0;
+fn _quote(value: string) -> string {
+    let mut result: string = "\"";
+    let mut i: number = 0;
     loop {
         if i >= value.length { break; }
         let ch = value[i];
@@ -144,14 +144,14 @@ test "format: type parameter with bound" {
 test "format: immutable field" {
     let name = "x";
     let type_text = "number";
-    assert name + " -> " + type_text == "x -> number";
+    assert name + ": " + type_text == "x: number";
 }
 
 test "format: mutable field" {
     let prefix = "mut ";
     let name = "x";
     let type_text = "number";
-    assert prefix + name + " -> " + type_text == "mut x -> number";
+    assert prefix + name + ": " + type_text == "mut x: number";
 }
 
 // ── Enum variant formatting tests ────────────────────────────────────
@@ -163,8 +163,8 @@ test "format: enum variant no fields" {
 
 test "format: enum variant with fields" {
     let name = "Some";
-    let fields = _join(["value -> number"], "; ");
-    assert name + " { " + fields + " }" == "Some { value -> number }";
+    let fields = _join(["value: number"], "; ");
+    assert name + " { " + fields + " }" == "Some { value: number }";
 }
 
 // ── Decorator formatting tests ───────────────────────────────────────

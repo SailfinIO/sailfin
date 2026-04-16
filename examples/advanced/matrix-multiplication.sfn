@@ -1,6 +1,6 @@
 // examples/advanced/matrix-multiplication.sfn
 
-fn multiply(a -> number[][], b -> number[][]) -> number[][] {
+fn multiply(a: number[][], b: number[][]) -> number[][] {
     let rowsA = a.length;
     let colsA = a[0].length;
     let colsB = b[0].length;

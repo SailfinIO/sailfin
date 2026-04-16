@@ -1,0 +1,431 @@
+# Sailfin Language Reference for LLMs
+
+> Version: 0.5.2-alpha.1 | Updated: 2026-04-16
+> Source: https://github.com/SailfinIO/sailfin | Site: https://sailfin.dev
+
+Sailfin is a compiled systems language with compile-time capability enforcement
+via effect types. The compiler is self-hosted (written in Sailfin), targets LLVM,
+and produces native single-binary executables. Licensed under GPLv2 with a
+runtime library exception.
+
+## Core Differentiator: Effect Types
+
+Every function declares what capabilities it uses. Effect annotations are
+supported today; the effect checker logic exists but is not yet invoked during
+normal compilation. Wiring it into the compilation gate (so violations block
+the build) is the top priority on the roadmap.
+
+    fn read_config(path: string) -> string ![io] {
+        return fs.readFile(path);
+    }
+
+    fn fetch_and_save(url: string, path: string) ![io, net] {
+        let data = http.get(url).body;
+        fs.writeFile(path, data);
+    }
+
+Canonical effects: io, net, model, clock, gpu, rand
+
+- io    -- file system, printing, process execution
+- net   -- HTTP, WebSocket, TCP, serve
+- model -- AI model invocation (prompt blocks)
+- clock -- sleep, timers, monotonic time
+- gpu   -- tensor dispatch, GPU compute (planned)
+- rand  -- random number generation (planned)
+
+A function with no effect list performs no side effects.
+
+## Syntax Quick Reference
+
+### Variables
+
+    let name: string = "Sailfin";
+    let mut count: number = 0;
+    count += 1;
+
+Type annotations use `:`. Type inference is supported (annotation optional).
+
+### Functions
+
+    fn add(x: number, y: number) -> number {
+        return x + y;
+    }
+
+    fn greet(name: string = "world") -> string ![io] {
+        print("Hello, {{name}}!");
+        return "Hello, {{name}}!";
+    }
+
+Parameters use `:` for type annotations. Return types use `->`.
+Default parameter values are supported. Effect lists come after the return type.
+
+### Structs
+
+    struct User {
+        id: number;
+        name: string;
+
+        fn greet(self) -> string {
+            return "Hello, {{self.name}}!";
+        }
+    }
+
+    let user: User = User { id: 1, name: "Alice" };
+    print(user.greet());
+
+Structs support methods (with `self`), generic type parameters, and
+`implements` clauses for interface conformance.
+
+### Interfaces
+
+    interface Greeter {
+        fn greet(self) -> string;
+    }
+
+    struct Bot implements Greeter {
+        name: string;
+
+        fn greet(self) -> string {
+            return "Beep boop, I'm {{self.name}}";
+        }
+    }
+
+### Enums (Algebraic Data Types)
+
+    enum Shape {
+        Circle { radius: number },
+        Rectangle { width: number, height: number },
+    }
+
+    fn area(shape: Shape) -> number {
+        match shape {
+            Shape.Circle { radius } => return 3.14 * radius * radius,
+            Shape.Rectangle { width, height } => return width * height,
+        }
+    }
+
+### Pattern Matching
+
+    match value {
+        0 => print("zero"),
+        1 => print("one"),
+        n if n > 100 => print("large"),
+        _ => print("other"),
+    }
+
+Supports literals, wildcards (`_`), guards (`if expr`), and enum destructuring.
+
+### Control Flow
+
+    if condition {
+        // ...
+    } else if other {
+        // ...
+    } else {
+        // ...
+    }
+
+    for item in collection {
+        // ...
+    }
+
+    loop {
+        if done { break; }
+    }
+
+### Error Handling
+
+    try {
+        let data = riskyOperation();
+    } catch (e) {
+        print("Error: {{e}}");
+    }
+
+Union return types for typed errors:
+
+    struct DivisionError { message: string; }
+
+    fn safe_divide(a: number, b: number) -> number | DivisionError {
+        if b == 0 {
+            return DivisionError { message: "division by zero" };
+        }
+        return a / b;
+    }
+
+Note: Result<T, E> and the ? operator are planned but not yet implemented.
+
+### Generics
+
+    struct List<T> {
+        items: T[];
+
+        fn add(self, item: T) -> void {
+            self.items.append(item);
+        }
+
+        fn get(self, index: number) -> T | null {
+            if index < 0 || index >= self.items.length {
+                return null;
+            }
+            return self.items[index];
+        }
+    }
+
+Generic type parameters are parsed. Constraint syntax (`<T: Bound>`) is parsed
+but not enforced. Monomorphization is not yet implemented.
+
+### Imports and Modules
+
+    import { fs } from "fs";
+    import { http } from "http";
+    import { parse_program } from "./parser/mod";
+
+Standard library capsules use bare names ("fs", "http", "json", etc.).
+Relative paths use "./" or "../" syntax.
+
+### Lambdas
+
+    let double = fn(x: number) -> number { return x * 2; };
+
+Lambdas are supported but do not capture enclosing variables (closures with
+capture are planned).
+
+### Tests
+
+    test "addition works" {
+        assert add(2, 3) == 5;
+        assert add(-1, 1) == 0;
+    }
+
+Tests are first-class declarations and can declare effects:
+
+    test "file operations" ![io] {
+        fs.writeFile("test.txt", "hello");
+        assert fs.readFile("test.txt") == "hello";
+    }
+
+### Decorators
+
+    @logExecution
+    fn process(data: string) -> string ![io] {
+        return transform(data);
+    }
+
+### String Interpolation
+
+    let name = "world";
+    print("Hello, {{name}}!");
+
+Uses `{{ }}` syntax (migration to `${ }` is planned pre-1.0).
+
+### Extern Functions (FFI)
+
+    unsafe extern fn malloc(size: number) -> number;
+    unsafe extern fn free(ptr: number) -> void;
+
+Declares external C symbols for linking.
+
+## Standard Library Capsules
+
+| Capsule   | Import       | Effects       | Description                              |
+|-----------|-------------|---------------|------------------------------------------|
+| sfn/fmt   | "fmt"       | None          | String formatting, trim, case, split     |
+| sfn/json  | "json"      | None          | JSON parse, serialize, pretty-print      |
+| sfn/crypto| "crypto"    | None          | SHA-256, base64                          |
+| sfn/math  | "math"      | None          | abs, min, max, clamp, pow, floor, ceil   |
+| sfn/path  | "path"      | None          | join, dirname, basename, ext, normalize  |
+| sfn/toml  | "toml"      | None          | TOML parsing and serialization           |
+| sfn/fs    | "fs"        | io            | File read/write/append, exists, mkdir    |
+| sfn/os    | "os"        | io            | Env vars, home dir, exec, exit           |
+| sfn/log   | "log"       | io, clock     | Structured leveled logging               |
+| sfn/time  | "time"      | clock         | Sleep, monotonic timing, elapsed         |
+| sfn/http  | "http"      | net, io       | HTTP GET/POST client (partial)           |
+| sfn/cli   | "cli"       | io            | CLI arg parsing, subcommands, styling    |
+| sfn/tensor| "tensor"    | gpu (planned) | Tensor ops, matmul, transpose (CPU)      |
+| sfn/losses| "losses"    | None          | MSE, MAE, Huber, hinge loss functions    |
+
+## Numeric Types
+
+The primary numeric type is `number` (64-bit float, f64). The compiler also
+recognizes `int` and `i64` annotations, which lower to 64-bit integers in LLVM
+IR. However, integer support is incomplete: there are no integer-specific
+operators, no integer literal syntax distinct from float, and stdlib APIs
+generally expect `number`. Broader integer/float ergonomics (bitwise operators,
+`int` as a first-class citizen with full operator and stdlib support) are
+pre-1.0 work.
+
+Bitwise operators (&, |, ^, >>, <<) are not yet implemented.
+
+## What Works End-to-End Today
+
+These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
+
+- Functions (including async fn, extern fn, generics, defaults, decorators)
+- Structs with methods, fields, generic params, implements clauses
+- Enums with variant payloads and pattern matching
+- Interfaces with method signatures
+- Control flow (if/else, for, loop, match, break, continue)
+- try/catch/finally exception handling
+- String interpolation (via runtime)
+- Lambdas (non-capturing)
+- Test declarations
+- Import/export across modules
+- Effect annotations (parsed and carried through to IR)
+- Colon type annotations (x: Type) for params, variables, fields
+- Arrow return types (-> Type) for functions
+
+## What Is Parsed but Not Fully Implemented
+
+- Effect enforcement -- checker logic exists but is not invoked during compilation (top priority)
+- Closures with capture -- lambdas parse but don't capture enclosing scope
+- Generic constraints (<T: Bound>) -- parsed as text, not enforced
+- Affine<T> / Linear<T> ownership -- parsed, transparent (no enforcement)
+- PII<T> / Secret<T> taint types -- parsed, no runtime enforcement
+- model / prompt / tool / pipeline -- parse and emit metadata only, no execution
+- Union types -- parse but match destructuring is unstable
+- async/await -- async fn compiles, await lowering is partial
+
+## What Is Not Yet in the Parser
+
+- int / float distinct numeric types
+- Result<T, E> and ? error propagation
+- Bitwise operators (&, |, ^, >>, <<)
+- ${ } string interpolation (currently uses {{ }})
+- routine { } structured concurrency blocks
+- channel() and spawn concurrency primitives
+- |> pipeline operator
+
+## Compiler Architecture
+
+The compiler is self-hosted (written in Sailfin, compiles itself):
+
+    Lexer (lexer.sfn)
+      -> Parser (parser/*.sfn)
+        -> AST (ast.sfn)
+          -> Type Checker (typecheck.sfn)
+            -> Native Emitter (emit_native.sfn)
+              -> .sfn-asm intermediate representation
+                -> LLVM Lowering (llvm/lowering/*.sfn)
+                  -> LLVM IR -> native binary
+
+Build commands:
+    make compile    -- build compiler from released seed (self-hosting)
+    make test       -- run unit + integration + e2e test suites
+    make check      -- full validation including seedcheck
+    make install    -- install to ~/.local/bin
+
+## Package Manifest (capsule.toml)
+
+    [capsule]
+    name = "my-app"
+    version = "1.0.0"
+
+    [dependencies]
+    "json" = "^1.0.0"
+    "http" = "^1.0.0"
+
+    [capabilities]
+    required = ["io", "net"]
+
+Packages are called "capsules" and published to registry.sailfin.dev.
+
+## Idiomatic Patterns
+
+### Pure function (no effects)
+    fn fibonacci(n: number) -> number {
+        if n <= 1 { return n; }
+        return fibonacci(n - 1) + fibonacci(n - 2);
+    }
+
+### Effectful service function
+    fn fetch_user(id: number) -> string ![io, net] {
+        let response = http.get("https://api.example.com/users/{{id}}");
+        if response.status != 200 {
+            print.err("Failed to fetch user {{id}}");
+            return "";
+        }
+        return response.body;
+    }
+
+### Struct with interface
+    interface Serializable {
+        fn to_json(self) -> string;
+    }
+
+    struct Config implements Serializable {
+        host: string;
+        port: number;
+
+        fn to_json(self) -> string {
+            return "{\"host\": \"{{self.host}}\", \"port\": {{self.port}}}";
+        }
+    }
+
+### Match with enum destructuring
+    enum Result {
+        Ok { value: string },
+        Err { message: string },
+    }
+
+    fn handle(result: Result) ![io] {
+        match result {
+            Result.Ok { value } => print("Success: {{value}}"),
+            Result.Err { message } => print.err("Error: {{message}}"),
+        }
+    }
+
+### File I/O with effects
+    import { fs } from "fs";
+
+    fn read_config(path: string) -> string ![io] {
+        if !fs.exists(path) {
+            return "{}";
+        }
+        return fs.readFile(path);
+    }
+
+### Test with effect declaration
+    test "config reader returns default for missing file" ![io] {
+        let config = read_config("nonexistent.toml");
+        assert config == "{}";
+    }
+
+## Design Principles
+
+1. Effect types are the core differentiator -- every function declares its
+   capabilities; the compiler verifies them.
+2. Boring syntax wins -- TypeScript/Rust/Python conventions unless there's a
+   compelling semantic reason to diverge.
+3. Libraries over keywords -- only add keywords for constructs that can't be
+   expressed as library functions.
+4. Don't ship unfinished safety claims -- features are either enforced end-to-end
+   or explicitly deferred. No "parsed but unenforced" marketing.
+5. Fix the foundation first -- int types, Result<T,E>, generic constraints, and
+   effect enforcement are prerequisites for everything else.
+
+## Key Differences from Similar Languages
+
+vs. TypeScript: Sailfin compiles to native code via LLVM. Effect types are
+    checked at compile time, not documented by convention.
+
+vs. Rust: Sailfin trades borrow checking for effect tracking. No lifetime
+    annotations. Capability safety instead of memory safety (ownership is
+    parsed but deferred to post-1.0).
+
+vs. Go: Sailfin adds compile-time capability enforcement and algebraic data
+    types with pattern matching. Same single-binary ergonomics.
+
+vs. Zig: Sailfin is more opinionated. Effect types control capabilities
+    instead of memory layout. Both target LLVM.
+
+## File Extension
+
+Sailfin source files use the `.sfn` extension.
+
+## Further Reading
+
+- Language spec: docs/spec.md
+- Feature status: docs/status.md
+- Roadmap: https://sailfin.dev/roadmap
+- Examples: examples/ directory (40+ programs across 11 categories)
+- Contributing: CONTRIBUTING.md
