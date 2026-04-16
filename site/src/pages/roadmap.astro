@@ -70,6 +70,7 @@ const v1Categories: RoadmapCategory[] = [
     title: "Effect System Hardening",
     description: "Make the effect system world-class — Sailfin's core differentiator. Can progress in parallel with runtime work.",
     items: [
+      { label: "Wire effect checker into compilation gate — violations block compilation, not just diagnostics", status: "planned" },
       { label: "Hierarchical effect enforcement (io.fs, net.http, etc.)", status: "planned" },
       { label: "Effect polymorphism for generics (fn map<T, E>(f: Fn ![E]) ![E])", status: "planned" },
       { label: "Transitive call-graph enforcement (if A calls B ![net], A needs ![net])", status: "planned" },
@@ -100,6 +101,16 @@ const v1Categories: RoadmapCategory[] = [
       { label: "Replace the sfn shell wrapper with a Sailfin-native CLI binary", status: "planned" },
       { label: "Remove Python tooling and scripts from the release pipeline", status: "planned" },
       { label: "Remove Python runtime shims", status: "done" },
+    ],
+  },
+  {
+    title: "LLM & Agent Adoption",
+    description: "Make Sailfin the language agents reach for when they need verifiable code. Structured tooling and training-data presence.",
+    items: [
+      { label: "llms.txt — canonical single-file language reference for LLM context windows", status: "in-progress" },
+      { label: "Structured diagnostics (sfn check --json) — machine-readable error output", status: "planned" },
+      { label: "MCP server wrapping the compiler for agentic compile-check-fix loops", status: "planned" },
+      { label: "50+ Rosetta Code / classic algorithm ports as training-data corpus", status: "planned" },
     ],
   },
   {
@@ -188,7 +199,7 @@ const statusLabel = (s: Status) =>
           Sailfin's path from alpha to a stable 1.0 release and beyond.
         </p>
         <p class="meta">
-          Last updated April 2026
+          Last updated April 16, 2026
         </p>
       </header>
 

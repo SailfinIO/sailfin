@@ -5,7 +5,7 @@ Every function declares what it can do — IO, network, clock, and more — and 
 
 ## Why Sailfin
 
-- **Effect types** — Capabilities like `io`, `net`, `clock`, and `model` are explicit in function signatures. You can look at a function and know exactly what it does — no hidden side effects. The compiler enforces these at compile time.
+- **Effect types** — Capabilities like `io`, `net`, `clock`, and `model` are explicit in function signatures. You can look at a function and know exactly what it does — no hidden side effects. The compiler checks these at compile time.
 - **Capability-based security** — Capsules declare what effects they need in their manifest. Undeclared capabilities are compile-time errors. Audit your entire dependency tree's capability surface before deploying.
 - **Pragmatic ergonomics** — Conventional syntax (TypeScript/Rust-like), fast compilation, single-binary output, and good error messages with fix-it hints. A language that's easy for humans and LLMs alike.
 - **Structured concurrency (planned)** — Routines, channels, and parallel blocks as first-class language constructs with deterministic scoping.
@@ -17,7 +17,7 @@ The self-hosted native compiler (`build/native/sailfin`) supports:
 
 - Functions, structs, enums, interfaces, type aliases, and generics (parsed; inference is limited)
 - `let`/`let mut` variables, pattern matching (`match`), `if`/`else`, `for`, `while`, `try`/`catch`
-- Effect annotations (`![io, net, model, clock]`) — the effect checker enforces capabilities at compile time
+- Effect annotations (`![io, net, model, clock]`) — the effect checker detects capability violations (compilation gating on the [roadmap](https://sailfin.dev/roadmap))
 - String interpolation (`{{ expression }}`), decorators, `async fn`
 - Standard library capsules: `fmt`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`, `time`, `cli`, `http` (partial)
 - Package registry at `registry.sailfin.dev` with dependency resolution (capability auditing planned)
@@ -76,6 +76,7 @@ Sailfin is under active development targeting a 1.0 release. The self-hosted com
 - `docs/spec.md` — language reference with design-preview callouts
 - [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — milestones and sequencing toward 1.0
 - `docs/enbf.md` — grammar sketch aligned to the current parser
+- `llms.txt` — single-file language reference designed for LLM context windows (also at [sailfin.dev/llms.txt](https://sailfin.dev/llms.txt))
 
 ## Installing the Compiler
 
