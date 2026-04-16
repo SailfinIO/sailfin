@@ -319,10 +319,9 @@ fn _measure_inline_block(fmt_tokens: FmtToken[], start: number) -> number {
         let role = ft.role;
         let lex = ft.token.lexeme;
 
-        // Any leading comments inside the block → not inlineable
-        if j > start {
-            if ft.leading_comments.length > 0 { return -1; }
-        }
+        // Any leading comments on or inside the block → not inlineable
+        if ft.leading_comments.length > 0 { return -1; }
+        if ft.blank_lines_before > 0 { return -1; }
         // Trailing comments → not inlineable
         if ft.trailing_comment.length > 0 { return -1; }
 
@@ -457,6 +456,21 @@ fn _needs_space_before(role: string, prev_role: string, lexeme: string, prev_lex
     return true;
 }
 
+fn _line_pos_from_end(out: string) -> number {
+    let len = out.length;
+    let mut pos = 0;
+    let limit = 200;
+    let mut si = len;
+    loop {
+        if si <= 0 { break; }
+        if pos >= limit { break; }
+        si -= 1;
+        if strings_equal(char_at(out, si), "\n") { break; }
+        pos += 1;
+    }
+    return pos;
+}
+
 fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
     let mut out = "";
     let mut indent = 0;
@@ -483,16 +497,8 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                     if measure >= 0 {
                         let line_len = measure / 1000;
                         let item_count = measure % 1000;
-                        // Current line position estimate
-                        let total_len = out.length;
-                        let mut cur_line_pos = 0;
-                        let mut si = total_len;
-                        loop {
-                            if si <= 0 { break; }
-                            si -= 1;
-                            if strings_equal(char_at(out, si), "\n") { break; }
-                            cur_line_pos += 1;
-                        }
+                        // Current line position (bounded scan, O(1))
+                        let cur_line_pos = _line_pos_from_end(out);
                         if !wraps_at_threshold(item_count, cur_line_pos + line_len) {
                             inline_block_depth = 1;
                         }
@@ -859,7 +865,7 @@ fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
 }
 
 // Sort the specifiers inside a single import { A, C, B } alphabetically
-fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: number, end: number) -> FmtToken[] {
+fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: number, end: number) -> string[] {
     // Find the { and } within this import span
     let mut brace_open = -1;
     let mut brace_close = -1;
@@ -936,6 +942,14 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
 
     let sorted_spans = _sort_import_spans(spans);
 
+    // Preserve leading_comments and blank_lines_before from the original first
+    // import — these may be file-header or section comments that should stay at
+    // the top of the import block regardless of sort order.
+    let orig_first = fmt_tokens[spans[0].start];
+    let header_comments = orig_first.leading_comments;
+    let header_blanks = orig_first.blank_lines_before;
+    let orig_first_start = spans[0].start;
+
     // Rebuild the token array: tokens before imports, sorted imports, tokens after
     let first_start = spans[0].start;
     let last_end = spans[spans.length - 1].end;
@@ -957,14 +971,30 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
         if si >= sorted_spans.length { break; }
         let span = sorted_spans[si];
 
+        // Determine leading_comments for this import's first token:
+        // - If this is the first emitted import (si == 0), use the saved header
+        //   comments so they stay at the top.
+        // - If this import was originally first but got sorted elsewhere, strip
+        //   its leading_comments (they were transferred above).
+        // - Otherwise, preserve the import's own leading_comments.
+        let first_ft = fmt_tokens[span.start];
+        let mut use_comments = first_ft.leading_comments;
+        let mut use_blanks = first_ft.blank_lines_before;
+
+        if si == 0 {
+            use_comments = header_comments;
+            use_blanks = header_blanks;
+        } else if span.start == orig_first_start {
+            use_comments = [];
+        }
+
         // Insert blank line between import groups
         if prev_group >= 0 {
             if span.group != prev_group {
                 // Add blank_lines_before to the first token of this import
-                let first_ft = fmt_tokens[span.start];
                 result.push(FmtToken {
                         token: first_ft.token,
-                        leading_comments: first_ft.leading_comments,
+                        leading_comments: use_comments,
                         trailing_comment: first_ft.trailing_comment,
                         blank_lines_before: 1,
                         role: first_ft.role,
@@ -977,10 +1007,9 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
                 }
             } else {
                 // Same group: clear any blank lines between
-                let first_ft = fmt_tokens[span.start];
                 result.push(FmtToken {
                         token: first_ft.token,
-                        leading_comments: first_ft.leading_comments,
+                        leading_comments: use_comments,
                         trailing_comment: first_ft.trailing_comment,
                         blank_lines_before: 0,
                         role: first_ft.role,
@@ -993,8 +1022,15 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
                 }
             }
         } else {
-            // First import: preserve any existing blank_lines_before
-            let mut j = span.start;
+            // First emitted import: use header comments/blanks
+            result.push(FmtToken {
+                    token: first_ft.token,
+                    leading_comments: use_comments,
+                    trailing_comment: first_ft.trailing_comment,
+                    blank_lines_before: use_blanks,
+                    role: first_ft.role,
+            });
+            let mut j = span.start + 1;
             loop {
                 if j > span.end { break; }
                 result.push(fmt_tokens[j]);
