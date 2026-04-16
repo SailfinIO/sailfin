@@ -304,16 +304,27 @@ fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
 }
 
 fn _is_stdlib_capsule_cmd(name: string) -> boolean {
-    if name == "http" { return true; }
-    if name == "json" { return true; }
-    if name == "test" { return true; }
-    if name == "crypto" { return true; }
-    if name == "fs" { return true; }
-    if name == "net" { return true; }
-    if name == "io" { return true; }
-    if name == "math" { return true; }
-    if name == "time" { return true; }
+    if name == "cli" { return true; }
     if name == "collections" { return true; }
+    if name == "crypto" { return true; }
+    if name == "fmt" { return true; }
+    if name == "fs" { return true; }
+    if name == "http" { return true; }
+    if name == "io" { return true; }
+    if name == "json" { return true; }
+    if name == "layers" { return true; }
+    if name == "log" { return true; }
+    if name == "losses" { return true; }
+    if name == "math" { return true; }
+    if name == "net" { return true; }
+    if name == "nn" { return true; }
+    if name == "os" { return true; }
+    if name == "path" { return true; }
+    if name == "sync" { return true; }
+    if name == "tensor" { return true; }
+    if name == "test" { return true; }
+    if name == "time" { return true; }
+    if name == "toml" { return true; }
     return false;
 }
 
