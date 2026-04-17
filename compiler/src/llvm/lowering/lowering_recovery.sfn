@@ -478,14 +478,19 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         }
         // Inline match case: `pattern => body,` — emit Case + body instructions.
         // Must NOT fire on `.case` or `.match` lines that happen to contain ` => `.
+        // Must NOT fire on `eval` lines where ` => ` appears inside a string literal
+        // (e.g. `eval line = line + " => {"`).  Misidentifying eval lines as inline
+        // cases corrupts the instruction list and causes a 2-cycle oscillation in
+        // the self-hosting fixed-point check.
         let mut _inline_score: number = 0;
         if is_inline_case { _inline_score += 1; }
+        if !is_eval { _inline_score += 1; }
         if !is_match_kw { _inline_score += 1; }
         if !is_case_kw { _inline_score += 1; }
         if !is_endmatch_kw { _inline_score += 1; }
         if !is_fn_start { _inline_score += 1; }
         if !is_fn_end { _inline_score += 1; }
-        if _inline_score >= 6 {
+        if _inline_score >= 7 {
             let case_instr = make_instruction_text(13, inline_pattern_raw);
             current = append_instruction_to_function(current, case_instr);
             if inline_body_is_return {
