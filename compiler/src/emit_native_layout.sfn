@@ -21,7 +21,6 @@ import {
     builder_emit_line,
     builder_new,
     builder_to_string,
-    contains_string,
     is_array_type,
     is_optional_annotation,
     number_to_string,
@@ -29,6 +28,7 @@ import {
     strip_optional_suffix,
     trim_text
 } from "./emit_native_state";
+import { contains_string } from "./string_utils";
 
 // ── Layout-specific data structures ──────────────────────────────────
 struct LayoutEmitResult {
