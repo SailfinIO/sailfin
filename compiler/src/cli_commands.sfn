@@ -671,11 +671,9 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
 
 // ---- Exported command handlers ----
 
-// Remove stale LLVM lowering state files from build/sailfin/ so that
-// inter-phase scratchpad data from a previous compilation doesn't corrupt
-// the next one.  Preserves runner control flags (.test_runner_active,
-// .trace_test_runner, .dump_test_sources, .skip_test_inlining, .trace_argv,
-// .trace_emit).
+// Remove stale LLVM lowering scratchpad files from build/sailfin/ so that
+// inter-phase data from a previous compilation doesn't corrupt the next one.
+// Only deletes known scratch prefixes; leaves control/debug flags untouched.
 fn _clean_lowering_state(dir: string) -> number ![io] {
     let entries = fs.listDirectory(dir);
     let mut ci: number = 0;
@@ -685,13 +683,25 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
         ci += 1;
         if entry.length == 0 { continue; }
         if entry[0] != "." { continue; }
-        // Preserve control flags
-        if strings_equal(entry, ".test_runner_active") { continue; }
-        if strings_equal(entry, ".trace_test_runner") { continue; }
-        if strings_equal(entry, ".dump_test_sources") { continue; }
-        if strings_equal(entry, ".skip_test_inlining") { continue; }
-        if strings_equal(entry, ".trace_argv") { continue; }
-        if strings_equal(entry, ".trace_emit") { continue; }
+        // Only delete known lowering scratch prefixes.
+        let mut is_scratch: boolean = false;
+        if _has_prefix_cmd(entry, ".async_inner_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".block_result_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".call_result_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".ctx_func_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".dispatch_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".expr_stmt_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".fn_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".instr_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".let_ipc_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".let_result_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".module_globals_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".phase_") { is_scratch = true; }
+        if _has_prefix_cmd(entry, ".self_field_") { is_scratch = true; }
+        if strings_equal(entry, ".condition_locals") { is_scratch = true; }
+        if strings_equal(entry, ".enum_info") { is_scratch = true; }
+        if strings_equal(entry, ".struct_info") { is_scratch = true; }
+        if !is_scratch { continue; }
         let full = dir + "/" + entry;
         fs.deleteFile(full);
     }

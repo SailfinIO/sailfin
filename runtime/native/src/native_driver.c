@@ -4,6 +4,12 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#if defined(__linux__)
+#include <unistd.h> // readlink
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h> // _NSGetExecutablePath
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #ifndef PATH_MAX
@@ -412,7 +418,42 @@ int main(int argc, char **argv)
             char *binary_dir = NULL;
             {
                 char resolved_exe[PATH_MAX];
-                if (argv[0] && realpath(argv[0], resolved_exe))
+                int got_exe = 0;
+#if defined(__linux__)
+                // /proc/self/exe is the most reliable source on Linux —
+                // works even when argv[0] is a bare name from $PATH.
+                ssize_t len = readlink("/proc/self/exe", resolved_exe, PATH_MAX - 1);
+                if (len > 0)
+                {
+                    resolved_exe[len] = '\0';
+                    got_exe = 1;
+                }
+#elif defined(__APPLE__)
+                uint32_t bufsize = PATH_MAX;
+                if (_NSGetExecutablePath(resolved_exe, &bufsize) == 0)
+                {
+                    // _NSGetExecutablePath may return a relative path; canonicalize.
+                    char canonical[PATH_MAX];
+                    if (realpath(resolved_exe, canonical))
+                    {
+                        memcpy(resolved_exe, canonical, strlen(canonical) + 1);
+                    }
+                    got_exe = 1;
+                }
+#elif defined(_WIN32)
+                DWORD len = GetModuleFileNameA(NULL, resolved_exe, PATH_MAX);
+                if (len > 0 && len < PATH_MAX)
+                {
+                    got_exe = 1;
+                }
+#endif
+                // Fallback: try realpath(argv[0]) — works when argv[0] is
+                // an absolute or relative path, but NOT a bare $PATH name.
+                if (!got_exe && argv[0] && realpath(argv[0], resolved_exe))
+                {
+                    got_exe = 1;
+                }
+                if (got_exe)
                 {
                     binary_dir = _dirname_dup(resolved_exe);
                 }
