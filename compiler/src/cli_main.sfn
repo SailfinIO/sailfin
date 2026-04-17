@@ -25,30 +25,30 @@ import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
     return "usage:\n" + "  sfn --version\n" + "  sfn version\n"
-        + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n"
-        + "  sfn build [-o OUTPUT] <file.sfn>\n"
-        + "  sfn run <file.sfn>\n"
-        + "  sfn run <exe>\n"
-        + "  sfn test [path]\n"
-        + "  sfn fmt [--check] [--write] [path...]\n"
-        + "  sfn init\n"
-        + "  sfn publish [path]\n"
-        + "  sfn add [--dev] <capsule>\n"
-        + "  sfn login [token]\n"
-        + "\n"
-        + "examples:\n"
-        + "  sfn emit llvm examples/basics/hello-world.sfn\n"
-        + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n"
-        + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n"
-        + "  sfn run examples/basics/hello-world.sfn\n"
-        + "  sfn run build/native/examples/hello\n"
-        + "  sfn test .\n"
-        + "  sfn init\n"
-        + "  sfn publish [path]\n"
-        + "  sfn add http\n"
-        + "  sfn add --dev test\n"
-        + "  sfn add acme/router\n"
-        + "  sfn login\n";
+    + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n"
+    + "  sfn build [-o OUTPUT] <file.sfn>\n"
+    + "  sfn run <file.sfn>\n"
+    + "  sfn run <exe>\n"
+    + "  sfn test [path]\n"
+    + "  sfn fmt [--check] [--write] [path...]\n"
+    + "  sfn init\n"
+    + "  sfn publish [path]\n"
+    + "  sfn add [--dev] <capsule>\n"
+    + "  sfn login [token]\n"
+    + "\n"
+    + "examples:\n"
+    + "  sfn emit llvm examples/basics/hello-world.sfn\n"
+    + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n"
+    + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n"
+    + "  sfn run examples/basics/hello-world.sfn\n"
+    + "  sfn run build/native/examples/hello\n"
+    + "  sfn test .\n"
+    + "  sfn init\n"
+    + "  sfn publish [path]\n"
+    + "  sfn add http\n"
+    + "  sfn add --dev test\n"
+    + "  sfn add acme/router\n"
+    + "  sfn login\n";
 }
 
 fn _ends_with(value: string, suffix: string) -> boolean {
@@ -154,29 +154,37 @@ fn _runtime_prelude_path(root: string) -> string ![io] {
 fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_flag: string) -> string[] ![io] {
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
-    if runtime_root.length == 0 { return ["", "", ""]; }
-    if !_runtime_bundle_exists(runtime_root) { return ["", "", ""]; }
+    if runtime_root.length == 0 { return ["", "", "", ""]; }
+    if !_runtime_bundle_exists(runtime_root) { return ["", "", "", ""]; }
 
     let include_dir = _path_join(runtime_root, "native/include");
     let runtime_src = _path_join(runtime_root, "native/src/sailfin_runtime.c");
+    let arena_src = _path_join(runtime_root, "native/src/sailfin_arena.c");
     let runtime_ir = _path_join(runtime_root, "native/ir/runtime_globals.ll");
     let prelude_obj = _runtime_prelude_path(runtime_root);
 
     let runtime_obj = _path_join(out_dir, "sailfin_runtime" + opt_flag + ".o");
+    let arena_obj = _path_join(out_dir, "sailfin_arena" + opt_flag + ".o");
     let globals_obj = _path_join(out_dir, "runtime_globals" + opt_flag + ".o");
 
     if !fs.exists(runtime_obj) {
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
-            + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
-        if rc != 0 { return ["", "", ""]; }
+                + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
+        if rc != 0 { return ["", "", "", ""]; }
+    }
+
+    if !fs.exists(arena_obj) {
+        let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
+                + include_dir, "-c", arena_src, "-o", arena_obj,]);
+        if rc_arena != 0 { return ["", "", "", ""]; }
     }
 
     if !fs.exists(globals_obj) {
         let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", runtime_ir, "-o", globals_obj,]);
-        if rc2 != 0 { return ["", "", ""]; }
+        if rc2 != 0 { return ["", "", "", ""]; }
     }
 
-    return [runtime_obj, globals_obj, prelude_obj];
+    return [runtime_obj, arena_obj, globals_obj, prelude_obj];
 }
 
 fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, opt_flag: string, cache_dir: string) -> number ![io] {
@@ -196,11 +204,13 @@ fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string,
     _ensure_dir(cache_dir);
     let cached = _clang_compile_runtime_objects(runtime_root, cache_dir, opt_flag);
     let runtime_obj = cached[0];
-    let globals_obj = cached[1];
-    let prelude_obj = cached[2];
+    let arena_obj = cached[1];
+    let globals_obj = cached[2];
+    let prelude_obj = cached[3];
 
     let mut _if3: boolean = false;
     if runtime_obj.length == 0 { _if3 = true; }
+    if arena_obj.length == 0 { _if3 = true; }
     if globals_obj.length == 0 { _if3 = true; }
     if prelude_obj.length == 0 { _if3 = true; }
     if _if3 {
@@ -209,7 +219,7 @@ fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string,
         return 1;
     }
 
-    let args: string[] = ["clang", opt_flag, "-Wno-override-module", runtime_obj, globals_obj, prelude_obj, ll_path, "-o", out_path, "-lm",];
+    let args: string[] = ["clang", opt_flag, "-Wno-override-module", runtime_obj, arena_obj, globals_obj, prelude_obj, ll_path, "-o", out_path, "-lm",];
     return process.run(args);
 }
 
