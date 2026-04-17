@@ -2,19 +2,21 @@
 //
 // Expression parsing helpers: member access, index expressions, assignments,
 // inline let, ternary, cast, and raw address parsing.
-
-import { substring, char_at, index_of } from "../string_utils";
+import { char_at, index_of, substring } from "../string_utils";
 import {
-    MemberAccessParse, IndexExpressionParse,
-    AssignmentParseResult, InlineLetParseResult,
-    TernaryParseResult, RawAddressParseResult, CastParseResult,
+    AssignmentParseResult,
+    CastParseResult,
+    IndexExpressionParse,
+    InlineLetParseResult,
+    MemberAccessParse,
+    RawAddressParseResult,
+    TernaryParseResult
 } from "./types";
-import { trim_text, starts_with, ends_with } from "./utils";
+import { ends_with, starts_with, trim_text } from "./utils";
 
 // =============================================================================
 // Expression Parsing Helpers
 // =============================================================================
-
 fn parse_member_access(expression: string) -> MemberAccessParse {
     let trimmed = trim_text(expression);
     let mut paren_depth: number = 0;
@@ -26,9 +28,7 @@ fn parse_member_access(expression: string) -> MemberAccessParse {
     let mut last_dot: number = -1;
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
         if in_double {
             if escape_next {
@@ -41,9 +41,7 @@ fn parse_member_access(expression: string) -> MemberAccessParse {
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_double = false;
-            }
+            if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
@@ -58,9 +56,7 @@ fn parse_member_access(expression: string) -> MemberAccessParse {
                 index += 1;
                 continue;
             }
-            if ch == "'" {
-                in_single = false;
-            }
+            if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -80,9 +76,7 @@ fn parse_member_access(expression: string) -> MemberAccessParse {
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -92,9 +86,7 @@ fn parse_member_access(expression: string) -> MemberAccessParse {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -104,9 +96,7 @@ fn parse_member_access(expression: string) -> MemberAccessParse {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -154,9 +144,7 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
     let mut open_bracket: number = -1;
     let mut index: number = trimmed.length - 1;
     loop {
-        if index < 0 {
-            break;
-        }
+        if index < 0 { break; }
         let ch = char_at(trimmed, index);
         if in_double {
             if escape_next {
@@ -169,9 +157,7 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
                 index -= 1;
                 continue;
             }
-            if ch == "\"" {
-                in_double = false;
-            }
+            if ch == "\"" { in_double = false; }
             index -= 1;
             continue;
         }
@@ -186,9 +172,7 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
                 index -= 1;
                 continue;
             }
-            if ch == "'" {
-                in_single = false;
-            }
+            if ch == "'" { in_single = false; }
             index -= 1;
             continue;
         }
@@ -208,9 +192,7 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
             continue;
         }
         if ch == "(" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index -= 1;
             continue;
         }
@@ -220,9 +202,7 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
             continue;
         }
         if ch == "{" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index -= 1;
             continue;
         }
@@ -253,13 +233,16 @@ fn parse_index_expression(expression: string) -> IndexExpressionParse {
     }
     let base = trim_text(substring(trimmed, 0, open_bracket));
     let index_value = trim_text(substring(trimmed, open_bracket + 1, trimmed.length - 1));
-    return IndexExpressionParse { success: true, base: base, index: index_value };
+    return IndexExpressionParse {
+        success: true,
+        base: base,
+        index: index_value
+    };
 }
 
 // =============================================================================
 // Assignment and Inline Let Parsing
 // =============================================================================
-
 fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
     let mut paren_depth: number = 0;
@@ -271,9 +254,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let mut equals_index: number = -1;
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
         if in_double {
             if escape_next {
@@ -286,9 +267,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_double = false;
-            }
+            if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
@@ -303,9 +282,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
                 index += 1;
                 continue;
             }
-            if ch == "'" {
-                in_single = false;
-            }
+            if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -325,9 +302,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -337,9 +312,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -349,9 +322,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -389,11 +360,21 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
         index += 1;
     }
     if equals_index < 0 {
-        return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
+        return AssignmentParseResult {
+            success: false,
+            target: "",
+            value: "",
+            operator: ""
+        };
     }
     let target = trim_text(substring(trimmed, 0, equals_index));
     let value = trim_text(substring(trimmed, equals_index + 1, trimmed.length));
-    return AssignmentParseResult { success: true, target: target, value: value, operator: "" };
+    return AssignmentParseResult {
+        success: true,
+        target: target,
+        value: value,
+        operator: ""
+    };
 }
 
 fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
@@ -401,7 +382,14 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let mut diagnostics: string[] = [];
 
     if !starts_with(trimmed, "let ") {
-        return InlineLetParseResult { success: false, name: "", mutable: false, type_annotation: "", initializer: "", diagnostics: diagnostics };
+        return InlineLetParseResult {
+            success: false,
+            name: "",
+            mutable: false,
+            type_annotation: "",
+            initializer: "",
+            diagnostics: diagnostics
+        };
     }
 
     let remainder = trim_text(substring(trimmed, 4, trimmed.length));
@@ -416,7 +404,14 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let assignment = parse_assignment_expression(after_mut);
     if !assignment.success {
         diagnostics.push("llvm lowering: inline let expression missing initializer");
-        return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: "", diagnostics: diagnostics };
+        return InlineLetParseResult {
+            success: false,
+            name: "",
+            mutable: is_mutable,
+            type_annotation: "",
+            initializer: "",
+            diagnostics: diagnostics
+        };
     }
 
     let lhs = trim_text(assignment.target);
@@ -430,28 +425,45 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     if arrow_index >= 0 {
         name = trim_text(substring(lhs, 0, arrow_index));
         type_annotation = trim_text(substring(lhs, arrow_index + 2, lhs.length));
-    } else {
-        name = lhs;
-    }
+    } else { name = lhs; }
 
     if name.length == 0 {
         diagnostics.push("llvm lowering: inline let expression missing variable name");
-        return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: type_annotation, initializer: initializer, diagnostics: diagnostics };
+        return InlineLetParseResult {
+            success: false,
+            name: "",
+            mutable: is_mutable,
+            type_annotation: type_annotation,
+            initializer: initializer,
+            diagnostics: diagnostics
+        };
     }
 
-    return InlineLetParseResult { success: true, name: name, mutable: is_mutable, type_annotation: type_annotation, initializer: initializer, diagnostics: diagnostics };
+    return InlineLetParseResult {
+        success: true,
+        name: name,
+        mutable: is_mutable,
+        type_annotation: type_annotation,
+        initializer: initializer,
+        diagnostics: diagnostics
+    };
 }
 
 // =============================================================================
 // Ternary Expression Parsing
 // =============================================================================
-
 fn parse_ternary_expression(text: string) -> TernaryParseResult {
     let mut diagnostics: string[] = [];
     let trimmed = trim_text(text);
 
     if trimmed.length == 0 {
-        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+        return TernaryParseResult {
+            success: false,
+            condition: "",
+            true_value: "",
+            false_value: "",
+            diagnostics: diagnostics
+        };
     }
 
     // Find '?' and ':' at the same nesting level (depth 0)
@@ -464,9 +476,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
     let mut escape_next: boolean = false;
 
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
         if in_double {
             if escape_next {
@@ -479,9 +489,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_double = false;
-            }
+            if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
@@ -496,9 +504,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
                 index += 1;
                 continue;
             }
-            if ch == "'" {
-                in_single = false;
-            }
+            if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -526,28 +532,20 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
         if ch == "]" { _if183 = true; }
         if ch == "}" { _if183 = true; }
         if _if183 {
-            if depth > 0 {
-                depth -= 1;
-            }
+            if depth > 0 { depth -= 1; }
             index += 1;
             continue;
         }
         if depth == 0 {
             let mut _if184: boolean = false;
             if ch == "?" {
-                if question_index < 0 {
-                    _if184 = true;
-                }
+                if question_index < 0 { _if184 = true; }
             }
-            if _if184 {
-                question_index = index;
-            } else {
+            if _if184 { question_index = index; } else {
                 let mut _elif188: boolean = false;
                 if ch == ":" {
                     if question_index >= 0 {
-                        if colon_index < 0 {
-                            _elif188 = true;
-                        }
+                        if colon_index < 0 { _elif188 = true; }
                     }
                 }
                 if _elif188 {
@@ -563,42 +561,79 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
     if question_index < 0 { _if185 = true; }
     if colon_index < 0 { _if185 = true; }
     if _if185 {
-        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+        return TernaryParseResult {
+            success: false,
+            condition: "",
+            true_value: "",
+            false_value: "",
+            diagnostics: diagnostics
+        };
     }
 
     let condition = trim_text(substring(trimmed, 0, question_index));
     let true_value = trim_text(substring(trimmed, question_index + 1, colon_index));
     let false_value = trim_text(substring(trimmed, colon_index + 1, trimmed.length));
 
-    return TernaryParseResult { success: true, condition: condition, true_value: true_value, false_value: false_value, diagnostics: diagnostics };
+    return TernaryParseResult {
+        success: true,
+        condition: condition,
+        true_value: true_value,
+        false_value: false_value,
+        diagnostics: diagnostics
+    };
 }
 
 // =============================================================================
 // Cast and Raw Address Parsing
 // =============================================================================
-
 fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
     let trimmed = trim_text(text);
     if !starts_with(trimmed, "raw_address(") {
-        return RawAddressParseResult { recognized: false, success: false, target: "", diagnostics: [] };
+        return RawAddressParseResult {
+            recognized: false,
+            success: false,
+            target: "",
+            diagnostics: []
+        };
     }
     if !ends_with(trimmed, ")") {
         let diagnostics: string[] = ["llvm lowering: raw_address expression missing closing `)`"];
-        return RawAddressParseResult { recognized: true, success: false, target: "", diagnostics: diagnostics };
+        return RawAddressParseResult {
+            recognized: true,
+            success: false,
+            target: "",
+            diagnostics: diagnostics
+        };
     }
     let inner = trim_text(substring(trimmed, 12, trimmed.length - 1));
     if inner.length == 0 {
         let diagnostics: string[] = ["llvm lowering: raw_address expression missing target"];
-        return RawAddressParseResult { recognized: true, success: false, target: "", diagnostics: diagnostics };
+        return RawAddressParseResult {
+            recognized: true,
+            success: false,
+            target: "",
+            diagnostics: diagnostics
+        };
     }
-    return RawAddressParseResult { recognized: true, success: true, target: inner, diagnostics: [] };
+    return RawAddressParseResult {
+        recognized: true,
+        success: true,
+        target: inner,
+        diagnostics: []
+    };
 }
 
 fn parse_cast_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
-        return CastParseResult { recognized: false, success: false, value: "", type_annotation: "", diagnostics: diagnostics };
+        return CastParseResult {
+            recognized: false,
+            success: false,
+            value: "",
+            type_annotation: "",
+            diagnostics: diagnostics
+        };
     }
 
     // Scan for a top-level ` as ` outside of brackets/strings.
@@ -613,9 +648,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     let mut index: number = 0;
 
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
         if in_double {
             if escape_next {
@@ -628,9 +661,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_double = false;
-            }
+            if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
@@ -645,9 +676,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
                 index += 1;
                 continue;
             }
-            if ch == "'" {
-                in_single = false;
-            }
+            if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -667,9 +696,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -679,9 +706,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -691,9 +716,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -703,9 +726,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == ">" {
-            if angle_depth > 0 {
-                angle_depth -= 1;
-            }
+            if angle_depth > 0 { angle_depth -= 1; }
             index += 1;
             continue;
         }
@@ -717,9 +738,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
                         let _as_end = index + 4;
                         if _as_end <= trimmed.length {
                             let window = substring(trimmed, index, _as_end);
-                            if window == " as " {
-                                match_index = index;
-                            }
+                            if window == " as " { match_index = index; }
                         }
                     }
                 }
@@ -729,7 +748,13 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     }
 
     if match_index < 0 {
-        return CastParseResult { recognized: false, success: false, value: "", type_annotation: "", diagnostics: diagnostics };
+        return CastParseResult {
+            recognized: false,
+            success: false,
+            value: "",
+            type_annotation: "",
+            diagnostics: diagnostics
+        };
     }
 
     let value = trim_text(substring(trimmed, 0, match_index));
@@ -738,8 +763,21 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     if value.length == 0 { _if186 = true; }
     if annotation.length == 0 { _if186 = true; }
     if _if186 {
-        diagnostics.push("llvm lowering: malformed cast expression `" + text + "`");
-        return CastParseResult { recognized: true, success: false, value: value, type_annotation: annotation, diagnostics: diagnostics };
+        diagnostics.push("llvm lowering: malformed cast expression `" + text
+            + "`");
+        return CastParseResult {
+            recognized: true,
+            success: false,
+            value: value,
+            type_annotation: annotation,
+            diagnostics: diagnostics
+        };
     }
-    return CastParseResult { recognized: true, success: true, value: value, type_annotation: annotation, diagnostics: diagnostics };
+    return CastParseResult {
+        recognized: true,
+        success: true,
+        value: value,
+        type_annotation: annotation,
+        diagnostics: diagnostics
+    };
 }

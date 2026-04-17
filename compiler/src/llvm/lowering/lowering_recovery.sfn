@@ -6,82 +6,73 @@
 // that the v0.1.1 seed cannot compile correctly.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-
-import { substring } from "../../string_utils";
 import {
-    NativeImport,
+    NativeEnum,
+    NativeEnumLayout,
+    NativeEnumVariant,
+    NativeEnumVariantField,
+    NativeEnumVariantLayout,
     NativeFunction,
+    NativeImport,
     NativeInstruction,
     NativeStruct,
     NativeStructField,
     NativeStructLayout,
     NativeStructLayoutField,
-    NativeEnum,
-    NativeEnumVariant,
-    NativeEnumVariantField,
-    NativeEnumLayout,
-    NativeEnumVariantLayout,
-    ParseNativeResult,
+    ParseNativeResult
 } from "../../native_ir";
 import {
-    parse_native_function_count_from_text,
-    parse_native_functions_from_text,
-    parse_native_structs_from_text,
-    parse_native_imports_from_text,
-    parse_native_interfaces_from_text,
-    parse_native_enums_from_text,
     parse_native_bindings_from_text,
     parse_native_diagnostics_from_text,
+    parse_native_enums_from_text,
+    parse_native_function_count_from_text,
+    parse_native_functions_from_text,
+    parse_native_imports_from_text,
+    parse_native_interfaces_from_text,
+    parse_native_structs_from_text
 } from "../../native_ir_api";
+import { substring } from "../../string_utils";
+import { index_of, number_to_string } from "../utils";
+import { sanitize_collection_length } from "./lowering_helpers";
+import { append_native_function } from "./lowering_helpers_mangling";
 import {
-    number_to_string,
-    index_of,
-} from "../utils";
-import {
-    split_lines_local,
-    starts_with_local,
-    trim_text_local,
-    index_of_char_local,
-    extract_kv_number,
-    extract_kv_string,
-    recover_function_name_from_header,
-    recover_function_is_async_from_header,
-    net_unquoted_brace_depth,
-} from "./lowering_text_utils";
-import {
+    append_instruction_to_function,
+    append_native_import,
+    append_param_to_function,
+    make_instruction_for,
+    make_instruction_simple,
+    make_instruction_text,
+    make_native_enum,
+    make_native_enum_layout,
+    make_native_enum_variant,
+    make_native_enum_variant_layout,
+    make_native_enum_variant_layout_with_fields,
     make_native_function_basic,
     make_native_function_method,
     make_native_function_with_return,
-    make_native_parameter,
     make_native_import,
-    make_native_struct_layout,
+    make_native_parameter,
     make_native_struct,
     make_native_struct_field,
+    make_native_struct_layout,
     make_native_struct_layout_field,
-    make_instruction_text,
-    make_instruction_simple,
-    make_instruction_for,
-    make_native_enum,
-    make_native_enum_variant,
-    make_native_enum_layout,
-    make_native_enum_variant_layout,
-    make_native_enum_variant_layout_with_fields,
     make_native_struct_layout_field,
-    update_function_return_type,
     update_function_effects,
-    append_param_to_function,
-    append_instruction_to_function,
-    append_native_import,
+    update_function_return_type
 } from "./lowering_native_helpers";
 import {
-    sanitize_collection_length,
-} from "./lowering_helpers";
-import {
-    append_native_function,
-} from "./lowering_helpers_mangling";
+    extract_kv_number,
+    extract_kv_string,
+    index_of_char_local,
+    net_unquoted_brace_depth,
+    recover_function_is_async_from_header,
+    recover_function_name_from_header,
+    split_lines_local,
+    starts_with_local,
+    trim_text_local
+} from "./lowering_text_utils";
 
 // ── Parse wrappers ───────────────────────────────────────────────────
-
 // Construct a ParseNativeResult from individual field-extraction calls.
 // This avoids the seed v0.1.1 struct-return ABI bug: each extractor returns
 // an array (works through double→pointer shim), then we assemble locally.
@@ -102,15 +93,12 @@ fn parse_native_artifact_safe(text: string) -> ParseNativeResult {
         interfaces: interfaces,
         enums: enums,
         bindings: bindings,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
     return result;
 }
 
-
-
 // ── Light function recovery ──────────────────────────────────────────
-
 fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
     // FLAT: no nested ifs, no else-if chains.
     // Seed degenerate-if bug drops ALL nested conditions and else-if branches.
@@ -122,9 +110,7 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
     let mut index: number = 0;
     let mut fn_count: number = 0;
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let line = trim_text_local(lines[index]);
         let mut _if237: boolean = false;
         if line.length == 0 { _if237 = true; }
@@ -176,7 +162,8 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         let method_paren_idx = index_of(method_header, "(");
         let method_name_from_paren = trim_text_local(substring(method_header, 0, method_paren_idx));
         let method_arrow_idx = index_of(method_header, " -> ");
-        let method_ret_from_arrow = trim_text_local(substring(method_header, method_arrow_idx + 4, method_header.length));
+        let method_ret_from_arrow = trim_text_local(substring(method_header, method_arrow_idx
+            + 4, method_header.length));
         // Check whether the method has a `self` parameter.  Static methods
         // (e.g. `fn new(w, h)`) must NOT get self injected.
         let mut method_has_self: boolean = false;
@@ -204,7 +191,9 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
             let mut _use_param_arrow: boolean = false;
             if param_arrow_idx < 0 { _use_param_arrow = true; }
             if param_arrow_idx >= 0 {
-                if param_legacy_arrow_idx < param_arrow_idx { _use_param_arrow = true; }
+                if param_legacy_arrow_idx < param_arrow_idx {
+                    _use_param_arrow = true;
+                }
             }
             if _use_param_arrow {
                 param_arrow_idx = param_legacy_arrow_idx;
@@ -212,20 +201,23 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
             }
         }
         let param_name_raw = trim_text_local(substring(param_text_raw, 0, param_arrow_idx));
-        let param_type_raw = trim_text_local(substring(param_text_raw, param_arrow_idx + param_sep_len, param_text_raw.length));
+        let param_type_raw = trim_text_local(substring(param_text_raw, param_arrow_idx
+            + param_sep_len, param_text_raw.length));
 
         // Pre-compute .for target/iterable extraction.
         let for_body_raw = trim_text_local(substring(line, 5, line.length));
         let for_in_idx = index_of(for_body_raw, " in ");
         let for_target_raw = trim_text_local(substring(for_body_raw, 0, for_in_idx));
-        let for_iterable_raw = trim_text_local(substring(for_body_raw, for_in_idx + 4, for_body_raw.length));
+        let for_iterable_raw = trim_text_local(substring(for_body_raw, for_in_idx
+            + 4, for_body_raw.length));
 
         // Pre-compute match/case extraction.
         let match_expr_raw = trim_text_local(substring(line, 7, line.length));
         let case_pattern_raw = trim_text_local(substring(line, 6, line.length));
         // Inline case: pattern => body,
         let inline_pattern_raw = trim_text_local(substring(line, 0, inline_arrow_idx));
-        let inline_body_full = trim_text_local(substring(line, inline_arrow_idx + 4, line.length));
+        let inline_body_full = trim_text_local(substring(line, inline_arrow_idx
+            + 4, line.length));
         // Strip trailing comma from inline body
         let mut inline_body_raw: string = inline_body_full;
         if inline_body_full.length > 0 {
@@ -294,7 +286,8 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
             if current_struct_name.length > 0 {
                 if method_paren_idx >= 0 {
                     if method_arrow_idx >= 0 {
-                        let full_name = current_struct_name + method_name_from_paren;
+                        let full_name = current_struct_name
+                            + method_name_from_paren;
                         if method_has_self {
                             current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
                         }
@@ -438,8 +431,12 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
             let _cont = lines[_gi];
             let _cont_trimmed = trim_text_local(_cont);
             let mut _is_stop_directive: boolean = false;
-            if starts_with_local(_cont_trimmed, ".") { _is_stop_directive = true; }
-            if starts_with_local(_cont_trimmed, ".span") { _is_stop_directive = false; }
+            if starts_with_local(_cont_trimmed, ".") {
+                _is_stop_directive = true;
+            }
+            if starts_with_local(_cont_trimmed, ".span") {
+                _is_stop_directive = false;
+            }
             if _is_stop_directive { break; }
             _eval_gathered = _eval_gathered + "\n" + _cont;
             let _cont_depth = net_unquoted_brace_depth(_cont);
@@ -456,44 +453,26 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         if is_ret_space {
             next_instruction = make_instruction_text(0, trim_text_local(substring(line, 4, line.length)));
         }
-        if is_ret_bare {
-            next_instruction = make_instruction_text(0, "");
-        }
-        if is_else_kw {
-            next_instruction = make_instruction_simple(4);
-        }
-        if is_endif_kw {
-            next_instruction = make_instruction_simple(5);
-        }
+        if is_ret_bare { next_instruction = make_instruction_text(0, ""); }
+        if is_else_kw { next_instruction = make_instruction_simple(4); }
+        if is_endif_kw { next_instruction = make_instruction_simple(5); }
         if is_if_kw {
             next_instruction = make_instruction_text(3, trim_text_local(substring(line, 4, line.length)));
         }
-        if is_loop_kw {
-            next_instruction = make_instruction_simple(8);
-        }
-        if is_endloop_kw {
-            next_instruction = make_instruction_simple(9);
-        }
+        if is_loop_kw { next_instruction = make_instruction_simple(8); }
+        if is_endloop_kw { next_instruction = make_instruction_simple(9); }
         if is_for_kw {
             if for_in_idx >= 0 {
                 next_instruction = make_instruction_for(for_target_raw, for_iterable_raw);
             }
         }
-        if is_endfor_kw {
-            next_instruction = make_instruction_simple(7);
-        }
-        if is_break_kw {
-            next_instruction = make_instruction_simple(10);
-        }
-        if is_continue_kw {
-            next_instruction = make_instruction_simple(11);
-        }
+        if is_endfor_kw { next_instruction = make_instruction_simple(7); }
+        if is_break_kw { next_instruction = make_instruction_simple(10); }
+        if is_continue_kw { next_instruction = make_instruction_simple(11); }
         if is_match_kw {
             next_instruction = make_instruction_text(12, match_expr_raw);
         }
-        if is_endmatch_kw {
-            next_instruction = make_instruction_simple(14);
-        }
+        if is_endmatch_kw { next_instruction = make_instruction_simple(14); }
         if is_case_kw {
             next_instruction = make_instruction_text(13, case_pattern_raw);
         }
@@ -527,15 +506,12 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
 }
 
 // ── Light import recovery ────────────────────────────────────────────
-
 fn recover_native_imports_light(native_text: string) -> NativeImport[] {
     let lines = split_lines_local(native_text);
     let mut imports: NativeImport[] = [];
     let mut index: number = 0;
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let line = trim_text_local(lines[index]);
         let is_import = starts_with_local(line, ".import ");
         let rest = trim_text_local(substring(line, 8, line.length));
@@ -557,7 +533,6 @@ fn recover_native_imports_light(native_text: string) -> NativeImport[] {
 }
 
 // ── Light struct recovery ────────────────────────────────────────────
-
 fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
     let lines = split_lines_local(native_text);
     let mut structs: NativeStruct[] = [];
@@ -572,9 +547,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
 
     let mut index: number = 0;
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let line = trim_text_local(lines[index]);
         let mut _if240: boolean = false;
         if line.length == 0 { _if240 = true; }
@@ -606,7 +579,9 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
             let mut _use_field_arrow: boolean = false;
             if field_arrow_idx < 0 { _use_field_arrow = true; }
             if field_arrow_idx >= 0 {
-                if field_legacy_arrow_idx < field_arrow_idx { _use_field_arrow = true; }
+                if field_legacy_arrow_idx < field_arrow_idx {
+                    _use_field_arrow = true;
+                }
             }
             if _use_field_arrow {
                 field_arrow_idx = field_legacy_arrow_idx;
@@ -614,7 +589,8 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
             }
         }
         let f_name = trim_text_local(substring(field_text, 0, field_arrow_idx));
-        let f_type = trim_text_local(substring(field_text, field_arrow_idx + field_sep_len, field_text.length));
+        let f_type = trim_text_local(substring(field_text, field_arrow_idx
+            + field_sep_len, field_text.length));
 
         let ls_text = trim_text_local(substring(line, 15, line.length));
         let ls_size_idx = index_of(ls_text, "size=");
@@ -649,9 +625,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
                 let mut _if259: boolean = false;
                 if layout_size > 0 { _if259 = true; }
                 if layout_fields.length > 0 { _if259 = true; }
-                if _if259 {
-                    _if242 = true;
-                }
+                if _if259 { _if242 = true; }
             }
         }
         if _if242 {
@@ -692,14 +666,10 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         }
 
         if is_layout_struct {
-            if ls_size_idx >= 0 {
-                layout_size = ls_size_val;
-            }
+            if ls_size_idx >= 0 { layout_size = ls_size_val; }
         }
         if is_layout_struct {
-            if ls_align_idx >= 0 {
-                layout_align = ls_align_val;
-            }
+            if ls_align_idx >= 0 { layout_align = ls_align_val; }
         }
         if is_layout_struct {
             index += 1;
@@ -730,9 +700,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         let mut _if260: boolean = false;
         if layout_size > 0 { _if260 = true; }
         if layout_fields.length > 0 { _if260 = true; }
-        if _if260 {
-            _if243 = true;
-        }
+        if _if260 { _if243 = true; }
     }
     if _if243 {
         struct_layout = make_native_struct_layout(layout_size, layout_align, layout_fields);
@@ -749,12 +717,9 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
 }
 
 // ── Higher-level recovery ────────────────────────────────────────────
-
 fn recover_functions_for_lowering(current_functions: NativeFunction[], native_text_override_path: string, artifact_text: string, debug_lowering: boolean) -> NativeFunction[] ![io] {
     let mut safe_functions = current_functions;
-    if safe_functions == null {
-        safe_functions = [];
-    }
+    if safe_functions == null { safe_functions = []; }
     let initial_function_count = sanitize_collection_length(safe_functions.length, 200000);
     if safe_functions.length != initial_function_count {
         if debug_lowering {
@@ -787,9 +752,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                 let mut has_body_instructions = false;
                 let mut body_index: number = 0;
                 loop {
-                    if body_index >= initial_function_count {
-                        break;
-                    }
+                    if body_index >= initial_function_count { break; }
                     let function = safe_functions[body_index];
                     if !function.is_extern {
                         if function.instructions != null {
@@ -801,18 +764,14 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                     }
                     body_index += 1;
                 }
-                if !has_body_instructions {
-                    use_expected = true;
-                }
+                if !has_body_instructions { use_expected = true; }
 
                 let mut index: number = 0;
                 loop {
                     let mut _if245: boolean = false;
                     if index >= initial_function_count { _if245 = true; }
                     if index >= expected_count { _if245 = true; }
-                    if _if245 {
-                        break;
-                    }
+                    if _if245 { break; }
                     let safe_name = trim_text_local(safe_functions[index].name);
                     let expected_name = trim_text_local(expected_functions[index].name);
                     let mut _if246: boolean = false;
@@ -840,9 +799,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                     let mut light_has_body = false;
                     let mut light_index: number = 0;
                     loop {
-                        if light_index >= light_count {
-                            break;
-                        }
+                        if light_index >= light_count { break; }
                         let function = light_functions[light_index];
                         if !function.is_extern {
                             if function.instructions != null {
@@ -858,9 +815,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                         replacement_functions = light_functions;
                     }
                     if debug_lowering {
-                        print.err(
-                            "emit-llvm: replacing suspicious parsed functions with stable function parse"
-                        );
+                        print.err("emit-llvm: replacing suspicious parsed functions with stable function parse");
                     }
                     safe_functions = replacement_functions;
                 }
@@ -874,9 +829,7 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
         recovery_text = native_text_override_path;
     }
     if recovery_text.length == 0 {
-        if artifact_text.length > 0 {
-            recovery_text = artifact_text;
-        }
+        if artifact_text.length > 0 { recovery_text = artifact_text; }
     }
     if recovery_text.length == 0 {
         if fs.exists("build/sailfin/emit-native.tmp") {
@@ -899,7 +852,8 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
     if parsed_recovery.length == recovered_count {
         if parsed_recovery.length > 0 {
             if debug_lowering {
-                print.err("emit-llvm: recovered functions via parse_native_functions_from_text=" + number_to_string(parsed_recovery.length));
+                print.err("emit-llvm: recovered functions via parse_native_functions_from_text="
+                    + number_to_string(parsed_recovery.length));
             }
             return parsed_recovery;
         }
@@ -910,7 +864,8 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
     if light_recovery.length == light_recovered_count {
         if light_recovery.length > 0 {
             if debug_lowering {
-                print.err("emit-llvm: recovered functions via light parser=" + number_to_string(light_recovery.length));
+                print.err("emit-llvm: recovered functions via light parser="
+                    + number_to_string(light_recovery.length));
             }
             return light_recovery;
         }
@@ -919,21 +874,17 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
     if fs.exists("build/sailfin/emit-native.tmp") {
         let disk_recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
         let disk_recovery = recover_native_functions_light(disk_recovery_text);
-        if disk_recovery.length > 0 {
-            return disk_recovery;
-        }
+        if disk_recovery.length > 0 { return disk_recovery; }
     }
     return [];
 }
 
 // build_parse_result_from_text lives in lowering_core.sfn to preserve
 // cross-module symbol mangling compatibility with the v0.1.1 seed shims.
-
 // ── Enum recovery ───────────────────────────────────────────────────
 // Light line-scanner for .enum/.endenum blocks, analogous to
 // recover_native_structs_light.  Avoids the cross-module ABI corruption
 // that makes parse_native_enums_for_import return empty arrays.
-
 fn recover_native_enums_light(native_text: string) -> NativeEnum[] {
     let lines = split_lines_local(native_text);
     let mut enums: NativeEnum[] = [];
@@ -959,9 +910,7 @@ fn recover_native_enums_light(native_text: string) -> NativeEnum[] {
 
     let mut index: number = 0;
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let line = trim_text_local(lines[index]);
         let mut _skip: boolean = false;
         if line.length == 0 { _skip = true; }

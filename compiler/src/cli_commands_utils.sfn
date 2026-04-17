@@ -2,7 +2,6 @@
 //
 // Utility functions for CLI command handlers: path, string, file, and
 // network operations.
-
 import { substring } from "./string_utils";
 
 export {
@@ -34,7 +33,7 @@ export {
     _is_ident_char_cmd,
     _byte_at_cmd,
     _word_matches_cmd,
-    _string_list_contains_cmd,
+    _string_list_contains_cmd
 };
 
 fn _ends_with_cmd(value: string, suffix: string) -> boolean {
@@ -49,17 +48,11 @@ fn _dirname_cmd(path: string) -> string {
     let mut i: number = 0;
     loop {
         if i >= path.length { break; }
-        if substring(path, i, i + 1) == "/" {
-            last_slash = i;
-        }
+        if substring(path, i, i + 1) == "/" { last_slash = i; }
         i += 1;
     }
-    if last_slash < 0 {
-        return ".";
-    }
-    if last_slash == 0 {
-        return "/";
-    }
+    if last_slash < 0 { return "."; }
+    if last_slash == 0 { return "/"; }
     return substring(path, 0, last_slash);
 }
 
@@ -67,9 +60,7 @@ fn find_char(text: string, ch: string, start: number) -> number {
     let mut i: number = start;
     loop {
         if i >= text.length { break; }
-        if substring(text, i, i + 1) == ch {
-            return i;
-        }
+        if substring(text, i, i + 1) == ch { return i; }
         i += 1;
     }
     return -1;
@@ -106,12 +97,8 @@ fn _toml_trim_cmd(text: string) -> string {
 fn _shell_read_cmd(cmd: string) -> string ![io] {
     let tmp = "/tmp/.sfn_shell_read_cmd_tmp";
     let rc = process.run(["sh", "-c", cmd + " > " + tmp + " 2>/dev/null"]);
-    if rc != 0 {
-        return "";
-    }
-    if !fs.exists(tmp) {
-        return "";
-    }
+    if rc != 0 { return ""; }
+    if !fs.exists(tmp) { return ""; }
     let raw = fs.readFile(tmp);
     process.run(["rm", "-f", tmp]);
     return _toml_trim_cmd(raw);
@@ -121,20 +108,14 @@ fn _get_env_cmd(name: string) -> string ![io] {
     return _shell_read_cmd("printf '%s' \"$" + name + "\"");
 }
 
-fn _get_home_cmd() -> string ![io] {
-    return _get_env_cmd("HOME");
-}
+fn _get_home_cmd() -> string ![io] { return _get_env_cmd("HOME"); }
 
 fn _ensure_dir_cmd(path: string) ![io] {
-    if !fs.exists(path) {
-        process.run(["mkdir", "-p", path]);
-    }
+    if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
 }
 
 fn _ensure_dir_recursive_cmd(path: string) -> void ![io] {
-    if !fs.exists(path) {
-        process.run(["mkdir", "-p", path]);
-    }
+    if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
 }
 
 fn _sanitize_filename_cmd(value: string) -> string {
@@ -147,11 +128,7 @@ fn _sanitize_filename_cmd(value: string) -> string {
         if ch == "/" { safe = false; }
         if ch == " " { safe = false; }
         if ch == "." { safe = false; }
-        if safe {
-            result = result + ch;
-        } else {
-            result = result + "_";
-        }
+        if safe { result = result + ch; } else { result = result + "_"; }
         i += 1;
     }
     return result;
@@ -167,9 +144,7 @@ fn _looks_like_test_file_cmd(name: string) -> boolean {
 
 fn _collect_test_files_cmd(root: string, max_depth: number) -> string[] ![io] {
     let mut results: string[] = [];
-    if _ends_with_cmd(root, ".sfn") {
-        return [root];
-    }
+    if _ends_with_cmd(root, ".sfn") { return [root]; }
     let mut queue: string[] = [root];
     let mut depth: number = 0;
     loop {
@@ -206,9 +181,7 @@ fn _collect_test_files_cmd(root: string, max_depth: number) -> string[] ![io] {
 
 fn _collect_sfn_files_cmd(root: string, max_depth: number) -> string[] ![io] {
     let mut results: string[] = [];
-    if _ends_with_cmd(root, ".sfn") {
-        return [root];
-    }
+    if _ends_with_cmd(root, ".sfn") { return [root]; }
     let mut queue: string[] = [root];
     let mut depth: number = 0;
     loop {
@@ -219,7 +192,10 @@ fn _collect_sfn_files_cmd(root: string, max_depth: number) -> string[] ![io] {
         loop {
             if qi >= queue.length { break; }
             let dir = queue[qi];
-            if !fs.exists(dir) { qi += 1; continue; }
+            if !fs.exists(dir) {
+                qi += 1;
+                continue;
+            }
             let entries = fs.listDirectory(dir);
             let mut ei: number = 0;
             loop {
@@ -246,13 +222,9 @@ fn _collect_sfn_files_cmd(root: string, max_depth: number) -> string[] ![io] {
 
 fn _curl_post_json_cmd(url: string, body_path: string, auth_header: string) -> string ![io] {
     let tmp = "/tmp/.sfn_curl_response_cmd_tmp";
-    let rc = process.run(["curl", "-sfS", "-X", "POST",
-        "-H", "Content-Type: application/json",
-        "-H", "Authorization: " + auth_header,
-        "-d", "@" + body_path,
-        "-o", tmp,
-        url
-    ]);
+    let rc = process.run(["curl", "-sfS", "-X", "POST", "-H", "Content-Type: application/json", "-H", "Authorization: "
+        + auth_header, "-d", "@"
+        + body_path, "-o", tmp, url]);
     if rc != 0 { return ""; }
     if !fs.exists(tmp) { return ""; }
     let response = fs.readFile(tmp);
@@ -278,7 +250,10 @@ fn _extract_sfnpkg_cmd(content: string, dest_dir: string) -> void ![io] {
         if pos >= content.length { break; }
         let remaining = substring(content, pos, content.length);
         if remaining.length < marker.length { break; }
-        if substring(remaining, 0, marker.length) != marker { pos += 1; continue; }
+        if substring(remaining, 0, marker.length) != marker {
+            pos += 1;
+            continue;
+        }
         let after_marker = substring(remaining, marker.length, remaining.length);
         let nl_idx = find_char(after_marker, "\n", 0);
         if nl_idx < 0 { break; }

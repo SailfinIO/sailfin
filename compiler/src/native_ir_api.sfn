@@ -3,98 +3,73 @@
 // Public API entry points for `.sfn-asm` parsing.
 // Thin wrappers around parse_native_artifact_impl (in native_ir_parser)
 // plus the layout-manifest parser.
-
 import { NativeArtifact } from "./emit_native_layout";
-
 import {
-    NativeFunction,
-    NativeStruct,
-    NativeImport,
-    NativeInterface,
-    NativeEnum,
-    NativeBinding,
-    ParseNativeResult,
+    EnumLayoutHeaderParse,
+    EnumLayoutPayloadParse,
+    EnumLayoutVariantParse,
     LayoutManifest,
-    NativeStructLayout,
-    NativeStructLayoutField,
+    NativeBinding,
+    NativeEnum,
     NativeEnumLayout,
     NativeEnumVariantLayout,
-    StructLayoutHeaderParse,
+    NativeFunction,
+    NativeImport,
+    NativeInterface,
+    NativeStruct,
+    NativeStructLayout,
+    NativeStructLayoutField,
+    ParseNativeResult,
     StructLayoutFieldParse,
-    EnumLayoutHeaderParse,
-    EnumLayoutVariantParse,
-    EnumLayoutPayloadParse,
+    StructLayoutHeaderParse
 } from "./native_ir";
-
 import { parse_native_artifact_impl } from "./native_ir_parser";
-
 import {
+    parse_enum_layout_header,
+    parse_enum_payload_layout,
+    parse_enum_variant_layout,
+    parse_struct_layout_field,
+    parse_struct_layout_header
+} from "./native_ir_utils_layout";
+import {
+    is_trim_char,
     split_lines,
-    trim_text,
     starts_with,
     strip_prefix,
-    is_trim_char,
+    trim_text
 } from "./native_ir_utils_text";
 
-import {
-    parse_struct_layout_header,
-    parse_struct_layout_field,
-    parse_enum_layout_header,
-    parse_enum_variant_layout,
-    parse_enum_payload_layout,
-} from "./native_ir_utils_layout";
-
 fn select_text_artifact(artifacts: NativeArtifact[]) -> NativeArtifact? {
-    if artifacts == null {
-        return null;
-    }
+    if artifacts == null { return null; }
     let mut max_items: number = artifacts.length;
     let mut _if356: boolean = false;
     if max_items != max_items { _if356 = true; }
     if max_items < 0 { _if356 = true; }
-    if _if356 {
-        return null;
-    }
-    if max_items > 10000 {
-        max_items = 10000;
-    }
+    if _if356 { return null; }
+    if max_items > 10000 { max_items = 10000; }
     let mut index: number = 0;
     loop {
-        if index >= max_items {
-            break;
-        }
+        if index >= max_items { break; }
         let artifact = artifacts[index];
-        if artifact.format == "sailfin-native-text" {
-            return artifact;
-        }
+        if artifact.format == "sailfin-native-text" { return artifact; }
         index += 1;
     }
     return null;
 }
 
 fn select_layout_manifest_artifact(artifacts: NativeArtifact[]) -> NativeArtifact? {
-    if artifacts == null {
-        return null;
-    }
+    if artifacts == null { return null; }
     let mut max_items: number = artifacts.length;
     let mut _if357: boolean = false;
     if max_items != max_items { _if357 = true; }
     if max_items < 0 { _if357 = true; }
-    if _if357 {
-        return null;
-    }
-    if max_items > 10000 {
-        max_items = 10000;
-    }
+    if _if357 { return null; }
+    if max_items > 10000 { max_items = 10000; }
     let mut index: number = 0;
     loop {
-        if index >= max_items {
-            break;
-        }
+        if index >= max_items { break; }
         let artifact = artifacts[index];
-        if artifact.format == "sailfin-layout-manifest" {
-            return artifact;
-        }
+        if artifact.format == "sailfin-layout-manifest" { return artifact; }
         index += 1;
     }
     return null;
@@ -106,105 +81,79 @@ fn parse_native_artifact(text: string) -> ParseNativeResult {
 
 fn parse_native_function_count_from_text(text: string) -> number {
     let parsed = parse_native_artifact_impl(text, false, false);
-    if parsed.functions == null {
-        return -1;
-    }
+    if parsed.functions == null { return -1; }
     return parsed.functions.length;
 }
 
 fn parse_native_functions_from_text(text: string) -> NativeFunction[] {
     let parsed = parse_native_artifact_impl(text, true, true);
-    if parsed.functions == null {
-        return [];
-    }
+    if parsed.functions == null { return []; }
     return parsed.functions;
 }
 
 fn parse_native_structs_from_text(text: string) -> NativeStruct[] {
     let parsed = parse_native_artifact_impl(text, true, true);
-    if parsed.structs == null {
-        return [];
-    }
+    if parsed.structs == null { return []; }
     return parsed.structs;
 }
 
 fn parse_native_imports_from_text(text: string) -> NativeImport[] {
     let parsed = parse_native_artifact_impl(text, true, true);
-    if parsed.imports == null {
-        return [];
-    }
+    if parsed.imports == null { return []; }
     return parsed.imports;
 }
 
 fn parse_native_interfaces_from_text(text: string) -> NativeInterface[] {
     let parsed = parse_native_artifact_impl(text, true, true);
-    if parsed.interfaces == null {
-        return [];
-    }
+    if parsed.interfaces == null { return []; }
     return parsed.interfaces;
 }
 
 fn parse_native_enums_from_text(text: string) -> NativeEnum[] {
     let parsed = parse_native_artifact_impl(text, true, true);
-    if parsed.enums == null {
-        return [];
-    }
+    if parsed.enums == null { return []; }
     return parsed.enums;
 }
 
 fn parse_native_bindings_from_text(text: string) -> NativeBinding[] {
     let parsed = parse_native_artifact_impl(text, true, true);
-    if parsed.bindings == null {
-        return [];
-    }
+    if parsed.bindings == null { return []; }
     return parsed.bindings;
 }
 
 fn parse_native_diagnostics_from_text(text: string) -> string[] {
     let parsed = parse_native_artifact_impl(text, true, true);
-    if parsed.diagnostics == null {
-        return [];
-    }
+    if parsed.diagnostics == null { return []; }
     return parsed.diagnostics;
 }
 
 fn parse_native_structs_for_import(text: string) -> NativeStruct[] {
     let parsed = parse_native_artifact_impl(text, false, false);
-    if parsed.structs == null {
-        return [];
-    }
+    if parsed.structs == null { return []; }
     return parsed.structs;
 }
 
 fn parse_native_imports_for_import(text: string) -> NativeImport[] {
     let parsed = parse_native_artifact_impl(text, false, false);
-    if parsed.imports == null {
-        return [];
-    }
+    if parsed.imports == null { return []; }
     return parsed.imports;
 }
 
 fn parse_native_interfaces_for_import(text: string) -> NativeInterface[] {
     let parsed = parse_native_artifact_impl(text, false, false);
-    if parsed.interfaces == null {
-        return [];
-    }
+    if parsed.interfaces == null { return []; }
     return parsed.interfaces;
 }
 
 fn parse_native_enums_for_import(text: string) -> NativeEnum[] {
     let parsed = parse_native_artifact_impl(text, false, false);
-    if parsed.enums == null {
-        return [];
-    }
+    if parsed.enums == null { return []; }
     return parsed.enums;
 }
 
 fn parse_native_functions_for_import(text: string) -> NativeFunction[] {
     let parsed = parse_native_artifact_impl(text, false, false);
-    if parsed.functions == null {
-        return [];
-    }
+    if parsed.functions == null { return []; }
     return parsed.functions;
 }
 
@@ -230,7 +179,7 @@ export {
     parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_artifact_for_import_context,
-    parse_layout_manifest,
+    parse_layout_manifest
 };
 
 fn parse_layout_manifest(text: string) -> LayoutManifest {
@@ -241,9 +190,7 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
     let mut index: number = 0;
 
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let raw_line = lines[index];
         let mut line = trim_text(raw_line);
         if line.length == 0 {
@@ -263,13 +210,9 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
             let tail = trim_text(strip_prefix(line, ".layout field "));
             let mut is_struct_header: boolean = false;
             if starts_with(tail, "struct") {
-                if tail.length == 6 {
-                    is_struct_header = true;
-                } else if tail.length > 6 {
+                if tail.length == 6 { is_struct_header = true; } else if tail.length > 6 {
                     let after = tail[6];
-                    if is_trim_char(after) {
-                        is_struct_header = true;
-                    }
+                    if is_trim_char(after) { is_struct_header = true; }
                 }
             }
             if is_struct_header {
@@ -295,9 +238,7 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
 
                 index += 1;
                 loop {
-                    if index >= lines.length {
-                        break;
-                    }
+                    if index >= lines.length { break; }
                     let field_line = trim_text(lines[index]);
 
                     if field_line.length == 0 {
@@ -306,31 +247,25 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                     }
 
                     let mut _if387: boolean = false;
-                    if starts_with(field_line, ".layout struct ") { _if387 = true; }
-                    if starts_with(field_line, ".layout enum ") { _if387 = true; }
-                    if _if387 {
-                        break;
+                    if starts_with(field_line, ".layout struct ") {
+                        _if387 = true;
                     }
+                    if starts_with(field_line, ".layout enum ") {
+                        _if387 = true;
+                    }
+                    if _if387 { break; }
 
-                    if !starts_with(field_line, ".layout field ") {
-                        break;
-                    }
+                    if !starts_with(field_line, ".layout field ") { break; }
 
                     let tail = trim_text(strip_prefix(field_line, ".layout field "));
                     let mut is_struct_header: boolean = false;
                     if starts_with(tail, "struct") {
-                        if tail.length == 6 {
-                            is_struct_header = true;
-                        } else if tail.length > 6 {
+                        if tail.length == 6 { is_struct_header = true; } else if tail.length > 6 {
                             let after = tail[6];
-                            if is_trim_char(after) {
-                                is_struct_header = true;
-                            }
+                            if is_trim_char(after) { is_struct_header = true; }
                         }
                     }
-                    if is_struct_header {
-                        break;
-                    }
+                    if is_struct_header { break; }
 
                     let field_result = parse_struct_layout_field(tail, struct_name);
                     let mut _ci: number = 0;
@@ -354,8 +289,8 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                     layout: NativeStructLayout {
                         size: header_result.size,
                         align: header_result.align,
-                        fields: fields,
-                    },
+                        fields: fields
+                    }
                 };
                 structs.push(struct_def);
             }
@@ -379,9 +314,7 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                 index += 1;
 
                 loop {
-                    if index >= lines.length {
-                        break;
-                    }
+                    if index >= lines.length { break; }
                     let variant_line = trim_text(lines[index]);
                     if variant_line.length == 0 {
                         index += 1;
@@ -403,7 +336,9 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                         let variant_result = parse_enum_variant_layout(variant_text, enum_name);
                         let mut _ci: number = 0;
                         loop {
-                            if _ci >= variant_result.diagnostics.length { break; }
+                            if _ci >= variant_result.diagnostics.length {
+                                break;
+                            }
                             diagnostics.push(variant_result.diagnostics[_ci]);
                             _ci += 1;
                         }
@@ -417,7 +352,9 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                         let payload_result = parse_enum_payload_layout(payload_text, enum_name);
                         let mut _ci: number = 0;
                         loop {
-                            if _ci >= payload_result.diagnostics.length { break; }
+                            if _ci >= payload_result.diagnostics.length {
+                                break;
+                            }
                             diagnostics.push(payload_result.diagnostics[_ci]);
                             _ci += 1;
                         }
@@ -434,7 +371,7 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                                     offset: last_variant.offset,
                                     size: last_variant.size,
                                     align: last_variant.align,
-                                    fields: updated_fields,
+                                    fields: updated_fields
                                 };
                             }
                         }
@@ -451,13 +388,11 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                         tag_type: header_result.tag_type,
                         tag_size: header_result.tag_size,
                         tag_align: header_result.tag_align,
-                        variants: variants,
-                    },
+                        variants: variants
+                    }
                 };
                 enums.push(enum_def);
-            } else {
-                index += 1;
-            }
+            } else { index += 1; }
             continue;
         }
 
@@ -467,6 +402,6 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
     return LayoutManifest {
         structs: structs,
         enums: enums,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }

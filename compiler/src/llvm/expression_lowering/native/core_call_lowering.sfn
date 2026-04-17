@@ -1,79 +1,46 @@
 // compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn
 //
 // Call lowering extracted from core.sfn.
-
 import { NativeFunction } from "../../../native_ir";
-
+import { index_of, substring } from "../../../string_utils";
+import { format_temp_name } from "../../expressions_helpers";
+import { is_simple_identifier } from "../../expressions_helpers";
+import { find_runtime_helper } from "../../runtime_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../../strings";
+import { resolve_enum_info_for_literal, resolve_enum_variant_info } from "../../type_context_queries";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
-    TypeContext,
-    ParameterBinding,
-    LocalBinding,
+    EnumLiteralParse,
     ExpressionResult,
     LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    RuntimeHelperDescriptor,
     StringConstant,
     StructLiteralField,
-    EnumLiteralParse,
-    RuntimeHelperDescriptor,
+    TypeContext
 } from "../../types";
-
 import {
-    trim_text,
-    starts_with,
     ends_with,
     extend_string_array,
     number_to_string,
+    starts_with,
+    trim_text
 } from "../../utils";
-
-import { substring, index_of } from "../../../string_utils";
-
-import { empty_string_constant_set, merge_string_constants } from "../../strings";
-
-import { format_temp_name } from "../../expressions_helpers";
-
-import { is_simple_identifier } from "../../expressions_helpers";
-
-import {
-    ends_with_pointer_suffix,
-    strip_pointer_suffix,
-} from "../../type_mapping";
-
-import {
-    resolve_enum_info_for_literal,
-    resolve_enum_variant_info,
-} from "../../type_context_queries";
-
-import {
-    array_pointer_element_type,
-} from "../arrays";
-
-import {
-    parse_member_access,
-} from "./core_parse";
-
-import {
-    find_local_binding,
-    find_parameter_binding,
-    replace_llvm_operand,
-} from "./core_scopes";
-
-import { lower_enum_literal } from "./core_literals_lowering";
-
-import { resolve_call_method_target, resolve_call_signature } from "./core_call_resolution";
-
-import { coerce_and_emit_call } from "./core_call_emission";
-
-import { find_runtime_helper } from "../../runtime_helpers";
-
+import { array_pointer_element_type } from "../arrays";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
+import { coerce_and_emit_call } from "./core_call_emission";
+import { resolve_call_method_target, resolve_call_signature } from "./core_call_resolution";
+import { lower_enum_literal } from "./core_literals_lowering";
+import { parse_member_access } from "./core_parse";
+import { find_local_binding, find_parameter_binding, replace_llvm_operand } from "./core_scopes";
 
 // Helper to access a string array element.
 // The seed compiler (v0.1.1) has a bug where `arr[idx]` inside complex loops
 // compiles as substring() on the wrong local variable.  Extracting the access
 // into a tiny function produces correct array-element-load LLVM IR.
-fn get_string_at(arr: string[], idx: number) -> string {
-    return arr[idx];
-}
+fn get_string_at(arr: string[], idx: number) -> string { return arr[idx]; }
 
 fn lower_call_expression(target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics: string[] = [];
@@ -82,14 +49,23 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let mut trimmed_target = trim_text(target);
     if trimmed_target.length == 0 {
         diagnostics.push("llvm lowering: call target missing");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
 
     // Check if this is an enum variant constructor call (e.g., LiteralValue.Null())
     let dot_index = index_of(trimmed_target, ".");
     let trace_calls = fs.exists("build/sailfin/.trace_call_lowering");
     if trace_calls {
-        print.err("call_lowering: target='" + trimmed_target + "' dot_index=" + number_to_string(dot_index) + " enums=" + number_to_string(context.enums.length));
+        print.err("call_lowering: target='" + trimmed_target + "' dot_index="
+            + number_to_string(dot_index)
+            + " enums="
+            + number_to_string(context.enums.length));
     }
     if dot_index > 0 {
         let enum_name = trim_text(substring(trimmed_target, 0, dot_index));
@@ -98,10 +74,11 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         let enum_info = resolve_enum_info_for_literal(context, enum_name);
         if trace_calls {
             let mut found_text: string = "null";
-            if enum_info != null {
-                found_text = "found";
-            }
-            print.err("call_lowering: enum_name='" + enum_name + "' variant='" + variant_name + "' resolved=" + found_text);
+            if enum_info != null { found_text = "found"; }
+            print.err("call_lowering: enum_name='" + enum_name + "' variant='"
+                + variant_name
+                + "' resolved="
+                + found_text);
         }
         if enum_info != null {
             let mut fields: StructLiteralField[] = [];
@@ -117,13 +94,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 if _if54 {
                     let mut arg_index: number = 0;
                     loop {
-                        if arg_index >= arguments.length {
-                            break;
-                        }
+                        if arg_index >= arguments.length { break; }
                         let field_info = variant_info.fields[arg_index];
                         fields.push(StructLiteralField {
-                                name: field_info.name,
-                                value: arguments[arg_index]
+                            name: field_info.name, value: arguments[arg_index]
                         });
                         arg_index += 1;
                     }
@@ -174,9 +148,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     // doesn't detect it as a method call).
     if helper_descriptor == null {
         let fallback_helper = find_runtime_helper(trimmed_target);
-        if fallback_helper != null {
-            helper_descriptor = fallback_helper;
-        }
+        if fallback_helper != null { helper_descriptor = fallback_helper; }
     }
 
     // Re-derive helper_descriptor for concat after signature resolution
@@ -196,7 +168,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                         symbol: "",
                         return_type: receiver_type,
                         parameter_types: expected_params,
-                        effects: [],
+                        effects: []
                     };
                     function_entry = null;
                 }
@@ -208,12 +180,12 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     let mut operands: LLVMOperand[] = [];
     let mut index: number = 0;
     loop {
-        if index >= arguments.length {
-            break;
-        }
+        if index >= arguments.length { break; }
         let argument_text = trim_text(get_string_at(arguments, index));
         if argument_text.length == 0 {
-            diagnostics.push("llvm lowering: empty argument in call to `" + trimmed_target + "`");
+            diagnostics.push("llvm lowering: empty argument in call to `"
+                + trimmed_target
+                + "`");
         }
         let mut argument_expected_type: string = "";
         let parameter_index = index + injected_argument_count;
@@ -225,10 +197,12 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
-        if lowered.operand != null {
-            operands.push(lowered.operand);
-        } else {
-            diagnostics.push("llvm lowering: failed to lower argument " + number_to_string(index) + " for call to `" + trimmed_target + "`");
+        if lowered.operand != null { operands.push(lowered.operand); } else {
+            diagnostics.push("llvm lowering: failed to lower argument "
+                + number_to_string(index)
+                + " for call to `"
+                + trimmed_target
+                + "`");
         }
         index += 1;
     }
@@ -240,9 +214,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         combined_operands.push(operand_value);
         let mut operand_index: number = 0;
         loop {
-            if operand_index >= operands.length {
-                break;
-            }
+            if operand_index >= operands.length { break; }
             combined_operands.push(operands[operand_index]);
             operand_index += 1;
         }
@@ -251,8 +223,16 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
 
     let expected_operand_count = arguments.length + injected_argument_count;
     if operands.length != expected_operand_count {
-        diagnostics.push("llvm lowering: unable to emit call to `" + trimmed_target + "` due to argument errors");
-        return ExpressionResult { lines: current_lines, temp_index: current_temp, operand: null, diagnostics: diagnostics, string_constants: collected_string_constants };
+        diagnostics.push("llvm lowering: unable to emit call to `"
+            + trimmed_target
+            + "` due to argument errors");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     // Re-check concat element type from actual operands
@@ -271,7 +251,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                         symbol: "",
                         return_type: operands[0].llvm_type,
                         parameter_types: expected_params,
-                        effects: [],
+                        effects: []
                     };
                 }
             }
@@ -283,16 +263,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
         if operands.length < expected_params.length {
             let mut param_index: number = operands.length;
             loop {
-                if param_index >= expected_params.length {
-                    break;
-                }
-                if param_index >= function_entry.parameters.length {
-                    break;
-                }
+                if param_index >= expected_params.length { break; }
+                if param_index >= function_entry.parameters.length { break; }
                 let param = function_entry.parameters[param_index];
-                if param.default_value == null {
-                    break;
-                }
+                if param.default_value == null { break; }
                 let expected_type = expected_params[param_index];
                 let lowered_default = lower_expression(param.default_value, bindings, locals, current_temp, current_lines, functions, context, expected_type);
                 diagnostics = extend_string_array(diagnostics, lowered_default.diagnostics);
@@ -300,7 +274,11 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 current_lines = lowered_default.lines;
                 current_temp = lowered_default.temp_index;
                 if lowered_default.operand == null {
-                    diagnostics.push("llvm lowering: failed to lower default argument for parameter `" + param.name + "` in call to `" + trimmed_target + "`");
+                    diagnostics.push("llvm lowering: failed to lower default argument for parameter `"
+                        + param.name
+                        + "` in call to `"
+                        + trimmed_target
+                        + "`");
                     break;
                 }
                 operands.push(lowered_default.operand);
@@ -321,12 +299,24 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                             let stripped = strip_pointer_suffix(self_operand.llvm_type);
                             if stripped == expected_self_type {
                                 let load_name = format_temp_name(current_temp);
-                                current_lines.push("  " + load_name + " = load " + expected_self_type + ", " + expected_self_type + "* " + self_operand.value);
+                                current_lines.push("  " + load_name + " = load "
+                                    + expected_self_type
+                                    + ", "
+                                    + expected_self_type
+                                    + "* "
+                                    + self_operand.value);
                                 current_temp += 1;
-                                let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: load_name };
+                                let updated_operand = LLVMOperand {
+                                    llvm_type: expected_self_type,
+                                    value: load_name
+                                };
                                 operands = replace_llvm_operand(operands, 0, updated_operand);
                             } else {
-                                diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                                diagnostics.push("llvm lowering: method call expects `"
+                                    + expected_self_type
+                                    + "` but base `"
+                                    + self_operand.llvm_type
+                                    + "` is incompatible");
                             }
                         } else if ends_with_pointer_suffix(expected_self_type) {
                             let method_parse = parse_member_access(trimmed_target);
@@ -340,7 +330,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                     }
                                 }
                                 if _if62 {
-                                    let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: local_pointer.pointer };
+                                    let updated_operand = LLVMOperand {
+                                        llvm_type: expected_self_type,
+                                        value: local_pointer.pointer
+                                    };
                                     operands = replace_llvm_operand(operands, 0, updated_operand);
                                 } else {
                                     let parameter_pointer = find_parameter_binding(bindings, base_name);
@@ -351,7 +344,10 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                         }
                                     }
                                     if _if64 {
-                                        let updated_operand = LLVMOperand { llvm_type: expected_self_type, value: parameter_pointer.llvm_name };
+                                        let updated_operand = LLVMOperand {
+                                            llvm_type: expected_self_type,
+                                            value: parameter_pointer.llvm_name
+                                        };
                                         operands = replace_llvm_operand(operands, 0, updated_operand);
                                     } else {
                                         let mut _elif66: boolean = false;
@@ -363,7 +359,11 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                         if _elif66 {
                                             // avoid warning
                                         } else {
-                                            diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                                            diagnostics.push("llvm lowering: method call expects `"
+                                                + expected_self_type
+                                                + "` but base `"
+                                                + self_operand.llvm_type
+                                                + "` is incompatible");
                                         }
                                     }
                                 }
@@ -372,20 +372,30 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                                 let mut _if63: boolean = false;
                                 if self_operand.llvm_type == receiver_base {
                                     let mut _if65: boolean = false;
-                                    if starts_with(receiver_base, "%") { _if65 = true; }
-                                    if starts_with(receiver_base, "{") { _if65 = true; }
-                                    if _if65 {
-                                        _if63 = true;
+                                    if starts_with(receiver_base, "%") {
+                                        _if65 = true;
                                     }
+                                    if starts_with(receiver_base, "{") {
+                                        _if65 = true;
+                                    }
+                                    if _if65 { _if63 = true; }
                                 }
                                 if _if63 {
                                     // ok
                                 } else {
-                                    diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                                    diagnostics.push("llvm lowering: method call expects `"
+                                        + expected_self_type
+                                        + "` but base `"
+                                        + self_operand.llvm_type
+                                        + "` is incompatible");
                                 }
                             }
                         } else {
-                            diagnostics.push("llvm lowering: method call expects `" + expected_self_type + "` but base `" + self_operand.llvm_type + "` is incompatible");
+                            diagnostics.push("llvm lowering: method call expects `"
+                                + expected_self_type
+                                + "` but base `"
+                                + self_operand.llvm_type
+                                + "` is incompatible");
                         }
                     }
                 }
@@ -394,14 +404,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
     }
 
     // Phase 4: Coerce operands and emit the call (delegated to core_call_emission)
-    return coerce_and_emit_call(
-        trimmed_target, operands, expected_params, llvm_return,
-        is_trait_dispatch, is_array_concat, array_concat_element_type,
-        is_array_push, array_push_element_type,
-        method_operand, helper_descriptor, function_entry,
-        current_temp, current_lines, diagnostics, collected_string_constants,
-        bindings, locals, context
-    );
+    return coerce_and_emit_call(trimmed_target, operands, expected_params, llvm_return, is_trait_dispatch, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type, method_operand, helper_descriptor, function_entry, current_temp, current_lines, diagnostics, collected_string_constants, bindings, locals, context);
 }
 
 export { lower_call_expression };

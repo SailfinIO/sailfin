@@ -3,35 +3,24 @@
 // String array operations, file I/O helpers, and miscellaneous lowering
 // utilities.  Extracted from lowering_core.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
-
 import { substring } from "../../string_utils";
+import { LifetimeRegionMetadata, StringConstant } from "../types";
 import {
-    LifetimeRegionMetadata,
-    StringConstant,
-} from "../types";
-import {
+    index_of,
     number_to_string,
     starts_with,
-    trim_text,
-    index_of,
+    trim_text
 } from "../utils";
 
 // ── String array operations ──────────────────────────────────────────
-
 fn extend_string_lines(values: string[], extras: string[]) -> string[] {
     let mut out = values;
-    if out == null {
-        out = [];
-    }
+    if out == null { out = []; }
     let mut safe_extras = extras;
-    if safe_extras == null {
-        safe_extras = [];
-    }
+    if safe_extras == null { safe_extras = []; }
     let mut index: number = 0;
     loop {
-        if index >= safe_extras.length {
-            break;
-        }
+        if index >= safe_extras.length { break; }
         out.push(safe_extras[index]);
         index += 1;
     }
@@ -40,18 +29,12 @@ fn extend_string_lines(values: string[], extras: string[]) -> string[] {
 
 fn append_string_lines(values: string[], extras: string[]) -> string[] {
     let mut out = values;
-    if out == null {
-        out = [];
-    }
+    if out == null { out = []; }
     let mut safe_extras = extras;
-    if safe_extras == null {
-        safe_extras = [];
-    }
+    if safe_extras == null { safe_extras = []; }
     let mut index: number = 0;
     loop {
-        if index >= safe_extras.length {
-            break;
-        }
+        if index >= safe_extras.length { break; }
         out.push(safe_extras[index]);
         index += 1;
     }
@@ -60,37 +43,28 @@ fn append_string_lines(values: string[], extras: string[]) -> string[] {
 
 fn extend_string_lines_checked(values: string[], extras: string[], label: string) -> string[] {
     let mut safe_values = values;
-    if safe_values == null {
-        safe_values = [];
-    }
+    if safe_values == null { safe_values = []; }
     let mut safe_extras = extras;
-    if safe_extras == null {
-        safe_extras = [];
-    }
-    if safe_extras.length == 0 {
-        return safe_values;
-    }
+    if safe_extras == null { safe_extras = []; }
+    if safe_extras.length == 0 { return safe_values; }
     if safe_extras.length > 1000000 {
         let mut out = safe_values;
-        out.push("llvm lowering: skipped oversized " + label + " diagnostics (len=" + number_to_string(extras.length) + ")");
+        out.push("llvm lowering: skipped oversized " + label
+            + " diagnostics (len="
+            + number_to_string(extras.length)
+            + ")");
         return out;
     }
     return extend_string_lines(safe_values, safe_extras);
 }
 
 fn extend_lifetime_regions_checked(values: LifetimeRegionMetadata[], extras: LifetimeRegionMetadata[]) -> LifetimeRegionMetadata[] {
-    if extras.length == 0 {
-        return values;
-    }
-    if extras.length > 1000000 {
-        return values;
-    }
+    if extras.length == 0 { return values; }
+    if extras.length > 1000000 { return values; }
     let mut out = values;
     let mut index: number = 0;
     loop {
-        if index >= extras.length {
-            break;
-        }
+        if index >= extras.length { break; }
         out = out.push(extras[index]);
         index += 1;
     }
@@ -101,23 +75,16 @@ fn insert_string_at(values: string[], insert_index: number, value: string) -> st
     let mut out: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
-        if index == insert_index {
-            out.push(value);
-        }
+        if index >= values.length { break; }
+        if index == insert_index { out.push(value); }
         out.push(values[index]);
         index += 1;
     }
-    if insert_index >= values.length {
-        out.push(value);
-    }
+    if insert_index >= values.length { out.push(value); }
     return out;
 }
 
 // ── File I/O helpers ─────────────────────────────────────────────────
-
 fn write_llvm_lines_chunked(path: string, lines: string[]) -> boolean ![io] {
     let mut _if257: boolean = false;
     if lines == null { _if257 = true; }
@@ -149,16 +116,12 @@ fn _write_llvm_lines_chunked_unused(path: string, lines: string[]) -> boolean ![
 
     let mut index2: number = 0;
     loop {
-        if index2 >= lines.length {
-            break;
-        }
+        if index2 >= lines.length { break; }
         let line2 = lines[index2] + "\n";
         let next_len = buffered + line2.length;
         if next_len > chunk_limit {
             if buffer.length > 0 {
-                if wrote {
-                    fs.appendFile(path, buffer);
-                } else {
+                if wrote { fs.appendFile(path, buffer); } else {
                     fs.writeFile(path, buffer);
                     wrote = true;
                 }
@@ -172,9 +135,7 @@ fn _write_llvm_lines_chunked_unused(path: string, lines: string[]) -> boolean ![
     }
 
     if buffer.length > 0 {
-        if wrote {
-            fs.appendFile(path, buffer);
-        } else {
+        if wrote { fs.appendFile(path, buffer); } else {
             fs.writeFile(path, buffer);
         }
     }
@@ -182,16 +143,11 @@ fn _write_llvm_lines_chunked_unused(path: string, lines: string[]) -> boolean ![
 }
 
 // ── Module helpers ───────────────────────────────────────────────────
-
 fn module_source_filename(module_name: string) -> string {
-    if module_name.length == 0 {
-        return "sailfin";
-    }
+    if module_name.length == 0 { return "sailfin"; }
     if module_name.length >= 4 {
         let suffix = substring(module_name, module_name.length - 4, module_name.length);
-        if suffix == ".sfn" {
-            return module_name;
-        }
+        if suffix == ".sfn" { return module_name; }
     }
     return module_name + ".sfn";
 }
@@ -201,13 +157,9 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
     let mut has_round_decl: boolean = false;
     let mut index: number = 0;
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let line = lines[index];
-        if index_of(line, "call double @round(") >= 0 {
-            uses_round = true;
-        }
+        if index_of(line, "call double @round(") >= 0 { uses_round = true; }
         let trimmed = trim_text(line);
         if starts_with(trimmed, "declare double @round(double)") {
             has_round_decl = true;
@@ -218,14 +170,10 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
     let mut _if258: boolean = false;
     if !uses_round { _if258 = true; }
     if has_round_decl { _if258 = true; }
-    if _if258 {
-        return lines;
-    }
+    if _if258 { return lines; }
 
     let mut out = lines;
     out.push("");
     out.push("declare double @round(double)");
     return out;
-}
-
-// make_native_module_for_emit lives in lowering_core.sfn (used by compile_native_text_to_llvm_file)
+}  // make_native_module_for_emit lives in lowering_core.sfn (used by compile_native_text_to_llvm_file)

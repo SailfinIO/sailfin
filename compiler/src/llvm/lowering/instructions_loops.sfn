@@ -1,102 +1,55 @@
 // compiler/src/llvm/lowering/instructions_loops.sfn
 //
 // Control flow handler: loop instruction lowering (infinite loops with break/continue).
-
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { substring, char_code, grapheme_at } from "../../string_utils";
-
+import { char_code, grapheme_at, substring } from "../../string_utils";
+import { lower_expression } from "../expression_lowering/native/core";
+import { find_local_binding } from "../expressions_bindings";
+import { format_temp_name } from "../expressions_helpers";
+import { make_child_scope_id } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
-    TypeContext,
-    LocalBinding,
-    ParameterBinding,
-    LLVMOperand,
     BlockLoweringResult,
-    LoopContext,
+    LLVMOperand,
     LifetimeRegionMetadata,
+    LocalBinding,
     LocalMutation,
-    StringConstant,
+    LoopContext,
     LoopStructure,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
 } from "../types";
-
-import {
-    trim_text,
-    extend_string_array,
-    number_to_string,
-} from "../utils";
-
-import {
-    empty_string_constant_set,
-    merge_string_constants,
-} from "../strings";
-
-import {
-    find_local_binding,
-} from "../expressions_bindings";
-
-import {
-    format_temp_name,
-} from "../expressions_helpers";
-
-import {
-    lower_expression,
-} from "../expression_lowering/native/core";
-
-import {
-    make_child_scope_id,
-} from "../lifetime";
-
-import {
-    find_mutation_for_name,
-    collect_mutation_names,
-} from "./phi";
-
-import {
-    lower_instruction_range,
-} from "./instructions";
-
-import {
-    extend_lifetime_regions,
-    extend_mutations,
-    _parse_int_from_string,
-} from "./instructions_helpers";
-
+import { extend_string_array, number_to_string, trim_text } from "../utils";
+import { lower_instruction_range } from "./instructions";
 import {
     allocate_block_label,
     lower_condition_to_i1,
-    sanitize_if_condition_text,
+    sanitize_if_condition_text
 } from "./instructions_condition";
+import { _parse_int_from_string, extend_lifetime_regions, extend_mutations } from "./instructions_helpers";
+import { get_instruction_condition, get_instruction_tag } from "./lowering_native_helpers";
+import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
-import {
-    get_instruction_tag,
-    get_instruction_condition,
-} from "./lowering_native_helpers";
-
-fn collect_loop_structure(
-    instructions: NativeInstruction[],
-    start_index: number,
-    end: number,
-    function_name: string
-) -> LoopStructure {
+fn collect_loop_structure(instructions: NativeInstruction[], start_index: number, end: number, function_name: string) -> LoopStructure {
     let mut diagnostics: string[] = [];
     let body_start = start_index + 1;
     let mut body_end = end;
     let mut depth: number = 0;
     let mut index: number = body_start;
     let mut limit: number = end;
-    if limit > instructions.length {
-        limit = instructions.length;
-    }
+    if limit > instructions.length { limit = instructions.length; }
     loop {
         if index >= limit {
-            if limit <= 0 {
-                limit = 0;
-            }
-            diagnostics.push("llvm lowering: unterminated `.loop` in `" + function_name + "`");
+            if limit <= 0 { limit = 0; }
+            diagnostics.push("llvm lowering: unterminated `.loop` in `"
+                + function_name
+                + "`");
             return LoopStructure {
                 body_start: body_start,
                 body_end: limit,
                 next_index: limit - 1,
-                diagnostics: diagnostics,
+                diagnostics: diagnostics
             };
         }
         let _loop_tag = get_instruction_tag(instructions, index);
@@ -118,12 +71,10 @@ fn collect_loop_structure(
                     body_start: body_start,
                     body_end: body_end,
                     next_index: index,
-                    diagnostics: diagnostics,
+                    diagnostics: diagnostics
                 };
             }
-            if depth > 0 {
-                depth -= 1;
-            }
+            if depth > 0 { depth -= 1; }
             index += 1;
             continue;
         }
@@ -134,7 +85,7 @@ fn collect_loop_structure(
         body_start: body_start,
         body_end: body_end,
         next_index: limit,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -160,26 +111,7 @@ fn last_loop_context(values: LoopContext[]) -> LoopContext {
     return values[index];
 }
 
-fn lower_loop_instruction(
-    function: NativeFunction,
-    start_index: number,
-    llvm_return: string,
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    allocas: string[],
-    lines: string[],
-    temp_index: number,
-    block_counter: number,
-    next_local_id: number,
-    next_region_id: number,
-    functions: NativeFunction[],
-    loop_stack: LoopContext[],
-    end: number,
-    context: TypeContext,
-    scope_id: string,
-    scope_depth: number,
-    current_label: string
-) -> BlockLoweringResult {
+fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, block_counter: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], loop_stack: LoopContext[], end: number, context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -195,11 +127,18 @@ fn lower_loop_instruction(
 
     let debug_loop = fs.exists("build/sailfin/.trace_lowering");
     if debug_loop {
-        print.err("emit-llvm: lower_loop start fn=" + function.name + " start_index=" + number_to_string(start_index) + " end=" + number_to_string(end));
+        print.err("emit-llvm: lower_loop start fn=" + function.name
+            + " start_index="
+            + number_to_string(start_index)
+            + " end="
+            + number_to_string(end));
     }
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     if debug_loop {
-        print.err("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+        print.err("emit-llvm: lower_loop after_collect body_start="
+            + number_to_string(structure.body_start)
+            + " body_end="
+            + number_to_string(structure.body_end));
     }
 
     // Detect exit-condition-at-top pattern: loop { if COND { break; } ... }
@@ -213,15 +152,18 @@ fn lower_loop_instruction(
     // first instruction. If it's non-empty, we have the pattern.
     let mut loop_exit_condition: string = "";
     if structure.body_start + 2 <= structure.body_end {
-        let second_body_tag = get_instruction_tag(function.instructions, structure.body_start + 1);
+        let second_body_tag = get_instruction_tag(function.instructions, structure.body_start
+            + 1);
         if second_body_tag == 10 {
-            let third_body_tag = get_instruction_tag(function.instructions, structure.body_start + 2);
+            let third_body_tag = get_instruction_tag(function.instructions, structure.body_start
+                + 2);
             if third_body_tag == 5 {
                 let raw_exit_cond = trim_text(get_instruction_condition(function.instructions, structure.body_start));
                 if raw_exit_cond.length > 0 {
                     loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
                     if debug_loop {
-                        print.err("emit-llvm: lower_loop detected exit condition: " + loop_exit_condition);
+                        print.err("emit-llvm: lower_loop detected exit condition: "
+                            + loop_exit_condition);
                     }
                 }
             }
@@ -239,13 +181,15 @@ fn lower_loop_instruction(
     let mut preloaded_locals: string[] = [];
     let mut preload_index: number = 0;
     loop {
-        if preload_index >= current_locals.length {
-            break;
-        }
+        if preload_index >= current_locals.length { break; }
         let local = current_locals[preload_index];
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
-        let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type
+            + ", "
+            + local.llvm_type
+            + "* "
+            + local.pointer;
         current_lines.push(preload_line);
         preloaded_locals.push(preload_temp);
         preload_index += 1;
@@ -273,7 +217,10 @@ fn lower_loop_instruction(
     current_lines.push(header_label + ":");
 
     // Update loop context: break goes to exit, continue goes to latch
-    let loop_context = LoopContext { break_label: exit_label, continue_label: latch_label };
+    let loop_context = LoopContext {
+        break_label: exit_label,
+        continue_label: latch_label
+    };
     let stacked = append_loop_context(loop_stack, loop_context);
 
     let base_locals = current_locals;
@@ -292,7 +239,11 @@ fn lower_loop_instruction(
     // Lower the body to discover mutations
     let body_scope_id = make_child_scope_id(scope_id, body_label);
     if debug_loop {
-        print.err("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(body_start_effective) + " body_end=" + number_to_string(structure.body_end));
+        print.err("emit-llvm: lower_loop pre_body_lir fn=" + function.name
+            + " body_start="
+            + number_to_string(body_start_effective)
+            + " body_end="
+            + number_to_string(structure.body_end));
     }
 
     // Lower the body, resuming after premature block terminators.
@@ -320,26 +271,8 @@ fn lower_loop_instruction(
         if _body_cursor >= structure.body_end { break; }
         if _body_terminated { break; }
         if _body_resume_iters > 20 { break; }
-        let _seg_result = lower_instruction_range(
-            function,
-            _body_cursor,
-            structure.body_end,
-            llvm_return,
-            _body_bindings,
-            _body_locals,
-            _body_allocas,
-            [],
-            _body_temp,
-            _body_blkctr,
-            _body_nextloc,
-            _body_nextreg,
-            functions,
-            stacked,
-            context,
-            body_scope_id,
-            scope_depth + 1,
-            _body_active_label
-        );
+        let _seg_result = lower_instruction_range(function, _body_cursor, structure.body_end, llvm_return, _body_bindings, _body_locals, _body_allocas, [], _body_temp, _body_blkctr, _body_nextloc, _body_nextreg, functions, stacked, context, body_scope_id, scope_depth
+            + 1, _body_active_label);
         // Merge segment results
         _body_lines = extend_string_array(_body_lines, _seg_result.lines);
         _body_allocas = _seg_result.allocas;
@@ -385,9 +318,7 @@ fn lower_loop_instruction(
                         }
                         if _skip_i < structure.body_end {
                             _body_cursor = _skip_i + 1;
-                        } else {
-                            _body_cursor = structure.body_end;
-                        }
+                        } else { _body_cursor = structure.body_end; }
                     } else {
                         // Other terminator (EndLoop, EndMatch, EndFor) — stop
                         _body_cursor = structure.body_end;
@@ -413,7 +344,7 @@ fn lower_loop_instruction(
         next_lifetime_region_id: _body_nextreg,
         next_index: _body_cursor,
         mutations: _body_mutations,
-        string_constants: _body_string_constants,
+        string_constants: _body_string_constants
     };
     // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
     // Use _read_ipc_int_min to prevent the counter from going backwards.
@@ -422,7 +353,9 @@ fn lower_loop_instruction(
     let _br_lp_nextloc = _body_nextloc;
     let _br_lp_nextreg = _body_nextreg;
     if debug_loop {
-        print.err("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
+        print.err("emit-llvm: lower_loop post_body_lir fn=" + function.name
+            + " body_lines="
+            + number_to_string(body_result.lines.length));
     }
 
     let mut _ci7: number = 0;
@@ -449,43 +382,27 @@ fn lower_loop_instruction(
     let mut mutated_names: string[] = [];
     let mut mut_idx: number = 0;
     loop {
-        if mut_idx >= body_result.mutations.length {
-            break;
-        }
+        if mut_idx >= body_result.mutations.length { break; }
         let mutation = body_result.mutations[mut_idx];
         let mut already_added: boolean = false;
         let mut check_idx: number = 0;
         loop {
-            if check_idx >= mutated_names.length {
-                break;
-            }
+            if check_idx >= mutated_names.length { break; }
             if mutated_names[check_idx] == mutation.name {
                 already_added = true;
                 break;
             }
             check_idx += 1;
         }
-        if !already_added {
-            mutated_names.push(mutation.name);
-        }
+        if !already_added { mutated_names.push(mutation.name); }
         mut_idx += 1;
     }
 
     // Note: We'll generate phi nodes after we know the latch load values
-
     // Emit header branch: conditional if we detected an exit condition at the
     // top of the loop body, otherwise fall back to unconditional (original behavior).
     if loop_exit_condition.length > 0 {
-        let header_cond = lower_condition_to_i1(
-            function.name,
-            loop_exit_condition,
-            bindings,
-            current_locals,
-            current_temp,
-            current_lines,
-            functions,
-            context
-        );
+        let header_cond = lower_condition_to_i1(function.name, loop_exit_condition, bindings, current_locals, current_temp, current_lines, functions, context);
         current_lines = header_cond.lines;
         current_temp = header_cond.temp_index;
         collected_string_constants = merge_string_constants(collected_string_constants, header_cond.string_constants);
@@ -497,7 +414,11 @@ fn lower_loop_instruction(
         }
 
         if header_cond.operand != null {
-            current_lines.push("  br i1 " + header_cond.operand.value + ", label %" + exit_label + ", label %" + body_label);
+            current_lines.push("  br i1 " + header_cond.operand.value
+                + ", label %"
+                + exit_label
+                + ", label %"
+                + body_label);
         } else {
             // Condition lowering failed — fall back to unconditional
             current_lines.push("  br label %" + body_label);
@@ -523,21 +444,21 @@ fn lower_loop_instruction(
     let mut latch_loads: string[] = [];
     let mut load_idx: number = 0;
     loop {
-        if load_idx >= mutated_names.length {
-            break;
-        }
+        if load_idx >= mutated_names.length { break; }
         let name = mutated_names[load_idx];
         let local = find_local_binding(base_locals, name);
 
         if local != null {
             let load_temp = format_temp_name(current_temp);
             current_temp += 1;
-            let load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+            let load_line = "  " + load_temp + " = load " + local.llvm_type
+                + ", "
+                + local.llvm_type
+                + "* "
+                + local.pointer;
             current_lines.push(load_line);
             latch_loads.push(load_temp);
-        } else {
-            latch_loads.push("");
-        }
+        } else { latch_loads.push(""); }
 
         load_idx += 1;
     }
@@ -547,9 +468,7 @@ fn lower_loop_instruction(
     // Generate phi nodes using the latch load values.
     let mut name_idx: number = 0;
     loop {
-        if name_idx >= mutated_names.length {
-            break;
-        }
+        if name_idx >= mutated_names.length { break; }
         let name = mutated_names[name_idx];
         let local = find_local_binding(base_locals, name);
 
@@ -562,9 +481,7 @@ fn lower_loop_instruction(
                     let mut preload_value: string = "";
                     let mut local_idx: number = 0;
                     loop {
-                        if local_idx >= base_locals.length {
-                            break;
-                        }
+                        if local_idx >= base_locals.length { break; }
                         if base_locals[local_idx].name == name {
                             if local_idx < preloaded_locals.length {
                                 preload_value = preloaded_locals[local_idx];
@@ -578,10 +495,24 @@ fn lower_loop_instruction(
                         let phi_temp = format_temp_name(current_temp);
                         current_temp += 1;
 
-                        let phi_line = "  " + phi_temp + " = phi " + local.llvm_type + " [ " + preload_value + ", %" + current_label + " ], [ " + latch_value + ", %" + latch_label + " ]";
+                        let phi_line = "  " + phi_temp + " = phi " + local.llvm_type
+                            + " [ "
+                            + preload_value
+                            + ", %"
+                            + current_label
+                            + " ], [ "
+                            + latch_value
+                            + ", %"
+                            + latch_label
+                            + " ]";
                         header_phis.push(phi_line);
 
-                        let store_line = "  store " + local.llvm_type + " " + phi_temp + ", " + local.llvm_type + "* " + local.pointer;
+                        let store_line = "  store " + local.llvm_type + " "
+                            + phi_temp
+                            + ", "
+                            + local.llvm_type
+                            + "* "
+                            + local.pointer;
                         phi_stores.push(store_line);
                     }
                 }
@@ -597,9 +528,7 @@ fn lower_loop_instruction(
     let mut line_idx: number = 0;
     let mut found_header: boolean = false;
     loop {
-        if line_idx >= current_lines.length {
-            break;
-        }
+        if line_idx >= current_lines.length { break; }
         let line = current_lines[line_idx];
         final_lines.push(line);
 
@@ -625,28 +554,26 @@ fn lower_loop_instruction(
     let mut exit_loads: string[] = [];
     let mut exit_load_idx: number = 0;
     loop {
-        if exit_load_idx >= mutated_names.length {
-            break;
-        }
+        if exit_load_idx >= mutated_names.length { break; }
         let name = mutated_names[exit_load_idx];
         let local = find_local_binding(base_locals, name);
         if local != null {
             let exit_load_temp = format_temp_name(current_temp);
             current_temp += 1;
-            current_lines.push("  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
+            current_lines.push("  " + exit_load_temp + " = load " + local.llvm_type
+                + ", "
+                + local.llvm_type
+                + "* "
+                + local.pointer);
             exit_loads.push(exit_load_temp);
-        } else {
-            exit_loads.push("");
-        }
+        } else { exit_loads.push(""); }
         exit_load_idx += 1;
     }
 
     let mut exit_mutations: LocalMutation[] = [];
     let mut name_idx: number = 0;
     loop {
-        if name_idx >= mutated_names.length {
-            break;
-        }
+        if name_idx >= mutated_names.length { break; }
         let name = mutated_names[name_idx];
         let mut exit_value: string = "";
         if name_idx < exit_loads.length {
@@ -662,19 +589,15 @@ fn lower_loop_instruction(
             }
             if llvm_type.length == 0 {
                 let local = find_local_binding(base_locals, name);
-                if local != null {
-                    llvm_type = local.llvm_type;
-                }
+                if local != null { llvm_type = local.llvm_type; }
             }
-            if llvm_type.length == 0 {
-                llvm_type = "double";
-            }
+            if llvm_type.length == 0 { llvm_type = "double"; }
             let exit_mutation = LocalMutation {
                 name: name,
                 llvm_type: llvm_type,
                 value_name: exit_value,
                 span: original_span,
-                originating_label: exit_label,
+                originating_label: exit_label
             };
             exit_mutations.push(exit_mutation);
         }
@@ -687,26 +610,20 @@ fn lower_loop_instruction(
     let mut body_scoped_mutations: LocalMutation[] = [];
     let mut body_mut_idx: number = 0;
     loop {
-        if body_mut_idx >= body_result.mutations.length {
-            break;
-        }
+        if body_mut_idx >= body_result.mutations.length { break; }
         let mutation = body_result.mutations[body_mut_idx];
         if find_local_binding(base_locals, mutation.name) == null {
             let mut already_added: boolean = false;
             let mut seen_idx: number = 0;
             loop {
-                if seen_idx >= body_scoped_mutations.length {
-                    break;
-                }
+                if seen_idx >= body_scoped_mutations.length { break; }
                 if body_scoped_mutations[seen_idx].name == mutation.name {
                     already_added = true;
                     break;
                 }
                 seen_idx += 1;
             }
-            if !already_added {
-                body_scoped_mutations.push(mutation);
-            }
+            if !already_added { body_scoped_mutations.push(mutation); }
         }
         body_mut_idx += 1;
     }
@@ -727,6 +644,6 @@ fn lower_loop_instruction(
         next_lifetime_region_id: current_next_region,
         next_index: structure.next_index + 1,
         mutations: collected_mutations,
-        string_constants: collected_string_constants,
+        string_constants: collected_string_constants
     };
 }

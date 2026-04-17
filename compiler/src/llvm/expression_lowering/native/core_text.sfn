@@ -6,46 +6,15 @@
 // pipeline: `number_to_string`, `trim_text`, `matches_case_insensitive`,
 // `sanitize_symbol`, character classification, and LLVM type string inspection
 // (e.g., `is_union_llvm_type`, `parse_union_payload_types`).
-
-import { substring, char_code, char_at } from "../../../string_utils";
-
-import {
-    InterpolatedTemplateParse,
-} from "../../types";
-
-import {
-    starts_with,
-    is_identifier_start_char,
-    is_identifier_part_char,
-} from "../../utils";
-
-import {
-    split_array_elements,
-} from "../splitting";
+import { char_at, char_code, substring } from "../../../string_utils";
+import { InterpolatedTemplateParse } from "../../types";
+import { is_identifier_part_char, is_identifier_start_char, starts_with } from "../../utils";
+import { split_array_elements } from "../splitting";
 
 fn number_to_string(value: number) -> string {
-    if value == 0 {
-        return "0";
-    }
+    if value == 0 { return "0"; }
     let digits = "0123456789";
-    let powers: number[] = [
-        1000000000000000,
-        100000000000000,
-        10000000000000,
-        1000000000000,
-        100000000000,
-        10000000000,
-        1000000000,
-        100000000,
-        10000000,
-        1000000,
-        100000,
-        10000,
-        1000,
-        100,
-        10,
-        1
-    ];
+    let powers: number[] = [1000000000000000, 100000000000000, 10000000000000, 1000000000000, 100000000000, 10000000000, 1000000000, 100000000, 10000000, 1000000, 100000, 10000, 1000, 100, 10, 1];
     let mut remaining: number = value;
     let mut is_negative: boolean = false;
     if remaining < 0 {
@@ -56,15 +25,11 @@ fn number_to_string(value: number) -> string {
     let mut index: number = 0;
     let mut started: boolean = false;
     loop {
-        if index >= powers.length {
-            break;
-        }
+        if index >= powers.length { break; }
         let power = powers[index];
         let mut count: number = 0;
         loop {
-            if remaining < power {
-                break;
-            }
+            if remaining < power { break; }
             remaining -= power;
             count += 1;
         }
@@ -78,12 +43,8 @@ fn number_to_string(value: number) -> string {
         }
         index += 1;
     }
-    if output.length == 0 {
-        output = "0";
-    }
-    if is_negative {
-        return "-" + output;
-    }
+    if output.length == 0 { output = "0"; }
+    if is_negative { return "-" + output; }
     return output;
 }
 
@@ -100,21 +61,15 @@ fn lower_char_code(code: number) -> number {
 }
 
 fn matches_case_insensitive(value: string, expected: string) -> boolean {
-    if value.length != expected.length {
-        return false;
-    }
+    if value.length != expected.length { return false; }
     let mut index: number = 0;
     loop {
-        if index >= value.length {
-            break;
-        }
+        if index >= value.length { break; }
         let value_ch = substring(value, index, index + 1);
         let expected_ch = substring(expected, index, index + 1);
         let value_code = lower_char_code(char_code(value_ch));
         let expected_code = lower_char_code(char_code(expected_ch));
-        if value_code != expected_code {
-            return false;
-        }
+        if value_code != expected_code { return false; }
         index += 1;
     }
     return true;
@@ -124,9 +79,7 @@ fn trim_text(value: string) -> string {
     let mut start: number = 0;
     let mut end: number = value.length;
     loop {
-        if start >= end {
-            break;
-        }
+        if start >= end { break; }
         let ch = char_at(value, start);
         if is_trim_char(ch) {
             start += 1;
@@ -135,9 +88,7 @@ fn trim_text(value: string) -> string {
         break;
     }
     loop {
-        if end <= start {
-            break;
-        }
+        if end <= start { break; }
         let ch = char_at(value, end - 1);
         if is_trim_char(ch) {
             end -= 1;
@@ -146,9 +97,7 @@ fn trim_text(value: string) -> string {
         break;
     }
     if start == 0 {
-        if end == value.length {
-            return value;
-        }
+        if end == value.length { return value; }
     }
     return substring(value, start, end);
 }
@@ -164,42 +113,30 @@ fn is_trim_char(ch: string) -> boolean {
 }
 
 fn index_of(value: string, target: string) -> number {
-    if target.length == 0 {
-        return 0;
-    }
+    if target.length == 0 { return 0; }
     // Use substring + == instead of char_code_at_text comparisons.
     // char_code_at_text is miscompiled by older seeds, but substring
     // (backed by the C runtime grapheme_at) and == both work correctly.
     let _search_limit = value.length - target.length;
     let mut index: number = 0;
     loop {
-        if index > _search_limit {
-            break;
-        }
+        if index > _search_limit { break; }
         let candidate = substring(value, index, index + target.length);
-        if candidate == target {
-            return index;
-        }
+        if candidate == target { return index; }
         index += 1;
     }
     return -1;
 }
 
 fn find_last_index_of_char(value: string, target: string) -> number {
-    if target.length != 1 {
-        return -1;
-    }
+    if target.length != 1 { return -1; }
     // Use substring + == instead of char_code_at_text.
     let mut index: number = value.length;
     loop {
-        if index <= 0 {
-            break;
-        }
+        if index <= 0 { break; }
         index -= 1;
         let ch = substring(value, index, index + 1);
-        if ch == target {
-            return index;
-        }
+        if ch == target { return index; }
     }
     return -1;
 }
@@ -212,40 +149,28 @@ fn append_string(values: string[], value: string) -> string[] {
 fn string_array_contains(values: string[], target: string) -> boolean {
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
-        if values[index] == target {
-            return true;
-        }
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
         index += 1;
     }
     return false;
 }
 
 fn join_with_separator(values: string[], separator: string) -> string {
-    if values.length == 0 {
-        return "";
-    }
-    if values.length == 1 {
-        return values[0];
-    }
+    if values.length == 0 { return ""; }
+    if values.length == 1 { return values[0]; }
 
     // Balanced join to avoid repeatedly concatenating an ever-growing prefix.
     // This keeps intermediate strings smaller and prevents runtime corruption
     // observed in large LLVM IR modules (notably the test harness build).
     let mut parts: string[] = values;
     loop {
-        if parts.length <= 1 {
-            break;
-        }
+        if parts.length <= 1 { break; }
 
         let mut next: string[] = [];
         let mut index: number = 0;
         loop {
-            if index >= parts.length {
-                break;
-            }
+            if index >= parts.length { break; }
             let _ct_next = index + 1;
             if _ct_next < parts.length {
                 let combined = parts[index] + separator + parts[_ct_next];
@@ -263,23 +188,15 @@ fn join_with_separator(values: string[], separator: string) -> string {
 }
 
 fn find_substring_from(value: string, target: string, start: number) -> number {
-    if target.length == 0 {
-        return start;
-    }
+    if target.length == 0 { return start; }
     let mut index: number = start;
-    if index < 0 {
-        index = 0;
-    }
+    if index < 0 { index = 0; }
     // Use substring + == instead of char_code_at_text comparisons.
     let _search_limit = value.length - target.length;
     loop {
-        if index > _search_limit {
-            break;
-        }
+        if index > _search_limit { break; }
         let candidate = substring(value, index, index + target.length);
-        if candidate == target {
-            return index;
-        }
+        if candidate == target { return index; }
         index += 1;
     }
     return -1;
@@ -287,12 +204,8 @@ fn find_substring_from(value: string, target: string, start: number) -> number {
 
 fn is_union_llvm_type(llvm_type: string) -> boolean {
     let trimmed = trim_text(llvm_type);
-    if !starts_with(trimmed, "{") {
-        return false;
-    }
-    if find_substring_from(trimmed, "i32", 0) < 0 {
-        return false;
-    }
+    if !starts_with(trimmed, "{") { return false; }
+    if find_substring_from(trimmed, "i32", 0) < 0 { return false; }
     // Heuristic: our union layout always starts with an i32 tag.
     // (Arrays are "{ T*, i64 }*" and won't match.)
     return starts_with(trim_text(trimmed), "{ i32,");
@@ -300,22 +213,16 @@ fn is_union_llvm_type(llvm_type: string) -> boolean {
 
 fn parse_union_payload_types(union_llvm_type: string) -> string[] {
     let trimmed = trim_text(union_llvm_type);
-    if !is_union_llvm_type(trimmed) {
-        return [];
-    }
+    if !is_union_llvm_type(trimmed) { return []; }
     // Remove outer braces.
     let inner = trim_text(substring(trimmed, 1, trimmed.length - 1));
     let fields = split_array_elements(inner);
     // Expect first entry to be i32 tag.
-    if fields.length < 2 {
-        return [];
-    }
+    if fields.length < 2 { return []; }
     let mut result: string[] = [];
     let mut index: number = 1;
     loop {
-        if index >= fields.length {
-            break;
-        }
+        if index >= fields.length { break; }
         result.push(trim_text(fields[index]));
         index += 1;
     }
@@ -324,22 +231,14 @@ fn parse_union_payload_types(union_llvm_type: string) -> string[] {
 
 fn extract_simple_identifier(text: string) -> string {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return "";
-    }
+    if trimmed.length == 0 { return ""; }
     let first = substring(trimmed, 0, 1);
-    if !is_identifier_start_char(first) {
-        return "";
-    }
+    if !is_identifier_start_char(first) { return ""; }
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
-        if !is_identifier_part_char(ch) {
-            return "";
-        }
+        if !is_identifier_part_char(ch) { return ""; }
         index += 1;
     }
     return trimmed;
@@ -347,20 +246,14 @@ fn extract_simple_identifier(text: string) -> string {
 
 fn is_boolean_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if matches_case_insensitive(trimmed, "true") {
-        return true;
-    }
-    if matches_case_insensitive(trimmed, "false") {
-        return true;
-    }
+    if matches_case_insensitive(trimmed, "true") { return true; }
+    if matches_case_insensitive(trimmed, "false") { return true; }
     return false;
 }
 
 fn is_null_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if matches_case_insensitive(trimmed, "null") {
-        return true;
-    }
+    if matches_case_insensitive(trimmed, "null") { return true; }
     return false;
 }
 
@@ -370,9 +263,7 @@ fn is_digit_char(ch: string) -> boolean {
     let nine = char_code("9");
     let mut _ret125: boolean = false;
     if code >= zero {
-        if code <= nine {
-            _ret125 = true;
-        }
+        if code <= nine { _ret125 = true; }
     }
     return _ret125;
 }
@@ -383,21 +274,15 @@ fn char_code_at_text(text: string, index: number) -> number {
 
 fn is_integer_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     let mut index: number = 0;
     if substring(trimmed, 0, 1) == "-" {
-        if trimmed.length == 1 {
-            return false;
-        }
+        if trimmed.length == 1 { return false; }
         index = 1;
     }
     let mut has_digit: boolean = false;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         let mut _if126: boolean = false;
         if ch == "0" { _if126 = true; }
@@ -425,19 +310,13 @@ fn is_number_literal(text: string) -> boolean {
     let mut has_digit: boolean = false;
     let mut has_decimal: boolean = false;
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     if substring(trimmed, 0, 1) == "-" {
-        if trimmed.length == 1 {
-            return false;
-        }
+        if trimmed.length == 1 { return false; }
         index = 1;
     }
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         let mut _if127: boolean = false;
         if ch == "0" { _if127 = true; }
@@ -456,9 +335,7 @@ fn is_number_literal(text: string) -> boolean {
             continue;
         }
         if ch == "." {
-            if has_decimal {
-                return false;
-            }
+            if has_decimal { return false; }
             has_decimal = true;
             index += 1;
             continue;
@@ -470,20 +347,14 @@ fn is_number_literal(text: string) -> boolean {
 
 fn normalise_number_literal(text: string) -> string {
     let trimmed = trim_text(text);
-    if index_of(trimmed, ".") >= 0 {
-        return trimmed;
-    }
+    if index_of(trimmed, ".") >= 0 { return trimmed; }
     return trimmed + ".0";
 }
 
 fn is_string_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if trimmed.length < 2 {
-        return false;
-    }
-    if substring(trimmed, 0, 1) != "\"" {
-        return false;
-    }
+    if trimmed.length < 2 { return false; }
+    if substring(trimmed, 0, 1) != "\"" { return false; }
     if substring(trimmed, trimmed.length - 1, trimmed.length) != "\"" {
         return false;
     }
@@ -493,9 +364,7 @@ fn is_string_literal(text: string) -> boolean {
     let mut escape: boolean = false;
     let mut index: number = 1;
     loop {
-        if index >= trimmed.length - 1 {
-            break;
-        }
+        if index >= trimmed.length - 1 { break; }
         let ch = char_at(trimmed, index);
         if escape {
             escape = false;
@@ -507,35 +376,25 @@ fn is_string_literal(text: string) -> boolean {
             index += 1;
             continue;
         }
-        if ch == "\"" {
-            return false;
-        }
+        if ch == "\"" { return false; }
         index += 1;
     }
     // A trailing backslash would escape the closing quote, so reject.
-    if escape {
-        return false;
-    }
+    if escape { return false; }
     return true;
 }
 
 fn is_character_literal(text: string) -> boolean {
     // Check if this is a single-character string literal like "a", "t", "\n"
-    if text.length < 2 {
-        return false;
-    }
+    if text.length < 2 { return false; }
     let mut _if128: boolean = false;
     if substring(text, 0, 1) != "\"" { _if128 = true; }
     if substring(text, text.length - 1, text.length) != "\"" { _if128 = true; }
-    if _if128 {
-        return false;
-    }
+    if _if128 { return false; }
     let inner = substring(text, 1, text.length - 1);
     // Handle escape sequences
     if inner.length == 2 {
-        if substring(inner, 0, 1) == "\\" {
-            return true;
-        }
+        if substring(inner, 0, 1) == "\\" { return true; }
     }
     // Single character
     return inner.length == 1;
@@ -543,17 +402,13 @@ fn is_character_literal(text: string) -> boolean {
 
 fn get_character_literal_value(text: string) -> number {
     let inner = substring(text, 1, text.length - 1);
-    if inner.length == 0 {
-        return 0;
-    }
+    if inner.length == 0 { return 0; }
     // Handle escape sequences
     if inner.length == 2 {
         if substring(inner, 0, 1) == "\\" {
             let escape = char_at(inner, 1);
             let escape_code = char_code(escape);
-            if escape_code == char_code("n") {
-                return char_code("\n");
-            } else if escape_code == char_code("r") {
+            if escape_code == char_code("n") { return char_code("\n"); } else if escape_code == char_code("r") {
                 return char_code("\r");
             } else if escape_code == char_code("t") {
                 return char_code("\t");
@@ -581,9 +436,7 @@ fn make_string_constant_name_for_module(module_name: string, content: string) ->
     let mut _if129: boolean = false;
     if tag.length == 0 { _if129 = true; }
     if tag == "_" { _if129 = true; }
-    if _if129 {
-        return base;
-    }
+    if _if129 { return base; }
     // base is @.str.len<LEN>.h<HASH>
     return "@.str." + tag + substring(base, 5, base.length);
 }
@@ -594,24 +447,18 @@ fn compute_string_constant_hash(content: string) -> number {
     let modulus: number = 2147483647;
     let mut index: number = 0;
     loop {
-        if index >= content.length {
-            break;
-        }
+        if index >= content.length { break; }
         let code = char_code(char_at(content, index));
         hash = hash * 33 + code;
         loop {
-            if hash < modulus {
-                break;
-            }
+            if hash < modulus { break; }
             hash -= modulus;
         }
         index += 1;
     }
     hash = hash * 33 + content.length;
     loop {
-        if hash < modulus {
-            break;
-        }
+        if hash < modulus { break; }
         hash -= modulus;
     }
     return hash;
@@ -622,9 +469,7 @@ fn parse_interpolated_template(content: string) -> InterpolatedTemplateParse {
     let mut expressions: string[] = [];
     let mut index: number = 0;
     loop {
-        if index > content.length {
-            break;
-        }
+        if index > content.length { break; }
         let start = find_substring_from(content, "{{", index);
         if start < 0 {
             parts.push(substring(content, index, content.length));
@@ -633,16 +478,28 @@ fn parse_interpolated_template(content: string) -> InterpolatedTemplateParse {
         parts.push(substring(content, index, start));
         let end = find_substring_from(content, "}}", start + 2);
         if end < 0 {
-            return InterpolatedTemplateParse { parts: [], expressions: [], success: false };
+            return InterpolatedTemplateParse {
+                parts: [],
+                expressions: [],
+                success: false
+            };
         }
         let expr_text = trim_text(substring(content, start + 2, end));
         if expr_text.length == 0 {
-            return InterpolatedTemplateParse { parts: [], expressions: [], success: false };
+            return InterpolatedTemplateParse {
+                parts: [],
+                expressions: [],
+                success: false
+            };
         }
         expressions.push(expr_text);
         index = end + 2;
     }
-    return InterpolatedTemplateParse { parts: parts, expressions: expressions, success: true };
+    return InterpolatedTemplateParse {
+        parts: parts,
+        expressions: expressions,
+        success: true
+    };
 }
 
 fn encode_string_literal_for_sailfin(content: string) -> string {
@@ -661,20 +518,12 @@ fn escape_string_for_sailfin_literal(content: string) -> string {
     let mut chunk_start: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= content.length {
-            break;
-        }
+        if index >= content.length { break; }
         let ch = substring(content, index, index + 1);
         let mut esc: string = "";
-        if ch == "\\" {
-            esc = "\\\\";
-        } else if ch == "\"" {
-            esc = "\\\"";
-        } else if ch == "\n" {
+        if ch == "\\" { esc = "\\\\"; } else if ch == "\"" { esc = "\\\""; } else if ch == "\n" {
             esc = "\\n";
-        } else if ch == "\r" {
-            esc = "\\r";
-        } else if ch == "\t" {
+        } else if ch == "\r" { esc = "\\r"; } else if ch == "\t" {
             esc = "\\t";
         }
         if esc.length > 0 {
@@ -689,18 +538,12 @@ fn escape_string_for_sailfin_literal(content: string) -> string {
     if chunk_start < content.length {
         chunks.push(substring(content, chunk_start, content.length));
     }
-    if chunks.length == 0 {
-        return "";
-    }
-    if chunks.length == 1 {
-        return chunks[0];
-    }
+    if chunks.length == 0 { return ""; }
+    if chunks.length == 1 { return chunks[0]; }
     let mut result: string = chunks[0];
     let mut i: number = 1;
     loop {
-        if i >= chunks.length {
-            break;
-        }
+        if i >= chunks.length { break; }
         result = result + chunks[i];
         i += 1;
     }
@@ -708,9 +551,7 @@ fn escape_string_for_sailfin_literal(content: string) -> string {
 }
 
 fn unescape_string_literal(literal: string) -> string {
-    if literal.length < 2 {
-        return "";
-    }
+    if literal.length < 2 { return ""; }
     let start_index = 1;
     let end_index = literal.length - 1;
     let inner = substring(literal, start_index, end_index);
@@ -718,9 +559,7 @@ fn unescape_string_literal(literal: string) -> string {
     let mut result: string = "";
     let mut index: number = 0;
     loop {
-        if index >= inner.length {
-            break;
-        }
+        if index >= inner.length { break; }
         let ch = char_at(inner, index);
         let _esc_next = index + 1;
         if char_code(ch) == char_code("\\") {
@@ -761,64 +600,44 @@ fn unescape_string_literal(literal: string) -> string {
 
 // Duplicated from string_utils to avoid cross-module function call issues in Stage2
 fn is_symbol_char(ch: string) -> boolean {
-    if ch.length == 0 {
-        return false;
-    }
-    if ch == "_" {
-        return true;
-    }
+    if ch.length == 0 { return false; }
+    if ch == "_" { return true; }
     let code = char_code(ch);
     let lower_a = char_code("a");
     let lower_z = char_code("z");
     if code >= lower_a {
-        if code <= lower_z {
-            return true;
-        }
+        if code <= lower_z { return true; }
     }
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
     if code >= upper_a {
-        if code <= upper_z {
-            return true;
-        }
+        if code <= upper_z { return true; }
     }
     let zero = char_code("0");
     let nine = char_code("9");
     if code >= zero {
-        if code <= nine {
-            return true;
-        }
+        if code <= nine { return true; }
     }
     return false;
 }
 
 fn sanitize_symbol(name: string) -> string {
-    if name.length == 0 {
-        return "_";
-    }
+    if name.length == 0 { return "_"; }
     let mut result: string = "";
     let mut index: number = 0;
     loop {
-        if index >= name.length {
-            break;
-        }
+        if index >= name.length { break; }
         let ch = substring(name, index, index + 1);
-        if is_symbol_char(ch) {
-            result = result + ch;
-        }
+        if is_symbol_char(ch) { result = result + ch; }
         index += 1;
     }
-    if result.length == 0 {
-        return "_";
-    }
+    if result.length == 0 { return "_"; }
     let first = substring(result, 0, 1);
     let first_code = char_code(first);
     let zero = char_code("0");
     let nine = char_code("9");
     if first_code >= zero {
-        if first_code <= nine {
-            result = "_" + result;
-        }
+        if first_code <= nine { result = "_" + result; }
     }
     return result;
 }

@@ -1,13 +1,8 @@
 // compiler/src/llvm/expression_lowering/native/core_calls.sfn
 //
 // Call parsing helpers for expression lowering.
-
 import { char_at } from "../../../string_utils";
-
-import {
-    trim_text,
-    append_string,
-} from "../../utils";
+import { append_string, trim_text } from "../../utils";
 
 fn find_call_site(expression: string) -> number {
     // Find the opening paren of the outermost (last) call in a chained
@@ -23,29 +18,19 @@ fn find_call_site(expression: string) -> number {
     let mut last_top_level_open: number = -1;
     let mut index: number = 0;
     loop {
-        if index >= expression.length {
-            break;
-        }
+        if index >= expression.length { break; }
         let ch = char_at(expression, index);
         if in_double {
-            if escape_next {
-                escape_next = false;
-            } else if ch == "\\" {
+            if escape_next { escape_next = false; } else if ch == "\\" {
                 escape_next = true;
-            } else if ch == "\"" {
-                in_double = false;
-            }
+            } else if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
         if in_single {
-            if escape_next {
-                escape_next = false;
-            } else if ch == "\\" {
+            if escape_next { escape_next = false; } else if ch == "\\" {
                 escape_next = true;
-            } else if ch == "'" {
-                in_single = false;
-            }
+            } else if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -59,27 +44,19 @@ fn find_call_site(expression: string) -> number {
             index += 1;
             continue;
         }
-        if ch == "{" {
-            brace_depth += 1;
-        } else if ch == "}" {
+        if ch == "{" { brace_depth += 1; } else if ch == "}" {
             if brace_depth > 0 { brace_depth -= 1; }
-        } else if ch == "[" {
-            bracket_depth += 1;
-        } else if ch == "]" {
+        } else if ch == "[" { bracket_depth += 1; } else if ch == "]" {
             if bracket_depth > 0 { bracket_depth -= 1; }
         } else if ch == "(" {
             if paren_depth == 0 {
                 if brace_depth == 0 {
-                    if bracket_depth == 0 {
-                        last_top_level_open = index;
-                    }
+                    if bracket_depth == 0 { last_top_level_open = index; }
                 }
             }
             paren_depth += 1;
         } else if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
         }
         index += 1;
     }
@@ -88,9 +65,7 @@ fn find_call_site(expression: string) -> number {
 
 fn split_call_arguments(text: string) -> string[] {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return [];
-    }
+    if trimmed.length == 0 { return []; }
     let mut entries: string[] = [];
     let mut current: string = "";
     let mut paren_depth: number = 0;
@@ -101,17 +76,11 @@ fn split_call_arguments(text: string) -> string[] {
     let mut escape: boolean = false;
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = char_at(text, index);
         if in_double {
             current = current + ch;
-            if escape {
-                escape = false;
-            } else if ch == "\\" {
-                escape = true;
-            } else if ch == "\"" {
+            if escape { escape = false; } else if ch == "\\" { escape = true; } else if ch == "\"" {
                 in_double = false;
             }
             index += 1;
@@ -119,11 +88,7 @@ fn split_call_arguments(text: string) -> string[] {
         }
         if in_single {
             current = current + ch;
-            if escape {
-                escape = false;
-            } else if ch == "\\" {
-                escape = true;
-            } else if ch == "'" {
+            if escape { escape = false; } else if ch == "\\" { escape = true; } else if ch == "'" {
                 in_single = false;
             }
             index += 1;
@@ -145,43 +110,33 @@ fn split_call_arguments(text: string) -> string[] {
             paren_depth += 1;
             current = current + ch;
         } else if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             current = current + ch;
         } else if ch == "[" {
             bracket_depth += 1;
             current = current + ch;
         } else if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             current = current + ch;
         } else if ch == "{" {
             brace_depth += 1;
             current = current + ch;
         } else if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             current = current + ch;
         } else {
             let mut _elif67: boolean = false;
             if ch == "," {
                 if paren_depth == 0 {
                     if bracket_depth == 0 {
-                        if brace_depth == 0 {
-                            _elif67 = true;
-                        }
+                        if brace_depth == 0 { _elif67 = true; }
                     }
                 }
             }
             if _elif67 {
                 entries.push(trim_text(current));
                 current = "";
-            } else {
-                current = current + ch;
-            }
+            } else { current = current + ch; }
         }
         index += 1;
     }

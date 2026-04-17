@@ -5,61 +5,40 @@
 // recovery from native text when the ABI corrupts struct fields.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-
 import { NativeModule } from "../../emit_native";
 import {
-    NativeImport,
-    NativeFunction,
-    NativeStruct,
-    NativeEnum,
-    NativeInterface,
-    NativeBinding,
     LayoutManifest,
-    ParseNativeResult,
+    NativeBinding,
+    NativeEnum,
+    NativeFunction,
+    NativeImport,
+    NativeInterface,
+    NativeStruct,
+    ParseNativeResult
 } from "../../native_ir";
+import { parse_native_bindings_from_text, parse_native_functions_from_text } from "../../native_ir_api";
+import { number_to_string } from "../utils";
+import { is_test_module_slug, sanitize_collection_length } from "./lowering_helpers";
+import { extend_string_lines_checked } from "./lowering_io";
+import { get_struct_fields_at, get_struct_name_at } from "./lowering_native_helpers";
 import {
-    parse_native_functions_from_text,
-    parse_native_bindings_from_text,
-} from "../../native_ir_api";
-
-import {
-    number_to_string,
-} from "../utils";
-
-import {
-    extend_string_lines_checked,
-} from "./lowering_io";
-
-import {
-    sanitize_collection_length,
-    is_test_module_slug,
-} from "./lowering_helpers";
-
-import {
-    get_struct_name_at,
-    get_struct_fields_at,
-} from "./lowering_native_helpers";
-
-import {
-    recover_native_functions_light,
-    recover_native_structs_light,
-    recover_native_imports_light,
-    recover_native_enums_light,
-    recover_functions_for_lowering,
     parse_native_artifact_safe,
+    recover_functions_for_lowering,
+    recover_native_enums_light,
+    recover_native_functions_light,
+    recover_native_imports_light,
+    recover_native_structs_light
 } from "./lowering_recovery";
 
 // Note: build_parse_result_from_text lives in lowering_core.sfn.
 // We inline its logic here to avoid a circular import
 // (lowering_core imports from this file).
-
 // Sanitize a single collection: null-check + length guard.
 // Returns the sanitized array length (0 if dropped).
 // The caller must handle setting the variable; this function writes
 // the decision to a file so the caller can read it.
 // (Kept inline because the pattern is simple and cross-module array
 // return is unreliable with the v0.1.1 seed.)
-
 // Sanitize and recover all parsed inputs for the lowering pipeline.
 // Recovery happens in memory because the v0.1.1 seed may corrupt
 // cross-module struct returns. This function does not write
@@ -69,21 +48,12 @@ import {
 // returned through a ParseNativeResult struct. Callers should read
 // the returned struct fields cautiously and use their own recovery
 // path if later phases detect corrupted data.
-fn sanitize_lowering_inputs(
-    parse_in: ParseNativeResult,
-    native_text_override_path: string,
-    native_module: NativeModule,
-    imported_manifests_in: LayoutManifest[],
-    imported_native_texts_in: string[],
-    diagnostics_in: string[],
-    debug_lowering: boolean
-) -> ParseNativeResult ![io] {
+fn sanitize_lowering_inputs(parse_in: ParseNativeResult, native_text_override_path: string, native_module: NativeModule, imported_manifests_in: LayoutManifest[], imported_native_texts_in: string[], diagnostics_in: string[], debug_lowering: boolean) -> ParseNativeResult ![io] {
     let mut parse = parse_in;
+    if debug_lowering { print.err("emit-llvm: dbg-A parse_in assigned"); }
     if debug_lowering {
-        print.err("emit-llvm: dbg-A parse_in assigned");
-    }
-    if debug_lowering {
-        print.err("emit-llvm: dbg-B before override check path_len=" + number_to_string(native_text_override_path.length));
+        print.err("emit-llvm: dbg-B before override check path_len="
+            + number_to_string(native_text_override_path.length));
     }
     // --- Reparse from override text ---
     if native_text_override_path.length > 0 {
@@ -97,14 +67,16 @@ fn sanitize_lowering_inputs(
             interfaces: [],
             enums: _rens,
             bindings: [],
-            diagnostics: [],
+            diagnostics: []
         };
         if reparsed.functions.length >= parse.functions.length {
             parse = reparsed;
         }
         if debug_lowering {
-            print.err("emit-llvm: reparsed from override text functions=" + number_to_string(parse.functions.length));
-            print.err("emit-llvm: reparsed from override diagnostics=" + number_to_string(parse.diagnostics.length));
+            print.err("emit-llvm: reparsed from override text functions="
+                + number_to_string(parse.functions.length));
+            print.err("emit-llvm: reparsed from override diagnostics="
+                + number_to_string(parse.diagnostics.length));
             if parse.diagnostics.length > 0 {
                 print.err("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
             }
@@ -119,9 +91,7 @@ fn sanitize_lowering_inputs(
 // Sanitize imported manifests array: null-check + length guard.
 fn sanitize_imported_manifests(imported_manifests: LayoutManifest[], debug_lowering: boolean) -> LayoutManifest[] {
     let mut safe = imported_manifests;
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         safe = [];
     }
@@ -134,9 +104,7 @@ fn sanitize_imported_manifests(imported_manifests: LayoutManifest[], debug_lower
 // Sanitize imported native texts array: null-check + length guard.
 fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowering: boolean) -> string[] {
     let mut safe = imported_native_texts;
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         safe = [];
     }
@@ -149,9 +117,7 @@ fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowerin
 // Sanitize diagnostics array: null-check + length guard.
 fn sanitize_diagnostics(diagnostics_in: string[]) -> string[] {
     let mut safe = diagnostics_in;
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 1000000) {
         safe = [];
     }
@@ -161,9 +127,7 @@ fn sanitize_diagnostics(diagnostics_in: string[]) -> string[] {
 // Sanitize entry points array: null-check + length guard.
 fn sanitize_entry_points(entry_points: string[], debug_lowering: boolean) -> string[] {
     let mut safe = entry_points;
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         safe = [];
     }
@@ -176,9 +140,7 @@ fn sanitize_entry_points(entry_points: string[], debug_lowering: boolean) -> str
 // Sanitize imports array: null-check + length guard.
 fn sanitize_imports(imports: NativeImport[], debug_lowering: boolean) -> NativeImport[] {
     let mut safe = imports;
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         safe = [];
     }
@@ -194,14 +156,14 @@ fn sanitize_imports(imports: NativeImport[], debug_lowering: boolean) -> NativeI
 // Sanitize structs array: null-check + length guard + diagnostics.
 fn sanitize_structs(structs: NativeStruct[], diagnostics: string[]) -> NativeStruct[] {
     let mut safe = structs;
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         safe = [];
     }
     if safe.length > 100000 {
-        diagnostics.push("llvm lowering: struct list too large (" + number_to_string(safe.length) + "); dropping");
+        diagnostics.push("llvm lowering: struct list too large ("
+            + number_to_string(safe.length)
+            + "); dropping");
         safe = [];
     }
     return safe;
@@ -212,22 +174,24 @@ fn sanitize_enums(enums: NativeEnum[], diagnostics: string[], _trace_enums: bool
     let mut safe = enums;
     if _trace_enums {
         let mut _enum_len_text: string = "null";
-        if safe != null {
-            _enum_len_text = number_to_string(safe.length);
-        }
+        if safe != null { _enum_len_text = number_to_string(safe.length); }
         print.err("enum_trace: parse.enums=" + _enum_len_text);
     }
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         if _trace_enums {
-            print.err("enum_trace: sanitize dropped enums (len=" + number_to_string(safe.length) + " sanitized=" + number_to_string(sanitize_collection_length(safe.length, 100000)) + ")");
+            print.err("enum_trace: sanitize dropped enums (len="
+                + number_to_string(safe.length)
+                + " sanitized="
+                + number_to_string(sanitize_collection_length(safe.length, 100000))
+                + ")");
         }
         safe = [];
     }
     if safe.length > 100000 {
-        diagnostics.push("llvm lowering: enum list too large (" + number_to_string(safe.length) + "); dropping");
+        diagnostics.push("llvm lowering: enum list too large ("
+            + number_to_string(safe.length)
+            + "); dropping");
         safe = [];
     }
     if _trace_enums {
@@ -239,14 +203,14 @@ fn sanitize_enums(enums: NativeEnum[], diagnostics: string[], _trace_enums: bool
 // Sanitize interfaces array: null-check + length guard + diagnostics.
 fn sanitize_interfaces(interfaces: NativeInterface[], diagnostics: string[]) -> NativeInterface[] {
     let mut safe = interfaces;
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
         safe = [];
     }
     if safe.length > 100000 {
-        diagnostics.push("llvm lowering: interface list too large (" + number_to_string(safe.length) + "); dropping");
+        diagnostics.push("llvm lowering: interface list too large ("
+            + number_to_string(safe.length)
+            + "); dropping");
         safe = [];
     }
     return safe;
@@ -254,11 +218,7 @@ fn sanitize_interfaces(interfaces: NativeInterface[], diagnostics: string[]) -> 
 
 // Sanitize functions array: null-check + length guard + recovery.
 // Writes diagnostics to the diagnostics array parameter.
-fn sanitize_functions(
-    functions: NativeFunction[],
-    native_text_override_path: string,
-    debug_lowering: boolean
-) -> NativeFunction[] ![io] {
+fn sanitize_functions(functions: NativeFunction[], native_text_override_path: string, debug_lowering: boolean) -> NativeFunction[] ![io] {
     if debug_lowering {
         print.err("emit-llvm: dbg-H1 before parse.functions access");
     }
@@ -271,9 +231,7 @@ fn sanitize_functions(
             print.err("emit-llvm: parse.functions is null");
         }
     }
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if debug_lowering {
         print.err("emit-llvm: dbg-H3 safe_functions.length=" + number_to_string(safe.length));
     }
@@ -284,7 +242,8 @@ fn sanitize_functions(
         safe = [];
     }
     if debug_lowering {
-        print.err("emit-llvm: dbg-H4 after sanitize safe_functions.length=" + number_to_string(safe.length));
+        print.err("emit-llvm: dbg-H4 after sanitize safe_functions.length="
+            + number_to_string(safe.length));
     }
     // Recovery: if parse returned no functions, try re-parsing from text
     if safe.length == 0 {
@@ -296,7 +255,8 @@ fn sanitize_functions(
             recovery_text = native_text_override_path;
         }
         if debug_lowering {
-            print.err("emit-llvm: dbg-R2 recovery_text.length=" + number_to_string(recovery_text.length));
+            print.err("emit-llvm: dbg-R2 recovery_text.length="
+                + number_to_string(recovery_text.length));
         }
         if recovery_text.length == 0 {
             if fs.exists("build/sailfin/emit-native.tmp") {
@@ -305,12 +265,14 @@ fn sanitize_functions(
                 }
                 recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
                 if debug_lowering {
-                    print.err("emit-llvm: dbg-R4 read emit-native.tmp bytes=" + number_to_string(recovery_text.length));
+                    print.err("emit-llvm: dbg-R4 read emit-native.tmp bytes="
+                        + number_to_string(recovery_text.length));
                 }
             }
         }
         if debug_lowering {
-            print.err("emit-llvm: dbg-R5 before parse recovery_text.length=" + number_to_string(recovery_text.length));
+            print.err("emit-llvm: dbg-R5 before parse recovery_text.length="
+                + number_to_string(recovery_text.length));
         }
         if recovery_text.length > 0 {
             if debug_lowering {
@@ -320,9 +282,7 @@ fn sanitize_functions(
             let mut recovered_has_body = false;
             let mut recovered_index: number = 0;
             loop {
-                if recovered_index >= recovered_functions.length {
-                    break;
-                }
+                if recovered_index >= recovered_functions.length { break; }
                 let recovered_function = recovered_functions[recovered_index];
                 if !recovered_function.is_extern {
                     if recovered_function.instructions != null {
@@ -342,9 +302,7 @@ fn sanitize_functions(
                 let mut light_has_body = false;
                 recovered_index = 0;
                 loop {
-                    if recovered_index >= light_recovered.length {
-                        break;
-                    }
+                    if recovered_index >= light_recovered.length { break; }
                     let recovered_function = light_recovered[recovered_index];
                     if !recovered_function.is_extern {
                         if recovered_function.instructions != null {
@@ -359,37 +317,32 @@ fn sanitize_functions(
                 let mut _if261: boolean = false;
                 if light_has_body { _if261 = true; }
                 if recovered_functions.length == 0 { _if261 = true; }
-                if _if261 {
-                    recovered_functions = light_recovered;
-                }
+                if _if261 { recovered_functions = light_recovered; }
             }
             if recovered_functions.length > 0 {
                 safe = recovered_functions;
                 if debug_lowering {
-                    print.err("emit-llvm: recovered empty parse.functions from artifact text count=" + number_to_string(safe.length));
+                    print.err("emit-llvm: recovered empty parse.functions from artifact text count="
+                        + number_to_string(safe.length));
                 }
             }
         }
     }
-    if safe.length > 200000 {
-        safe = [];
-    }
+    if safe.length > 200000 { safe = []; }
     return safe;
 }
 
 // Recover safe_functions through the additional recovery pipeline.
-fn recover_safe_functions(
-    safe_functions: NativeFunction[],
-    native_text_override_path: string,
-    debug_lowering: boolean
-) -> NativeFunction[] ![io] {
+fn recover_safe_functions(safe_functions: NativeFunction[], native_text_override_path: string, debug_lowering: boolean) -> NativeFunction[] ![io] {
     if debug_lowering {
-        print.err("emit-llvm: phase=recover_functions_start current=" + number_to_string(safe_functions.length));
+        print.err("emit-llvm: phase=recover_functions_start current="
+            + number_to_string(safe_functions.length));
     }
     let artifact_text = "";
     let recovered_safe = recover_functions_for_lowering(safe_functions, native_text_override_path, artifact_text, debug_lowering);
     if debug_lowering {
-        print.err("emit-llvm: phase=recover_functions_done current=" + number_to_string(recovered_safe.length));
+        print.err("emit-llvm: phase=recover_functions_done current="
+            + number_to_string(recovered_safe.length));
     }
     return recovered_safe;
 }
@@ -397,19 +350,13 @@ fn recover_safe_functions(
 // Recover struct definitions when the main parser returned corrupt results.
 // Validates each struct has a non-empty name; if any looks corrupt, replaces
 // with light recovery from native text.
-fn recover_structs_if_corrupt(
-    safe_structs: NativeStruct[],
-    native_text_override_path: string,
-    debug_lowering: boolean
-) -> NativeStruct[] ![io] {
+fn recover_structs_if_corrupt(safe_structs: NativeStruct[], native_text_override_path: string, debug_lowering: boolean) -> NativeStruct[] ![io] {
     let mut structs_look_corrupt: boolean = safe_structs.length == 0;
     if !structs_look_corrupt {
         if safe_structs.length > 0 {
             let mut check_i: number = 0;
             loop {
-                if check_i >= safe_structs.length {
-                    break;
-                }
+                if check_i >= safe_structs.length { break; }
                 let check_struct = safe_structs[check_i];
                 let mut _if262: boolean = false;
                 if check_struct.name == null { _if262 = true; }
@@ -435,9 +382,7 @@ fn recover_structs_if_corrupt(
         }
         if struct_recovery_text.length > 0 {
             let recovered_structs = recover_native_structs_light(struct_recovery_text);
-            if recovered_structs.length > 0 {
-                return recovered_structs;
-            }
+            if recovered_structs.length > 0 { return recovered_structs; }
         }
     }
     return safe_structs;
@@ -446,14 +391,14 @@ fn recover_structs_if_corrupt(
 // Sanitize and recover bindings array.
 fn sanitize_bindings(bindings: NativeBinding[], diagnostics: string[]) -> NativeBinding[] ![io] {
     let mut safe = bindings;
-    if safe == null {
-        safe = [];
-    }
+    if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 200000) {
         safe = [];
     }
     if safe.length > 200000 {
-        diagnostics.push("llvm lowering: binding list too large (" + number_to_string(safe.length) + "); dropping");
+        diagnostics.push("llvm lowering: binding list too large ("
+            + number_to_string(safe.length)
+            + "); dropping");
         safe = [];
     }
     // Recovery: if bindings empty, re-parse from emit-native.tmp

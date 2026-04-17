@@ -5,27 +5,100 @@
 // The original write_llvm_ir_for_tests function (~600 lines duplicating
 // the entire lowering pipeline) was removed to fix OOM during selfhost.
 // Imports are preserved — the seed linker needs the full import graph.
-
 import { NativeArtifact, NativeModule } from "../../emit_native";
-import { NativeFunction, NativeStruct, NativeEnum, NativeInterface, LayoutManifest, ParseNativeResult } from "../../native_ir";
-import { select_text_artifact, parse_native_structs_for_import, parse_native_interfaces_for_import, parse_native_enums_for_import, parse_native_functions_for_import } from "../../native_ir_api";
+import {
+    LayoutManifest,
+    NativeEnum,
+    NativeFunction,
+    NativeInterface,
+    NativeStruct,
+    ParseNativeResult
+} from "../../native_ir";
+import {
+    parse_native_enums_for_import,
+    parse_native_functions_for_import,
+    parse_native_interfaces_for_import,
+    parse_native_structs_for_import,
+    select_text_artifact
+} from "../../native_ir_api";
 import { substring } from "../../string_utils";
-import { TypeContext, TraitMetadata, LoweredLLVMLinesResult, FunctionEffectEntry, LifetimeRegionMetadata, StringConstant } from "../types";
-import { append_string, join_with_separator, number_to_string, sanitize_symbol, string_array_contains, index_of } from "../utils";
-import { empty_string_constant_set, merge_string_constants, render_string_constants } from "../strings";
-import { collect_direct_function_effects, collect_function_call_graph, propagate_function_effects, collect_runtime_helper_targets, append_unique_effect, find_function_effect_entry, append_function_effect_entry } from "../effects";
-import { render_struct_type_definitions, render_enum_type_definitions, render_trait_metadata_comments, render_runtime_helper_declarations, render_imported_function_declarations } from "../rendering";
-import { render_test_harness_main_for_module } from "./lowering_helpers";
-import { collect_exported_symbol_names, render_interface_type_definitions, render_vtable_type_definitions, render_vtable_constants, find_function_by_name } from "../rendering_helpers";
-import { fixup_enum_layouts, build_type_context } from "../type_context";
-import { collect_imported_module_context_for_module, apply_layout_manifest_to_module } from "../imports";
-import { lower_module_bindings_to_globals } from "./module_globals";
+import {
+    append_function_effect_entry,
+    append_unique_effect,
+    collect_direct_function_effects,
+    collect_function_call_graph,
+    collect_runtime_helper_targets,
+    find_function_effect_entry,
+    propagate_function_effects
+} from "../effects";
+import {
+    apply_layout_manifest_to_module,
+    collect_imported_module_context_for_module
+} from "../imports";
+import {
+    render_enum_type_definitions,
+    render_imported_function_declarations,
+    render_runtime_helper_declarations,
+    render_struct_type_definitions,
+    render_trait_metadata_comments
+} from "../rendering";
+import {
+    collect_exported_symbol_names,
+    find_function_by_name,
+    render_interface_type_definitions,
+    render_vtable_constants,
+    render_vtable_type_definitions
+} from "../rendering_helpers";
+import {
+    empty_string_constant_set,
+    merge_string_constants,
+    render_string_constants
+} from "../strings";
+import { build_type_context, fixup_enum_layouts } from "../type_context";
+import {
+    FunctionEffectEntry,
+    LifetimeRegionMetadata,
+    LoweredLLVMLinesResult,
+    StringConstant,
+    TraitMetadata,
+    TypeContext
+} from "../types";
+import {
+    append_string,
+    index_of,
+    join_with_separator,
+    number_to_string,
+    sanitize_symbol,
+    string_array_contains
+} from "../utils";
 import { emit_llvm_function } from "./emission";
-import { empty_trait_metadata, is_test_module_slug, extend_native_structs, extend_native_enums, extend_native_interfaces, extend_native_functions } from "./lowering_helpers";
-import { empty_capability_manifest, _join_llvm_lines_linear, concat_native_functions, flatten_struct_methods } from "./lowering_helpers_mangling";
-import { lower_to_llvm_lines_with_parsed_context_for_tests, build_parse_result_from_text } from "./lowering_core";
+import {
+    build_parse_result_from_text,
+    lower_to_llvm_lines_with_parsed_context_for_tests
+} from "./lowering_core";
+import { render_test_harness_main_for_module } from "./lowering_helpers";
+import {
+    empty_trait_metadata,
+    extend_native_enums,
+    extend_native_functions,
+    extend_native_interfaces,
+    extend_native_structs,
+    is_test_module_slug
+} from "./lowering_helpers";
+import {
+    _join_llvm_lines_linear,
+    concat_native_functions,
+    empty_capability_manifest,
+    flatten_struct_methods
+} from "./lowering_helpers_mangling";
+import {
+    ensure_intrinsic_declarations,
+    extend_string_lines,
+    extend_string_lines_checked,
+    module_source_filename
+} from "./lowering_io";
 import { parse_native_artifact_safe } from "./lowering_recovery";
-import { extend_string_lines, extend_string_lines_checked, ensure_intrinsic_declarations, module_source_filename } from "./lowering_io";
+import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Stub: kept for import-graph compatibility (main.sfn imports this symbol).
 // The full implementation (~600 lines duplicating the entire lowering pipeline)
@@ -60,17 +133,13 @@ fn write_llvm_ir_for_tests_from_text(native_text: string, module_name: string, o
     let parse = build_parse_result_from_text(native_text);
     let dummy_module = NativeModule {
         module_name: module_name,
-        artifacts: [NativeArtifact { name: module_name, format: "sailfin-native-text", contents: native_text }],
+        artifacts: [NativeArtifact {
+            name: module_name, format: "sailfin-native-text", contents: native_text
+        }],
         entry_points: [],
-        symbol_count: 0,
+        symbol_count: 0
     };
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(
-        dummy_module,
-        parse,
-        [],
-        [],
-        []
-    );
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(dummy_module, parse, [], [], []);
     if lowered_lines.lines.length == 0 {
         print.err("test llvm: no lines emitted from native text");
         return false;

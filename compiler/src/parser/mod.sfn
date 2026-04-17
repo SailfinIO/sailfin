@@ -9,36 +9,39 @@
 //   - expressions.sfn:  Expression parsing (Pratt parser, literals, lambdas)
 //   - statements.sfn:   Block statement parsing (control flow, return, match)
 //   - declarations.sfn: Top-level declarations (fn, struct, enum, import, etc.)
-
+import { Program, Statement } from "../ast";
 import { lex } from "../lexer";
 import { Token, TokenKind } from "../token";
-import { Program, Statement } from "../ast";
-
-// Import types from submodules
-import { Parser, StatementParseResult } from "./types";
-import { parser_peek_raw, parser_advance_raw, skip_trivia, is_end_of_file, identifier_matches } from "./token_utils";
 import {
     parse_decorators,
-    parse_import,
+    parse_enum,
     parse_export,
-    parse_variable,
+    parse_extern_function,
+    parse_function,
+    parse_import,
+    parse_interface,
     parse_model,
     parse_pipeline,
-    parse_tool,
-    parse_test,
-    parse_function,
-    parse_extern_function,
     parse_struct,
+    parse_test,
+    parse_tool,
     parse_type_alias,
-    parse_interface,
-    parse_enum,
     parse_unknown,
+    parse_variable
 } from "./declarations";
+import {
+    identifier_matches,
+    is_end_of_file,
+    parser_advance_raw,
+    parser_peek_raw,
+    skip_trivia
+} from "./token_utils";
+// Import types from submodules
+import { Parser, StatementParseResult } from "./types";
 
 // ============================================================================
 // Main Entry Points
 // ============================================================================
-
 fn parse_program(source: string) -> Program {
     let tokens = lex(source);
     return parse_tokens(tokens);
@@ -51,9 +54,7 @@ fn parse_tokens(tokens: Token[]) -> Program {
 
     loop {
         let token = parser_peek_raw(parser);
-        if is_end_of_file(parser, token) {
-            break;
-        }
+        if is_end_of_file(parser, token) { break; }
 
         let prev_index = parser.index;
         let result = parse_statement(parser);
@@ -72,7 +73,6 @@ fn parse_tokens(tokens: Token[]) -> Program {
 // ============================================================================
 // Top-Level Statement Dispatch
 // ============================================================================
-
 fn parse_statement(initial_parser: Parser) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     let original = parser;
@@ -86,45 +86,31 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
     let token = parser_peek_raw(parser);
 
     if identifier_matches(token, "import") {
-        if decorators.length > 0 {
-            return parse_unknown(original);
-        }
+        if decorators.length > 0 { return parse_unknown(original); }
         return parse_import(parser);
     }
     if identifier_matches(token, "export") {
-        if decorators.length > 0 {
-            return parse_unknown(original);
-        }
+        if decorators.length > 0 { return parse_unknown(original); }
         return parse_export(parser);
     }
     if identifier_matches(token, "let") {
-        if decorators.length > 0 {
-            return parse_unknown(original);
-        }
+        if decorators.length > 0 { return parse_unknown(original); }
         return parse_variable(parser);
     }
     if identifier_matches(token, "model") {
-        if decorators.length > 0 {
-            return parse_unknown(original);
-        }
+        if decorators.length > 0 { return parse_unknown(original); }
         return parse_model(parser, decorators);
     }
     if identifier_matches(token, "pipeline") {
-        if decorators.length > 0 {
-            return parse_unknown(original);
-        }
+        if decorators.length > 0 { return parse_unknown(original); }
         return parse_pipeline(parser, decorators);
     }
     if identifier_matches(token, "tool") {
-        if decorators.length > 0 {
-            return parse_unknown(original);
-        }
+        if decorators.length > 0 { return parse_unknown(original); }
         return parse_tool(parser, decorators);
     }
     if identifier_matches(token, "test") {
-        if decorators.length > 0 {
-            return parse_unknown(original);
-        }
+        if decorators.length > 0 { return parse_unknown(original); }
         return parse_test(parser, decorators);
     }
     if identifier_matches(token, "fn") {
@@ -158,9 +144,7 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
         return parse_enum(parser, decorators);
     }
 
-    if decorators.length > 0 {
-        return parse_unknown(original);
-    }
+    if decorators.length > 0 { return parse_unknown(original); }
 
     return parse_unknown(parser);
 }
@@ -168,7 +152,6 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
 // ============================================================================
 // Append Helper
 // ============================================================================
-
 fn append_statement(statements: Statement[], statement: Statement) -> Statement[] {
     statements.push(statement);
     return statements;
@@ -177,7 +160,6 @@ fn append_statement(statements: Statement[], statement: Statement) -> Statement[
 // ============================================================================
 // Re-exports
 // ============================================================================
-
 // Re-export all types
 export {
     // Core parser state
@@ -229,7 +211,7 @@ export {
     CallArgumentsParseResult,
     ArrayLiteralParseResult,
     ObjectLiteralParseResult,
-    StructTypeNameResult,
+    StructTypeNameResult
 } from "./types";
 
 // Re-export string utilities
@@ -243,7 +225,7 @@ export {
     looks_like_number,
     is_decimal_digit,
     string_array_contains,
-    append_string,
+    append_string
 } from "./utils";
 
 // Re-export token utilities
@@ -302,7 +284,7 @@ export {
 
     // Append helpers
     append_token,
-    append_token_array,
+    append_token_array
 } from "./token_utils";
 
 // Re-export expression parsing functions
@@ -352,7 +334,7 @@ export {
     unary_precedence,
 
     // Expression normalization
-    normalize_expression,
+    normalize_expression
 } from "./expressions";
 
 // Re-export statement parsing functions
@@ -390,7 +372,7 @@ export {
     parse_expression_statement,
 
     // Unknown statement (fallback)
-    parse_unknown_statement,
+    parse_unknown_statement
 } from "./statements";
 
 // Re-export declaration parsing functions
@@ -461,5 +443,5 @@ export {
     parse_test,
 
     // Unknown statement (fallback)
-    parse_unknown,
+    parse_unknown
 } from "./declarations";

@@ -8,7 +8,6 @@
 // value in code compiled by the first-pass binary — the lowering silently drops
 // all subsequent instructions.  We extract `{` at runtime via substring() from
 // a simple assignment (which the lowering handles correctly).
-
 import { trim_text, substring } from "../utils";
 
 fn build_define_header_line(linkage: string, llvm_return: string, sanitized: string, signature: string) -> string {

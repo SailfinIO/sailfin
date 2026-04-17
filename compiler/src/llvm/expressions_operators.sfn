@@ -1,16 +1,14 @@
 // compiler/src/llvm/expressions_operators.sfn
 //
 // Top-level operator finding, binary operator detection, and separator scanning.
-
-import { substring, char_at } from "../string_utils";
+import { char_at, substring } from "../string_utils";
+import { contains_text } from "./expressions_helpers";
 import { OperatorMatch } from "./types";
 import { is_identifier_part_char } from "./utils";
-import { contains_text } from "./expressions_helpers";
 
 // =============================================================================
 // Operator Finding
 // =============================================================================
-
 fn find_top_level_operator(expression: string, operators: string) -> OperatorMatch {
     let mut paren_depth: number = 0;
     let mut bracket_depth: number = 0;
@@ -23,9 +21,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
     let mut candidate_symbol: string = "";
     let mut index: number = 0;
     loop {
-        if index >= expression.length {
-            break;
-        }
+        if index >= expression.length { break; }
         let ch = char_at(expression, index);
         if in_double {
             if escape_next {
@@ -38,9 +34,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_double = false;
-            }
+            if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
@@ -55,9 +49,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
                 index += 1;
                 continue;
             }
-            if ch == "'" {
-                in_single = false;
-            }
+            if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -77,9 +69,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -89,9 +79,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -101,9 +89,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -113,9 +99,7 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
             continue;
         }
         if ch == ">" {
-            if angle_depth > 0 {
-                angle_depth -= 1;
-            }
+            if angle_depth > 0 { angle_depth -= 1; }
             index += 1;
             continue;
         }
@@ -149,68 +133,53 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
     // Keep struct literal values simple; our stage2 LLVM lowering has a
     // lightweight struct-literal parser that can get confused by comparisons.
     let success = candidate_index >= 0;
-    return OperatorMatch { success: success, index: candidate_index, symbol: candidate_symbol };
+    return OperatorMatch {
+        success: success,
+        index: candidate_index,
+        symbol: candidate_symbol
+    };
 }
 
 fn is_binary_minus(expression: string, index: number) -> boolean {
-    if index == 0 {
-        return false;
-    }
+    if index == 0 { return false; }
     let prev_char = char_at(expression, index - 1);
     let mut _if178: boolean = false;
     if prev_char == " " { _if178 = true; }
     if prev_char == "\t" { _if178 = true; }
-    if _if178 {
-        return true;
-    }
-    if is_identifier_part_char(prev_char) {
-        return true;
-    }
+    if _if178 { return true; }
+    if is_identifier_part_char(prev_char) { return true; }
     let mut _if179: boolean = false;
     if prev_char == ")" { _if179 = true; }
     if prev_char == "]" { _if179 = true; }
-    if _if179 {
-        return true;
-    }
+    if _if179 { return true; }
     return false;
 }
 
 fn is_binary_star(expression: string, index: number) -> boolean {
-    if index == 0 {
-        return false;
-    }
+    if index == 0 { return false; }
     let prev_char = char_at(expression, index - 1);
     let mut _if180: boolean = false;
     if prev_char == " " { _if180 = true; }
     if prev_char == "\t" { _if180 = true; }
-    if _if180 {
-        return true;
-    }
-    if is_identifier_part_char(prev_char) {
-        return true;
-    }
+    if _if180 { return true; }
+    if is_identifier_part_char(prev_char) { return true; }
     let mut _if181: boolean = false;
     if prev_char == ")" { _if181 = true; }
     if prev_char == "]" { _if181 = true; }
-    if _if181 {
-        return true;
-    }
+    if _if181 { return true; }
     return false;
 }
 
 // =============================================================================
 // Range and Separator Finding
 // =============================================================================
-
 fn find_top_level_range_separator(value: string) -> number {
     let mut paren_depth: number = 0;
     let mut bracket_depth: number = 0;
     let mut brace_depth: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= value.length {
-            break;
-        }
+        if index >= value.length { break; }
         let ch = substring(value, index, index + 1);
         if ch == "(" {
             paren_depth += 1;
@@ -218,9 +187,7 @@ fn find_top_level_range_separator(value: string) -> number {
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -230,9 +197,7 @@ fn find_top_level_range_separator(value: string) -> number {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -242,9 +207,7 @@ fn find_top_level_range_separator(value: string) -> number {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -255,9 +218,7 @@ fn find_top_level_range_separator(value: string) -> number {
                 if substring(value, _dot_next, _dot_next2) == "." {
                     if paren_depth == 0 {
                         if bracket_depth == 0 {
-                            if brace_depth == 0 {
-                                return index;
-                            }
+                            if brace_depth == 0 { return index; }
                         }
                     }
                 }
@@ -278,17 +239,11 @@ fn find_top_level_union_separator(text: string) -> number {
     let mut escape: boolean = false;
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
         if in_double {
-            if escape {
-                escape = false;
-            } else {
-                if ch == "\\" {
-                    escape = true;
-                } else if ch == "\"" {
+            if escape { escape = false; } else {
+                if ch == "\\" { escape = true; } else if ch == "\"" {
                     in_double = false;
                 }
             }
@@ -296,12 +251,8 @@ fn find_top_level_union_separator(text: string) -> number {
             continue;
         }
         if in_single {
-            if escape {
-                escape = false;
-            } else {
-                if ch == "\\" {
-                    escape = true;
-                } else if ch == "'" {
+            if escape { escape = false; } else {
+                if ch == "\\" { escape = true; } else if ch == "'" {
                     in_single = false;
                 }
             }
@@ -318,37 +269,19 @@ fn find_top_level_union_separator(text: string) -> number {
             index += 1;
             continue;
         }
-        if ch == "(" {
-            paren_depth += 1;
-        } else if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
-        } else if ch == "[" {
-            bracket_depth += 1;
-        } else if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
-        } else if ch == "{" {
-            brace_depth += 1;
-        } else if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
-        } else if ch == "<" {
-            angle_depth += 1;
-        } else if ch == ">" {
-            if angle_depth > 0 {
-                angle_depth -= 1;
-            }
+        if ch == "(" { paren_depth += 1; } else if ch == ")" {
+            if paren_depth > 0 { paren_depth -= 1; }
+        } else if ch == "[" { bracket_depth += 1; } else if ch == "]" {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+        } else if ch == "{" { brace_depth += 1; } else if ch == "}" {
+            if brace_depth > 0 { brace_depth -= 1; }
+        } else if ch == "<" { angle_depth += 1; } else if ch == ">" {
+            if angle_depth > 0 { angle_depth -= 1; }
         } else if ch == "|" {
             if paren_depth == 0 {
                 if brace_depth == 0 {
                     if bracket_depth == 0 {
-                        if angle_depth == 0 {
-                            return index;
-                        }
+                        if angle_depth == 0 { return index; }
                     }
                 }
             }

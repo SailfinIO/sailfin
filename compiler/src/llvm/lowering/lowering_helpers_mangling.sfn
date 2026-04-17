@@ -3,50 +3,52 @@
 // Module symbol mangling, trait metadata construction, and function
 // collection helpers.  Split from lowering_helpers.sfn to keep both
 // files under 1000 lines.
-
-import { NativeImport, NativeImportSpecifier, NativeFunction, NativeParameter, NativeInterface, NativeStruct } from "../../native_ir";
-
 import {
-    TraitMetadata,
+    NativeFunction,
+    NativeImport,
+    NativeImportSpecifier,
+    NativeInterface,
+    NativeParameter,
+    NativeStruct
+} from "../../native_ir";
+import { substring } from "../../string_utils";
+import {
+    CapabilityManifest,
     TraitDescriptor,
     TraitImplementationDescriptor,
-    CapabilityManifest,
+    TraitMetadata
 } from "../types";
-
-import { number_to_string, sanitize_symbol, string_array_contains, starts_with, index_of, trim_text, join_with_separator } from "../utils";
-
-import { substring } from "../../string_utils";
-
 import {
-    sanitize_module_suffix,
-    should_keep_unmangled_abi_symbol,
+    index_of,
+    join_with_separator,
+    number_to_string,
+    sanitize_symbol,
+    starts_with,
+    string_array_contains,
+    trim_text
+} from "../utils";
+import {
+    DeclareSignature,
+    MangledModuleResult,
+    apply_symbol_substitutions,
     collect_available_import_module_names,
     collect_defined_function_symbols,
-    resolve_import_provider_module_name,
-    apply_symbol_substitutions,
     find_declare_signature,
-    render_function_shim,
     insert_before_llvm_footer,
-    MangledModuleResult,
-    DeclareSignature,
+    render_function_shim,
+    resolve_import_provider_module_name,
+    sanitize_module_suffix,
+    should_keep_unmangled_abi_symbol
 } from "./lowering_helpers";
 
-fn apply_module_symbol_mangling(
-    lines: string[],
-    imports: NativeImport[],
-    current_module_slug: string,
-    imported_native_texts: string[],
-    native_text_path: string
-) -> MangledModuleResult {
+fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], native_text_path: string) -> MangledModuleResult {
     let mut diagnostics: string[] = [];
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {
         print.err("emit-llvm: mangle start module=" + current_module_slug);
     }
     let mut safe_imports = imports;
-    if safe_imports == null {
-        safe_imports = [];
-    }
+    if safe_imports == null { safe_imports = []; }
     if safe_imports.length > 100000 {
         diagnostics.push("llvm lowering: import list too large for mangling; dropping");
         safe_imports = [];
@@ -77,9 +79,7 @@ fn apply_module_symbol_mangling(
     let mut local_news: string[] = [];
     let mut def_index: number = 0;
     loop {
-        if def_index >= defined.length {
-            break;
-        }
+        if def_index >= defined.length { break; }
         let sym = defined[def_index];
         if should_keep_unmangled_abi_symbol(sym) {
             def_index += 1;
@@ -124,41 +124,27 @@ fn apply_module_symbol_mangling(
         // Scan native text line-by-line for .import directives.
         let mut scan_pos: number = 0;
         loop {
-            if scan_pos >= native_text.length {
-                break;
-            }
+            if scan_pos >= native_text.length { break; }
             // Find end of current line.
             let mut line_end: number = scan_pos;
             loop {
-                if line_end >= native_text.length {
-                    break;
-                }
-                if native_text[line_end] == "\n" {
-                    break;
-                }
+                if line_end >= native_text.length { break; }
+                if native_text[line_end] == "\n" { break; }
                 line_end += 1;
             }
             let raw_line = substring(native_text, scan_pos, line_end);
             let line = trim_text(raw_line);
             scan_pos = line_end + 1;
 
-            if !starts_with(line, ".import ") {
-                continue;
-            }
+            if !starts_with(line, ".import ") { continue; }
             // Extract module path between first pair of quotes.
             let q1 = index_of(line, "\"");
-            if q1 < 0 {
-                continue;
-            }
+            if q1 < 0 { continue; }
             let after_q1 = substring(line, q1 + 1, line.length);
             let q2 = index_of(after_q1, "\"");
-            if q2 <= 0 {
-                continue;
-            }
+            if q2 <= 0 { continue; }
             let import_module = substring(after_q1, 0, q2);
-            if import_module.length == 0 {
-                continue;
-            }
+            if import_module.length == 0 { continue; }
 
             let provider_module = resolve_import_provider_module_name(import_module, current_module_slug, available_modules);
             let provider_is_runtime = starts_with(provider_module, "runtime/");
@@ -167,21 +153,15 @@ fn apply_module_symbol_mangling(
             // Extract specifiers between { and }.
             let brace_open = index_of(line, "{");
             let brace_close = index_of(line, "}");
-            if brace_open < 0 {
-                continue;
-            }
-            if brace_close <= brace_open {
-                continue;
-            }
+            if brace_open < 0 { continue; }
+            if brace_close <= brace_open { continue; }
             let specs_text = substring(line, brace_open + 1, brace_close);
 
             // Split specifiers by comma and process each one.
             let mut remaining = specs_text;
             loop {
                 remaining = trim_text(remaining);
-                if remaining.length == 0 {
-                    break;
-                }
+                if remaining.length == 0 { break; }
                 let comma_pos = index_of(remaining, ",");
                 let mut spec_name: string = "";
                 if comma_pos >= 0 {
@@ -191,9 +171,7 @@ fn apply_module_symbol_mangling(
                     spec_name = trim_text(remaining);
                     remaining = "";
                 }
-                if spec_name.length == 0 {
-                    continue;
-                }
+                if spec_name.length == 0 { continue; }
 
                 // Handle aliased imports: "name as alias" → local=alias, original=name
                 let mut local_name = spec_name;
@@ -206,17 +184,16 @@ fn apply_module_symbol_mangling(
 
                 let local_symbol = sanitize_symbol(local_name);
                 let original_symbol = sanitize_symbol(original_name);
-                if should_keep_unmangled_abi_symbol(local_symbol) {
-                    continue;
-                }
+                if should_keep_unmangled_abi_symbol(local_symbol) { continue; }
                 if string_array_contains(defined, local_symbol) {
-                    diagnostics.push("llvm lowering: import `" + local_symbol + "` shadows local function in module `" + current_module_slug + "`");
+                    diagnostics.push("llvm lowering: import `" + local_symbol
+                        + "` shadows local function in module `"
+                        + current_module_slug
+                        + "`");
                     continue;
                 }
                 // Don't rewrite if already qualified.
-                if index_of(local_symbol, "__") >= 0 {
-                    continue;
-                }
+                if index_of(local_symbol, "__") >= 0 { continue; }
                 import_olds.push(local_symbol);
                 let mut target_symbol = original_symbol;
                 if !provider_is_runtime {
@@ -250,9 +227,7 @@ fn apply_module_symbol_mangling(
         let mut _if274: boolean = false;
         if shim_index >= shim_exports.length { _if274 = true; }
         if shim_index >= shim_targets.length { _if274 = true; }
-        if _if274 {
-            break;
-        }
+        if _if274 { break; }
         let export_sym = shim_exports[shim_index];
         let target_sym = shim_targets[shim_index];
         let signature = find_declare_signature(rewritten, target_sym);
@@ -293,17 +268,13 @@ fn _has_declare_or_define(lines: string[], symbol: string) -> boolean {
     let at_sym = "@" + symbol + "(";
     let mut index: number = 0;
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let trimmed = trim_text(lines[index]);
         let mut _is_hdr: boolean = false;
         if starts_with(trimmed, "declare ") { _is_hdr = true; }
         if starts_with(trimmed, "define ") { _is_hdr = true; }
         if _is_hdr {
-            if index_of(trimmed, at_sym) >= 0 {
-                return true;
-            }
+            if index_of(trimmed, at_sym) >= 0 { return true; }
         }
         index += 1;
     }
@@ -314,13 +285,13 @@ fn _render_declare_line(symbol: string, signature: DeclareSignature) -> string {
     let mut param_types: string[] = [];
     let mut idx: number = 0;
     loop {
-        if idx >= signature.param_types.length {
-            break;
-        }
+        if idx >= signature.param_types.length { break; }
         param_types.push(signature.param_types[idx]);
         idx += 1;
     }
-    return "declare " + signature.return_type + " @" + symbol + "(" + join_with_separator(param_types, ", ") + ")";
+    return "declare " + signature.return_type + " @" + symbol + "("
+        + join_with_separator(param_types, ", ")
+        + ")";
 }
 
 fn empty_capability_manifest() -> CapabilityManifest {
@@ -337,18 +308,12 @@ fn build_trait_metadata(interfaces: NativeInterface[], structs: NativeStruct[]) 
     let mut interface_descriptors: TraitDescriptor[] = [];
     let mut index: number = 0;
     loop {
-        if index >= interfaces.length {
-            break;
-        }
+        if index >= interfaces.length { break; }
         let interface = interfaces[index];
         let mut updated_interfaces = interface_descriptors;
-        updated_interfaces = updated_interfaces.push(
-            TraitDescriptor {
-                name: interface.name,
-                type_parameters: interface.type_parameters,
-                signatures: interface.signatures,
-            }
-        );
+        updated_interfaces = updated_interfaces.push(TraitDescriptor {
+            name: interface.name, type_parameters: interface.type_parameters, signatures: interface.signatures
+        });
         interface_descriptors = updated_interfaces;
         index += 1;
     }
@@ -356,32 +321,29 @@ fn build_trait_metadata(interfaces: NativeInterface[], structs: NativeStruct[]) 
     let mut implementation_descriptors: TraitImplementationDescriptor[] = [];
     index = 0;
     loop {
-        if index >= structs.length {
-            break;
-        }
+        if index >= structs.length { break; }
         let definition = structs[index];
         let mut impls = definition.implements;
-        if impls == null {
-            impls = [];
-        }
+        if impls == null { impls = []; }
         if impls.length > 0 {
             let mut updated_impls = implementation_descriptors;
-            updated_impls = updated_impls.push(
-                TraitImplementationDescriptor { struct_name: definition.name, interfaces: impls }
-            );
+            updated_impls = updated_impls.push(TraitImplementationDescriptor {
+                struct_name: definition.name, interfaces: impls
+            });
             implementation_descriptors = updated_impls;
         }
         index += 1;
     }
 
-    return TraitMetadata { interfaces: interface_descriptors, implementations: implementation_descriptors };
+    return TraitMetadata {
+        interfaces: interface_descriptors,
+        implementations: implementation_descriptors
+    };
 }
 
 fn append_native_function(values: NativeFunction[], value: NativeFunction) -> NativeFunction[] {
     let mut out = values;
-    if out == null {
-        out = [];
-    }
+    if out == null { out = []; }
     out = out.push(value);
     return out;
 }
@@ -389,32 +351,20 @@ fn append_native_function(values: NativeFunction[], value: NativeFunction) -> Na
 fn concat_native_functions(first: NativeFunction[], second: NativeFunction[]) -> NativeFunction[] {
     let mut result: NativeFunction[] = [];
     let mut safe_first = first;
-    if safe_first == null {
-        safe_first = [];
-    }
-    if safe_first.length > 200000 {
-        return result;
-    }
+    if safe_first == null { safe_first = []; }
+    if safe_first.length > 200000 { return result; }
     let mut safe_second = second;
-    if safe_second == null {
-        safe_second = [];
-    }
-    if safe_second.length > 200000 {
-        return result;
-    }
+    if safe_second == null { safe_second = []; }
+    if safe_second.length > 200000 { return result; }
     let mut index: number = 0;
     loop {
-        if index >= safe_first.length {
-            break;
-        }
+        if index >= safe_first.length { break; }
         result = append_native_function(result, safe_first[index]);
         index += 1;
     }
     index = 0;
     loop {
-        if index >= safe_second.length {
-            break;
-        }
+        if index >= safe_second.length { break; }
         result = append_native_function(result, safe_second[index]);
         index += 1;
     }
@@ -443,21 +393,13 @@ fn concat_native_functions(first: NativeFunction[], second: NativeFunction[]) ->
 // the safe call sites.
 fn extend_native_functions_inplace(dst: NativeFunction[], src: NativeFunction[]) -> NativeFunction[] {
     let mut out = dst;
-    if out == null {
-        out = [];
-    }
+    if out == null { out = []; }
     let mut safe_src = src;
-    if safe_src == null {
-        safe_src = [];
-    }
-    if safe_src.length > 200000 {
-        return out;
-    }
+    if safe_src == null { safe_src = []; }
+    if safe_src.length > 200000 { return out; }
     let mut index: number = 0;
     loop {
-        if index >= safe_src.length {
-            break;
-        }
+        if index >= safe_src.length { break; }
         out = append_native_function(out, safe_src[index]);
         index += 1;
     }
@@ -465,15 +407,11 @@ fn extend_native_functions_inplace(dst: NativeFunction[], src: NativeFunction[])
 }
 
 fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
-    if structs.length > 100000 {
-        return [];
-    }
+    if structs.length > 100000 { return []; }
     let mut result: NativeFunction[] = [];
     let mut index: number = 0;
     loop {
-        if index >= structs.length {
-            break;
-        }
+        if index >= structs.length { break; }
         let definition = structs[index];
         let mut methods = definition.methods;
         if methods == null {
@@ -486,9 +424,7 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
         }
         let mut method_index: number = 0;
         loop {
-            if method_index >= methods.length {
-                break;
-            }
+            if method_index >= methods.length { break; }
             let method = methods[method_index];
             let qualified_name = definition.name + method.name;
             // Rebuild parameters so that the `self` parameter always carries
@@ -497,36 +433,26 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
             // empty strings, producing `define ... @Fn( %self)` in LLVM IR.
             let mut fixed_params: NativeParameter[] = [];
             let mut raw_params = method.parameters;
-            if raw_params == null {
-                raw_params = [];
-            }
+            if raw_params == null { raw_params = []; }
             let mut pi: number = 0;
             loop {
-                if pi >= raw_params.length {
-                    break;
-                }
+                if pi >= raw_params.length { break; }
                 let p = raw_params[pi];
                 let mut p_name = p.name;
-                if p_name == null {
-                    p_name = "";
-                }
+                if p_name == null { p_name = ""; }
                 let mut p_type = p.type_annotation;
-                if p_type == null {
-                    p_type = "";
-                }
+                if p_type == null { p_type = ""; }
                 // If this is the self parameter and type is empty, fill it
                 // with the struct name so type mapping resolves correctly.
                 if p_name == "self" {
-                    if p_type.length == 0 {
-                        p_type = definition.name;
-                    }
+                    if p_type.length == 0 { p_type = definition.name; }
                 }
                 let fixed_p = NativeParameter {
                     name: p_name,
                     type_annotation: p_type,
                     mutable: p.mutable,
                     default_value: p.default_value,
-                    span: p.span,
+                    span: p.span
                 };
                 fixed_params.push(fixed_p);
                 pi += 1;
@@ -539,7 +465,7 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
                 effects: method.effects,
                 decorators: method.decorators,
                 instructions: method.instructions,
-                is_extern: false,
+                is_extern: false
             };
             result = append_native_function(result, qualified);
             method_index += 1;
@@ -549,17 +475,10 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
     return result;
 }
 
-
 fn _join_llvm_lines_linear(lines: string[]) -> string {
-    if lines == null {
-        return "";
-    }
-    if lines.length == 0 {
-        return "";
-    }
-    if lines.length == 1 {
-        return lines[0];
-    }
+    if lines == null { return ""; }
+    if lines.length == 0 { return ""; }
+    if lines.length == 1 { return lines[0]; }
     // Pair-wise merge: each pass halves the working array. O(N log N) memory
     // total instead of the O(N^2) accumulation of `out = out + line` in a
     // loop. For emit_native.sfn this is the difference between blowing the
@@ -570,20 +489,14 @@ fn _join_llvm_lines_linear(lines: string[]) -> string {
     // string_append peephole (b3b6dad) reuses the buffer in place.
     let mut current = lines;
     loop {
-        if current.length <= 1 {
-            break;
-        }
+        if current.length <= 1 { break; }
         let mut next: string[] = [];
         let mut i: number = 0;
         loop {
-            if i >= current.length {
-                break;
-            }
+            if i >= current.length { break; }
             if i + 1 < current.length {
                 next.push(current[i] + "\n" + current[i + 1]);
-            } else {
-                next.push(current[i]);
-            }
+            } else { next.push(current[i]); }
             i += 2;
         }
         current = next;

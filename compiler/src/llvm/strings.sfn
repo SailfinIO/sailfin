@@ -2,59 +2,40 @@
 //
 // String constant management for LLVM IR generation. Handles deduplication,
 // escaping, and rendering of string constants in LLVM IR format.
-
 import { substring } from "../string_utils";
 import { StringConstant } from "./types";
-import { number_to_string, append_string } from "./utils";
+import { append_string, number_to_string } from "./utils";
 
 // =============================================================================
 // String Constant Set Operations
 // =============================================================================
-
-fn empty_string_constant_set() -> StringConstant[] {
-    return [];
-}
+fn empty_string_constant_set() -> StringConstant[] { return []; }
 
 fn string_constant_singleton(constant: StringConstant) -> StringConstant[] {
     return [constant];
 }
 
-
 fn append_string_constant(set: StringConstant[], constant: StringConstant) -> StringConstant[] {
     let mut out = set;
-    if out == null {
-        out = [];
-    }
-    if constant == null {
-        return out;
-    }
+    if out == null { out = []; }
+    if constant == null { return out; }
     out = out.push(constant);
     return out;
 }
 
 fn merge_string_constants(existing: StringConstant[], new_constants: StringConstant[]) -> StringConstant[] {
     let mut safe_existing = existing;
-    if safe_existing == null {
-        safe_existing = [];
-    }
+    if safe_existing == null { safe_existing = []; }
     let mut safe_new_constants = new_constants;
-    if safe_new_constants == null {
-        return safe_existing;
-    }
-    if safe_new_constants.length == 0 {
-        return safe_existing;
-    }
-    if safe_existing.length == 0 {
-        return safe_new_constants;
-    }
+    if safe_new_constants == null { return safe_existing; }
+    if safe_new_constants.length == 0 { return safe_existing; }
+    if safe_existing.length == 0 { return safe_new_constants; }
 
     // Append new constants directly onto the existing array (in-place via push)
     // to avoid cloning the entire set on every merge.
     let mut index: number = 0;
     loop {
-        if index >= safe_new_constants.length {
-            break;
-        }
+        if index >= safe_new_constants.length { break; }
         let candidate = safe_new_constants[index];
         let mut _if298: boolean = false;
         if candidate == null { _if298 = true; }
@@ -64,9 +45,7 @@ fn merge_string_constants(existing: StringConstant[], new_constants: StringConst
             continue;
         }
         let found_by_name = find_string_constant_by_name(safe_existing, candidate.name);
-        if found_by_name == null {
-            safe_existing.push(candidate);
-        }
+        if found_by_name == null { safe_existing.push(candidate); }
         index += 1;
     }
     return safe_existing;
@@ -75,21 +54,14 @@ fn merge_string_constants(existing: StringConstant[], new_constants: StringConst
 // =============================================================================
 // String Constant Lookup
 // =============================================================================
-
 fn find_string_constant(constants: StringConstant[], content: string) -> StringConstant? {
-    if constants == null {
-        return null;
-    }
+    if constants == null { return null; }
     let mut index: number = 0;
     loop {
-        if index >= constants.length {
-            break;
-        }
+        if index >= constants.length { break; }
         let candidate = constants[index];
         if candidate != null {
-            if candidate.content == content {
-                return candidate;
-            }
+            if candidate.content == content { return candidate; }
         }
         index += 1;
     }
@@ -97,19 +69,13 @@ fn find_string_constant(constants: StringConstant[], content: string) -> StringC
 }
 
 fn find_string_constant_by_name(constants: StringConstant[], name: string) -> StringConstant? {
-    if constants == null {
-        return null;
-    }
+    if constants == null { return null; }
     let mut index: number = 0;
     loop {
-        if index >= constants.length {
-            break;
-        }
+        if index >= constants.length { break; }
         let candidate = constants[index];
         if candidate != null {
-            if candidate.name == name {
-                return candidate;
-            }
+            if candidate.name == name { return candidate; }
         }
         index += 1;
     }
@@ -119,24 +85,24 @@ fn find_string_constant_by_name(constants: StringConstant[], name: string) -> St
 // =============================================================================
 // LLVM IR Rendering
 // =============================================================================
-
 fn render_string_constants(constants: StringConstant[]) -> string[] {
-    if constants == null {
-        return [];
-    }
+    if constants == null { return []; }
     let mut lines: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= constants.length {
-            break;
-        }
+        if index >= constants.length { break; }
         let constant = constants[index];
         if constant != null {
             if constant.name != null {
                 if constant.content != null {
                     let escaped = escape_string_for_llvm(constant.content);
                     let length_str = number_to_string(constant.byte_count + 1);
-                    let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";
+                    let declaration = constant.name
+                        + " = private unnamed_addr constant ["
+                        + length_str
+                        + " x i8] c\""
+                        + escaped
+                        + "\\00\"";
                     lines.push(declaration);
                 }
             }
@@ -147,9 +113,7 @@ fn render_string_constants(constants: StringConstant[]) -> string[] {
 }
 
 fn escape_string_for_llvm(content: string) -> string {
-    if content == null {
-        return "";
-    }
+    if content == null { return ""; }
     // Build the result by collecting unchanged-text runs and escape sequences
     // as chunks, then assemble at the end. The previous implementation did
     // `result = result + ch` per character, which is O(N^2) in memory under
@@ -160,20 +124,12 @@ fn escape_string_for_llvm(content: string) -> string {
     let mut chunk_start: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= content.length {
-            break;
-        }
+        if index >= content.length { break; }
         let ch = substring(content, index, index + 1);
         let mut esc: string = "";
-        if ch == "\n" {
-            esc = "\\0A";
-        } else if ch == "\r" {
-            esc = "\\0D";
-        } else if ch == "\t" {
+        if ch == "\n" { esc = "\\0A"; } else if ch == "\r" { esc = "\\0D"; } else if ch == "\t" {
             esc = "\\09";
-        } else if ch == "\"" {
-            esc = "\\22";
-        } else if ch == "\\" {
+        } else if ch == "\"" { esc = "\\22"; } else if ch == "\\" {
             esc = "\\5C";
         }
         if esc.length > 0 {
@@ -188,18 +144,12 @@ fn escape_string_for_llvm(content: string) -> string {
     if chunk_start < content.length {
         chunks.push(substring(content, chunk_start, content.length));
     }
-    if chunks.length == 0 {
-        return "";
-    }
-    if chunks.length == 1 {
-        return chunks[0];
-    }
+    if chunks.length == 0 { return ""; }
+    if chunks.length == 1 { return chunks[0]; }
     let mut result: string = chunks[0];
     let mut i: number = 1;
     loop {
-        if i >= chunks.length {
-            break;
-        }
+        if i >= chunks.length { break; }
         result = result + chunks[i];
         i += 1;
     }

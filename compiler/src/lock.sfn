@@ -13,9 +13,7 @@
 //
 // Each entry under [packages] maps a capsule display name to its locked
 // version and integrity hash, space-separated within the quoted value.
-
 // ---- Internal helpers ----
-
 fn _lock_trim(text: string) -> string {
     let mut start: number = 0;
     let mut end: number = text.length;
@@ -26,9 +24,7 @@ fn _lock_trim(text: string) -> string {
         if ch == " " { ws = true; }
         if ch == "\t" { ws = true; }
         if ch == "\r" { ws = true; }
-        if ws {
-            start += 1;
-        } else { break; }
+        if ws { start += 1; } else { break; }
     }
     loop {
         if end <= start { break; }
@@ -37,9 +33,7 @@ fn _lock_trim(text: string) -> string {
         if ch == " " { ws = true; }
         if ch == "\t" { ws = true; }
         if ch == "\r" { ws = true; }
-        if ws {
-            end -= 1;
-        } else { break; }
+        if ws { end -= 1; } else { break; }
     }
     return substring(text, start, end);
 }
@@ -68,9 +62,7 @@ fn _lock_split_lines(text: string) -> string[] {
         }
         i += 1;
     }
-    if start <= len {
-        lines.push(substring(text, start, len));
-    }
+    if start <= len { lines.push(substring(text, start, len)); }
     return lines;
 }
 
@@ -93,7 +85,9 @@ fn _lock_parse(text: string) -> _LockEntry[] {
         if line[0] == "#" { continue; }
         if line[0] == "[" {
             let close = find_char(line, "]", 0);
-            if close > 0 { section = _lock_trim(substring(line, 1, close)); }
+            if close > 0 {
+                section = _lock_trim(substring(line, 1, close));
+            }
             continue;
         }
         if !strings_equal(section, "packages") { continue; }
@@ -111,13 +105,14 @@ fn _lock_parse(text: string) -> _LockEntry[] {
             ver = substring(raw_value, 0, space_pos);
             integrity = substring(raw_value, space_pos + 1, raw_value.length);
         }
-        entries.push(_LockEntry { capsule: capsule_name, version: ver, hash: integrity });
+        entries.push(_LockEntry {
+            capsule: capsule_name, version: ver, hash: integrity
+        });
     }
     return entries;
 }
 
 // ---- Public API ----
-
 // Return locked dependency versions as a newline-separated string of
 // "capsule=version" pairs — same format as toml_get_dependencies() so
 // callers can use _lookup_dep_version_cmd directly.
@@ -179,7 +174,9 @@ fn lock_add_entry(lock_text: string, capsule: string, version: string, hash: str
         i += 1;
     }
     if !found {
-        entries.push(_LockEntry { capsule: capsule, version: version, hash: hash });
+        entries.push(_LockEntry {
+            capsule: capsule, version: version, hash: hash
+        });
     }
     return _lock_write(entries);
 }
@@ -194,9 +191,7 @@ fn _lock_write(entries: _LockEntry[]) -> string {
         if i >= entries.length { break; }
         let e = entries[i];
         let mut value: string = e.version;
-        if e.hash.length > 0 {
-            value = value + " " + e.hash;
-        }
+        if e.hash.length > 0 { value = value + " " + e.hash; }
         out = out + "\"" + e.capsule + "\" = \"" + value + "\"\n";
         i += 1;
     }

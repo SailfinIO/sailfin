@@ -2,46 +2,32 @@
 //
 // Struct and enum definition parsing, extracted from native_ir_parser.sfn
 // to keep the module under the seed compiler's OOM threshold.
-
-import { substring, char_code } from "./string_utils";
-
 import {
-    NativeInstruction,
-    NativeSourceSpan,
-    NativeParameter,
-    NativeFunction,
-    NativeStructField,
-    NativeStructLayoutField,
-    NativeStructLayout,
-    NativeStruct,
-    NativeEnumVariant,
-    NativeEnumVariantLayout,
-    NativeEnumLayout,
-    NativeEnum,
     EnumParseResult,
     InstructionParseResult,
-    StructParseResult,
+    NativeEnum,
+    NativeEnumLayout,
+    NativeEnumVariant,
+    NativeEnumVariantLayout,
+    NativeFunction,
+    NativeInstruction,
+    NativeParameter,
+    NativeSourceSpan,
+    NativeStruct,
+    NativeStructField,
+    NativeStructLayout,
+    NativeStructLayoutField,
+    StructParseResult
 } from "./native_ir";
-
-import {
-    index_of,
-    is_trim_char,
-    starts_with,
-    strip_generics,
-    strip_prefix,
-    trim_text,
-    split_whitespace,
-} from "./native_ir_utils_text";
-
+import { parse_instruction } from "./native_ir_parser_instructions";
 import {
     parse_decimal_number,
     parse_enum_layout_header,
     parse_enum_payload_layout,
     parse_enum_variant_layout,
     parse_struct_layout_field,
-    parse_struct_layout_header,
+    parse_struct_layout_header
 } from "./native_ir_utils_layout";
-
 import {
     parse_decorator_name,
     parse_effect_list,
@@ -49,43 +35,37 @@ import {
     parse_function_name,
     parse_parameter_entry,
     parse_struct_field_line,
-    parse_struct_header,
+    parse_struct_header
 } from "./native_ir_utils_parse";
-
 import {
-    parse_instruction,
-} from "./native_ir_parser_instructions";
+    index_of,
+    is_trim_char,
+    split_whitespace,
+    starts_with,
+    strip_generics,
+    strip_prefix,
+    trim_text
+} from "./native_ir_utils_text";
+import { char_code, substring } from "./string_utils";
 
 fn parse_source_span(text: string) -> NativeSourceSpan? {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return null;
-    }
+    if trimmed.length == 0 { return null; }
     let parts = split_whitespace(trimmed);
-    if parts.length != 4 {
-        return null;
-    }
+    if parts.length != 4 { return null; }
     let start_line = parse_decimal_number(parts[0]);
-    if !start_line.success {
-        return null;
-    }
+    if !start_line.success { return null; }
     let start_column = parse_decimal_number(parts[1]);
-    if !start_column.success {
-        return null;
-    }
+    if !start_column.success { return null; }
     let end_line = parse_decimal_number(parts[2]);
-    if !end_line.success {
-        return null;
-    }
+    if !end_line.success { return null; }
     let end_column = parse_decimal_number(parts[3]);
-    if !end_column.success {
-        return null;
-    }
+    if !end_column.success { return null; }
     return NativeSourceSpan {
         start_line: start_line.value,
         start_column: start_column.value,
         end_line: end_line.value,
-        end_column: end_column.value,
+        end_column: end_column.value
     };
 }
 
@@ -100,7 +80,7 @@ fn append_parameter(function: NativeFunction, parameter: NativeParameter) -> Nat
         effects: function.effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
-        instructions: function.instructions,
+        instructions: function.instructions
     };
 }
 
@@ -115,7 +95,7 @@ fn append_instruction(function: NativeFunction, instruction: NativeInstruction) 
         effects: function.effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
-        instructions: instructions,
+        instructions: instructions
     };
 }
 
@@ -130,12 +110,10 @@ fn apply_meta(function: NativeFunction, entry: string) -> NativeFunction {
             effects: function.effects,
             decorators: function.decorators,
             is_extern: true,
-            instructions: function.instructions,
+            instructions: function.instructions
         };
     }
-    if trimmed == "unsafe" {
-        return function;
-    }
+    if trimmed == "unsafe" { return function; }
     if starts_with(trimmed, "return ") {
         let return_type = trim_text(strip_prefix(trimmed, "return "));
         return update_function_meta(function, return_type, function.effects);
@@ -157,7 +135,7 @@ fn update_function_meta(function: NativeFunction, return_type: string, effects: 
         effects: effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
-        instructions: function.instructions,
+        instructions: function.instructions
     };
 }
 
@@ -169,12 +147,8 @@ fn append_struct_layout_field(fields: NativeStructLayoutField[], field: NativeSt
 fn find_enum_variant_layout(variants: NativeEnumVariantLayout[], name: string) -> number {
     let mut index: number = 0;
     loop {
-        if index >= variants.length {
-            break;
-        }
-        if variants[index].name == name {
-            return index;
-        }
+        if index >= variants.length { break; }
+        if variants[index].name == name { return index; }
         index += 1;
     }
     return -1;
@@ -184,9 +158,7 @@ fn update_enum_variant_fields(variants: NativeEnumVariantLayout[], index: number
     let mut result: NativeEnumVariantLayout[] = [];
     let mut current_index: number = 0;
     loop {
-        if current_index >= variants.length {
-            break;
-        }
+        if current_index >= variants.length { break; }
         if current_index == index {
             let variant = variants[current_index];
             let updated = NativeEnumVariantLayout {
@@ -195,12 +167,10 @@ fn update_enum_variant_fields(variants: NativeEnumVariantLayout[], index: number
                 offset: variant.offset,
                 size: variant.size,
                 align: variant.align,
-                fields: append_struct_layout_field(variant.fields, field),
+                fields: append_struct_layout_field(variant.fields, field)
             };
             result.push(updated);
-        } else {
-            result.push(variants[current_index]);
-        }
+        } else { result.push(variants[current_index]); }
         current_index += 1;
     }
     return result;
@@ -221,7 +191,11 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
     let mut implements = header_parse.implements;
     if struct_name.length == 0 {
         diagnostics.push("unable to parse struct header: " + header);
-        return StructParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
+        return StructParseResult {
+            definition: null,
+            next_index: start_index + 1,
+            diagnostics: diagnostics
+        };
     }
 
     let mut fields: NativeStructField[] = [];
@@ -241,12 +215,22 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             diagnostics.push("unterminated struct " + struct_name);
             let mut struct_layout_value: NativeStructLayout? = null;
             if struct_layout_header_success {
-                struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields };
+                struct_layout_value = NativeStructLayout {
+                    size: struct_layout_size,
+                    align: struct_layout_align,
+                    fields: struct_layout_fields
+                };
             }
             return StructParseResult {
-                definition: NativeStruct { name: struct_name, fields: fields, methods: methods, implements: implements, layout: struct_layout_value },
+                definition: NativeStruct {
+                    name: struct_name,
+                    fields: fields,
+                    methods: methods,
+                    implements: implements,
+                    layout: struct_layout_value
+                },
                 next_index: index,
-                diagnostics: diagnostics,
+                diagnostics: diagnostics
             };
         }
         let raw_line = trim_text(lines[index]);
@@ -285,7 +269,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             if starts_with(raw_line, ".param ") {
                 let parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "), method_pending_span);
                 if parameter == null {
-                    diagnostics.push("unable to parse method parameter: " + raw_line);
+                    diagnostics.push("unable to parse method parameter: "
+                        + raw_line);
                 } else {
                     current_method = append_parameter(current_method, parameter);
                 }
@@ -294,27 +279,26 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                 continue;
             }
             if starts_with(raw_line, ".method ") {
-                diagnostics.push("nested method declaration in struct " + struct_name);
+                diagnostics.push("nested method declaration in struct "
+                    + struct_name);
                 index += 1;
                 continue;
             }
             if starts_with(raw_line, ".span ") {
                 let parsed_method_span = parse_source_span(strip_prefix(raw_line, ".span "));
                 if parsed_method_span == null {
-                    diagnostics.push("unable to parse span metadata: " + raw_line);
-                } else {
-                    method_pending_span = parsed_method_span;
-                }
+                    diagnostics.push("unable to parse span metadata: "
+                        + raw_line);
+                } else { method_pending_span = parsed_method_span; }
                 index += 1;
                 continue;
             }
             if starts_with(raw_line, ".init-span ") {
                 let parsed_method_init_span = parse_source_span(strip_prefix(raw_line, ".init-span "));
                 if parsed_method_init_span == null {
-                    diagnostics.push("unable to parse initializer span metadata: " + raw_line);
-                } else {
-                    method_pending_value_span = parsed_method_init_span;
-                }
+                    diagnostics.push("unable to parse initializer span metadata: "
+                        + raw_line);
+                } else { method_pending_value_span = parsed_method_init_span; }
                 index += 1;
                 continue;
             }
@@ -323,13 +307,9 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                 method_pending_value_span = null;
                 let mut scan = index;
                 loop {
-                    if scan >= lines.length {
-                        break;
-                    }
+                    if scan >= lines.length { break; }
                     let candidate = trim_text(lines[scan]);
-                    if candidate == ".endmethod" {
-                        break;
-                    }
+                    if candidate == ".endmethod" { break; }
                     scan += 1;
                 }
                 index = scan;
@@ -346,7 +326,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             if method_instruction_result.value_span_consumed {
                 method_pending_value_span = null;
             } else if method_pending_value_span != null {
-                diagnostics.push("unused initializer span metadata before: " + raw_line);
+                diagnostics.push("unused initializer span metadata before: "
+                    + raw_line);
                 method_pending_value_span = null;
             }
             let mut instruction_index: number = 0;
@@ -372,7 +353,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                 }
                 if header_result.success {
                     if struct_layout_header_success {
-                        diagnostics.push("duplicate struct layout header in " + struct_name);
+                        diagnostics.push("duplicate struct layout header in "
+                            + struct_name);
                     } else {
                         struct_layout_size = header_result.size;
                         struct_layout_align = header_result.align;
@@ -386,13 +368,9 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                 let tail = trim_text(strip_prefix(body, "field "));
                 let mut is_struct_header: boolean = false;
                 if starts_with(tail, "struct") {
-                    if tail.length == 6 {
-                        is_struct_header = true;
-                    } else if tail.length > 6 {
+                    if tail.length == 6 { is_struct_header = true; } else if tail.length > 6 {
                         let after = tail[6];
-                        if is_trim_char(after) {
-                            is_struct_header = true;
-                        }
+                        if is_trim_char(after) { is_struct_header = true; }
                     }
                 }
                 if is_struct_header {
@@ -406,7 +384,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                     }
                     if header_result.success {
                         if struct_layout_header_success {
-                            diagnostics.push("duplicate struct layout header in " + struct_name);
+                            diagnostics.push("duplicate struct layout header in "
+                                + struct_name);
                         } else {
                             struct_layout_size = header_result.size;
                             struct_layout_align = header_result.align;
@@ -428,7 +407,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                     struct_layout_fields.push(field_result.field);
                     if !struct_layout_header_success {
                         if !struct_layout_reported_missing_header {
-                            diagnostics.push("struct " + struct_name + " layout field encountered before layout header");
+                            diagnostics.push("struct " + struct_name
+                                + " layout field encountered before layout header");
                             struct_layout_reported_missing_header = true;
                         }
                     }
@@ -448,36 +428,33 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             let parsed_field = parse_struct_field_line(strip_prefix(raw_line, ".field "));
             if parsed_field == null {
                 diagnostics.push("unable to parse struct field: " + raw_line);
-            } else {
-                fields.push(parsed_field);
-            }
+            } else { fields.push(parsed_field); }
             index += 1;
             continue;
         }
         if starts_with(raw_line, ".decorator") {
             if current_method != null {
-                diagnostics.push("decorator directive encountered inside method body: " + raw_line);
+                diagnostics.push("decorator directive encountered inside method body: "
+                    + raw_line);
             } else {
                 let decorator_name = parse_decorator_name(raw_line);
                 if decorator_name == null {
-                    diagnostics.push("unable to parse decorator directive: " + raw_line);
-                } else {
-                    method_pending_decorators.push(decorator_name);
-                }
+                    diagnostics.push("unable to parse decorator directive: "
+                        + raw_line);
+                } else { method_pending_decorators.push(decorator_name); }
             }
             index += 1;
             continue;
         }
         if starts_with(raw_line, ".method ") {
             if current_method != null {
-                diagnostics.push("nested method declaration in struct " + struct_name);
+                diagnostics.push("nested method declaration in struct "
+                    + struct_name);
             }
             let header = strip_prefix(raw_line, ".method ");
             let trimmed = trim_text(header);
             let mut is_async: boolean = false;
-            if starts_with(trimmed, "async ") {
-                is_async = true;
-            }
+            if starts_with(trimmed, "async ") { is_async = true; }
             let method_name = parse_function_name(header);
             current_method = NativeFunction {
                 name: method_name,
@@ -487,7 +464,7 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                 effects: [],
                 decorators: method_pending_decorators,
                 is_extern: false,
-                instructions: [],
+                instructions: []
             };
             method_pending_decorators = [];
             method_pending_span = null;
@@ -501,13 +478,23 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
 
     let mut struct_layout_value: NativeStructLayout? = null;
     if struct_layout_header_success {
-        struct_layout_value = NativeStructLayout { size: struct_layout_size, align: struct_layout_align, fields: struct_layout_fields };
+        struct_layout_value = NativeStructLayout {
+            size: struct_layout_size,
+            align: struct_layout_align,
+            fields: struct_layout_fields
+        };
     }
 
     return StructParseResult {
-        definition: NativeStruct { name: struct_name, fields: fields, methods: methods, implements: implements, layout: struct_layout_value },
+        definition: NativeStruct {
+            name: struct_name,
+            fields: fields,
+            methods: methods,
+            implements: implements,
+            layout: struct_layout_value
+        },
         next_index: index,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -518,12 +505,16 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
     let mut enum_name: string = name_text;
     let space_index = index_of(enum_name, " ");
     if space_index >= 0 {
-    enum_name = trim_text(substring(enum_name, 0, space_index));
+        enum_name = trim_text(substring(enum_name, 0, space_index));
     }
     enum_name = strip_generics(enum_name);
     if enum_name.length == 0 {
         diagnostics.push("unable to parse enum header: " + header);
-        return EnumParseResult { definition: null, next_index: start_index + 1, diagnostics: diagnostics };
+        return EnumParseResult {
+            definition: null,
+            next_index: start_index + 1,
+            diagnostics: diagnostics
+        };
     }
 
     let mut variants: NativeEnumVariant[] = [];
@@ -547,13 +538,17 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                     tag_type: enum_layout_tag_type,
                     tag_size: enum_layout_tag_size,
                     tag_align: enum_layout_tag_align,
-                    variants: enum_layout_variants,
+                    variants: enum_layout_variants
                 };
             }
             return EnumParseResult {
-                definition: NativeEnum { name: enum_name, variants: variants, layout: enum_layout_value },
+                definition: NativeEnum {
+                    name: enum_name,
+                    variants: variants,
+                    layout: enum_layout_value
+                },
                 next_index: index,
-                diagnostics: diagnostics,
+                diagnostics: diagnostics
             };
         }
         let raw_line = trim_text(lines[index]);
@@ -580,7 +575,8 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                 }
                 if header_result.success {
                     if enum_layout_header_success {
-                        diagnostics.push("duplicate enum layout header in " + enum_name);
+                        diagnostics.push("duplicate enum layout header in "
+                            + enum_name);
                     } else {
                         enum_layout_size = header_result.size;
                         enum_layout_align = header_result.align;
@@ -621,13 +617,17 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                 if variant_result.success {
                     let existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name);
                     if existing_index >= 0 {
-                        diagnostics.push("duplicate enum layout variant `" + variant_result.variant.name + "` in " + enum_name);
+                        diagnostics.push("duplicate enum layout variant `"
+                            + variant_result.variant.name
+                            + "` in "
+                            + enum_name);
                     } else {
                         enum_layout_variants.push(variant_result.variant);
                     }
                     if !enum_layout_header_success {
                         if !enum_layout_reported_missing_header {
-                            diagnostics.push("enum " + enum_name + " layout variant encountered before layout header");
+                            diagnostics.push("enum " + enum_name
+                                + " layout variant encountered before layout header");
                             enum_layout_reported_missing_header = true;
                         }
                     }
@@ -646,13 +646,17 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                 if payload_result.success {
                     let target_index = find_enum_variant_layout(enum_layout_variants, payload_result.variant_name);
                     if target_index < 0 {
-                        diagnostics.push("enum " + enum_name + " layout payload references unknown variant `" + payload_result.variant_name + "`");
+                        diagnostics.push("enum " + enum_name
+                            + " layout payload references unknown variant `"
+                            + payload_result.variant_name
+                            + "`");
                     } else {
                         enum_layout_variants = update_enum_variant_fields(enum_layout_variants, target_index, payload_result.field);
                     }
                     if !enum_layout_header_success {
                         if !enum_layout_reported_missing_header {
-                            diagnostics.push("enum " + enum_name + " layout payload encountered before layout header");
+                            diagnostics.push("enum " + enum_name
+                                + " layout payload encountered before layout header");
                             enum_layout_reported_missing_header = true;
                         }
                     }
@@ -672,9 +676,7 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
             let parsed_variant = parse_enum_variant_line(strip_prefix(raw_line, ".variant "));
             if parsed_variant == null {
                 diagnostics.push("unable to parse enum variant: " + raw_line);
-            } else {
-                variants.push(parsed_variant);
-            }
+            } else { variants.push(parsed_variant); }
             index += 1;
             continue;
         }
@@ -690,15 +692,26 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
             tag_type: enum_layout_tag_type,
             tag_size: enum_layout_tag_size,
             tag_align: enum_layout_tag_align,
-            variants: enum_layout_variants,
+            variants: enum_layout_variants
         };
     }
 
     return EnumParseResult {
-        definition: NativeEnum { name: enum_name, variants: variants, layout: enum_layout_value },
+        definition: NativeEnum {
+            name: enum_name,
+            variants: variants,
+            layout: enum_layout_value
+        },
         next_index: index,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
-export { parse_struct_definition, parse_enum_definition, parse_source_span, apply_meta, append_parameter, append_instruction };
+export {
+    parse_struct_definition,
+    parse_enum_definition,
+    parse_source_span,
+    apply_meta,
+    append_parameter,
+    append_instruction
+};

@@ -9,48 +9,25 @@
 // returned TypeContext has missing or empty enum names.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-
 import {
-    NativeStruct,
     NativeEnum,
-    NativeInterface,
     NativeFunction,
+    NativeInterface,
+    NativeStruct
 } from "../../native_ir";
 import { substring } from "../../string_utils";
-
+import { build_type_context, fixup_enum_layouts } from "../type_context";
+import { EnumTypeInfo, EnumVariantInfo, TypeContext } from "../types";
+import { index_of, number_to_string, sanitize_symbol } from "../utils";
+import { extend_string_lines_checked } from "./lowering_io";
 import {
-    TypeContext,
-    EnumTypeInfo,
-    EnumVariantInfo,
-} from "../types";
-
-import {
-    number_to_string,
-    sanitize_symbol,
-    index_of,
-} from "../utils";
-
-import {
-    fixup_enum_layouts,
-    build_type_context,
-} from "../type_context";
-
-import {
-    extend_string_lines_checked,
-} from "./lowering_io";
-
-import {
-    get_struct_name_at,
-    get_struct_fields_at,
+    get_enum_name_at,
     get_struct_field_name_at,
     get_struct_field_type_at,
-    get_enum_name_at,
+    get_struct_fields_at,
+    get_struct_name_at
 } from "./lowering_native_helpers";
-
-import {
-    split_lines_local,
-    parse_number_local,
-} from "./lowering_text_utils";
+import { parse_number_local, split_lines_local } from "./lowering_text_utils";
 
 // Serialize struct info to build/sailfin/.struct_info for use by
 // build_type_context recovery.  Format per line:
@@ -80,14 +57,15 @@ fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
                 if fn_name == null { fn_name = ""; }
                 let mut ft = "i8*";
                 let ann = get_struct_field_type_at(fields, fi);
-                if ann == "number" { ft = "double"; }
-                else if ann == "boolean" { ft = "i1"; }
-                else if ann == "bool" { ft = "i1"; }
-                else if ann == "i64" { ft = "i64"; }
-                else if ann == "int" { ft = "i64"; }
-                else if ann == "usize" { ft = "i64"; }
-                else if ann == "i32" { ft = "i32"; }
-                else if ann == "u8" { ft = "i8"; }
+                if ann == "number" { ft = "double"; } else if ann == "boolean" {
+                    ft = "i1";
+                } else if ann == "bool" { ft = "i1"; } else if ann == "i64" {
+                    ft = "i64";
+                } else if ann == "int" { ft = "i64"; } else if ann == "usize" {
+                    ft = "i64";
+                } else if ann == "i32" { ft = "i32"; } else if ann == "u8" {
+                    ft = "i8";
+                }
                 line = line + fn_name + ":" + ft;
                 fi += 1;
             }
@@ -121,7 +99,13 @@ fn serialize_enum_info(enums: NativeEnum[], _trace_enums: boolean) -> string ![i
         let tag_align = "4";
         let size = "4";
         let align = "4";
-        let mut line = name + "\t" + tag_type + "\t" + tag_size + "\t" + tag_align + "\t" + size + "\t" + align + "\t";
+        let mut line = name + "\t" + tag_type + "\t" + tag_size + "\t"
+            + tag_align
+            + "\t"
+            + size
+            + "\t"
+            + align
+            + "\t";
         let e = enums[idx];
         let variants = e.variants;
         let mut vi: number = 0;
@@ -129,7 +113,8 @@ fn serialize_enum_info(enums: NativeEnum[], _trace_enums: boolean) -> string ![i
             loop {
                 if vi >= variants.length { break; }
                 if vi > 0 { line = line + ","; }
-                line = line + "v" + number_to_string(vi) + "=" + number_to_string(vi);
+                line = line + "v" + number_to_string(vi) + "="
+                    + number_to_string(vi);
                 vi += 1;
             }
         }
@@ -146,21 +131,15 @@ fn serialize_enum_info(enums: NativeEnum[], _trace_enums: boolean) -> string ![i
 // Build the type context and recover enum info from file-based channel
 // if cross-module ABI corruption caused enums to arrive empty.
 // Returns the TypeContext (enums may be recovered from .enum_info).
-fn build_type_context_with_recovery(
-    combined_structs: NativeStruct[],
-    combined_enums: NativeEnum[],
-    combined_interfaces: NativeInterface[],
-    diagnostics: string[],
-    _trace_enums: boolean,
-    debug_lowering: boolean
-) -> TypeContext ![io] {
+fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_enums: NativeEnum[], combined_interfaces: NativeInterface[], diagnostics: string[], _trace_enums: boolean, debug_lowering: boolean) -> TypeContext ![io] {
     // Skip cross-module fixup_enum_layouts: the seed's struct-returning
     // cross-module ABI segfaults.  Pass enums through directly.
     let fixed_enums_list = combined_enums;
-    // (No diagnostics from skipped fixup.)
 
+    // (No diagnostics from skipped fixup.)
     if debug_lowering {
-        print.err("emit-llvm: about to fixup_enum_layouts enums=" + number_to_string(combined_enums.length));
+        print.err("emit-llvm: about to fixup_enum_layouts enums="
+            + number_to_string(combined_enums.length));
     }
 
     // Serialize struct/enum info BEFORE the cross-module build_type_context call.
@@ -168,7 +147,9 @@ fn build_type_context_with_recovery(
     serialize_enum_info(fixed_enums_list, _trace_enums);
 
     if _trace_enums {
-        print.err("enum_trace: combined_enums=" + number_to_string(combined_enums.length) + " fixed_enums=" + number_to_string(fixed_enums_list.length));
+        print.err("enum_trace: combined_enums=" + number_to_string(combined_enums.length)
+            + " fixed_enums="
+            + number_to_string(fixed_enums_list.length));
     }
 
     let type_build = build_type_context(combined_structs, fixed_enums_list, combined_interfaces);
@@ -201,9 +182,7 @@ fn build_type_context_with_recovery(
     if type_context.enums.length == 0 { _if263 = true; }
     if _enum_names_empty { _if263 = true; }
     if _if263 {
-        if fs.exists("build/sailfin/.enum_info") {
-            _needs_recovery = true;
-        }
+        if fs.exists("build/sailfin/.enum_info") { _needs_recovery = true; }
     }
     if _needs_recovery {
         let recovered = recover_enums_from_file(_trace_enums);
@@ -212,16 +191,14 @@ fn build_type_context_with_recovery(
                 structs: type_context.structs,
                 enums: recovered,
                 interfaces: type_context.interfaces,
-                vtables: type_context.vtables,
+                vtables: type_context.vtables
             };
         }
     }
     if _trace_enums {
         print.err("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
     }
-    if debug_lowering {
-        print.err("emit-llvm: phase=type_context");
-    }
+    if debug_lowering { print.err("emit-llvm: phase=type_context"); }
     return type_context;
 }
 
@@ -229,9 +206,7 @@ fn build_type_context_with_recovery(
 // Returns an array of EnumTypeInfo parsed from the tab-delimited format.
 fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
     let raw = fs.readFile("build/sailfin/.enum_info");
-    if raw.length == 0 {
-        return [];
-    }
+    if raw.length == 0 { return []; }
     let lines = split_lines_local(raw);
     let mut recovered: EnumTypeInfo[] = [];
     let mut eli: number = 0;
@@ -240,23 +215,38 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
         let el = lines[eli];
         // Format: name\ttag_type\ttag_size\ttag_align\tsize\talign\tv0=t0,v1=t1,...
         let tab1 = index_of(el, "\t");
-        if tab1 < 0 { eli += 1; continue; }
+        if tab1 < 0 {
+            eli += 1;
+            continue;
+        }
         let ename = substring(el, 0, tab1);
         let rest1 = substring(el, tab1 + 1, el.length);
         let tab2 = index_of(rest1, "\t");
-        if tab2 < 0 { eli += 1; continue; }
+        if tab2 < 0 {
+            eli += 1;
+            continue;
+        }
         let etag_type = substring(rest1, 0, tab2);
         let rest2 = substring(rest1, tab2 + 1, rest1.length);
         let tab3 = index_of(rest2, "\t");
-        if tab3 < 0 { eli += 1; continue; }
+        if tab3 < 0 {
+            eli += 1;
+            continue;
+        }
         let etag_size = parse_number_local(substring(rest2, 0, tab3));
         let rest3 = substring(rest2, tab3 + 1, rest2.length);
         let tab4 = index_of(rest3, "\t");
-        if tab4 < 0 { eli += 1; continue; }
+        if tab4 < 0 {
+            eli += 1;
+            continue;
+        }
         let etag_align = parse_number_local(substring(rest3, 0, tab4));
         let rest4 = substring(rest3, tab4 + 1, rest3.length);
         let tab5 = index_of(rest4, "\t");
-        if tab5 < 0 { eli += 1; continue; }
+        if tab5 < 0 {
+            eli += 1;
+            continue;
+        }
         let esize = parse_number_local(substring(rest4, 0, tab5));
         let rest5 = substring(rest4, tab5 + 1, rest4.length);
         let tab6 = index_of(rest5, "\t");
@@ -265,9 +255,7 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
         if tab6 >= 0 {
             ealign = parse_number_local(substring(rest5, 0, tab6));
             variants_str = substring(rest5, tab6 + 1, rest5.length);
-        } else {
-            ealign = parse_number_local(rest5);
-        }
+        } else { ealign = parse_number_local(rest5); }
 
         // Parse variants: v0=t0,v1=t1,...
         let evariants = parse_enum_variants(variants_str);
@@ -276,21 +264,14 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
         let mut max_ps: number = esize - etag_size;
         if max_ps < 0 { max_ps = 0; }
         recovered.push(EnumTypeInfo {
-                name: ename,
-                llvm_name: ellvm,
-                tag_type: etag_type,
-                tag_size: etag_size,
-                tag_align: etag_align,
-                max_payload_size: max_ps,
-                size: esize,
-                align: ealign,
-                variants: evariants,
+            name: ename, llvm_name: ellvm, tag_type: etag_type, tag_size: etag_size, tag_align: etag_align, max_payload_size: max_ps, size: esize, align: ealign, variants: evariants
         });
         eli += 1;
     }
     if recovered.length > 0 {
         if _trace_enums {
-            print.err("enum_trace: recovered " + number_to_string(recovered.length) + " enum(s) from .enum_info");
+            print.err("enum_trace: recovered " + number_to_string(recovered.length)
+                + " enum(s) from .enum_info");
         }
     }
     return recovered;
@@ -299,17 +280,13 @@ fn recover_enums_from_file(_trace_enums: boolean) -> EnumTypeInfo[] ![io] {
 // Parse enum variant string "v0=0,v1=1,..." into EnumVariantInfo[].
 fn parse_enum_variants(variants_str: string) -> EnumVariantInfo[] {
     let mut result: EnumVariantInfo[] = [];
-    if variants_str.length == 0 {
-        return result;
-    }
+    if variants_str.length == 0 { return result; }
     let mut vpos: number = 0;
     let mut vtag: number = 0;
     loop {
         let comma = index_of(substring(variants_str, vpos, variants_str.length), ",");
         let mut vend: number = variants_str.length;
-        if comma >= 0 {
-            vend = vpos + comma;
-        }
+        if comma >= 0 { vend = vpos + comma; }
         let vpair = substring(variants_str, vpos, vend);
         let eq = index_of(vpair, "=");
         let mut vname: string = vpair;
@@ -319,12 +296,7 @@ fn parse_enum_variants(variants_str: string) -> EnumVariantInfo[] {
         }
         if vname.length > 0 {
             result.push(EnumVariantInfo {
-                    name: vname,
-                    tag: vtag,
-                    offset: 0,
-                    size: 0,
-                    align: 1,
-                    fields: [],
+                name: vname, tag: vtag, offset: 0, size: 0, align: 1, fields: []
             });
         }
         vtag += 1;
@@ -366,14 +338,10 @@ fn serialize_context_functions(context_functions: NativeFunction[], debug_loweri
         fs.writeFile(cfw_prefix + "_name", cfw_fn.name);
         fs.writeFile(cfw_prefix + "_return_type", cfw_fn.return_type);
         let mut cfw_async_flag: string = "0";
-        if cfw_fn.is_async {
-            cfw_async_flag = "1";
-        }
+        if cfw_fn.is_async { cfw_async_flag = "1"; }
         fs.writeFile(cfw_prefix + "_is_async", cfw_async_flag);
         let mut cfw_params = cfw_fn.parameters;
-        if cfw_params == null {
-            cfw_params = [];
-        }
+        if cfw_params == null { cfw_params = []; }
         fs.writeFile(cfw_prefix + "_param_count", number_to_string(cfw_params.length));
         let mut cfw_j: number = 0;
         loop {
@@ -386,7 +354,8 @@ fn serialize_context_functions(context_functions: NativeFunction[], debug_loweri
         cfw_i += 1;
     }
     if debug_lowering {
-        print.err("emit-llvm: serialized context_functions count=" + number_to_string(context_functions.length));
+        print.err("emit-llvm: serialized context_functions count="
+            + number_to_string(context_functions.length));
     }
     return context_functions.length;
 }

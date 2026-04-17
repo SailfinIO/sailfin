@@ -82,6 +82,76 @@ test "addition is commutative" {
 
 ---
 
+### `sfn fmt [options] <path...>`
+
+Format Sailfin source files. One style, no configuration — like `gofmt` for Sailfin.
+
+The formatter operates on the token stream (not the AST), so it works on any syntactically valid file including partial or experimental code. It preserves all comments and produces deterministic, idempotent output.
+
+**Usage:**
+
+```bash
+sfn fmt <file.sfn>             # print formatted output to stdout
+sfn fmt --write <path...>      # format files in place
+sfn fmt --check <path...>      # exit 1 if any file would change (CI mode)
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--write` | Overwrite files in place with formatted output |
+| `--check` | Check if files are formatted; exit 1 if any differ (no modifications) |
+
+`--check` and `--write` are mutually exclusive. Without either flag, formatted output is printed to stdout.
+
+Paths can be individual `.sfn` files or directories. When given a directory, `sfn fmt` recursively discovers all `.sfn` files (up to 10 levels deep).
+
+**Examples:**
+
+```bash
+# Format a single file and see the result
+sfn fmt src/main.sfn
+
+# Format all compiler sources in place
+sfn fmt --write compiler/src/
+
+# CI check — fails if any file is unformatted
+sfn fmt --check compiler/src/ runtime/
+```
+
+**Formatting rules:**
+
+- **Indentation:** 4 spaces per level (no tabs)
+- **Spacing:** Spaces around operators and after keywords; no space before `:`, `;`, or `?` (optional suffix); no space after unary `!` and `-`
+- **Braces:** K&R style — opening brace on the same line as the declaration
+- **Blank lines:** Exactly one between top-level declarations; suppress at block boundaries
+- **Imports:** Sorted by path (standard library first, then relative), specifiers sorted alphabetically within each import
+- **Inline blocks:** Single-statement blocks stay on one line when they fit (e.g., `if x { return true; }`); multi-statement blocks and struct/enum declarations always expand
+- **Comments:** Preserved exactly as written; leading and trailing comments kept attached to their tokens
+- **Wrapping:** Import specifier lists and struct literals wrap at 80 characters
+
+**Known limitations:**
+
+| Limitation | Description |
+|---|---|
+| No expression wrapping | Long expressions stay on one line; the formatter does not break at operator boundaries |
+| No `--diff` mode | Cannot show inline diff between original and formatted; use `diff` externally |
+| Bulk OOM on many files | `sfn fmt --write <large-directory>` may OOM when processing hundreds of files in a single invocation; use a per-file loop as workaround (see below) |
+| No semantic formatting | Cannot reorder match arms, inline function bodies, or restructure code |
+| Comment-blank-line collapse | Blank lines between section-divider comments and declarations may be normalized away |
+
+**Workaround for bulk formatting:**
+
+```bash
+# Per-file loop avoids OOM on large codebases
+find compiler/src runtime -name '*.sfn' | while read f; do
+    sfn fmt --write "$f"
+done
+```
+
+---
+
 ### `sfn build <file>`
 
 Compile a Sailfin source file without running it. Writes an executable to the output path (default: the source filename without `.sfn` in the current directory).
@@ -148,7 +218,6 @@ The following commands are planned for a future release. They are not available 
 | `sfn init [name]` | Scaffold a new Sailfin capsule with a `capsule.toml` manifest |
 | `sfn add <capsule>` | Add a dependency to the current capsule |
 | `sfn publish` | Publish the current capsule to the package registry |
-| `sfn fmt [path]` | Format Sailfin source files in place |
 | `sfn check [path]` | Type-check and effect-check without compiling to a binary |
 
 ---

@@ -2,60 +2,54 @@
 //
 // CLI command handlers extracted from cli_main.sfn to keep
 // sailfin_cli_main under ~500 .sfn-asm instructions (avoids seed OOM).
-
 import {
-    compile_to_llvm_file_with_module,
-    compile_tests_to_llvm_file_with_module,
-    number_to_string,
-    module_name_from_path,
-} from "./main";
-import {
-    toml_get_name,
-    toml_get_version,
-    toml_get_dependencies,
-    toml_generate,
-    toml_add_dependency,
-    toml_add_dev_dependency,
-} from "./toml_parser";
-import {
-    lock_get_versions,
-    lock_get_version,
-    lock_add_entry,
-} from "./lock";
-import { substring } from "./string_utils";
-import { format_source } from "./tools/fmt";
-
-import {
-    _ends_with_cmd,
+    _byte_at_cmd,
+    _collect_sfn_files_cmd,
+    _collect_test_files_cmd,
+    _curl_download_cmd,
+    _curl_post_json_cmd,
     _dirname_cmd,
-    find_char,
-    _toml_trim_cmd,
-    _shell_read_cmd,
-    _get_env_cmd,
-    _get_home_cmd,
+    _display_capsule_name_cmd,
+    _ends_with_cmd,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,
-    _sanitize_filename_cmd,
-    _write_text_cmd,
-    _looks_like_test_file_cmd,
-    _collect_test_files_cmd,
-    _collect_sfn_files_cmd,
-    _curl_post_json_cmd,
-    _curl_download_cmd,
-    _sha256_of_file_cmd,
     _extract_sfnpkg_cmd,
-    _is_stdlib_capsule_cmd,
-    _has_slash_cmd,
-    _resolve_capsule_name_cmd,
-    _display_capsule_name_cmd,
+    _get_env_cmd,
+    _get_home_cmd,
     _has_prefix_cmd,
-    _path_join_cmd,
-    _string_contains_cmd,
+    _has_slash_cmd,
     _is_ident_char_cmd,
-    _byte_at_cmd,
-    _word_matches_cmd,
+    _is_stdlib_capsule_cmd,
+    _looks_like_test_file_cmd,
+    _path_join_cmd,
+    _resolve_capsule_name_cmd,
+    _sanitize_filename_cmd,
+    _sha256_of_file_cmd,
+    _shell_read_cmd,
+    _string_contains_cmd,
     _string_list_contains_cmd,
+    _toml_trim_cmd,
+    _word_matches_cmd,
+    _write_text_cmd,
+    find_char
 } from "./cli_commands_utils";
+import { lock_add_entry, lock_get_version, lock_get_versions } from "./lock";
+import {
+    compile_tests_to_llvm_file_with_module,
+    compile_to_llvm_file_with_module,
+    module_name_from_path,
+    number_to_string
+} from "./main";
+import { substring } from "./string_utils";
+import {
+    toml_add_dependency,
+    toml_add_dev_dependency,
+    toml_generate,
+    toml_get_dependencies,
+    toml_get_name,
+    toml_get_version
+} from "./toml_parser";
+import { format_source } from "./tools/fmt";
 
 struct _RelativeImportSpanCmd {
     start: number;
@@ -99,20 +93,44 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
             continue;
         }
         if in_string {
-            if escaping { escaping = false; i += 1; continue; }
-            if ch == "\\" { escaping = true; i += 1; continue; }
-            if ch == "\"" { in_string = false; i += 1; continue; }
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
             i += 1;
             continue;
         }
         if ch == "/" {
             if i + 1 < source_len {
                 let next = _byte_at_cmd(source, i + 1);
-                if next == "/" { in_line_comment = true; i += 2; continue; }
-                if next == "*" { in_block_comment = true; i += 2; continue; }
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
             }
         }
-        if ch == "\"" { in_string = true; i += 1; continue; }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
 
         if _word_matches_cmd(source, i, "import") {
             let stmt_start = i;
@@ -131,33 +149,61 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                 let cj = _byte_at_cmd(source, j);
                 if s_in_line_comment {
                     if cj == "\n" { s_in_line_comment = false; }
-                    j += 1; continue;
+                    j += 1;
+                    continue;
                 }
                 if s_in_block_comment {
                     if cj == "*" {
                         if j + 1 < source_len {
                             if _byte_at_cmd(source, j + 1) == "/" {
                                 s_in_block_comment = false;
-                                j += 2; continue;
+                                j += 2;
+                                continue;
                             }
                         }
                     }
-                    j += 1; continue;
+                    j += 1;
+                    continue;
                 }
                 if s_in_string {
-                    if s_escaping { s_escaping = false; j += 1; continue; }
-                    if cj == "\\" { s_escaping = true; j += 1; continue; }
-                    if cj == "\"" { s_in_string = false; j += 1; continue; }
-                    j += 1; continue;
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
                 }
                 if cj == "/" {
                     if j + 1 < source_len {
                         let nj = _byte_at_cmd(source, j + 1);
-                        if nj == "/" { s_in_line_comment = true; j += 2; continue; }
-                        if nj == "*" { s_in_block_comment = true; j += 2; continue; }
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
                     }
                 }
-                if cj == "\"" { s_in_string = true; j += 1; continue; }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
                 if spec.length == 0 {
                     if _word_matches_cmd(source, j, "from") {
                         let mut k = j + 4;
@@ -169,7 +215,10 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                             if wk == "\t" { ws = true; }
                             if wk == "\n" { ws = true; }
                             if wk == "\r" { ws = true; }
-                            if ws { k += 1; continue; }
+                            if ws {
+                                k += 1;
+                                continue;
+                            }
                             break;
                         }
                         if k < source_len {
@@ -180,8 +229,16 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                                 loop {
                                     if k >= source_len { break; }
                                     let sk = _byte_at_cmd(source, k);
-                                    if esc { esc = false; k += 1; continue; }
-                                    if sk == "\\" { esc = true; k += 1; continue; }
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
                                     if sk == "\"" {
                                         spec = substring(source, start, k);
                                         break;
@@ -192,7 +249,10 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                         }
                     }
                 }
-                if cj == ";" { stmt_end = j + 1; break; }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
                 j += 1;
             }
             if stmt_end > 0 {
@@ -201,7 +261,9 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                     if _has_prefix_cmd(spec, "./") { is_relative = true; }
                     if _has_prefix_cmd(spec, "../") { is_relative = true; }
                     if is_relative {
-                        spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                        spans.push(_RelativeImportSpanCmd {
+                            start: stmt_start, end: stmt_end, spec: spec
+                        });
                     } else {
                         // Check for capsule imports: bare name ("test") or scoped ("sfn/test")
                         let mut is_capsule: boolean = false;
@@ -209,11 +271,15 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                         if !is_capsule {
                             if _has_prefix_cmd(spec, "sfn/") {
                                 let capsule_suffix = substring(spec, 4, spec.length);
-                                if _is_stdlib_capsule_cmd(capsule_suffix) { is_capsule = true; }
+                                if _is_stdlib_capsule_cmd(capsule_suffix) {
+                                    is_capsule = true;
+                                }
                             }
                         }
                         if is_capsule {
-                            spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                            spans.push(_RelativeImportSpanCmd {
+                                start: stmt_start, end: stmt_end, spec: spec
+                            });
                         } else {
                             // Non-stdlib scoped import (e.g. "sfn/cli", "acme/router") —
                             // may be a cached capsule dependency declared in capsule.toml.
@@ -221,14 +287,19 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                             // separately by the linker.
                             if _has_slash_cmd(spec) {
                                 if !_has_prefix_cmd(spec, "runtime/") {
-                                    spans.push(_RelativeImportSpanCmd { start: stmt_start, end: stmt_end, spec: spec });
+                                    spans.push(_RelativeImportSpanCmd {
+                                        start: stmt_start, end: stmt_end, spec: spec
+                                    });
                                 }
                             }
                         }
                     }
                 }
             }
-            if stmt_end > 0 { i = stmt_end; continue; }
+            if stmt_end > 0 {
+                i = stmt_end;
+                continue;
+            }
         }
         i += 1;
     }
@@ -362,13 +433,12 @@ fn _resolve_cached_capsule_path_cmd(spec: string, deps: string) -> string ![io] 
     // Build cache path: ~/.sfn/cache/capsules/{scope}/{name}/{version}/src/mod.sfn
     let home = _get_home_cmd();
     if home.length == 0 { return ""; }
-    return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
+    return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version
+        + "/src/mod.sfn";
 }
 
 fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number, visited: string[]) -> string ![io] {
-    if depth <= 0 {
-        return _strip_relative_import_lines_cmd(source);
-    }
+    if depth <= 0 { return _strip_relative_import_lines_cmd(source); }
     let spans = _collect_relative_import_spans_cmd(source);
     let mut combined: string = "";
     let mut next_visited = visited;
@@ -457,7 +527,10 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
                         // Not in lockfile — fall back to capsule.toml and warn
                         cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
                         if cached_path.length > 0 {
-                            print.err("warning: dependency \"" + spec + "\" is not in capsule.lock — run `sfn add " + spec + "` to lock it");
+                            print.err("warning: dependency \"" + spec
+                                + "\" is not in capsule.lock — run `sfn add "
+                                + spec
+                                + "` to lock it");
                         }
                     }
                 } else {
@@ -476,7 +549,10 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
                 if !_has_prefix_cmd(spec, "./") {
                     if !_has_prefix_cmd(spec, "../") {
                         if !_has_prefix_cmd(spec, "runtime/") {
-                            print.err("error: dependency \"" + spec + "\" is not declared in capsule.toml — run `sfn add " + spec + "` first");
+                            print.err("error: dependency \"" + spec
+                                + "\" is not declared in capsule.toml — run `sfn add "
+                                + spec
+                                + "` first");
                             return "";
                         }
                     }
@@ -490,14 +566,18 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
             if !_string_list_contains_cmd(next_visited, dep_path) {
                 if !fs.exists(dep_path) {
                     // Directory import fallback: ./dir -> dir/mod.sfn
-                    let mod_fallback = substring(dep_path, 0, dep_path.length - 4) + "/mod.sfn";
-                    if fs.exists(mod_fallback) {
-                        dep_path = mod_fallback;
-                    } else {
+                    let mod_fallback = substring(dep_path, 0, dep_path.length - 4)
+                        + "/mod.sfn";
+                    if fs.exists(mod_fallback) { dep_path = mod_fallback; } else {
                         if is_capsule_import {
-                            print.err("error: cached capsule not found: " + dep_path + " — run `sfn add " + spec + "` to download it");
+                            print.err("error: cached capsule not found: "
+                                + dep_path
+                                + " — run `sfn add "
+                                + spec
+                                + "` to download it");
                         } else {
-                            print.err("import inlining: missing dependency: " + dep_path);
+                            print.err("import inlining: missing dependency: "
+                                + dep_path);
                         }
                         index += 1;
                         continue;
@@ -542,9 +622,7 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
         let src_dir = runtime_root + "/native/src";
         let include_dir = runtime_root + "/native/include";
         if fs.exists(src_dir) {
-            if fs.exists(include_dir) {
-                args.push("-I" + include_dir);
-            }
+            if fs.exists(include_dir) { args.push("-I" + include_dir); }
             let entries = fs.listDirectory(src_dir);
             let mut i: number = 0;
             loop {
@@ -559,17 +637,11 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
         }
         // Link runtime globals (IR)
         let globals_ll = runtime_root + "/native/ir/runtime_globals.ll";
-        if fs.exists(globals_ll) {
-            args.push(globals_ll);
-        }
+        if fs.exists(globals_ll) { args.push(globals_ll); }
         // Link prelude object — check known locations
-        let prelude_paths: string[] = [
-            "build/selfhost/native/obj/runtime/prelude.o",
-            "build/native/obj/runtime/prelude.o",
-            "build/native/obj/prelude.o",
-            runtime_root + "/native/obj/runtime/prelude.o",
-            runtime_root + "/native/obj/prelude.o",
-        ];
+        let prelude_paths: string[] = ["build/selfhost/native/obj/runtime/prelude.o", "build/native/obj/runtime/prelude.o", "build/native/obj/prelude.o", runtime_root
+            + "/native/obj/runtime/prelude.o", runtime_root
+            + "/native/obj/prelude.o",];
         let mut pi: number = 0;
         loop {
             if pi >= prelude_paths.length { break; }
@@ -590,9 +662,7 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
         process.run(["llvm-objcopy", "--weaken", weak_path]);
         args.push(weak_path);
         let shim_path = "build/selfhost/native/obj/cross_module_shim.o";
-        if fs.exists(shim_path) {
-            args.push(shim_path);
-        }
+        if fs.exists(shim_path) { args.push(shim_path); }
     }
     args.push("-lm");
     args.push("-pthread");
@@ -600,12 +670,9 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
 }
 
 // ---- Exported command handlers ----
-
 fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     let mut root: string = ".";
-    if args.length == 2 {
-        root = args[1];
-    } else if args.length != 1 {
+    if args.length == 2 { root = args[1]; } else if args.length != 1 {
         print("usage: sfn test [path]");
         return 2;
     }
@@ -641,11 +708,17 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         let base_dir = _dirname_cmd(path);
         let mut combined_source = source;
         if skip_inlining {
-            if trace_runner { print.err("test runner: skipping import inlining"); }
+            if trace_runner {
+                print.err("test runner: skipping import inlining");
+            }
         } else {
             if trace_runner { print.err("test runner: inlining start"); }
             combined_source = _inline_relative_imports_cmd(source, base_dir, 10, []);
-            if trace_runner { print.err("test runner: inlining done (bytes=" + number_to_string(combined_source.length) + ")"); }
+            if trace_runner {
+                print.err("test runner: inlining done (bytes="
+                    + number_to_string(combined_source.length)
+                    + ")");
+            }
         }
 
         if dump_sources {
@@ -670,7 +743,10 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         }
         if trace_runner { print.err("test runner: exec start"); }
         let run_rc = process.run([exe_path]);
-        if trace_runner { print.err("test runner: exec done (exit=" + number_to_string(run_rc) + ")"); }
+        if trace_runner {
+            print.err("test runner: exec done (exit=" + number_to_string(run_rc)
+                + ")");
+        }
         if run_rc != 0 {
             print("test failed: " + path);
             fs.deleteFile(test_runner_active_path);
@@ -720,9 +796,7 @@ fn handle_publish_command(args: string[]) -> number ![io] {
 
     let mut token: string = "";
     let env_token = _get_env_cmd("SFN_TOKEN");
-    if env_token.length > 0 {
-        token = env_token;
-    } else {
+    if env_token.length > 0 { token = env_token; } else {
         let home = _get_home_cmd();
         if home.length > 0 {
             let cred_path = home + "/.sfn/credentials";
@@ -775,14 +849,20 @@ fn handle_publish_command(args: string[]) -> number ![io] {
         process.run(["rm", "-f", payload_tmp]);
         return 1;
     }
-    let build_json_rc = process.run(["sh", "-c",
-            "printf '{\"type\":\"capsule\",\"capsule\":\"" + pkg_name
-            + "\",\"version\":\"" + pkg_version
-            + "\",\"digest\":\"" + digest
-            + "\",\"content_b64\":\"' > " + body_tmp
-            + " && base64 < '" + payload_tmp + "' | tr -d '\\n' >> " + body_tmp
-            + " && printf '\",\"meta\":{}}' >> " + body_tmp
-    ]);
+    let build_json_rc = process.run(["sh", "-c", "printf '{\"type\":\"capsule\",\"capsule\":\""
+        + pkg_name
+        + "\",\"version\":\""
+        + pkg_version
+        + "\",\"digest\":\""
+        + digest
+        + "\",\"content_b64\":\"' > "
+        + body_tmp
+        + " && base64 < '"
+        + payload_tmp
+        + "' | tr -d '\\n' >> "
+        + body_tmp
+        + " && printf '\",\"meta\":{}}' >> "
+        + body_tmp]);
     if build_json_rc != 0 {
         print("failed to build publish payload");
         process.run(["rm", "-f", payload_tmp]);
@@ -795,14 +875,9 @@ fn handle_publish_command(args: string[]) -> number ![io] {
     print("publishing to " + registry_url + "...");
     let response_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
     let header_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
-    let curl_rc = process.run(["curl", "-sS", "-X", "POST",
-            "-H", "Content-Type: application/json",
-            "-H", "Authorization: " + auth_header,
-            "-d", "@" + body_tmp,
-            "-o", response_tmp,
-            "-D", header_tmp,
-            registry_url
-    ]);
+    let curl_rc = process.run(["curl", "-sS", "-X", "POST", "-H", "Content-Type: application/json", "-H", "Authorization: "
+        + auth_header, "-d", "@"
+        + body_tmp, "-o", response_tmp, "-D", header_tmp, registry_url]);
     process.run(["rm", "-f", payload_tmp]);
     process.run(["rm", "-f", body_tmp]);
     let mut response: string = "";
@@ -845,9 +920,7 @@ fn handle_add_command(args: string[]) -> number ![io] {
     let mut argi: number = 1;
     loop {
         if argi >= args.length { break; }
-        if strings_equal(args[argi], "--dev") {
-            is_dev = true;
-        } else if strings_equal(args[argi], "--update") {
+        if strings_equal(args[argi], "--dev") { is_dev = true; } else if strings_equal(args[argi], "--update") {
             is_update = true;
         } else {
             if capsule_arg.length > 0 {
@@ -879,9 +952,7 @@ fn handle_add_command(args: string[]) -> number ![io] {
         if fs.exists("capsule.lock") {
             let lock_text = fs.readFile("capsule.lock");
             locked_version = lock_get_version(lock_text, display_name);
-            if locked_version.length > 0 {
-                use_locked = true;
-            }
+            if locked_version.length > 0 { use_locked = true; }
         }
     }
 
@@ -891,10 +962,10 @@ fn handle_add_command(args: string[]) -> number ![io] {
         print("using locked version: " + display_name + "@" + resolved_version);
     } else {
         print("fetching registry index...");
-        resolved_version = _shell_read_cmd(
-            "curl -sfS 'https://registry.sailfin.dev/api/index.json'"
-            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('" + registry_name + "',{}); print(c.get('latest',''))\" 2>/dev/null"
-        );
+        resolved_version = _shell_read_cmd("curl -sfS 'https://registry.sailfin.dev/api/index.json'"
+            + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('"
+            + registry_name
+            + "',{}); print(c.get('latest',''))\" 2>/dev/null");
         if resolved_version.length == 0 {
             print("capsule not found in registry: " + registry_name);
             return 1;
@@ -903,7 +974,8 @@ fn handle_add_command(args: string[]) -> number ![io] {
 
     let slash_pos = find_char(registry_name, "/", 0);
     if slash_pos < 0 {
-        print("invalid capsule id — expected scope/name format: " + registry_name);
+        print("invalid capsule id — expected scope/name format: "
+            + registry_name);
         return 1;
     }
     let scope = substring(registry_name, 0, slash_pos);
@@ -928,16 +1000,23 @@ fn handle_add_command(args: string[]) -> number ![io] {
         print("could not determine home directory");
         return 1;
     }
-    let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + resolved_version;
+    let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/"
+        + resolved_version;
     _ensure_dir_recursive_cmd(home + "/.sfn");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules/" + scope);
-    _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules/" + scope + "/" + name);
+    _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules/" + scope + "/"
+        + name);
     _ensure_dir_recursive_cmd(cache_base);
 
     let pkg_path = cache_base + "/" + resolved_version + ".sfnpkg";
-    let download_url = "https://registry.sailfin.dev/api/capsules/" + scope + "/" + name + "/" + resolved_version + ".sfnpkg";
+    let download_url = "https://registry.sailfin.dev/api/capsules/" + scope
+        + "/"
+        + name
+        + "/"
+        + resolved_version
+        + ".sfnpkg";
     print("downloading " + display_name + "@" + resolved_version + "...");
     let dl_rc = _curl_download_cmd(download_url, pkg_path);
     if dl_rc != 0 {
@@ -960,12 +1039,11 @@ fn handle_add_command(args: string[]) -> number ![io] {
     // Compute integrity hash of the downloaded package and write capsule.lock
     let raw_hash = _sha256_of_file_cmd(pkg_path);
     if raw_hash.length == 0 {
-        print("warning: could not compute integrity hash for " + pkg_path + " — lockfile entry will have no hash");
+        print("warning: could not compute integrity hash for " + pkg_path
+            + " — lockfile entry will have no hash");
     }
     let mut pkg_hash: string = "";
-    if raw_hash.length > 0 {
-        pkg_hash = "sha256:" + raw_hash;
-    }
+    if raw_hash.length > 0 { pkg_hash = "sha256:" + raw_hash; }
     let mut existing_lock: string = "";
     if fs.exists("capsule.lock") {
         existing_lock = fs.readFile("capsule.lock");
@@ -975,12 +1053,8 @@ fn handle_add_command(args: string[]) -> number ![io] {
 
     if is_dev {
         print("added dev dependency: " + display_name + "@" + resolved_version);
-    } else {
-        print("added " + display_name + "@" + resolved_version);
-    }
-    if is_update {
-        print("lock entry updated for " + display_name);
-    }
+    } else { print("added " + display_name + "@" + resolved_version); }
+    if is_update { print("lock entry updated for " + display_name); }
     return 0;
 }
 
@@ -1000,9 +1074,7 @@ fn handle_init_command(args: string[]) -> number ![io] {
         let mut si: number = 0;
         loop {
             if si >= cwd.length { break; }
-            if substring(cwd, si, si + 1) == "/" {
-                last_slash = si;
-            }
+            if substring(cwd, si, si + 1) == "/" { last_slash = si; }
             si += 1;
         }
         if last_slash >= 0 {
@@ -1013,9 +1085,7 @@ fn handle_init_command(args: string[]) -> number ![io] {
     }
     let toml_text = toml_generate(pkg_name, "0.1.0", "", "src/main.sfn");
     fs.writeFile("capsule.toml", toml_text);
-    if !fs.exists("src") {
-        fs.createDirectory("src", true);
-    }
+    if !fs.exists("src") { fs.createDirectory("src", true); }
     if !fs.exists("src/main.sfn") {
         fs.writeFile("src/main.sfn", "fn main() ![io] {\n    print(\"Hello, Sailfin!\");\n}\n");
     }
@@ -1030,9 +1100,7 @@ fn handle_login_command(args: string[]) -> number ![io] {
     }
 
     let mut token: string = "";
-    if args.length == 2 {
-        token = _toml_trim_cmd(args[1]);
-    } else {
+    if args.length == 2 { token = _toml_trim_cmd(args[1]); } else {
         print("enter your registry token:");
         let tmp = _shell_read_cmd("mktemp /tmp/.sfn_login_XXXXXX");
         if tmp.length == 0 {
@@ -1045,9 +1113,7 @@ fn handle_login_command(args: string[]) -> number ![io] {
             print("error: failed to read token");
             return 1;
         }
-        if fs.exists(tmp) {
-            token = _toml_trim_cmd(fs.readFile(tmp));
-        }
+        if fs.exists(tmp) { token = _toml_trim_cmd(fs.readFile(tmp)); }
         process.run(["rm", "-f", tmp]);
     }
 
@@ -1148,7 +1214,6 @@ fn handle_guillermo_command() -> number ![io] {
 // ═══════════════════════════════════════════════════════════════════
 // sfn fmt — canonical formatter
 // ═══════════════════════════════════════════════════════════════════
-
 fn handle_fmt_command(args: string[]) -> number ![io] {
     let mut check_mode = false;
     let mut write_mode = false;
@@ -1158,13 +1223,9 @@ fn handle_fmt_command(args: string[]) -> number ![io] {
     loop {
         if i >= args.length { break; }
         let arg = args[i];
-        if strings_equal(arg, "--check") {
-            check_mode = true;
-        } else if strings_equal(arg, "--write") {
+        if strings_equal(arg, "--check") { check_mode = true; } else if strings_equal(arg, "--write") {
             write_mode = true;
-        } else {
-            paths.push(arg);
-        }
+        } else { paths.push(arg); }
         i += 1;
     }
 
@@ -1222,18 +1283,14 @@ fn handle_fmt_command(args: string[]) -> number ![io] {
             if formatted.length > 0 {
                 if strings_equal(substring(formatted, formatted.length - 1, formatted.length), "\n") {
                     print(substring(formatted, 0, formatted.length - 1));
-                } else {
-                    print(formatted);
-                }
+                } else { print(formatted); }
             }
         }
         fi += 1;
     }
 
     if check_mode {
-        if would_change > 0 {
-            return 1;
-        }
+        if would_change > 0 { return 1; }
     }
 
     return 0;
@@ -1246,4 +1303,13 @@ fn inline_imports_for_source(source: string, base_dir: string) -> string ![io] {
     return _inline_relative_imports_cmd(source, base_dir, 10, []);
 }
 
-export { handle_test_command, handle_publish_command, handle_add_command, handle_init_command, handle_login_command, handle_guillermo_command, handle_fmt_command, inline_imports_for_source };
+export {
+    handle_test_command,
+    handle_publish_command,
+    handle_add_command,
+    handle_init_command,
+    handle_login_command,
+    handle_guillermo_command,
+    handle_fmt_command,
+    inline_imports_for_source
+};
