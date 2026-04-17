@@ -181,14 +181,20 @@ struct Arena {
 - `sfn_arena_destroy(arena: Arena*) -> void` — free all backing pages and the
   arena itself.
 
-**No realloc.** Arenas do not support `realloc`. Growing a buffer (e.g. array
-growth, string append) in an arena means allocating a new region and copying.
-This is acceptable because:
+**Grow-if-at-tip realloc.** The M0.5 C arena supports a limited realloc
+(`sfn_arena_realloc`) optimized for the `string_append` hot path: if the
+pointer being reallocated is the last allocation on the current page and the
+page has room, the bump pointer is simply extended in place (no copy). Otherwise
+a new region is allocated and data is copied. The planned Sailfin-native arena
+(M2+) may drop realloc in favor of a simpler alloc-only API if profiling shows
+the tip-growth optimization is not worth the complexity.
+
+The rationale:
 1. Arena allocations are O(1) bump operations — the copy cost dominates, which
    is the same as `realloc` when it can't grow in place.
 2. The "wasted" old buffer is reclaimed in bulk at arena reset.
-3. This eliminates the complexity of tracking which allocations can be grown
-   in-place.
+3. Grow-if-at-tip adds minimal complexity (~15 lines) and eliminates copies in
+   the common `string_append` loop pattern.
 
 **Compiler arena vs. user-program arena:**
 

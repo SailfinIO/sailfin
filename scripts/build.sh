@@ -851,6 +851,8 @@ log "compiling C runtime..."
 INCLUDE_DIR="$REPO_ROOT/runtime/native/include"
 
 # shellcheck disable=SC2086
+run "$CLANG" $CLANG_FLAGS -I "$INCLUDE_DIR" -c runtime/native/src/sailfin_arena.c    -o "$OBJ_DIR/sailfin_arena.o"
+# shellcheck disable=SC2086
 run "$CLANG" $CLANG_FLAGS -I "$INCLUDE_DIR" -c runtime/native/src/sailfin_runtime.c -o "$OBJ_DIR/sailfin_runtime.o"
 # shellcheck disable=SC2086
 run "$CLANG" $CLANG_FLAGS -I "$INCLUDE_DIR" -c runtime/native/src/sailfin_sha256.c   -o "$OBJ_DIR/sailfin_sha256.o"
@@ -878,6 +880,7 @@ mkdir -p "$(dirname "$OUT")"
 # shellcheck disable=SC2086
 run "$CLANG" $CLANG_FLAGS \
     -o "$OUT" \
+    "$OBJ_DIR/sailfin_arena.o" \
     "$OBJ_DIR/sailfin_runtime.o" \
     "$OBJ_DIR/sailfin_sha256.o" \
     "$OBJ_DIR/sailfin_base64.o" \

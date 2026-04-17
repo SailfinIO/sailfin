@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 16, 2026
+Updated: April 17, 2026
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -11,6 +11,9 @@ feature availability.
 - `scripts/build.sh` is the sole build driver — pure shell, no fixups.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
+- **Deterministic self-hosting**: the compiler is a verified fixed point —
+  stage2 and stage3 produce byte-identical LLVM IR across all modules.
+  `make check` enforces this.
 - The legacy Python fixup script (`selfhost_native.py`) was removed after the
   compiler reached clean LLVM IR output (v0.5.0-alpha.22+).
 
