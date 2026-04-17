@@ -2,61 +2,40 @@
 // contains_string.  Self-contained: re-implements the functions locally to
 // avoid pulling in runtime/prelude transitive dependencies that the test
 // runner's import inliner cannot link.
+
 fn starts_with(value: string, prefix: string) -> boolean {
-    if prefix.length > value.length {
-        return false;
-    }
+    if prefix.length > value.length { return false; }
     let mut index: number = 0;
     loop {
-        if index >= prefix.length {
-            break;
-        }
-        if value[index] != prefix[index] {
-            return false;
-        }
+        if index >= prefix.length { break; }
+        if value[index] != prefix[index] { return false; }
         index += 1;
     }
     return true;
 }
 
 fn ends_with(value: string, suffix: string) -> boolean {
-    if suffix.length == 0 {
-        return true;
-    }
-    if value.length < suffix.length {
-        return false;
-    }
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
     let start = value.length - suffix.length;
     let mut index: number = 0;
     loop {
-        if index >= suffix.length {
-            break;
-        }
+        if index >= suffix.length { break; }
         let _cmp_pos = start + index;
-        if value[_cmp_pos] != suffix[index] {
-            return false;
-        }
+        if value[_cmp_pos] != suffix[index] { return false; }
         index += 1;
     }
     return true;
 }
 
 fn _substring(value: string, start: number, end: number) -> string {
-    if start >= end {
-        return "";
-    }
-    if start >= value.length {
-        return "";
-    }
+    if start >= end { return ""; }
+    if start >= value.length { return ""; }
     let mut result: string = "";
     let mut i: number = start;
     loop {
-        if i >= end {
-            break;
-        }
-        if i >= value.length {
-            break;
-        }
+        if i >= end { break; }
+        if i >= value.length { break; }
         result = result + value[i];
         i += 1;
     }
@@ -73,12 +52,8 @@ fn strip_prefix(value: string, prefix: string) -> string {
 fn contains_string(values: string[], target: string) -> boolean {
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
-        if values[index] == target {
-            return true;
-        }
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
         index += 1;
     }
     return false;
