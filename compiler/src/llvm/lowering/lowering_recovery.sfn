@@ -163,7 +163,7 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         let method_name_from_paren = trim_text_local(substring(method_header, 0, method_paren_idx));
         let method_arrow_idx = index_of(method_header, " -> ");
         let method_ret_from_arrow = trim_text_local(substring(method_header, method_arrow_idx
-                + 4, method_header.length));
+            + 4, method_header.length));
         // Check whether the method has a `self` parameter.  Static methods
         // (e.g. `fn new(w, h)`) must NOT get self injected.
         let mut method_has_self: boolean = false;
@@ -202,14 +202,14 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         }
         let param_name_raw = trim_text_local(substring(param_text_raw, 0, param_arrow_idx));
         let param_type_raw = trim_text_local(substring(param_text_raw, param_arrow_idx
-                + param_sep_len, param_text_raw.length));
+            + param_sep_len, param_text_raw.length));
 
         // Pre-compute .for target/iterable extraction.
         let for_body_raw = trim_text_local(substring(line, 5, line.length));
         let for_in_idx = index_of(for_body_raw, " in ");
         let for_target_raw = trim_text_local(substring(for_body_raw, 0, for_in_idx));
         let for_iterable_raw = trim_text_local(substring(for_body_raw, for_in_idx
-                + 4, for_body_raw.length));
+            + 4, for_body_raw.length));
 
         // Pre-compute match/case extraction.
         let match_expr_raw = trim_text_local(substring(line, 7, line.length));
@@ -217,7 +217,7 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
         // Inline case: pattern => body,
         let inline_pattern_raw = trim_text_local(substring(line, 0, inline_arrow_idx));
         let inline_body_full = trim_text_local(substring(line, inline_arrow_idx
-                + 4, line.length));
+            + 4, line.length));
         // Strip trailing comma from inline body
         let mut inline_body_raw: string = inline_body_full;
         if inline_body_full.length > 0 {
@@ -287,7 +287,7 @@ fn recover_native_functions_light(native_text: string) -> NativeFunction[] {
                 if method_paren_idx >= 0 {
                     if method_arrow_idx >= 0 {
                         let full_name = current_struct_name
-                        + method_name_from_paren;
+                            + method_name_from_paren;
                         if method_has_self {
                             current = make_native_function_method(full_name, current_struct_name, method_ret_from_arrow);
                         }
@@ -595,7 +595,7 @@ fn recover_native_structs_light(native_text: string) -> NativeStruct[] {
         }
         let f_name = trim_text_local(substring(field_text, 0, field_arrow_idx));
         let f_type = trim_text_local(substring(field_text, field_arrow_idx
-                + field_sep_len, field_text.length));
+            + field_sep_len, field_text.length));
 
         let ls_text = trim_text_local(substring(line, 15, line.length));
         let ls_size_idx = index_of(ls_text, "size=");
