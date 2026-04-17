@@ -13,19 +13,25 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "./ast";
-import { Token, TokenKind } from "./token";
-import { starts_with, contains_string } from "./string_utils";
+import {
+    Token,
+    TokenKind
+} from "./token";
+import {
+    starts_with,
+    contains_string
+} from "./string_utils";
 
 struct Diagnostic {
     code: string;
     message: string;
-    primary: Token?;
+    primary: Token ?;
 }
 
 struct SymbolEntry {
     name: string;
     kind: string;
-    span: SourceSpan?;
+    span: SourceSpan ?;
 }
 
 struct SymbolCollectionResult {
@@ -39,12 +45,16 @@ struct ScopeResult {
 }
 
 fn check_struct_implements_interfaces(statement: Statement, interfaces: Statement[]) -> Diagnostic[] {
-    if statement.implements_types.length == 0 { return []; }
+    if statement.implements_types.length == 0 {
+        return [];
+    }
 
     let mut method_names: string[] = [];
     let mut _mi: number = 0;
     loop {
-        if _mi >= statement.methods.length { break; }
+        if _mi >= statement.methods.length {
+            break;
+        }
         method_names.push(statement.methods[_mi].signature.name);
         _mi += 1;
     }
@@ -52,23 +62,31 @@ fn check_struct_implements_interfaces(statement: Statement, interfaces: Statemen
     let mut diagnostics: Diagnostic[] = [];
     let mut _ai: number = 0;
     loop {
-        if _ai >= statement.implements_types.length { break; }
+        if _ai >= statement.implements_types.length {
+            break;
+        }
         let annotation = statement.implements_types[_ai];
         let interface_definition = resolve_interface_annotation(annotation, interfaces);
-        if interface_definition == null { continue; }
+        if interface_definition == null {
+            continue;
+        }
         let interface_name = interface_definition.name;
         let _via_diags = validate_interface_annotation(statement.name, interface_definition, annotation);
         let mut _ci: number = 0;
         loop {
-            if _ci >= _via_diags.length { break; }
+            if _ci >= _via_diags.length {
+                break;
+            }
             diagnostics.push(_via_diags[_ci]);
             _ci += 1;
         }
         let mut _mbi: number = 0;
         loop {
-            if _mbi >= interface_definition.members.length { break; }
+            if _mbi >= interface_definition.members.length {
+                break;
+            }
             let member = interface_definition.members[_mbi];
-            if !contains_string(method_names, member.name) {
+            if ! contains_string(method_names, member.name) {
                 diagnostics.push(make_missing_interface_member_diagnostic(statement.name, interface_name, member.name));
             }
             _mbi += 1;
@@ -79,16 +97,22 @@ fn check_struct_implements_interfaces(statement: Statement, interfaces: Statemen
     return diagnostics;
 }
 
-fn resolve_interface_annotation(annotation: TypeAnnotation, interfaces: Statement[]) -> Statement? {
+fn resolve_interface_annotation(annotation: TypeAnnotation, interfaces: Statement[]) -> Statement ? {
     let text = annotation.text;
     let mut _ii: number = 0;
     loop {
-        if _ii >= interfaces.length { break; }
+        if _ii >= interfaces.length {
+            break;
+        }
         let iface = interfaces[_ii];
         let name = iface.name;
-        if text == name { return iface; }
+        if text == name {
+            return iface;
+        }
         let generic_prefix = name + "<";
-        if starts_with(text, generic_prefix) { return iface; }
+        if starts_with(text, generic_prefix) {
+            return iface;
+        }
         _ii += 1;
     }
     return null;
@@ -100,12 +124,16 @@ fn check_struct_fields(fields: FieldDeclaration[]) -> Diagnostic[] {
 
     let mut _fi: number = 0;
     loop {
-        if _fi >= fields.length { break; }
+        if _fi >= fields.length {
+            break;
+        }
         let field = fields[_fi];
         let name = field.name;
         if contains_string(seen, name) {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "struct field", token_from_name(name, field.name_span)));
-        } else { seen.push(name); }
+        } else {
+            seen.push(name);
+        }
         _fi += 1;
     }
 
@@ -137,21 +165,28 @@ fn format_interface_signature(interface_definition: Statement) -> string {
     let mut names: string[] = [];
     let mut _pi: number = 0;
     loop {
-        if _pi >= interface_definition.type_parameters.length { break; }
+        if _pi >= interface_definition.type_parameters.length {
+            break;
+        }
         names.push(interface_definition.type_parameters[_pi].name);
         _pi += 1;
     }
-    if names.length == 0 { return interface_definition.name; }
-    return interface_definition.name + "<" + join_with_separator(names, ", ")
-        + ">";
+    if names.length == 0 {
+        return interface_definition.name;
+    }
+    return interface_definition.name + "<" + join_with_separator(names, ", ") + ">";
 }
 
 fn join_with_separator(items: string[], separator: string) -> string {
-    if items.length == 0 { return ""; }
+    if items.length == 0 {
+        return "";
+    }
     let mut result = items[0];
     let mut index: number = 1;
     loop {
-        if index >= items.length { break; }
+        if index >= items.length {
+            break;
+        }
         result = result + separator + items[index];
         index += 1;
     }
@@ -160,23 +195,31 @@ fn join_with_separator(items: string[], separator: string) -> string {
 
 fn parse_type_arguments(annotation_text: string) -> string[] {
     let block = extract_generic_argument_block(annotation_text);
-    if block == null { return []; }
+    if block == null {
+        return [];
+    }
     return split_generic_argument_list(block);
 }
 
-fn extract_generic_argument_block(annotation_text: string) -> string? {
+fn extract_generic_argument_block(annotation_text: string) -> string ? {
     let trimmed = trim_text(annotation_text);
     let mut index: number = 0;
     let mut depth: number = 0;
-    let mut start_index: number = -1;
+    let mut start_index: number = - 1;
     loop {
-        if index >= trimmed.length { break; }
+        if index >= trimmed.length {
+            break;
+        }
         let ch = trimmed[index];
         if ch == "<" {
-            if depth == 0 { start_index = index + 1; }
+            if depth == 0 {
+                start_index = index + 1;
+            }
             depth += 1;
         } else if ch == ">" {
-            if depth == 0 { return null; }
+            if depth == 0 {
+                return null;
+            }
             depth -= 1;
             if depth == 0 {
                 return slice_text(trimmed, start_index, index);
@@ -193,28 +236,38 @@ fn split_generic_argument_list(block: string) -> string[] {
     let mut depth: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= block.length { break; }
+        if index >= block.length {
+            break;
+        }
         let ch = block[index];
         if ch == "<" {
             depth += 1;
             current = current + ch;
         } else if ch == ">" {
-            if depth > 0 { depth -= 1; }
+            if depth > 0 {
+                depth -= 1;
+            }
             current = current + ch;
         } else if ch == "," {
             if depth == 0 {
                 let trimmed = trim_text(current);
-                if trimmed.length > 0 { arguments.push(trimmed); }
+                if trimmed.length > 0 {
+                    arguments.push(trimmed);
+                }
                 current = "";
                 index += 1;
                 continue;
             }
             current = current + ch;
-        } else { current = current + ch; }
+        } else {
+            current = current + ch;
+        }
         index += 1;
     }
     let tail = trim_text(current);
-    if tail.length > 0 { arguments.push(tail); }
+    if tail.length > 0 {
+        arguments.push(tail);
+    }
     return arguments;
 }
 
@@ -222,7 +275,9 @@ fn trim_text(value: string) -> string {
     let mut start: number = 0;
     let mut end: number = value.length;
     loop {
-        if start >= end { break; }
+        if start >= end {
+            break;
+        }
         if is_whitespace(value[start]) {
             start += 1;
             continue;
@@ -230,7 +285,9 @@ fn trim_text(value: string) -> string {
         break;
     }
     loop {
-        if end <= start { break; }
+        if end <= start {
+            break;
+        }
         if is_whitespace(value[end - 1]) {
             end -= 1;
             continue;
@@ -244,13 +301,21 @@ fn slice_text(value: string, start: number, end: number) -> string {
     let mut normalized_start: number = start;
     let mut normalized_end: number = end;
 
-    if normalized_start < 0 { normalized_start = 0; }
-    if normalized_end > value.length { normalized_end = value.length; }
-    if normalized_end <= normalized_start { return ""; }
+    if normalized_start < 0 {
+        normalized_start = 0;
+    }
+    if normalized_end > value.length {
+        normalized_end = value.length;
+    }
+    if normalized_end <= normalized_start {
+        return "";
+    }
     let mut result: string = "";
     let mut index = normalized_start;
     loop {
-        if index >= normalized_end { break; }
+        if index >= normalized_end {
+            break;
+        }
         result = result + value[index];
         index += 1;
     }
@@ -259,10 +324,18 @@ fn slice_text(value: string, start: number, end: number) -> string {
 
 fn is_whitespace(ch: string) -> boolean {
     let mut _ret438: boolean = false;
-    if ch == " " { _ret438 = true; }
-    if ch == "\n" { _ret438 = true; }
-    if ch == "\t" { _ret438 = true; }
-    if ch == "\r" { _ret438 = true; }
+    if ch == " " {
+        _ret438 = true;
+    }
+    if ch == "\n" {
+        _ret438 = true;
+    }
+    if ch == "\t" {
+        _ret438 = true;
+    }
+    if ch == "\r" {
+        _ret438 = true;
+    }
     return _ret438;
 }
 
@@ -272,19 +345,25 @@ fn check_struct_methods(methods: MethodDeclaration[]) -> Diagnostic[] {
 
     let mut _mi: number = 0;
     loop {
-        if _mi >= methods.length { break; }
+        if _mi >= methods.length {
+            break;
+        }
         let method = methods[_mi];
         let _sig_diags = check_function_signature(method.signature);
         let mut _ci: number = 0;
         loop {
-            if _ci >= _sig_diags.length { break; }
+            if _ci >= _sig_diags.length {
+                break;
+            }
             diagnostics.push(_sig_diags[_ci]);
             _ci += 1;
         }
         let name = method.signature.name;
         if contains_string(seen, name) {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "method", token_from_name(name, method.signature.name_span)));
-        } else { seen.push(name); }
+        } else {
+            seen.push(name);
+        }
         _mi += 1;
     }
 
@@ -297,12 +376,16 @@ fn check_enum_variants(variants: EnumVariant[]) -> Diagnostic[] {
 
     let mut _vi: number = 0;
     loop {
-        if _vi >= variants.length { break; }
+        if _vi >= variants.length {
+            break;
+        }
         let variant = variants[_vi];
         let name = variant.name;
         if contains_string(seen, name) {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "enum variant", token_from_name(name, variant.name_span)));
-        } else { seen.push(name); }
+        } else {
+            seen.push(name);
+        }
         _vi += 1;
     }
 
@@ -315,19 +398,25 @@ fn check_interface_members(members: FunctionSignature[]) -> Diagnostic[] {
 
     let mut _mbi: number = 0;
     loop {
-        if _mbi >= members.length { break; }
+        if _mbi >= members.length {
+            break;
+        }
         let member = members[_mbi];
         let _sig_diags = check_function_signature(member);
         let mut _ci: number = 0;
         loop {
-            if _ci >= _sig_diags.length { break; }
+            if _ci >= _sig_diags.length {
+                break;
+            }
             diagnostics.push(_sig_diags[_ci]);
             _ci += 1;
         }
         let name = member.name;
         if contains_string(seen, name) {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "interface member", token_from_name(name, member.name_span)));
-        } else { seen.push(name); }
+        } else {
+            seen.push(name);
+        }
         _mbi += 1;
     }
 
@@ -340,12 +429,16 @@ fn check_model_properties(properties: ModelProperty[]) -> Diagnostic[] {
 
     let mut _pi: number = 0;
     loop {
-        if _pi >= properties.length { break; }
+        if _pi >= properties.length {
+            break;
+        }
         let property = properties[_pi];
         let name = property.name;
         if contains_string(seen, name) {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "model property", token_from_name(name, property.span)));
-        } else { seen.push(name); }
+        } else {
+            seen.push(name);
+        }
         _pi += 1;
     }
 
@@ -362,19 +455,23 @@ fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {
 
     let mut _tpi: number = 0;
     loop {
-        if _tpi >= type_parameters.length { break; }
+        if _tpi >= type_parameters.length {
+            break;
+        }
         let type_parameter = type_parameters[_tpi];
         let name = type_parameter.name;
         if contains_string(seen, name) {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "type parameter", token_from_name(name, type_parameter.span)));
-        } else { seen.push(name); }
+        } else {
+            seen.push(name);
+        }
         _tpi += 1;
     }
 
     return diagnostics;
 }
 
-fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?) -> ScopeResult {
+fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan ?) -> ScopeResult {
     if has_symbol(bindings, name) {
         return ScopeResult {
             bindings: bindings,
@@ -383,10 +480,13 @@ fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, sp
     }
 
     let updated = append_symbol(bindings, name, kind, span);
-    return ScopeResult { bindings: updated, diagnostics: [] };
+    return ScopeResult {
+        bindings: updated,
+        diagnostics: []
+    };
 }
 
-fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: SymbolEntry[]) -> SymbolCollectionResult {
+fn register_symbol(name: string, kind: string, span: SourceSpan ?, existing: SymbolEntry[]) -> SymbolCollectionResult {
     if has_symbol(existing, name) {
         return SymbolCollectionResult {
             symbols: existing,
@@ -400,9 +500,11 @@ fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: Symb
     };
 }
 
-fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan?) -> SymbolEntry[] {
+fn append_symbol(symbols: SymbolEntry[], name: string, kind: string, span: SourceSpan ?) -> SymbolEntry[] {
     let mut updated: SymbolEntry[] = clone_bindings(symbols);
-    updated.push(SymbolEntry { name: name, kind: kind, span: span });
+    updated.push(SymbolEntry {
+        name: name, kind: kind, span: span
+    });
     return updated;
 }
 
@@ -410,7 +512,9 @@ fn clone_bindings(source: SymbolEntry[]) -> SymbolEntry[] {
     let mut copy: SymbolEntry[] = [];
     let mut _ci: number = 0;
     loop {
-        if _ci >= source.length { break; }
+        if _ci >= source.length {
+            break;
+        }
         copy.push(source[_ci]);
         _ci += 1;
     }
@@ -420,8 +524,12 @@ fn clone_bindings(source: SymbolEntry[]) -> SymbolEntry[] {
 fn has_symbol(symbols: SymbolEntry[], name: string) -> boolean {
     let mut _si: number = 0;
     loop {
-        if _si >= symbols.length { break; }
-        if symbols[_si].name == name { return true; }
+        if _si >= symbols.length {
+            break;
+        }
+        if symbols[_si].name == name {
+            return true;
+        }
         _si += 1;
     }
     return false;
@@ -430,10 +538,7 @@ fn has_symbol(symbols: SymbolEntry[], name: string) -> boolean {
 fn make_interface_missing_type_arguments_diagnostic(struct_name: string, interface_name: string, interface_signature: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
-        message: "struct " + struct_name + " implements " + interface_name
-            + " but must specify "
-            + interface_signature
-            + " type arguments",
+        message: "struct " + struct_name + " implements " + interface_name + " but must specify " + interface_signature + " type arguments",
         primary: null
     };
 }
@@ -441,10 +546,7 @@ fn make_interface_missing_type_arguments_diagnostic(struct_name: string, interfa
 fn make_interface_type_argument_mismatch_diagnostic(struct_name: string, annotation_text: string, interface_signature: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
-        message: "struct " + struct_name + " implements " + annotation_text
-            + " but must match "
-            + interface_signature
-            + " type arguments",
+        message: "struct " + struct_name + " implements " + annotation_text + " but must match " + interface_signature + " type arguments",
         primary: null
     };
 }
@@ -452,16 +554,15 @@ fn make_interface_type_argument_mismatch_diagnostic(struct_name: string, annotat
 fn make_interface_no_type_arguments_diagnostic(struct_name: string, annotation_text: string, interface_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
-        message: "struct " + struct_name + " implements " + annotation_text
-            + " but "
-            + interface_name
-            + " does not take type arguments",
+        message: "struct " + struct_name + " implements " + annotation_text + " but " + interface_name + " does not take type arguments",
         primary: null
     };
 }
 
-fn token_from_name(name: string, span: SourceSpan?) -> Token? {
-    if span == null { return null; }
+fn token_from_name(name: string, span: SourceSpan ?) -> Token ? {
+    if span == null {
+        return null;
+    }
     return Token {
         kind: TokenKind.Identifier(),
         lexeme: name,
@@ -470,7 +571,7 @@ fn token_from_name(name: string, span: SourceSpan?) -> Token? {
     };
 }
 
-fn make_duplicate_symbol_diagnostic(name: string, kind: string, token: Token?) -> Diagnostic {
+fn make_duplicate_symbol_diagnostic(name: string, kind: string, token: Token ?) -> Diagnostic {
     return Diagnostic {
         code: "E0001",
         message: "duplicate " + kind + " `" + name + "` declared",
@@ -481,11 +582,7 @@ fn make_duplicate_symbol_diagnostic(name: string, kind: string, token: Token?) -
 fn make_missing_interface_member_diagnostic(struct_name: string, interface_name: string, member_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0301",
-        message: "struct " + struct_name + " implements " + interface_name
-            + " but is missing member `"
-            + member_name
-            + "`",
+        message: "struct " + struct_name + " implements " + interface_name + " but is missing member `" + member_name + "`",
         primary: null
     };
 }
-
