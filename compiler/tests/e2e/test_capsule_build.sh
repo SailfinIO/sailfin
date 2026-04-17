@@ -62,29 +62,49 @@ EOF
 cat > "$SCRATCH/src/main.sfn" <<'EOF'
 import { abs, clamp } from "sfn/math";
 
-fn main() -> number ![io] {
+fn main() ![io] {
+    // Match the conventional `fn main() ![io]` signature used in the
+    // examples/ tree. We signal pass/fail via stdout ("OK" or "FAIL ...")
+    // and the shell test inspects that output.
     let a = abs(-7);
     let b = clamp(15, 0, 10);
-    print("abs(-7)=" + number_to_string(a));
-    print("clamp(15,0,10)=" + number_to_string(b));
-    return 0;
+    if a != 7 {
+        print("FAIL abs(-7)");
+    } else if b != 10 {
+        print("FAIL clamp(15,0,10)");
+    } else {
+        print("OK");
+    }
 }
 EOF
 
 # ---- Test 1: sfn build succeeds on a project with a capsule dep ----
 test_build_succeeds() {
-    cd "$SCRATCH"
-    "$BINARY" build -o build/program src/main.sfn >/tmp/capsule-build.stdout 2>&1
+    cd "$SCRATCH" || return 1
+    local rc
+    "$BINARY" build -o build/program src/main.sfn > "$SCRATCH/build.stdout" 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   sfn build exited with code $rc; output:" >&2
+        cat "$SCRATCH/build.stdout" >&2
+    fi
+    return $rc
 }
 run_test "sfn build completes with a capsule dep" test_build_succeeds
 
-# ---- Test 2: the linked binary runs and prints expected output ----
+# ---- Test 2: the linked binary runs and returns exit 0 + prints "OK" ----
 test_binary_runs() {
-    cd "$SCRATCH"
+    cd "$SCRATCH" || return 1
     [ -x "build/program" ] || return 1
-    local out
-    out="$("$SCRATCH/build/program" 2>&1)"
-    echo "$out" | grep -q "abs(-7)=7" && echo "$out" | grep -q "clamp(15,0,10)=10"
+    local rc
+    "$SCRATCH/build/program" > "$SCRATCH/program.stdout" 2>&1
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   binary exited with code $rc; output:" >&2
+        cat "$SCRATCH/program.stdout" >&2
+        return 1
+    fi
+    grep -q "^OK$" "$SCRATCH/program.stdout"
 }
 run_test "binary links and runs using capsule symbols" test_binary_runs
 
