@@ -256,7 +256,7 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
         let role = _classify_role(token, prev_lex, next_lex);
 
         result.push(FmtToken {
-                token: token, leading_comments: pending_comments, trailing_comment: [], blank_lines_before: blank_lines, role: role
+            token: token, leading_comments: pending_comments, trailing_comment: [], blank_lines_before: blank_lines, role: role
         });
 
         last_structural_line = token.line;
@@ -922,7 +922,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                                         next_len = fmt_tokens[i + 1].token.lexeme.length;
                                     }
                                     if cur_pos + 1 + lexeme.length + 1
-                                    + next_len > 80 { should_wrap = true; }
+                                        + next_len > 80 { should_wrap = true; }
                                 }
                             }
                         }
@@ -1049,7 +1049,7 @@ fn _find_import_spans(fmt_tokens: FmtToken[]) -> ImportSpan[] {
                     let path = _extract_import_path(fmt_tokens, start, j);
                     let grp = import_group(path);
                     spans.push(ImportSpan {
-                            start: start, end: j, path: path, group: grp
+                        start: start, end: j, path: path, group: grp
                     });
                     i = j + 1;
                     break;
@@ -1279,7 +1279,7 @@ fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: num
                     column: orig.token.column
                 };
                 result.push(FmtToken {
-                        token: new_token, leading_comments: orig.leading_comments, trailing_comment: orig.trailing_comment, blank_lines_before: orig.blank_lines_before, role: orig.role
+                    token: new_token, leading_comments: orig.leading_comments, trailing_comment: orig.trailing_comment, blank_lines_before: orig.blank_lines_before, role: orig.role
                 });
                 name_idx += 1;
             }
@@ -1347,20 +1347,20 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
             if span.group != prev_group {
                 // Add blank_lines_before to the first token of this import
                 result.push(FmtToken {
-                        token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 1, role: first_ft.role
+                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 1, role: first_ft.role
                 });
                 result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
             } else {
                 // Same group: clear any blank lines between
                 result.push(FmtToken {
-                        token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 0, role: first_ft.role
+                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 0, role: first_ft.role
                 });
                 result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
             }
         } else {
             // First emitted import: use header comments/blanks
             result.push(FmtToken {
-                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: use_blanks, role: first_ft.role
+                token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: use_blanks, role: first_ft.role
             });
             result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
         }
