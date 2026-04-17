@@ -54,10 +54,13 @@ Flow:
    compiler's manifest declares no dependencies, so only the in-tree
    compiler + runtime sources are used.
 3. **Import-context staging.** For every source, the seed runs
-   `seed emit native <file>` once to produce a `.sfn-asm` textual IR and a
-   `.layout-manifest` sidecar. These artifacts are the cross-module interface
-   the second-pass emit depends on. They are written to
-   `build/selfhost/native/seed_cwd/build/native/import-context/<slug>.sfn-asm`.
+   `seed emit native <file>` once to produce a `.sfn-asm` textual IR.
+   `scripts/build.sh` then derives the corresponding `.layout-manifest`
+   by `grep`-extracting `.layout` lines from the emitted `.sfn-asm`
+   (the seed does not produce the manifest as an independent output).
+   Together these staged artifacts form the cross-module interface the
+   second-pass emit depends on. They are written under
+   `build/selfhost/native/seed_cwd/build/native/import-context/`.
 4. **Per-module LLVM emit.** For each source the script:
    - Creates an isolated `seed_cwd` directory.
    - Copies the *entire* import-context directory into it (one copy per
@@ -106,12 +109,16 @@ Three import resolution rules are interleaved across
 - **Relative** (`./foo`, `../foo`) → resolve against the source file's
   directory.
 - **Stdlib bare** (`http`, `fs`, `test`, …) → rewritten to `sfn/<name>`
-  and resolved against `capsules/sfn/<name>/src/mod.sfn`. The stdlib list is
-  a hard-coded allowlist of 20 names.
-- **Scoped** (`sfn/cli`, `acme/router`) → looked up in the nearest
-  `capsule.toml` (walking up from the source directory), then resolved under
-  `~/.sfn/cache/capsules/<scope>/<name>/<version>/src/mod.sfn`. Prefers
-  `capsule.lock` over `capsule.toml` when both are present.
+  and resolved against `capsules/sfn/<name>/src/mod.sfn`. The stdlib list
+  is a hard-coded allowlist.
+- **Stdlib scoped special-case** (`sfn/cli`, `sfn/http`, … for names in
+  the stdlib allowlist) → resolved directly against the in-tree
+  `capsules/sfn/<name>/src/mod.sfn`, bypassing both `capsule.toml` and
+  the user cache.
+- **Scoped, non-stdlib** (`acme/router`) → looked up in the nearest
+  `capsule.toml` (walking up from the source directory), then resolved
+  under `~/.sfn/cache/capsules/<scope>/<name>/<version>/src/mod.sfn`.
+  Prefers `capsule.lock` over `capsule.toml` when both are present.
 
 ### 1.3 Running tests (`sfn test`)
 
@@ -129,7 +136,7 @@ Three import resolution rules are interleaved across
 
 ### 1.4 Capsules today
 
-`capsules/sfn/*` contains 20 first-party capsules
+`capsules/sfn/*` contains the first-party stdlib
 (`cli`, `crypto`, `fmt`, `fs`, `http`, `json`, `layers`, `log`, `losses`,
 `math`, `net`, `nn`, `os`, `path`, `sync`, `tensor`, `test`, `time`,
 `toml`). Each has:
@@ -175,7 +182,7 @@ places.
 ### 2.2 Stdlib is a compiler-internal allowlist
 
 `_is_stdlib_capsule_cmd` in `compiler/src/cli_commands_utils.sfn` is a
-hard-coded list of 20 bare names. The resolver logic that maps
+hard-coded list of bare names. The resolver logic that maps
 `import … from "http"` to `capsules/sfn/http/src/mod.sfn` is in the
 compiler binary. Adding or renaming a stdlib capsule is a compiler change,
 not a registry change. The stdlib is also not versioned independently of
@@ -229,14 +236,21 @@ of those branches is a live bug the driver is papering over.
 
 ### 2.6 Runtime bundle coupling
 
-`sfn build`'s link step needs six files from a runtime bundle:
-`include/`, `src/sailfin_runtime.c`, `src/sailfin_sha256.c`,
-`src/sailfin_base64.c`, `src/native_driver.c`, `ir/runtime_globals.ll`,
-and `obj/prelude.o`. The installer copies these to `runtime/native/` next
-to the binary and resolves at runtime by probing five candidate paths in
-`_runtime_prelude_path`. This is fine for a C runtime — it has to be fine
-because the C runtime is what exists — but when the runtime moves to
-Sailfin, the link model has to change. If we plan for that now, the
+`sfn build`'s `_clang_link` step needs four inputs from the runtime
+bundle: `include/`, `src/sailfin_runtime.c`, `ir/runtime_globals.ll`,
+and `obj/prelude.o`. `sfn test`'s `_clang_link_test_cmd` has a broader
+coupling — it additionally pulls in `src/sailfin_sha256.c` and
+`src/sailfin_base64.c` (every `.c` under `src/` except `native_driver.c`,
+which supplies the binary's `main` and is excluded in the test path).
+The compiler's own self-host build (`scripts/build.sh`) links every
+runtime source including `native_driver.c`. So the runtime bundle is
+three different shapes depending on which code path consumes it.
+
+The installer copies these assets to `runtime/native/` next to the
+binary and resolves at runtime by probing six candidate paths in
+`_runtime_prelude_path`. This is fine for a C runtime — it has to be
+fine because the C runtime is what exists — but when the runtime moves
+to Sailfin, the link model has to change. If we plan for that now, the
 transition is a capsule-resolution problem, not a link-script rewrite.
 
 ### 2.7 `sfn build` is single-file
@@ -820,7 +834,7 @@ consecutive builds with the same inputs produce different IR hashes,
 
 The transition is staged so that at every step the compiler still builds
 itself and the test suite still passes. Each stage ships independently
-and is individually revertable.
+and is individually revertible.
 
 ### Stage A — Manifest & workspace schema (no behavior change)
 
