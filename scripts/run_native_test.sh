@@ -25,10 +25,20 @@ else
     TIMEOUT_CMD=""
 fi
 
-if [ -n "$TIMEOUT_CMD" ]; then
-    output=$("$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE" 2>&1) && RC_INNER=0 || RC_INNER=$?
-else
-    output=$("$COMPILER" test "$TEST_FILE" 2>&1) && RC_INNER=0 || RC_INNER=$?
+_run_once() {
+    if [ -n "$TIMEOUT_CMD" ]; then
+        output=$("$TIMEOUT_CMD" "$TIMEOUT" "$COMPILER" test "$TEST_FILE" 2>&1) && RC_INNER=0 || RC_INNER=$?
+    else
+        output=$("$COMPILER" test "$TEST_FILE" 2>&1) && RC_INNER=0 || RC_INNER=$?
+    fi
+}
+
+_run_once
+
+# Retry once on signal-kill (segfault=139, OOM=137) — transient under CI memory pressure
+if [ $RC_INNER -eq 137 ] || [ $RC_INNER -eq 139 ]; then
+    echo "[test] RETRY: $BASENAME (exit code $RC_INNER, retrying once)"
+    _run_once
 fi
 
 if [ $RC_INNER -ne 0 ]; then

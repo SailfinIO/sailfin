@@ -219,7 +219,7 @@ fn lookup_allocation_info(context: TypeContext, llvm_type: string) -> TypeAlloca
 // =============================================================================
 // Method Target Resolution
 // =============================================================================
-fn resolve_struct_info_for_method_target(base: string, bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> StructTypeInfo? ![io] {
+fn resolve_struct_info_for_method_target(base: string, bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> StructTypeInfo? {
     let trimmed = trim_text(base);
     if trimmed.length == 0 { return null; }
     if is_simple_identifier(trimmed) {
@@ -252,42 +252,6 @@ fn resolve_struct_info_for_method_target(base: string, bindings: ParameterBindin
     // Allow static method calls on a struct type (e.g. `BankAccount.new(123)`).
     let by_name = find_struct_info_by_name(context, trimmed);
     if by_name != null { return by_name; }
-    // Last resort: read locals from the condition_locals file written by
-    // instructions.sfn.  Cross-module ABI corruption in the v0.1.1 seed can
-    // leave the in-memory `locals` array empty/corrupt, so this file-based
-    // fallback ensures the type_annotation is available.
-    if fs.exists("build/sailfin/.condition_locals") {
-        let _cl_raw = fs.readFile("build/sailfin/.condition_locals");
-        if _cl_raw.length > 0 {
-            let mut _cl_pos: number = 0;
-            loop {
-                if _cl_pos >= _cl_raw.length { break; }
-                let _cl_nl = index_of(substring(_cl_raw, _cl_pos, _cl_raw.length), "\n");
-                let mut _cl_line: string = "";
-                if _cl_nl < 0 {
-                    _cl_line = substring(_cl_raw, _cl_pos, _cl_raw.length);
-                    _cl_pos = _cl_raw.length;
-                } else {
-                    _cl_line = substring(_cl_raw, _cl_pos, _cl_pos + _cl_nl);
-                    _cl_pos = _cl_pos + _cl_nl + 1;
-                }
-                if _cl_line.length == 0 { continue; }
-                // Format: name\ttype_annotation\tllvm_type\tpointer
-                let _ct1 = index_of(_cl_line, "\t");
-                if _ct1 < 0 { continue; }
-                let _cl_name = substring(_cl_line, 0, _ct1);
-                if _cl_name != trimmed { continue; }
-                let _cl_rest = substring(_cl_line, _ct1 + 1, _cl_line.length);
-                let _ct2 = index_of(_cl_rest, "\t");
-                if _ct2 < 0 { continue; }
-                let _cl_type_ann = substring(_cl_rest, 0, _ct2);
-                if _cl_type_ann.length > 0 {
-                    let by_file_annotation = find_struct_info_by_name(context, _cl_type_ann);
-                    if by_file_annotation != null { return by_file_annotation; }
-                }
-            }
-        }
-    }
     return null;
 }
 

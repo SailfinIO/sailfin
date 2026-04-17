@@ -4,6 +4,12 @@
 #include <string.h>
 #include <sys/stat.h>
 
+#if defined(__linux__)
+#include <unistd.h> // readlink
+#elif defined(__APPLE__)
+#include <mach-o/dyld.h> // _NSGetExecutablePath
+#endif
+
 #if defined(_WIN32)
 #include <windows.h>
 #ifndef PATH_MAX
@@ -405,14 +411,63 @@ int main(int argc, char **argv)
         if (is_cli)
         {
             char *runtime_root = _resolve_runtime_root(argv[0]);
+
+            // Resolve the binary's own directory so the Sailfin CLI can
+            // look for .build-stamp / capsule.toml relative to the binary
+            // rather than the current working directory.
+            char *binary_dir = NULL;
+            {
+                char resolved_exe[PATH_MAX];
+                int got_exe = 0;
+#if defined(__linux__)
+                // /proc/self/exe is the most reliable source on Linux —
+                // works even when argv[0] is a bare name from $PATH.
+                ssize_t len = readlink("/proc/self/exe", resolved_exe, PATH_MAX - 1);
+                if (len > 0)
+                {
+                    resolved_exe[len] = '\0';
+                    got_exe = 1;
+                }
+#elif defined(__APPLE__)
+                uint32_t bufsize = PATH_MAX;
+                if (_NSGetExecutablePath(resolved_exe, &bufsize) == 0)
+                {
+                    // _NSGetExecutablePath may return a relative path; canonicalize.
+                    char canonical[PATH_MAX];
+                    if (realpath(resolved_exe, canonical))
+                    {
+                        memcpy(resolved_exe, canonical, strlen(canonical) + 1);
+                    }
+                    got_exe = 1;
+                }
+#elif defined(_WIN32)
+                DWORD len = GetModuleFileNameA(NULL, resolved_exe, PATH_MAX);
+                if (len > 0 && len < PATH_MAX)
+                {
+                    got_exe = 1;
+                }
+#endif
+                // Fallback: try realpath(argv[0]) — works when argv[0] is
+                // an absolute or relative path, but NOT a bare $PATH name.
+                if (!got_exe && argv[0] && realpath(argv[0], resolved_exe))
+                {
+                    got_exe = 1;
+                }
+                if (got_exe)
+                {
+                    binary_dir = _dirname_dup(resolved_exe);
+                }
+            }
+
             SailfinPtrArray args;
-            int64_t extra = runtime_root ? 2 : 0;
+            int64_t extra = (runtime_root ? 2 : 0) + (binary_dir ? 2 : 0);
             char **argv_copy = (char **)malloc(
                 sizeof(char *) * (size_t)(argc - 1 + extra + 1));
             if (!argv_copy)
             {
                 fprintf(stderr, "out of memory building native argv\n");
                 free(runtime_root);
+                free(binary_dir);
                 return 1;
             }
 
@@ -421,6 +476,11 @@ int main(int argc, char **argv)
             {
                 argv_copy[out_index++] = "--runtime-root";
                 argv_copy[out_index++] = runtime_root;
+            }
+            if (binary_dir)
+            {
+                argv_copy[out_index++] = "--binary-dir";
+                argv_copy[out_index++] = binary_dir;
             }
             for (int i = 1; i < argc; i++)
             {
@@ -436,6 +496,7 @@ int main(int argc, char **argv)
             double rc = sailfin_cli_main__cli_main(&args);
             free(argv_copy);
             free(runtime_root);
+            free(binary_dir);
             return (int)rc;
         }
     }
