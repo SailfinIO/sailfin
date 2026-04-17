@@ -250,9 +250,29 @@ The win is concentrated on the target module; aggregate is within bench variance
 ### Phase 2: Eliminate IPC Files (Resumed)
 
 **Priority:** Highest — **Expected:** 40-60% time reduction, enables parallel builds
-**Depends on:** Phase 0 (arena allocator) to prevent OOM
+**Depends on:** Phase 0 (arena allocator) to prevent OOM for the per-binding/per-instruction channels
 
-With memory management solved, resume replacing filesystem IPC with direct struct returns. Remaining targets by priority:
+Most IPC channels were introduced as workarounds for v0.1.1-seed ABI corruption of array-of-struct parameters across module boundaries. The 0.5.x seed lineage no longer corrupts those parameters, so many channels are now dead-code fallbacks whose readers already have the data in-memory via an existing `bindings` or `locals` parameter. Those channels can be removed immediately — they do not depend on Phase 0.
+
+Channels that serialize per-instruction/per-binding control-flow state (dispatch, let result, block result, statement mutations) are different: they still act as implicit GC per the IPC-as-GC Problem above and must wait for Phase 0.
+
+#### Procedure: Removing an IPC Channel
+
+Use this pattern for every channel in the priority list. It keeps diffs surgical, preserves self-hosting after each step, and makes the determinism delta measurable.
+
+1. **Locate the writer.** `grep -R 'fs\.writeLines.*\.channel_name\|fs\.writeFile.*\.channel_name' compiler/src`. There is usually exactly one.
+2. **Identify the data being serialized.** If it's a struct that the writer already has as a local — and the reader already accepts that struct type as a parameter — the channel is dead code.
+3. **At each reader, check whether the enclosing function already takes that parameter.** `grep -R 'fs\.readFile.*\.channel_name' compiler/src` to enumerate readers. For `LocalBinding[]`, `ParameterBinding[]`, and `TypeContext`, readers almost always already have the param.
+4. **Replace the file read with the in-memory lookup.** Prefer existing helpers (`find_local_binding`, `find_parameter_binding`, `find_struct_info_by_name`) over rewriting parser logic inline.
+5. **If the enclosing function does _not_ have the parameter:** add it to the signature and update every caller. Blast radius is usually one hop. Do not introduce new wrapper structs unless two or more params need to travel together.
+6. **Delete the writer.** The channel is gone.
+7. **Rebuild (`make rebuild`) to confirm self-hosting still succeeds.** This is the critical gate — if the v0.1.1-seed-era fallback was actually still live, rebuild will fail with a resolution error and you need to examine why the in-memory path is incomplete.
+8. **Measure the determinism delta.** Run the emit-sweep against a heavy module (e.g. `compiler/src/parser/expressions.sfn`) 20+ times; distinct hash counts should strictly decrease. Record the before/after in the Completed Work entry.
+9. **Delete dead imports.** `index_of`/`substring` in particular often become unused once the file-parsing loop is gone.
+
+If step 7 fails, the channel is not purely a workaround — some caller is relying on the file as actual storage. That case is out of scope for a simple channel removal and needs to be addressed with an explicit in-memory struct (Phase 0 arena may also be required before it is safe).
+
+#### Remaining targets by priority:
 
 1. **Instruction dispatch channel** (45 refs in `instructions_dispatch.sfn`) — hottest path
 2. **Let result channel** (32 refs in `instructions_let.sfn`) — per-let-binding overhead
@@ -260,7 +280,7 @@ With memory management solved, resume replacing filesystem IPC with direct struc
 4. **Function metadata channel** (13 refs in `lowering_phase_functions.sfn`) — per-function overhead
 5. **Context functions serialization** (14 refs in `lowering_phase_types.sfn`) — per-module overhead
 6. **Module globals channel** (18 refs in `module_globals.sfn`)
-7. **Remaining channels** (emission, self-field, async, coerce, condition locals)
+7. **Remaining channels** (emission, self-field, async, coerce)
 
 Named IPC functions to eliminate:
 - `_write_block_result_files()` — `instructions_helpers.sfn:122`
@@ -315,6 +335,33 @@ This requires the compiler to support a "compile module" entry point that takes 
 ### Phase 1 Array Accumulator Sweep (April 15, `d2d0bf1` + `220c8b7`)
 
 **Status: Partially implemented.** Converted `extend_string_lines` to in-place `push()` and replaced ~50 `.concat([x])` loop-accumulator sites. Two functions (`concat_native_functions`, `append_local_binding`) were reverted in `220c8b7` because callers depend on the input array staying pristine; those remain copy-based and are now tracked as Phase 1b.
+
+### Condition Locals IPC Channel Removal (April 17)
+
+**Status: Implemented.** Removed the `.condition_locals` file IPC channel — a v0.1.1-seed-era workaround for array-of-struct parameter ABI corruption that is no longer needed on the 0.5.x seed lineage. The writer in `instructions_condition.sfn` built a tab-separated view of every `LocalBinding` and wrote it to `build/sailfin/.condition_locals` immediately before calling `lower_expression`; four readers (`type_context_queries.sfn`, `core_member_lowering.sfn`, `core_call_resolution.sfn`, `core_member_helpers.sfn`) re-parsed that file as a fallback to their in-memory `locals` parameter.
+
+This channel was the first concrete source proven responsible for silent LLVM IR miscompilation on macOS arm64: when two passes' file writes and reads interleaved unpredictably within a single emit, entire source-level blocks (e.g. `if tok.kind.variant == "EndOfFile" { break; }` inside `parse_block_for_lambda`) dropped out of the generated IR, which then passed `llvm-as` validation but produced binaries that segfaulted on any parse input.
+
+**Determinism delta (emit `llvm` x 20 runs on macOS arm64, same seed):**
+
+| Module | Baseline (seed 0.5.5 pre-change) | New compiler (post-change) |
+|--------|----------------------------------|-----------------------------|
+| `compiler/src/parser/expressions.sfn` | 4/30 divergent (5 distinct hashes) | 0/20 divergent (1 hash) |
+| `compiler/src/llvm/lowering/lowering_core.sfn` | intermittently dropped all user fns | 0/20 divergent (1 hash) |
+| `compiler/src/llvm/expression_lowering/native/core.sfn` | (not measured baseline) | 0/20 divergent |
+| `compiler/src/parser/statements.sfn` | (not measured baseline) | 1/20 divergent (other channels) |
+
+The three large modules that previously flaked are now fully deterministic. The residual 1/20 flake on `parser/statements.sfn` is driven by other scratch channels still active (call-result, struct-info, instr-fn-name) and will be eliminated as subsequent Phase 2 channels are removed.
+
+Concurrently, the `build.sh` retry loop went from 3 `invalid_ir` retries per full build (`core_operands`, `core_parsing`, `instructions_helpers`) down to 1 (`cli_commands`), another signal that real non-determinism volume dropped materially.
+
+**Scope of change:**
+- 1 writer deletion (`instructions_condition.sfn`)
+- 4 reader conversions to `find_local_binding(locals, name)` against the existing in-memory parameter
+- 1 signature extension (`lower_inline_gep_field_access` in `core_member_helpers.sfn` — added `locals: LocalBinding[]`, updated two call sites in `core_member_lowering.sfn`)
+- ~150 lines removed, ~15 added
+
+This is the first IPC removal under the procedure in Phase 2 above; future channel removals should follow the same 9-step pattern.
 
 ---
 
