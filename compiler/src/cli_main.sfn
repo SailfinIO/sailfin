@@ -25,30 +25,30 @@ import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
     return "usage:\n" + "  sfn --version\n" + "  sfn version\n"
-    + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n"
-    + "  sfn build [-o OUTPUT] <file.sfn>\n"
-    + "  sfn run <file.sfn>\n"
-    + "  sfn run <exe>\n"
-    + "  sfn test [path]\n"
-    + "  sfn fmt [--check] [--write] [path...]\n"
-    + "  sfn init\n"
-    + "  sfn publish [path]\n"
-    + "  sfn add [--dev] <capsule>\n"
-    + "  sfn login [token]\n"
-    + "\n"
-    + "examples:\n"
-    + "  sfn emit llvm examples/basics/hello-world.sfn\n"
-    + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n"
-    + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n"
-    + "  sfn run examples/basics/hello-world.sfn\n"
-    + "  sfn run build/native/examples/hello\n"
-    + "  sfn test .\n"
-    + "  sfn init\n"
-    + "  sfn publish [path]\n"
-    + "  sfn add http\n"
-    + "  sfn add --dev test\n"
-    + "  sfn add acme/router\n"
-    + "  sfn login\n";
+        + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n"
+        + "  sfn build [-o OUTPUT] <file.sfn>\n"
+        + "  sfn run <file.sfn>\n"
+        + "  sfn run <exe>\n"
+        + "  sfn test [path]\n"
+        + "  sfn fmt [--check] [--write] [path...]\n"
+        + "  sfn init\n"
+        + "  sfn publish [path]\n"
+        + "  sfn add [--dev] <capsule>\n"
+        + "  sfn login [token]\n"
+        + "\n"
+        + "examples:\n"
+        + "  sfn emit llvm examples/basics/hello-world.sfn\n"
+        + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n"
+        + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n"
+        + "  sfn run examples/basics/hello-world.sfn\n"
+        + "  sfn run build/native/examples/hello\n"
+        + "  sfn test .\n"
+        + "  sfn init\n"
+        + "  sfn publish [path]\n"
+        + "  sfn add http\n"
+        + "  sfn add --dev test\n"
+        + "  sfn add acme/router\n"
+        + "  sfn login\n";
 }
 
 fn _ends_with(value: string, suffix: string) -> boolean {
@@ -173,7 +173,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
 
     if !fs.exists(runtime_obj) {
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
-                + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
+            + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 {
             return ["", "", "", ""];
         }
@@ -181,7 +181,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
 
     if !fs.exists(arena_obj) {
         let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
-                + include_dir, "-c", arena_src, "-o", arena_obj,]);
+            + include_dir, "-c", arena_src, "-o", arena_obj,]);
         if rc_arena != 0 {
             return ["", "", "", ""];
         }
