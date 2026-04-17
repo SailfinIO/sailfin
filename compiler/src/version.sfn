@@ -112,23 +112,44 @@ fn _read_capsule_version(paths: string[]) -> string ![io] {
     return "";
 }
 
-// Resolve the compiler version using the best available source:
+// Resolve the compiler version using the best available source.
 //
-//   1. build/native/.build-stamp  — written by build.sh, includes +dev.<hash>
-//   2. compiler/capsule.toml      — canonical version (dev builds from repo root)
-//   3. capsule.toml               — when CWD is inside compiler/
-//   4. __version_fallback__       — baked-in default for installed binaries
+// When binary_dir is provided (from the C driver's realpath(argv[0])),
+// paths are resolved relative to the binary — not the CWD.  This prevents
+// an installed binary from picking up a stale build/native/.build-stamp
+// when run from inside the repo checkout.
 //
-fn resolve_compiler_version() -> string ![io] {
-    // 1. Build stamp takes priority (includes git hash for dev builds).
+// Resolution order:
+//   1. <binary_dir>/.build-stamp   — written by build.sh, includes +dev.<hash>
+//   2. <binary_dir>/../../compiler/capsule.toml — repo root (binary is at build/native/)
+//   3. __version_fallback__        — baked-in default for installed binaries
+//
+// When binary_dir is empty (tests, direct calls), CWD-relative paths are
+// used as a convenience fallback.
+//
+fn resolve_compiler_version(binary_dir: string) -> string ![io] {
+    if binary_dir.length > 0 {
+        // Binary-relative resolution (normal runtime path).
+        let stamp = _read_stamp(binary_dir + "/.build-stamp");
+        if stamp.length > 0 { return stamp; }
+
+        let capsule_path = binary_dir + "/../../compiler/capsule.toml";
+        if fs.exists(capsule_path) {
+            let text = fs.readFile(capsule_path);
+            let ver = _strict_capsule_version(text);
+            if ver.length > 0 { return ver; }
+        }
+
+        return __version_fallback__;
+    }
+
+    // CWD-relative fallback (tests, standalone invocations).
     let stamp = _read_stamp("build/native/.build-stamp");
     if stamp.length > 0 { return stamp; }
 
-    // 2. Try capsule.toml at known relative paths.
     let capsule_paths: string[] = ["compiler/capsule.toml", "capsule.toml"];
     let capsule_ver = _read_capsule_version(capsule_paths);
     if capsule_ver.length > 0 { return capsule_ver; }
 
-    // 3. Fallback to the baked-in version.
     return __version_fallback__;
 }
