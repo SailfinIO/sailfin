@@ -116,5 +116,5 @@ export {
     sanitize_symbol,
     strings_equal,
     index_of,
-    find_last_index_of_char,
+    find_last_index_of_char
 };

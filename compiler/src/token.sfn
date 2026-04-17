@@ -11,7 +11,7 @@ enum TokenKind {
     Symbol,
     Whitespace,
     Comment,
-    EndOfFile,
+    EndOfFile
 }
 
 struct Token {
@@ -26,6 +26,6 @@ fn eof_token(line: number, column: number) -> Token {
         kind: TokenKind.EndOfFile(),
         lexeme: "",
         line: line,
-        column: column,
+        column: column
     };
 }

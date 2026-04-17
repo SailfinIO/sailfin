@@ -5,11 +5,7 @@
 // Provides lookup and mutation helpers for parameter/local bindings during
 // expression lowering: finding bindings by name, marking consumption state,
 // resetting consumption, and updating ownership metadata.
-import {
-    LocalBinding,
-    ParameterBinding,
-    OwnershipInfo,
-} from "../types";
+import { LocalBinding, ParameterBinding, OwnershipInfo } from "../types";
 
 fn bindings_find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     let mut index: number = 0;
@@ -35,7 +31,7 @@ fn bindings_mark_parameter_consumed(bindings: ParameterBinding[], name: string) 
                 llvm_type: binding.llvm_type,
                 type_annotation: binding.type_annotation,
                 consumed: true,
-                span: binding.span,
+                span: binding.span
             };
             result.push(updated);
         } else { result.push(binding); }
@@ -59,7 +55,7 @@ fn bindings_mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBi
                 ownership: entry.ownership,
                 consumed: true,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
+                scope_depth: entry.scope_depth
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -83,7 +79,7 @@ fn bindings_reset_local_consumption(locals: LocalBinding[], name: string) -> Loc
                 ownership: entry.ownership,
                 consumed: false,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
+                scope_depth: entry.scope_depth
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -107,7 +103,7 @@ fn bindings_update_local_ownership(locals: LocalBinding[], name: string, ownersh
                 ownership: ownership,
                 consumed: entry.consumed,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
+                scope_depth: entry.scope_depth
             };
             result.push(updated);
         } else { result.push(entry); }

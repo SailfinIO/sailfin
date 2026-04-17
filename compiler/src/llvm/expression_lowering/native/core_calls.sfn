@@ -2,7 +2,7 @@
 //
 // Call parsing helpers for expression lowering.
 import { char_at } from "../../../string_utils";
-import { append_string, trim_text, } from "../../utils";
+import { append_string, trim_text } from "../../utils";
 
 fn find_call_site(expression: string) -> number {
     // Find the opening paren of the outermost (last) call in a chained

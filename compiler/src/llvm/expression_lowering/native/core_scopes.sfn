@@ -15,7 +15,7 @@ import {
     OwnershipInfo,
     ParameterBinding,
     ScopeMetadata,
-    StructLiteralField,
+    StructLiteralField
 } from "../../types";
 import { starts_with } from "../../utils";
 import { bindings_find_parameter_binding } from "../bindings";
@@ -88,7 +88,7 @@ fn mark_lifetime_region_released(regions: LifetimeRegionMetadata[], region_id: n
                 base_scope_depth: entry.base_scope_depth,
                 end_scope_id: scope_id,
                 end_scope_depth: scope_depth,
-                released: true,
+                released: true
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -123,7 +123,7 @@ fn make_lifetime_region_metadata(id: number, binding: string, ownership: Ownersh
         base_scope_depth: base_scope_depth,
         end_scope_id: "",
         end_scope_depth: 0,
-        released: false,
+        released: false
     };
 }
 

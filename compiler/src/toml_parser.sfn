@@ -160,7 +160,7 @@ fn _parse_toml_internal(text: string) -> SailToml {
         entry: "src/main.sfn",
         dependencies: [],
         dev_dependencies: [],
-        capabilities: [],
+        capabilities: []
     };
     let lines = _toml_split_lines(text);
     let mut section: string = "";

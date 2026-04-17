@@ -19,7 +19,7 @@ import {
     NativeParameter,
     NativeSourceSpan,
     NativeStructField,
-    StructHeaderParse,
+    StructHeaderParse
 } from "./native_ir";
 import {
     find_matching_angle,
@@ -34,7 +34,7 @@ import {
     strip_prefix,
     strip_quotes,
     trim_text,
-    trim_trailing_delimiters,
+    trim_trailing_delimiters
 } from "./native_ir_utils_text";
 import { substring } from "./string_utils";
 
@@ -64,7 +64,7 @@ export {
     parse_parameter_entry,
     line_looks_like_parameter_entry,
     split_parameter_entries,
-    parse_effect_list,
+    parse_effect_list
 };
 
 fn parse_case_instruction(line: string) -> NativeInstruction {
@@ -83,7 +83,8 @@ fn parse_inline_case_instruction(line: string) -> NativeInstruction[] {
         return [NativeInstruction.Unknown { text: line }];
     }
     let head = trim_text(substring(trimmed, 0, arrow_index));
-    let remainder = trim_trailing_delimiters(trim_text(substring(trimmed, arrow_index + 2, trimmed.length)));
+    let remainder = trim_trailing_delimiters(trim_text(substring(trimmed, arrow_index
+        + 2, trimmed.length)));
     let split = split_case_components(head);
     let mut instructions: NativeInstruction[] = [];
     instructions.push(NativeInstruction.Case {
@@ -240,7 +241,7 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
                     signatures: signatures
                 },
                 next_index: index,
-                diagnostics: diagnostics,
+                diagnostics: diagnostics
             };
         }
         let raw_line = trim_text(lines[index]);
@@ -284,7 +285,7 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
             signatures: signatures
         },
         next_index: index,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -296,10 +297,14 @@ fn parse_struct_header(text: string) -> StructHeaderParse {
         if starts_with(base.remainder, "implements ") {
             let list_text = trim_text(strip_prefix(base.remainder, "implements "));
             if list_text.length == 0 {
-                diagnostics.push("struct " + base.name + " header missing implements list");
+                diagnostics.push("struct " + base.name
+                    + " header missing implements list");
             } else { implements = parse_implements_list(list_text); }
         } else {
-            diagnostics.push("struct " + base.name + " header has unsupported segment `" + base.remainder + "`");
+            diagnostics.push("struct " + base.name
+                + " header has unsupported segment `"
+                + base.remainder
+                + "`");
         }
     }
     return StructHeaderParse {
@@ -313,7 +318,10 @@ fn parse_interface_header(text: string) -> InterfaceHeaderParse {
     let base = parse_header_name_and_remainder(text);
     let mut diagnostics: string[] = base.diagnostics;
     if base.remainder.length > 0 {
-        diagnostics.push("interface " + base.name + " header has unsupported segment `" + base.remainder + "`");
+        diagnostics.push("interface " + base.name
+            + " header has unsupported segment `"
+            + base.remainder
+            + "`");
     }
     return InterfaceHeaderParse {
         name: base.name,
@@ -330,12 +338,13 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
         type_parameters: [],
         parameters: [],
         return_type: "void",
-        effects: [],
+        effects: []
     };
 
     let trimmed = trim_trailing_delimiters(trim_text(text));
     if trimmed.length == 0 {
-        diagnostics.push("interface " + interface_name + " signature missing content");
+        diagnostics.push("interface " + interface_name
+            + " signature missing content");
         return InterfaceSignatureParse {
             success: false,
             signature: default_signature,
@@ -352,7 +361,9 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
 
     let paren_index = index_of(remainder, "(");
     if paren_index < 0 {
-        diagnostics.push("interface " + interface_name + " signature missing parameter list: " + trimmed);
+        diagnostics.push("interface " + interface_name
+            + " signature missing parameter list: "
+            + trimmed);
         return InterfaceSignatureParse {
             success: false,
             signature: default_signature,
@@ -362,7 +373,9 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
 
     let close_index = find_matching_paren(remainder, paren_index);
     if close_index < 0 {
-        diagnostics.push("interface " + interface_name + " signature has unterminated parameter list: " + trimmed);
+        diagnostics.push("interface " + interface_name
+            + " signature has unterminated parameter list: "
+            + trimmed);
         return InterfaceSignatureParse {
             success: false,
             signature: default_signature,
@@ -379,11 +392,17 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
         _ci += 1;
     }
     if name_parse.remainder.length > 0 {
-        diagnostics.push("interface " + interface_name + " signature `" + trimmed + "` has unsupported segment `" + name_parse.remainder + "`");
+        diagnostics.push("interface " + interface_name + " signature `"
+            + trimmed
+            + "` has unsupported segment `"
+            + name_parse.remainder
+            + "`");
     }
     let method_name = name_parse.name;
     if method_name.length == 0 {
-        diagnostics.push("interface " + interface_name + " signature `" + trimmed + "` missing name");
+        diagnostics.push("interface " + interface_name + " signature `"
+            + trimmed
+            + "` missing name");
     }
 
     let parameters_section = substring(remainder, paren_index + 1, close_index);
@@ -396,7 +415,11 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
             if entry_index >= entries.length { break; }
             let parsed = parse_parameter_entry(entries[entry_index], null);
             if parsed == null {
-                diagnostics.push("interface " + interface_name + " signature `" + method_name + "` has invalid parameter `" + entries[entry_index] + "`");
+                diagnostics.push("interface " + interface_name + " signature `"
+                    + method_name
+                    + "` has invalid parameter `"
+                    + entries[entry_index]
+                    + "`");
             } else { parameters.push(parsed); }
             entry_index += 1;
         }
@@ -417,7 +440,11 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
                 let type_text = trim_text(strip_prefix(suffix, "->"));
                 if type_text.length > 0 { return_type = type_text; }
             } else {
-                diagnostics.push("interface " + interface_name + " signature `" + method_name + "` has unsupported suffix `" + suffix + "`");
+                diagnostics.push("interface " + interface_name + " signature `"
+                    + method_name
+                    + "` has unsupported suffix `"
+                    + suffix
+                    + "`");
             }
         }
         if effect_segment.length > 0 {
@@ -431,7 +458,11 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
                 let body = substring(effect_segment, 2, effect_segment.length - 1);
                 effects = parse_effect_list(body);
             } else {
-                diagnostics.push("interface " + interface_name + " signature `" + method_name + "` has invalid effects annotation `" + effect_segment + "`");
+                diagnostics.push("interface " + interface_name + " signature `"
+                    + method_name
+                    + "` has invalid effects annotation `"
+                    + effect_segment
+                    + "`");
             }
         }
     }
@@ -442,7 +473,7 @@ fn parse_interface_signature(text: string, interface_name: string) -> InterfaceS
         type_parameters: name_parse.type_parameters,
         parameters: parameters,
         return_type: return_type,
-        effects: effects,
+        effects: effects
     };
     let mut _let366: boolean = false;
     if method_name.length > 0 {
@@ -677,7 +708,7 @@ fn parse_let_instruction(line: string, span: NativeSourceSpan?, value_span: Nati
         type_annotation: parsed.type_annotation,
         value: parsed.value,
         span: span,
-        value_span: value_span,
+        value_span: value_span
     };
 }
 
@@ -781,7 +812,8 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
                 type_annotation = trim_text(substring(remainder, 0, assign_index));
-                let default_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
+                let default_text = trim_text(substring(remainder, assign_index
+                    + 1, remainder.length));
                 if default_text.length > 0 { default_value = default_text; }
             } else { type_annotation = trim_text(remainder); }
         } else if starts_with(remainder, "->") {
@@ -789,7 +821,8 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
             let assign_index = index_of(remainder, "=");
             if assign_index >= 0 {
                 type_annotation = trim_text(substring(remainder, 0, assign_index));
-                let default_text = trim_text(substring(remainder, assign_index + 1, remainder.length));
+                let default_text = trim_text(substring(remainder, assign_index
+                    + 1, remainder.length));
                 if default_text.length > 0 { default_value = default_text; }
             } else { type_annotation = trim_text(remainder); }
         } else if starts_with(remainder, "=") {
@@ -802,7 +835,7 @@ fn parse_parameter_entry(body: string, span: NativeSourceSpan?) -> NativeParamet
         type_annotation: type_annotation,
         mutable: is_mutable,
         default_value: default_value,
-        span: span,
+        span: span
     };
 }
 

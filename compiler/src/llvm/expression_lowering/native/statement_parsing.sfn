@@ -6,8 +6,8 @@
 // assignments like `x += y`) and `parse_inline_let_expression` (parses
 // `let [mut] name [: type] = init`).
 import { substring } from "../../../string_utils";
-import { AssignmentParseResult, InlineLetParseResult, } from "../../types";
-import { index_of, trim_text, } from "../../utils";
+import { AssignmentParseResult, InlineLetParseResult } from "../../types";
+import { index_of, trim_text } from "../../utils";
 
 fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
@@ -138,7 +138,9 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let mut diagnostics: string[] = [];
     let trimmed = trim_text(expression);
     if trimmed.length < 4 {
-        diagnostics.push("llvm lowering: malformed let expression `" + expression + "`");
+        diagnostics.push("llvm lowering: malformed let expression `"
+            + expression
+            + "`");
         return InlineLetParseResult {
             success: false,
             name: "",
@@ -169,7 +171,9 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
         }
     }
     if remainder.length == 0 {
-        diagnostics.push("llvm lowering: let expression missing binding name in `" + expression + "`");
+        diagnostics.push("llvm lowering: let expression missing binding name in `"
+            + expression
+            + "`");
         return InlineLetParseResult {
             success: false,
             name: "",
@@ -195,7 +199,9 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     }
     name = trim_text(name);
     if name.length == 0 {
-        diagnostics.push("llvm lowering: let expression missing binding name in `" + expression + "`");
+        diagnostics.push("llvm lowering: let expression missing binding name in `"
+            + expression
+            + "`");
         return InlineLetParseResult {
             success: false,
             name: "",
@@ -245,7 +251,9 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
         }
     }
     if initializer == null {
-        diagnostics.push("llvm lowering: let expression missing initializer for `" + name + "`");
+        diagnostics.push("llvm lowering: let expression missing initializer for `"
+            + name
+            + "`");
         return InlineLetParseResult {
             success: false,
             name: name,

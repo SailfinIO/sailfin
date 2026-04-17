@@ -17,9 +17,9 @@ import { empty_string_constant_set, merge_string_constants } from "../../strings
 import {
     find_interface_info_by_name,
     resolve_interface_info_for_method_target,
-    resolve_struct_info_for_method_target,
+    resolve_struct_info_for_method_target
 } from "../../type_context_queries";
-import { ends_with_pointer_suffix, } from "../../type_mapping";
+import { ends_with_pointer_suffix } from "../../type_mapping";
 import {
     CallSignatureResolution,
     CallTargetResolution,
@@ -31,26 +31,26 @@ import {
     RuntimeHelperDescriptor,
     StringConstant,
     StructTypeInfo,
-    TypeContext,
+    TypeContext
 } from "../../types";
 import {
     ends_with,
     number_to_string,
     starts_with,
-    trim_text,
+    trim_text
 } from "../../utils";
-import { array_pointer_element_type, } from "../arrays";
+import { array_pointer_element_type } from "../arrays";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
-import { collect_parameter_types, } from "./core_helpers";
-import { load_local_operand, } from "./core_operands";
-import { parse_member_access, } from "./core_parse";
-import { find_local_binding, find_parameter_binding, } from "./core_scopes";
+import { collect_parameter_types } from "./core_helpers";
+import { load_local_operand } from "./core_operands";
+import { parse_member_access } from "./core_parse";
+import { find_local_binding, find_parameter_binding } from "./core_scopes";
 import { sanitize_symbol } from "./core_text";
 import {
     future_pointer_type_for_return_type,
     map_parameter_type,
-    map_return_type,
+    map_return_type
 } from "./core_type_mapping";
 
 // Resolve fused concat/push targets (e.g. `valuesconcat(xs)` → `concat`).
@@ -123,7 +123,7 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     symbol: "",
                                     return_type: receiver_operand.llvm_type,
                                     parameter_types: [receiver_operand.llvm_type, receiver_operand.llvm_type],
-                                    effects: [],
+                                    effects: []
                                 };
                             }
                         }
@@ -214,8 +214,10 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                                 _pre_line = substring(_pre_raw, _pre_pos, _pre_raw.length);
                                                 _pre_pos = _pre_raw.length;
                                             } else {
-                                                _pre_line = substring(_pre_raw, _pre_pos, _pre_pos + _pre_nl);
-                                                _pre_pos = _pre_pos + _pre_nl + 1;
+                                                _pre_line = substring(_pre_raw, _pre_pos, _pre_pos
+                                                    + _pre_nl);
+                                                _pre_pos = _pre_pos + _pre_nl
+                                                    + 1;
                                             }
                                             if _pre_line.length == 0 {
                                                 continue;
@@ -226,7 +228,8 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                             if _pre_name != _pre_base {
                                                 continue;
                                             }
-                                            let _pre_rest = substring(_pre_line, _pre_t1 + 1, _pre_line.length);
+                                            let _pre_rest = substring(_pre_line, _pre_t1
+                                                + 1, _pre_line.length);
                                             let _pre_t2 = index_of(_pre_rest, "\t");
                                             if _pre_t2 < 0 { continue; }
                                             _pre_struct = substring(_pre_rest, 0, _pre_t2);
@@ -247,7 +250,8 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                             result_temp = _pre_lowered.temp_index;
                                             if _pre_lowered.operand != null {
                                                 method_operand = _pre_lowered.operand;
-                                                result_target = _pre_struct + _pre_field;
+                                                result_target = _pre_struct
+                                                    + _pre_field;
                                                 injected_argument_count = 1;
                                             }
                                         }
@@ -300,7 +304,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                 r_lines = lowered_self.lines;
                 r_temp = lowered_self.temp_index;
                 if lowered_self.operand == null {
-                    r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    r_diagnostics.push("llvm lowering: method call base `"
+                        + method_parse.base
+                        + "` produced no value");
                     return CallTargetResolution {
                         trimmed_target: r_target,
                         method_operand: null,
@@ -313,7 +319,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         current_lines: r_lines,
                         current_temp: r_temp,
                         diagnostics: r_diagnostics,
-                        string_constants: r_string_constants,
+                        string_constants: r_string_constants
                     };
                 }
 
@@ -333,7 +339,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 symbol: "",
                                 return_type: base_operand.llvm_type,
                                 parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                effects: [],
+                                effects: []
                             };
                         }
                     } else {
@@ -347,7 +353,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             symbol: "",
                             return_type: base_operand.llvm_type,
                             parameter_types: [base_operand.llvm_type, array_element_type],
-                            effects: [],
+                            effects: []
                         };
                     }
                 }
@@ -387,7 +393,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             r_target = method_info.name + method_parse.field;
                             r_injected_count = 1;
                         } else {
-                            r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                            r_diagnostics.push("llvm lowering: method call base `"
+                                + method_parse.base
+                                + "` produced no value");
                             return CallTargetResolution {
                                 trimmed_target: r_target,
                                 method_operand: null,
@@ -400,7 +408,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 current_lines: r_lines,
                                 current_temp: r_temp,
                                 diagnostics: r_diagnostics,
-                                string_constants: r_string_constants,
+                                string_constants: r_string_constants
                             };
                         }
                     }
@@ -420,7 +428,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_target = method_info.name + method_parse.field;
                         r_injected_count = 1;
                     } else {
-                        r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                        r_diagnostics.push("llvm lowering: method call base `"
+                            + method_parse.base
+                            + "` produced no value");
                         return CallTargetResolution {
                             trimmed_target: r_target,
                             method_operand: null,
@@ -433,7 +443,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             current_lines: r_lines,
                             current_temp: r_temp,
                             diagnostics: r_diagnostics,
-                            string_constants: r_string_constants,
+                            string_constants: r_string_constants
                         };
                     }
                 }
@@ -450,10 +460,13 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                 r_temp = lowered_self.temp_index;
                 if lowered_self.operand != null {
                     r_method_operand = lowered_self.operand;
-                    r_target = "trait_dispatch__" + interface_info.name + "__" + method_parse.field;
+                    r_target = "trait_dispatch__" + interface_info.name + "__"
+                        + method_parse.field;
                     r_injected_count = 1;
                 } else {
-                    r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    r_diagnostics.push("llvm lowering: method call base `"
+                        + method_parse.base
+                        + "` produced no value");
                     return CallTargetResolution {
                         trimmed_target: r_target,
                         method_operand: null,
@@ -466,7 +479,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         current_lines: r_lines,
                         current_temp: r_temp,
                         diagnostics: r_diagnostics,
-                        string_constants: r_string_constants,
+                        string_constants: r_string_constants
                     };
                 }
             } else {
@@ -505,7 +518,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_target = _struct_fallback_info.name + method_parse.field;
                         r_injected_count = 1;
                     } else {
-                        r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                        r_diagnostics.push("llvm lowering: method call base `"
+                            + method_parse.base
+                            + "` produced no value");
                         return CallTargetResolution {
                             trimmed_target: r_target,
                             method_operand: null,
@@ -518,7 +533,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             current_lines: r_lines,
                             current_temp: r_temp,
                             diagnostics: r_diagnostics,
-                            string_constants: r_string_constants,
+                            string_constants: r_string_constants
                         };
                     }
                 } else {
@@ -540,7 +555,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                         r_lines = lowered_self.lines;
                         r_temp = lowered_self.temp_index;
                         if lowered_self.operand == null {
-                            r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                            r_diagnostics.push("llvm lowering: method call base `"
+                                + method_parse.base
+                                + "` produced no value");
                             return CallTargetResolution {
                                 trimmed_target: r_target,
                                 method_operand: null,
@@ -553,7 +570,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 current_lines: r_lines,
                                 current_temp: r_temp,
                                 diagnostics: r_diagnostics,
-                                string_constants: r_string_constants,
+                                string_constants: r_string_constants
                             };
                         }
 
@@ -583,7 +600,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                     symbol: "",
                                     return_type: base_operand.llvm_type,
                                     parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                    effects: [],
+                                    effects: []
                                 };
                             }
                         } else {
@@ -605,7 +622,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                     symbol: "",
                                     return_type: base_operand.llvm_type,
                                     parameter_types: [base_operand.llvm_type, array_element_type],
-                                    effects: [],
+                                    effects: []
                                 };
                             }
                         }
@@ -627,7 +644,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
         current_lines: r_lines,
         current_temp: r_temp,
         diagnostics: r_diagnostics,
-        string_constants: r_string_constants,
+        string_constants: r_string_constants
     };
 }
 
@@ -675,7 +692,7 @@ fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
                 let pname = fs.readFile(pp + "_name");
                 let ptype = fs.readFile(pp + "_type");
                 params.push(NativeParameter {
-                    name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null,
+                    name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null
                 });
                 j += 1;
             }
@@ -687,7 +704,7 @@ fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
                 effects: [],
                 decorators: [],
                 is_extern: false,
-                instructions: [],
+                instructions: []
             };
         }
         if starts_with(fname, suffix_prefix) {
@@ -706,7 +723,7 @@ fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
                     let pname = fs.readFile(pp + "_name");
                     let ptype = fs.readFile(pp + "_type");
                     params.push(NativeParameter {
-                        name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null,
+                        name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null
                     });
                     j += 1;
                 }
@@ -718,7 +735,7 @@ fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
                     effects: [],
                     decorators: [],
                     is_extern: false,
-                    instructions: [],
+                    instructions: []
                 };
             }
         }
@@ -821,12 +838,14 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                 let mut _fl_i: number = 0;
                 loop {
                     if _fl_i >= _fl_count { break; }
-                    let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_i);
+                    let _fl_prefix = "build/sailfin/.ctx_func_"
+                        + number_to_string(_fl_i);
                     if !fs.exists(_fl_prefix + "_name") { break; }
                     let _fl_name = fs.readFile(_fl_prefix + "_name");
                     if _fl_name == result_target {
                         _file_fn_name = _fl_name;
-                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
+                        _file_fn_return_type = fs.readFile(_fl_prefix
+                            + "_return_type");
                         let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
                         _file_fn_is_async = _fl_async_str == "1";
                         let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
@@ -834,7 +853,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                         let mut _fl_j: number = 0;
                         loop {
                             if _fl_j >= _fl_pc { break; }
-                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
+                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_"
+                                + number_to_string(_fl_j)
+                                + "_type");
                             let _fl_mapped = map_parameter_type(context, _fl_ptype);
                             _file_fn_param_types.push(_fl_mapped);
                             _fl_j += 1;
@@ -850,9 +871,11 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                 }
                 if !_file_fn_found {
                     if _fl_suffix_count == 1 {
-                        let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_suffix_idx);
+                        let _fl_prefix = "build/sailfin/.ctx_func_"
+                            + number_to_string(_fl_suffix_idx);
                         _file_fn_name = fs.readFile(_fl_prefix + "_name");
-                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
+                        _file_fn_return_type = fs.readFile(_fl_prefix
+                            + "_return_type");
                         let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
                         _file_fn_is_async = _fl_async_str == "1";
                         let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
@@ -860,7 +883,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                         let mut _fl_j: number = 0;
                         loop {
                             if _fl_j >= _fl_pc { break; }
-                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
+                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_"
+                                + number_to_string(_fl_j)
+                                + "_type");
                             let _fl_mapped = map_parameter_type(context, _fl_ptype);
                             _file_fn_param_types.push(_fl_mapped);
                             _fl_j += 1;
@@ -884,7 +909,11 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             if _file_fn_is_async {
                 let future_return = future_pointer_type_for_return_type(_file_fn_return_type);
                 if future_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: async function `" + result_target + "` has unsupported return type `" + _file_fn_return_type + "`");
+                    result_diagnostics.push("llvm lowering: async function `"
+                        + result_target
+                        + "` has unsupported return type `"
+                        + _file_fn_return_type
+                        + "`");
                     llvm_return = "i8*";
                 } else { llvm_return = future_return; }
                 // Store the underlying return type so await can unbox structs
@@ -893,7 +922,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             } else {
                 llvm_return = map_return_type(context, _file_fn_return_type);
                 if llvm_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: unsupported return type in call to `" + result_target + "`");
+                    result_diagnostics.push("llvm lowering: unsupported return type in call to `"
+                        + result_target
+                        + "`");
                     llvm_return = "i8*";
                 }
                 expected_params = _file_fn_param_types;
@@ -903,7 +934,11 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             if function_entry.is_async {
                 let future_return = future_pointer_type_for_return_type(function_entry.return_type);
                 if future_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: async function `" + result_target + "` has unsupported return type `" + function_entry.return_type + "`");
+                    result_diagnostics.push("llvm lowering: async function `"
+                        + result_target
+                        + "` has unsupported return type `"
+                        + function_entry.return_type
+                        + "`");
                     llvm_return = "i8*";
                 } else { llvm_return = future_return; }
                 // Store the underlying return type so await can unbox structs
@@ -912,13 +947,17 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
             } else {
                 llvm_return = map_return_type(context, function_entry.return_type);
                 if llvm_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: unsupported return type in call to `" + result_target + "`");
+                    result_diagnostics.push("llvm lowering: unsupported return type in call to `"
+                        + result_target
+                        + "`");
                     llvm_return = "i8*";
                 }
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
             }
         } else {
-            result_diagnostics.push("llvm lowering: call to unknown function `" + result_target + "`");
+            result_diagnostics.push("llvm lowering: call to unknown function `"
+                + result_target
+                + "`");
         }
     }
 
@@ -944,7 +983,7 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         llvm_return: llvm_return,
         expected_params: expected_params,
         is_trait_dispatch: is_trait_dispatch,
-        diagnostics: result_diagnostics,
+        diagnostics: result_diagnostics
     };
 }
 

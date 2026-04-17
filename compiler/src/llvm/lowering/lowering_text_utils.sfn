@@ -197,7 +197,7 @@ fn _parse_module_globals_locals(raw: string) -> LocalBinding[] {
             ownership: null,
             consumed: false,
             scope_id: scope_id,
-            scope_depth: 0,
+            scope_depth: 0
         };
         result = result.push(binding);
     }

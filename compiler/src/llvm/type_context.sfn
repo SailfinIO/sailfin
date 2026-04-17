@@ -79,7 +79,7 @@ fn synthesize_unit_enum_layout(enum_def: NativeEnum) -> NativeEnumLayout {
         if index >= enum_def.variants.length { break; }
         let variant = enum_def.variants[index];
         layouts.push(NativeEnumVariantLayout {
-            name: variant.name, tag: index, offset: 0, size: tag_size, align: tag_align, fields: [],
+            name: variant.name, tag: index, offset: 0, size: tag_size, align: tag_align, fields: []
         });
         index += 1;
     }
@@ -89,7 +89,7 @@ fn synthesize_unit_enum_layout(enum_def: NativeEnum) -> NativeEnumLayout {
         tag_type: "i32",
         tag_size: tag_size,
         tag_align: tag_align,
-        variants: layouts,
+        variants: layouts
     };
 }
 
@@ -119,7 +119,9 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
     if enums.length > 10000 {
         return EnumLayoutFixupResult {
             enums: [],
-            diagnostics: ["llvm lowering: enum layout fixup skipped (too many enums=" + number_to_string(enums.length) + ")"],
+            diagnostics: ["llvm lowering: enum layout fixup skipped (too many enums="
+                + number_to_string(enums.length)
+                + ")"]
         };
     }
     let mut diagnostics: string[] = [];
@@ -137,7 +139,8 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
                     variants: enum_def.variants,
                     layout: synthesize_unit_enum_layout(enum_def)
                 };
-                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` missing layout metadata; synthesized unit-enum layout");
+                diagnostics.push("llvm lowering: enum `" + enum_def.name
+                    + "` missing layout metadata; synthesized unit-enum layout");
             }
             updated.push(fixed);
             index += 1;
@@ -152,9 +155,11 @@ fn fixup_enum_layouts(enums: NativeEnum[]) -> EnumLayoutFixupResult {
                     variants: enum_def.variants,
                     layout: synthesize_unit_enum_layout(enum_def)
                 };
-                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; synthesized unit-enum layout");
+                diagnostics.push("llvm lowering: enum `" + enum_def.name
+                    + "` layout variants incomplete/garbled; synthesized unit-enum layout");
             } else {
-                diagnostics.push("llvm lowering: enum `" + enum_def.name + "` layout variants incomplete/garbled; payload enums require full layout metadata");
+                diagnostics.push("llvm lowering: enum `" + enum_def.name
+                    + "` layout variants incomplete/garbled; payload enums require full layout metadata");
             }
         }
 
@@ -190,7 +195,13 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
     if _if300 {
         return TypeContextBuild {
             context: empty_type_context(),
-            diagnostics: ["llvm lowering: type context build skipped (counts structs=" + number_to_string(structs.length) + " enums=" + number_to_string(enums.length) + " interfaces=" + number_to_string(interfaces.length) + ")",],
+            diagnostics: ["llvm lowering: type context build skipped (counts structs="
+                + number_to_string(structs.length)
+                + " enums="
+                + number_to_string(enums.length)
+                + " interfaces="
+                + number_to_string(interfaces.length)
+                + ")",]
         };
     }
     let mut diagnostics: string[] = [];
@@ -200,7 +211,8 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         if index >= structs.length { break; }
         let definition = structs[index];
         if definition.layout == null {
-            diagnostics.push("llvm lowering: struct `" + definition.name + "` missing layout metadata; skipping type emission");
+            diagnostics.push("llvm lowering: struct `" + definition.name
+                + "` missing layout metadata; skipping type emission");
             index += 1;
             continue;
         }
@@ -215,7 +227,12 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             let mapped = map_struct_field_annotation(layout_field.type_annotation);
             let mut llvm_field_type: string = mapped;
             if llvm_field_type.length == 0 {
-                diagnostics.push("llvm lowering: struct `" + definition.name + "` field `" + layout_field.name + "` uses unsupported type `" + layout_field.type_annotation + "`; lowering as `i8*`");
+                diagnostics.push("llvm lowering: struct `" + definition.name
+                    + "` field `"
+                    + layout_field.name
+                    + "` uses unsupported type `"
+                    + layout_field.type_annotation
+                    + "`; lowering as `i8*`");
                 llvm_field_type = "i8*";
             } else if ends_with_pointer_suffix(llvm_field_type) {
                 let layout_base_type = layout_annotation_base_type(layout_field.type_annotation);
@@ -246,7 +263,8 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         if enum_index >= enums.length { break; }
         let enum_def = enums[enum_index];
         if enum_def.layout == null {
-            diagnostics.push("llvm lowering: enum `" + enum_def.name + "` missing layout metadata; skipping type emission");
+            diagnostics.push("llvm lowering: enum `" + enum_def.name
+                + "` missing layout metadata; skipping type emission");
             enum_index += 1;
             continue;
         }
@@ -268,7 +286,14 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                 let mapped_variant_type = map_struct_field_annotation(variant_field.type_annotation);
                 let mut llvm_variant_field_type: string = mapped_variant_type;
                 if llvm_variant_field_type.length == 0 {
-                    diagnostics.push("llvm lowering: enum `" + enum_def.name + "` variant `" + variant_layout.name + "` field `" + variant_field.name + "` uses unsupported type `" + variant_field.type_annotation + "`; lowering as `i8*`");
+                    diagnostics.push("llvm lowering: enum `" + enum_def.name
+                        + "` variant `"
+                        + variant_layout.name
+                        + "` field `"
+                        + variant_field.name
+                        + "` uses unsupported type `"
+                        + variant_field.type_annotation
+                        + "`; lowering as `i8*`");
                     llvm_variant_field_type = "i8*";
                 } else if ends_with_pointer_suffix(llvm_variant_field_type) {
                     let variant_base_type = layout_annotation_base_type(variant_field.type_annotation);
@@ -288,7 +313,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                 variant_field_index += 1;
             }
             variants = append_enum_variant_info(variants, EnumVariantInfo {
-                name: variant_layout.name, tag: variant_layout.tag, offset: variant_layout.offset, size: variant_layout.size, align: variant_layout.align, fields: variant_fields,
+                name: variant_layout.name, tag: variant_layout.tag, offset: variant_layout.offset, size: variant_layout.size, align: variant_layout.align, fields: variant_fields
             });
             variant_index += 1;
         }
@@ -305,7 +330,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             payload_scan += 1;
         }
         enum_entries = append_enum_type_info(enum_entries, EnumTypeInfo {
-            name: enum_def.name, llvm_name: llvm_enum_name, tag_type: enum_layout.tag_type, tag_size: enum_layout.tag_size, tag_align: enum_layout.tag_align, max_payload_size: max_payload_size, size: enum_layout.size, align: enum_align_value, variants: variants,
+            name: enum_def.name, llvm_name: llvm_enum_name, tag_type: enum_layout.tag_type, tag_size: enum_layout.tag_size, tag_align: enum_layout.tag_align, max_payload_size: max_payload_size, size: enum_layout.size, align: enum_align_value, variants: variants
         });
         enum_index += 1;
     }
@@ -319,7 +344,7 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
         let sanitized_interface = sanitize_symbol(interface_def.name);
         let llvm_interface_name = "%trait." + sanitized_interface;
         interface_entries = append_interface_type_info(interface_entries, InterfaceTypeInfo {
-            name: interface_def.name, llvm_name: llvm_interface_name, type_parameters: interface_def.type_parameters, signatures: interface_def.signatures,
+            name: interface_def.name, llvm_name: llvm_interface_name, type_parameters: interface_def.type_parameters, signatures: interface_def.signatures
         });
         interface_index += 1;
     }
@@ -349,7 +374,10 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             }
 
             if interface_def_opt == null {
-                diagnostics.push("llvm lowering: struct `" + struct_def.name + "` implements unknown interface `" + interface_name + "`");
+                diagnostics.push("llvm lowering: struct `" + struct_def.name
+                    + "` implements unknown interface `"
+                    + interface_name
+                    + "`");
                 implements_index += 1;
                 continue;
             }
@@ -357,8 +385,11 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
             let interface_def = interface_def_opt;
             let sanitized_struct = sanitize_symbol(struct_def.name);
             let sanitized_iface = sanitize_symbol(interface_name);
-            let vtable_type_name = "%vtable." + sanitized_struct + "." + sanitized_iface;
-            let vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const";
+            let vtable_type_name = "%vtable." + sanitized_struct + "."
+                + sanitized_iface;
+            let vtable_global_name = "@vtable." + sanitized_struct + "."
+                + sanitized_iface
+                + ".const";
 
             // Build vtable entries for each method
             let mut vtable_method_entries: VTableEntry[] = [];
@@ -377,16 +408,17 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                     param_idx += 1;
                 }
                 let return_type = map_type_annotation(signature.return_type);
-                let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
+                let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ")
+                    + ")*";
 
                 vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
-                    method_name: struct_def.name + signature.name, interface_method_name: signature.name, function_pointer_type: func_ptr_type,
+                    method_name: struct_def.name + signature.name, interface_method_name: signature.name, function_pointer_type: func_ptr_type
                 });
                 sig_index += 1;
             }
 
             vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
-                struct_name: struct_def.name, interface_name: interface_name, llvm_type_name: vtable_type_name, llvm_global_name: vtable_global_name, entries: vtable_method_entries,
+                struct_name: struct_def.name, interface_name: interface_name, llvm_type_name: vtable_type_name, llvm_global_name: vtable_global_name, entries: vtable_method_entries
             });
             implements_index += 1;
         }
@@ -402,8 +434,11 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                     let interface_name = interface_def.name;
                     let sanitized_struct = sanitize_symbol(struct_def.name);
                     let sanitized_iface = sanitize_symbol(interface_name);
-                    let vtable_type_name = "%vtable." + sanitized_struct + "." + sanitized_iface;
-                    let vtable_global_name = "@vtable." + sanitized_struct + "." + sanitized_iface + ".const";
+                    let vtable_type_name = "%vtable." + sanitized_struct + "."
+                        + sanitized_iface;
+                    let vtable_global_name = "@vtable." + sanitized_struct + "."
+                        + sanitized_iface
+                        + ".const";
 
                     let mut vtable_method_entries: VTableEntry[] = [];
                     let mut sig_index: number = 0;
@@ -424,15 +459,17 @@ fn build_type_context(structs: NativeStruct[], enums: NativeEnum[], interfaces: 
                             param_idx += 1;
                         }
                         let return_type = map_type_annotation(signature.return_type);
-                        let func_ptr_type = return_type + " (" + join_with_separator(param_types, ", ") + ")*";
+                        let func_ptr_type = return_type + " ("
+                            + join_with_separator(param_types, ", ")
+                            + ")*";
                         vtable_method_entries = append_vtable_entry(vtable_method_entries, VTableEntry {
-                            method_name: struct_def.name + signature.name, interface_method_name: signature.name, function_pointer_type: func_ptr_type,
+                            method_name: struct_def.name + signature.name, interface_method_name: signature.name, function_pointer_type: func_ptr_type
                         });
                         sig_index += 1;
                     }
 
                     vtable_entries = append_vtable_info(vtable_entries, VTableInfo {
-                        struct_name: struct_def.name, interface_name: interface_name, llvm_type_name: vtable_type_name, llvm_global_name: vtable_global_name, entries: vtable_method_entries,
+                        struct_name: struct_def.name, interface_name: interface_name, llvm_type_name: vtable_type_name, llvm_global_name: vtable_global_name, entries: vtable_method_entries
                     });
                 }
             }

@@ -463,7 +463,8 @@ fn parse_type_descriptor(text: string) -> TypeDescriptor {
     if string_starts_with(normalized, "runtime.") {
         normalized = descriptor_trim(substring(normalized, 8, normalized.length));
     }
-    if normalized == "string" || normalized == "number" || normalized == "boolean" || normalized == "void" {
+    if normalized == "string" || normalized == "number" || normalized == "boolean"
+        || normalized == "void" {
         return type_descriptor_primitive(normalized);
     }
     return type_descriptor_named(normalized);

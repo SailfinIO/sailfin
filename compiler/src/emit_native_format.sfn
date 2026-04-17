@@ -16,13 +16,13 @@ import {
     SourceSpan,
     Statement,
     TypeAnnotation,
-    TypeParameter,
+    TypeParameter
 } from "./ast";
 import {
     join_with_separator,
     number_to_string,
     quote_string,
-    trim_text,
+    trim_text
 } from "./emit_native_state";
 
 // ── Expression formatting ────────────────────────────────────────────
@@ -60,7 +60,8 @@ fn format_expression(expression: Expression) -> string {
         return format_expression(expression.callee) + "(" + args + ")";
     }
     if expression.variant == "Index" {
-        return format_expression(expression.sequence) + "[" + format_expression(expression.index) + "]";
+        return format_expression(expression.sequence) + "[" + format_expression(expression.index)
+            + "]";
     }
     if expression.variant == "Array" {
         return format_array_expression(expression.elements);
@@ -291,7 +292,11 @@ fn format_decorator(decorator: Decorator) -> string {
 
 // ── Span formatting ──────────────────────────────────────────────────
 fn format_span(span: SourceSpan) -> string {
-    return number_to_string(span.start_line) + " " + number_to_string(span.start_column) + " " + number_to_string(span.end_line) + " " + number_to_string(span.end_column);
+    return number_to_string(span.start_line) + " " + number_to_string(span.start_column)
+        + " "
+        + number_to_string(span.end_line)
+        + " "
+        + number_to_string(span.end_column);
 }
 
 // ── Specifier formatting ─────────────────────────────────────────────

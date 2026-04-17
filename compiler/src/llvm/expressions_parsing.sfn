@@ -10,7 +10,7 @@ import {
     InlineLetParseResult,
     MemberAccessParse,
     RawAddressParseResult,
-    TernaryParseResult,
+    TernaryParseResult
 } from "./types";
 import { ends_with, starts_with, trim_text } from "./utils";
 
@@ -763,7 +763,8 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     if value.length == 0 { _if186 = true; }
     if annotation.length == 0 { _if186 = true; }
     if _if186 {
-        diagnostics.push("llvm lowering: malformed cast expression `" + text + "`");
+        diagnostics.push("llvm lowering: malformed cast expression `" + text
+            + "`");
         return CastParseResult {
             recognized: true,
             success: false,

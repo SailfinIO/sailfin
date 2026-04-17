@@ -70,7 +70,7 @@ export {
 
     // Import types
     ImportedModuleContext,
-    LayoutManifestApplication,
+    LayoutManifestApplication
 } from "./types";
 
 // Re-export utility functions
@@ -88,7 +88,7 @@ export {
     is_identifier_start_char,
     is_identifier_part_char,
     find_parameter_binding as find_parameter_binding_util,
-    merge_parameter_bindings,
+    merge_parameter_bindings
 } from "./utils";
 
 // Re-export string constant management
@@ -98,7 +98,7 @@ export {
     merge_string_constants,
     find_string_constant,
     render_string_constants,
-    escape_string_for_llvm,
+    escape_string_for_llvm
 } from "./strings";
 
 // Re-export effect system functions
@@ -109,14 +109,14 @@ export {
     build_capability_manifest,
     collect_function_borrow_effects,
     collect_expression_borrow_effects,
-    collect_runtime_helper_targets,
+    collect_runtime_helper_targets
 } from "./effects";
 
 // Re-export runtime helper functions
 export {
     runtime_helper_descriptors,
     find_runtime_helper,
-    append_runtime_helper,
+    append_runtime_helper
 } from "./runtime_helpers";
 
 // Re-export type mapping functions
@@ -127,11 +127,11 @@ export {
     map_local_type,
     map_struct_type_annotation,
     map_struct_field_annotation,
-    unwrap_move_wrapper,
+    unwrap_move_wrapper
 } from "./type_mapping";
 
 // Re-export TypeContext building functions
-export { build_type_context, empty_type_context, } from "./type_context";
+export { build_type_context, empty_type_context } from "./type_context";
 
 // Re-export TypeContext query/lookup functions
 export {
@@ -139,7 +139,7 @@ export {
     find_struct_info_by_llvm_name,
     find_enum_info_by_llvm_type,
     find_interface_info_by_name,
-    resolve_struct_info_for_literal,
+    resolve_struct_info_for_literal
 } from "./type_context_queries";
 
 // Re-export import handling functions
@@ -147,7 +147,7 @@ export {
     load_imported_layout_manifests,
     collect_imported_module_context,
     resolve_import_module_slug,
-    apply_layout_manifest_to_module,
+    apply_layout_manifest_to_module
 } from "./imports";
 
 // Re-export rendering functions
@@ -156,7 +156,7 @@ export {
     render_runtime_helper_declarations,
     render_imported_function_declarations,
     render_struct_type_definitions,
-    render_enum_type_definitions,
+    render_enum_type_definitions
 } from "./rendering";
 
 // Re-export rendering helper functions
@@ -173,7 +173,7 @@ export {
     is_entry_point,
     collect_exported_symbol_names,
     is_exported_symbol,
-    should_internalize_function,
+    should_internalize_function
 } from "./rendering_helpers";
 
 // Re-export lifetime/borrow tracking functions
@@ -200,7 +200,7 @@ export {
     is_scope_descendant,
     format_use_after_move_message,
     format_span_location,
-    format_suspension_location,
+    format_suspension_location
 } from "./lifetime";
 
 // Re-export expression helper functions (from decomposed submodules)
@@ -209,7 +209,7 @@ export {
     find_parameter_binding,
     mark_parameter_consumed,
     mark_local_consumed,
-    reset_local_consumption,
+    reset_local_consumption
 } from "./expressions_bindings";
 
 export {
@@ -220,7 +220,7 @@ export {
     is_string_literal,
     is_character_literal,
     get_character_literal_value,
-    normalise_number_literal,
+    normalise_number_literal
 } from "./expressions_literals";
 
 export {
@@ -234,7 +234,7 @@ export {
     default_return_literal,
     format_temp_name,
     format_local_pointer_name,
-    format_typed_operand,
+    format_typed_operand
 } from "./expressions_helpers";
 
 export {
@@ -242,7 +242,7 @@ export {
     is_binary_minus,
     is_binary_star,
     find_top_level_range_separator,
-    find_top_level_union_separator,
+    find_top_level_union_separator
 } from "./expressions_operators";
 
 export {
@@ -252,5 +252,5 @@ export {
     parse_inline_let_expression,
     parse_ternary_expression,
     parse_raw_address_expression,
-    parse_cast_expression,
+    parse_cast_expression
 } from "./expressions_parsing";

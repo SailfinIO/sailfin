@@ -4,12 +4,12 @@
 // utilities.  Extracted from lowering_core.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
 import { substring } from "../../string_utils";
-import { LifetimeRegionMetadata, StringConstant, } from "../types";
+import { LifetimeRegionMetadata, StringConstant } from "../types";
 import {
     index_of,
     number_to_string,
     starts_with,
-    trim_text,
+    trim_text
 } from "../utils";
 
 // ── String array operations ──────────────────────────────────────────
@@ -49,7 +49,10 @@ fn extend_string_lines_checked(values: string[], extras: string[], label: string
     if safe_extras.length == 0 { return safe_values; }
     if safe_extras.length > 1000000 {
         let mut out = safe_values;
-        out.push("llvm lowering: skipped oversized " + label + " diagnostics (len=" + number_to_string(extras.length) + ")");
+        out.push("llvm lowering: skipped oversized " + label
+            + " diagnostics (len="
+            + number_to_string(extras.length)
+            + ")");
         return out;
     }
     return extend_string_lines(safe_values, safe_extras);

@@ -3,11 +3,11 @@
 // Shared condition-lowering utilities used by if, loop, and match instruction handlers.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
-import { lower_expression, } from "../expression_lowering/native/core";
-import { detect_suspension_conflicts, } from "../expression_lowering/native/statement_suspension";
-import { find_local_binding, find_parameter_binding, } from "../expressions_bindings";
-import { default_return_literal, format_temp_name, } from "../expressions_helpers";
-import { is_number_literal, normalise_number_literal, } from "../expressions_literals";
+import { lower_expression } from "../expression_lowering/native/core";
+import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
+import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
+import { default_return_literal, format_temp_name } from "../expressions_helpers";
+import { is_number_literal, normalise_number_literal } from "../expressions_literals";
 import {
     BlockLabelResult,
     ConditionConversion,
@@ -15,15 +15,15 @@ import {
     LocalBinding,
     ParameterBinding,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     index_of,
     number_to_string,
     starts_with,
-    trim_text,
+    trim_text
 } from "../utils";
-import { _parse_int_from_string, } from "./instructions_helpers";
+import { _parse_int_from_string } from "./instructions_helpers";
 
 fn allocate_block_label(prefix: string, counter: number) -> BlockLabelResult {
     return BlockLabelResult {
@@ -50,7 +50,8 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
         if _lta_llvm == null { _lta_llvm = ""; }
         let mut _lta_ptr = locals[_lta_i].pointer;
         if _lta_ptr == null { _lta_ptr = ""; }
-        _lta_lines.push(_lta_name + "\t" + _lta_type + "\t" + _lta_llvm + "\t" + _lta_ptr);
+        _lta_lines.push(_lta_name + "\t" + _lta_type + "\t" + _lta_llvm + "\t"
+            + _lta_ptr);
         _lta_i += 1;
     }
     fs.writeLines("build/sailfin/.condition_locals", _lta_lines);
@@ -88,9 +89,15 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
     if lowered.operand == null {
         let rendered_condition = trim_text(expression);
         if rendered_condition.length == 0 {
-            diagnostics.push("llvm lowering: condition produced no value in `" + function_name + "`");
+            diagnostics.push("llvm lowering: condition produced no value in `"
+                + function_name
+                + "`");
         } else {
-            diagnostics.push("llvm lowering: condition produced no value in `" + function_name + "` for `" + rendered_condition + "`");
+            diagnostics.push("llvm lowering: condition produced no value in `"
+                + function_name
+                + "` for `"
+                + rendered_condition
+                + "`");
         }
         return ConditionConversion {
             lines: current_lines,
@@ -114,7 +121,8 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
 
     if operand.llvm_type == "double" {
         let temp_name = format_temp_name(current_temp);
-        current_lines.push("  " + temp_name + " = fcmp one double " + operand.value + ", 0.0");
+        current_lines.push("  " + temp_name + " = fcmp one double " + operand.value
+            + ", 0.0");
         let converted = LLVMOperand { llvm_type: "i1", value: temp_name };
         return ConditionConversion {
             lines: current_lines,
@@ -130,7 +138,12 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
     if operand.llvm_type == "i64" { _if226 = true; }
     if _if226 {
         let temp_name = format_temp_name(current_temp);
-        current_lines.push("  " + temp_name + " = icmp ne " + operand.llvm_type + " " + operand.value + ", " + default_return_literal(operand.llvm_type) + "");
+        current_lines.push("  " + temp_name + " = icmp ne " + operand.llvm_type
+            + " "
+            + operand.value
+            + ", "
+            + default_return_literal(operand.llvm_type)
+            + "");
         let converted = LLVMOperand { llvm_type: "i1", value: temp_name };
         return ConditionConversion {
             lines: current_lines,
@@ -141,7 +154,10 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
         };
     }
 
-    diagnostics.push("llvm lowering: unsupported condition type `" + operand.llvm_type + "` in `" + function_name + "`");
+    diagnostics.push("llvm lowering: unsupported condition type `" + operand.llvm_type
+        + "` in `"
+        + function_name
+        + "`");
     return ConditionConversion {
         lines: current_lines,
         temp_index: current_temp,

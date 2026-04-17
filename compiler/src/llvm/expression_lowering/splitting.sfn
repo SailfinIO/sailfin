@@ -6,7 +6,7 @@
 // parentheses, brackets, braces, and string literals. Used to parse array
 // elements, function arguments, and other comma-separated constructs.
 import { char_at } from "../../string_utils";
-import { append_string, trim_text, } from "../utils";
+import { append_string, trim_text } from "../utils";
 
 fn split_array_elements(text: string) -> string[] {
     let trimmed = trim_text(text);

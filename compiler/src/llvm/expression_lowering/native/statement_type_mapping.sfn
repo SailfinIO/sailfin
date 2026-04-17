@@ -7,20 +7,20 @@
 // IR type representations.  Used by statement lowering for return types,
 // parameter types, and local variable types.
 import { substring } from "../../../string_utils";
-import { find_interface_info_by_name, find_struct_info_by_name, } from "../../type_context_queries";
+import { find_interface_info_by_name, find_struct_info_by_name } from "../../type_context_queries";
 import {
     annotation_is_array,
     ends_with_pointer_suffix,
     layout_annotation_represents_user_value,
     map_type_annotation,
-    strip_pointer_suffix,
+    strip_pointer_suffix
 } from "../../type_mapping";
 import { TypeContext } from "../../types";
 import {
     index_of,
     join_with_separator,
     starts_with,
-    trim_text,
+    trim_text
 } from "../../utils";
 
 // ---------------------------------------------------------------------------

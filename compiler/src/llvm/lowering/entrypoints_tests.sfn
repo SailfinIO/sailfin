@@ -111,7 +111,7 @@ fn lower_to_llvm_for_tests(native_module: NativeModule) -> LoweredLLVMResult ![i
             function_effects: [],
             lifetime_regions: [],
             capability_manifest: empty_capability_manifest(),
-            string_constants: empty_string_constant_set(),
+            string_constants: empty_string_constant_set()
         };
     }
     let parse = parse_native_artifact_safe(artifact.contents);

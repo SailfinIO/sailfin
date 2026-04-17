@@ -2,32 +2,24 @@
 //
 // Let binding instruction lowering.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import {
-    analyze_value_ownership,
-    detect_borrow_conflicts,
-    lower_expression,
-} from "../expression_lowering/native/core";
-import { coerce_operand_to_type, } from "../expression_lowering/native/core_operands";
-import { append_local_binding, } from "../expression_lowering/native/core_scopes";
-import { detect_suspension_conflicts, } from "../expression_lowering/native/statement_suspension";
-import { map_local_type, } from "../expression_lowering/native/statement_type_mapping";
-import {
-    find_local_binding,
-    mark_local_consumed,
-    mark_parameter_consumed,
-} from "../expressions_bindings";
-import { default_return_literal, format_local_pointer_name, } from "../expressions_helpers";
+import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
+import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
+import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
+import { map_local_type } from "../expression_lowering/native/statement_type_mapping";
+import { find_local_binding, mark_local_consumed, mark_parameter_consumed } from "../expressions_bindings";
+import { default_return_literal, format_local_pointer_name } from "../expressions_helpers";
 import {
     append_lifetime_region,
     append_lifetime_release_event,
     infer_borrow_base_scope,
-    make_lifetime_region_metadata,
+    make_lifetime_region_metadata
 } from "../lifetime";
-import { empty_string_constant_set, merge_string_constants, } from "../strings";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     find_interface_info_by_name,
     find_struct_info_by_llvm_type,
-    find_vtable_for_struct_interface,
+    find_vtable_for_struct_interface
 } from "../type_context_queries";
 import {
     LLVMOperand,
@@ -40,9 +32,9 @@ import {
     OwnershipInfo,
     ParameterBinding,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../types";
-import { number_to_string, trim_text, } from "../utils";
+import { number_to_string, trim_text } from "../utils";
 
 fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> LetLoweringResult ![io] {
     let mut diagnostics: string[] = [];
@@ -91,7 +83,11 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     if trimmed_annotation.length > 0 {
         llvm_type = map_local_type(context, instruction.type_annotation);
         if llvm_type.length == 0 {
-            diagnostics.push("llvm lowering: unsupported local type for `" + instruction.name + "` in `" + function.name + "`");
+            diagnostics.push("llvm lowering: unsupported local type for `"
+                + instruction.name
+                + "` in `"
+                + function.name
+                + "`");
         }
     }
 
@@ -122,7 +118,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 base: ownership.base,
                 mutable: ownership.mutable,
                 span: ownership.span,
-                region_id: region_id,
+                region_id: region_id
             };
             let region = make_lifetime_region_metadata(region_id, instruction.name, ownership, scope_id, scope_depth, base_scope.scope_id, base_scope.scope_depth);
             lifetime_regions = append_lifetime_region(lifetime_regions, region);
@@ -132,7 +128,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 base: ownership.base,
                 mutable: ownership.mutable,
                 span: ownership.span,
-                region_id: -1,
+                region_id: -1
             };
         }
     }
@@ -150,7 +146,10 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     if instruction.value == null { _if230 = true; }
     if instruction.value.length == 0 { _if230 = true; }
     if _if230 {
-        diagnostics.push("llvm lowering: let `" + instruction.name + "` missing initializer in `" + function.name + "`");
+        diagnostics.push("llvm lowering: let `" + instruction.name
+            + "` missing initializer in `"
+            + function.name
+            + "`");
     } else {
         // Clear stale call-result files before expression lowering so that only
         // a call from THIS let's initializer can populate them.
@@ -161,7 +160,9 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             fs.deleteFile("build/sailfin/.call_result_value");
         }
         if fs.exists("build/sailfin/.trace_lowering") {
-            print.err("let-lowering: pre-lower_expression name=" + instruction.name + " value=" + instruction.value);
+            print.err("let-lowering: pre-lower_expression name=" + instruction.name
+                + " value="
+                + instruction.value);
         }
         let _pre_expr_line_count = current_lines.length;
         let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
@@ -192,7 +193,8 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         }
         current_temp = lowered.temp_index;
         if fs.exists("build/sailfin/.trace_lowering") {
-            print.err("let-lowering: got temp_index=" + number_to_string(current_temp) + ", accessing operand");
+            print.err("let-lowering: got temp_index=" + number_to_string(current_temp)
+                + ", accessing operand");
         }
         operand = lowered.operand;
         if fs.exists("build/sailfin/.trace_lowering") {
@@ -261,17 +263,42 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                     current_temp += 1;
 
                     // Allocate space for the struct on the stack
-                    current_lines.push("  " + struct_ptr_temp + " = alloca " + struct_info.llvm_name);
+                    current_lines.push("  " + struct_ptr_temp + " = alloca "
+                        + struct_info.llvm_name);
                     // Store the struct value
-                    current_lines.push("  store " + operand.llvm_type + " " + operand.value + ", " + operand.llvm_type + "* " + struct_ptr_temp);
+                    current_lines.push("  store " + operand.llvm_type + " "
+                        + operand.value
+                        + ", "
+                        + operand.llvm_type
+                        + "* "
+                        + struct_ptr_temp);
                     // Cast struct pointer to i8*
-                    current_lines.push("  " + data_ptr_temp + " = bitcast " + struct_info.llvm_name + "* " + struct_ptr_temp + " to i8*");
+                    current_lines.push("  " + data_ptr_temp + " = bitcast "
+                        + struct_info.llvm_name
+                        + "* "
+                        + struct_ptr_temp
+                        + " to i8*");
                     // Get vtable pointer (bitcast global vtable constant to i8*)
-                    current_lines.push("  " + vtable_ptr_temp + " = bitcast " + vtable.llvm_type_name + "* " + vtable.llvm_global_name + " to i8*");
+                    current_lines.push("  " + vtable_ptr_temp + " = bitcast "
+                        + vtable.llvm_type_name
+                        + "* "
+                        + vtable.llvm_global_name
+                        + " to i8*");
                     // Build trait object: insert data pointer
-                    current_lines.push("  " + with_data_temp + " = insertvalue " + interface_info.llvm_name + " undef, i8* " + data_ptr_temp + ", 0");
+                    current_lines.push("  " + with_data_temp + " = insertvalue "
+                        + interface_info.llvm_name
+                        + " undef, i8* "
+                        + data_ptr_temp
+                        + ", 0");
                     // Insert vtable pointer
-                    current_lines.push("  " + with_vtable_temp + " = insertvalue " + interface_info.llvm_name + " " + with_data_temp + ", i8* " + vtable_ptr_temp + ", 1");
+                    current_lines.push("  " + with_vtable_temp
+                        + " = insertvalue "
+                        + interface_info.llvm_name
+                        + " "
+                        + with_data_temp
+                        + ", i8* "
+                        + vtable_ptr_temp
+                        + ", 1");
                     // Update operand to the boxed trait object
                     operand = LLVMOperand {
                         llvm_type: interface_info.llvm_name,
@@ -279,7 +306,10 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                     };
                     llvm_type = interface_info.llvm_name;
                 } else {
-                    diagnostics.push("llvm lowering: struct `" + struct_info.name + "` does not implement interface `" + interface_info.name + "`");
+                    diagnostics.push("llvm lowering: struct `" + struct_info.name
+                        + "` does not implement interface `"
+                        + interface_info.name
+                        + "`");
                 }
             }
         }
@@ -314,7 +344,10 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                         value: _fixup_value
                     };
                     if fs.exists("build/sailfin/.trace_lowering") {
-                        print.err("let-lowering: operand reconstructed type=" + _fixup_type + " value=" + _fixup_value);
+                        print.err("let-lowering: operand reconstructed type="
+                            + _fixup_type
+                            + " value="
+                            + _fixup_value);
                     }
                 }
             }
@@ -324,9 +357,15 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         if operand.llvm_type == llvm_type {
             // Identity coercion — use operand directly
             stored_value = operand.value;
-            current_lines.push("  store " + llvm_type + " " + operand.value + ", " + llvm_type + "* " + pointer);
+            current_lines.push("  store " + llvm_type + " " + operand.value
+                + ", "
+                + llvm_type
+                + "* "
+                + pointer);
             if fs.exists("build/sailfin/.trace_lowering") {
-                print.err("let-lowering: identity coerce type=" + llvm_type + " value=" + operand.value);
+                print.err("let-lowering: identity coerce type=" + llvm_type
+                    + " value="
+                    + operand.value);
             }
         } else {
             // Types differ — need coercion. Since coerce_operand_to_type returns
@@ -339,10 +378,23 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 let _cr_value = fs.readFile("build/sailfin/.coerce_result_value");
                 if _cr_type.length > 0 {
                     stored_value = _cr_value;
-                    current_lines.push("  store " + llvm_type + " " + _cr_value + ", " + llvm_type + "* " + pointer);
+                    current_lines.push("  store " + llvm_type + " " + _cr_value
+                        + ", "
+                        + llvm_type
+                        + "* "
+                        + pointer);
                 } else {
-                    diagnostics.push("llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`");
-                    current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+                    diagnostics.push("llvm lowering: unable to coerce initializer for `"
+                        + instruction.name
+                        + "` to `"
+                        + llvm_type
+                        + "`");
+                    current_lines.push("  store " + llvm_type + " "
+                        + default_return_literal(llvm_type)
+                        + ", "
+                        + llvm_type
+                        + "* "
+                        + pointer);
                 }
                 fs.deleteFile("build/sailfin/.coerce_result_type");
             } else {
@@ -356,17 +408,34 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
                 if coerced.operand == null {
-                    diagnostics.push("llvm lowering: unable to coerce initializer for `" + instruction.name + "` to `" + llvm_type + "`");
-                    current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+                    diagnostics.push("llvm lowering: unable to coerce initializer for `"
+                        + instruction.name
+                        + "` to `"
+                        + llvm_type
+                        + "`");
+                    current_lines.push("  store " + llvm_type + " "
+                        + default_return_literal(llvm_type)
+                        + ", "
+                        + llvm_type
+                        + "* "
+                        + pointer);
                 } else {
                     let stored = coerced.operand;
                     stored_value = stored.value;
-                    current_lines.push("  store " + llvm_type + " " + stored.value + ", " + llvm_type + "* " + pointer);
+                    current_lines.push("  store " + llvm_type + " " + stored.value
+                        + ", "
+                        + llvm_type
+                        + "* "
+                        + pointer);
                 }
             }
         }
     } else {
-        current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type) + ", " + llvm_type + "* " + pointer);
+        current_lines.push("  store " + llvm_type + " " + default_return_literal(llvm_type)
+            + ", "
+            + llvm_type
+            + "* "
+            + pointer);
     }
 
     // For locals that hold async futures, store the underlying return type
@@ -388,12 +457,13 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         llvm_type: llvm_type,
         value_name: stored_value,
         span: initializer_span,
-        originating_label: current_label,
+        originating_label: current_label
     };
     mutations.push(mutation);
 
     if fs.exists("build/sailfin/.trace_lowering") {
-        print.err("let-lowering: returning LetLoweringResult for name=" + instruction.name);
+        print.err("let-lowering: returning LetLoweringResult for name="
+            + instruction.name);
     }
     return LetLoweringResult {
         lines: current_lines,
@@ -407,7 +477,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         lifetime_releases: lifetime_releases,
         next_region_id: current_next_region,
         mutations: mutations,
-        string_constants: string_constants,
+        string_constants: string_constants
     };
 }
 
@@ -431,7 +501,8 @@ fn _infer_field_constants_from_lines(lines: string[], start_offset: number) -> S
             let mut ci: number = 0;
             loop {
                 if ci >= marker_len { break; }
-                if substring(line, pos + ci, pos + ci + 1) != substring(marker, ci, ci + 1) {
+                if substring(line, pos + ci, pos + ci + 1) != substring(marker, ci, ci
+                    + 1) {
                     matches = false;
                     break;
                 }

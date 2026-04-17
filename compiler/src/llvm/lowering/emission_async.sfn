@@ -8,11 +8,11 @@ import { NativeFunction } from "../../native_ir";
 import {
     future_pointer_type_for_return_type,
     spawn_ctx_symbol_for_return_type,
-    spawn_symbol_for_return_type,
+    spawn_symbol_for_return_type
 } from "../expression_lowering/native/statement_suspension";
-import { format_temp_name, } from "../expressions_helpers";
-import { empty_string_constant_set, merge_string_constants, } from "../strings";
-import { map_return_type, } from "../type_mapping";
+import { format_temp_name } from "../expressions_helpers";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import { map_return_type } from "../type_mapping";
 import {
     LLVMOperand,
     LifetimeRegionMetadata,
@@ -21,13 +21,13 @@ import {
     ParameterBinding,
     ParameterPreparation,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     extend_string_array,
     join_with_separator,
     number_to_string,
-    sanitize_symbol,
+    sanitize_symbol
 } from "../utils";
 import { emit_llvm_function } from "./emission";
 import { prepare_parameters_from_files } from "./emission";
@@ -41,7 +41,10 @@ fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: 
     if future_return.length == 0 { _if205 = true; }
     if impl_return.length == 0 { _if205 = true; }
     if _if205 {
-        diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
+        diagnostics.push("llvm lowering: async fn `" + fn_name
+            + "` has unsupported return type `"
+            + fn_return_type
+            + "`");
         let empty_constants = empty_string_constant_set();
         return LoweredLLVMFunction {
             lines: [],
@@ -79,7 +82,10 @@ fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: 
     if fn_param_count == 0 {
         let spawn_symbol = spawn_symbol_for_return_type(fn_return_type);
         if spawn_symbol.length == 0 {
-            diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
+            diagnostics.push("llvm lowering: async fn `" + fn_name
+                + "` has unsupported return type `"
+                + fn_return_type
+                + "`");
             let empty_constants = empty_string_constant_set();
             return LoweredLLVMFunction {
                 lines: [],
@@ -88,16 +94,29 @@ fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: 
                 string_constants: empty_constants
             };
         }
-        wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
+        wrapper_lines.push("define " + linkage + future_return + " @"
+            + wrapper_symbol
+            + "("
+            + signature
+            + ") {");
         wrapper_lines.push("block.entry:");
         let t0 = format_temp_name(0);
-        wrapper_lines.push("  " + t0 + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " ()* @" + impl_symbol + ")");
+        wrapper_lines.push("  " + t0 + " = call " + future_return + " @"
+            + spawn_symbol
+            + "("
+            + impl_return
+            + " ()* @"
+            + impl_symbol
+            + ")");
         wrapper_lines.push("  ret " + future_return + " " + t0);
         wrapper_lines.push("}");
     } else {
         let spawn_symbol = spawn_ctx_symbol_for_return_type(fn_return_type);
         if spawn_symbol.length == 0 {
-            diagnostics.push("llvm lowering: async fn `" + fn_name + "` has unsupported return type `" + fn_return_type + "`");
+            diagnostics.push("llvm lowering: async fn `" + fn_name
+                + "` has unsupported return type `"
+                + fn_return_type
+                + "`");
             let empty_constants = empty_string_constant_set();
             return LoweredLLVMFunction {
                 lines: [],
@@ -118,16 +137,20 @@ fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: 
             param_llvm_types.push(preparation.bindings[param_index].llvm_type);
             param_index += 1;
         }
-        wrapper_lines.push(ctx_type + " = type { " + join_with_separator(param_llvm_types, ", ") + " }");
+        wrapper_lines.push(ctx_type + " = type { " + join_with_separator(param_llvm_types, ", ")
+            + " }");
         wrapper_lines.push("");
 
-        wrapper_lines.push("define internal " + impl_return + " @" + trampoline_symbol + "(i8* %ctx_raw) {");
+        wrapper_lines.push("define internal " + impl_return + " @"
+            + trampoline_symbol
+            + "(i8* %ctx_raw) {");
         wrapper_lines.push("block.entry:");
 
         let mut tramp_temp: number = 0;
         let tramp_ctx = format_temp_name(tramp_temp);
         tramp_temp += 1;
-        wrapper_lines.push("  " + tramp_ctx + " = bitcast i8* %ctx_raw to " + ctx_ptr_type);
+        wrapper_lines.push("  " + tramp_ctx + " = bitcast i8* %ctx_raw to "
+            + ctx_ptr_type);
 
         let mut arg_texts: string[] = [];
         let mut load_index: number = 0;
@@ -136,44 +159,76 @@ fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: 
             let binding = preparation.bindings[load_index];
             let field_ptr = format_temp_name(tramp_temp);
             tramp_temp += 1;
-            wrapper_lines.push("  " + field_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " " + tramp_ctx + ", i32 0, i32 " + number_to_string(load_index));
+            wrapper_lines.push("  " + field_ptr + " = getelementptr inbounds "
+                + ctx_type
+                + ", "
+                + ctx_ptr_type
+                + " "
+                + tramp_ctx
+                + ", i32 0, i32 "
+                + number_to_string(load_index));
             let loaded = format_temp_name(tramp_temp);
             tramp_temp += 1;
-            wrapper_lines.push("  " + loaded + " = load " + binding.llvm_type + ", " + binding.llvm_type + "* " + field_ptr);
+            wrapper_lines.push("  " + loaded + " = load " + binding.llvm_type
+                + ", "
+                + binding.llvm_type
+                + "* "
+                + field_ptr);
             arg_texts.push(binding.llvm_type + " " + loaded);
             load_index += 1;
         }
         let call_args = join_with_separator(arg_texts, ", ");
 
         if impl_return == "void" {
-            wrapper_lines.push("  call void @" + impl_symbol + "(" + call_args + ")");
+            wrapper_lines.push("  call void @" + impl_symbol + "(" + call_args
+                + ")");
             wrapper_lines.push("  call void @free(i8* %ctx_raw)");
             wrapper_lines.push("  ret void");
         } else {
             let tramp_result = format_temp_name(tramp_temp);
             tramp_temp += 1;
-            wrapper_lines.push("  " + tramp_result + " = call " + impl_return + " @" + impl_symbol + "(" + call_args + ")");
+            wrapper_lines.push("  " + tramp_result + " = call " + impl_return
+                + " @"
+                + impl_symbol
+                + "("
+                + call_args
+                + ")");
             wrapper_lines.push("  call void @free(i8* %ctx_raw)");
             wrapper_lines.push("  ret " + impl_return + " " + tramp_result);
         }
         wrapper_lines.push("}");
         wrapper_lines.push("");
 
-        wrapper_lines.push("define " + linkage + future_return + " @" + wrapper_symbol + "(" + signature + ") {");
+        wrapper_lines.push("define " + linkage + future_return + " @"
+            + wrapper_symbol
+            + "("
+            + signature
+            + ") {");
         wrapper_lines.push("block.entry:");
         let mut wrap_temp: number = 0;
         let size_ptr = format_temp_name(wrap_temp);
         wrap_temp += 1;
-        wrapper_lines.push("  " + size_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " null, i32 1");
+        wrapper_lines.push("  " + size_ptr + " = getelementptr inbounds "
+            + ctx_type
+            + ", "
+            + ctx_ptr_type
+            + " null, i32 1");
         let size_i64 = format_temp_name(wrap_temp);
         wrap_temp += 1;
-        wrapper_lines.push("  " + size_i64 + " = ptrtoint " + ctx_ptr_type + " " + size_ptr + " to i64");
+        wrapper_lines.push("  " + size_i64 + " = ptrtoint " + ctx_ptr_type + " "
+            + size_ptr
+            + " to i64");
         let ctx_raw = format_temp_name(wrap_temp);
         wrap_temp += 1;
-        wrapper_lines.push("  " + ctx_raw + " = call noalias i8* @calloc(i64 1, i64 " + size_i64 + ")");
+        wrapper_lines.push("  " + ctx_raw
+            + " = call noalias i8* @calloc(i64 1, i64 "
+            + size_i64
+            + ")");
         let ctx_typed = format_temp_name(wrap_temp);
         wrap_temp += 1;
-        wrapper_lines.push("  " + ctx_typed + " = bitcast i8* " + ctx_raw + " to " + ctx_ptr_type);
+        wrapper_lines.push("  " + ctx_typed + " = bitcast i8* " + ctx_raw
+            + " to "
+            + ctx_ptr_type);
 
         let mut store_index: number = 0;
         loop {
@@ -181,14 +236,33 @@ fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: 
             let binding = preparation.bindings[store_index];
             let field_ptr = format_temp_name(wrap_temp);
             wrap_temp += 1;
-            wrapper_lines.push("  " + field_ptr + " = getelementptr inbounds " + ctx_type + ", " + ctx_ptr_type + " " + ctx_typed + ", i32 0, i32 " + number_to_string(store_index));
-            wrapper_lines.push("  store " + binding.llvm_type + " " + binding.llvm_name + ", " + binding.llvm_type + "* " + field_ptr);
+            wrapper_lines.push("  " + field_ptr + " = getelementptr inbounds "
+                + ctx_type
+                + ", "
+                + ctx_ptr_type
+                + " "
+                + ctx_typed
+                + ", i32 0, i32 "
+                + number_to_string(store_index));
+            wrapper_lines.push("  store " + binding.llvm_type + " " + binding.llvm_name
+                + ", "
+                + binding.llvm_type
+                + "* "
+                + field_ptr);
             store_index += 1;
         }
 
         let out_future = format_temp_name(wrap_temp);
         wrap_temp += 1;
-        wrapper_lines.push("  " + out_future + " = call " + future_return + " @" + spawn_symbol + "(" + impl_return + " (i8*)* @" + trampoline_symbol + ", i8* " + ctx_raw + ")");
+        wrapper_lines.push("  " + out_future + " = call " + future_return + " @"
+            + spawn_symbol
+            + "("
+            + impl_return
+            + " (i8*)* @"
+            + trampoline_symbol
+            + ", i8* "
+            + ctx_raw
+            + ")");
         wrapper_lines.push("  ret " + future_return + " " + out_future);
         wrapper_lines.push("}");
     }
@@ -204,7 +278,7 @@ fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: 
         lines: merged_lines,
         diagnostics: diagnostics,
         lifetime_regions: impl_lowered.lifetime_regions,
-        string_constants: merged_constants,
+        string_constants: merged_constants
     };
 }
 

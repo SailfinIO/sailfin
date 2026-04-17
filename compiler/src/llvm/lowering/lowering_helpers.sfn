@@ -15,7 +15,7 @@ import {
     NativeStructField,
     NativeStructLayout,
     NativeStructLayoutField,
-    ParseNativeResult,
+    ParseNativeResult
 } from "../../native_ir";
 import {
     parse_layout_manifest,
@@ -24,15 +24,12 @@ import {
     parse_native_function_count_from_text,
     parse_native_functions_from_text,
     select_layout_manifest_artifact,
-    select_text_artifact,
+    select_text_artifact
 } from "../../native_ir_api";
 import { split_lines } from "../../native_ir_utils_text";
 import { char_code, substring } from "../../string_utils";
-import {
-    resolve_import_artifact_slug,
-    resolve_import_module_slug_for_module,
-} from "../imports";
-import { find_function_by_name, should_internalize_function, } from "../rendering";
+import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
+import { find_function_by_name, should_internalize_function } from "../rendering";
 import {
     CapabilityManifest,
     EnumTypeInfo,
@@ -46,7 +43,7 @@ import {
     TraitDescriptor,
     TraitImplementationDescriptor,
     TraitMetadata,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     append_string,
@@ -56,7 +53,7 @@ import {
     sanitize_symbol,
     starts_with,
     string_array_contains,
-    trim_text,
+    trim_text
 } from "../utils";
 import { extend_string_lines } from "./lowering_io";
 
@@ -205,13 +202,25 @@ fn render_test_harness_main_for_module(tests: NativeFunction[], module_slug: str
         let msg = "  RUN  " + label;
         let escaped = _escape_llvm_string_h(msg);
         let idx_str = number_to_string(index);
-        lines = extend_string_lines(lines, ["@.test_name_" + idx_str + " = private unnamed_addr constant [" + number_to_string(msg.length + 1) + " x i8] c\"" + escaped + "\\00\""]);
+        lines = extend_string_lines(lines, ["@.test_name_" + idx_str
+            + " = private unnamed_addr constant ["
+            + number_to_string(msg.length
+            + 1)
+            + " x i8] c\""
+            + escaped
+            + "\\00\""]);
         index += 1;
     }
 
-    let pass_msg = "  PASS  (all " + number_to_string(test_count) + " tests passed)";
+    let pass_msg = "  PASS  (all " + number_to_string(test_count)
+        + " tests passed)";
     let pass_escaped = _escape_llvm_string_h(pass_msg);
-    lines = extend_string_lines(lines, ["@.test_pass_msg = private unnamed_addr constant [" + number_to_string(pass_msg.length + 1) + " x i8] c\"" + pass_escaped + "\\00\""]);
+    lines = extend_string_lines(lines, ["@.test_pass_msg = private unnamed_addr constant ["
+        + number_to_string(pass_msg.length
+        + 1)
+        + " x i8] c\""
+        + pass_escaped
+        + "\\00\""]);
     lines = extend_string_lines(lines, ["declare i32 @puts(i8*)"]);
 
     lines = extend_string_lines(lines, ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"]);
@@ -225,12 +234,31 @@ fn render_test_harness_main_for_module(tests: NativeFunction[], module_slug: str
         }
         let idx_str = number_to_string(index);
         let msg = "  RUN  " + _test_label_from_name_h(tests[index].name);
-        lines = extend_string_lines(lines, ["  %name_ptr_" + idx_str + " = getelementptr [" + number_to_string(msg.length + 1) + " x i8], [" + number_to_string(msg.length + 1) + " x i8]* @.test_name_" + idx_str + ", i64 0, i64 0", "  call i32 @puts(i8* %name_ptr_" + idx_str + ")", "  call void @" + sym + "()",]);
+        lines = extend_string_lines(lines, ["  %name_ptr_" + idx_str
+            + " = getelementptr ["
+            + number_to_string(msg.length
+            + 1)
+            + " x i8], ["
+            + number_to_string(msg.length
+            + 1)
+            + " x i8]* @.test_name_"
+            + idx_str
+            + ", i64 0, i64 0", "  call i32 @puts(i8* %name_ptr_"
+            + idx_str
+            + ")", "  call void @"
+            + sym
+            + "()",]);
         index += 1;
     }
 
     // Print summary
-    lines = extend_string_lines(lines, ["  %pass_ptr = getelementptr [" + number_to_string(pass_msg.length + 1) + " x i8], [" + number_to_string(pass_msg.length + 1) + " x i8]* @.test_pass_msg, i64 0, i64 0", "  call i32 @puts(i8* %pass_ptr)", "  ret i32 0", "}",]);
+    lines = extend_string_lines(lines, ["  %pass_ptr = getelementptr ["
+        + number_to_string(pass_msg.length
+        + 1)
+        + " x i8], ["
+        + number_to_string(pass_msg.length
+        + 1)
+        + " x i8]* @.test_pass_msg, i64 0, i64 0", "  call i32 @puts(i8* %pass_ptr)", "  ret i32 0", "}",]);
     return lines;
 }
 
@@ -646,7 +674,8 @@ fn find_declare_signature(lines: string[], symbol: string) -> DeclareSignature? 
                 let params_start = call_pos + call_needle.length;
                 let close_paren = index_of(substring(trimmed, params_start, trimmed.length), ")");
                 if close_paren >= 0 {
-                    let params_text = substring(trimmed, params_start, params_start + close_paren);
+                    let params_text = substring(trimmed, params_start, params_start
+                        + close_paren);
                     if ret_type.length > 0 {
                         // Strip parameter values, keeping only types.
                         // For multi-token types like `double (i8*)*`, split on
@@ -715,11 +744,21 @@ fn render_function_shim(export_symbol: string, target_symbol: string, signature:
         idx += 1;
     }
 
-    let header = "define " + signature.return_type + " @" + export_symbol + "(" + join_with_separator(param_decls, ", ") + ") {";
+    let header = "define " + signature.return_type + " @" + export_symbol + "("
+        + join_with_separator(param_decls, ", ")
+        + ") {";
     if signature.return_type == "void" {
-        return [header, "entry:", "  call void @" + target_symbol + "(" + join_with_separator(call_args, ", ") + ")", "  ret void", "}",];
+        return [header, "entry:", "  call void @" + target_symbol + "("
+            + join_with_separator(call_args, ", ")
+            + ")", "  ret void", "}",];
     }
-    return [header, "entry:", "  %t0 = call " + signature.return_type + " @" + target_symbol + "(" + join_with_separator(call_args, ", ") + ")", "  ret " + signature.return_type + " %t0", "}",];
+    return [header, "entry:", "  %t0 = call " + signature.return_type + " @"
+        + target_symbol
+        + "("
+        + join_with_separator(call_args, ", ")
+        + ")", "  ret "
+        + signature.return_type
+        + " %t0", "}",];
 }
 
 fn insert_before_llvm_footer(lines: string[], inserted: string[]) -> string[] {

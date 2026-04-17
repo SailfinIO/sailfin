@@ -2,22 +2,22 @@
 //
 // Expression lowering type-mapping helpers extracted from core.sfn.
 import { substring } from "../../../string_utils";
-import { find_interface_info_by_name, find_struct_info_by_name, } from "../../type_context_queries";
+import { find_interface_info_by_name, find_struct_info_by_name } from "../../type_context_queries";
 import {
     annotation_is_array,
     array_struct_type_for_element,
     ends_with_pointer_suffix,
     layout_annotation_represents_user_value,
     map_type_annotation,
-    strip_pointer_suffix,
+    strip_pointer_suffix
 } from "../../type_mapping";
-import { TypeContext, } from "../../types";
+import { TypeContext } from "../../types";
 import {
     append_string,
     index_of,
     join_with_separator,
     starts_with,
-    trim_text,
+    trim_text
 } from "../../utils";
 
 fn map_struct_type_annotation_ctx(context: TypeContext, annotation: string) -> string {

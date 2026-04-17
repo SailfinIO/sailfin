@@ -529,7 +529,7 @@ fn _merge_copy_parameter_binding(primary: ParameterBinding, consumed_flag: boole
         llvm_type: primary.llvm_type,
         type_annotation: primary.type_annotation,
         consumed: consumed_flag,
-        span: primary.span,
+        span: primary.span
     };
 }
 

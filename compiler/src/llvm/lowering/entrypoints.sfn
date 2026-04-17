@@ -16,7 +16,7 @@ import {
     NativeStructField,
     NativeStructLayout,
     NativeStructLayoutField,
-    ParseNativeResult,
+    ParseNativeResult
 } from "../../native_ir";
 import {
     parse_layout_manifest,
@@ -35,7 +35,7 @@ import {
     parse_native_structs_for_import,
     parse_native_structs_from_text,
     select_layout_manifest_artifact,
-    select_text_artifact,
+    select_text_artifact
 } from "../../native_ir_api";
 import { split_lines } from "../../native_ir_utils_text";
 import { char_code, substring } from "../../string_utils";
@@ -47,20 +47,20 @@ import {
     collect_function_call_graph,
     collect_runtime_helper_targets,
     find_function_effect_entry,
-    propagate_function_effects,
+    propagate_function_effects
 } from "../effects";
 import {
     apply_layout_manifest_to_module,
     collect_imported_module_context_for_module,
     resolve_import_artifact_slug,
-    resolve_import_module_slug_for_module,
+    resolve_import_module_slug_for_module
 } from "../imports";
 import {
     render_enum_type_definitions,
     render_imported_function_declarations,
     render_runtime_helper_declarations,
     render_struct_type_definitions,
-    render_trait_metadata_comments,
+    render_trait_metadata_comments
 } from "../rendering";
 import {
     collect_exported_symbol_names,
@@ -69,14 +69,14 @@ import {
     render_test_harness_main,
     render_vtable_constants,
     render_vtable_type_definitions,
-    should_internalize_function,
+    should_internalize_function
 } from "../rendering_helpers";
 import {
     empty_string_constant_set,
     merge_string_constants,
-    render_string_constants,
+    render_string_constants
 } from "../strings";
-import { build_type_context, fixup_enum_layouts, } from "../type_context";
+import { build_type_context, fixup_enum_layouts } from "../type_context";
 import {
     CapabilityManifest,
     EnumTypeInfo,
@@ -90,7 +90,7 @@ import {
     TraitDescriptor,
     TraitImplementationDescriptor,
     TraitMetadata,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     append_string,
@@ -100,13 +100,13 @@ import {
     sanitize_symbol,
     starts_with,
     string_array_contains,
-    trim_text,
+    trim_text
 } from "../utils";
-import { emit_llvm_function, } from "./emission";
+import { emit_llvm_function } from "./emission";
 import {
     compile_native_text_to_llvm_file,
     lower_to_llvm_lines_with_parsed_context,
-    lower_to_llvm_lines_with_parsed_context_for_tests,
+    lower_to_llvm_lines_with_parsed_context_for_tests
 } from "./lowering_core";
 import {
     DeclareSignature,
@@ -124,7 +124,7 @@ import {
     render_function_shim,
     render_test_harness_main_for_module,
     resolve_import_provider_module_name,
-    sanitize_collection_length,
+    sanitize_collection_length
 } from "./lowering_helpers";
 import {
     _join_llvm_lines_linear,
@@ -133,7 +133,7 @@ import {
     build_trait_metadata,
     concat_native_functions,
     empty_capability_manifest,
-    flatten_struct_methods,
+    flatten_struct_methods
 } from "./lowering_helpers_mangling";
 import {
     append_string_lines,
@@ -142,16 +142,16 @@ import {
     extend_string_lines,
     extend_string_lines_checked,
     module_source_filename,
-    write_llvm_lines_chunked,
+    write_llvm_lines_chunked
 } from "./lowering_io";
 import {
     parse_native_artifact_safe,
     recover_functions_for_lowering,
     recover_native_functions_light,
     recover_native_imports_light,
-    recover_native_structs_light,
+    recover_native_structs_light
 } from "./lowering_recovery";
-import { lower_module_bindings_to_globals, } from "./module_globals";
+import { lower_module_bindings_to_globals } from "./module_globals";
 
 fn lower_to_llvm(native_module: NativeModule) -> LoweredLLVMResult ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
@@ -190,7 +190,7 @@ fn lower_to_llvm_lines(native_module: NativeModule) -> LoweredLLVMLinesResult ![
         function_effects: [],
         lifetime_regions: [],
         capability_manifest: empty_capability_manifest(),
-        string_constants: empty_string_constant_set(),
+        string_constants: empty_string_constant_set()
     };
 }
 
@@ -234,14 +234,22 @@ fn lower_to_llvm_ir_from_text(native_text: string, module_name: string) -> strin
             name: module_name, format: "sailfin-native-text", contents: native_text
         }],
         entry_points: [],
-        symbol_count: 0,
+        symbol_count: 0
     };
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
     let mut _if219: boolean = false;
     if lowered_lines.lines == null { _if219 = true; }
     if lowered_lines.lines.length == 0 { _if219 = true; }
     if _if219 {
-        print.err("emit-llvm: no lines from native text (functions=" + number_to_string(parse.functions.length) + " structs=" + number_to_string(parse.structs.length) + " enums=" + number_to_string(parse.enums.length) + " diagnostics=" + number_to_string(parse.diagnostics.length) + ")");
+        print.err("emit-llvm: no lines from native text (functions="
+            + number_to_string(parse.functions.length)
+            + " structs="
+            + number_to_string(parse.structs.length)
+            + " enums="
+            + number_to_string(parse.enums.length)
+            + " diagnostics="
+            + number_to_string(parse.diagnostics.length)
+            + ")");
         return "";
     }
     return _join_llvm_lines_linear(lowered_lines.lines);
@@ -257,7 +265,14 @@ fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io]
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, artifact.contents);
     let lines = lowered_lines.lines;
     if lines.length == 0 {
-        print.err("emit-llvm: no lines from module (module=" + native_module.module_name + " functions=" + number_to_string(parse.functions.length) + " imports=" + number_to_string(parse.imports.length) + " diagnostics=" + number_to_string(lowered_lines.diagnostics.length) + ")");
+        print.err("emit-llvm: no lines from module (module=" + native_module.module_name
+            + " functions="
+            + number_to_string(parse.functions.length)
+            + " imports="
+            + number_to_string(parse.imports.length)
+            + " diagnostics="
+            + number_to_string(lowered_lines.diagnostics.length)
+            + ")");
         if lowered_lines.diagnostics.length > 0 {
             print.err("emit-llvm: diagnostic " + lowered_lines.diagnostics[0]);
         }
@@ -290,7 +305,7 @@ fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNa
             function_effects: lowered.function_effects,
             lifetime_regions: lowered.lifetime_regions,
             capability_manifest: lowered.capability_manifest,
-            string_constants: lowered.string_constants,
+            string_constants: lowered.string_constants
         };
     }
     let ir = _join_llvm_lines_linear(lowered.lines);
@@ -303,7 +318,7 @@ fn lower_to_llvm_with_parsed_context(native_module: NativeModule, parse: ParseNa
         function_effects: lowered.function_effects,
         lifetime_regions: lowered.lifetime_regions,
         capability_manifest: lowered.capability_manifest,
-        string_constants: lowered.string_constants,
+        string_constants: lowered.string_constants
     };
 }
 
@@ -319,7 +334,7 @@ fn lower_to_llvm_with_context(native_module: NativeModule, imported_manifests: L
         function_effects: lowered.function_effects,
         lifetime_regions: lowered.lifetime_regions,
         capability_manifest: lowered.capability_manifest,
-        string_constants: lowered.string_constants,
+        string_constants: lowered.string_constants
     };
 }
 
@@ -344,7 +359,7 @@ fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manife
             function_effects: [],
             lifetime_regions: [],
             capability_manifest: empty_capability_manifest(),
-            string_constants: empty_constants,
+            string_constants: empty_constants
         };
     }
 

@@ -6,37 +6,33 @@
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import { NativeModule } from "../../emit_native";
-import {
-    NativeFunction,
-    NativeInstruction,
-    NativeParameter,
-} from "../../native_ir";
-import { append_function_effect_entry, find_function_effect_entry, } from "../effects";
-import { collect_exported_symbol_names, } from "../rendering_helpers";
+import { NativeFunction, NativeInstruction, NativeParameter } from "../../native_ir";
+import { append_function_effect_entry, find_function_effect_entry } from "../effects";
+import { collect_exported_symbol_names } from "../rendering_helpers";
 import {
     empty_string_constant_set,
     merge_string_constants,
-    render_string_constants,
+    render_string_constants
 } from "../strings";
 import {
     FunctionEffectEntry,
     LocalBinding,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     number_to_string,
     sanitize_symbol,
     starts_with,
-    trim_text,
+    trim_text
 } from "../utils";
-import { emit_llvm_function, } from "./emission";
-import { apply_module_symbol_mangling, } from "./lowering_helpers_mangling";
+import { emit_llvm_function } from "./emission";
+import { apply_module_symbol_mangling } from "./lowering_helpers_mangling";
 import {
     append_string_lines,
     ensure_intrinsic_declarations,
     extend_string_lines,
-    extend_string_lines_checked,
+    extend_string_lines_checked
 } from "./lowering_io";
 import {
     get_function_decorators_at,
@@ -46,9 +42,9 @@ import {
     get_function_is_extern_at,
     get_function_name_at,
     get_function_parameters_at,
-    get_function_return_type_at,
+    get_function_return_type_at
 } from "./lowering_native_helpers";
-import { _parse_lowered_fn_string_constants, split_lines_local, } from "./lowering_text_utils";
+import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowering_text_utils";
 
 // Write function metadata to file-based IPC channels for emit_llvm_function.
 // The v0.1.1 seed compiles emission.sfn with NativeFunction as i8*,
@@ -71,8 +67,10 @@ fn write_function_ipc(local_functions: NativeFunction[], index: number, safe_fun
     let mut param_write_i: number = 0;
     loop {
         if param_write_i >= safe_parameters.length { break; }
-        fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_name", safe_parameters[param_write_i].name);
-        fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i) + "_type", safe_parameters[param_write_i].type_annotation);
+        fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i)
+            + "_name", safe_parameters[param_write_i].name);
+        fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i)
+            + "_type", safe_parameters[param_write_i].type_annotation);
         param_write_i += 1;
     }
     let mut dec_write_i: number = 0;
@@ -100,7 +98,9 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
     let mut diagnostics: string[] = [];
 
     if trace {
-        print.err("test llvm: lowering functions start (count=" + number_to_string(local_functions.length) + ")");
+        print.err("test llvm: lowering functions start (count="
+            + number_to_string(local_functions.length)
+            + ")");
     }
     if debug_lowering { print.err("emit-llvm: phase=functions"); }
     loop {
@@ -129,7 +129,7 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
             effects: safe_effects,
             decorators: safe_decorators,
             instructions: safe_instructions,
-            is_extern: fn_is_extern,
+            is_extern: fn_is_extern
         };
         if trace {
             let mut return_count: number = 0;
@@ -141,7 +141,14 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
                 }
                 instr_index += 1;
             }
-            print.err("test llvm: function " + number_to_string(index) + "/" + number_to_string(local_functions.length) + " " + safe_function_name + " instrs=" + number_to_string(safe_instructions.length) + " returns=" + number_to_string(return_count));
+            print.err("test llvm: function " + number_to_string(index) + "/"
+                + number_to_string(local_functions.length)
+                + " "
+                + safe_function_name
+                + " instrs="
+                + number_to_string(safe_instructions.length)
+                + " returns="
+                + number_to_string(return_count));
         }
         let aggregated_entry = find_function_effect_entry(aggregated_effects, safe_function_name);
         let mut effective_effects: string[] = [];
@@ -149,10 +156,12 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
             effective_effects = aggregated_entry.effects;
         }
         function_effects = append_function_effect_entry(function_effects, FunctionEffectEntry {
-            name: safe_function_name, effects: effective_effects,
+            name: safe_function_name, effects: effective_effects
         });
         if debug_lowering {
-            print.err("emit-llvm: function-start " + safe_function_name + " idx=" + number_to_string(index));
+            print.err("emit-llvm: function-start " + safe_function_name
+                + " idx="
+                + number_to_string(index));
         }
         // Write function metadata to file-based IPC
         write_function_ipc(local_functions, index, safe_function_name, safe_return_type, safe_parameters, safe_instructions, safe_decorators, fn_is_async, fn_is_extern);
@@ -161,10 +170,16 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
         let _lfn_diags = lowered.diagnostics;
         let _lfn_string_constants = lowered.string_constants;
         if debug_lowering {
-            print.err("emit-llvm: function-done " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length));
+            print.err("emit-llvm: function-done " + safe_function_name
+                + " lines="
+                + number_to_string(_lfn_lines.length));
         }
         if trace {
-            print.err("test llvm: function lowered " + safe_function_name + " lines=" + number_to_string(_lfn_lines.length) + " diagnostics=" + number_to_string(_lfn_diags.length));
+            print.err("test llvm: function lowered " + safe_function_name
+                + " lines="
+                + number_to_string(_lfn_lines.length)
+                + " diagnostics="
+                + number_to_string(_lfn_diags.length));
             if _lfn_lines.length > 0 {
                 print.err("test llvm: function first line " + _lfn_lines[0]);
                 print.err("test llvm: function last line " + _lfn_lines[_lfn_lines.length - 1]);
@@ -185,32 +200,40 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
         if safe_function_name == "add" { has_add_function = true; }
         diagnostics = extend_string_lines_checked(diagnostics, _lfn_diags, "function lowering");
         if trace {
-            print.err("test llvm: function diagnostics merged " + safe_function_name);
+            print.err("test llvm: function diagnostics merged "
+                + safe_function_name);
         }
         let normalized_lowered_lines = _lfn_lines;
         if normalized_lowered_lines != null {
             if normalized_lowered_lines.length > 0 {
                 lines = append_string_lines(lines, normalized_lowered_lines);
                 if trace {
-                    print.err("test llvm: function lines merged " + safe_function_name);
-                    print.err("test llvm: function post-merge check " + safe_function_name);
+                    print.err("test llvm: function lines merged "
+                        + safe_function_name);
+                    print.err("test llvm: function post-merge check "
+                        + safe_function_name);
                 }
                 let _ep_next = index + 1;
                 if _ep_next < local_functions.length { lines.push(""); }
                 if trace {
-                    print.err("test llvm: function post-merge blank " + safe_function_name);
+                    print.err("test llvm: function post-merge blank "
+                        + safe_function_name);
                 }
             }
         }
         if _lfn_string_constants != null {
             if _lfn_string_constants.length > 0 {
                 if trace {
-                    print.err("test llvm: merging string constants " + safe_function_name + " count=" + number_to_string(_lfn_string_constants.length));
+                    print.err("test llvm: merging string constants "
+                        + safe_function_name
+                        + " count="
+                        + number_to_string(_lfn_string_constants.length));
                 }
                 let existing_constants = all_string_constants;
                 all_string_constants = merge_string_constants(existing_constants, _lfn_string_constants);
                 if trace {
-                    print.err("test llvm: merged string constants " + safe_function_name);
+                    print.err("test llvm: merged string constants "
+                        + safe_function_name);
                 }
             }
         }

@@ -40,7 +40,8 @@ fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
         let interface = metadata.interfaces[index];
         let mut header: string = "; interface " + interface.name;
         if interface.type_parameters.length > 0 {
-            header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">";
+            header = header + "<" + join_with_separator(interface.type_parameters, ", ")
+                + ">";
         }
         interface_lines.push(header);
 
@@ -63,7 +64,9 @@ fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
     loop {
         if index >= metadata.implementations.length { break; }
         let implementation = metadata.implementations[index];
-        let mut line: string = "; struct " + implementation.struct_name + " implements " + join_with_separator(implementation.interfaces, ", ");
+        let mut line: string = "; struct " + implementation.struct_name
+            + " implements "
+            + join_with_separator(implementation.interfaces, ", ");
         struct_lines.push(line);
         index += 1;
     }
@@ -129,13 +132,19 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             // Emit capability metadata comment if the intrinsic has effects
             if descriptor.effects.length > 0 {
                 let effects_text = join_with_separator(descriptor.effects, ", ");
-                lines.push("; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]");
+                lines.push("; intrinsic " + descriptor.symbol
+                    + " requires capabilities: !["
+                    + effects_text
+                    + "]");
             }
             let mut parameter_text: string = "";
             if descriptor.parameter_types.length > 0 {
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ");
             }
-            let line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")";
+            let line = "declare " + descriptor.return_type + " @" + descriptor.symbol
+                + "("
+                + parameter_text
+                + ")";
             lines.push(line);
             declared_symbols.push(descriptor.symbol);
             // Also declare the target name if it differs from the symbol.
@@ -146,7 +155,12 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
                 if sanitized_target != descriptor.symbol {
                     if !string_array_contains(declared_symbols, sanitized_target) {
                         if !string_array_contains(local_symbols, sanitized_target) {
-                            let alias_line = "declare " + descriptor.return_type + " @" + sanitized_target + "(" + parameter_text + ")";
+                            let alias_line = "declare " + descriptor.return_type
+                                + " @"
+                                + sanitized_target
+                                + "("
+                                + parameter_text
+                                + ")";
                             lines.push(alias_line);
                             declared_symbols.push(sanitized_target);
                         }
@@ -218,7 +232,9 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
         }
         let param_types = collect_parameter_types(context, function.parameters, function.name);
         let param_text = join_with_separator(param_types, ", ");
-        let line = "declare " + return_type + " @" + sanitized_name + "(" + param_text + ")";
+        let line = "declare " + return_type + " @" + sanitized_name + "("
+            + param_text
+            + ")";
         lines.push(line);
         index += 1;
     }
@@ -490,7 +506,9 @@ fn render_enum_type_definitions(context: TypeContext) -> string[] {
                 payload_storage_size += (elem_size - remainder);
             }
             let elem_count = payload_storage_size / elem_size;
-            payload_repr = ", [" + number_to_string(elem_count) + " x " + elem_type + "]";
+            payload_repr = ", [" + number_to_string(elem_count) + " x "
+                + elem_type
+                + "]";
         }
 
         let body = "{ " + llvm_tag_type + pad_repr + payload_repr + " }";

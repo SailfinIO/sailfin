@@ -2,18 +2,14 @@
 //
 // Control flow handler: match instruction lowering.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { lower_expression, } from "../expression_lowering/native/core";
+import { lower_expression } from "../expression_lowering/native/core";
 import { append_match_arm_mutations } from "../expression_lowering/native/core_match_helpers";
-import {
-    emit_boolean_and,
-    emit_comparison_instruction,
-    harmonise_operands,
-} from "../expression_lowering/native/core_operands";
+import { emit_boolean_and, emit_comparison_instruction, harmonise_operands } from "../expression_lowering/native/core_operands";
 import { parse_enum_literal, parse_struct_pattern } from "../expression_lowering/native/core_parse";
 import {
     extract_simple_identifier,
     is_union_llvm_type,
-    parse_union_payload_types,
+    parse_union_payload_types
 } from "../expression_lowering/native/core_text";
 import { find_local_binding } from "../expressions_bindings";
 import { format_temp_name } from "../expressions_helpers";
@@ -23,13 +19,13 @@ import {
     find_enum_info_by_llvm_type,
     find_struct_info_by_name,
     resolve_enum_info_for_literal,
-    resolve_enum_variant_info,
+    resolve_enum_variant_info
 } from "../type_context_queries";
 import {
     ends_with_pointer_suffix,
     layout_annotation_represents_user_value,
     map_struct_field_annotation,
-    strip_pointer_suffix,
+    strip_pointer_suffix
 } from "../type_mapping";
 import {
     BlockLoweringResult,
@@ -50,22 +46,22 @@ import {
     StringConstant,
     StructFieldInfo,
     StructTypeInfo,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     copy_string_array,
     extend_string_array,
     merge_parameter_bindings,
     number_to_string,
-    trim_text,
+    trim_text
 } from "../utils";
-import { lower_instruction_range, } from "./instructions";
-import { allocate_block_label, lower_condition_to_i1, } from "./instructions_condition";
+import { lower_instruction_range } from "./instructions";
+import { allocate_block_label, lower_condition_to_i1 } from "./instructions_condition";
 import {
     _parse_int_from_string,
     clone_local_bindings,
     extend_lifetime_regions,
-    extend_mutations,
+    extend_mutations
 } from "./instructions_helpers";
 import { lower_match_case_condition } from "./instructions_match_condition";
 import { emit_phi_merges_for_match, materialize_mutation_values_at_label } from "./phi";
@@ -82,7 +78,7 @@ fn _match_make_local_binding(name: string, pointer: string, llvm_type: string, s
         ownership: null,
         consumed: false,
         scope_id: scope_id,
-        scope_depth: scope_depth,
+        scope_depth: scope_depth
     };
 }
 
@@ -96,7 +92,9 @@ fn collect_match_structure(instructions: NativeInstruction[], start_index: numbe
     if limit > instructions.length { limit = instructions.length; }
     loop {
         if index >= limit {
-            diagnostics.push("llvm lowering: unterminated `.match` in `" + function_name + "`");
+            diagnostics.push("llvm lowering: unterminated `.match` in `"
+                + function_name
+                + "`");
             if current_case != null {
                 let finished = finalize_match_case(current_case, limit);
                 cases = append_match_case(cases, finished);
@@ -146,7 +144,7 @@ fn collect_match_structure(instructions: NativeInstruction[], start_index: numbe
                 guard: guard_text,
                 body_start: index + 1,
                 body_end: index + 1,
-                is_default: is_default_pattern(instruction.pattern),
+                is_default: is_default_pattern(instruction.pattern)
             };
             index += 1;
             continue;
@@ -174,7 +172,7 @@ fn finalize_match_case(case: MatchCaseStructure?, body_end: number) -> MatchCase
         guard: value.guard,
         body_start: value.body_start,
         body_end: body_end,
-        is_default: value.is_default,
+        is_default: value.is_default
     };
 }
 
@@ -223,7 +221,9 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
     collected_string_constants = merge_string_constants(collected_string_constants, subject_result.string_constants);
 
     if subject_result.operand == null {
-        diagnostics.push("llvm lowering: unable to lower match subject in `" + function.name + "`");
+        diagnostics.push("llvm lowering: unable to lower match subject in `"
+            + function.name
+            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -238,7 +238,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
             next_lifetime_region_id: current_next_region,
             next_index: structure.end_index + 1,
             mutations: collected_mutations,
-            string_constants: collected_string_constants,
+            string_constants: collected_string_constants
         };
     }
 
@@ -250,7 +250,8 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
     let mut matched_enum_tags: number[] = [];
 
     if structure.cases.length == 0 {
-        diagnostics.push("llvm lowering: match without cases in `" + function.name + "`");
+        diagnostics.push("llvm lowering: match without cases in `" + function.name
+            + "`");
         let merge_alloc = allocate_block_label("matchmerge", current_block_counter);
         let merge_label = merge_alloc.label;
         current_block_counter = merge_alloc.next_counter;
@@ -270,7 +271,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
             next_lifetime_region_id: current_next_region,
             next_index: structure.end_index + 1,
             mutations: collected_mutations,
-            string_constants: collected_string_constants,
+            string_constants: collected_string_constants
         };
     }
 
@@ -299,7 +300,11 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
         let local = current_locals[preload_index];
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
-        let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type
+            + ", "
+            + local.llvm_type
+            + "* "
+            + local.pointer;
         current_lines.push(preload_line);
         preloaded_locals.push(preload_temp);
         preload_index += 1;
@@ -395,7 +400,11 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
             has_unconditional_default = true;
             current_lines.push("  br label %" + body_labels[index]);
         } else if lowered_condition.operand != null {
-            current_lines.push("  br i1 " + lowered_condition.operand.value + ", label %" + body_labels[index] + ", label %" + failure_target);
+            current_lines.push("  br i1 " + lowered_condition.operand.value
+                + ", label %"
+                + body_labels[index]
+                + ", label %"
+                + failure_target);
         } else { current_lines.push("  br label %" + failure_target); }
 
         current_lines.push(body_labels[index] + ":");
@@ -415,8 +424,16 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
                         // Allocate subject on stack for field extraction
                         let subject_alloca_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + subject_alloca_temp + " = alloca " + subject_operand.llvm_type);
-                        current_lines.push("  store " + subject_operand.llvm_type + " " + subject_operand.value + ", " + subject_operand.llvm_type + "* " + subject_alloca_temp);
+                        current_lines.push("  " + subject_alloca_temp
+                            + " = alloca "
+                            + subject_operand.llvm_type);
+                        current_lines.push("  store " + subject_operand.llvm_type
+                            + " "
+                            + subject_operand.value
+                            + ", "
+                            + subject_operand.llvm_type
+                            + "* "
+                            + subject_alloca_temp);
 
                         // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
                         let mut binding_idx: number = 0;
@@ -436,12 +453,23 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
                                     payload_field_index = 2;
                                 }
                             }
-                            current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info_val.llvm_name + ", " + enum_info_val.llvm_name + "* " + subject_alloca_temp + ", i32 0, i32 " + number_to_string(payload_field_index));
+                            current_lines.push("  " + payload_ptr_temp
+                                + " = getelementptr inbounds "
+                                + enum_info_val.llvm_name
+                                + ", "
+                                + enum_info_val.llvm_name
+                                + "* "
+                                + subject_alloca_temp
+                                + ", i32 0, i32 "
+                                + number_to_string(payload_field_index));
 
                             // 2. Treat payload as a raw byte pointer (opaque pointers)
                             let byte_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines.push("  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
+                            current_lines.push("  " + byte_ptr_temp
+                                + " = bitcast ptr "
+                                + payload_ptr_temp
+                                + " to ptr");
 
                             // 3. Offset to field position
                             let field_offset_in_payload = field_binding.field_offset - variant_info_val.offset;
@@ -449,30 +477,49 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
                             if field_offset_in_payload > 0 {
                                 let offset_ptr_temp = format_temp_name(current_temp);
                                 current_temp += 1;
-                                current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+                                current_lines.push("  " + offset_ptr_temp
+                                    + " = getelementptr inbounds i8, ptr "
+                                    + byte_ptr_temp
+                                    + ", i64 "
+                                    + number_to_string(field_offset_in_payload));
                                 field_ptr_temp = offset_ptr_temp;
                             }
 
                             // 4. Cast to field type pointer (opaque pointers)
                             let typed_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines.push("  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
+                            current_lines.push("  " + typed_ptr_temp
+                                + " = bitcast ptr "
+                                + field_ptr_temp
+                                + " to ptr");
 
                             // 5. Load the field value
                             let value_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines.push("  " + value_temp + " = load " + field_binding.field_type + ", ptr " + typed_ptr_temp);
+                            current_lines.push("  " + value_temp + " = load "
+                                + field_binding.field_type
+                                + ", ptr "
+                                + typed_ptr_temp);
 
                             // 6. Allocate a local for this binding
                             let local_alloca_temp = format_temp_name(current_temp);
                             current_temp += 1;
-                            current_lines.push("  " + local_alloca_temp + " = alloca " + field_binding.field_type);
+                            current_lines.push("  " + local_alloca_temp
+                                + " = alloca "
+                                + field_binding.field_type);
 
                             // 7. Store the value into the local
-                            current_lines.push("  store " + field_binding.field_type + " " + value_temp + ", " + field_binding.field_type + "* " + local_alloca_temp);
+                            current_lines.push("  store " + field_binding.field_type
+                                + " "
+                                + value_temp
+                                + ", "
+                                + field_binding.field_type
+                                + "* "
+                                + local_alloca_temp);
 
                             // 8. Add to locals so the match arm body can reference it
-                            base_locals.push(_match_make_local_binding(field_binding.field_name, local_alloca_temp, field_binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1));
+                            base_locals.push(_match_make_local_binding(field_binding.field_name, local_alloca_temp, field_binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth
+                                + 1));
 
                             base_local_id += 1;
                             binding_idx += 1;
@@ -494,7 +541,12 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
                     let payload_temp = format_temp_name(current_temp);
                     current_temp += 1;
                     let payload_type = union_payload_types[variant_index];
-                    current_lines.push("  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
+                    current_lines.push("  " + payload_temp + " = extractvalue "
+                        + subject_operand.llvm_type
+                        + " "
+                        + subject_operand.value
+                        + ", "
+                        + number_to_string(payload_index));
 
                     let typed_payload_ptr = payload_temp;
                     // If the payload is an opaque pointer, try to preserve the expected struct pointer type.
@@ -502,7 +554,10 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
                     if payload_type == "i8*" {
                         let cast_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + cast_temp + " = bitcast i8* " + payload_temp + " to " + expected_ptr_type);
+                        current_lines.push("  " + cast_temp + " = bitcast i8* "
+                            + payload_temp
+                            + " to "
+                            + expected_ptr_type);
                         typed_payload_ptr = cast_temp;
                     }
 
@@ -516,18 +571,38 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
                         // Compute field pointer and load.
                         let gep_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + gep_temp + " = getelementptr " + struct_info_val.llvm_name + ", " + expected_ptr_type + " " + typed_payload_ptr + ", i32 0, i32 " + number_to_string(binding.field_index));
+                        current_lines.push("  " + gep_temp + " = getelementptr "
+                            + struct_info_val.llvm_name
+                            + ", "
+                            + expected_ptr_type
+                            + " "
+                            + typed_payload_ptr
+                            + ", i32 0, i32 "
+                            + number_to_string(binding.field_index));
                         let load_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + load_temp + " = load " + binding.field_type + ", " + binding.field_type + "* " + gep_temp);
+                        current_lines.push("  " + load_temp + " = load "
+                            + binding.field_type
+                            + ", "
+                            + binding.field_type
+                            + "* "
+                            + gep_temp);
 
                         // Allocate a local for this binding.
                         let local_alloca_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + local_alloca_temp + " = alloca " + binding.field_type);
-                        current_lines.push("  store " + binding.field_type + " " + load_temp + ", " + binding.field_type + "* " + local_alloca_temp);
+                        current_lines.push("  " + local_alloca_temp
+                            + " = alloca "
+                            + binding.field_type);
+                        current_lines.push("  store " + binding.field_type + " "
+                            + load_temp
+                            + ", "
+                            + binding.field_type
+                            + "* "
+                            + local_alloca_temp);
 
-                        base_locals.push(_match_make_local_binding(binding.field_name, local_alloca_temp, binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1));
+                        base_locals.push(_match_make_local_binding(binding.field_name, local_alloca_temp, binding.field_type, make_child_scope_id(scope_id, body_labels[index]), scope_depth
+                            + 1));
                         base_local_id += 1;
                         binding_idx += 1;
                     }
@@ -564,15 +639,29 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
                         let payload_type = union_payload_types[remaining_index];
                         let payload_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + payload_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", " + number_to_string(payload_index));
+                        current_lines.push("  " + payload_temp
+                            + " = extractvalue "
+                            + subject_operand.llvm_type
+                            + " "
+                            + subject_operand.value
+                            + ", "
+                            + number_to_string(payload_index));
 
                         let local_alloca_temp = format_temp_name(current_temp);
                         current_temp += 1;
-                        current_lines.push("  " + local_alloca_temp + " = alloca " + payload_type);
-                        current_lines.push("  store " + payload_type + " " + payload_temp + ", " + payload_type + "* " + local_alloca_temp);
+                        current_lines.push("  " + local_alloca_temp
+                            + " = alloca "
+                            + payload_type);
+                        current_lines.push("  store " + payload_type + " "
+                            + payload_temp
+                            + ", "
+                            + payload_type
+                            + "* "
+                            + local_alloca_temp);
 
                         base_locals.push(LocalBinding {
-                            name: subject_name, pointer: local_alloca_temp, llvm_type: payload_type, type_annotation: "", ownership: null, consumed: false, scope_id: make_child_scope_id(scope_id, body_labels[index]), scope_depth: scope_depth + 1,
+                            name: subject_name, pointer: local_alloca_temp, llvm_type: payload_type, type_annotation: "", ownership: null, consumed: false, scope_id: make_child_scope_id(scope_id, body_labels[index]), scope_depth: scope_depth
+                                + 1
                         });
                         base_local_id += 1;
                     }
@@ -580,7 +669,8 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
             }
         }
 
-        let body_result = lower_instruction_range(function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth + 1, body_labels[index]);
+        let body_result = lower_instruction_range(function, case.body_start, case.body_end, llvm_return, bindings, base_locals, base_allocas, [], current_temp, current_block_counter, base_local_id, current_next_region, functions, loop_stack, context, make_child_scope_id(scope_id, body_labels[index]), scope_depth
+            + 1, body_labels[index]);
         let mut _ci3: number = 0;
         loop {
             if _ci3 >= body_result.diagnostics.length { break; }
@@ -600,7 +690,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
 
         // Track mutations per arm for phi node emission
         arm_mutations_list = append_match_arm_mutations(arm_mutations_list, MatchArmMutations {
-            mutations: body_result.mutations, label: body_labels[index], terminated: body_result.terminated,
+            mutations: body_result.mutations, label: body_labels[index], terminated: body_result.terminated
         });
 
         if !body_result.terminated {
@@ -670,6 +760,6 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
         next_lifetime_region_id: current_next_region,
         next_index: structure.end_index + 1,
         mutations: collected_mutations,
-        string_constants: result_string_constants,
+        string_constants: result_string_constants
     };
 }

@@ -7,7 +7,7 @@ import { default_return_literal, format_temp_name } from "../../expressions_help
 import {
     append_string_constant,
     empty_string_constant_set,
-    find_string_constant_by_name,
+    find_string_constant_by_name
 } from "../../strings";
 import {
     find_enum_info_by_llvm_type,
@@ -16,14 +16,14 @@ import {
     find_struct_info_by_llvm_type,
     find_struct_info_by_name,
     find_variant_field_info,
-    resolve_enum_info_for_literal,
+    resolve_enum_info_for_literal
 } from "../../type_context_queries";
 import {
     ends_with_pointer_suffix,
     layout_annotation_base_type,
     layout_annotation_represents_user_value,
     map_type_annotation,
-    strip_pointer_suffix,
+    strip_pointer_suffix
 } from "../../type_mapping";
 import {
     EnumTypeInfo,
@@ -37,14 +37,14 @@ import {
     StringPointerResult,
     StructFieldInfo,
     StructTypeInfo,
-    TypeContext,
+    TypeContext
 } from "../../types";
 import {
     append_string,
     contains_text,
     number_to_string,
     starts_with,
-    trim_text,
+    trim_text
 } from "../../utils";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
@@ -57,7 +57,7 @@ fn make_expression_result(lines: string[], temp_index: number, operand: LLVMOper
         temp_index: temp_index,
         operand: operand,
         diagnostics: diagnostics,
-        string_constants: string_constants,
+        string_constants: string_constants
     };
 }
 
@@ -66,7 +66,13 @@ fn emit_string_constant_pointer(constant: StringConstant, temp_index: number, li
     let array_length = constant.byte_count + 1;
     let array_type = "[" + number_to_string(array_length) + " x i8]";
     let temp_name = format_temp_name(temp_index);
-    current_lines.push("  " + temp_name + " = getelementptr inbounds " + array_type + ", " + array_type + "* " + constant.name + ", i32 0, i32 0");
+    current_lines.push("  " + temp_name + " = getelementptr inbounds "
+        + array_type
+        + ", "
+        + array_type
+        + "* "
+        + constant.name
+        + ", i32 0, i32 0");
     return StringPointerResult {
         lines: current_lines,
         temp_index: temp_index + 1,
@@ -100,7 +106,12 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     let field_pointer = pointer_result.pointer;
 
     let call_temp = format_temp_name(current_temp);
-    current_lines.push("  " + call_temp + " = call i8* @sailfin_runtime_get_field(i8* " + base_operand.value + ", i8* " + field_pointer + ")");
+    current_lines.push("  " + call_temp
+        + " = call i8* @sailfin_runtime_get_field(i8* "
+        + base_operand.value
+        + ", i8* "
+        + field_pointer
+        + ")");
     current_temp += 1;
 
     let mut _if70: boolean = false;
@@ -116,7 +127,10 @@ fn lower_dynamic_member_access(field: string, base_operand: LLVMOperand, temp_in
     if field == "length" { _if70 = true; }
     if _if70 {
         let number_temp = format_temp_name(current_temp);
-        current_lines.push("  " + number_temp + " = call double @sailfin_runtime_string_to_number(i8* " + call_temp + ")");
+        current_lines.push("  " + number_temp
+            + " = call double @sailfin_runtime_string_to_number(i8* "
+            + call_temp
+            + ")");
         current_temp += 1;
         let operand = LLVMOperand { llvm_type: "double", value: number_temp };
         return make_expression_result(current_lines, current_temp, operand, diagnostics, dynamic_string_constants);
@@ -153,10 +167,20 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     };
     if pointer_available {
         let tag_ptr = format_temp_name(current_temp);
-        current_lines.push("  " + tag_ptr + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + base_operand.value + ", i32 0, i32 0");
+        current_lines.push("  " + tag_ptr + " = getelementptr inbounds "
+            + enum_info.llvm_name
+            + ", "
+            + enum_info.llvm_name
+            + "* "
+            + base_operand.value
+            + ", i32 0, i32 0");
         current_temp += 1;
         let tag_temp = format_temp_name(current_temp);
-        current_lines.push("  " + tag_temp + " = load " + enum_info.tag_type + ", " + enum_info.tag_type + "* " + tag_ptr);
+        current_lines.push("  " + tag_temp + " = load " + enum_info.tag_type
+            + ", "
+            + enum_info.tag_type
+            + "* "
+            + tag_ptr);
         current_temp += 1;
         tag_operand = LLVMOperand {
             llvm_type: enum_info.tag_type,
@@ -164,7 +188,10 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         };
     } else {
         let tag_temp = format_temp_name(current_temp);
-        current_lines.push("  " + tag_temp + " = extractvalue " + enum_info.llvm_name + " " + base_operand.value + ", 0");
+        current_lines.push("  " + tag_temp + " = extractvalue " + enum_info.llvm_name
+            + " "
+            + base_operand.value
+            + ", 0");
         current_temp += 1;
         tag_operand = LLVMOperand {
             llvm_type: enum_info.tag_type,
@@ -174,7 +201,8 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
 
     if parse.field == "variant" {
         let sanitized_enum = sanitize_symbol(enum_info.name);
-        let default_constant_name = "@.enum." + sanitized_enum + ".variant.default";
+        let default_constant_name = "@.enum." + sanitized_enum
+            + ".variant.default";
         let existing_default = find_string_constant_by_name(enum_string_constants, default_constant_name);
         let mut default_constant: StringConstant = StringConstant {
             name: default_constant_name,
@@ -200,7 +228,9 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             if variant_index >= enum_info.variants.length { break; }
             let variant_info = enum_info.variants[variant_index];
             let sanitized_variant = sanitize_symbol(variant_info.name);
-            let constant_name = "@.enum." + sanitized_enum + "." + sanitized_variant + ".variant";
+            let constant_name = "@.enum." + sanitized_enum + "."
+                + sanitized_variant
+                + ".variant";
             let existing_variant = find_string_constant_by_name(enum_string_constants, constant_name);
             let mut variant_constant: StringConstant = StringConstant {
                 name: constant_name,
@@ -222,11 +252,20 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             let variant_pointer = pointer_result.pointer;
 
             let compare_temp = format_temp_name(current_temp);
-            current_lines.push("  " + compare_temp + " = icmp eq " + tag_operand.llvm_type + " " + tag_operand.value + ", " + number_to_string(variant_info.tag));
+            current_lines.push("  " + compare_temp + " = icmp eq " + tag_operand.llvm_type
+                + " "
+                + tag_operand.value
+                + ", "
+                + number_to_string(variant_info.tag));
             current_temp += 1;
 
             let select_temp = format_temp_name(current_temp);
-            current_lines.push("  " + select_temp + " = select i1 " + compare_temp + ", i8* " + variant_pointer + ", i8* " + current_pointer);
+            current_lines.push("  " + select_temp + " = select i1 "
+                + compare_temp
+                + ", i8* "
+                + variant_pointer
+                + ", i8* "
+                + current_pointer);
             current_temp += 1;
 
             current_pointer = select_temp;
@@ -264,7 +303,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
                     llvm_type: mapped,
                     type_annotation: resolved_field.type_annotation,
                     index: resolved_field.index,
-                    offset: resolved_field.offset,
+                    offset: resolved_field.offset
                 };
             }
             matched_variants.push(candidate_variant);
@@ -274,7 +313,10 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     }
 
     if matched_variants.length == 0 {
-        messages.push("llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` on any variant");
+        messages.push("llvm lowering: enum `" + enum_info.name
+            + "` has no field `"
+            + parse.field
+            + "` on any variant");
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
@@ -302,9 +344,17 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
 
     if selected_variants.length == 0 {
         if expected_type.length > 0 {
-            messages.push("llvm lowering: enum `" + enum_info.name + "` has no field `" + parse.field + "` compatible with expected type `" + expected_type + "`");
+            messages.push("llvm lowering: enum `" + enum_info.name
+                + "` has no field `"
+                + parse.field
+                + "` compatible with expected type `"
+                + expected_type
+                + "`");
         } else {
-            messages.push("llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
+            messages.push("llvm lowering: enum member access for `" + enum_info.name
+                + "."
+                + parse.field
+                + "` uses incompatible field types across variants");
         }
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
@@ -350,7 +400,10 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     }
 
     if !consistent_base {
-        messages.push("llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
+        messages.push("llvm lowering: enum member access for `" + enum_info.name
+            + "."
+            + parse.field
+            + "` uses incompatible field types across variants");
         return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
     }
 
@@ -379,7 +432,10 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             pointer_coercion = true;
             field_type = base_type + "*";
         } else {
-            messages.push("llvm lowering: enum member access for `" + enum_info.name + "." + parse.field + "` uses incompatible field types across variants");
+            messages.push("llvm lowering: enum member access for `" + enum_info.name
+                + "."
+                + parse.field
+                + "` uses incompatible field types across variants");
             return make_expression_result(current_lines, current_temp, null, messages, enum_string_constants);
         }
     }
@@ -389,7 +445,11 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         let alloca_temp = format_temp_name(current_temp);
         current_lines.push("  " + alloca_temp + " = alloca " + enum_info.llvm_name);
         current_temp += 1;
-        current_lines.push("  store " + enum_info.llvm_name + " " + base_operand.value + ", " + enum_info.llvm_name + "* " + alloca_temp);
+        current_lines.push("  store " + enum_info.llvm_name + " " + base_operand.value
+            + ", "
+            + enum_info.llvm_name
+            + "* "
+            + alloca_temp);
         enum_pointer_value = alloca_temp;
     }
 
@@ -406,18 +466,32 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
         if enum_info.max_payload_size > 0 {
             if enum_info.align > enum_info.tag_size { payload_field_index = 2; }
         }
-        current_lines.push("  " + payload_ptr_temp + " = getelementptr inbounds " + enum_info.llvm_name + ", " + enum_info.llvm_name + "* " + enum_pointer_value + ", i32 0, i32 " + number_to_string(payload_field_index));
+        current_lines.push("  " + payload_ptr_temp
+            + " = getelementptr inbounds "
+            + enum_info.llvm_name
+            + ", "
+            + enum_info.llvm_name
+            + "* "
+            + enum_pointer_value
+            + ", i32 0, i32 "
+            + number_to_string(payload_field_index));
         current_temp += 1;
 
         let byte_ptr_temp = format_temp_name(current_temp);
-        current_lines.push("  " + byte_ptr_temp + " = bitcast ptr " + payload_ptr_temp + " to ptr");
+        current_lines.push("  " + byte_ptr_temp + " = bitcast ptr "
+            + payload_ptr_temp
+            + " to ptr");
         current_temp += 1;
 
         let field_offset_in_payload = field_info.offset - variant_info.offset;
         let mut field_ptr_temp: string = byte_ptr_temp;
         if field_offset_in_payload > 0 {
             let offset_ptr_temp = format_temp_name(current_temp);
-            current_lines.push("  " + offset_ptr_temp + " = getelementptr inbounds i8, ptr " + byte_ptr_temp + ", i64 " + number_to_string(field_offset_in_payload));
+            current_lines.push("  " + offset_ptr_temp
+                + " = getelementptr inbounds i8, ptr "
+                + byte_ptr_temp
+                + ", i64 "
+                + number_to_string(field_offset_in_payload));
             current_temp += 1;
             field_ptr_temp = offset_ptr_temp;
         }
@@ -436,28 +510,46 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             storage_type = mapped;
         }
         let typed_ptr_temp = format_temp_name(current_temp);
-        current_lines.push("  " + typed_ptr_temp + " = bitcast ptr " + field_ptr_temp + " to ptr");
+        current_lines.push("  " + typed_ptr_temp + " = bitcast ptr "
+            + field_ptr_temp
+            + " to ptr");
         current_temp += 1;
 
         let mut value_temp: string = typed_ptr_temp;
         if pointer_coercion {
             if ends_with_pointer_suffix(storage_type) {
                 value_temp = format_temp_name(current_temp);
-                current_lines.push("  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp);
+                current_lines.push("  " + value_temp + " = load " + storage_type
+                    + ", ptr "
+                    + typed_ptr_temp);
                 current_temp += 1;
             }
         } else {
             value_temp = format_temp_name(current_temp);
-            current_lines.push("  " + value_temp + " = load " + storage_type + ", ptr " + typed_ptr_temp);
+            current_lines.push("  " + value_temp + " = load " + storage_type
+                + ", ptr "
+                + typed_ptr_temp);
             current_temp += 1;
         }
 
         let compare_temp = format_temp_name(current_temp);
-        current_lines.push("  " + compare_temp + " = icmp eq " + tag_operand.llvm_type + " " + tag_operand.value + ", " + number_to_string(variant_info.tag));
+        current_lines.push("  " + compare_temp + " = icmp eq " + tag_operand.llvm_type
+            + " "
+            + tag_operand.value
+            + ", "
+            + number_to_string(variant_info.tag));
         current_temp += 1;
 
         let select_temp = format_temp_name(current_temp);
-        current_lines.push("  " + select_temp + " = select i1 " + compare_temp + ", " + field_type + " " + value_temp + ", " + field_type + " " + current_value_text);
+        current_lines.push("  " + select_temp + " = select i1 " + compare_temp
+            + ", "
+            + field_type
+            + " "
+            + value_temp
+            + ", "
+            + field_type
+            + " "
+            + current_value_text);
         current_temp += 1;
 
         current_value_text = select_temp;
@@ -498,11 +590,21 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                         let struct_inner = trim_text(substring(inner_type, 1, inner_type.length - 1));
                         if contains_text(struct_inner, ", i64") {
                             let loaded_array = format_temp_name(current_temp);
-                            current_lines.push("  " + loaded_array + " = load " + inner_type + ", " + base_operand.llvm_type + " " + base_operand.value);
+                            current_lines.push("  " + loaded_array + " = load "
+                                + inner_type
+                                + ", "
+                                + base_operand.llvm_type
+                                + " "
+                                + base_operand.value);
                             current_temp += 1;
 
                             let length_temp = format_temp_name(current_temp);
-                            current_lines.push("  " + length_temp + " = extractvalue " + inner_type + " " + loaded_array + ", 1");
+                            current_lines.push("  " + length_temp
+                                + " = extractvalue "
+                                + inner_type
+                                + " "
+                                + loaded_array
+                                + ", 1");
                             current_temp += 1;
 
                             let operand = LLVMOperand {
@@ -526,7 +628,10 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     if parse.field == "length" {
         if base_operand.llvm_type == "i8*" {
             let length_temp = format_temp_name(current_temp);
-            current_lines.push("  " + length_temp + " = call i64 @sailfin_runtime_string_length(i8* " + base_operand.value + ")");
+            current_lines.push("  " + length_temp
+                + " = call i64 @sailfin_runtime_string_length(i8* "
+                + base_operand.value
+                + ")");
             current_temp += 1;
             let operand = LLVMOperand {
                 llvm_type: "i64",
@@ -567,7 +672,9 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
 
             if base_type_trimmed != "double" {
                 if base_type_trimmed != "i8" {
-                    diagnostics.push("llvm lowering: member access base `" + base_type_trimmed + "` lacks struct metadata");
+                    diagnostics.push("llvm lowering: member access base `"
+                        + base_type_trimmed
+                        + "` lacks struct metadata");
                 }
             }
             return ExpressionResult {
@@ -593,7 +700,9 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             }
             if base_type_trimmed != "double" {
                 if base_type_trimmed != "i8" {
-                    diagnostics.push("llvm lowering: member access base `" + base_type_trimmed + "` lacks struct metadata");
+                    diagnostics.push("llvm lowering: member access base `"
+                        + base_type_trimmed
+                        + "` lacks struct metadata");
                 }
             }
             return ExpressionResult {
@@ -609,7 +718,10 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     let info = struct_info;
     let field_info = find_struct_field_info(info, parse.field);
     if field_info == null {
-        diagnostics.push("llvm lowering: struct `" + info.name + "` has no field `" + parse.field + "`");
+        diagnostics.push("llvm lowering: struct `" + info.name
+            + "` has no field `"
+            + parse.field
+            + "`");
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -622,10 +734,20 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     if pointer_available {
         let struct_type = info.llvm_name;
         let gep_name = format_temp_name(current_temp);
-        current_lines.push("  " + gep_name + " = getelementptr " + struct_type + ", " + struct_type + "* " + pointer_operand.value + ", i32 0, i32 " + number_to_string(field_info.index));
+        current_lines.push("  " + gep_name + " = getelementptr " + struct_type
+            + ", "
+            + struct_type
+            + "* "
+            + pointer_operand.value
+            + ", i32 0, i32 "
+            + number_to_string(field_info.index));
         current_temp += 1;
         let load_name = format_temp_name(current_temp);
-        current_lines.push("  " + load_name + " = load " + field_info.llvm_type + ", " + field_info.llvm_type + "* " + gep_name);
+        current_lines.push("  " + load_name + " = load " + field_info.llvm_type
+            + ", "
+            + field_info.llvm_type
+            + "* "
+            + gep_name);
         current_temp += 1;
 
         if field_info.llvm_type == "i8*" {
@@ -634,7 +756,11 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 let enum_info = resolve_enum_info_for_literal(context, base_type);
                 if enum_info != null {
                     let cast_name = format_temp_name(current_temp);
-                    current_lines.push("  " + cast_name + " = bitcast i8* " + load_name + " to " + enum_info.llvm_name + "*");
+                    current_lines.push("  " + cast_name + " = bitcast i8* "
+                        + load_name
+                        + " to "
+                        + enum_info.llvm_name
+                        + "*");
                     current_temp += 1;
                     let typed_operand = LLVMOperand {
                         llvm_type: enum_info.llvm_name + "*",
@@ -652,7 +778,11 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 let struct_info_candidate = find_struct_info_by_name(context, base_type);
                 if struct_info_candidate != null {
                     let cast_name = format_temp_name(current_temp);
-                    current_lines.push("  " + cast_name + " = bitcast i8* " + load_name + " to " + struct_info_candidate.llvm_name + "*");
+                    current_lines.push("  " + cast_name + " = bitcast i8* "
+                        + load_name
+                        + " to "
+                        + struct_info_candidate.llvm_name
+                        + "*");
                     current_temp += 1;
                     let typed_operand = LLVMOperand {
                         llvm_type: struct_info_candidate.llvm_name + "*",
@@ -683,7 +813,11 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     }
 
     let extract_name = format_temp_name(current_temp);
-    current_lines.push("  " + extract_name + " = extractvalue " + info.llvm_name + " " + base_operand.value + ", " + number_to_string(field_info.index));
+    current_lines.push("  " + extract_name + " = extractvalue " + info.llvm_name
+        + " "
+        + base_operand.value
+        + ", "
+        + number_to_string(field_info.index));
     current_temp += 1;
 
     if field_info.llvm_type == "i8*" {
@@ -692,7 +826,11 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             let enum_info = resolve_enum_info_for_literal(context, base_type);
             if enum_info != null {
                 let cast_name = format_temp_name(current_temp);
-                current_lines.push("  " + cast_name + " = bitcast i8* " + extract_name + " to " + enum_info.llvm_name + "*");
+                current_lines.push("  " + cast_name + " = bitcast i8* "
+                    + extract_name
+                    + " to "
+                    + enum_info.llvm_name
+                    + "*");
                 current_temp += 1;
                 let typed_operand = LLVMOperand {
                     llvm_type: enum_info.llvm_name + "*",
@@ -710,7 +848,11 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             let struct_info_candidate = find_struct_info_by_name(context, base_type);
             if struct_info_candidate != null {
                 let cast_name = format_temp_name(current_temp);
-                current_lines.push("  " + cast_name + " = bitcast i8* " + extract_name + " to " + struct_info_candidate.llvm_name + "*");
+                current_lines.push("  " + cast_name + " = bitcast i8* "
+                    + extract_name
+                    + " to "
+                    + struct_info_candidate.llvm_name
+                    + "*");
                 current_temp += 1;
                 let typed_operand = LLVMOperand {
                     llvm_type: struct_info_candidate.llvm_name + "*",
@@ -815,7 +957,8 @@ fn try_file_based_struct_field_access(base_name: string, field_name: string, bas
                             _sf_line = substring(_sf_raw, _sf_pos, _sf_raw.length);
                             _sf_pos = _sf_raw.length;
                         } else {
-                            _sf_line = substring(_sf_raw, _sf_pos, _sf_pos + _sf_nl);
+                            _sf_line = substring(_sf_raw, _sf_pos, _sf_pos
+                                + _sf_nl);
                             _sf_pos = _sf_pos + _sf_nl + 1;
                         }
                         if _sf_line.length == 0 { continue; }
@@ -904,14 +1047,26 @@ fn try_file_based_struct_field_access(base_name: string, field_name: string, bas
     let mut _out_lines = lines;
     let mut _out_temp = temp_index;
     let cast_temp = format_temp_name(_out_temp);
-    _out_lines.push("  " + cast_temp + " = bitcast i8* " + base_operand.value + " to " + _si_llvm + "*");
+    _out_lines.push("  " + cast_temp + " = bitcast i8* " + base_operand.value
+        + " to "
+        + _si_llvm
+        + "*");
     _out_temp += 1;
     let gep_temp = format_temp_name(_out_temp);
-    _out_lines.push("  " + gep_temp + " = getelementptr inbounds " + _si_llvm + ", " + _si_llvm + "* " + cast_temp + ", i32 0, i32 " + number_to_string(_si_field_idx));
+    _out_lines.push("  " + gep_temp + " = getelementptr inbounds " + _si_llvm
+        + ", "
+        + _si_llvm
+        + "* "
+        + cast_temp
+        + ", i32 0, i32 "
+        + number_to_string(_si_field_idx));
     _out_temp += 1;
     let load_temp = format_temp_name(_out_temp);
     let field_ptr_type = _si_field_type + "*";
-    _out_lines.push("  " + load_temp + " = load " + _si_field_type + ", " + field_ptr_type + " " + gep_temp);
+    _out_lines.push("  " + load_temp + " = load " + _si_field_type + ", "
+        + field_ptr_type
+        + " "
+        + gep_temp);
     _out_temp += 1;
     let operand = LLVMOperand { llvm_type: _si_field_type, value: load_temp };
     return ExpressionResult {
@@ -927,5 +1082,5 @@ export {
     lower_member_access,
     lower_dynamic_member_access,
     lower_enum_member_access,
-    lower_runtime_global_reference,
+    lower_runtime_global_reference
 };

@@ -2,23 +2,19 @@
 //
 // Ownership/borrow analysis helpers extracted from core.sfn.
 import { NativeSourceSpan } from "../../../native_ir";
-import { is_simple_identifier, } from "../../expressions_helpers";
-import { is_copy_type, } from "../../type_mapping";
+import { is_simple_identifier } from "../../expressions_helpers";
+import { is_copy_type } from "../../type_mapping";
 import {
     LocalBinding,
     OwnershipAnalysis,
     OwnershipConsumption,
     OwnershipInfo,
-    ParameterBinding,
+    ParameterBinding
 } from "../../types";
-import {
-    append_string,
-    number_to_string,
-    trim_text,
-} from "../../utils";
-import { find_parameter_binding, } from "./core_bindings";
-import { parse_borrow_expression, } from "./core_parsing";
-import { find_local_binding, } from "./core_scopes";
+import { append_string, number_to_string, trim_text } from "../../utils";
+import { find_parameter_binding } from "./core_bindings";
+import { parse_borrow_expression } from "./core_parsing";
+import { find_local_binding } from "./core_scopes";
 
 fn analyze_value_ownership_impl(initializer: string?, span: NativeSourceSpan?, locals: LocalBinding[], bindings: ParameterBinding[]) -> OwnershipAnalysis {
     if initializer == null {
@@ -140,7 +136,8 @@ fn format_use_after_move_message(name: string, span: NativeSourceSpan?) -> strin
     if span == null {
         return "llvm lowering: use-after-move of `" + name + "`";
     }
-    return "llvm lowering: use-after-move of `" + name + "` at " + format_span_location(span);
+    return "llvm lowering: use-after-move of `" + name + "` at "
+        + format_span_location(span);
 }
 
 fn format_span_location(span: NativeSourceSpan) -> string {
@@ -185,13 +182,37 @@ fn detect_borrow_conflicts_impl(ownership: OwnershipInfo?, locals: LocalBinding[
                 if existing_base == base {
                     if ownership.mutable {
                         if details.mutable {
-                            diagnostics.push("llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: mutable borrow `"
+                                + binding_name
+                                + "` conflicts with active mutable borrow `"
+                                + existing.name
+                                + "` of `"
+                                + base
+                                + "` in `"
+                                + function_name
+                                + "`");
                         } else {
-                            diagnostics.push("llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: mutable borrow `"
+                                + binding_name
+                                + "` conflicts with active shared borrow `"
+                                + existing.name
+                                + "` of `"
+                                + base
+                                + "` in `"
+                                + function_name
+                                + "`");
                         }
                     } else {
                         if details.mutable {
-                            diagnostics.push("llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: shared borrow `"
+                                + binding_name
+                                + "` conflicts with active mutable borrow `"
+                                + existing.name
+                                + "` of `"
+                                + base
+                                + "` in `"
+                                + function_name
+                                + "`");
                         }
                     }
                 }

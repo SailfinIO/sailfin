@@ -19,7 +19,7 @@ export {
     format_test_name,
     trim_block_body,
     collapse_whitespace,
-    tokens_to_source,
+    tokens_to_source
 };
 
 import { char_at, substring } from "./string_utils";

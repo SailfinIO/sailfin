@@ -219,7 +219,7 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
                         leading_comments: prev_ft.leading_comments,
                         trailing_comment: updated_trailing,
                         blank_lines_before: prev_ft.blank_lines_before,
-                        role: prev_ft.role,
+                        role: prev_ft.role
                     };
                     i += 1;
                     continue;
@@ -256,7 +256,7 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
         let role = _classify_role(token, prev_lex, next_lex);
 
         result.push(FmtToken {
-            token: token, leading_comments: pending_comments, trailing_comment: [], blank_lines_before: blank_lines, role: role,
+                token: token, leading_comments: pending_comments, trailing_comment: [], blank_lines_before: blank_lines, role: role
         });
 
         last_structural_line = token.line;
@@ -283,7 +283,7 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
                 leading_comments: last_ft.leading_comments,
                 trailing_comment: merged,
                 blank_lines_before: last_ft.blank_lines_before,
-                role: last_ft.role,
+                role: last_ft.role
             };
         }
     }
@@ -569,8 +569,17 @@ fn _measure_inline_block(fmt_tokens: FmtToken[], start: number) -> number {
 
         has_content = true;
         if strings_equal(role, "separator") {
-            items += 1;
-            length = length + lex.length + 1;
+            // Don't count trailing comma (separator before block_close) as an item or length
+            let is_trailing = false;
+            if j + 1 < fmt_tokens.length {
+                if strings_equal(fmt_tokens[j + 1].role, "block_close") {
+                    is_trailing = true;
+                }
+            }
+            if !is_trailing {
+                items += 1;
+                length = length + lex.length + 1;
+            }
         } else if strings_equal(role, "colon") {
             has_colon = true;
             length = length + lex.length + 1;
@@ -734,6 +743,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
     let mut paren_depth = 0;
     let mut inline_block_depth = 0;
     let mut inline_block_end = -1;
+    let mut wrap_operators = false;
 
     let mut i = 0;
     loop {
@@ -753,9 +763,8 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                         let item_count = measure % 1000;
                         // Current line position (bounded scan, O(1))
                         let cur_line_pos = _line_pos_from_end(out);
-                        if !wraps_at_threshold(item_count, cur_line_pos + line_len) {
-                            inline_block_depth = 1;
-                        }
+                        if !wraps_at_threshold(item_count, cur_line_pos
+                            + line_len) { inline_block_depth = 1; }
                     }
                 }
             } else { inline_block_depth += 1; }
@@ -890,7 +899,53 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                     at_line_start = false;
                 } else {
                     let needs_sp = _needs_space_before(role, prev_role, lexeme, prev_lexeme);
-                    if needs_sp { out = out + " "; }
+                    if needs_sp {
+                        // Expression wrapping: break before binary operator when line gets long
+                        let mut should_wrap = false;
+                        if strings_equal(role, "operator") {
+                            // Only wrap at chain-style operators, not arithmetic
+                            let is_wrappable = false;
+                            if strings_equal(lexeme, "+") {
+                                is_wrappable = true;
+                            }
+                            if strings_equal(lexeme, "&&") {
+                                is_wrappable = true;
+                            }
+                            if strings_equal(lexeme, "||") {
+                                is_wrappable = true;
+                            }
+                            if is_wrappable {
+                                if wrap_operators { should_wrap = true; } else {
+                                    let cur_pos = _line_pos_from_end(out);
+                                    let mut next_len = 0;
+                                    if i + 1 < fmt_tokens.length {
+                                        next_len = fmt_tokens[i + 1].token.lexeme.length;
+                                    }
+                                    if cur_pos + 1 + lexeme.length + 1
+                                    + next_len > 80 { should_wrap = true; }
+                                }
+                            }
+                        }
+                        if should_wrap {
+                            out = out + "\n" + _emit_indent(indent + 1);
+                            wrap_operators = true;
+                        } else { out = out + " "; }
+                    }
+                }
+            }
+        }
+
+        // ── Skip trailing comma before closing delimiter ──
+        // Strips trailing commas in single-line imports: { a, b, } → { a, b }
+        if strings_equal(role, "separator") {
+            if i + 1 < fmt_tokens.length {
+                let next_role = fmt_tokens[i + 1].role;
+                if strings_equal(next_role, "block_close") {
+                    // Skip this comma — don't emit it
+                    prev_role = role;
+                    prev_lexeme = lexeme;
+                    i += 1;
+                    continue;
                 }
             }
         }
@@ -924,6 +979,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             if strings_equal(role, "semicolon") {
                 out = out + "\n";
                 at_line_start = true;
+                wrap_operators = false;
             }
 
             // ── Newline after comma at statement level ──
@@ -934,6 +990,10 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                 }
             }
         }
+
+        // Reset expression wrapping at block boundaries
+        if strings_equal(role, "block_open") { wrap_operators = false; }
+        if strings_equal(role, "block_close") { wrap_operators = false; }
 
         prev_role = role;
         prev_lexeme = lexeme;
@@ -989,7 +1049,7 @@ fn _find_import_spans(fmt_tokens: FmtToken[]) -> ImportSpan[] {
                     let path = _extract_import_path(fmt_tokens, start, j);
                     let grp = import_group(path);
                     spans.push(ImportSpan {
-                        start: start, end: j, path: path, group: grp
+                            start: start, end: j, path: path, group: grp
                     });
                     i = j + 1;
                     break;
@@ -1216,10 +1276,10 @@ fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: num
                     kind: orig.token.kind,
                     lexeme: sorted_names[name_idx],
                     line: orig.token.line,
-                    column: orig.token.column,
+                    column: orig.token.column
                 };
                 result.push(FmtToken {
-                    token: new_token, leading_comments: orig.leading_comments, trailing_comment: orig.trailing_comment, blank_lines_before: orig.blank_lines_before, role: orig.role,
+                        token: new_token, leading_comments: orig.leading_comments, trailing_comment: orig.trailing_comment, blank_lines_before: orig.blank_lines_before, role: orig.role
                 });
                 name_idx += 1;
             }
@@ -1287,20 +1347,20 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
             if span.group != prev_group {
                 // Add blank_lines_before to the first token of this import
                 result.push(FmtToken {
-                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 1, role: first_ft.role,
+                        token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 1, role: first_ft.role
                 });
                 result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
             } else {
                 // Same group: clear any blank lines between
                 result.push(FmtToken {
-                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 0, role: first_ft.role,
+                        token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 0, role: first_ft.role
                 });
                 result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
             }
         } else {
             // First emitted import: use header comments/blanks
             result.push(FmtToken {
-                token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: use_blanks, role: first_ft.role,
+                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: use_blanks, role: first_ft.role
             });
             result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
         }

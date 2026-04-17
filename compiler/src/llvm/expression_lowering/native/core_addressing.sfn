@@ -1,18 +1,18 @@
 // compiler/src/llvm/expression_lowering/native/core_addressing.sfn
 //
 // Addressing helpers for Stage2 expression lowering.
-import { is_simple_identifier, } from "../../expressions_helpers";
-import { empty_string_constant_set, } from "../../strings";
+import { is_simple_identifier } from "../../expressions_helpers";
+import { empty_string_constant_set } from "../../strings";
 import {
     ExpressionResult,
     LLVMOperand,
     LocalBinding,
     ParameterBinding,
-    RawAddressParseResult,
+    RawAddressParseResult
 } from "../../types";
-import { append_string, trim_text, } from "../../utils";
-import { find_parameter_binding, } from "./core_bindings";
-import { find_local_binding, } from "./core_scopes";
+import { append_string, trim_text } from "../../utils";
+import { find_parameter_binding } from "./core_bindings";
+import { find_local_binding } from "./core_scopes";
 
 fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[]) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
@@ -28,7 +28,9 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
     }
     let target = trim_text(parse.target);
     if !is_simple_identifier(target) {
-        diagnostics.push("llvm lowering: &raw currently supports only simple identifiers (got `" + target + "`)");
+        diagnostics.push("llvm lowering: &raw currently supports only simple identifiers (got `"
+            + target
+            + "`)");
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -53,7 +55,9 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
     }
     let param = find_parameter_binding(bindings, target);
     if param != null {
-        diagnostics.push("llvm lowering: cannot take raw address of parameter `" + target + "` yet");
+        diagnostics.push("llvm lowering: cannot take raw address of parameter `"
+            + target
+            + "` yet");
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -62,7 +66,8 @@ fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: Paramete
             string_constants: empty_constants
         };
     }
-    diagnostics.push("llvm lowering: &raw target `" + target + "` is not a local");
+    diagnostics.push("llvm lowering: &raw target `" + target
+        + "` is not a local");
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,

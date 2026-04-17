@@ -10,17 +10,17 @@ import { NativeBinding, NativeFunction } from "../../native_ir";
 import { lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { append_local_binding, find_local_binding } from "../expression_lowering/native/core_scopes";
-import { default_return_literal, } from "../expressions_helpers";
-import { is_string_literal, normalise_number_literal, } from "../expressions_literals";
-import { format_root_scope_id, } from "../lifetime";
-import { empty_string_constant_set, merge_string_constants, } from "../strings";
-import { map_local_type, } from "../type_mapping";
+import { default_return_literal } from "../expressions_helpers";
+import { is_string_literal, normalise_number_literal } from "../expressions_literals";
+import { format_root_scope_id } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import { map_local_type } from "../type_mapping";
 import {
     LocalBinding,
     ModuleGlobalLoweringResult,
     ParameterBinding,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     append_string,
@@ -30,7 +30,7 @@ import {
     matches_case_insensitive,
     number_to_string,
     sanitize_symbol,
-    trim_text,
+    trim_text
 } from "../utils";
 
 fn module_global_symbol(name: string) -> string {
@@ -115,15 +115,27 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
                 let str_content = _strip_string_quotes(str_val);
                 let str_len = str_content.length + 1;
                 let str_const_name = "@str.global." + sanitize_symbol(name);
-                let line1 = str_const_name + " = private constant [" + number_to_string(str_len) + " x i8] c\"" + str_content + "\\00\"";
-                let line2 = global_name + " = internal global i8* getelementptr ([" + number_to_string(str_len) + " x i8], [" + number_to_string(str_len) + " x i8]* " + str_const_name + ", i32 0, i32 0)";
+                let line1 = str_const_name + " = private constant ["
+                    + number_to_string(str_len)
+                    + " x i8] c\""
+                    + str_content
+                    + "\\00\"";
+                let line2 = global_name
+                    + " = internal global i8* getelementptr (["
+                    + number_to_string(str_len)
+                    + " x i8], ["
+                    + number_to_string(str_len)
+                    + " x i8]* "
+                    + str_const_name
+                    + ", i32 0, i32 0)";
                 _append_to_file("build/sailfin/.module_globals_preamble", line1);
                 _append_to_file("build/sailfin/.module_globals_preamble", line2);
                 string_handled = true;
             }
         }
         if !string_handled {
-            _append_to_file("build/sailfin/.module_globals_preamble", global_name + " = internal global i8* null");
+            _append_to_file("build/sailfin/.module_globals_preamble", global_name
+                + " = internal global i8* null");
             if binding.value != null { needs_init_result = "init"; }
         }
     } else {
@@ -160,11 +172,18 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
             }
             if !is_const { needs_init_result = "init"; }
         }
-        _append_to_file("build/sailfin/.module_globals_preamble", global_name + " = internal global " + llvm_type + " " + initializer_text);
+        _append_to_file("build/sailfin/.module_globals_preamble", global_name
+            + " = internal global "
+            + llvm_type
+            + " "
+            + initializer_text);
     }
 
     // Append local binding entry (tab-separated)
-    let local_line = name + "\t" + global_name + "\t" + llvm_type + "\t" + effective_type_annotation + "\t" + scope_id;
+    let local_line = name + "\t" + global_name + "\t" + llvm_type + "\t"
+        + effective_type_annotation
+        + "\t"
+        + scope_id;
     _append_to_file("build/sailfin/.module_globals_locals", local_line);
 
     return needs_init_result;
@@ -196,7 +215,7 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
             needs_init_call: false,
             locals: [],
             string_constants: empty_string_constant_set(),
-            diagnostics: [],
+            diagnostics: []
         };
     }
 
@@ -239,6 +258,6 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
         needs_init_call: needs_init,
         locals: [],
         string_constants: empty_string_constant_set(),
-        diagnostics: [],
+        diagnostics: []
     };
 }

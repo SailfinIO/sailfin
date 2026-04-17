@@ -17,16 +17,16 @@ import {
     NativeStructField,
     NativeStructLayout,
     NativeStructLayoutField,
-    StructParseResult,
+    StructParseResult
 } from "./native_ir";
-import { parse_instruction, } from "./native_ir_parser_instructions";
+import { parse_instruction } from "./native_ir_parser_instructions";
 import {
     parse_decimal_number,
     parse_enum_layout_header,
     parse_enum_payload_layout,
     parse_enum_variant_layout,
     parse_struct_layout_field,
-    parse_struct_layout_header,
+    parse_struct_layout_header
 } from "./native_ir_utils_layout";
 import {
     parse_decorator_name,
@@ -35,7 +35,7 @@ import {
     parse_function_name,
     parse_parameter_entry,
     parse_struct_field_line,
-    parse_struct_header,
+    parse_struct_header
 } from "./native_ir_utils_parse";
 import {
     index_of,
@@ -44,7 +44,7 @@ import {
     starts_with,
     strip_generics,
     strip_prefix,
-    trim_text,
+    trim_text
 } from "./native_ir_utils_text";
 import { char_code, substring } from "./string_utils";
 
@@ -65,7 +65,7 @@ fn parse_source_span(text: string) -> NativeSourceSpan? {
         start_line: start_line.value,
         start_column: start_column.value,
         end_line: end_line.value,
-        end_column: end_column.value,
+        end_column: end_column.value
     };
 }
 
@@ -80,7 +80,7 @@ fn append_parameter(function: NativeFunction, parameter: NativeParameter) -> Nat
         effects: function.effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
-        instructions: function.instructions,
+        instructions: function.instructions
     };
 }
 
@@ -95,7 +95,7 @@ fn append_instruction(function: NativeFunction, instruction: NativeInstruction) 
         effects: function.effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
-        instructions: instructions,
+        instructions: instructions
     };
 }
 
@@ -110,7 +110,7 @@ fn apply_meta(function: NativeFunction, entry: string) -> NativeFunction {
             effects: function.effects,
             decorators: function.decorators,
             is_extern: true,
-            instructions: function.instructions,
+            instructions: function.instructions
         };
     }
     if trimmed == "unsafe" { return function; }
@@ -135,7 +135,7 @@ fn update_function_meta(function: NativeFunction, return_type: string, effects: 
         effects: effects,
         decorators: function.decorators,
         is_extern: function.is_extern,
-        instructions: function.instructions,
+        instructions: function.instructions
     };
 }
 
@@ -167,7 +167,7 @@ fn update_enum_variant_fields(variants: NativeEnumVariantLayout[], index: number
                 offset: variant.offset,
                 size: variant.size,
                 align: variant.align,
-                fields: append_struct_layout_field(variant.fields, field),
+                fields: append_struct_layout_field(variant.fields, field)
             };
             result.push(updated);
         } else { result.push(variants[current_index]); }
@@ -230,7 +230,7 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                     layout: struct_layout_value
                 },
                 next_index: index,
-                diagnostics: diagnostics,
+                diagnostics: diagnostics
             };
         }
         let raw_line = trim_text(lines[index]);
@@ -269,7 +269,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             if starts_with(raw_line, ".param ") {
                 let parameter = parse_parameter_entry(strip_prefix(raw_line, ".param "), method_pending_span);
                 if parameter == null {
-                    diagnostics.push("unable to parse method parameter: " + raw_line);
+                    diagnostics.push("unable to parse method parameter: "
+                        + raw_line);
                 } else {
                     current_method = append_parameter(current_method, parameter);
                 }
@@ -278,14 +279,16 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                 continue;
             }
             if starts_with(raw_line, ".method ") {
-                diagnostics.push("nested method declaration in struct " + struct_name);
+                diagnostics.push("nested method declaration in struct "
+                    + struct_name);
                 index += 1;
                 continue;
             }
             if starts_with(raw_line, ".span ") {
                 let parsed_method_span = parse_source_span(strip_prefix(raw_line, ".span "));
                 if parsed_method_span == null {
-                    diagnostics.push("unable to parse span metadata: " + raw_line);
+                    diagnostics.push("unable to parse span metadata: "
+                        + raw_line);
                 } else { method_pending_span = parsed_method_span; }
                 index += 1;
                 continue;
@@ -293,7 +296,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             if starts_with(raw_line, ".init-span ") {
                 let parsed_method_init_span = parse_source_span(strip_prefix(raw_line, ".init-span "));
                 if parsed_method_init_span == null {
-                    diagnostics.push("unable to parse initializer span metadata: " + raw_line);
+                    diagnostics.push("unable to parse initializer span metadata: "
+                        + raw_line);
                 } else { method_pending_value_span = parsed_method_init_span; }
                 index += 1;
                 continue;
@@ -322,7 +326,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             if method_instruction_result.value_span_consumed {
                 method_pending_value_span = null;
             } else if method_pending_value_span != null {
-                diagnostics.push("unused initializer span metadata before: " + raw_line);
+                diagnostics.push("unused initializer span metadata before: "
+                    + raw_line);
                 method_pending_value_span = null;
             }
             let mut instruction_index: number = 0;
@@ -348,7 +353,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                 }
                 if header_result.success {
                     if struct_layout_header_success {
-                        diagnostics.push("duplicate struct layout header in " + struct_name);
+                        diagnostics.push("duplicate struct layout header in "
+                            + struct_name);
                     } else {
                         struct_layout_size = header_result.size;
                         struct_layout_align = header_result.align;
@@ -378,7 +384,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                     }
                     if header_result.success {
                         if struct_layout_header_success {
-                            diagnostics.push("duplicate struct layout header in " + struct_name);
+                            diagnostics.push("duplicate struct layout header in "
+                                + struct_name);
                         } else {
                             struct_layout_size = header_result.size;
                             struct_layout_align = header_result.align;
@@ -400,7 +407,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                     struct_layout_fields.push(field_result.field);
                     if !struct_layout_header_success {
                         if !struct_layout_reported_missing_header {
-                            diagnostics.push("struct " + struct_name + " layout field encountered before layout header");
+                            diagnostics.push("struct " + struct_name
+                                + " layout field encountered before layout header");
                             struct_layout_reported_missing_header = true;
                         }
                     }
@@ -426,11 +434,13 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
         }
         if starts_with(raw_line, ".decorator") {
             if current_method != null {
-                diagnostics.push("decorator directive encountered inside method body: " + raw_line);
+                diagnostics.push("decorator directive encountered inside method body: "
+                    + raw_line);
             } else {
                 let decorator_name = parse_decorator_name(raw_line);
                 if decorator_name == null {
-                    diagnostics.push("unable to parse decorator directive: " + raw_line);
+                    diagnostics.push("unable to parse decorator directive: "
+                        + raw_line);
                 } else { method_pending_decorators.push(decorator_name); }
             }
             index += 1;
@@ -438,7 +448,8 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
         }
         if starts_with(raw_line, ".method ") {
             if current_method != null {
-                diagnostics.push("nested method declaration in struct " + struct_name);
+                diagnostics.push("nested method declaration in struct "
+                    + struct_name);
             }
             let header = strip_prefix(raw_line, ".method ");
             let trimmed = trim_text(header);
@@ -453,7 +464,7 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                 effects: [],
                 decorators: method_pending_decorators,
                 is_extern: false,
-                instructions: [],
+                instructions: []
             };
             method_pending_decorators = [];
             method_pending_span = null;
@@ -483,7 +494,7 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             layout: struct_layout_value
         },
         next_index: index,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -527,7 +538,7 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                     tag_type: enum_layout_tag_type,
                     tag_size: enum_layout_tag_size,
                     tag_align: enum_layout_tag_align,
-                    variants: enum_layout_variants,
+                    variants: enum_layout_variants
                 };
             }
             return EnumParseResult {
@@ -537,7 +548,7 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                     layout: enum_layout_value
                 },
                 next_index: index,
-                diagnostics: diagnostics,
+                diagnostics: diagnostics
             };
         }
         let raw_line = trim_text(lines[index]);
@@ -564,7 +575,8 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                 }
                 if header_result.success {
                     if enum_layout_header_success {
-                        diagnostics.push("duplicate enum layout header in " + enum_name);
+                        diagnostics.push("duplicate enum layout header in "
+                            + enum_name);
                     } else {
                         enum_layout_size = header_result.size;
                         enum_layout_align = header_result.align;
@@ -605,13 +617,17 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                 if variant_result.success {
                     let existing_index = find_enum_variant_layout(enum_layout_variants, variant_result.variant.name);
                     if existing_index >= 0 {
-                        diagnostics.push("duplicate enum layout variant `" + variant_result.variant.name + "` in " + enum_name);
+                        diagnostics.push("duplicate enum layout variant `"
+                            + variant_result.variant.name
+                            + "` in "
+                            + enum_name);
                     } else {
                         enum_layout_variants.push(variant_result.variant);
                     }
                     if !enum_layout_header_success {
                         if !enum_layout_reported_missing_header {
-                            diagnostics.push("enum " + enum_name + " layout variant encountered before layout header");
+                            diagnostics.push("enum " + enum_name
+                                + " layout variant encountered before layout header");
                             enum_layout_reported_missing_header = true;
                         }
                     }
@@ -630,13 +646,17 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                 if payload_result.success {
                     let target_index = find_enum_variant_layout(enum_layout_variants, payload_result.variant_name);
                     if target_index < 0 {
-                        diagnostics.push("enum " + enum_name + " layout payload references unknown variant `" + payload_result.variant_name + "`");
+                        diagnostics.push("enum " + enum_name
+                            + " layout payload references unknown variant `"
+                            + payload_result.variant_name
+                            + "`");
                     } else {
                         enum_layout_variants = update_enum_variant_fields(enum_layout_variants, target_index, payload_result.field);
                     }
                     if !enum_layout_header_success {
                         if !enum_layout_reported_missing_header {
-                            diagnostics.push("enum " + enum_name + " layout payload encountered before layout header");
+                            diagnostics.push("enum " + enum_name
+                                + " layout payload encountered before layout header");
                             enum_layout_reported_missing_header = true;
                         }
                     }
@@ -672,7 +692,7 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
             tag_type: enum_layout_tag_type,
             tag_size: enum_layout_tag_size,
             tag_align: enum_layout_tag_align,
-            variants: enum_layout_variants,
+            variants: enum_layout_variants
         };
     }
 
@@ -683,7 +703,7 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
             layout: enum_layout_value
         },
         next_index: index,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 

@@ -7,13 +7,13 @@ import {
     Expression,
     Parameter,
     Statement,
-    TypeAnnotation,
+    TypeAnnotation
 } from "./ast";
 import {
     collapse_whitespace,
     join_with_separator,
     quote_string,
-    trim_text,
+    trim_text
 } from "./emitter_sailfin_utils";
 
 fn format_optional_expression(expression: Expression?) -> string {

@@ -7,7 +7,7 @@ import {
     EnumVariant,
     FieldDeclaration,
     Program,
-    Statement,
+    Statement
 } from "./ast";
 import {
     LayoutContext,
@@ -27,7 +27,7 @@ import {
     number_to_string,
     state_emit_line,
     strip_optional_suffix,
-    trim_text,
+    trim_text
 } from "./emit_native_state";
 
 // ── Layout-specific data structures ──────────────────────────────────
@@ -127,7 +127,10 @@ fn compute_struct_layout_lines(context: LayoutContext, struct_name: string, fiel
     let inputs = convert_struct_fields(fields);
     let layout = calculate_record_layout(context, inputs, "struct", struct_name, append_string([], struct_name));
     let mut lines: string[] = [];
-    lines.push(".layout struct name=" + struct_name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align));
+    lines.push(".layout struct name=" + struct_name + " size="
+        + number_to_string(layout.size)
+        + " align="
+        + number_to_string(layout.align));
     let mut index: number = 0;
     loop {
         if index >= layout.fields.length { break; }
@@ -160,8 +163,13 @@ fn compute_enum_layout_lines(context: LayoutContext, statement: Statement) -> La
     }
     let layout = infer_enum_aggregate_layout(context, statement.name, layout_variants, append_string([], statement.name));
     let mut lines: string[] = [];
-    let mut header: string = ".layout enum name=" + statement.name + " size=" + number_to_string(layout.size) + " align=" + number_to_string(layout.align);
-    header = header + " tag_type=i32 tag_size=" + number_to_string(layout.tag_size) + " tag_align=" + number_to_string(layout.tag_align);
+    let mut header: string = ".layout enum name=" + statement.name + " size="
+        + number_to_string(layout.size)
+        + " align="
+        + number_to_string(layout.align);
+    header = header + " tag_type=i32 tag_size=" + number_to_string(layout.tag_size)
+        + " tag_align="
+        + number_to_string(layout.tag_align);
     lines.push(header);
     let mut variant_index: number = 0;
     loop {
@@ -177,7 +185,9 @@ fn compute_enum_layout_lines(context: LayoutContext, statement: Statement) -> La
         loop {
             if payload_index >= descriptor.fields.length { break; }
             let payload = descriptor.fields[payload_index];
-            let mut payload_line: string = ".layout payload " + descriptor.name + "." + payload.name;
+            let mut payload_line: string = ".layout payload " + descriptor.name
+                + "."
+                + payload.name;
             payload_line = payload_line + " type=" + payload.type_annotation;
             payload_line = payload_line + " offset=" + number_to_string(payload.offset);
             payload_line = payload_line + " size=" + number_to_string(payload.size);
@@ -226,7 +236,7 @@ fn infer_enum_aggregate_layout(context: LayoutContext, enum_name: string, varian
                 type_annotation: field.type_annotation,
                 offset: payload_offset + field.offset,
                 size: field.size,
-                align: field.align,
+                align: field.align
             };
             absolute_fields = append_struct_field_layout(absolute_fields, absolute);
             field_index += 1;
@@ -234,7 +244,7 @@ fn infer_enum_aggregate_layout(context: LayoutContext, enum_name: string, varian
         let variant_size = payload_offset + record.size;
         if variant_size > union_size { union_size = variant_size; }
         descriptors = append_enum_variant_layout(descriptors, EnumVariantLayoutDescriptor {
-            name: variant.name, tag: index, offset: payload_offset, size: record.size, align: variant_align, fields: absolute_fields,
+            name: variant.name, tag: index, offset: payload_offset, size: record.size, align: variant_align, fields: absolute_fields
         });
         index += 1;
     }
@@ -252,7 +262,7 @@ fn infer_enum_aggregate_layout(context: LayoutContext, enum_name: string, varian
         tag_size: tag_size,
         tag_align: tag_align,
         variants: descriptors,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -280,7 +290,7 @@ fn calculate_record_layout(context: LayoutContext, inputs: LayoutFieldInput[], c
             type_annotation: trim_text(input.type_annotation),
             offset: offset,
             size: layout.size,
-            align: field_align,
+            align: field_align
         };
         fields = append_struct_field_layout(fields, descriptor);
         offset += layout.size;
@@ -304,7 +314,11 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
     let trimmed = trim_text(type_annotation);
     let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
-        diagnostics.push("native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` missing type annotation; defaulting to pointer layout");
+        diagnostics.push("native layout: " + container_kind + " `"
+            + container_name
+            + "` field `"
+            + field_name
+            + "` missing type annotation; defaulting to pointer layout");
         return TypeLayoutInfo {
             size: 8,
             align: 8,
@@ -370,7 +384,11 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
     if is_optional_annotation(trimmed) {
         let inner = trim_text(strip_optional_suffix(trimmed));
         if inner.length == 0 {
-            diagnostics.push("native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` optional type missing inner annotation; defaulting to pointer layout");
+            diagnostics.push("native layout: " + container_kind + " `"
+                + container_name
+                + "` field `"
+                + field_name
+                + "` optional type missing inner annotation; defaulting to pointer layout");
         }
         return TypeLayoutInfo {
             size: 8,
@@ -431,7 +449,12 @@ fn analyze_type_layout(context: LayoutContext, visiting: string[], type_annotati
             diagnostics: diagnostics
         };
     }
-    diagnostics.push("native layout: " + container_kind + " `" + container_name + "` field `" + field_name + "` uses unsupported type `" + trimmed + "`; defaulting to pointer layout");
+    diagnostics.push("native layout: " + container_kind + " `" + container_name
+        + "` field `"
+        + field_name
+        + "` uses unsupported type `"
+        + trimmed
+        + "`; defaulting to pointer layout");
     return TypeLayoutInfo { size: 8, align: 8, diagnostics: diagnostics };
 }
 
@@ -691,7 +714,7 @@ fn generate_layout_manifest(program: Program, context: LayoutContext) -> NativeA
     return NativeArtifact {
         name: "module.layout-manifest",
         format: "sailfin-layout-manifest",
-        contents: builder_to_string(builder),
+        contents: builder_to_string(builder)
     };
 }
 

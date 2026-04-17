@@ -3,11 +3,11 @@
 // Control flow handler: loop instruction lowering (infinite loops with break/continue).
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
-import { lower_expression, } from "../expression_lowering/native/core";
-import { find_local_binding, } from "../expressions_bindings";
-import { format_temp_name, } from "../expressions_helpers";
-import { make_child_scope_id, } from "../lifetime";
-import { empty_string_constant_set, merge_string_constants, } from "../strings";
+import { lower_expression } from "../expression_lowering/native/core";
+import { find_local_binding } from "../expressions_bindings";
+import { format_temp_name } from "../expressions_helpers";
+import { make_child_scope_id } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,
     LLVMOperand,
@@ -18,26 +18,18 @@ import {
     LoopStructure,
     ParameterBinding,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../types";
-import {
-    extend_string_array,
-    number_to_string,
-    trim_text,
-} from "../utils";
-import { lower_instruction_range, } from "./instructions";
+import { extend_string_array, number_to_string, trim_text } from "../utils";
+import { lower_instruction_range } from "./instructions";
 import {
     allocate_block_label,
     lower_condition_to_i1,
-    sanitize_if_condition_text,
+    sanitize_if_condition_text
 } from "./instructions_condition";
-import {
-    _parse_int_from_string,
-    extend_lifetime_regions,
-    extend_mutations,
-} from "./instructions_helpers";
-import { get_instruction_condition, get_instruction_tag, } from "./lowering_native_helpers";
-import { collect_mutation_names, find_mutation_for_name, } from "./phi";
+import { _parse_int_from_string, extend_lifetime_regions, extend_mutations } from "./instructions_helpers";
+import { get_instruction_condition, get_instruction_tag } from "./lowering_native_helpers";
+import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 fn collect_loop_structure(instructions: NativeInstruction[], start_index: number, end: number, function_name: string) -> LoopStructure {
     let mut diagnostics: string[] = [];
@@ -50,12 +42,14 @@ fn collect_loop_structure(instructions: NativeInstruction[], start_index: number
     loop {
         if index >= limit {
             if limit <= 0 { limit = 0; }
-            diagnostics.push("llvm lowering: unterminated `.loop` in `" + function_name + "`");
+            diagnostics.push("llvm lowering: unterminated `.loop` in `"
+                + function_name
+                + "`");
             return LoopStructure {
                 body_start: body_start,
                 body_end: limit,
                 next_index: limit - 1,
-                diagnostics: diagnostics,
+                diagnostics: diagnostics
             };
         }
         let _loop_tag = get_instruction_tag(instructions, index);
@@ -77,7 +71,7 @@ fn collect_loop_structure(instructions: NativeInstruction[], start_index: number
                     body_start: body_start,
                     body_end: body_end,
                     next_index: index,
-                    diagnostics: diagnostics,
+                    diagnostics: diagnostics
                 };
             }
             if depth > 0 { depth -= 1; }
@@ -91,7 +85,7 @@ fn collect_loop_structure(instructions: NativeInstruction[], start_index: number
         body_start: body_start,
         body_end: body_end,
         next_index: limit,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -133,11 +127,18 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
 
     let debug_loop = fs.exists("build/sailfin/.trace_lowering");
     if debug_loop {
-        print.err("emit-llvm: lower_loop start fn=" + function.name + " start_index=" + number_to_string(start_index) + " end=" + number_to_string(end));
+        print.err("emit-llvm: lower_loop start fn=" + function.name
+            + " start_index="
+            + number_to_string(start_index)
+            + " end="
+            + number_to_string(end));
     }
     let structure = collect_loop_structure(function.instructions, start_index, end, function.name);
     if debug_loop {
-        print.err("emit-llvm: lower_loop after_collect body_start=" + number_to_string(structure.body_start) + " body_end=" + number_to_string(structure.body_end));
+        print.err("emit-llvm: lower_loop after_collect body_start="
+            + number_to_string(structure.body_start)
+            + " body_end="
+            + number_to_string(structure.body_end));
     }
 
     // Detect exit-condition-at-top pattern: loop { if COND { break; } ... }
@@ -151,15 +152,18 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
     // first instruction. If it's non-empty, we have the pattern.
     let mut loop_exit_condition: string = "";
     if structure.body_start + 2 <= structure.body_end {
-        let second_body_tag = get_instruction_tag(function.instructions, structure.body_start + 1);
+        let second_body_tag = get_instruction_tag(function.instructions, structure.body_start
+            + 1);
         if second_body_tag == 10 {
-            let third_body_tag = get_instruction_tag(function.instructions, structure.body_start + 2);
+            let third_body_tag = get_instruction_tag(function.instructions, structure.body_start
+                + 2);
             if third_body_tag == 5 {
                 let raw_exit_cond = trim_text(get_instruction_condition(function.instructions, structure.body_start));
                 if raw_exit_cond.length > 0 {
                     loop_exit_condition = sanitize_if_condition_text(raw_exit_cond);
                     if debug_loop {
-                        print.err("emit-llvm: lower_loop detected exit condition: " + loop_exit_condition);
+                        print.err("emit-llvm: lower_loop detected exit condition: "
+                            + loop_exit_condition);
                     }
                 }
             }
@@ -181,7 +185,11 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
         let local = current_locals[preload_index];
         let preload_temp = format_temp_name(current_temp);
         current_temp += 1;
-        let preload_line = "  " + preload_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+        let preload_line = "  " + preload_temp + " = load " + local.llvm_type
+            + ", "
+            + local.llvm_type
+            + "* "
+            + local.pointer;
         current_lines.push(preload_line);
         preloaded_locals.push(preload_temp);
         preload_index += 1;
@@ -231,7 +239,11 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
     // Lower the body to discover mutations
     let body_scope_id = make_child_scope_id(scope_id, body_label);
     if debug_loop {
-        print.err("emit-llvm: lower_loop pre_body_lir fn=" + function.name + " body_start=" + number_to_string(body_start_effective) + " body_end=" + number_to_string(structure.body_end));
+        print.err("emit-llvm: lower_loop pre_body_lir fn=" + function.name
+            + " body_start="
+            + number_to_string(body_start_effective)
+            + " body_end="
+            + number_to_string(structure.body_end));
     }
 
     // Lower the body, resuming after premature block terminators.
@@ -259,7 +271,8 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
         if _body_cursor >= structure.body_end { break; }
         if _body_terminated { break; }
         if _body_resume_iters > 20 { break; }
-        let _seg_result = lower_instruction_range(function, _body_cursor, structure.body_end, llvm_return, _body_bindings, _body_locals, _body_allocas, [], _body_temp, _body_blkctr, _body_nextloc, _body_nextreg, functions, stacked, context, body_scope_id, scope_depth + 1, _body_active_label);
+        let _seg_result = lower_instruction_range(function, _body_cursor, structure.body_end, llvm_return, _body_bindings, _body_locals, _body_allocas, [], _body_temp, _body_blkctr, _body_nextloc, _body_nextreg, functions, stacked, context, body_scope_id, scope_depth
+            + 1, _body_active_label);
         // Merge segment results
         _body_lines = extend_string_array(_body_lines, _seg_result.lines);
         _body_allocas = _seg_result.allocas;
@@ -331,7 +344,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
         next_lifetime_region_id: _body_nextreg,
         next_index: _body_cursor,
         mutations: _body_mutations,
-        string_constants: _body_string_constants,
+        string_constants: _body_string_constants
     };
     // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
     // Use _read_ipc_int_min to prevent the counter from going backwards.
@@ -340,7 +353,9 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
     let _br_lp_nextloc = _body_nextloc;
     let _br_lp_nextreg = _body_nextreg;
     if debug_loop {
-        print.err("emit-llvm: lower_loop post_body_lir fn=" + function.name + " body_lines=" + number_to_string(body_result.lines.length));
+        print.err("emit-llvm: lower_loop post_body_lir fn=" + function.name
+            + " body_lines="
+            + number_to_string(body_result.lines.length));
     }
 
     let mut _ci7: number = 0;
@@ -399,7 +414,11 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
         }
 
         if header_cond.operand != null {
-            current_lines.push("  br i1 " + header_cond.operand.value + ", label %" + exit_label + ", label %" + body_label);
+            current_lines.push("  br i1 " + header_cond.operand.value
+                + ", label %"
+                + exit_label
+                + ", label %"
+                + body_label);
         } else {
             // Condition lowering failed — fall back to unconditional
             current_lines.push("  br label %" + body_label);
@@ -432,7 +451,11 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
         if local != null {
             let load_temp = format_temp_name(current_temp);
             current_temp += 1;
-            let load_line = "  " + load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer;
+            let load_line = "  " + load_temp + " = load " + local.llvm_type
+                + ", "
+                + local.llvm_type
+                + "* "
+                + local.pointer;
             current_lines.push(load_line);
             latch_loads.push(load_temp);
         } else { latch_loads.push(""); }
@@ -472,10 +495,24 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
                         let phi_temp = format_temp_name(current_temp);
                         current_temp += 1;
 
-                        let phi_line = "  " + phi_temp + " = phi " + local.llvm_type + " [ " + preload_value + ", %" + current_label + " ], [ " + latch_value + ", %" + latch_label + " ]";
+                        let phi_line = "  " + phi_temp + " = phi " + local.llvm_type
+                            + " [ "
+                            + preload_value
+                            + ", %"
+                            + current_label
+                            + " ], [ "
+                            + latch_value
+                            + ", %"
+                            + latch_label
+                            + " ]";
                         header_phis.push(phi_line);
 
-                        let store_line = "  store " + local.llvm_type + " " + phi_temp + ", " + local.llvm_type + "* " + local.pointer;
+                        let store_line = "  store " + local.llvm_type + " "
+                            + phi_temp
+                            + ", "
+                            + local.llvm_type
+                            + "* "
+                            + local.pointer;
                         phi_stores.push(store_line);
                     }
                 }
@@ -523,7 +560,11 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
         if local != null {
             let exit_load_temp = format_temp_name(current_temp);
             current_temp += 1;
-            current_lines.push("  " + exit_load_temp + " = load " + local.llvm_type + ", " + local.llvm_type + "* " + local.pointer);
+            current_lines.push("  " + exit_load_temp + " = load " + local.llvm_type
+                + ", "
+                + local.llvm_type
+                + "* "
+                + local.pointer);
             exit_loads.push(exit_load_temp);
         } else { exit_loads.push(""); }
         exit_load_idx += 1;
@@ -556,7 +597,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
                 llvm_type: llvm_type,
                 value_name: exit_value,
                 span: original_span,
-                originating_label: exit_label,
+                originating_label: exit_label
             };
             exit_mutations.push(exit_mutation);
         }
@@ -603,6 +644,6 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
         next_lifetime_region_id: current_next_region,
         next_index: structure.next_index + 1,
         mutations: collected_mutations,
-        string_constants: collected_string_constants,
+        string_constants: collected_string_constants
     };
 }

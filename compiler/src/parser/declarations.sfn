@@ -18,7 +18,7 @@ import {
     Statement,
     TypeAnnotation,
     TypeParameter,
-    decorator_names,
+    decorator_names
 } from "../ast";
 import { infer_effects } from "../decorator_semantics";
 import {
@@ -56,7 +56,7 @@ import {
     symbol_matches,
     token_slice,
     tokens_to_text,
-    trim_token_edges,
+    trim_token_edges
 } from "./token_utils";
 import {
     BlockParseResult,
@@ -75,14 +75,14 @@ import {
     StatementParseResult,
     StructFieldParseResult,
     TypeParameterParseResult,
-    TypeSeparatorParseResult,
+    TypeSeparatorParseResult
 } from "./types";
 import {
     looks_like_number,
     normalize_test_name,
     strip_loose_quotes,
     strip_surrounding_quotes,
-    trim_text,
+    trim_text
 } from "./utils";
 
 // ============================================================================
@@ -414,7 +414,7 @@ fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
     return ImplementsParseResult {
         parser: current,
         types: implements_types,
-        found: true,
+        found: true
     };
 }
 
@@ -509,7 +509,7 @@ fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
         type_annotation: type_annotation,
         default_value: default_value,
         mutable: is_mutable,
-        span: span,
+        span: span
     };
     return ParameterParseResult { parser: parser, parameter: parameter };
 }
@@ -554,7 +554,7 @@ fn parse_import(initial_parser: Parser) -> StatementParseResult {
 
     let statement = Statement.ImportDeclaration {
         import_specifiers: import_specifiers,
-        source: source,
+        source: source
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -596,7 +596,7 @@ fn parse_export(initial_parser: Parser) -> StatementParseResult {
 
     let statement = Statement.ExportDeclaration {
         export_specifiers: export_specifiers,
-        source: source,
+        source: source
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -785,7 +785,7 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
         type_annotation: type_annotation,
         initializer: initializer,
         span: span,
-        initializer_span: initializer_span,
+        initializer_span: initializer_span
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -876,13 +876,13 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
-        name_span: name_span,
+        name_span: name_span
     };
 
     let statement = Statement.FunctionDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -961,13 +961,13 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
-        name_span: name_span,
+        name_span: name_span
     };
 
     let statement = Statement.ExternFunctionDeclaration {
         signature: signature,
         unsafe: is_unsafe,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1047,7 +1047,7 @@ fn parse_struct(initial_parser: Parser, decorators: Decorator[]) -> StatementPar
         implements_types: implements_types,
         fields: fields,
         methods: methods,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1114,13 +1114,13 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
         name: name,
         type_annotation: TypeAnnotation { text: type_text },
         mutable: is_mutable,
-        name_span: name_span,
+        name_span: name_span
     };
 
     return StructFieldParseResult {
         parser: current,
         field: field,
-        success: true,
+        success: true
     };
 }
 
@@ -1199,19 +1199,19 @@ fn parse_struct_method(parser: Parser, decorators: Decorator[]) -> MethodParseRe
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
-        name_span: name_span,
+        name_span: name_span
     };
 
     let method = MethodDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators,
+        decorators: decorators
     };
 
     return MethodParseResult {
         parser: current,
         method: method,
-        success: true,
+        success: true
     };
 }
 
@@ -1269,7 +1269,7 @@ fn parse_enum(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
         name_span: name_span,
         type_parameters: type_parameters,
         variants: variants,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1327,13 +1327,13 @@ fn parse_enum_variant(parser: Parser) -> EnumVariantParseResult {
     let variant = EnumVariant {
         name: name,
         fields: fields,
-        name_span: name_span,
+        name_span: name_span
     };
 
     return EnumVariantParseResult {
         parser: current,
         variant: variant,
-        success: true,
+        success: true
     };
 }
 
@@ -1408,13 +1408,13 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
         name: name,
         type_annotation: TypeAnnotation { text: type_text },
         mutable: is_mutable,
-        name_span: name_span,
+        name_span: name_span
     };
 
     return StructFieldParseResult {
         parser: current,
         field: field,
-        success: true,
+        success: true
     };
 }
 
@@ -1477,7 +1477,7 @@ fn parse_interface(initial_parser: Parser, decorators: Decorator[]) -> Statement
         name_span: name_span,
         type_parameters: type_parameters,
         members: members,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1562,13 +1562,13 @@ fn parse_interface_member(parser: Parser, decorators: Decorator[]) -> InterfaceM
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
-        name_span: name_span,
+        name_span: name_span
     };
 
     return InterfaceMemberParseResult {
         parser: current,
         signature: signature,
-        success: true,
+        success: true
     };
 }
 
@@ -1616,7 +1616,7 @@ fn parse_type_alias(initial_parser: Parser, decorators: Decorator[]) -> Statemen
         name_span: name_span,
         type_parameters: type_parameters,
         aliased_type: aliased_type,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1690,7 +1690,7 @@ fn parse_model(initial_parser: Parser, decorators: Decorator[]) -> StatementPars
         model_type: model_type,
         properties: properties,
         effects: effects,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1737,7 +1737,7 @@ fn parse_model_property(parser: Parser) -> ModelPropertyParseResult {
     let property = ModelProperty {
         name: name,
         value: value_expression,
-        span: source_span_from_tokens([name_token]),
+        span: source_span_from_tokens([name_token])
     };
 
     return ModelPropertyParseResult {
@@ -1815,13 +1815,13 @@ fn parse_pipeline(initial_parser: Parser, decorators: Decorator[]) -> StatementP
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: [],
-        name_span: name_span,
+        name_span: name_span
     };
 
     let statement = Statement.PipelineDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1890,13 +1890,13 @@ fn parse_tool(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: [],
-        name_span: name_span,
+        name_span: name_span
     };
 
     let statement = Statement.ToolDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1931,7 +1931,7 @@ fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
         name_span: name_span,
         body: body,
         effects: inferred_effects,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }

@@ -9,7 +9,7 @@ import {
     handle_login_command,
     handle_publish_command,
     handle_test_command,
-    inline_imports_for_source,
+    inline_imports_for_source
 } from "./cli_commands";
 import {
     compile_to_llvm_file_with_module,
@@ -19,12 +19,36 @@ import {
     compile_to_sailfin,
     module_name_from_path,
     number_to_string,
-    write_native_text_file_with_module,
+    write_native_text_file_with_module
 } from "./main";
 import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
-    return "usage:\n" + "  sfn --version\n" + "  sfn version\n" + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n" + "  sfn build [-o OUTPUT] <file.sfn>\n" + "  sfn run <file.sfn>\n" + "  sfn run <exe>\n" + "  sfn test [path]\n" + "  sfn fmt [--check] [--write] [path...]\n" + "  sfn init\n" + "  sfn publish [path]\n" + "  sfn add [--dev] <capsule>\n" + "  sfn login [token]\n" + "\n" + "examples:\n" + "  sfn emit llvm examples/basics/hello-world.sfn\n" + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n" + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n" + "  sfn run examples/basics/hello-world.sfn\n" + "  sfn run build/native/examples/hello\n" + "  sfn test .\n" + "  sfn init\n" + "  sfn publish [path]\n" + "  sfn add http\n" + "  sfn add --dev test\n" + "  sfn add acme/router\n" + "  sfn login\n";
+    return "usage:\n" + "  sfn --version\n" + "  sfn version\n"
+        + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n"
+        + "  sfn build [-o OUTPUT] <file.sfn>\n"
+        + "  sfn run <file.sfn>\n"
+        + "  sfn run <exe>\n"
+        + "  sfn test [path]\n"
+        + "  sfn fmt [--check] [--write] [path...]\n"
+        + "  sfn init\n"
+        + "  sfn publish [path]\n"
+        + "  sfn add [--dev] <capsule>\n"
+        + "  sfn login [token]\n"
+        + "\n"
+        + "examples:\n"
+        + "  sfn emit llvm examples/basics/hello-world.sfn\n"
+        + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n"
+        + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n"
+        + "  sfn run examples/basics/hello-world.sfn\n"
+        + "  sfn run build/native/examples/hello\n"
+        + "  sfn test .\n"
+        + "  sfn init\n"
+        + "  sfn publish [path]\n"
+        + "  sfn add http\n"
+        + "  sfn add --dev test\n"
+        + "  sfn add acme/router\n"
+        + "  sfn login\n";
 }
 
 fn _ends_with(value: string, suffix: string) -> boolean {
@@ -142,7 +166,8 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     let globals_obj = _path_join(out_dir, "runtime_globals" + opt_flag + ".o");
 
     if !fs.exists(runtime_obj) {
-        let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I" + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
+        let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
+            + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 { return ["", "", ""]; }
     }
 
@@ -241,7 +266,8 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         let mut arg_index_trace: number = 0;
         loop {
             if arg_index_trace >= args.length { break; }
-            print.err("cli: args[" + number_to_string(arg_index_trace) + "]=" + args[arg_index_trace]);
+            print.err("cli: args[" + number_to_string(arg_index_trace) + "]="
+                + args[arg_index_trace]);
             arg_index_trace += 1;
         }
         if args.length > 0 {

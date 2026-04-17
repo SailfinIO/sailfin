@@ -141,7 +141,8 @@ fn format_interface_signature(interface_definition: Statement) -> string {
         _pi += 1;
     }
     if names.length == 0 { return interface_definition.name; }
-    return interface_definition.name + "<" + join_with_separator(names, ", ") + ">";
+    return interface_definition.name + "<" + join_with_separator(names, ", ")
+        + ">";
 }
 
 fn join_with_separator(items: string[], separator: string) -> string {
@@ -386,25 +387,25 @@ fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, sp
     if has_symbol(bindings, name) {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))],
+            diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))]
         };
     }
 
     let updated = append_symbol(bindings, name, kind, span);
-    return ScopeResult { bindings: updated, diagnostics: [], };
+    return ScopeResult { bindings: updated, diagnostics: [] };
 }
 
 fn register_symbol(name: string, kind: string, span: SourceSpan?, existing: SymbolEntry[]) -> SymbolCollectionResult {
     if has_symbol(existing, name) {
         return SymbolCollectionResult {
             symbols: existing,
-            diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))],
+            diagnostics: [make_duplicate_symbol_diagnostic(name, kind, token_from_name(name, span))]
         };
     }
 
     return SymbolCollectionResult {
         symbols: append_symbol(existing, name, kind, span),
-        diagnostics: [],
+        diagnostics: []
     };
 }
 
@@ -438,24 +439,33 @@ fn has_symbol(symbols: SymbolEntry[], name: string) -> boolean {
 fn make_interface_missing_type_arguments_diagnostic(struct_name: string, interface_name: string, interface_signature: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
-        message: "struct " + struct_name + " implements " + interface_name + " but must specify " + interface_signature + " type arguments",
-        primary: null,
+        message: "struct " + struct_name + " implements " + interface_name
+            + " but must specify "
+            + interface_signature
+            + " type arguments",
+        primary: null
     };
 }
 
 fn make_interface_type_argument_mismatch_diagnostic(struct_name: string, annotation_text: string, interface_signature: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
-        message: "struct " + struct_name + " implements " + annotation_text + " but must match " + interface_signature + " type arguments",
-        primary: null,
+        message: "struct " + struct_name + " implements " + annotation_text
+            + " but must match "
+            + interface_signature
+            + " type arguments",
+        primary: null
     };
 }
 
 fn make_interface_no_type_arguments_diagnostic(struct_name: string, annotation_text: string, interface_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
-        message: "struct " + struct_name + " implements " + annotation_text + " but " + interface_name + " does not take type arguments",
-        primary: null,
+        message: "struct " + struct_name + " implements " + annotation_text
+            + " but "
+            + interface_name
+            + " does not take type arguments",
+        primary: null
     };
 }
 
@@ -465,7 +475,7 @@ fn token_from_name(name: string, span: SourceSpan?) -> Token? {
         kind: TokenKind.Identifier(),
         lexeme: name,
         line: span.start_line,
-        column: span.start_column,
+        column: span.start_column
     };
 }
 
@@ -473,15 +483,18 @@ fn make_duplicate_symbol_diagnostic(name: string, kind: string, token: Token?) -
     return Diagnostic {
         code: "E0001",
         message: "duplicate " + kind + " `" + name + "` declared",
-        primary: token,
+        primary: token
     };
 }
 
 fn make_missing_interface_member_diagnostic(struct_name: string, interface_name: string, member_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0301",
-        message: "struct " + struct_name + " implements " + interface_name + " but is missing member `" + member_name + "`",
-        primary: null,
+        message: "struct " + struct_name + " implements " + interface_name
+            + " but is missing member `"
+            + member_name
+            + "`",
+        primary: null
     };
 }
 

@@ -6,8 +6,8 @@ import { NativeFunction } from "../../../native_ir";
 import { find_last_index_of_char, substring } from "../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import { merge_string_constants } from "../../strings";
-import { find_interface_info_by_name, } from "../../type_context_queries";
-import { ends_with_pointer_suffix, strip_pointer_suffix, } from "../../type_mapping";
+import { find_interface_info_by_name } from "../../type_context_queries";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
     ExpressionResult,
     LLVMOperand,
@@ -16,23 +16,23 @@ import {
     ParameterBinding,
     RuntimeHelperDescriptor,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../../types";
 import {
     extend_string_array,
     join_with_separator,
     number_to_string,
     starts_with,
-    trim_text,
+    trim_text
 } from "../../utils";
 import {
     array_pointer_element_type,
     lower_array_push_in_place,
-    lower_struct_array_concat,
+    lower_struct_array_concat
 } from "../arrays";
 import { coerce_operand_to_type } from "./core_operands";
-import { parse_member_access, } from "./core_parse";
-import { find_local_binding, } from "./core_scopes";
+import { parse_member_access } from "./core_parse";
+import { find_local_binding } from "./core_scopes";
 import { sanitize_symbol } from "./core_text";
 
 fn _write_emission_result_lines(result_lines: string[], result_temp: number) -> void ![io] {
@@ -49,7 +49,11 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
 
     // Coerce operands to expected parameter types
     if _trace_ccl {
-        print.err("call_lowering: pre-coerce operands=" + number_to_string(operands.length) + " expected_params=" + number_to_string(expected_params.length) + " llvm_return=" + llvm_return);
+        print.err("call_lowering: pre-coerce operands=" + number_to_string(operands.length)
+            + " expected_params="
+            + number_to_string(expected_params.length)
+            + " llvm_return="
+            + llvm_return);
     }
     let mut coerced_operands: LLVMOperand[] = [];
     let mut index: number = 0;
@@ -57,7 +61,11 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         if index >= operands.length { break; }
         let operand = operands[index];
         if _trace_ccl {
-            print.err("call_lowering: coerce-loop idx=" + number_to_string(index) + " operand_type=" + operand.llvm_type + " operand_value=" + operand.value);
+            print.err("call_lowering: coerce-loop idx=" + number_to_string(index)
+                + " operand_type="
+                + operand.llvm_type
+                + " operand_value="
+                + operand.value);
         }
         let mut target_type: string = "";
         if expected_params.length > index {
@@ -75,7 +83,11 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
             if coerced.operand == null {
-                result_diagnostics.push("llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`: passing original operand");
+                result_diagnostics.push("llvm lowering: unable to coerce argument "
+                    + number_to_string(index)
+                    + " for call to `"
+                    + trimmed_target
+                    + "`: passing original operand");
                 coerced_operands.push(operand);
             } else { coerced_operands.push(coerced.operand); }
         }
@@ -87,7 +99,9 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     }
 
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-A is_concat=" + number_to_string(0) + " is_push=" + number_to_string(0));
+        print.err("call_lowering: checkpoint-A is_concat=" + number_to_string(0)
+            + " is_push="
+            + number_to_string(0));
     }
 
     // Array concat inline lowering
@@ -171,7 +185,13 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                         let push_receiver_name = trim_text(method_parse.base);
                         let push_receiver_local = find_local_binding(locals, push_receiver_name);
                         if push_receiver_local != null {
-                            result_lines.push("  store " + push_result.operand.llvm_type + " " + push_result.operand.value + ", " + push_result.operand.llvm_type + "* " + push_receiver_local.pointer);
+                            result_lines.push("  store " + push_result.operand.llvm_type
+                                + " "
+                                + push_result.operand.value
+                                + ", "
+                                + push_result.operand.llvm_type
+                                + "* "
+                                + push_receiver_local.pointer);
                         }
                     }
                 }
@@ -199,7 +219,8 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     }
 
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-B fn_entry_null=" + number_to_string(0));
+        print.err("call_lowering: checkpoint-B fn_entry_null="
+            + number_to_string(0));
     }
     let mut _if56: boolean = false;
     if function_entry != null { _if56 = true; }
@@ -209,7 +230,11 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     }
     if _if56 {
         if expected_params.length != final_operands.length {
-            result_diagnostics.push("llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(final_operands.length));
+            result_diagnostics.push("llvm lowering: call to `" + trimmed_target
+                + "` expected "
+                + number_to_string(expected_params.length)
+                + " arguments but received "
+                + number_to_string(final_operands.length));
         }
     }
 
@@ -253,11 +278,19 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
 
                 let data_ptr_temp = "%t" + number_to_string(result_temp);
                 result_temp += 1;
-                result_lines.push("  " + data_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 0");
+                result_lines.push("  " + data_ptr_temp + " = extractvalue "
+                    + trait_object.llvm_type
+                    + " "
+                    + trait_object.value
+                    + ", 0");
 
                 let vtable_ptr_temp = "%t" + number_to_string(result_temp);
                 result_temp += 1;
-                result_lines.push("  " + vtable_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 1");
+                result_lines.push("  " + vtable_ptr_temp + " = extractvalue "
+                    + trait_object.llvm_type
+                    + " "
+                    + trait_object.value
+                    + ", 1");
 
                 let interface_info3 = find_interface_info_by_name(context, interface_name);
                 if interface_info3 != null {
@@ -283,23 +316,37 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                             arg_idx += 1;
                         }
                         let fp_params = join_with_separator(fp_param_types, ", ");
-                        let function_type = llvm_return + " (" + fp_params + ")*";
+                        let function_type = llvm_return + " (" + fp_params
+                            + ")*";
 
                         let vtable_slots_temp = "%t" + number_to_string(result_temp);
                         result_temp += 1;
-                        result_lines.push("  " + vtable_slots_temp + " = bitcast i8* " + vtable_ptr_temp + " to i8**");
+                        result_lines.push("  " + vtable_slots_temp
+                            + " = bitcast i8* "
+                            + vtable_ptr_temp
+                            + " to i8**");
 
                         let slot_ptr_temp = "%t" + number_to_string(result_temp);
                         result_temp += 1;
-                        result_lines.push("  " + slot_ptr_temp + " = getelementptr i8*, i8** " + vtable_slots_temp + ", i64 " + number_to_string(method_index));
+                        result_lines.push("  " + slot_ptr_temp
+                            + " = getelementptr i8*, i8** "
+                            + vtable_slots_temp
+                            + ", i64 "
+                            + number_to_string(method_index));
 
                         let raw_ptr_temp = "%t" + number_to_string(result_temp);
                         result_temp += 1;
-                        result_lines.push("  " + raw_ptr_temp + " = load i8*, i8** " + slot_ptr_temp);
+                        result_lines.push("  " + raw_ptr_temp
+                            + " = load i8*, i8** "
+                            + slot_ptr_temp);
 
                         let method_ptr_temp = "%t" + number_to_string(result_temp);
                         result_temp += 1;
-                        result_lines.push("  " + method_ptr_temp + " = bitcast i8* " + raw_ptr_temp + " to " + function_type);
+                        result_lines.push("  " + method_ptr_temp
+                            + " = bitcast i8* "
+                            + raw_ptr_temp
+                            + " to "
+                            + function_type);
 
                         let mut call_args: string[] = ["i8* " + data_ptr_temp];
                         arg_idx = 1;
@@ -311,7 +358,10 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                         let call_arg_text = join_with_separator(call_args, ", ");
 
                         if llvm_return == "void" {
-                            result_lines.push("  call void " + method_ptr_temp + "(" + call_arg_text + ")");
+                            result_lines.push("  call void " + method_ptr_temp
+                                + "("
+                                + call_arg_text
+                                + ")");
                             return ExpressionResult {
                                 lines: result_lines,
                                 temp_index: result_temp,
@@ -321,7 +371,14 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                             };
                         } else {
                             let result_temp_name = format_temp_name(result_temp);
-                            result_lines.push("  " + result_temp_name + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")");
+                            result_lines.push("  " + result_temp_name
+                                + " = call "
+                                + llvm_return
+                                + " "
+                                + method_ptr_temp
+                                + "("
+                                + call_arg_text
+                                + ")");
                             let result_operand = LLVMOperand {
                                 llvm_type: llvm_return,
                                 value: result_temp_name
@@ -335,22 +392,31 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                             };
                         }
                     } else {
-                        result_diagnostics.push("llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`");
+                        result_diagnostics.push("llvm lowering: method `"
+                            + method_name
+                            + "` not found in interface `"
+                            + interface_name
+                            + "`");
                     }
                 } else {
-                    result_diagnostics.push("llvm lowering: interface `" + interface_name + "` not found for trait dispatch");
+                    result_diagnostics.push("llvm lowering: interface `"
+                        + interface_name
+                        + "` not found for trait dispatch");
                 }
             } else {
                 result_diagnostics.push("llvm lowering: trait dispatch requires at least one argument (the trait object)");
             }
         } else {
-            result_diagnostics.push("llvm lowering: malformed trait dispatch target `" + trimmed_target + "`");
+            result_diagnostics.push("llvm lowering: malformed trait dispatch target `"
+                + trimmed_target
+                + "`");
         }
     }
 
     // Standard function call
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-F call_symbol target=" + trimmed_target);
+        print.err("call_lowering: checkpoint-F call_symbol target="
+            + trimmed_target);
     }
     let mut call_symbol = sanitize_symbol(trimmed_target);
     if helper_descriptor != null { call_symbol = helper_descriptor.symbol; }
@@ -361,10 +427,13 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         if call_symbol == "concat" { call_symbol = "sailfin_runtime_concat"; }
     }
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-G llvm_return=" + llvm_return + " call_symbol=" + call_symbol);
+        print.err("call_lowering: checkpoint-G llvm_return=" + llvm_return
+            + " call_symbol="
+            + call_symbol);
     }
     if llvm_return == "void" {
-        let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
+        let call_line = "  call void @" + call_symbol + "(" + argument_text
+            + ")";
         result_lines.push(call_line);
         if _trace_ccl {
             print.err("call_lowering: checkpoint-H void return");
@@ -385,7 +454,11 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     if _trace_ccl {
         print.err("call_lowering: checkpoint-I temp_name=" + temp_name);
     }
-    let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
+    let call_line = "  " + temp_name + " = call " + llvm_return + " @"
+        + call_symbol
+        + "("
+        + argument_text
+        + ")";
     result_lines.push(call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
     if _trace_ccl {

@@ -21,7 +21,7 @@ import {
     NativeStructLayoutField,
     ParseNativeResult,
     StructLayoutFieldParse,
-    StructLayoutHeaderParse,
+    StructLayoutHeaderParse
 } from "./native_ir";
 import { parse_native_artifact_impl } from "./native_ir_parser";
 import {
@@ -29,14 +29,14 @@ import {
     parse_enum_payload_layout,
     parse_enum_variant_layout,
     parse_struct_layout_field,
-    parse_struct_layout_header,
+    parse_struct_layout_header
 } from "./native_ir_utils_layout";
 import {
     is_trim_char,
     split_lines,
     starts_with,
     strip_prefix,
-    trim_text,
+    trim_text
 } from "./native_ir_utils_text";
 
 fn select_text_artifact(artifacts: NativeArtifact[]) -> NativeArtifact? {
@@ -179,7 +179,7 @@ export {
     parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_artifact_for_import_context,
-    parse_layout_manifest,
+    parse_layout_manifest
 };
 
 fn parse_layout_manifest(text: string) -> LayoutManifest {
@@ -289,8 +289,8 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                     layout: NativeStructLayout {
                         size: header_result.size,
                         align: header_result.align,
-                        fields: fields,
-                    },
+                        fields: fields
+                    }
                 };
                 structs.push(struct_def);
             }
@@ -371,7 +371,7 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                                     offset: last_variant.offset,
                                     size: last_variant.size,
                                     align: last_variant.align,
-                                    fields: updated_fields,
+                                    fields: updated_fields
                                 };
                             }
                         }
@@ -388,8 +388,8 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
                         tag_type: header_result.tag_type,
                         tag_size: header_result.tag_size,
                         tag_align: header_result.tag_align,
-                        variants: variants,
-                    },
+                        variants: variants
+                    }
                 };
                 enums.push(enum_def);
             } else { index += 1; }
@@ -402,6 +402,6 @@ fn parse_layout_manifest(text: string) -> LayoutManifest {
     return LayoutManifest {
         structs: structs,
         enums: enums,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }

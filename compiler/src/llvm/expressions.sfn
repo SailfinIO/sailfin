@@ -15,7 +15,7 @@ export {
     find_parameter_binding,
     mark_parameter_consumed,
     mark_local_consumed,
-    reset_local_consumption,
+    reset_local_consumption
 } from "./expressions_bindings";
 
 // --- Literal detection ---
@@ -30,7 +30,7 @@ export {
     is_string_literal,
     is_character_literal,
     get_character_literal_value,
-    matches_case_insensitive,
+    matches_case_insensitive
 } from "./expressions_literals";
 
 // --- Identifier helpers, type helpers, and formatting ---
@@ -45,7 +45,7 @@ export {
     default_return_literal,
     format_temp_name,
     format_local_pointer_name,
-    format_typed_operand,
+    format_typed_operand
 } from "./expressions_helpers";
 
 // --- Operator finding and separators ---
@@ -54,7 +54,7 @@ export {
     is_binary_minus,
     is_binary_star,
     find_top_level_range_separator,
-    find_top_level_union_separator,
+    find_top_level_union_separator
 } from "./expressions_operators";
 
 // --- Expression parsing ---
@@ -65,5 +65,5 @@ export {
     parse_inline_let_expression,
     parse_ternary_expression,
     parse_raw_address_expression,
-    parse_cast_expression,
+    parse_cast_expression
 } from "./expressions_parsing";

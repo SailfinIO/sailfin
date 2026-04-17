@@ -271,7 +271,9 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
     let inner = substring(text, 1, closing_index);
     let remainder = trim_text(substring(text, closing_index + 1, text.length));
     if remainder.length > 0 {
-        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
+        diagnostics.push("llvm lowering: borrow expression trailing content `"
+            + remainder
+            + "`");
         return BorrowArgumentParse {
             success: false,
             argument: "",
@@ -314,7 +316,9 @@ fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
     }
     let remainder = trim_text(substring(trimmed, index, trimmed.length));
     if remainder.length > 0 {
-        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
+        diagnostics.push("llvm lowering: borrow expression trailing content `"
+            + remainder
+            + "`");
         return BorrowArgumentParse {
             success: false,
             argument: target,
@@ -382,7 +386,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
     if local == null {
         let parameter = find_parameter_binding(bindings, target);
         if parameter == null {
-            diagnostics.push("llvm lowering: borrow target `" + target + "` not found");
+            diagnostics.push("llvm lowering: borrow target `" + target
+                + "` not found");
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
@@ -407,7 +412,11 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             };
         }
 
-        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
+        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `"
+            + target
+            + "` (type `"
+            + parameter.llvm_type
+            + "`)");
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,
@@ -565,7 +574,7 @@ fn update_local_ownership(locals: LocalBinding[], name: string, ownership: Owner
                 ownership: ownership,
                 consumed: entry.consumed,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
+                scope_depth: entry.scope_depth
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -593,13 +602,37 @@ fn detect_borrow_conflicts(ownership: OwnershipInfo?, locals: LocalBinding[], bi
                 if existing_base == base {
                     if ownership.mutable {
                         if details.mutable {
-                            diagnostics.push("llvm lowering: mutable borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: mutable borrow `"
+                                + binding_name
+                                + "` conflicts with active mutable borrow `"
+                                + existing.name
+                                + "` of `"
+                                + base
+                                + "` in `"
+                                + function_name
+                                + "`");
                         } else {
-                            diagnostics.push("llvm lowering: mutable borrow `" + binding_name + "` conflicts with active shared borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: mutable borrow `"
+                                + binding_name
+                                + "` conflicts with active shared borrow `"
+                                + existing.name
+                                + "` of `"
+                                + base
+                                + "` in `"
+                                + function_name
+                                + "`");
                         }
                     } else {
                         if details.mutable {
-                            diagnostics.push("llvm lowering: shared borrow `" + binding_name + "` conflicts with active mutable borrow `" + existing.name + "` of `" + base + "` in `" + function_name + "`");
+                            diagnostics.push("llvm lowering: shared borrow `"
+                                + binding_name
+                                + "` conflicts with active mutable borrow `"
+                                + existing.name
+                                + "` of `"
+                                + base
+                                + "` in `"
+                                + function_name
+                                + "`");
                         }
                     }
                 }
@@ -694,7 +727,7 @@ fn mark_lifetime_region_released(regions: LifetimeRegionMetadata[], region_id: n
                 base_scope_depth: entry.base_scope_depth,
                 end_scope_id: scope_id,
                 end_scope_depth: scope_depth,
-                released: true,
+                released: true
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -729,7 +762,7 @@ fn make_lifetime_region_metadata(id: number, binding: string, ownership: Ownersh
         base_scope_depth: base_scope_depth,
         end_scope_id: "",
         end_scope_depth: 0,
-        released: false,
+        released: false
     };
 }
 
@@ -761,7 +794,11 @@ fn validate_borrow_lifetimes(function: NativeFunction, regions: LifetimeRegionMe
     let mut diagnostics: string[] = [];
     if regions == null { return diagnostics; }
     if regions.length > 1000000 {
-        diagnostics.push("llvm lowering: lifetime region overflow in `" + function.name + "` (len=" + number_to_string(regions.length) + ")");
+        diagnostics.push("llvm lowering: lifetime region overflow in `"
+            + function.name
+            + "` (len="
+            + number_to_string(regions.length)
+            + ")");
         return diagnostics;
     }
     let mut index: number = 0;
@@ -790,7 +827,15 @@ fn validate_borrow_lifetimes(function: NativeFunction, regions: LifetimeRegionMe
             if region.start_span != null {
                 location = " at " + format_span_location(region.start_span);
             }
-            diagnostics.push("llvm lowering: borrow `" + region.binding + "` of `" + region.base + "` escapes lifetime of `" + region.base + "` in `" + function.name + "`" + location);
+            diagnostics.push("llvm lowering: borrow `" + region.binding
+                + "` of `"
+                + region.base
+                + "` escapes lifetime of `"
+                + region.base
+                + "` in `"
+                + function.name
+                + "`"
+                + location);
         }
         index += 1;
     }
@@ -813,7 +858,15 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
                     if details.mutable {
                         let base_name = normalise_borrow_base(details.base);
                         let location = format_suspension_location(keyword, details.span, suspension_span);
-                        diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+                        diagnostics.push("llvm lowering: " + keyword
+                            + " suspends while mutable borrow `"
+                            + local.name
+                            + "` of `"
+                            + base_name
+                            + "` remains active in `"
+                            + function_name
+                            + "`"
+                            + location);
                     }
                 }
             }
@@ -827,7 +880,13 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
         if !binding.consumed {
             if is_mutable_borrow_annotation(binding.type_annotation) {
                 let location = format_suspension_location(keyword, binding.span, suspension_span);
-                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
+                diagnostics.push("llvm lowering: " + keyword
+                    + " suspends while mutable borrow parameter `"
+                    + binding.name
+                    + "` remains active in `"
+                    + function_name
+                    + "`"
+                    + location);
             }
         }
         parameter_index += 1;
@@ -898,7 +957,8 @@ fn format_use_after_move_message(name: string, span: NativeSourceSpan?) -> strin
     if span == null {
         return "llvm lowering: use-after-move of `" + name + "`";
     }
-    return "llvm lowering: use-after-move of `" + name + "` at " + format_span_location(span);
+    return "llvm lowering: use-after-move of `" + name + "` at "
+        + format_span_location(span);
 }
 
 fn format_span_location(span: NativeSourceSpan) -> string {

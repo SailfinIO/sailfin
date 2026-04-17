@@ -7,13 +7,13 @@ import {
     InstructionGatherResult,
     InstructionParseResult,
     NativeInstruction,
-    NativeSourceSpan,
+    NativeSourceSpan
 } from "./native_ir";
 import {
     parse_binding_components,
     parse_case_instruction,
     parse_inline_case_instruction,
-    parse_let_instruction,
+    parse_let_instruction
 } from "./native_ir_utils_parse";
 import {
     index_of,
@@ -21,7 +21,7 @@ import {
     starts_with,
     strip_prefix,
     trim_text,
-    trim_trailing_delimiters,
+    trim_trailing_delimiters
 } from "./native_ir_utils_text";
 import { substring } from "./string_utils";
 
@@ -105,7 +105,7 @@ fn update_instruction_depth_state(state: InstructionDepthState, text: string) ->
         bracket_depth: bracket_depth,
         brace_depth: brace_depth,
         in_string: in_string,
-        escaping: escaping,
+        escaping: escaping
     };
 }
 
@@ -355,7 +355,7 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
         return InstructionParseResult {
             instructions: [parse_let_instruction(line, span, value_span)],
             span_consumed: true,
-            value_span_consumed: true,
+            value_span_consumed: true
         };
     }
     if starts_with(line, ".return") {
@@ -369,7 +369,7 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
                 expression: expression, span: span
             }],
             span_consumed: true,
-            value_span_consumed: false,
+            value_span_consumed: false
         };
     }
     if starts_with(line, "ret") {
@@ -379,7 +379,7 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
                     expression: "", span: span
                 }],
                 span_consumed: true,
-                value_span_consumed: false,
+                value_span_consumed: false
             };
         }
         let separator = line[3];
@@ -394,7 +394,7 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
                         expression: "", span: span
                     }],
                     span_consumed: true,
-                    value_span_consumed: false,
+                    value_span_consumed: false
                 };
             }
             return InstructionParseResult {
@@ -402,7 +402,7 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
                     expression: trim_trailing_delimiters(remainder), span: span
                 }],
                 span_consumed: true,
-                value_span_consumed: false,
+                value_span_consumed: false
             };
         }
     }
@@ -416,10 +416,10 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
         let parsed = parse_binding_components(body);
         return InstructionParseResult {
             instructions: [NativeInstruction.Let {
-                name: parsed.name, mutable: is_mutable, type_annotation: parsed.type_annotation, value: maybe_trim_trailing(parsed.value), span: span, value_span: value_span,
+                name: parsed.name, mutable: is_mutable, type_annotation: parsed.type_annotation, value: maybe_trim_trailing(parsed.value), span: span, value_span: value_span
             }],
             span_consumed: true,
-            value_span_consumed: true,
+            value_span_consumed: true
         };
     }
     if starts_with(line, "eval ") {
@@ -428,7 +428,7 @@ fn parse_instruction(line: string, span: NativeSourceSpan?, value_span: NativeSo
                 expression: trim_trailing_delimiters(trim_text(strip_prefix(line, "eval "))), span: span
             }],
             span_consumed: true,
-            value_span_consumed: false,
+            value_span_consumed: false
         };
     }
     if index_of(line, "=>") >= 0 {

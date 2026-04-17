@@ -3,7 +3,7 @@
 // Parsing helpers for expression lowering extracted from core.sfn.
 import { char_at, substring } from "../../../string_utils";
 import { array_struct_type_for_element } from "../../type_mapping";
-import { map_type_annotation, } from "../../type_mapping";
+import { map_type_annotation } from "../../type_mapping";
 import {
     ArrayLiteralMetadata,
     BorrowArgumentParse,
@@ -11,7 +11,7 @@ import {
     CastParseResult,
     RawAddressParseResult,
     TernaryParseResult,
-    TypeContext,
+    TypeContext
 } from "../../types";
 import {
     append_string,
@@ -19,9 +19,9 @@ import {
     is_identifier_part_char,
     is_identifier_start_char,
     starts_with,
-    trim_text,
+    trim_text
 } from "../../utils";
-import { map_primitive_type, } from "./core_type_mapping";
+import { map_primitive_type } from "./core_type_mapping";
 
 fn parse_borrow_expression(expression: string) -> BorrowParseResult {
     let trimmed = trim_text(expression);
@@ -234,7 +234,9 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
     let inner = substring(text, 1, closing_index);
     let remainder = trim_text(substring(text, closing_index + 1, text.length));
     if remainder.length > 0 {
-        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
+        diagnostics.push("llvm lowering: borrow expression trailing content `"
+            + remainder
+            + "`");
         return BorrowArgumentParse {
             success: false,
             argument: "",
@@ -277,7 +279,9 @@ fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
     }
     let remainder = trim_text(substring(trimmed, index, trimmed.length));
     if remainder.length > 0 {
-        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
+        diagnostics.push("llvm lowering: borrow expression trailing content `"
+            + remainder
+            + "`");
         return BorrowArgumentParse {
             success: false,
             argument: target,
@@ -650,7 +654,8 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     if value.length == 0 { _if120 = true; }
     if annotation.length == 0 { _if120 = true; }
     if _if120 {
-        diagnostics.push("llvm lowering: malformed cast expression `" + text + "`");
+        diagnostics.push("llvm lowering: malformed cast expression `" + text
+            + "`");
         return CastParseResult {
             recognized: true,
             success: false,

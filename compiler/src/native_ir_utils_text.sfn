@@ -22,7 +22,7 @@ export {
     split_top_level_commas,
     find_matching_angle,
     find_matching_paren,
-    split_whitespace,
+    split_whitespace
 };
 
 fn is_trim_char(ch: string) -> boolean {

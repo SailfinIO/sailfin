@@ -7,13 +7,9 @@
 // `sanitize_symbol`, character classification, and LLVM type string inspection
 // (e.g., `is_union_llvm_type`, `parse_union_payload_types`).
 import { char_at, char_code, substring } from "../../../string_utils";
-import { InterpolatedTemplateParse, } from "../../types";
-import {
-    is_identifier_part_char,
-    is_identifier_start_char,
-    starts_with,
-} from "../../utils";
-import { split_array_elements, } from "../splitting";
+import { InterpolatedTemplateParse } from "../../types";
+import { is_identifier_part_char, is_identifier_start_char, starts_with } from "../../utils";
+import { split_array_elements } from "../splitting";
 
 fn number_to_string(value: number) -> string {
     if value == 0 { return "0"; }

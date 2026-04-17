@@ -10,9 +10,9 @@ import {
     LocalBinding,
     ParameterBinding,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../../types";
-import { number_to_string, trim_text, } from "../../utils";
+import { number_to_string, trim_text } from "../../utils";
 
 // Try to resolve a struct field access via file-based struct info when the
 // base type is i8* (opaque pointer). Returns an ExpressionResult with the
@@ -50,7 +50,8 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
                             _igep_ln = substring(_igep_si, _igep_sp, _igep_si.length);
                             _igep_sp = _igep_si.length;
                         } else {
-                            _igep_ln = substring(_igep_si, _igep_sp, _igep_sp + _igep_nl);
+                            _igep_ln = substring(_igep_si, _igep_sp, _igep_sp
+                                + _igep_nl);
                             _igep_sp = _igep_sp + _igep_nl + 1;
                         }
                         if _igep_ln.length == 0 { continue; }
@@ -84,7 +85,8 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
                     _igep_cln = substring(_igep_cl, _igep_cp, _igep_cl.length);
                     _igep_cp = _igep_cl.length;
                 } else {
-                    _igep_cln = substring(_igep_cl, _igep_cp, _igep_cp + _igep_cnl);
+                    _igep_cln = substring(_igep_cl, _igep_cp, _igep_cp
+                        + _igep_cnl);
                     _igep_cp = _igep_cp + _igep_cnl + 1;
                 }
                 if _igep_cln.length == 0 { continue; }
@@ -166,13 +168,26 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
     let mut current_lines = lines;
     let mut current_temp: number = temp_index;
     let _igep_ct1 = format_temp_name(current_temp);
-    current_lines.push("  " + _igep_ct1 + " = bitcast i8* " + base_operand.value + " to " + _igep_llvm + "*");
+    current_lines.push("  " + _igep_ct1 + " = bitcast i8* " + base_operand.value
+        + " to "
+        + _igep_llvm
+        + "*");
     current_temp += 1;
     let _igep_ct2_name = format_temp_name(current_temp);
-    current_lines.push("  " + _igep_ct2_name + " = getelementptr inbounds " + _igep_llvm + ", " + _igep_llvm + "* " + _igep_ct1 + ", i32 0, i32 " + number_to_string(_igep_fidx));
+    current_lines.push("  " + _igep_ct2_name + " = getelementptr inbounds "
+        + _igep_llvm
+        + ", "
+        + _igep_llvm
+        + "* "
+        + _igep_ct1
+        + ", i32 0, i32 "
+        + number_to_string(_igep_fidx));
     current_temp += 1;
     let _igep_ct3 = format_temp_name(current_temp);
-    current_lines.push("  " + _igep_ct3 + " = load " + _igep_ftype + ", " + _igep_ftype + "* " + _igep_ct2_name);
+    current_lines.push("  " + _igep_ct3 + " = load " + _igep_ftype + ", "
+        + _igep_ftype
+        + "* "
+        + _igep_ct2_name);
     current_temp += 1;
     let _igep_op = LLVMOperand { llvm_type: _igep_ftype, value: _igep_ct3 };
     return ExpressionResult {

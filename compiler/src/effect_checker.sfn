@@ -13,7 +13,7 @@ import {
     MethodDeclaration,
     Program,
     Statement,
-    decorator_names,
+    decorator_names
 } from "./ast";
 import { substring } from "./string_utils";
 
@@ -61,7 +61,7 @@ fn analyze_statement(statement: Statement) -> EffectViolation[] {
             return_type: null,
             effects: statement.effects,
             type_parameters: [],
-            name_span: null,
+            name_span: null
         };
         let qualified = "test " + statement.name;
         return analyze_routine(signature, statement.body, statement.decorators, qualified);
@@ -135,7 +135,7 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     if missing.length == 0 { return []; }
     let mut result: EffectViolation[] = [];
     result = append_violation(result, EffectViolation {
-        routine_name: name, missing_effects: missing, requirements: missing_requirements,
+        routine_name: name, missing_effects: missing, requirements: missing_requirements
     });
     return result;
 }
@@ -169,7 +169,7 @@ fn collect_effects_from_statement(statement: Statement) -> EffectRequirement[] {
     if statement.variant == "PromptStatement" {
         let mut required = collect_effects_from_block(statement.body);
         required = append_requirement(required, EffectRequirement {
-            effect: "model", description: "prompt \"" + statement.channel + "\"",
+            effect: "model", description: "prompt \"" + statement.channel + "\""
         });
         return required;
     }

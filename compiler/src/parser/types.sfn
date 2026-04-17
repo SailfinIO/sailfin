@@ -23,7 +23,7 @@ import {
     Statement,
     TypeAnnotation,
     TypeParameter,
-    WithClause,
+    WithClause
 } from "../ast";
 import { Token } from "../token";
 

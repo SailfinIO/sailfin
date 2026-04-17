@@ -25,13 +25,13 @@ import {
     NativeParameter,
     NativeStruct,
     NativeStructField,
-    ParseNativeResult,
+    ParseNativeResult
 } from "../../native_ir";
 import {
     parse_native_bindings_from_text,
     parse_native_function_count_from_text,
     parse_native_functions_from_text,
-    parse_native_structs_for_import,
+    parse_native_structs_for_import
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 import {
@@ -39,14 +39,14 @@ import {
     collect_direct_function_effects,
     collect_function_call_graph,
     collect_runtime_helper_targets,
-    propagate_function_effects,
+    propagate_function_effects
 } from "../effects";
 import {
     apply_layout_manifest_to_module,
-    collect_imported_module_context_for_module,
+    collect_imported_module_context_for_module
 } from "../imports";
-import { collect_exported_symbol_names, } from "../rendering_helpers";
-import { empty_string_constant_set, escape_string_for_llvm, } from "../strings";
+import { collect_exported_symbol_names } from "../rendering_helpers";
+import { empty_string_constant_set, escape_string_for_llvm } from "../strings";
 import {
     FunctionEffectEntry,
     LifetimeRegionMetadata,
@@ -54,13 +54,13 @@ import {
     LoweredLLVMLinesResult,
     StringConstant,
     TraitMetadata,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     index_of,
     number_to_string,
     sanitize_symbol,
-    string_array_contains,
+    string_array_contains
 } from "../utils";
 import {
     collect_defined_function_symbols,
@@ -69,7 +69,7 @@ import {
     extend_native_interfaces,
     extend_native_structs,
     is_test_module_slug,
-    render_test_harness_main_for_module,
+    render_test_harness_main_for_module
 } from "./lowering_helpers";
 import {
     apply_module_symbol_mangling,
@@ -77,22 +77,22 @@ import {
     concat_native_functions,
     empty_capability_manifest,
     extend_native_functions_inplace,
-    flatten_struct_methods,
+    flatten_struct_methods
 } from "./lowering_helpers_mangling";
 import {
     append_string_lines,
     extend_string_lines,
     extend_string_lines_checked,
     module_source_filename,
-    write_llvm_lines_chunked,
+    write_llvm_lines_chunked
 } from "./lowering_io";
-import { lower_all_functions, } from "./lowering_phase_functions";
+import { lower_all_functions } from "./lowering_phase_functions";
 import {
     extract_import_struct_methods,
     parse_single_import_functions,
-    parse_single_import_interfaces,
+    parse_single_import_interfaces
 } from "./lowering_phase_imports";
-import { render_llvm_preamble, } from "./lowering_phase_render";
+import { render_llvm_preamble } from "./lowering_phase_render";
 // Phase modules
 import {
     recover_safe_functions,
@@ -107,22 +107,22 @@ import {
     sanitize_imports,
     sanitize_interfaces,
     sanitize_lowering_inputs,
-    sanitize_structs,
+    sanitize_structs
 } from "./lowering_phase_sanitize";
-import { build_type_context_with_recovery, serialize_context_functions, } from "./lowering_phase_types";
+import { build_type_context_with_recovery, serialize_context_functions } from "./lowering_phase_types";
 import {
     recover_functions_for_lowering,
     recover_native_enums_light,
     recover_native_functions_light,
     recover_native_imports_light,
-    recover_native_structs_light,
+    recover_native_structs_light
 } from "./lowering_recovery";
 import {
     _parse_lowered_fn_string_constants,
     _parse_module_globals_locals,
-    split_lines_local,
+    split_lines_local
 } from "./lowering_text_utils";
-import { lower_module_bindings_to_globals, } from "./module_globals";
+import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Consolidated: parse all structure from native text using light recovery.
 // Kept in lowering_core to preserve cross-module symbol mangling compatibility
@@ -139,7 +139,7 @@ fn build_parse_result_from_text(native_text: string) -> ParseNativeResult {
         interfaces: [],
         enums: recovered_enums,
         bindings: [],
-        diagnostics: [],
+        diagnostics: []
     };
 }
 
@@ -188,18 +188,44 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
                 let idx_s = number_to_string(test_idx);
                 let msg_arr_len = number_to_string(msg.length + 1);
                 let escaped = escape_string_for_llvm(msg);
-                harness_globals = extend_string_lines(harness_globals, ["@.tname." + idx_s + " = private unnamed_addr constant [" + msg_arr_len + " x i8] c\"" + escaped + "\\00\"",]);
-                harness = extend_string_lines(harness, ["  %tn" + idx_s + " = getelementptr [" + msg_arr_len + " x i8], [" + msg_arr_len + " x i8]* @.tname." + idx_s + ", i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tn" + idx_s + ")", "  call void @" + sym + "()",]);
+                harness_globals = extend_string_lines(harness_globals, ["@.tname."
+                    + idx_s
+                    + " = private unnamed_addr constant ["
+                    + msg_arr_len
+                    + " x i8] c\""
+                    + escaped
+                    + "\\00\"",]);
+                harness = extend_string_lines(harness, ["  %tn" + idx_s
+                    + " = getelementptr ["
+                    + msg_arr_len
+                    + " x i8], ["
+                    + msg_arr_len
+                    + " x i8]* @.tname."
+                    + idx_s
+                    + ", i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tn"
+                    + idx_s
+                    + ")", "  call void @"
+                    + sym
+                    + "()",]);
                 test_idx += 1;
             }
         }
         ti += 1;
     }
-    let pass_msg = "  PASS  (all " + number_to_string(test_idx) + " tests passed)";
+    let pass_msg = "  PASS  (all " + number_to_string(test_idx)
+        + " tests passed)";
     let pass_escaped = escape_string_for_llvm(pass_msg);
     let pass_len_s = number_to_string(pass_msg.length + 1);
-    harness_globals = extend_string_lines(harness_globals, ["@.tpass = private unnamed_addr constant [" + pass_len_s + " x i8] c\"" + pass_escaped + "\\00\"",]);
-    harness = extend_string_lines(harness, ["  %tp = getelementptr [" + pass_len_s + " x i8], [" + pass_len_s + " x i8]* @.tpass, i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tp)", "  ret i32 0", "}",]);
+    harness_globals = extend_string_lines(harness_globals, ["@.tpass = private unnamed_addr constant ["
+        + pass_len_s
+        + " x i8] c\""
+        + pass_escaped
+        + "\\00\"",]);
+    harness = extend_string_lines(harness, ["  %tp = getelementptr ["
+        + pass_len_s
+        + " x i8], ["
+        + pass_len_s
+        + " x i8]* @.tpass, i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tp)", "  ret i32 0", "}",]);
 
     let mut updated = base;
     if updated.lines.length > 0 {
@@ -218,7 +244,7 @@ fn make_native_module_for_emit(module_name: string, native_text: string) -> Nati
             name: module_name, format: "sailfin-native-text", contents: native_text
         }],
         entry_points: [],
-        symbol_count: 0,
+        symbol_count: 0
     };
 }
 
@@ -307,7 +333,11 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
                 if first_import.specifiers != null {
                     import_spec_count = first_import.specifiers.length;
                 }
-                print.err("emit-llvm: safe_imports[0].kind=" + import_kind + " module=" + import_module + " specs=" + number_to_string(import_spec_count));
+                print.err("emit-llvm: safe_imports[0].kind=" + import_kind
+                    + " module="
+                    + import_module
+                    + " specs="
+                    + number_to_string(import_spec_count));
             } else { print.err("emit-llvm: safe_imports[0]=<null>"); }
         }
     }
@@ -322,7 +352,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     safe_functions = recover_safe_functions(safe_functions, native_text_override_path, debug_lowering);
 
     if debug_lowering {
-        print.err("emit-llvm: functions parsed=" + number_to_string(parse.functions.length) + " safe=" + number_to_string(safe_functions.length));
+        print.err("emit-llvm: functions parsed=" + number_to_string(parse.functions.length)
+            + " safe="
+            + number_to_string(safe_functions.length));
     }
 
     safe_structs = recover_structs_if_corrupt(safe_structs, native_text_override_path, debug_lowering);
@@ -706,7 +738,13 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
             }
             i += 1;
         }
-        print.err("test llvm: lowered lines=" + number_to_string(lines.length) + " nonempty=" + number_to_string(nonempty) + " first_len=" + number_to_string(first_len) + " diagnostics=" + number_to_string(diagnostics.length));
+        print.err("test llvm: lowered lines=" + number_to_string(lines.length)
+            + " nonempty="
+            + number_to_string(nonempty)
+            + " first_len="
+            + number_to_string(first_len)
+            + " diagnostics="
+            + number_to_string(diagnostics.length));
         let mut diag_index: number = 0;
         loop {
             if diag_index >= diagnostics.length { break; }
@@ -715,7 +753,15 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         }
     }
     if lines.length == 0 {
-        print.err("emit-llvm: lowering produced no lines (functions=" + number_to_string(local_functions.length) + " structs=" + number_to_string(module_structs.length) + " enums=" + number_to_string(module_enums.length) + " diagnostics=" + number_to_string(diagnostics.length) + ")");
+        print.err("emit-llvm: lowering produced no lines (functions="
+            + number_to_string(local_functions.length)
+            + " structs="
+            + number_to_string(module_structs.length)
+            + " enums="
+            + number_to_string(module_enums.length)
+            + " diagnostics="
+            + number_to_string(diagnostics.length)
+            + ")");
     }
     if debug_lowering {
         print.err("emit-llvm: phase=end lines=" + number_to_string(lines.length));
@@ -727,6 +773,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         function_effects: function_effects,
         lifetime_regions: lifetime_regions,
         capability_manifest: manifest,
-        string_constants: all_string_constants,
+        string_constants: all_string_constants
     };
 }

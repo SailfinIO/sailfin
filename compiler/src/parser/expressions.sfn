@@ -7,7 +7,7 @@ import {
     Expression,
     ObjectField,
     Parameter,
-    TypeAnnotation,
+    TypeAnnotation
 } from "../ast";
 import {
     char_at,
@@ -29,7 +29,7 @@ import {
     symbol_matches,
     token_slice,
     tokens_to_text,
-    trim_token_edges,
+    trim_token_edges
 } from "./token_utils";
 import {
     ArrayLiteralParseResult,
@@ -44,7 +44,7 @@ import {
     LambdaParameterParseResult,
     ObjectLiteralParseResult,
     Parser,
-    StructTypeNameResult,
+    StructTypeNameResult
 } from "./types";
 import { string_array_contains, trim_text } from "./utils";
 
@@ -71,7 +71,7 @@ fn expression_parse_failure(state: ExpressionTokens) -> ExpressionParseResult {
     return ExpressionParseResult {
         state: state,
         expression: Expression.Raw { text: "" },
-        success: false,
+        success: false
     };
 }
 
@@ -100,7 +100,7 @@ fn expression_tokens_consume_type_separator(state: ExpressionTokens, accept_colo
             return ExpressionTypeSeparatorParseResult {
                 state: expression_tokens_advance(state),
                 used_separator: ":",
-                found: true,
+                found: true
             };
         }
     }
@@ -110,7 +110,7 @@ fn expression_tokens_consume_type_separator(state: ExpressionTokens, accept_colo
             return ExpressionTypeSeparatorParseResult {
                 state: expression_tokens_advance(state),
                 used_separator: "->",
-                found: true,
+                found: true
             };
         }
         if symbol_matches(token, "-") {
@@ -126,7 +126,7 @@ fn expression_tokens_consume_type_separator(state: ExpressionTokens, accept_colo
             return ExpressionTypeSeparatorParseResult {
                 state: next_state,
                 used_separator: "->",
-                found: true,
+                found: true
             };
         }
     }
@@ -326,13 +326,13 @@ fn parse_expression_bp(state: ExpressionTokens, min_precedence: number) -> Expre
         if op == ".." {
             left_expression = Expression.Range {
                 start: left_expression,
-                end: rhs_result.expression,
+                end: rhs_result.expression
             };
         } else {
             left_expression = Expression.Binary {
                 operator: op,
                 left: left_expression,
-                right: rhs_result.expression,
+                right: rhs_result.expression
             };
         }
     }
@@ -340,7 +340,7 @@ fn parse_expression_bp(state: ExpressionTokens, min_precedence: number) -> Expre
     return ExpressionParseResult {
         state: current_state,
         expression: left_expression,
-        success: true,
+        success: true
     };
 }
 
@@ -363,9 +363,9 @@ fn parse_prefix_expression(state: ExpressionTokens) -> ExpressionParseResult {
                 state: operand_result.state,
                 expression: Expression.Unary {
                     operator: sym,
-                    operand: operand_result.expression,
+                    operand: operand_result.expression
                 },
-                success: true,
+                success: true
             };
         }
     }
@@ -392,14 +392,14 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
         return ExpressionParseResult {
             state: expression_tokens_advance(state),
             expression: Expression.NumberLiteral { value: token.lexeme },
-            success: true,
+            success: true
         };
     }
     if token.kind.variant == "BooleanLiteral" {
         return ExpressionParseResult {
             state: expression_tokens_advance(state),
             expression: Expression.BooleanLiteral { value: token.lexeme },
-            success: true,
+            success: true
         };
     }
     if token.kind.variant == "StringLiteral" {
@@ -408,7 +408,7 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
             expression: Expression.StringLiteral {
                 value: string_literal_value(token)
             },
-            success: true,
+            success: true
         };
     }
     if token.kind.variant == "Identifier" {
@@ -417,27 +417,27 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
             return ExpressionParseResult {
                 state: expression_tokens_advance(state),
                 expression: Expression.BooleanLiteral { value: "true" },
-                success: true,
+                success: true
             };
         }
         if strings_equal(name, "false") {
             return ExpressionParseResult {
                 state: expression_tokens_advance(state),
                 expression: Expression.BooleanLiteral { value: "false" },
-                success: true,
+                success: true
             };
         }
         if strings_equal(name, "null") {
             return ExpressionParseResult {
                 state: expression_tokens_advance(state),
                 expression: Expression.NullLiteral(),
-                success: true,
+                success: true
             };
         }
         return ExpressionParseResult {
             state: expression_tokens_advance(state),
             expression: Expression.Identifier { name: name },
-            success: true,
+            success: true
         };
     }
     if symbol_matches(token, "(") {
@@ -455,7 +455,7 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
         return ExpressionParseResult {
             state: expression_tokens_advance(after_inner),
             expression: inner_result.expression,
-            success: true,
+            success: true
         };
     }
 
@@ -465,7 +465,7 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
         return ExpressionParseResult {
             state: array_result.state,
             expression: Expression.Array { elements: array_result.elements },
-            success: true,
+            success: true
         };
     }
 
@@ -475,7 +475,7 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
         return ExpressionParseResult {
             state: object_result.state,
             expression: Expression.Object { fields: object_result.fields },
-            success: true,
+            success: true
         };
     }
 
@@ -507,7 +507,7 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             current_state = expression_tokens_advance(after_dot);
             current_expression = Expression.Member {
                 object: current_expression,
-                member: identifier_text(member_token),
+                member: identifier_text(member_token)
             };
             continue;
         }
@@ -519,7 +519,7 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             current_state = call_result.state;
             current_expression = Expression.Call {
                 callee: current_expression,
-                arguments: call_result.arguments,
+                arguments: call_result.arguments
             };
             continue;
         }
@@ -540,7 +540,7 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             current_state = expression_tokens_advance(after_index);
             current_expression = Expression.Index {
                 sequence: current_expression,
-                index: index_result.expression,
+                index: index_result.expression
             };
             continue;
         }
@@ -560,7 +560,7 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
     return ExpressionParseResult {
         state: current_state,
         expression: current_expression,
-        success: true,
+        success: true
     };
 }
 
@@ -846,9 +846,9 @@ fn parse_struct_literal(state: ExpressionTokens, target: Expression) -> Expressi
         state: fields_result.state,
         expression: Expression.Struct {
             type_name: type_result.parts,
-            fields: fields_result.fields,
+            fields: fields_result.fields
         },
-        success: true,
+        success: true
     };
 }
 
@@ -874,7 +874,7 @@ fn collect_struct_type_name(expression: Expression) -> StructTypeNameResult {
         }
         return StructTypeNameResult {
             parts: append_string_local(inner.parts, expression.member),
-            success: true,
+            success: true
         };
     }
     return StructTypeNameResult { parts: [], success: false };
@@ -934,7 +934,7 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
 
     let mut block_tokens = block_result.tokens;
     block_tokens = append_token(block_tokens, Token {
-        kind: TokenKind.EndOfFile(), lexeme: "", line: 0, column: 0,
+        kind: TokenKind.EndOfFile(), lexeme: "", line: 0, column: 0
     });
     let block_parser = Parser { tokens: block_tokens, index: 0 };
     let parsed_block = parse_block_for_lambda(block_parser);
@@ -945,9 +945,9 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
         expression: Expression.Lambda {
             parameters: parameters,
             body: body,
-            return_type: return_type,
+            return_type: return_type
         },
-        success: true,
+        success: true
     };
 }
 
@@ -1066,7 +1066,7 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
         type_annotation: type_annotation,
         default_value: default_value,
         mutable: is_mutable,
-        span: span,
+        span: span
     };
 
     return LambdaParameterParseResult {
@@ -1298,7 +1298,7 @@ fn parse_block_for_lambda(parser: Parser) -> BlockParseResult {
     if !symbol_matches(token, "{") {
         return BlockParseResult {
             parser: current,
-            block: Block { tokens: [], text: "", statements: [] },
+            block: Block { tokens: [], text: "", statements: [] }
         };
     }
 

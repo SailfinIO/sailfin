@@ -6,16 +6,12 @@
 // The main import gathering loop lives in lowering_core.sfn (orchestrator)
 // to avoid duplicate parsing.  This module provides thin wrappers used
 // by the orchestrator for individual parse operations.
-import {
-    NativeFunction,
-    NativeInterface,
-    NativeStruct,
-} from "../../native_ir";
+import { NativeFunction, NativeInterface, NativeStruct } from "../../native_ir";
 import {
     parse_native_functions_for_import,
-    parse_native_interfaces_for_import,
+    parse_native_interfaces_for_import
 } from "../../native_ir_api";
-import { flatten_struct_methods, } from "./lowering_helpers_mangling";
+import { flatten_struct_methods } from "./lowering_helpers_mangling";
 
 // Parse imported interfaces from a single import text.
 fn parse_single_import_interfaces(native_text: string) -> NativeInterface[] {

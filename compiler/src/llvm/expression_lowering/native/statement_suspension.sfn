@@ -6,12 +6,12 @@
 // points, and provides future type / spawn symbol mapping for the async runtime.
 import { NativeSourceSpan } from "../../../native_ir";
 import { substring } from "../../../string_utils";
-import { LocalBinding, ParameterBinding, } from "../../types";
+import { LocalBinding, ParameterBinding } from "../../types";
 import {
     is_identifier_part_char,
     matches_keyword,
     starts_with,
-    trim_text,
+    trim_text
 } from "../../utils";
 import { format_suspension_location } from "./core";
 import { unwrap_move_wrapper } from "./statement_type_mapping";
@@ -125,7 +125,15 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
                     if details.mutable {
                         let base_name = normalise_borrow_base(details.base);
                         let location = format_suspension_location(keyword, details.span, suspension_span);
-                        diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+                        diagnostics.push("llvm lowering: " + keyword
+                            + " suspends while mutable borrow `"
+                            + local.name
+                            + "` of `"
+                            + base_name
+                            + "` remains active in `"
+                            + function_name
+                            + "`"
+                            + location);
                     }
                 }
             }
@@ -139,7 +147,13 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
         if !binding.consumed {
             if is_mutable_borrow_annotation(binding.type_annotation) {
                 let location = format_suspension_location(keyword, binding.span, suspension_span);
-                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
+                diagnostics.push("llvm lowering: " + keyword
+                    + " suspends while mutable borrow parameter `"
+                    + binding.name
+                    + "` remains active in `"
+                    + function_name
+                    + "`"
+                    + location);
             }
         }
         parameter_index += 1;

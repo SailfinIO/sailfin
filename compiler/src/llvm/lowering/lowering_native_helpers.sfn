@@ -16,7 +16,7 @@ import {
     NativeEnumVariant,
     NativeEnumVariantField,
     NativeEnumLayout,
-    NativeEnumVariantLayout,
+    NativeEnumVariantLayout
 } from "../../native_ir";
 
 // ── NativeFunction constructors ──────────────────────────────────────

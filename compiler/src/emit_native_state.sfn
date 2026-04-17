@@ -106,7 +106,7 @@ fn state_emit_line(state: NativeState, line: string) -> NativeState {
     return NativeState {
         builder: builder_emit_line(state.builder, line),
         diagnostics: state.diagnostics,
-        layout_context: state.layout_context,
+        layout_context: state.layout_context
     };
 }
 
@@ -114,7 +114,7 @@ fn state_emit_blank(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_emit_blank(state.builder),
         diagnostics: state.diagnostics,
-        layout_context: state.layout_context,
+        layout_context: state.layout_context
     };
 }
 
@@ -122,7 +122,7 @@ fn state_push_indent(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_push_indent(state.builder),
         diagnostics: state.diagnostics,
-        layout_context: state.layout_context,
+        layout_context: state.layout_context
     };
 }
 
@@ -130,7 +130,7 @@ fn state_pop_indent(state: NativeState) -> NativeState {
     return NativeState {
         builder: builder_pop_indent(state.builder),
         diagnostics: state.diagnostics,
-        layout_context: state.layout_context,
+        layout_context: state.layout_context
     };
 }
 
@@ -139,7 +139,7 @@ fn state_add_diagnostic(state: NativeState, message: string) -> NativeState {
     return NativeState {
         builder: builder_emit_line(state.builder, "; " + message),
         diagnostics: diagnostics,
-        layout_context: state.layout_context,
+        layout_context: state.layout_context
     };
 }
 

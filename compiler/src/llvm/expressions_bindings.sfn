@@ -1,7 +1,7 @@
 // compiler/src/llvm/expressions_bindings.sfn
 //
 // Local and parameter binding lookup and mutation helpers.
-import { LocalBinding, ParameterBinding, } from "./types";
+import { LocalBinding, ParameterBinding } from "./types";
 
 // =============================================================================
 // Local and Parameter Binding Lookup
@@ -41,7 +41,7 @@ fn mark_parameter_consumed(bindings: ParameterBinding[], name: string) -> Parame
                 llvm_type: binding.llvm_type,
                 type_annotation: binding.type_annotation,
                 consumed: true,
-                span: binding.span,
+                span: binding.span
             };
             result.push(updated);
         } else { result.push(binding); }
@@ -65,7 +65,7 @@ fn mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
                 ownership: entry.ownership,
                 consumed: true,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
+                scope_depth: entry.scope_depth
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -89,7 +89,7 @@ fn reset_local_consumption(locals: LocalBinding[], name: string) -> LocalBinding
                 ownership: entry.ownership,
                 consumed: false,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
+                scope_depth: entry.scope_depth
             };
             result.push(updated);
         } else { result.push(entry); }

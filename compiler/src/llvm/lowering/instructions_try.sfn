@@ -3,16 +3,12 @@
 // Control flow handlers: try/catch/finally/throw instruction lowering.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
-import { lower_expression, } from "../expression_lowering/native/core";
-import { coerce_operand_to_type, } from "../expression_lowering/native/core_operands";
-import { append_local_binding, } from "../expression_lowering/native/core_scopes";
-import {
-    default_return_literal,
-    format_local_pointer_name,
-    format_temp_name,
-} from "../expressions_helpers";
-import { make_child_scope_id, } from "../lifetime";
-import { empty_string_constant_set, merge_string_constants, } from "../strings";
+import { lower_expression } from "../expression_lowering/native/core";
+import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
+import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { default_return_literal, format_local_pointer_name, format_temp_name } from "../expressions_helpers";
+import { make_child_scope_id } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,
     LLVMOperand,
@@ -29,18 +25,18 @@ import {
     StringConstant,
     ThrowLoweringResult,
     TryStructure,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     append_string,
     extend_string_array,
     number_to_string,
-    trim_text,
+    trim_text
 } from "../utils";
-import { lower_instruction_range, } from "./instructions";
-import { allocate_block_label, } from "./instructions_condition";
-import { _parse_int_from_string, extend_lifetime_regions, } from "./instructions_helpers";
-import { get_instruction_tag, } from "./lowering_native_helpers";
+import { lower_instruction_range } from "./instructions";
+import { allocate_block_label } from "./instructions_condition";
+import { _parse_int_from_string, extend_lifetime_regions } from "./instructions_helpers";
+import { get_instruction_tag } from "./lowering_native_helpers";
 
 fn collect_try_structure(instructions: NativeInstruction[], start_index: number, end: number, function_name: string) -> TryStructure {
     let mut diagnostics: string[] = [];
@@ -79,7 +75,9 @@ fn collect_try_structure(instructions: NativeInstruction[], start_index: number,
     }
 
     if end_index == -1 {
-        diagnostics.push("llvm lowering: try without endtry in `" + function_name + "`");
+        diagnostics.push("llvm lowering: try without endtry in `"
+            + function_name
+            + "`");
         end_index = end - 1;
     }
 
@@ -116,7 +114,7 @@ fn collect_try_structure(instructions: NativeInstruction[], start_index: number,
         finally_end: finally_end,
         end_index: end_index,
         next_index: end_index + 1,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -138,7 +136,9 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
     collected_string_constants = merge_string_constants(collected_string_constants, lowered_expr.string_constants);
 
     if lowered_expr.operand == null {
-        diagnostics.push("llvm lowering: unsupported throw expression in `" + function_name + "`");
+        diagnostics.push("llvm lowering: unsupported throw expression in `"
+            + function_name
+            + "`");
         current_lines.push("  unreachable");
         return ThrowLoweringResult {
             lines: current_lines,
@@ -159,7 +159,9 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
     if coerced.operand == null {
-        diagnostics.push("llvm lowering: unable to coerce throw value to string in `" + function_name + "`");
+        diagnostics.push("llvm lowering: unable to coerce throw value to string in `"
+            + function_name
+            + "`");
         current_lines.push("  unreachable");
         return ThrowLoweringResult {
             lines: current_lines,
@@ -170,7 +172,9 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
         };
     }
 
-    current_lines.push("  call void @sailfin_runtime_set_exception(i8* " + coerced.operand.value + ")");
+    current_lines.push("  call void @sailfin_runtime_set_exception(i8* "
+        + coerced.operand.value
+        + ")");
     if llvm_return == "void" { current_lines.push("  ret void"); } else {
         current_lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
     }
@@ -236,7 +240,8 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
     // Try block
     current_lines.push(try_label + ":");
     let try_scope_id = make_child_scope_id(scope_id, try_label);
-    let try_result = lower_instruction_range(function, structure.try_start, structure.try_end, llvm_return, current_bindings, current_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, try_scope_id, scope_depth + 1, try_label);
+    let try_result = lower_instruction_range(function, structure.try_start, structure.try_end, llvm_return, current_bindings, current_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, try_scope_id, scope_depth
+        + 1, try_label);
     let mut _ci3: number = 0;
     loop {
         if _ci3 >= try_result.diagnostics.length { break; }
@@ -255,11 +260,14 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
     if !try_result.terminated {
         let has_exc = format_temp_name(current_temp);
         current_temp += 1;
-        current_lines.push("  " + has_exc + " = call i1 @sailfin_runtime_has_exception()");
+        current_lines.push("  " + has_exc
+            + " = call i1 @sailfin_runtime_has_exception()");
         let normal_target = merge_label;
         if structure.finally_index != -1 { normal_target = finally_label; }
         if structure.catch_index != -1 {
-            current_lines.push("  br i1 " + has_exc + ", label %" + catch_label + ", label %" + normal_target);
+            current_lines.push("  br i1 " + has_exc + ", label %" + catch_label
+                + ", label %"
+                + normal_target);
         } else {
             // No catch: proceed to normal target; any pending exception will be propagated after finally/merge.
             current_lines.push("  br label %" + normal_target);
@@ -272,7 +280,8 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
         let catch_scope_id = make_child_scope_id(scope_id, catch_label);
         let exception_temp = format_temp_name(current_temp);
         current_temp += 1;
-        current_lines.push("  " + exception_temp + " = call i8* @sailfin_runtime_take_exception()");
+        current_lines.push("  " + exception_temp
+            + " = call i8* @sailfin_runtime_take_exception()");
 
         let mut catch_locals: LocalBinding[] = current_locals;
         let trimmed_name = trim_text(structure.catch_name);
@@ -282,14 +291,17 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
                 let err_slot = format_local_pointer_name(current_next_local);
                 current_next_local += 1;
                 current_allocas.push("  " + err_slot + " = alloca i8*");
-                current_lines.push("  store i8* " + exception_temp + ", i8** " + err_slot);
+                current_lines.push("  store i8* " + exception_temp + ", i8** "
+                    + err_slot);
                 catch_locals = append_local_binding(catch_locals, LocalBinding {
-                    name: trimmed_name, pointer: err_slot, llvm_type: "i8*", type_annotation: "string", ownership: null, consumed: false, scope_id: catch_scope_id, scope_depth: scope_depth + 1,
+                    name: trimmed_name, pointer: err_slot, llvm_type: "i8*", type_annotation: "string", ownership: null, consumed: false, scope_id: catch_scope_id, scope_depth: scope_depth
+                        + 1
                 });
             }
         }
 
-        let catch_result = lower_instruction_range(function, structure.catch_start, structure.catch_end, llvm_return, current_bindings, catch_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, catch_scope_id, scope_depth + 1, catch_label);
+        let catch_result = lower_instruction_range(function, structure.catch_start, structure.catch_end, llvm_return, current_bindings, catch_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, catch_scope_id, scope_depth
+            + 1, catch_label);
         let mut _ci4: number = 0;
         loop {
             if _ci4 >= catch_result.diagnostics.length { break; }
@@ -315,7 +327,8 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
     if structure.finally_index != -1 {
         current_lines.push(finally_label + ":");
         let finally_scope_id = make_child_scope_id(scope_id, finally_label);
-        let finally_result = lower_instruction_range(function, structure.finally_start, structure.finally_end, llvm_return, current_bindings, current_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, finally_scope_id, scope_depth + 1, finally_label);
+        let finally_result = lower_instruction_range(function, structure.finally_start, structure.finally_end, llvm_return, current_bindings, current_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, finally_scope_id, scope_depth
+            + 1, finally_label);
         let mut _ci5: number = 0;
         loop {
             if _ci5 >= finally_result.diagnostics.length { break; }
@@ -341,14 +354,18 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
     // If an exception is still pending after try/catch/finally, propagate it.
     let has_exc_after = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + has_exc_after + " = call i1 @sailfin_runtime_has_exception()");
+    current_lines.push("  " + has_exc_after
+        + " = call i1 @sailfin_runtime_has_exception()");
     let propagate_label_alloc = allocate_block_label("try.propagate", current_block_counter);
     let propagate_label = propagate_label_alloc.label;
     current_block_counter = propagate_label_alloc.next_counter;
     let continue_label_alloc = allocate_block_label("try.continue", current_block_counter);
     let continue_label = continue_label_alloc.label;
     current_block_counter = continue_label_alloc.next_counter;
-    current_lines.push("  br i1 " + has_exc_after + ", label %" + propagate_label + ", label %" + continue_label);
+    current_lines.push("  br i1 " + has_exc_after + ", label %"
+        + propagate_label
+        + ", label %"
+        + continue_label);
     current_lines.push(propagate_label + ":");
     if llvm_return == "void" { current_lines.push("  ret void"); } else {
         current_lines.push("  ret " + llvm_return + " " + default_return_literal(llvm_return));
@@ -369,6 +386,6 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
         next_lifetime_region_id: current_next_region,
         next_index: structure.next_index,
         mutations: [],
-        string_constants: collected_string_constants,
+        string_constants: collected_string_constants
     };
 }

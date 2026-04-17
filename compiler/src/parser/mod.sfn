@@ -27,7 +27,7 @@ import {
     parse_tool,
     parse_type_alias,
     parse_unknown,
-    parse_variable,
+    parse_variable
 } from "./declarations";
 import {
     identifier_matches,
@@ -211,7 +211,7 @@ export {
     CallArgumentsParseResult,
     ArrayLiteralParseResult,
     ObjectLiteralParseResult,
-    StructTypeNameResult,
+    StructTypeNameResult
 } from "./types";
 
 // Re-export string utilities
@@ -225,7 +225,7 @@ export {
     looks_like_number,
     is_decimal_digit,
     string_array_contains,
-    append_string,
+    append_string
 } from "./utils";
 
 // Re-export token utilities
@@ -284,7 +284,7 @@ export {
 
     // Append helpers
     append_token,
-    append_token_array,
+    append_token_array
 } from "./token_utils";
 
 // Re-export expression parsing functions
@@ -334,7 +334,7 @@ export {
     unary_precedence,
 
     // Expression normalization
-    normalize_expression,
+    normalize_expression
 } from "./expressions";
 
 // Re-export statement parsing functions
@@ -372,7 +372,7 @@ export {
     parse_expression_statement,
 
     // Unknown statement (fallback)
-    parse_unknown_statement,
+    parse_unknown_statement
 } from "./statements";
 
 // Re-export declaration parsing functions
@@ -443,5 +443,5 @@ export {
     parse_test,
 
     // Unknown statement (fallback)
-    parse_unknown,
+    parse_unknown
 } from "./declarations";

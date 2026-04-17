@@ -44,7 +44,8 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
     if local == null {
         let parameter = find_parameter_binding(bindings, target);
         if parameter == null {
-            diagnostics.push("llvm lowering: borrow target `" + target + "` not found");
+            diagnostics.push("llvm lowering: borrow target `" + target
+                + "` not found");
             return ExpressionResult {
                 lines: lines,
                 temp_index: temp_index,
@@ -69,7 +70,11 @@ fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[
             };
         }
 
-        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
+        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `"
+            + target
+            + "` (type `"
+            + parameter.llvm_type
+            + "`)");
         return ExpressionResult {
             lines: lines,
             temp_index: temp_index,

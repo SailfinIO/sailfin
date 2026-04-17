@@ -97,7 +97,12 @@ fn render_string_constants(constants: StringConstant[]) -> string[] {
                 if constant.content != null {
                     let escaped = escape_string_for_llvm(constant.content);
                     let length_str = number_to_string(constant.byte_count + 1);
-                    let declaration = constant.name + " = private unnamed_addr constant [" + length_str + " x i8] c\"" + escaped + "\\00\"";
+                    let declaration = constant.name
+                        + " = private unnamed_addr constant ["
+                        + length_str
+                        + " x i8] c\""
+                        + escaped
+                        + "\\00\"";
                     lines.push(declaration);
                 }
             }

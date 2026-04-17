@@ -13,13 +13,13 @@ import {
     LocalBinding,
     ParameterBinding,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../../types";
 import {
     append_string,
     number_to_string,
     starts_with,
-    trim_text,
+    trim_text
 } from "../../utils";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
@@ -150,7 +150,9 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     }
 
     if element_type.length == 0 {
-        diagnostics.push("llvm lowering: unable to determine element type for array indexing on type `" + array_type + "`");
+        diagnostics.push("llvm lowering: unable to determine element type for array indexing on type `"
+            + array_type
+            + "`");
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -182,7 +184,12 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         }
 
         let call_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + call_temp + " = call i8* @sailfin_runtime_grapheme_at(i8* " + base_operand.value + ", double " + index_as_double.operand.value + ")");
+        current_lines = append_string(current_lines, "  " + call_temp
+            + " = call i8* @sailfin_runtime_grapheme_at(i8* "
+            + base_operand.value
+            + ", double "
+            + index_as_double.operand.value
+            + ")");
         current_temp += 1;
         let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
         return ExpressionResult {
@@ -200,31 +207,62 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
 
         let array_struct_type = strip_pointer_suffix(array_type);
         let loaded_array = format_temp_name(current_temp);
-        current_lines.push("  " + loaded_array + " = load " + array_struct_type + ", " + array_type + " " + base_operand.value);
+        current_lines.push("  " + loaded_array + " = load " + array_struct_type
+            + ", "
+            + array_type
+            + " "
+            + base_operand.value);
         current_temp += 1;
 
         let data_ptr_extracted = format_temp_name(current_temp);
-        current_lines.push("  " + data_ptr_extracted + " = extractvalue " + array_struct_type + " " + loaded_array + ", 0");
+        current_lines.push("  " + data_ptr_extracted + " = extractvalue "
+            + array_struct_type
+            + " "
+            + loaded_array
+            + ", 0");
         current_temp += 1;
         data_ptr = data_ptr_extracted;
 
         let length_temp = format_temp_name(current_temp);
-        current_lines.push("  " + length_temp + " = extractvalue " + array_struct_type + " " + loaded_array + ", 1");
+        current_lines.push("  " + length_temp + " = extractvalue "
+            + array_struct_type
+            + " "
+            + loaded_array
+            + ", 1");
         current_temp += 1;
         length_value = length_temp;
 
         let bounds_check = format_temp_name(current_temp);
-        current_lines.push("  " + bounds_check + " = icmp uge i64 " + coerced_index.value + ", " + length_value);
+        current_lines.push("  " + bounds_check + " = icmp uge i64 "
+            + coerced_index.value
+            + ", "
+            + length_value);
         current_temp += 1;
-        current_lines.push("  ; bounds check: " + bounds_check + " (if true, out of bounds)");
-        current_lines.push("  call void @sailfin_runtime_bounds_check(i64 " + coerced_index.value + ", i64 " + length_value + ")");
+        current_lines.push("  ; bounds check: " + bounds_check
+            + " (if true, out of bounds)");
+        current_lines.push("  call void @sailfin_runtime_bounds_check(i64 "
+            + coerced_index.value
+            + ", i64 "
+            + length_value
+            + ")");
 
         let element_ptr = format_temp_name(current_temp);
-        current_lines.push("  " + element_ptr + " = getelementptr " + element_type + ", " + element_type + "* " + data_ptr + ", i64 " + coerced_index.value);
+        current_lines.push("  " + element_ptr + " = getelementptr "
+            + element_type
+            + ", "
+            + element_type
+            + "* "
+            + data_ptr
+            + ", i64 "
+            + coerced_index.value);
         current_temp += 1;
 
         let element_value = format_temp_name(current_temp);
-        current_lines.push("  " + element_value + " = load " + element_type + ", " + element_type + "* " + element_ptr);
+        current_lines.push("  " + element_value + " = load " + element_type
+            + ", "
+            + element_type
+            + "* "
+            + element_ptr);
         current_temp += 1;
 
         let operand = LLVMOperand {
@@ -240,7 +278,9 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         };
     }
 
-    diagnostics.push("llvm lowering: unsupported array type for indexing: `" + array_type + "`");
+    diagnostics.push("llvm lowering: unsupported array type for indexing: `"
+        + array_type
+        + "`");
     return ExpressionResult {
         lines: current_lines,
         temp_index: current_temp,

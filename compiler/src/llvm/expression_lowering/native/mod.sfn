@@ -11,13 +11,13 @@ export {
     // Statement + entrypoint helpers
     lower_expression_statement,
     lower_return_instruction,
-    prepare_parameters,
+    prepare_parameters
 } from "./statement";
 
 export {
     // Expression parsing
     parse_assignment_expression,
-    parse_inline_let_expression,
+    parse_inline_let_expression
 } from "./statement_parsing";
 
 export {
@@ -25,12 +25,12 @@ export {
     detect_suspension_conflicts,
     future_pointer_type_for_return_type,
     spawn_symbol_for_return_type,
-    spawn_ctx_symbol_for_return_type,
+    spawn_ctx_symbol_for_return_type
 } from "./statement_suspension";
 
 export {
     // Type mapping helper consumed by instruction lowering
-    map_local_type,
+    map_local_type
 } from "./statement_type_mapping";
 
 export {
@@ -38,7 +38,7 @@ export {
     lower_expression,
     // Ownership/borrow analysis helpers used across lowering
     analyze_value_ownership,
-    detect_borrow_conflicts,
+    detect_borrow_conflicts
 } from "./core";
 
 export {
@@ -46,20 +46,12 @@ export {
     harmonise_operands,
     emit_boolean_and,
     emit_comparison_instruction,
-    load_local_operand,
+    load_local_operand
 } from "./core_operands";
 
-export {
-    append_local_binding,
-    find_local_binding,
-    append_llvm_operand,
-} from "./core_scopes";
+export { append_local_binding, find_local_binding, append_llvm_operand } from "./core_scopes";
 
-export {
-    parse_enum_literal,
-    parse_struct_pattern,
-    parse_range_iterable,
-} from "./core_parse";
+export { parse_enum_literal, parse_struct_pattern, parse_range_iterable } from "./core_parse";
 
 export {
     // Union helpers shared across lowering
@@ -70,7 +62,7 @@ export {
     // String helpers used by bootstrap shims
     unescape_string_literal,
     make_string_constant_name,
-    make_string_constant_name_for_module,
+    make_string_constant_name_for_module
 } from "./core_text";
 
 // Historically consumers imported these via expression_lowering_stage2.

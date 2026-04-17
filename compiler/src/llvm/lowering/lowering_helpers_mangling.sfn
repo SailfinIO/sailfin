@@ -16,7 +16,7 @@ import {
     CapabilityManifest,
     TraitDescriptor,
     TraitImplementationDescriptor,
-    TraitMetadata,
+    TraitMetadata
 } from "../types";
 import {
     index_of,
@@ -38,7 +38,7 @@ import {
     render_function_shim,
     resolve_import_provider_module_name,
     sanitize_module_suffix,
-    should_keep_unmangled_abi_symbol,
+    should_keep_unmangled_abi_symbol
 } from "./lowering_helpers";
 
 fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], native_text_path: string) -> MangledModuleResult {
@@ -186,7 +186,10 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
                 let original_symbol = sanitize_symbol(original_name);
                 if should_keep_unmangled_abi_symbol(local_symbol) { continue; }
                 if string_array_contains(defined, local_symbol) {
-                    diagnostics.push("llvm lowering: import `" + local_symbol + "` shadows local function in module `" + current_module_slug + "`");
+                    diagnostics.push("llvm lowering: import `" + local_symbol
+                        + "` shadows local function in module `"
+                        + current_module_slug
+                        + "`");
                     continue;
                 }
                 // Don't rewrite if already qualified.
@@ -286,7 +289,9 @@ fn _render_declare_line(symbol: string, signature: DeclareSignature) -> string {
         param_types.push(signature.param_types[idx]);
         idx += 1;
     }
-    return "declare " + signature.return_type + " @" + symbol + "(" + join_with_separator(param_types, ", ") + ")";
+    return "declare " + signature.return_type + " @" + symbol + "("
+        + join_with_separator(param_types, ", ")
+        + ")";
 }
 
 fn empty_capability_manifest() -> CapabilityManifest {
@@ -307,7 +312,7 @@ fn build_trait_metadata(interfaces: NativeInterface[], structs: NativeStruct[]) 
         let interface = interfaces[index];
         let mut updated_interfaces = interface_descriptors;
         updated_interfaces = updated_interfaces.push(TraitDescriptor {
-            name: interface.name, type_parameters: interface.type_parameters, signatures: interface.signatures,
+            name: interface.name, type_parameters: interface.type_parameters, signatures: interface.signatures
         });
         interface_descriptors = updated_interfaces;
         index += 1;
@@ -447,7 +452,7 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
                     type_annotation: p_type,
                     mutable: p.mutable,
                     default_value: p.default_value,
-                    span: p.span,
+                    span: p.span
                 };
                 fixed_params.push(fixed_p);
                 pi += 1;
@@ -460,7 +465,7 @@ fn flatten_struct_methods(structs: NativeStruct[]) -> NativeFunction[] {
                 effects: method.effects,
                 decorators: method.decorators,
                 instructions: method.instructions,
-                is_extern: false,
+                is_extern: false
             };
             result = append_native_function(result, qualified);
             method_index += 1;

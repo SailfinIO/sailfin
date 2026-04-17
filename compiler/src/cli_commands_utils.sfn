@@ -33,7 +33,7 @@ export {
     _is_ident_char_cmd,
     _byte_at_cmd,
     _word_matches_cmd,
-    _string_list_contains_cmd,
+    _string_list_contains_cmd
 };
 
 fn _ends_with_cmd(value: string, suffix: string) -> boolean {
@@ -222,7 +222,9 @@ fn _collect_sfn_files_cmd(root: string, max_depth: number) -> string[] ![io] {
 
 fn _curl_post_json_cmd(url: string, body_path: string, auth_header: string) -> string ![io] {
     let tmp = "/tmp/.sfn_curl_response_cmd_tmp";
-    let rc = process.run(["curl", "-sfS", "-X", "POST", "-H", "Content-Type: application/json", "-H", "Authorization: " + auth_header, "-d", "@" + body_path, "-o", tmp, url]);
+    let rc = process.run(["curl", "-sfS", "-X", "POST", "-H", "Content-Type: application/json", "-H", "Authorization: "
+        + auth_header, "-d", "@"
+        + body_path, "-o", tmp, url]);
     if rc != 0 { return ""; }
     if !fs.exists(tmp) { return ""; }
     let response = fs.readFile(tmp);

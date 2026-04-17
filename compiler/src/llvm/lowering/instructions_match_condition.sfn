@@ -32,7 +32,7 @@ import {
     StringConstant,
     StructFieldInfo,
     StructTypeInfo,
-    TypeContext,
+    TypeContext
 } from "../types";
 import { number_to_string, trim_text } from "../utils";
 import { lower_condition_to_i1 } from "./instructions_condition";
@@ -62,11 +62,16 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
             // This is an enum pattern - extract tag and compare
             let enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name);
             if enum_info == null {
-                diagnostics.push("llvm lowering: match pattern references unknown enum `" + enum_parse.enum_name + "`");
+                diagnostics.push("llvm lowering: match pattern references unknown enum `"
+                    + enum_parse.enum_name
+                    + "`");
             } else {
                 let variant_info = resolve_enum_variant_info(enum_info, enum_parse.variant_name);
                 if variant_info == null {
-                    diagnostics.push("llvm lowering: enum `" + enum_parse.enum_name + "` has no variant `" + enum_parse.variant_name + "`");
+                    diagnostics.push("llvm lowering: enum `" + enum_parse.enum_name
+                        + "` has no variant `"
+                        + enum_parse.variant_name
+                        + "`");
                 } else {
                     // Map tag type to LLVM integer type
                     let mut tag_llvm_type: string = "i32";
@@ -78,7 +83,11 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                     // Extract the tag from the subject enum value using extractvalue
                     let tag_temp = format_temp_name(current_temp);
                     current_temp += 1;
-                    current_lines.push("  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
+                    current_lines.push("  " + tag_temp + " = extractvalue "
+                        + subject_operand.llvm_type
+                        + " "
+                        + subject_operand.value
+                        + ", 0");
 
                     // Compare the extracted tag with the variant's tag
                     let tag_operand = LLVMOperand {
@@ -138,11 +147,17 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                 }
                                 let mut updated_fields = field_bindings;
                                 updated_fields = updated_fields.push(MatchFieldBinding {
-                                    field_name: pattern_field.name, field_type: llvm_field_type, field_offset: found_field.offset,
+                                    field_name: pattern_field.name, field_type: llvm_field_type, field_offset: found_field.offset
                                 });
                                 field_bindings = updated_fields;
                             } else {
-                                diagnostics.push("llvm lowering: match pattern field `" + pattern_field.name + "` not found in variant `" + enum_parse.enum_name + "." + enum_parse.variant_name + "`");
+                                diagnostics.push("llvm lowering: match pattern field `"
+                                    + pattern_field.name
+                                    + "` not found in variant `"
+                                    + enum_parse.enum_name
+                                    + "."
+                                    + enum_parse.variant_name
+                                    + "`");
                             }
 
                             field_idx += 1;
@@ -184,7 +199,12 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                 // Extract and compare tag.
                                 let tag_temp = format_temp_name(current_temp);
                                 current_temp += 1;
-                                current_lines.push("  " + tag_temp + " = extractvalue " + subject_operand.llvm_type + " " + subject_operand.value + ", 0");
+                                current_lines.push("  " + tag_temp
+                                    + " = extractvalue "
+                                    + subject_operand.llvm_type
+                                    + " "
+                                    + subject_operand.value
+                                    + ", 0");
                                 let tag_operand = LLVMOperand {
                                     llvm_type: "i32",
                                     value: tag_temp
@@ -229,14 +249,20 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                         if field_info != null {
                                             let mut updated_structs = union_struct_bindings;
                                             updated_structs = updated_structs.push(MatchStructFieldBinding {
-                                                field_name: pattern_field.name, field_type: field_info.llvm_type, field_index: field_info.index,
+                                                field_name: pattern_field.name, field_type: field_info.llvm_type, field_index: field_info.index
                                             });
                                             union_struct_bindings = updated_structs;
                                         } else {
-                                            diagnostics.push("llvm lowering: match pattern field `" + pattern_field.name + "` not found in struct `" + struct_parse.type_name + "`");
+                                            diagnostics.push("llvm lowering: match pattern field `"
+                                                + pattern_field.name
+                                                + "` not found in struct `"
+                                                + struct_parse.type_name
+                                                + "`");
                                         }
                                     } else {
-                                        diagnostics.push("llvm lowering: match struct field literal patterns are not supported for `" + pattern_field.name + "`");
+                                        diagnostics.push("llvm lowering: match struct field literal patterns are not supported for `"
+                                            + pattern_field.name
+                                            + "`");
                                     }
                                     fidx += 1;
                                 }
@@ -244,10 +270,16 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                                 union_variant_index = found_index;
                                 union_struct_info = info;
                             } else {
-                                diagnostics.push("llvm lowering: match struct pattern `" + struct_parse.type_name + "` does not match union type `" + subject_operand.llvm_type + "`");
+                                diagnostics.push("llvm lowering: match struct pattern `"
+                                    + struct_parse.type_name
+                                    + "` does not match union type `"
+                                    + subject_operand.llvm_type
+                                    + "`");
                             }
                         } else {
-                            diagnostics.push("llvm lowering: match pattern references unknown struct `" + struct_parse.type_name + "`");
+                            diagnostics.push("llvm lowering: match pattern references unknown struct `"
+                                + struct_parse.type_name
+                                + "`");
                         }
                     }
                 }
@@ -295,7 +327,9 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                         current_temp = harmonised.temp_index;
                     }
                 } else {
-                    diagnostics.push("llvm lowering: unable to lower match case pattern in `" + function_name + "`");
+                    diagnostics.push("llvm lowering: unable to lower match case pattern in `"
+                        + function_name
+                        + "`");
                 }
             }
         }
@@ -330,7 +364,9 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                     condition_operand = merged.operand;
                 }
             } else {
-                diagnostics.push("llvm lowering: unable to lower guard in match case for `" + function_name + "`");
+                diagnostics.push("llvm lowering: unable to lower guard in match case for `"
+                    + function_name
+                    + "`");
             }
         }
     }
@@ -355,6 +391,6 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
         union_variant_index: union_variant_index,
         union_struct_info: union_struct_info,
         union_struct_bindings: union_struct_bindings,
-        string_constants: collected_string_constants,
+        string_constants: collected_string_constants
     };
 }

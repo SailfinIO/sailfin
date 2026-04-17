@@ -8,14 +8,14 @@
 // Each handler writes results to file IPC so the caller can read them back.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
-import { lower_expression, } from "../expression_lowering/native/core";
-import { append_local_binding, } from "../expression_lowering/native/core_scopes";
-import { lower_expression_statement, lower_return_instruction, } from "../expression_lowering/native/statement";
-import { parse_inline_let_expression, } from "../expression_lowering/native/statement_parsing";
-import { detect_suspension_conflicts, } from "../expression_lowering/native/statement_suspension";
-import { map_local_type, } from "../expression_lowering/native/statement_type_mapping";
-import { apply_lifetime_release_events, } from "../lifetime";
-import { merge_string_constants, } from "../strings";
+import { lower_expression } from "../expression_lowering/native/core";
+import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { lower_expression_statement, lower_return_instruction } from "../expression_lowering/native/statement";
+import { parse_inline_let_expression } from "../expression_lowering/native/statement_parsing";
+import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
+import { map_local_type } from "../expression_lowering/native/statement_type_mapping";
+import { apply_lifetime_release_events } from "../lifetime";
+import { merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,
     LLVMOperand,
@@ -26,7 +26,7 @@ import {
     LoopContext,
     ParameterBinding,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     append_string,
@@ -34,21 +34,17 @@ import {
     index_of,
     number_to_string,
     starts_with,
-    trim_text,
+    trim_text
 } from "../utils";
-import {
-    _parse_int_from_string,
-    _read_ipc_int_min,
-    extend_mutations,
-} from "./instructions_helpers";
-import { extend_lifetime_regions, } from "./instructions_helpers";
-import { lower_let_instruction, } from "./instructions_let";
+import { _parse_int_from_string, _read_ipc_int_min, extend_mutations } from "./instructions_helpers";
+import { extend_lifetime_regions } from "./instructions_helpers";
+import { lower_let_instruction } from "./instructions_let";
 import {
     get_instruction_condition,
     get_instruction_tag,
-    get_instruction_text,
+    get_instruction_text
 } from "./lowering_native_helpers";
-import { split_lines_local, } from "./lowering_text_utils";
+import { split_lines_local } from "./lowering_text_utils";
 
 // Write bindings to files for statement.sfn to read.
 // Extracted from the Expression and Return handlers where this pattern
@@ -221,7 +217,7 @@ fn dispatch_expression_instruction(function: NativeFunction, index: number, inst
                     type_annotation: inline_parse.type_annotation,
                     value: inline_parse.initializer,
                     span: null,
-                    value_span: null,
+                    value_span: null
                 };
                 let lowered = lower_let_instruction(function, inline_instruction, bindings, result_locals, allocas, lines, temp_index, next_region_id, next_region_id, functions, context, scope_id, scope_depth, active_label);
                 result_locals = _apply_let_result_from_files(diagnostics, result_locals, scope_id, scope_depth);
@@ -259,7 +255,7 @@ fn dispatch_expression_instruction(function: NativeFunction, index: number, inst
             let _mv = fs.readFile(_mp + "_value");
             let _ml = fs.readFile(_mp + "_label");
             current_mutations = extend_mutations(current_mutations, [LocalMutation {
-                name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
+                name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml
             }]);
             _mi += 1;
         }
@@ -305,7 +301,9 @@ fn dispatch_return_instruction(function: NativeFunction, index: number, instruct
     loop {
         if _si >= result_sc.length { break; }
         if _si > 0 { _joined_sc = _joined_sc + "\n"; }
-        _joined_sc = _joined_sc + result_sc[_si].name + "\t" + result_sc[_si].content + "\t" + number_to_string(result_sc[_si].byte_count);
+        _joined_sc = _joined_sc + result_sc[_si].name + "\t" + result_sc[_si].content
+            + "\t"
+            + number_to_string(result_sc[_si].byte_count);
         _si += 1;
     }
     fs.writeFile("build/sailfin/.dispatch_string_constants", _joined_sc);

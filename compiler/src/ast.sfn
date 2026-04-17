@@ -52,7 +52,7 @@ enum Expression {
         return_type: TypeAnnotation?
     },
     Range { start: Expression, end: Expression },
-    Raw { text: string },
+    Raw { text: string }
 }
 
 struct Parameter {
@@ -323,5 +323,5 @@ enum Statement {
     Unknown {
         tokens: Token[];
         text: string;
-    },
+    }
 }

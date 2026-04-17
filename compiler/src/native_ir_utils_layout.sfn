@@ -9,13 +9,13 @@ import {
     NativeStructLayoutField,
     NumberParseResult,
     StructLayoutFieldParse,
-    StructLayoutHeaderParse,
+    StructLayoutHeaderParse
 } from "./native_ir";
 import {
     index_of,
     split_whitespace,
     starts_with,
-    trim_text,
+    trim_text
 } from "./native_ir_utils_text";
 import { substring } from "./string_utils";
 
@@ -25,7 +25,7 @@ export {
     parse_struct_layout_field,
     parse_enum_layout_header,
     parse_enum_variant_layout,
-    parse_enum_payload_layout,
+    parse_enum_payload_layout
 };
 
 fn parse_decimal_number(text: string) -> NumberParseResult {
@@ -98,7 +98,9 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics.push("struct layout header has invalid size `" + value_text + "`");
+                diagnostics.push("struct layout header has invalid size `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -107,10 +109,13 @@ fn parse_struct_layout_header(text: string) -> StructLayoutHeaderParse {
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics.push("struct layout header has invalid align `" + value_text + "`");
+                diagnostics.push("struct layout header has invalid align `"
+                    + value_text
+                    + "`");
             }
         } else {
-            diagnostics.push("struct layout header unrecognized token `" + token + "`");
+            diagnostics.push("struct layout header unrecognized token `" + token
+                + "`");
         }
         index += 1;
     }
@@ -147,7 +152,8 @@ fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutF
         align: 0
     };
     if trimmed.length == 0 {
-        diagnostics.push("struct " + struct_name + " layout field missing content");
+        diagnostics.push("struct " + struct_name
+            + " layout field missing content");
         return StructLayoutFieldParse {
             success: false,
             field: default_field,
@@ -156,7 +162,8 @@ fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutF
     }
     let tokens = split_whitespace(trimmed);
     if tokens.length == 0 {
-        diagnostics.push("struct " + struct_name + " layout field missing entries");
+        diagnostics.push("struct " + struct_name
+            + " layout field missing entries");
         return StructLayoutFieldParse {
             success: false,
             field: default_field,
@@ -192,7 +199,11 @@ fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutF
                 offset_found = true;
                 offset_value = parsed.value;
             } else {
-                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid offset `" + value_text + "`");
+                diagnostics.push("struct " + struct_name + " layout field `"
+                    + field_name
+                    + "` has invalid offset `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
@@ -201,7 +212,11 @@ fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutF
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid size `" + value_text + "`");
+                diagnostics.push("struct " + struct_name + " layout field `"
+                    + field_name
+                    + "` has invalid size `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -210,24 +225,40 @@ fn parse_struct_layout_field(text: string, struct_name: string) -> StructLayoutF
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` has invalid align `" + value_text + "`");
+                diagnostics.push("struct " + struct_name + " layout field `"
+                    + field_name
+                    + "` has invalid align `"
+                    + value_text
+                    + "`");
             }
         } else {
-            diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` unrecognized token `" + token + "`");
+            diagnostics.push("struct " + struct_name + " layout field `"
+                + field_name
+                + "` unrecognized token `"
+                + token
+                + "`");
         }
         index += 1;
     }
     if type_text.length == 0 {
-        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing type entry");
+        diagnostics.push("struct " + struct_name + " layout field `"
+            + field_name
+            + "` missing type entry");
     }
     if !offset_found {
-        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing offset entry");
+        diagnostics.push("struct " + struct_name + " layout field `"
+            + field_name
+            + "` missing offset entry");
     }
     if !size_found {
-        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing size entry");
+        diagnostics.push("struct " + struct_name + " layout field `"
+            + field_name
+            + "` missing size entry");
     }
     if !align_found {
-        diagnostics.push("struct " + struct_name + " layout field `" + field_name + "` missing align entry");
+        diagnostics.push("struct " + struct_name + " layout field `"
+            + field_name
+            + "` missing align entry");
     }
     let mut _let375: boolean = false;
     if type_text.length > 0 {
@@ -295,7 +326,9 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics.push("enum layout header has invalid size `" + value_text + "`");
+                diagnostics.push("enum layout header has invalid size `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -304,7 +337,9 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics.push("enum layout header has invalid align `" + value_text + "`");
+                diagnostics.push("enum layout header has invalid align `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "tag_type=") {
             tag_type = substring(token, 9, token.length);
@@ -315,7 +350,9 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
                 tag_size_found = true;
                 tag_size_value = parsed.value;
             } else {
-                diagnostics.push("enum layout header has invalid tag_size `" + value_text + "`");
+                diagnostics.push("enum layout header has invalid tag_size `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "tag_align=") {
             let value_text = substring(token, 10, token.length);
@@ -324,10 +361,13 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
                 tag_align_found = true;
                 tag_align_value = parsed.value;
             } else {
-                diagnostics.push("enum layout header has invalid tag_align `" + value_text + "`");
+                diagnostics.push("enum layout header has invalid tag_align `"
+                    + value_text
+                    + "`");
             }
         } else {
-            diagnostics.push("enum layout header unrecognized token `" + token + "`");
+            diagnostics.push("enum layout header unrecognized token `" + token
+                + "`");
         }
         index += 1;
     }
@@ -367,7 +407,7 @@ fn parse_enum_layout_header(text: string) -> EnumLayoutHeaderParse {
         tag_type: tag_type,
         tag_size: tag_size_value,
         tag_align: tag_align_value,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -427,7 +467,11 @@ fn parse_enum_variant_layout(text: string, enum_name: string) -> EnumLayoutVaria
                 tag_found = true;
                 tag_value = parsed.value;
             } else {
-                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid tag `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout variant `"
+                    + variant_name
+                    + "` has invalid tag `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "offset=") {
             let value_text = substring(token, 7, token.length);
@@ -436,7 +480,11 @@ fn parse_enum_variant_layout(text: string, enum_name: string) -> EnumLayoutVaria
                 offset_found = true;
                 offset_value = parsed.value;
             } else {
-                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid offset `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout variant `"
+                    + variant_name
+                    + "` has invalid offset `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
@@ -445,7 +493,11 @@ fn parse_enum_variant_layout(text: string, enum_name: string) -> EnumLayoutVaria
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid size `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout variant `"
+                    + variant_name
+                    + "` has invalid size `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -454,24 +506,40 @@ fn parse_enum_variant_layout(text: string, enum_name: string) -> EnumLayoutVaria
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` has invalid align `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout variant `"
+                    + variant_name
+                    + "` has invalid align `"
+                    + value_text
+                    + "`");
             }
         } else {
-            diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` unrecognized token `" + token + "`");
+            diagnostics.push("enum " + enum_name + " layout variant `"
+                + variant_name
+                + "` unrecognized token `"
+                + token
+                + "`");
         }
         index += 1;
     }
     if !tag_found {
-        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing tag entry");
+        diagnostics.push("enum " + enum_name + " layout variant `"
+            + variant_name
+            + "` missing tag entry");
     }
     if !offset_found {
-        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing offset entry");
+        diagnostics.push("enum " + enum_name + " layout variant `"
+            + variant_name
+            + "` missing offset entry");
     }
     if !size_found {
-        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing size entry");
+        diagnostics.push("enum " + enum_name + " layout variant `"
+            + variant_name
+            + "` missing size entry");
     }
     if !align_found {
-        diagnostics.push("enum " + enum_name + " layout variant `" + variant_name + "` missing align entry");
+        diagnostics.push("enum " + enum_name + " layout variant `"
+            + variant_name
+            + "` missing align entry");
     }
     let mut _let377: boolean = false;
     if tag_found {
@@ -535,7 +603,9 @@ fn parse_enum_payload_layout(text: string, enum_name: string) -> EnumLayoutPaylo
     if dot_index <= 0 { _if378 = true; }
     if _dot_next >= identifier.length { _if378 = true; }
     if _if378 {
-        diagnostics.push("enum " + enum_name + " layout payload identifier `" + identifier + "` invalid");
+        diagnostics.push("enum " + enum_name + " layout payload identifier `"
+            + identifier
+            + "` invalid");
         return EnumLayoutPayloadParse {
             success: false,
             variant_name: "",
@@ -565,7 +635,11 @@ fn parse_enum_payload_layout(text: string, enum_name: string) -> EnumLayoutPaylo
                 offset_found = true;
                 offset_value = parsed.value;
             } else {
-                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid offset `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout payload `"
+                    + identifier
+                    + "` has invalid offset `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "size=") {
             let value_text = substring(token, 5, token.length);
@@ -574,7 +648,11 @@ fn parse_enum_payload_layout(text: string, enum_name: string) -> EnumLayoutPaylo
                 size_found = true;
                 size_value = parsed.value;
             } else {
-                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid size `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout payload `"
+                    + identifier
+                    + "` has invalid size `"
+                    + value_text
+                    + "`");
             }
         } else if starts_with(token, "align=") {
             let value_text = substring(token, 6, token.length);
@@ -583,24 +661,36 @@ fn parse_enum_payload_layout(text: string, enum_name: string) -> EnumLayoutPaylo
                 align_found = true;
                 align_value = parsed.value;
             } else {
-                diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` has invalid align `" + value_text + "`");
+                diagnostics.push("enum " + enum_name + " layout payload `"
+                    + identifier
+                    + "` has invalid align `"
+                    + value_text
+                    + "`");
             }
         } else {
-            diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` unrecognized token `" + token + "`");
+            diagnostics.push("enum " + enum_name + " layout payload `"
+                + identifier
+                + "` unrecognized token `"
+                + token
+                + "`");
         }
         index += 1;
     }
     if type_text.length == 0 {
-        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing type entry");
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier
+            + "` missing type entry");
     }
     if !offset_found {
-        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing offset entry");
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier
+            + "` missing offset entry");
     }
     if !size_found {
-        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing size entry");
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier
+            + "` missing size entry");
     }
     if !align_found {
-        diagnostics.push("enum " + enum_name + " layout payload `" + identifier + "` missing align entry");
+        diagnostics.push("enum " + enum_name + " layout payload `" + identifier
+            + "` missing align entry");
     }
     let mut _let379: boolean = false;
     if type_text.length > 0 {

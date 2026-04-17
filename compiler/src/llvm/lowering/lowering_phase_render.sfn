@@ -6,29 +6,25 @@
 // and libc declarations.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-import { NativeFunction, NativeStruct, } from "../../native_ir";
+import { NativeFunction, NativeStruct } from "../../native_ir";
 import { substring } from "../../string_utils";
 import {
     render_enum_type_definitions,
     render_imported_function_declarations,
     render_runtime_helper_declarations,
     render_struct_type_definitions,
-    render_trait_metadata_comments,
+    render_trait_metadata_comments
 } from "../rendering";
 import {
     find_function_by_name,
     render_interface_type_definitions,
     render_vtable_constants,
-    render_vtable_type_definitions,
+    render_vtable_type_definitions
 } from "../rendering_helpers";
-import { TraitMetadata, TypeContext, } from "../types";
-import {
-    index_of,
-    number_to_string,
-    starts_with,
-} from "../utils";
-import { extend_string_lines, module_source_filename, } from "./lowering_io";
-import { split_lines_local, } from "./lowering_text_utils";
+import { TraitMetadata, TypeContext } from "../types";
+import { index_of, number_to_string, starts_with } from "../utils";
+import { extend_string_lines, module_source_filename } from "./lowering_io";
+import { split_lines_local } from "./lowering_text_utils";
 
 // Render the LLVM IR preamble: source filename, trait metadata,
 // struct/enum/interface type definitions, async runtime types,
@@ -38,7 +34,8 @@ import { split_lines_local, } from "./lowering_text_utils";
 // Returns the preamble as a string[] of LLVM IR lines.
 fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_metadata: TraitMetadata, context_functions: NativeFunction[], local_functions: NativeFunction[], imported_functions: NativeFunction[], runtime_helpers: string[], debug_lowering: boolean) -> string[] ![io] {
     let mut lines: string[] = [];
-    lines.push("source_filename = \"" + module_source_filename(module_name) + "\"");
+    lines.push("source_filename = \"" + module_source_filename(module_name)
+        + "\"");
     lines.push("");
 
     // Trait metadata comments
@@ -52,7 +49,11 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     // Struct type definitions
     if debug_lowering {
         print.err("emit-llvm: phase=render_structs");
-        print.err("emit-llvm: render_structs counts structs=" + number_to_string(type_context.structs.length) + " enums=" + number_to_string(type_context.enums.length) + " functions=" + number_to_string(context_functions.length));
+        print.err("emit-llvm: render_structs counts structs=" + number_to_string(type_context.structs.length)
+            + " enums="
+            + number_to_string(type_context.enums.length)
+            + " functions="
+            + number_to_string(context_functions.length));
     }
     let struct_type_lines = render_struct_type_definitions(type_context, context_functions);
     // Filter out corrupted struct type lines (empty name: "% = type ...").

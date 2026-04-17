@@ -41,7 +41,9 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
     }
     let trace = _let189;
     if trace {
-        print.err("test llvm: collect_imported_module_context start (imports=" + number_to_string(imports.length) + ")");
+        print.err("test llvm: collect_imported_module_context start (imports="
+            + number_to_string(imports.length)
+            + ")");
     }
     let mut manifests: LayoutManifest[] = [];
     let mut native_texts: string[] = [];
@@ -73,7 +75,11 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
         if trace {
             if queue_index > 0 {
                 if queue_index % 50 == 0 {
-                    print.err("test llvm: collect_imported_module_context progress (index=" + number_to_string(queue_index) + " queued=" + number_to_string(queue_paths.length) + ")");
+                    print.err("test llvm: collect_imported_module_context progress (index="
+                        + number_to_string(queue_index)
+                        + " queued="
+                        + number_to_string(queue_paths.length)
+                        + ")");
                 }
             }
         }
@@ -113,9 +119,15 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
                 }
             }
             if is_cached_capsule {
-                diagnostics.push("layout manifest: missing artifact for capsule import `" + module_path + "` — ensure imports are inlined before LLVM lowering");
+                diagnostics.push("layout manifest: missing artifact for capsule import `"
+                    + module_path
+                    + "` — ensure imports are inlined before LLVM lowering");
             } else {
-                diagnostics.push("layout manifest: missing artifact for import `" + module_path + "` (expected " + manifest_path + ")");
+                diagnostics.push("layout manifest: missing artifact for import `"
+                    + module_path
+                    + "` (expected "
+                    + manifest_path
+                    + ")");
             }
         }
 
@@ -135,13 +147,17 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
             }
         } else {
             if depth == 0 {
-                diagnostics.push("native lowering: missing native text artifact for import `" + module_path + "` (expected " + native_text_path + ")");
+                diagnostics.push("native lowering: missing native text artifact for import `"
+                    + module_path
+                    + "` (expected "
+                    + native_text_path
+                    + ")");
             }
         }
 
         let mut updated_manifests = manifests;
         updated_manifests = updated_manifests.push(LayoutManifest {
-            structs: manifest_structs, enums: manifest_enums, diagnostics: [],
+            structs: manifest_structs, enums: manifest_enums, diagnostics: []
         });
         manifests = updated_manifests;
         let mut updated_texts = native_texts;
@@ -170,7 +186,9 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
     }
 
     if trace {
-        print.err("test llvm: collect_imported_module_context done (unique_imports=" + number_to_string(seen.length) + ")");
+        print.err("test llvm: collect_imported_module_context done (unique_imports="
+            + number_to_string(seen.length)
+            + ")");
     }
 
     return ImportedModuleContext {
@@ -345,11 +363,13 @@ fn native_text_path_for_slug(slug: string) -> string {
 }
 
 fn _selfhost_layout_manifest_path_for_slug(slug: string) -> string {
-    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug + ".layout-manifest";
+    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
+        + ".layout-manifest";
 }
 
 fn _selfhost_native_text_path_for_slug(slug: string) -> string {
-    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug + ".sfn-asm";
+    return "build/selfhost/native/seed_cwd/build/native/import-context/" + slug
+        + ".sfn-asm";
 }
 
 fn _resolve_layout_manifest_path_for_slug(slug: string) -> string ![io] {
@@ -465,7 +485,10 @@ fn resolve_cached_capsule_source(module: string, deps: string, home_dir: string)
     if !_version_safe { return ""; }
 
     // Construct cache path
-    let cached_path = home_dir + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src/mod.sfn";
+    let cached_path = home_dir + "/.sfn/cache/capsules/" + scope + "/" + name
+        + "/"
+        + version
+        + "/src/mod.sfn";
     if fs.exists(cached_path) { return cached_path; }
     return "";
 }
@@ -494,7 +517,8 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
         let layout_struct = manifest.structs[struct_index];
         let target_index = find_struct_index(updated_structs, layout_struct.name);
         if target_index < 0 {
-            diagnostics.push("layout manifest: struct `" + layout_struct.name + "` missing from native module");
+            diagnostics.push("layout manifest: struct `" + layout_struct.name
+                + "` missing from native module");
         } else {
             let target = updated_structs[target_index];
             let replaced = NativeStruct {
@@ -502,7 +526,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
                 fields: target.fields,
                 methods: target.methods,
                 implements: target.implements,
-                layout: layout_struct.layout,
+                layout: layout_struct.layout
             };
             updated_structs = replace_native_struct(updated_structs, target_index, replaced);
         }
@@ -516,13 +540,14 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
         let layout_enum = manifest.enums[enum_index];
         let target_index = find_enum_index(updated_enums, layout_enum.name);
         if target_index < 0 {
-            diagnostics.push("layout manifest: enum `" + layout_enum.name + "` missing from native module");
+            diagnostics.push("layout manifest: enum `" + layout_enum.name
+                + "` missing from native module");
         } else {
             let target = updated_enums[target_index];
             let replaced = NativeEnum {
                 name: target.name,
                 variants: target.variants,
-                layout: layout_enum.layout,
+                layout: layout_enum.layout
             };
             updated_enums = replace_native_enum(updated_enums, target_index, replaced);
         }
@@ -532,7 +557,7 @@ fn apply_layout_manifest_entries(structs: NativeStruct[], enums: NativeEnum[], m
     return LayoutManifestApplication {
         structs: updated_structs,
         enums: updated_enums,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 

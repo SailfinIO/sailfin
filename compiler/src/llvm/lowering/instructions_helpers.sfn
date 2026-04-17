@@ -5,8 +5,8 @@
 // the v0.1.1 seed's per-module streaming emission limit.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
-import { append_local_binding, } from "../expression_lowering/native/core_scopes";
-import { merge_string_constants, } from "../strings";
+import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,
     LLVMOperand,
@@ -21,7 +21,7 @@ import {
     ParameterBinding,
     ScopeMetadata,
     StringConstant,
-    TypeContext,
+    TypeContext
 } from "../types";
 import {
     append_string,
@@ -29,9 +29,9 @@ import {
     index_of,
     number_to_string,
     starts_with,
-    trim_text,
+    trim_text
 } from "../utils";
-import { split_lines_local, } from "./lowering_text_utils";
+import { split_lines_local } from "./lowering_text_utils";
 
 fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
@@ -101,7 +101,9 @@ fn _write_block_result_files(lines: string[], allocas: string[], terminated: boo
     let mut si: number = 0;
     loop {
         if si >= string_constants.length { break; }
-        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content + "\t" + number_to_string(string_constants[si].byte_count));
+        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content
+            + "\t"
+            + number_to_string(string_constants[si].byte_count));
         si = si + 1;
     }
     fs.writeLines("build/sailfin/.block_result_string_constants", sc_lines);
@@ -388,7 +390,7 @@ fn read_expr_mutations(existing: LocalMutation[]) -> LocalMutation[] ![io] {
         let _mv = fs.readFile(_mp + "_value");
         let _ml = fs.readFile(_mp + "_label");
         result = extend_mutations(result, [LocalMutation {
-            name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml,
+            name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml
         }]);
         _mi += 1;
     }

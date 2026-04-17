@@ -14,7 +14,7 @@ import {
     MemberAccessParse,
     RangeIterableParse,
     StructLiteralField,
-    StructLiteralParse,
+    StructLiteralParse
 } from "../../types";
 import { ends_with, is_identifier_start_char } from "../../utils";
 import { split_array_elements } from "../splitting";
@@ -24,7 +24,7 @@ import {
     index_of,
     is_digit_char,
     string_array_contains,
-    trim_text,
+    trim_text
 } from "./core_text";
 
 fn find_matching_closing_brace(text: string, open_index: number) -> number {
@@ -257,7 +257,8 @@ fn parse_struct_literal(text: string) -> StructLiteralParse {
         if snippet.length > 120 {
             snippet = substring(snippet, 0, 117) + "...";
         }
-        diagnostics.push("llvm lowering: struct literal context `" + snippet + "`");
+        diagnostics.push("llvm lowering: struct literal context `" + snippet
+            + "`");
         fatal = true;
     }
 
@@ -281,7 +282,9 @@ fn parse_struct_literal(text: string) -> StructLiteralParse {
                 if entry.length == 0 { continue; }
                 let colon_index = find_top_level_colon(entry);
                 if colon_index < 0 {
-                    diagnostics.push("llvm lowering: struct literal field `" + entry + "` missing `:`");
+                    diagnostics.push("llvm lowering: struct literal field `"
+                        + entry
+                        + "` missing `:`");
                     continue;
                 }
                 let field_name = trim_text(substring(entry, 0, colon_index));
@@ -291,11 +294,15 @@ fn parse_struct_literal(text: string) -> StructLiteralParse {
                     continue;
                 }
                 if string_array_contains(seen, field_name) {
-                    diagnostics.push("llvm lowering: struct literal field `" + field_name + "` repeated");
+                    diagnostics.push("llvm lowering: struct literal field `"
+                        + field_name
+                        + "` repeated");
                     continue;
                 }
                 if value_text.length == 0 {
-                    diagnostics.push("llvm lowering: struct literal field `" + field_name + "` missing value");
+                    diagnostics.push("llvm lowering: struct literal field `"
+                        + field_name
+                        + "` missing value");
                     continue;
                 }
                 seen.push(field_name);
@@ -310,7 +317,9 @@ fn parse_struct_literal(text: string) -> StructLiteralParse {
         if close_index >= 0 {
             let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
             if remainder.length > 0 {
-                diagnostics.push("llvm lowering: struct literal trailing content `" + remainder + "`");
+                diagnostics.push("llvm lowering: struct literal trailing content `"
+                    + remainder
+                    + "`");
                 fatal = true;
             }
         }
@@ -730,7 +739,9 @@ fn parse_enum_literal(text: string) -> EnumLiteralParse {
                         continue;
                     }
                     if string_array_contains(seen, field_name) {
-                        diagnostics.push("llvm lowering: enum literal field `" + field_name + "` repeated");
+                        diagnostics.push("llvm lowering: enum literal field `"
+                            + field_name
+                            + "` repeated");
                         continue;
                     }
                     seen.push(field_name);
@@ -747,11 +758,15 @@ fn parse_enum_literal(text: string) -> EnumLiteralParse {
                     continue;
                 }
                 if string_array_contains(seen, field_name) {
-                    diagnostics.push("llvm lowering: enum literal field `" + field_name + "` repeated");
+                    diagnostics.push("llvm lowering: enum literal field `"
+                        + field_name
+                        + "` repeated");
                     continue;
                 }
                 if value_text.length == 0 {
-                    diagnostics.push("llvm lowering: enum literal field `" + field_name + "` missing value");
+                    diagnostics.push("llvm lowering: enum literal field `"
+                        + field_name
+                        + "` missing value");
                     continue;
                 }
                 seen.push(field_name);
@@ -766,7 +781,9 @@ fn parse_enum_literal(text: string) -> EnumLiteralParse {
         if close_index >= 0 {
             let remainder = trim_text(substring(trimmed, close_index + 1, trimmed.length));
             if remainder.length > 0 {
-                diagnostics.push("llvm lowering: enum literal trailing content `" + remainder + "`");
+                diagnostics.push("llvm lowering: enum literal trailing content `"
+                    + remainder
+                    + "`");
                 fatal = true;
             }
         }
@@ -1080,7 +1097,8 @@ fn parse_range_iterable(iterable: string) -> RangeIterableParse {
             diagnostics: diagnostics
         };
     }
-    let second_separator = find_top_level_range_separator_from(trimmed, first_separator + 2);
+    let second_separator = find_top_level_range_separator_from(trimmed, first_separator
+        + 2);
     let start_text = trim_text(substring(trimmed, 0, first_separator));
     let mut end_text = trim_text(substring(trimmed, first_separator + 2, trimmed.length));
     if second_separator >= 0 {

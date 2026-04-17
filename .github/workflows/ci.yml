@@ -96,7 +96,7 @@ jobs:
           done < <(find compiler/src runtime -name '*.sfn' -print | sort)
           if [ "$fail" -gt 0 ]; then
             echo ""
-            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/"
+            echo "[fmt] $fail file(s) need formatting. Run: sfn fmt --write compiler/src/ runtime/"
             exit 1
           fi
           echo "[fmt] all files formatted"

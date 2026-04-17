@@ -112,7 +112,7 @@ import {
     matches_keyword,
     merge_parameter_bindings,
     is_effect_delimiter,
-    extend_string_array,
+    extend_string_array
 } from "../../utils";
 
 import {
@@ -146,7 +146,7 @@ import {
     encode_string_literal_for_sailfin,
     escape_string_for_sailfin_literal,
     unescape_string_literal,
-    sanitize_symbol,
+    sanitize_symbol
 } from "./core_text";
 
 export {
@@ -155,7 +155,7 @@ export {
     extract_simple_identifier,
     unescape_string_literal,
     make_string_constant_name,
-    make_string_constant_name_for_module,
+    make_string_constant_name_for_module
 } from "./core_text";
 
 import {
@@ -164,7 +164,7 @@ import {
     parse_enum_literal,
     parse_member_access,
     parse_index_expression,
-    parse_range_iterable,
+    parse_range_iterable
 } from "./core_parse";
 
 export {
@@ -173,7 +173,7 @@ export {
     parse_enum_literal,
     parse_member_access,
     parse_index_expression,
-    parse_range_iterable,
+    parse_range_iterable
 } from "./core_parse";
 
 import {
@@ -183,7 +183,7 @@ import {
     coerce_operand_to_type,
     dominant_type,
     is_string_pointer_type,
-    harmonise_operands,
+    harmonise_operands
 } from "./core_operands";
 
 export {
@@ -193,7 +193,7 @@ export {
     coerce_operand_to_type,
     dominant_type,
     is_string_pointer_type,
-    harmonise_operands,
+    harmonise_operands
 } from "./core_operands";
 
 import {
@@ -211,7 +211,7 @@ import {
     append_struct_literal_field,
     append_native_struct,
     append_native_enum,
-    replace_llvm_operand,
+    replace_llvm_operand
 } from "./core_scopes";
 
 export {
@@ -229,7 +229,7 @@ export {
     append_struct_literal_field,
     append_native_struct,
     append_native_enum,
-    replace_llvm_operand,
+    replace_llvm_operand
 } from "./core_scopes";
 
 import {
@@ -251,7 +251,7 @@ import {
     annotation_is_array,
     layout_annotation_represents_user_value,
     is_copy_type,
-    array_struct_type_for_element,
+    array_struct_type_for_element
 } from "../../type_mapping";
 
 import { fixup_enum_layouts } from "../../type_context";
@@ -273,9 +273,9 @@ import {
     find_variant_field_info
 } from "../../type_context_queries";
 
-import { find_function_by_name, } from "../../rendering";
+import { find_function_by_name } from "../../rendering";
 
-import { find_runtime_helper, } from "../../runtime_helpers";
+import { find_runtime_helper } from "../../runtime_helpers";
 
 import {
     format_temp_name,
@@ -283,7 +283,7 @@ import {
     format_typed_operand,
     default_return_literal,
     strip_mut_prefix,
-    is_simple_identifier,
+    is_simple_identifier
 } from "../../expressions_helpers";
 
 import {
@@ -291,7 +291,7 @@ import {
     mark_parameter_consumed,
     mark_local_consumed,
     reset_local_consumption,
-    update_local_ownership,
+    update_local_ownership
 } from "./core_bindings";
 
 import {
@@ -311,7 +311,7 @@ import {
     map_return_type,
     future_pointer_type_for_return_type,
     await_symbol_for_future_pointer_type,
-    map_parameter_type,
+    map_parameter_type
 } from "./core_type_mapping";
 
 import {
@@ -323,7 +323,7 @@ import {
     parse_raw_address_expression,
     parse_cast_expression,
     parse_array_literal_metadata,
-    map_metadata_annotation,
+    map_metadata_annotation
 } from "./core_parsing";
 
 import {
@@ -331,35 +331,31 @@ import {
     find_top_level_operator,
     find_comparison_operator,
     find_logical_operator,
-    lines_end_with_terminator,
+    lines_end_with_terminator
 } from "./core_operators";
 
-import {
-    lower_string_literal,
-    emit_string_concat,
-    coerce_operand_to_string,
-} from "./core_strings";
+import { lower_string_literal, emit_string_concat, coerce_operand_to_string } from "./core_strings";
 
-import { find_call_site, split_call_arguments, } from "./core_calls";
+import { find_call_site, split_call_arguments } from "./core_calls";
 
-import { lower_raw_address_expression, } from "./core_addressing";
+import { lower_raw_address_expression } from "./core_addressing";
 
 import {
     analyze_value_ownership_impl,
     detect_borrow_conflicts_impl,
     format_suspension_location_impl,
-    resolve_borrow_base_impl,
+    resolve_borrow_base_impl
 } from "./core_ownership";
 
-import { split_array_elements, } from "../splitting";
+import { split_array_elements } from "../splitting";
 
-import { collect_parameter_types, operation_name_for_symbol, } from "./core_helpers";
+import { collect_parameter_types, operation_name_for_symbol } from "./core_helpers";
 
 import {
     lower_struct_array_concat,
     lower_array_push_in_place,
     find_top_level_comma_in_llvm_type,
-    array_pointer_element_type,
+    array_pointer_element_type
 } from "../arrays";
 
 import {
@@ -369,7 +365,7 @@ import {
     lower_binary_operation,
     lower_comparison_operation,
     lower_logical_and,
-    lower_logical_or,
+    lower_logical_or
 } from "./core_ops_lowering";
 
 import { lower_borrow_expression } from "./core_borrow_lowering";
@@ -382,7 +378,7 @@ import {
     lower_struct_literal,
     lower_enum_literal,
     lower_cast_expression,
-    try_lower_interpolated_string_literal,
+    try_lower_interpolated_string_literal
 } from "./core_literals_lowering";
 
 fn analyze_value_ownership(initializer: string?, span: NativeSourceSpan?, locals: LocalBinding[], bindings: ParameterBinding[]) -> OwnershipAnalysis {
@@ -407,7 +403,11 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     let empty_constants = empty_string_constant_set();
     let dbg_expr = fs.exists("build/sailfin/.trace_lowering");
     if dbg_expr {
-        print.err("emit-llvm: lower_expression ENTER expr=" + trimmed + " bindings_len=" + number_to_string(bindings.length) + " expected=" + expected_type);
+        print.err("emit-llvm: lower_expression ENTER expr=" + trimmed
+            + " bindings_len="
+            + number_to_string(bindings.length)
+            + " expected="
+            + expected_type);
     }
     if trimmed.length == 0 {
         diagnostics.push("llvm lowering: empty expression encountered");
@@ -562,7 +562,9 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             let future_operand = lowered.operand;
             let await_symbol = await_symbol_for_future_pointer_type(future_operand.llvm_type);
             if await_symbol.length == 0 {
-                let with_issue = append_string(diagnostics, "llvm lowering: await expects a Future pointer, got `" + future_operand.llvm_type + "`");
+                let with_issue = append_string(diagnostics, "llvm lowering: await expects a Future pointer, got `"
+                    + future_operand.llvm_type
+                    + "`");
                 return ExpressionResult {
                     lines: lowered.lines,
                     temp_index: lowered.temp_index,
@@ -574,7 +576,11 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
 
             // Await returns a value whose type depends on the future kind.
             if future_operand.llvm_type == "%SailfinFutureVoid*" {
-                let mut awaited_lines = append_string(lowered.lines, "  call void @" + await_symbol + "(%SailfinFutureVoid* " + future_operand.value + ")");
+                let mut awaited_lines = append_string(lowered.lines, "  call void @"
+                    + await_symbol
+                    + "(%SailfinFutureVoid* "
+                    + future_operand.value
+                    + ")");
                 let out_operand = LLVMOperand {
                     llvm_type: "void",
                     value: ""
@@ -598,7 +604,14 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 result_type = "i1";
             }
             let result_temp = format_temp_name(lowered.temp_index);
-            let awaited_call = "  " + result_temp + " = call " + result_type + " @" + await_symbol + "(" + future_operand.llvm_type + " " + future_operand.value + ")";
+            let awaited_call = "  " + result_temp + " = call " + result_type
+                + " @"
+                + await_symbol
+                + "("
+                + future_operand.llvm_type
+                + " "
+                + future_operand.value
+                + ")";
             let mut awaited_lines2 = append_string(lowered.lines, awaited_call);
 
             // If we're awaiting an opaque pointer future in a typed context, try to unbox.
@@ -631,11 +644,25 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 if trimmed_expected.length > 0 {
                     if trimmed_expected != "i8*" {
                         if !ends_with_pointer_suffix(trimmed_expected) {
-                            let typed_ptr_temp = format_temp_name(lowered.temp_index + 1);
-                            let load_temp = format_temp_name(lowered.temp_index + 2);
-                            awaited_lines2.push("  " + typed_ptr_temp + " = bitcast i8* " + result_temp + " to " + trimmed_expected + "*");
-                            awaited_lines2.push("  " + load_temp + " = load " + trimmed_expected + ", " + trimmed_expected + "* " + typed_ptr_temp);
-                            awaited_lines2.push("  call void @free(i8* " + result_temp + ")");
+                            let typed_ptr_temp = format_temp_name(lowered.temp_index
+                                + 1);
+                            let load_temp = format_temp_name(lowered.temp_index
+                                + 2);
+                            awaited_lines2.push("  " + typed_ptr_temp
+                                + " = bitcast i8* "
+                                + result_temp
+                                + " to "
+                                + trimmed_expected
+                                + "*");
+                            awaited_lines2.push("  " + load_temp + " = load "
+                                + trimmed_expected
+                                + ", "
+                                + trimmed_expected
+                                + "* "
+                                + typed_ptr_temp);
+                            awaited_lines2.push("  call void @free(i8* "
+                                + result_temp
+                                + ")");
                             let out_operand_unboxed = LLVMOperand {
                                 llvm_type: trimmed_expected,
                                 value: load_temp
@@ -712,11 +739,18 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     if dbg_expr {
         let mut add_succ = "false";
         if additive.success { add_succ = "true"; }
-        print.err("emit-llvm: lower_expression additive_check expr=" + stripped + " success=" + add_succ + " index=" + number_to_string(additive.index) + " symbol=" + additive.symbol);
+        print.err("emit-llvm: lower_expression additive_check expr=" + stripped
+            + " success="
+            + add_succ
+            + " index="
+            + number_to_string(additive.index)
+            + " symbol="
+            + additive.symbol);
     }
     if additive.success {
         if dbg_expr {
-            print.err("emit-llvm: lower_expression DISPATCH binary_op expr=" + stripped);
+            print.err("emit-llvm: lower_expression DISPATCH binary_op expr="
+                + stripped);
         }
         return lower_binary_operation(stripped, additive, bindings, locals, temp_index, lines, functions, context);
     }
@@ -767,7 +801,9 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             }
             let ptr_operand = lowered_ptr.operand;
             if !ends_with_pointer_suffix(ptr_operand.llvm_type) {
-                let with_issue = append_string(diagnostics, "llvm lowering: cannot dereference non-pointer type `" + ptr_operand.llvm_type + "`");
+                let with_issue = append_string(diagnostics, "llvm lowering: cannot dereference non-pointer type `"
+                    + ptr_operand.llvm_type
+                    + "`");
                 return ExpressionResult {
                     lines: lowered_ptr.lines,
                     temp_index: lowered_ptr.temp_index,
@@ -778,7 +814,14 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             }
             let element_type = strip_pointer_suffix(ptr_operand.llvm_type);
             let load_name = format_temp_name(lowered_ptr.temp_index);
-            let updated_lines = append_string(lowered_ptr.lines, "  " + load_name + " = load " + element_type + ", " + element_type + "* " + ptr_operand.value);
+            let updated_lines = append_string(lowered_ptr.lines, "  "
+                + load_name
+                + " = load "
+                + element_type
+                + ", "
+                + element_type
+                + "* "
+                + ptr_operand.value);
             let operand = LLVMOperand {
                 llvm_type: element_type,
                 value: load_name
@@ -935,7 +978,10 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         if parameter != null {
             param_found = parameter.name + " -> " + parameter.llvm_name;
         }
-        print.err("emit-llvm: lower_expression param_lookup stripped=" + stripped + " result=" + param_found);
+        print.err("emit-llvm: lower_expression param_lookup stripped="
+            + stripped
+            + " result="
+            + param_found);
     }
     if parameter != null {
         let operand = LLVMOperand {
@@ -970,9 +1016,11 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     }
 
     if dbg_expr {
-        print.err("emit-llvm: lower_expression FALLTHROUGH expr=" + stripped + " (unhandled)");
+        print.err("emit-llvm: lower_expression FALLTHROUGH expr=" + stripped
+            + " (unhandled)");
     }
-    diagnostics.push("llvm lowering: unable to lower expression `" + expression + "`");
+    diagnostics.push("llvm lowering: unable to lower expression `" + expression
+        + "`");
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,

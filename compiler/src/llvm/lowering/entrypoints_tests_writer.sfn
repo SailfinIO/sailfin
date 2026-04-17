@@ -137,7 +137,7 @@ fn write_llvm_ir_for_tests_from_text(native_text: string, module_name: string, o
             name: module_name, format: "sailfin-native-text", contents: native_text
         }],
         entry_points: [],
-        symbol_count: 0,
+        symbol_count: 0
     };
     let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(dummy_module, parse, [], [], []);
     if lowered_lines.lines.length == 0 {

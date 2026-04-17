@@ -22,7 +22,7 @@ fn lex(source: string) -> Token[] {
         source_len: length,
         index: 0,
         line: 1,
-        column: 1,
+        column: 1
     };
 
     let tokens: Token[] = [];
@@ -57,7 +57,7 @@ fn lex(source: string) -> Token[] {
             }
             let lexeme = slice(state.source, start_index, state.index);
             tokens = append(tokens, Token {
-                kind: TokenKind.Whitespace(), lexeme: lexeme, line: start_line, column: start_column,
+                kind: TokenKind.Whitespace(), lexeme: lexeme, line: start_line, column: start_column
             });
             continue;
         }
@@ -94,7 +94,7 @@ fn lex(source: string) -> Token[] {
                     state.index = comment_end;
                     state.column += consumed_columns;
                     tokens = append(tokens, Token {
-                        kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column,
+                        kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column
                     });
                     continue;
                 }
@@ -130,7 +130,7 @@ fn lex(source: string) -> Token[] {
 
                     let lexeme = slice(state.source, start_index, state.index);
                     tokens = append(tokens, Token {
-                        kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column,
+                        kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column
                     });
                     continue;
                 }
@@ -182,7 +182,7 @@ fn lex(source: string) -> Token[] {
 
             let lexeme = slice(state.source, start_index, state.index);
             tokens = append(tokens, Token {
-                kind: TokenKind.StringLiteral(), lexeme: lexeme, line: start_line, column: start_column,
+                kind: TokenKind.StringLiteral(), lexeme: lexeme, line: start_line, column: start_column
             });
             continue;
         }
@@ -228,7 +228,7 @@ fn lex(source: string) -> Token[] {
 
             let lexeme = slice(state.source, start_index, state.index);
             tokens = append(tokens, Token {
-                kind: TokenKind.NumberLiteral(), lexeme: lexeme, line: start_line, column: start_column,
+                kind: TokenKind.NumberLiteral(), lexeme: lexeme, line: start_line, column: start_column
             });
             continue;
         }
@@ -253,11 +253,11 @@ fn lex(source: string) -> Token[] {
             if value == "false" { _if36 = true; }
             if _if36 {
                 tokens = append(tokens, Token {
-                    kind: TokenKind.BooleanLiteral(), lexeme: value, line: start_line, column: start_column,
+                    kind: TokenKind.BooleanLiteral(), lexeme: value, line: start_line, column: start_column
                 });
             } else {
                 tokens = append(tokens, Token {
-                    kind: TokenKind.Identifier(), lexeme: value, line: start_line, column: start_column,
+                    kind: TokenKind.Identifier(), lexeme: value, line: start_line, column: start_column
                 });
             }
             continue;
@@ -279,7 +279,7 @@ fn lex(source: string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
                 tokens = append(tokens, Token {
-                    kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column,
+                    kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
                 });
                 continue;
             }
@@ -288,7 +288,7 @@ fn lex(source: string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
                 tokens = append(tokens, Token {
-                    kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column,
+                    kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
                 });
                 continue;
             }
@@ -301,7 +301,7 @@ fn lex(source: string) -> Token[] {
         } else { state.column += 1; }
 
         tokens = append(tokens, Token {
-            kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column,
+            kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
         });
     }
 

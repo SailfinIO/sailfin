@@ -25,13 +25,13 @@ import {
     Statement,
     TypeAnnotation,
     TypeParameter,
-    WithClause,
+    WithClause
 } from "./ast";
 import {
     format_expression,
     format_initializer,
     format_optional_expression,
-    format_type_annotation,
+    format_type_annotation
 } from "./emitter_sailfin_expr";
 import {
     TextBuilder,
@@ -45,7 +45,7 @@ import {
     format_test_name,
     join_with_separator,
     tokens_to_source,
-    trim_block_body,
+    trim_block_body
 } from "./emitter_sailfin_utils";
 import { Token } from "./token";
 
@@ -160,7 +160,8 @@ fn emit_statement(builder: TextBuilder, statement: Statement) -> TextBuilder {
         let comment = "// original: " + collapse_whitespace(statement.text);
         return builder_emit_line(builder, comment);
     }
-    return builder_emit_line(builder, "// TODO: unsupported statement: " + statement.variant);
+    return builder_emit_line(builder, "// TODO: unsupported statement: "
+        + statement.variant);
 }
 
 fn emit_import(builder: TextBuilder, specifiers: ImportSpecifier[], source: string) -> TextBuilder {
@@ -221,7 +222,8 @@ fn emit_model(builder: TextBuilder, statement: Statement) -> TextBuilder {
     loop {
         if index >= statement.properties.length { break; }
         let property = statement.properties[index];
-        let line = property.name + " = " + format_expression(property.value) + ";";
+        let line = property.name + " = " + format_expression(property.value)
+            + ";";
         current = builder_emit_line(current, line);
         index += 1;
     }
@@ -317,7 +319,8 @@ fn emit_struct(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut field_index: number = 0;
     loop {
         if field_index >= statement.fields.length { break; }
-        current = builder_emit_line(current, format_field(statement.fields[field_index]) + ";");
+        current = builder_emit_line(current, format_field(statement.fields[field_index])
+            + ";");
         field_index += 1;
     }
 
@@ -389,7 +392,8 @@ fn emit_block_statement(builder: TextBuilder, statement: Statement) -> TextBuild
         return builder_emit_line(builder, "continue;");
     }
     if statement.variant == "ExpressionStatement" {
-        return builder_emit_line(builder, format_expression(statement.expression) + ";");
+        return builder_emit_line(builder, format_expression(statement.expression)
+            + ";");
     }
     if statement.variant == "VariableDeclaration" {
         return emit_variable(builder, statement);
@@ -422,7 +426,8 @@ fn emit_block_statement(builder: TextBuilder, statement: Statement) -> TextBuild
     if statement.variant == "MatchStatement" {
         return emit_match(builder, statement);
     }
-    return builder_emit_line(builder, "// TODO: unsupported block statement: " + statement.variant);
+    return builder_emit_line(builder, "// TODO: unsupported block statement: "
+        + statement.variant);
 }
 
 fn emit_prompt(builder: TextBuilder, statement: Statement) -> TextBuilder {
@@ -461,7 +466,8 @@ fn emit_else_branch(builder: TextBuilder, branch: ElseBranch) -> TextBuilder {
         let nested = branch.statement;
         if nested == null { return builder; }
         if nested.variant == "IfStatement" {
-            let after = emit_block_with_header(builder, "else if " + format_expression(nested.condition), nested.then_block);
+            let after = emit_block_with_header(builder, "else if "
+                + format_expression(nested.condition), nested.then_block);
             let nested_else = nested.else_branch;
             if nested_else == null { return after; }
             return emit_else_branch(after, nested_else);

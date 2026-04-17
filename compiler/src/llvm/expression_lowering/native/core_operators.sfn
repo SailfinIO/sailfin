@@ -2,13 +2,9 @@
 //
 // Operator and expression-shape helpers extracted from core.sfn.
 import { char_at, char_code, substring } from "../../../string_utils";
-import { OperatorMatch, } from "../../types";
-import {
-    contains_text,
-    starts_with,
-    trim_text,
-} from "../../utils";
-import { char_code_at_text, is_trim_char, } from "./core_text";
+import { OperatorMatch } from "../../types";
+import { contains_text, starts_with, trim_text } from "../../utils";
+import { char_code_at_text, is_trim_char } from "./core_text";
 
 fn lines_end_with_terminator(lines: string[]) -> boolean {
     let mut index: number = lines.length - 1;
@@ -160,16 +156,19 @@ fn find_top_level_operator(expression: string, operators: string) -> OperatorMat
                             if ch == "-" {
                                 if is_binary_minus(expression, index) {
                                     candidate_index = index;
-                                    candidate_symbol = substring(expression, index, index + 1);
+                                    candidate_symbol = substring(expression, index, index
+                                        + 1);
                                 }
                             } else if ch == "*" {
                                 if is_binary_star(expression, index) {
                                     candidate_index = index;
-                                    candidate_symbol = substring(expression, index, index + 1);
+                                    candidate_symbol = substring(expression, index, index
+                                        + 1);
                                 }
                             } else {
                                 candidate_index = index;
-                                candidate_symbol = substring(expression, index, index + 1);
+                                candidate_symbol = substring(expression, index, index
+                                    + 1);
                             }
                         }
                     }

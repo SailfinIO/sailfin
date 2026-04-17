@@ -84,7 +84,7 @@ fn collect_top_level_symbols(program: Program) -> SymbolCollectionResult {
 
     return SymbolCollectionResult {
         symbols: symbols,
-        diagnostics: diagnostics,
+        diagnostics: diagnostics
     };
 }
 
@@ -119,7 +119,7 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
     if statement.variant == "VariableDeclaration" {
         return register_symbol(statement.name, "variable", statement.span, existing);
     }
-    return SymbolCollectionResult { symbols: existing, diagnostics: [], };
+    return SymbolCollectionResult { symbols: existing, diagnostics: [] };
 }
 
 fn check_program_scopes(program: Program, interfaces: Statement[]) -> Diagnostic[] {
@@ -163,7 +163,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
     if statement.variant == "StructDeclaration" {
@@ -212,7 +212,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
     if statement.variant == "EnumDeclaration" {
@@ -234,7 +234,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
     if statement.variant == "InterfaceDeclaration" {
@@ -256,7 +256,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
     if statement.variant == "ModelDeclaration" {
@@ -271,7 +271,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
     if statement.variant == "PipelineDeclaration" {
@@ -293,7 +293,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
     if statement.variant == "ToolDeclaration" {
@@ -315,7 +315,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
     if statement.variant == "TestDeclaration" {
@@ -330,19 +330,19 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
     if statement.variant == "WithStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces),
+            diagnostics: check_block(statement.body, bindings, interfaces)
         };
     }
     if statement.variant == "ForStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces),
+            diagnostics: check_block(statement.body, bindings, interfaces)
         };
     }
     if statement.variant == "MatchStatement" {
@@ -360,7 +360,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             }
             index += 1;
         }
-        return ScopeResult { bindings: bindings, diagnostics: diagnostics, };
+        return ScopeResult { bindings: bindings, diagnostics: diagnostics };
     }
     if statement.variant == "IfStatement" {
         let mut diagnostics = check_block(statement.then_block, bindings, interfaces);
@@ -385,18 +385,18 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
                 }
             }
         }
-        return ScopeResult { bindings: bindings, diagnostics: diagnostics, };
+        return ScopeResult { bindings: bindings, diagnostics: diagnostics };
     }
     if statement.variant == "BlockStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces),
+            diagnostics: check_block(statement.body, bindings, interfaces)
         };
     }
     if statement.variant == "PromptStatement" {
         return ScopeResult {
             bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces),
+            diagnostics: check_block(statement.body, bindings, interfaces)
         };
     }
     if statement.variant == "TypeAliasDeclaration" {
@@ -411,10 +411,10 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
         }
         return ScopeResult {
             bindings: registration.bindings,
-            diagnostics: diagnostics,
+            diagnostics: diagnostics
         };
     }
-    return ScopeResult { bindings: bindings, diagnostics: [], };
+    return ScopeResult { bindings: bindings, diagnostics: [] };
 }
 
 fn check_function_body(signature: FunctionSignature, body: Block, interfaces: Statement[]) -> Diagnostic[] {
@@ -445,7 +445,7 @@ fn seed_parameter_scope(signature: FunctionSignature) -> ScopeResult {
         }
     }
 
-    return ScopeResult { bindings: bindings, diagnostics: diagnostics, };
+    return ScopeResult { bindings: bindings, diagnostics: diagnostics };
 }
 
 fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Statement[]) -> Diagnostic[] {
