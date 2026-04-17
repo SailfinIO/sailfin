@@ -260,9 +260,9 @@ Channels that serialize per-instruction/per-binding control-flow state (dispatch
 
 Use this pattern for every channel in the priority list. It keeps diffs surgical, preserves self-hosting after each step, and makes the determinism delta measurable.
 
-1. **Locate the writer.** `grep 'fs\.writeLines.*\.channel_name\|fs\.writeFile.*\.channel_name' compiler/src`. There is usually exactly one.
+1. **Locate the writer.** `grep -R 'fs\.writeLines.*\.channel_name\|fs\.writeFile.*\.channel_name' compiler/src`. There is usually exactly one.
 2. **Identify the data being serialized.** If it's a struct that the writer already has as a local — and the reader already accepts that struct type as a parameter — the channel is dead code.
-3. **At each reader, check whether the enclosing function already takes that parameter.** `grep 'fs\.readFile.*\.channel_name' compiler/src` to enumerate readers. For `LocalBinding[]`, `ParameterBinding[]`, and `TypeContext`, readers almost always already have the param.
+3. **At each reader, check whether the enclosing function already takes that parameter.** `grep -R 'fs\.readFile.*\.channel_name' compiler/src` to enumerate readers. For `LocalBinding[]`, `ParameterBinding[]`, and `TypeContext`, readers almost always already have the param.
 4. **Replace the file read with the in-memory lookup.** Prefer existing helpers (`find_local_binding`, `find_parameter_binding`, `find_struct_info_by_name`) over rewriting parser logic inline.
 5. **If the enclosing function does _not_ have the parameter:** add it to the signature and update every caller. Blast radius is usually one hop. Do not introduce new wrapper structs unless two or more params need to travel together.
 6. **Delete the writer.** The channel is gone.

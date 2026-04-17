@@ -219,7 +219,7 @@ fn lookup_allocation_info(context: TypeContext, llvm_type: string) -> TypeAlloca
 // =============================================================================
 // Method Target Resolution
 // =============================================================================
-fn resolve_struct_info_for_method_target(base: string, bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> StructTypeInfo? ![io] {
+fn resolve_struct_info_for_method_target(base: string, bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> StructTypeInfo? {
     let trimmed = trim_text(base);
     if trimmed.length == 0 { return null; }
     if is_simple_identifier(trimmed) {
