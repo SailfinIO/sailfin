@@ -4,7 +4,7 @@
 // native emitter.  Extracted from emit_native.sfn to reduce per-file
 // memory footprint during self-hosting compilation.
 import { TypeAnnotation } from "./ast";
-import { substring } from "./string_utils";
+import { substring, ends_with, contains_string } from "./string_utils";
 
 // ── Data structures ──────────────────────────────────────────────────
 struct TextBuilder {
@@ -214,20 +214,6 @@ fn trim_right(value: string) -> string {
     return substring(value, 0, end);
 }
 
-fn ends_with(value: string, suffix: string) -> boolean {
-    if suffix.length == 0 { return true; }
-    if value.length < suffix.length { return false; }
-    let start = value.length - suffix.length;
-    let mut index: number = 0;
-    loop {
-        if index >= suffix.length { break; }
-        let _cmp_pos = start + index;
-        if value[_cmp_pos] != suffix[index] { return false; }
-        index += 1;
-    }
-    return true;
-}
-
 fn number_to_string(value: number) -> string {
     if value == 0 { return "0"; }
     let mut remaining: number = value;
@@ -330,16 +316,6 @@ fn join_type_annotations(values: TypeAnnotation[]) -> string {
         index += 1;
     }
     return join_with_separator(parts, ", ");
-}
-
-fn contains_string(values: string[], target: string) -> boolean {
-    let mut index: number = 0;
-    loop {
-        if index >= values.length { break; }
-        if values[index] == target { return true; }
-        index += 1;
-    }
-    return false;
 }
 
 fn append_unique(values: string[], value: string) -> string[] {

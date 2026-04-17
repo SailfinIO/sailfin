@@ -14,6 +14,7 @@ import {
     TypeParameter
 } from "./ast";
 import { Token, TokenKind } from "./token";
+import { starts_with, contains_string } from "./string_utils";
 
 struct Diagnostic {
     code: string;
@@ -373,16 +374,6 @@ fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {
     return diagnostics;
 }
 
-fn contains_string(items: string[], candidate: string) -> boolean {
-    let mut _ci: number = 0;
-    loop {
-        if _ci >= items.length { break; }
-        if items[_ci] == candidate { return true; }
-        _ci += 1;
-    }
-    return false;
-}
-
 fn register_local_symbol(bindings: SymbolEntry[], name: string, kind: string, span: SourceSpan?) -> ScopeResult {
     if has_symbol(bindings, name) {
         return ScopeResult {
@@ -498,13 +489,3 @@ fn make_missing_interface_member_diagnostic(struct_name: string, interface_name:
     };
 }
 
-fn starts_with(value: string, prefix: string) -> boolean {
-    if prefix.length > value.length { return false; }
-    let mut index: number = 0;
-    loop {
-        if index >= prefix.length { break; }
-        if value[index] != prefix[index] { return false; }
-        index += 1;
-    }
-    return true;
-}

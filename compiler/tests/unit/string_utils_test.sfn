@@ -1,0 +1,71 @@
+import { starts_with, ends_with, strip_prefix, contains_string } from "../../src/string_utils";
+
+test "starts_with: matching prefix" {
+    assert starts_with("hello world", "hello") == true;
+}
+
+test "starts_with: non-matching prefix" {
+    assert starts_with("hello world", "world") == false;
+}
+
+test "starts_with: empty prefix" {
+    assert starts_with("hello", "") == true;
+}
+
+test "starts_with: prefix longer than value" {
+    assert starts_with("hi", "hello") == false;
+}
+
+test "starts_with: exact match" {
+    assert starts_with("hello", "hello") == true;
+}
+
+test "ends_with: matching suffix" {
+    assert ends_with("hello world", "world") == true;
+}
+
+test "ends_with: non-matching suffix" {
+    assert ends_with("hello world", "hello") == false;
+}
+
+test "ends_with: empty suffix" {
+    assert ends_with("hello", "") == true;
+}
+
+test "ends_with: suffix longer than value" {
+    assert ends_with("hi", "hello") == false;
+}
+
+test "ends_with: exact match" {
+    assert ends_with("hello", "hello") == true;
+}
+
+test "strip_prefix: removes matching prefix" {
+    let result = strip_prefix("hello world", "hello ");
+    assert result == "world";
+}
+
+test "strip_prefix: no match returns original" {
+    let result = strip_prefix("hello world", "goodbye");
+    assert result == "hello world";
+}
+
+test "strip_prefix: empty prefix returns original" {
+    let result = strip_prefix("hello", "");
+    assert result == "hello";
+}
+
+test "contains_string: found" {
+    let items: string[] = ["apple", "banana", "cherry"];
+    assert contains_string(items, "banana") == true;
+}
+
+test "contains_string: not found" {
+    let items: string[] = ["apple", "banana", "cherry"];
+    assert contains_string(items, "grape") == false;
+}
+
+test "contains_string: empty array" {
+    let items: string[] = [];
+    assert contains_string(items, "anything") == false;
+}

@@ -105,6 +105,48 @@ fn find_last_index_of_char(value: string, target: string) -> number {
     return -1;
 }
 
+fn starts_with(value: string, prefix: string) -> boolean {
+    if prefix.length > value.length { return false; }
+    let mut index: number = 0;
+    loop {
+        if index >= prefix.length { break; }
+        if value[index] != prefix[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn ends_with(value: string, suffix: string) -> boolean {
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
+    let start = value.length - suffix.length;
+    let mut index: number = 0;
+    loop {
+        if index >= suffix.length { break; }
+        let _cmp_pos = start + index;
+        if value[_cmp_pos] != suffix[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn strip_prefix(value: string, prefix: string) -> string {
+    if starts_with(value, prefix) {
+        return substring(value, prefix.length, value.length);
+    }
+    return value;
+}
+
+fn contains_string(values: string[], target: string) -> boolean {
+    let mut index: number = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
+        index += 1;
+    }
+    return false;
+}
+
 export {
     clamp,
     substring,
@@ -116,5 +158,9 @@ export {
     sanitize_symbol,
     strings_equal,
     index_of,
-    find_last_index_of_char
+    find_last_index_of_char,
+    starts_with,
+    ends_with,
+    strip_prefix,
+    contains_string
 };
