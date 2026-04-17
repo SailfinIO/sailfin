@@ -103,7 +103,7 @@ test "version: version_from_capsule_toml handles extra fields" {
 // ---------------------------------------------------------------------------
 
 test "version: resolve_compiler_version returns non-empty string" ![io] {
-    let v = resolve_compiler_version();
+    let v = resolve_compiler_version("");
     assert v.length > 0;
     assert _contains(v, ".");
     assert _starts_with_digit(v);
@@ -118,7 +118,7 @@ test "version: resolve_compiler_version matches capsule.toml when available" ![i
     let toml_text = fs.readFile(toml_path);
     let capsule_ver = version_from_capsule_toml(toml_text);
 
-    let v = resolve_compiler_version();
+    let v = resolve_compiler_version("");
     // The resolved version must start with the capsule version.
     // It may be exactly the capsule version, or <capsule_ver>+dev.<hash>.
     assert v.length >= capsule_ver.length;

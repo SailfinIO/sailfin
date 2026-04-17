@@ -1,4 +1,4 @@
-// Seed viability integration test: bootstrap readiness.
+// Self-hosting pipeline integration test.
 // This test exercises ALL patterns required for the compiler to compile itself:
 // - Complex string building (LLVM IR generation)
 // - Struct with array fields (AST nodes, instruction lists)

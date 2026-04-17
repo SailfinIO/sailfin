@@ -405,14 +405,28 @@ int main(int argc, char **argv)
         if (is_cli)
         {
             char *runtime_root = _resolve_runtime_root(argv[0]);
+
+            // Resolve the binary's own directory so the Sailfin CLI can
+            // look for .build-stamp / capsule.toml relative to the binary
+            // rather than the current working directory.
+            char *binary_dir = NULL;
+            {
+                char resolved_exe[PATH_MAX];
+                if (argv[0] && realpath(argv[0], resolved_exe))
+                {
+                    binary_dir = _dirname_dup(resolved_exe);
+                }
+            }
+
             SailfinPtrArray args;
-            int64_t extra = runtime_root ? 2 : 0;
+            int64_t extra = (runtime_root ? 2 : 0) + (binary_dir ? 2 : 0);
             char **argv_copy = (char **)malloc(
                 sizeof(char *) * (size_t)(argc - 1 + extra + 1));
             if (!argv_copy)
             {
                 fprintf(stderr, "out of memory building native argv\n");
                 free(runtime_root);
+                free(binary_dir);
                 return 1;
             }
 
@@ -421,6 +435,11 @@ int main(int argc, char **argv)
             {
                 argv_copy[out_index++] = "--runtime-root";
                 argv_copy[out_index++] = runtime_root;
+            }
+            if (binary_dir)
+            {
+                argv_copy[out_index++] = "--binary-dir";
+                argv_copy[out_index++] = binary_dir;
             }
             for (int i = 1; i < argc; i++)
             {
@@ -436,6 +455,7 @@ int main(int argc, char **argv)
             double rc = sailfin_cli_main__cli_main(&args);
             free(argv_copy);
             free(runtime_root);
+            free(binary_dir);
             return (int)rc;
         }
     }

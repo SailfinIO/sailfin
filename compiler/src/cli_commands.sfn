@@ -262,7 +262,7 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                     if _has_prefix_cmd(spec, "../") { is_relative = true; }
                     if is_relative {
                         spans.push(_RelativeImportSpanCmd {
-                            start: stmt_start, end: stmt_end, spec: spec
+                                start: stmt_start, end: stmt_end, spec: spec
                         });
                     } else {
                         // Check for capsule imports: bare name ("test") or scoped ("sfn/test")
@@ -278,7 +278,7 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                         }
                         if is_capsule {
                             spans.push(_RelativeImportSpanCmd {
-                                start: stmt_start, end: stmt_end, spec: spec
+                                    start: stmt_start, end: stmt_end, spec: spec
                             });
                         } else {
                             // Non-stdlib scoped import (e.g. "sfn/cli", "acme/router") —
@@ -288,7 +288,7 @@ fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[
                             if _has_slash_cmd(spec) {
                                 if !_has_prefix_cmd(spec, "runtime/") {
                                     spans.push(_RelativeImportSpanCmd {
-                                        start: stmt_start, end: stmt_end, spec: spec
+                                            start: stmt_start, end: stmt_end, spec: spec
                                     });
                                 }
                             }
@@ -434,7 +434,7 @@ fn _resolve_cached_capsule_path_cmd(spec: string, deps: string) -> string ![io] 
     let home = _get_home_cmd();
     if home.length == 0 { return ""; }
     return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version
-        + "/src/mod.sfn";
+    + "/src/mod.sfn";
 }
 
 fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number, visited: string[]) -> string ![io] {
@@ -567,7 +567,7 @@ fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number,
                 if !fs.exists(dep_path) {
                     // Directory import fallback: ./dir -> dir/mod.sfn
                     let mod_fallback = substring(dep_path, 0, dep_path.length - 4)
-                        + "/mod.sfn";
+                    + "/mod.sfn";
                     if fs.exists(mod_fallback) { dep_path = mod_fallback; } else {
                         if is_capsule_import {
                             print.err("error: cached capsule not found: "
@@ -670,6 +670,34 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
 }
 
 // ---- Exported command handlers ----
+
+// Remove stale LLVM lowering state files from build/sailfin/ so that
+// inter-phase scratchpad data from a previous compilation doesn't corrupt
+// the next one.  Preserves runner control flags (.test_runner_active,
+// .trace_test_runner, .dump_test_sources, .skip_test_inlining, .trace_argv,
+// .trace_emit).
+fn _clean_lowering_state(dir: string) -> number ![io] {
+    let entries = fs.listDirectory(dir);
+    let mut ci: number = 0;
+    loop {
+        if ci >= entries.length { break; }
+        let entry = entries[ci];
+        ci += 1;
+        if entry.length == 0 { continue; }
+        if entry[0] != "." { continue; }
+        // Preserve control flags
+        if strings_equal(entry, ".test_runner_active") { continue; }
+        if strings_equal(entry, ".trace_test_runner") { continue; }
+        if strings_equal(entry, ".dump_test_sources") { continue; }
+        if strings_equal(entry, ".skip_test_inlining") { continue; }
+        if strings_equal(entry, ".trace_argv") { continue; }
+        if strings_equal(entry, ".trace_emit") { continue; }
+        let full = dir + "/" + entry;
+        fs.deleteFile(full);
+    }
+    return 0;
+}
+
 fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     let mut root: string = ".";
     if args.length == 2 { root = args[1]; } else if args.length != 1 {
@@ -727,6 +755,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         }
 
         if trace_runner { print.err("test runner: compile start"); }
+        _clean_lowering_state("build/sailfin");
         let _compiled = compile_tests_to_llvm_file_with_module(combined_source, module_name, ll_path);
         if !_compiled {
             print("test runner: compile failed for " + path);
@@ -850,19 +879,19 @@ fn handle_publish_command(args: string[]) -> number ![io] {
         return 1;
     }
     let build_json_rc = process.run(["sh", "-c", "printf '{\"type\":\"capsule\",\"capsule\":\""
-        + pkg_name
-        + "\",\"version\":\""
-        + pkg_version
-        + "\",\"digest\":\""
-        + digest
-        + "\",\"content_b64\":\"' > "
-        + body_tmp
-        + " && base64 < '"
-        + payload_tmp
-        + "' | tr -d '\\n' >> "
-        + body_tmp
-        + " && printf '\",\"meta\":{}}' >> "
-        + body_tmp]);
+            + pkg_name
+            + "\",\"version\":\""
+            + pkg_version
+            + "\",\"digest\":\""
+            + digest
+            + "\",\"content_b64\":\"' > "
+            + body_tmp
+            + " && base64 < '"
+            + payload_tmp
+            + "' | tr -d '\\n' >> "
+            + body_tmp
+            + " && printf '\",\"meta\":{}}' >> "
+            + body_tmp]);
     if build_json_rc != 0 {
         print("failed to build publish payload");
         process.run(["rm", "-f", payload_tmp]);
@@ -876,8 +905,8 @@ fn handle_publish_command(args: string[]) -> number ![io] {
     let response_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
     let header_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
     let curl_rc = process.run(["curl", "-sS", "-X", "POST", "-H", "Content-Type: application/json", "-H", "Authorization: "
-        + auth_header, "-d", "@"
-        + body_tmp, "-o", response_tmp, "-D", header_tmp, registry_url]);
+            + auth_header, "-d", "@"
+            + body_tmp, "-o", response_tmp, "-D", header_tmp, registry_url]);
     process.run(["rm", "-f", payload_tmp]);
     process.run(["rm", "-f", body_tmp]);
     let mut response: string = "";
@@ -1001,7 +1030,7 @@ fn handle_add_command(args: string[]) -> number ![io] {
         return 1;
     }
     let cache_base = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/"
-        + resolved_version;
+    + resolved_version;
     _ensure_dir_recursive_cmd(home + "/.sfn");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache");
     _ensure_dir_recursive_cmd(home + "/.sfn/cache/capsules");
@@ -1012,11 +1041,11 @@ fn handle_add_command(args: string[]) -> number ![io] {
 
     let pkg_path = cache_base + "/" + resolved_version + ".sfnpkg";
     let download_url = "https://registry.sailfin.dev/api/capsules/" + scope
-        + "/"
-        + name
-        + "/"
-        + resolved_version
-        + ".sfnpkg";
+    + "/"
+    + name
+    + "/"
+    + resolved_version
+    + ".sfnpkg";
     print("downloading " + display_name + "@" + resolved_version + "...");
     let dl_rc = _curl_download_cmd(download_url, pkg_path);
     if dl_rc != 0 {

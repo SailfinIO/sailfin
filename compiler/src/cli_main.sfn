@@ -25,30 +25,30 @@ import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
     return "usage:\n" + "  sfn --version\n" + "  sfn version\n"
-        + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n"
-        + "  sfn build [-o OUTPUT] <file.sfn>\n"
-        + "  sfn run <file.sfn>\n"
-        + "  sfn run <exe>\n"
-        + "  sfn test [path]\n"
-        + "  sfn fmt [--check] [--write] [path...]\n"
-        + "  sfn init\n"
-        + "  sfn publish [path]\n"
-        + "  sfn add [--dev] <capsule>\n"
-        + "  sfn login [token]\n"
-        + "\n"
-        + "examples:\n"
-        + "  sfn emit llvm examples/basics/hello-world.sfn\n"
-        + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n"
-        + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n"
-        + "  sfn run examples/basics/hello-world.sfn\n"
-        + "  sfn run build/native/examples/hello\n"
-        + "  sfn test .\n"
-        + "  sfn init\n"
-        + "  sfn publish [path]\n"
-        + "  sfn add http\n"
-        + "  sfn add --dev test\n"
-        + "  sfn add acme/router\n"
-        + "  sfn login\n";
+    + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n"
+    + "  sfn build [-o OUTPUT] <file.sfn>\n"
+    + "  sfn run <file.sfn>\n"
+    + "  sfn run <exe>\n"
+    + "  sfn test [path]\n"
+    + "  sfn fmt [--check] [--write] [path...]\n"
+    + "  sfn init\n"
+    + "  sfn publish [path]\n"
+    + "  sfn add [--dev] <capsule>\n"
+    + "  sfn login [token]\n"
+    + "\n"
+    + "examples:\n"
+    + "  sfn emit llvm examples/basics/hello-world.sfn\n"
+    + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n"
+    + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n"
+    + "  sfn run examples/basics/hello-world.sfn\n"
+    + "  sfn run build/native/examples/hello\n"
+    + "  sfn test .\n"
+    + "  sfn init\n"
+    + "  sfn publish [path]\n"
+    + "  sfn add http\n"
+    + "  sfn add --dev test\n"
+    + "  sfn add acme/router\n"
+    + "  sfn login\n";
 }
 
 fn _ends_with(value: string, suffix: string) -> boolean {
@@ -173,7 +173,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
 
     if !fs.exists(runtime_obj) {
         let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
-            + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
+                + include_dir, "-c", runtime_src, "-o", runtime_obj,]);
         if rc != 0 {
             return ["", "", "", ""];
         }
@@ -181,7 +181,7 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
 
     if !fs.exists(arena_obj) {
         let rc_arena = process.run(["clang", opt_flag, "-Wno-override-module", "-I"
-            + include_dir, "-c", arena_src, "-o", arena_obj,]);
+                + include_dir, "-c", arena_src, "-o", arena_obj,]);
         if rc_arena != 0 {
             return ["", "", "", ""];
         }
@@ -255,15 +255,28 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     }
 
     let mut runtime_root: string = "";
+    let mut binary_dir: string = "";
     let mut start_index: number = 0;
-    if argv.length >= 2 {
-        if argv[0] == "--runtime-root" {
-            runtime_root = argv[1];
-            start_index = 2;
+    // Parse internal flags injected by the C driver (order: --runtime-root, --binary-dir).
+    if start_index < argv.length {
+        if argv[start_index] == "--runtime-root" {
+            if start_index + 1 < argv.length {
+                runtime_root = argv[start_index + 1];
+                start_index += 2;
+            }
+        }
+    }
+    if start_index < argv.length {
+        if argv[start_index] == "--binary-dir" {
+            if start_index + 1 < argv.length {
+                binary_dir = argv[start_index + 1];
+                start_index += 2;
+            }
         }
     }
     if trace_argv {
         print.err("cli: runtime_root=" + runtime_root);
+        print.err("cli: binary_dir=" + binary_dir);
         print.err("cli: start_index=" + number_to_string(start_index));
     }
     if runtime_root.length == 0 {
@@ -342,7 +355,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
 
             return 2;
         }
-        print("sfn " + resolve_compiler_version());
+        print("sfn " + resolve_compiler_version(binary_dir));
         return 0;
     }
 
