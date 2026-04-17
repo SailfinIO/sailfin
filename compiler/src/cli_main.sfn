@@ -255,15 +255,28 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     }
 
     let mut runtime_root: string = "";
+    let mut binary_dir: string = "";
     let mut start_index: number = 0;
-    if argv.length >= 2 {
-        if argv[0] == "--runtime-root" {
-            runtime_root = argv[1];
-            start_index = 2;
+    // Parse internal flags injected by the C driver (order: --runtime-root, --binary-dir).
+    if start_index < argv.length {
+        if argv[start_index] == "--runtime-root" {
+            if start_index + 1 < argv.length {
+                runtime_root = argv[start_index + 1];
+                start_index += 2;
+            }
+        }
+    }
+    if start_index < argv.length {
+        if argv[start_index] == "--binary-dir" {
+            if start_index + 1 < argv.length {
+                binary_dir = argv[start_index + 1];
+                start_index += 2;
+            }
         }
     }
     if trace_argv {
         print.err("cli: runtime_root=" + runtime_root);
+        print.err("cli: binary_dir=" + binary_dir);
         print.err("cli: start_index=" + number_to_string(start_index));
     }
     if runtime_root.length == 0 {
@@ -342,7 +355,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
 
             return 2;
         }
-        print("sfn " + resolve_compiler_version());
+        print("sfn " + resolve_compiler_version(binary_dir));
         return 0;
     }
 
