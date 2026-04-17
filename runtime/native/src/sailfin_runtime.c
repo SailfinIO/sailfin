@@ -1,4 +1,5 @@
 #include "sailfin_runtime.h"
+#include "sailfin_arena.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -594,17 +595,61 @@ static size_t _sailfin_owned_table_tombstones = 0;
 // strictly stronger than tracking only "store" calls — it catches ALL
 // intervening activity including LLVM store instructions that call runtime
 // helpers and any function that might observe the string.
-static char *_concat_reuse_ptr = NULL;    // last concat result pointer
-static size_t _concat_reuse_cap = 0;      // allocated capacity of that buffer
-static size_t _concat_reuse_len = 0;      // current string length in the buffer
-static uint64_t _concat_reuse_seq = 0;    // call_seq when last result was produced
-static uint64_t _runtime_call_seq = 0;    // incremented at entry to every exported fn
+static char *_concat_reuse_ptr = NULL; // last concat result pointer
+static size_t _concat_reuse_cap = 0;   // allocated capacity of that buffer
+static size_t _concat_reuse_len = 0;   // current string length in the buffer
+static uint64_t _concat_reuse_seq = 0; // call_seq when last result was produced
+static uint64_t _runtime_call_seq = 0; // incremented at entry to every exported fn
 
 // Call this at the top of every exported runtime function.
 static inline void _runtime_enter(void) { _runtime_call_seq++; }
 
 // Backwards compat alias used in array_push / concat / string_drop
 static inline void _invalidate_concat_reuse(void) { /* now handled by _runtime_enter */ }
+
+// =============================================================================
+// Arena-aware allocation helpers (M0.5)
+// =============================================================================
+// When SAILFIN_USE_ARENA=1, all string/array allocations route through the
+// process-global arena. In arena mode the owned-string hash table and
+// persistent-pointer set are bypassed entirely — memory is freed in bulk at
+// process exit.
+
+static inline void *_rt_malloc(size_t size)
+{
+    if (sfn_arena_enabled())
+        return sfn_arena_alloc(sfn_arena_global(), size, 8);
+    return malloc(size);
+}
+
+static inline void *_rt_calloc(size_t count, size_t size)
+{
+    if (sfn_arena_enabled())
+    {
+        size_t total = count * size;
+        void *p = sfn_arena_alloc(sfn_arena_global(), total, 8);
+        if (p)
+            memset(p, 0, total);
+        return p;
+    }
+    return calloc(count, size);
+}
+
+static inline void *_rt_realloc(void *ptr, size_t old_size, size_t new_size)
+{
+    if (sfn_arena_enabled())
+        return sfn_arena_realloc(sfn_arena_global(), ptr, old_size, new_size, 8);
+    (void)old_size;
+    return realloc(ptr, new_size);
+}
+
+/* No-op in arena mode; free() in malloc mode. */
+static inline void _rt_free(void *ptr)
+{
+    if (sfn_arena_enabled())
+        return;
+    free(ptr);
+}
 
 // =============================================================================
 // Recent string allocation tracking (debugging aid)
@@ -1222,6 +1267,10 @@ static void _track_owned_string(char *ptr)
     {
         return;
     }
+    if (sfn_arena_enabled())
+    {
+        return; /* Arena handles bulk deallocation — no per-string tracking. */
+    }
     if (_is_immediate_codepoint_string(ptr, NULL))
     {
         return;
@@ -1629,6 +1678,10 @@ void sailfin_runtime_mark_persistent(char *ptr)
     {
         return;
     }
+    if (sfn_arena_enabled())
+    {
+        return; /* Arena handles bulk deallocation — no persistent tracking. */
+    }
     if (_is_immediate_codepoint_string(ptr, NULL))
     {
         return;
@@ -1641,6 +1694,10 @@ void sailfin_runtime_mark_persistent(char *ptr)
 void sailfin_runtime_string_drop(char *text)
 {
     _invalidate_concat_reuse();
+    if (sfn_arena_enabled())
+    {
+        return; /* Arena handles bulk deallocation. */
+    }
     static int free_enabled = -1;
     if (free_enabled < 0)
     {
@@ -1933,7 +1990,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
     _maybe_init_alloc_stats();
     if (!text)
     {
-        char *out = (char *)malloc(1);
+        char *out = (char *)_rt_malloc(1);
         if (out)
         {
             out[0] = '\0';
@@ -1970,7 +2027,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
         }
 
         int64_t length = end - start;
-        char *out = (char *)malloc((size_t)length + 1);
+        char *out = (char *)_rt_malloc((size_t)length + 1);
         if (!out)
         {
             return NULL;
@@ -2015,7 +2072,7 @@ char *sailfin_runtime_substring(char *text, int64_t start, int64_t end)
 
     int64_t length = end - start;
 
-    char *out = (char *)malloc((size_t)length + 1);
+    char *out = (char *)_rt_malloc((size_t)length + 1);
     if (!out)
     {
         return NULL;
@@ -2040,7 +2097,7 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
     _maybe_init_alloc_stats();
     if (!text)
     {
-        char *out = (char *)malloc(1);
+        char *out = (char *)_rt_malloc(1);
         if (out)
         {
             out[0] = '\0';
@@ -2078,7 +2135,7 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
         }
 
         int64_t length = end - start;
-        char *out = (char *)malloc((size_t)length + 1);
+        char *out = (char *)_rt_malloc((size_t)length + 1);
         if (!out)
         {
             return NULL;
@@ -2110,7 +2167,7 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
     // .length which calls strlen once).  Removing the per-call strlen turns
     // per-character scanning loops from O(n²) to O(n).
     int64_t length = end - start;
-    char *out = (char *)malloc((size_t)length + 1);
+    char *out = (char *)_rt_malloc((size_t)length + 1);
     if (!out)
     {
         return NULL;
@@ -2431,7 +2488,7 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     // ---- Normal allocation path ----
     const size_t pad = 64;
     size_t alloc_size = alen + blen + 1 + pad;
-    char *out = (char *)malloc(alloc_size);
+    char *out = (char *)_rt_malloc(alloc_size);
     if (!out)
     {
         fprintf(
@@ -2787,7 +2844,17 @@ char *sailfin_runtime_string_append(char *buf, char *suffix)
 
     const size_t pad = 64;
     size_t alloc_size = buf_len + suffix_len + 1 + pad;
-    char *out = (char *)realloc(buf, alloc_size);
+    char *out;
+    if (sfn_arena_enabled())
+    {
+        /* Arena realloc: grow-if-at-tip, else alloc+copy. */
+        out = (char *)sfn_arena_realloc(sfn_arena_global(), buf,
+                                        buf_len + 1, alloc_size, 8);
+    }
+    else
+    {
+        out = (char *)realloc(buf, alloc_size);
+    }
     if (!out)
     {
         // On POSIX, realloc failure does not free buf — it remains valid.
@@ -2802,7 +2869,7 @@ char *sailfin_runtime_string_append(char *buf, char *suffix)
     // Remove old buf pointer from owned table now that realloc succeeded.
     // (realloc may have returned the same pointer or a new one; either way,
     // remove the old entry and track the new one below.)
-    if (out != buf)
+    if (out != buf && !sfn_arena_enabled())
     {
         pthread_mutex_lock(&_sailfin_owned_string_lock);
         _owned_table_remove_unlocked(buf);
@@ -2859,7 +2926,7 @@ char *sailfin_runtime_number_to_string(double value)
         buf[len] = '\0';
     }
 
-    char *out = (char *)malloc(len + 1);
+    char *out = (char *)_rt_malloc(len + 1);
     if (!out)
     {
         return NULL;
@@ -2915,7 +2982,7 @@ static SailfinPtrArray *_alloc_array(int64_t len)
         sailfin_runtime_raise_value_error("array alloc limit exceeded");
     }
     _maybe_init_alloc_stats();
-    SailfinPtrArray *arr = (SailfinPtrArray *)malloc(sizeof(SailfinPtrArray));
+    SailfinPtrArray *arr = (SailfinPtrArray *)_rt_malloc(sizeof(SailfinPtrArray));
     if (!arr)
     {
         return NULL;
@@ -2976,10 +3043,10 @@ static SailfinPtrArray *_alloc_array(int64_t len)
     const size_t header_slots = 2u;
     const size_t canary_slots = 4u;
     const uintptr_t header_magic = (uintptr_t)0x5341494c46494e43ull; // "SAILFINC" tag
-    char **raw = (char **)calloc(header_slots + capacity + canary_slots, sizeof(char *));
+    char **raw = (char **)_rt_calloc(header_slots + capacity + canary_slots, sizeof(char *));
     if (!raw)
     {
-        free(arr);
+        _rt_free(arr);
         return NULL;
     }
 
@@ -3740,7 +3807,7 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         array->data = fresh->data;
         array->len = fresh->len;
         // Leak the temporary struct; stage2-native does not reliably free arrays.
-        free(fresh);
+        _rt_free(fresh);
 
         capacity = (size_t)(uintptr_t)array->data[-1];
         has_header = true;
@@ -3780,7 +3847,9 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         char **raw = array->data - header_slots;
         // Evict stale data pointer before realloc frees the old backing.
         _recent_array_remove((const void *)array->data);
-        char **grown = (char **)realloc(raw, (header_slots + new_capacity + canary_slots) * sizeof(char *));
+        size_t old_alloc = (header_slots + capacity + canary_slots) * sizeof(char *);
+        size_t new_alloc = (header_slots + new_capacity + canary_slots) * sizeof(char *);
+        char **grown = (char **)_rt_realloc(raw, old_alloc, new_alloc);
         if (!grown)
         {
             // realloc failed — re-record since old buffer is still valid.
@@ -4115,7 +4184,7 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
         }
 
         size_t payload = new_capacity * (size_t)elem_size;
-        uint8_t *raw = (uint8_t *)calloc(1, header_bytes + payload + canary_bytes);
+        uint8_t *raw = (uint8_t *)_rt_calloc(1, header_bytes + payload + canary_bytes);
         if (!raw)
         {
             return NULL;
@@ -4176,7 +4245,9 @@ char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int
         // in the ring, read a bogus header from freed/reused memory, and
         // corrupt the array contents.
         _recent_array_remove((const void *)data);
-        uint8_t *grown = (uint8_t *)realloc(raw, header_bytes + new_payload + canary_bytes);
+        size_t old_raw_size = header_bytes + old_payload + canary_bytes;
+        size_t new_raw_size = header_bytes + new_payload + canary_bytes;
+        uint8_t *grown = (uint8_t *)_rt_realloc(raw, old_raw_size, new_raw_size);
         if (!grown)
         {
             // realloc failed — re-record the old pointer since it's still valid.
@@ -5893,9 +5964,12 @@ void runtime_raise_value_error_fn(void *message)
  * Guards against UB from NaN/out-of-range double→int64_t casts. */
 static int64_t _clamp_to_i64(double v)
 {
-    if (v != v) return 0;                       /* NaN */
-    if (v < (double)INT64_MIN) return INT64_MIN;
-    if (v > (double)INT64_MAX) return INT64_MAX;
+    if (v != v)
+        return 0; /* NaN */
+    if (v < (double)INT64_MIN)
+        return INT64_MIN;
+    if (v > (double)INT64_MAX)
+        return INT64_MAX;
     return (int64_t)v;
 }
 
@@ -5997,18 +6071,25 @@ void sailfin_runtime_debug_validate_identifier(void *expr_ptr, void *name_ptr)
    Returns: tag value as double */
 /* NativeInstruction = { i32 tag, [4 x i8] pad, [6 x i64] payload }
    Mirror the LLVM struct layout so sizeof() tracks any future changes. */
-struct SailfnNativeInstruction {
-    int32_t  tag;
-    uint8_t  _pad[4];
-    int64_t  payload[6];
+struct SailfnNativeInstruction
+{
+    int32_t tag;
+    uint8_t _pad[4];
+    int64_t payload[6];
 };
 
 double sailfin_enum_tag_from_instruction_array(void *arr_ptr, double idx)
 {
-    struct { void *data; int64_t length; } *hdr = arr_ptr;
-    if (!hdr || !hdr->data) return 21.0; /* Unknown */
+    struct
+    {
+        void *data;
+        int64_t length;
+    } *hdr = arr_ptr;
+    if (!hdr || !hdr->data)
+        return 21.0; /* Unknown */
     int64_t i = (int64_t)idx;
-    if (i < 0 || i >= hdr->length) return 21.0;
+    if (i < 0 || i >= hdr->length)
+        return 21.0;
     struct SailfnNativeInstruction *elem =
         (struct SailfnNativeInstruction *)hdr->data + i;
     return (double)elem->tag;
