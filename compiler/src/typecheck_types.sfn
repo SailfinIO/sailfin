@@ -13,8 +13,8 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "./ast";
-import { Token, TokenKind } from "./token";
 import { contains_string, starts_with } from "./string_utils";
+import { Token, TokenKind } from "./token";
 
 struct Diagnostic {
     code: string;
