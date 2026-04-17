@@ -221,6 +221,12 @@ nondeterminism is eliminated, removing the retry loop is a regression;
 but every day it stays in place, the signal that a compiler bug exists
 gets absorbed as "normal noise".
 
+The same applies to `compile_to_llvm_file_with_module` in `main.sfn`,
+which has a fallback path for "try the structured pipeline; if that
+looks corrupted, prepend a header; if that still looks corrupted, try
+`compile_to_llvm_with_module` as a string-return fallback". Every one
+of those branches is a live bug the driver is papering over.
+
 ### 2.6 Runtime bundle coupling
 
 `sfn build`'s link step needs six files from a runtime bundle:
@@ -248,6 +254,118 @@ A "build" command in every other modern toolchain (cargo, go, zig) takes a
 project manifest and produces whatever the manifest declares. Ours takes a
 file.
 
+### 2.8 Make is a second orchestrator layered on top of `build.sh`
+
+The 615-line Makefile exists because `sfn` is incomplete. It glues
+together `build.sh` (compile), `install.sh` (seed fetch), `tools/package.sh`
+(package), `scripts/bench_compile.sh` (bench), `scripts/run_native_test.sh`
+(test), `scripts/test_arena.sh` (arena gate), plus an inline 100-line
+MinGW cross-compile branch for Windows. Every target is a thin shell
+wrapper around a dedicated script.
+
+This is the classic "tooling grown into the scar tissue of missing
+language tooling" pattern. Cargo users don't run `make build`. Go users
+don't run `make build`. When `sfn build`, `sfn test`, `sfn package`,
+`sfn bench` exist as first-class commands, the Makefile serves no
+purpose — its targets either disappear or reduce to a one-line `sfn X`
+invocation.
+
+### 2.9 Stdlib versioning is bolted to compiler releases
+
+Because `_is_stdlib_capsule_cmd` is a hard-coded compiler allowlist, the
+stdlib cannot ship patches between compiler releases. Fixing a bug in
+`sfn/http` requires cutting a new compiler version, because the stdlib
+capsules are installed as part of the compiler tree, not resolved from
+the registry. This kills any hope of:
+
+- Shipping `sfn/http@0.2.2` as a point release.
+- Running an old compiler against a newer stdlib capsule.
+- Letting stdlib capsules have independent deprecation cycles.
+
+The ecosystem constraint is much worse than it looks at first glance:
+every stdlib contributor is gated on a full compiler release cycle.
+
+### 2.10 `sfn test` weakens compiler symbols with `llvm-objcopy`
+
+`_clang_link_test_cmd` in `cli_commands.sfn` runs
+`llvm-objcopy --weaken` against the self-hosted compiler's
+`native.linked.o` and links it into every test binary. This works because
+the compiler binary happens to contain every symbol any compiler test
+might need — the runtime helpers, the parser exports, the AST
+constructors. Weakening lets test-provided symbols (from inlined test
+imports) override the compiler's copies at link time.
+
+This is a scary hack:
+
+- It only works for tests of the compiler itself. A third-party capsule's
+  tests can't weaken the compiler binary because they don't want the
+  compiler's exports in scope.
+- It ties tests to a specific build of the compiler — if a symbol is
+  renamed, every test's link breaks until the compiler is rebuilt.
+- It is a concrete blocker on separating the compiler into a
+  `sfn/compiler-lib` capsule, because the library can't be linked in as
+  a normal dep when tests expect the whole compiler as a weak object.
+
+### 2.11 `runtime/prelude.sfn` is privileged and invisible
+
+`runtime/prelude.sfn` is Sailfin source, not C. But it is not a capsule.
+It has:
+
+- A hard-coded location (`runtime/prelude.sfn`, not under `capsules/`).
+- A hard-coded module name (`runtime__prelude` in `build.sh`'s slug
+  function).
+- A special link position (compiled separately, linked after
+  `native.linked.o`, never included in llvm-link's merge).
+- An implicit dependency from every other compile (the prelude's
+  symbols are assumed to be in scope for every module).
+
+From a build system perspective, the prelude is the hairiest module in
+the tree because nothing declares its relationship to anything else. A
+proper capsule model would make it `sfn/prelude` — a capsule every
+compile implicitly depends on, built and linked the same way as every
+other dep.
+
+### 2.12 Cross-compilation is a Makefile branch
+
+The `ci-cross-windows` target in the Makefile is ~100 lines of inline
+shell that reuses the Linux `.ll` files, runs `llvm-link`, cross-compiles
+C runtime with `x86_64-w64-mingw32-gcc`, and links. There is no
+corresponding macOS-arm64 or wasm target — adding one requires another
+100-line branch.
+
+The future state has `sfn build --target=<triple>`, but every line of
+that Makefile target is a decision the driver needs to make
+declaratively: which runtime capsule per target, which C compiler, which
+linker flags, which system libs. The Makefile encodes those decisions
+in shell; the driver should encode them in manifests.
+
+### 2.13 Compiler sub-directories are effectively hidden sub-capsules
+
+`compiler/src/` has nested trees: `llvm/` (~16 files), `lowering/`
+(phase-structured), `parser/` (phase-structured), `expression_lowering/`,
+`tools/`. These directories are *de facto* sub-capsules — each has
+tight internal cohesion and a thin interface to its siblings. But they
+are not capsules:
+
+- They share the compiler's single `capsule.toml`.
+- They cannot be built independently or cached independently.
+- A change to one forces a full re-emit of the entire compiler.
+
+In a capsule-aware world, splitting the compiler into
+`sfn/compiler-parser`, `sfn/compiler-typecheck`, `sfn/compiler-emit`,
+`sfn/compiler-llvm`, etc. would:
+
+- Make the compiler's dep graph visible to the build system.
+- Let `sfn build --jobs=N` parallelize across sub-capsules, not just
+  modules.
+- Cap per-capsule memory usage (today `lowering_core.sfn` alone can
+  consume 7 GB).
+- Let tests depend on just the sub-capsule they exercise, not the whole
+  compiler.
+
+This is a Stage F-style cleanup, but the manifest schema should permit
+it from day one.
+
 
 ---
 
@@ -256,38 +374,53 @@ file.
 The future system should satisfy the following, in priority order:
 
 1. **One build driver.** `sfn build` is the only code path that turns
-   sources into artifacts. `scripts/build.sh` shrinks to a one-line
-   bootstrap that runs `sfn build -p compiler` using the seed compiler.
-2. **Capsule is the unit of compilation.** A capsule is defined by its
+   sources into artifacts. `scripts/build.sh` is deleted, not shrunk.
+   The bootstrap is a Makefile target (or `sfn bootstrap` subcommand)
+   that fetches a seed and invokes `seed sfn build -p compiler`.
+2. **No orchestration layer above `sfn`.** The Makefile retires in
+   parallel with `build.sh`. Anything `make X` does today becomes either
+   a `sfn X` subcommand or a one-line convenience wrapper. Steady-state
+   contributors type `sfn build`, not `make compile`.
+3. **Capsule is the unit of compilation.** A capsule is defined by its
    `capsule.toml`. Builds produce one artifact per capsule plus a
    dependency manifest; the driver composes them.
-3. **Build graph is explicit and machine-readable.** The driver can emit
+4. **Build graph is explicit and machine-readable.** The driver can emit
    the dependency graph, the cache keys, and the per-module timings as
    structured output. No free-form stderr parsing.
-4. **Stdlib is a registry fact, not a compiler fact.** The compiler does
+5. **Stdlib is a registry fact, not a compiler fact.** The compiler does
    not know which capsules are stdlib; it knows how to resolve
    `scope/name` specs against a configured set of sources (workspace
-   tree, cache, registry). Stdlib is the `sfn/*` scope, registered in a
-   workspace file that ships with the compiler.
-5. **One resolver, two modes.** Intra-capsule and inter-capsule imports
+   tree, cache, registry). Stdlib capsules version independently from the
+   compiler — patches and minor versions ship without a compiler release.
+6. **One resolver, two modes.** Intra-capsule and inter-capsule imports
    go through the same resolver. The only difference is whether the
    source lives in the current capsule's `src/` or a dependency's `src/`.
-6. **In-process by default, subprocess only when required.** The
+7. **In-process by default, subprocess only when required.** The
    long-lived driver compiles all modules in one process, shares parsed
    imports, and resets the arena between modules. A subprocess is spawned
    only when the user asks for it (e.g., `sfn build --isolate-modules`
    for debugging corruption).
-7. **Cache is content-addressed.** Cache keys are
+8. **Cache is content-addressed.** Cache keys are
    `hash(source, resolved_deps, compiler_version, flags)`. The driver
    never trusts mtime.
-8. **Runtime is a capsule.** The C runtime stays as `sfn/runtime-native`
-   (or similar) until the Sailfin rewrite lands; after that, it is a
-   first-party Sailfin capsule resolved through the same dependency graph
-   as everything else.
-9. **Fix-ups belong in the compiler.** The driver does not retry on
-   miscompilation, does not post-process IR, and does not have fallback
-   paths for "try X, if that doesn't work try Y". If the compiler emits
-   invalid IR, the build fails.
+9. **Runtime and prelude are capsules.** The C runtime stays as
+   `sfn/runtime-native` until the Sailfin rewrite lands; `runtime/prelude.sfn`
+   becomes `sfn/prelude` immediately. No privileged locations, no hard-coded
+   module names, no magic link order — the manifest declares the facts.
+10. **Cross-compilation is a manifest property.** `sfn build --target=<triple>`
+    selects a per-target runtime capsule, toolchain, and link profile from
+    declarative data. No shell branches.
+11. **Tests are normal capsules.** `sfn test` depends on `sfn/test` as a
+    library, not on weakened symbols from the compiler binary. The
+    `llvm-objcopy --weaken` path retires with textual import inlining.
+12. **Fix-ups belong in the compiler.** The driver does not retry on
+    miscompilation, does not post-process IR, and does not have fallback
+    paths for "try X, if that doesn't work try Y". If the compiler emits
+    invalid IR, the build fails — loudly, with the IR attached.
+13. **Link-time errors are structured diagnostics.** Clang stderr is
+    parsed into `{severity, file, span, message, kind}` entries and
+    merged into the driver's diagnostic stream. `sfn build --json` emits
+    link errors the same way it emits parse errors.
 
 
 ---
@@ -297,6 +430,7 @@ The future system should satisfy the following, in priority order:
 ### 4.1 Command surface
 
 ```
+# Build pipeline
 sfn build                    # build the capsule in the current directory
 sfn build -p <capsule>       # build a specific capsule by name or path
 sfn build --release          # optimized build (default is debug)
@@ -306,17 +440,44 @@ sfn build --emit=bin         # default; produce an executable/library
 sfn build --target=<triple>  # cross-compile
 sfn build --jobs=N           # parallel module compilation (default: nproc)
 sfn build --json             # structured build report on stdout
-sfn build --isolate-modules  # subprocess per module (for debugging)
+sfn build --isolate-modules  # subprocess per module (diagnostic only)
+sfn build --check-determinism # build twice, diff IR hashes
+
+# Derived from build
+sfn run                      # sfn build --emit=bin, then exec
+sfn test                     # sfn build with dev-deps, exec test binaries
+sfn check                    # sfn build stopping after typecheck + effects
+sfn fmt                      # (exists) format sources
+
+# Registry / workspace
+sfn add <capsule>            # (exists) add a dependency
+sfn init                     # (exists) scaffold a capsule
+sfn publish                  # (exists) publish to registry
+sfn login                    # (exists) store registry token
+sfn bootstrap                # fetch a seed binary (replaces install.sh for
+                             #   users who already have an older sfn)
+
+# Release / distribution
+sfn package                  # produce distributable tarballs
+                             #   (replaces tools/package.sh)
+sfn bench                    # run benchmarks
+                             #   (replaces scripts/bench_compile.sh)
 ```
 
 `sfn run`, `sfn test`, `sfn check` all delegate to the same build pipeline
 and only differ in what they do with the artifact:
 
 - `sfn run` → `sfn build --emit=bin`, then execute the binary.
-- `sfn test` → `sfn build` with test-only deps enabled, then execute each
+- `sfn test` → `sfn build` with dev-deps enabled, then execute each
   test binary (or one combined test binary — see §4.6).
 - `sfn check` → `sfn build --emit=ir` stopping after typecheck + effects,
   no codegen.
+
+`sfn package` and `sfn bench` subsume `tools/package.sh` and
+`scripts/bench_compile.sh` respectively. Together with `sfn bootstrap`
+replacing `install.sh` for updates, this leaves zero build-related shell
+scripts in steady state. (`install.sh` stays as a one-shot first-install
+curl target for users who don't have `sfn` yet.)
 
 ### 4.2 Capsule manifest (extended)
 
@@ -503,7 +664,137 @@ script produces today, but declaratively. When the Sailfin runtime rewrite
 lands, `c-sources` is replaced with `entry = "src/mod.sfn"` and the link
 step loses a special case.
 
-### 4.8 Caching and determinism
+### 4.8 Prelude as a capsule
+
+`runtime/prelude.sfn` becomes `sfn/prelude`:
+
+```toml
+# capsules/sfn/prelude/capsule.toml
+[capsule]
+name = "sfn/prelude"
+version = "0.5.4"
+description = "Sailfin standard prelude (collections, strings, type checks)"
+
+[capabilities]
+required = []
+
+[build]
+kind = "library"
+entry = "src/mod.sfn"
+implicit = true                  # implicit dep of every compilation
+```
+
+`implicit = true` signals that the driver adds this capsule to every
+build's dep graph automatically — the same effect the current magic
+prelude link achieves, but driven by the manifest instead of hard-coded
+paths. A user with a custom `workspace.toml` can override `sfn/prelude`
+for embedded targets.
+
+Side effects:
+
+- `slug_from_path` in `build.sh` loses its special case for
+  `runtime__prelude`.
+- The compiler's import resolver loses the implicit `runtime/*` branch;
+  prelude symbols are in scope because `sfn/prelude` is an implicit dep,
+  not because of path magic.
+- Packaging no longer has a "copy prelude.o to its own location" step;
+  the prelude is an ordinary artifact in `build/capsules/sfn/prelude/obj/`.
+
+### 4.9 Cross-compilation
+
+```
+sfn build --target=x86_64-w64-mingw32
+sfn build --target=aarch64-apple-darwin
+sfn build --target=wasm32-unknown-unknown
+```
+
+The driver consults `[targets.<triple>]` in the manifest, which may
+override:
+
+- The resolved runtime capsule (e.g., `sfn/runtime-wasm` for wasm32).
+- The C toolchain (`cc`, `ar`, `ld`) for any `kind = "runtime"` dep.
+- Optimization flags and link flags.
+- Additional system libraries.
+
+```toml
+[targets.x86_64-w64-mingw32]
+runtime = "sfn/runtime-native"
+cc = "x86_64-w64-mingw32-gcc"
+link-libs = ["-static"]
+
+[targets.wasm32-unknown-unknown]
+runtime = "sfn/runtime-wasm"
+cc = "clang"
+cc-flags = ["-target", "wasm32-unknown-unknown"]
+```
+
+The 100-line `ci-cross-windows` Makefile target reduces to
+`sfn build --target=x86_64-w64-mingw32 --release && sfn package --target=x86_64-w64-mingw32`.
+
+### 4.10 Compiler decomposition into sub-capsules
+
+The compiler's own source tree is organized into workspace members:
+
+```
+compiler/
+├── capsule.toml                 # sfn/compiler — the binary entry
+├── src/cli_main.sfn             # thin driver over the sub-capsules
+├── parser/capsule.toml          # sfn/compiler-parser
+├── parser/src/...
+├── typecheck/capsule.toml       # sfn/compiler-typecheck
+├── typecheck/src/...
+├── emit/capsule.toml            # sfn/compiler-emit
+├── emit/src/...
+└── llvm/capsule.toml            # sfn/compiler-llvm
+    └── src/...
+```
+
+Benefits:
+
+- Each sub-capsule has its own dep graph, own cache key, own parallel
+  worker slot.
+- Tests for the parser depend on `sfn/compiler-parser`, not the whole
+  compiler. `llvm-objcopy --weaken` has no excuse to exist.
+- Per-capsule memory caps bound the worst-case compile footprint (today
+  `lowering_core.sfn` alone hits 7 GB; isolated in a sub-capsule, it
+  still hits 7 GB, but it can't starve its siblings).
+- Sub-capsules can be published independently for tooling
+  (`sfn/compiler-parser` is useful to LSP and `sfn check` consumers).
+
+This is Stage F-plus work — the schema supports it from Stage A, but
+the actual decomposition is a late-cycle cleanup.
+
+### 4.11 Structured link diagnostics
+
+Clang's stderr is currently the user's first signal that a link failed.
+The driver normalizes it into the same diagnostic schema the compiler
+already produces:
+
+```json
+{
+  "severity": "error",
+  "kind": "link/undefined-symbol",
+  "message": "undefined reference to 'sailfin_runtime_foo'",
+  "artifacts": ["build/capsules/sfn/http/obj/mod.o"],
+  "hint": "Missing dep? Check [dependencies] in capsules/sfn/http/capsule.toml"
+}
+```
+
+The driver ships a small number of link-error recognizers:
+
+- Undefined symbol → hint "check your `[dependencies]`" or "did you
+  forget to `sfn add`?".
+- Multiple definition → hint "symbol `X` defined in both caps `A` and
+  `B`; rename or re-export".
+- Missing runtime object → hint "`sfn/prelude` did not produce
+  `prelude.o`; try `sfn build --clean`".
+
+Unknown link errors pass through as `kind = "link/unknown"` with the
+raw clang line attached. `sfn build --json` emits all of them the same
+way it emits parse errors, making `sfn lsp` and MCP integrations
+able to act on link failures.
+
+### 4.12 Caching and determinism
 
 - Cache key per module:
   `sha256(source)` ⊕ `sha256(each resolved dep's .layout-manifest)` ⊕
@@ -528,65 +819,145 @@ consecutive builds with the same inputs produce different IR hashes,
 ## Part 5 — Migration Path
 
 The transition is staged so that at every step the compiler still builds
-itself and the test suite still passes.
+itself and the test suite still passes. Each stage ships independently
+and is individually revertable.
 
-### Stage A — Manifest as source of truth (no user-visible changes)
+### Stage A — Manifest & workspace schema (no behavior change)
+
+**Goal:** Make the declarative future expressible without changing how
+builds actually run.
 
 - Extend `capsule.toml` parser to accept `[build].kind`,
-  `[workspace]`, `[dev-dependencies]`, `[targets.*]`. The parser accepts
-  them; nothing consumes them yet.
-- Add a top-level `workspace.toml` alongside `compiler/capsule.toml`
-  that enumerates `compiler`, `runtime-native`, and `capsules/sfn/*` as
-  workspace members.
-- `build.sh` continues to drive the build. Lands with no behavior change
-  beyond richer manifest schemas.
+  `[build].implicit`, `[workspace]`, `[dev-dependencies]`,
+  `[targets.*]`, `[exports]`. The parser accepts them; nothing consumes
+  them yet.
+- Create `workspace.toml` at the repo root, enumerating `compiler`,
+  `runtime-native`, `runtime-prelude` (new — wrapping
+  `runtime/prelude.sfn`), and `capsules/sfn/*` as workspace members.
+- Create `capsules/sfn/prelude/capsule.toml` pointing at `runtime/prelude.sfn`.
+- `build.sh` continues to drive the build. No user-visible change.
 
-### Stage B — Resolver-in-compiler
+**Exit criteria:** `make compile && make check` passes; the new manifest
+fields round-trip through the parser; `workspace.toml` loads cleanly.
 
-- Port `_inline_relative_imports_cmd` logic into a first-class resolver
-  in `compiler/src/resolver/mod.sfn`.
-- Replace the hard-coded stdlib allowlist with workspace-driven
-  resolution backed by the workspace file.
-- `sfn run` / `sfn test` stop doing textual inlining; they call the
-  resolver and pass a `ResolvedGraph` to the emit pipeline.
-- `sfn build` gains the ability to build a capsule from its manifest
-  (`sfn build -p <path>`). It still can't build the compiler.
+### Stage B — Real resolver, retire textual inlining and the weaken hack
+
+**Goal:** One import-resolution code path, used by every CLI command.
+
+- Port `_inline_relative_imports_cmd` into a first-class resolver
+  `compiler/src/resolver/mod.sfn` that returns a `ResolvedGraph`.
+- Retire `_is_stdlib_capsule_cmd` — the resolver reads the workspace
+  file to discover that `sfn/http` maps to `capsules/sfn/http`.
+- `sfn run` stops textually inlining imports; it compiles modules
+  separately and links them. Diagnostics now reference original files.
+- `sfn test` stops weakening the compiler binary. Tests that need
+  compiler internals depend on a new `sfn/compiler-lib` capsule
+  (extracted from `compiler/src/`, excluding `cli_main.sfn` and
+  `cli_commands.sfn`) as a dev-dep. Tests that don't need compiler
+  internals lose the weakening step entirely and get faster.
+- `sfn build` accepts `-p <path>` and reads the manifest to resolve the
+  entry + dep graph, but still hands off to the single-file emit path.
+- Stdlib capsules can now ship patch versions: `sfn/http@0.2.2` is
+  valid without a compiler release.
+
+**Exit criteria:** `sfn test` passes with zero uses of `llvm-objcopy`;
+`_inline_relative_imports_cmd` is deleted; stdlib allowlist is deleted;
+`sfn build -p capsules/sfn/http` produces the same `mod.o` that
+`build.sh` would.
 
 ### Stage C — In-process driver for user capsules
 
-- Implement the driver function graph from §4.3 in Sailfin.
-- User capsules build with `sfn build`. All stdlib capsules are rebuilt
-  this way in CI to exercise the driver.
-- Cache keyed on content hashes. Rebuild-performance parity with today's
-  `sfn build <file>` is a must-hit.
-- `scripts/build.sh` continues to build the compiler.
+**Goal:** `sfn build` is a real project builder for everything except
+the compiler.
 
-### Stage D — Compiler builds itself with `sfn build`
+- Implement the driver function graph from §4.3 in Sailfin.
+- Content-addressed cache under `build/cache/`.
+- `sfn package` and `sfn bench` subcommands ship; `tools/package.sh`
+  and `scripts/bench_compile.sh` are deleted.
+- `sfn bootstrap` ships; it fetches a released seed binary (replaces
+  `install.sh` for users already on sfn). `install.sh` stays as the
+  first-install curl target.
+- All stdlib capsules build with `sfn build` in CI to exercise the
+  driver before the compiler itself depends on it.
+- `scripts/build.sh` continues to build the compiler (one last stage).
+
+**Exit criteria:** Every stdlib capsule in `capsules/sfn/*` builds with
+`sfn build -p <path>`, matches `build.sh` output byte-for-byte, and is
+covered by cache-hit assertions in CI.
+
+### Stage D — Compiler builds itself; `build.sh` and the Makefile retire
+
+**Goal:** Delete the legacy orchestration.
 
 - Teach the driver to handle `kind = "binary"` capsules that depend on
-  `kind = "runtime"` capsules (the C runtime).
+  `kind = "runtime"` capsules (C runtime + Sailfin prelude).
 - Port the llvm-link + C runtime + final link steps out of `build.sh`
   into the driver's link phase.
-- `scripts/build.sh` is rewritten as a 30-line shim that fetches the
-  seed, runs `seed sfn build -p compiler`, and copies the output.
-- Retry/validation logic migrates into the driver as
-  `--isolate-modules` (opt-in, diagnostic only). Default path is
-  single-process, no retries.
+- Cross-compile lands via `sfn build --target=<triple>` reading
+  `[targets.*]` from the manifest. The `ci-cross-windows` Makefile
+  target is deleted; CI calls `sfn build --target=x86_64-w64-mingw32`.
+- `scripts/build.sh` is **deleted**.
+- The Makefile is **deleted** (or shrunk to a 5-line convenience wrapper
+  for contributors who prefer `make` muscle memory). `make compile` →
+  `sfn build -p compiler`. `make test` → `sfn test`. `make check` →
+  `sfn build --check-determinism`. `make package` → `sfn package`.
+- The bootstrap sequence is now: `install.sh` (or `sfn bootstrap`)
+  fetches a seed, then `sfn build -p compiler`.
+- Retry/validation logic from `build.sh` survives only as
+  `sfn build --isolate-modules` (opt-in, diagnostic only). Default path
+  is single-process, no retries. If the compiler emits bad IR, the
+  build fails loudly and the bad IR is dumped for inspection.
 
-### Stage E — Long-lived arena, incremental builds
+**Exit criteria:** `scripts/build.sh` and the Makefile no longer exist.
+Fresh-clone bootstrap works with `install.sh && sfn build -p compiler`.
+`compile_to_llvm_file_with_module`'s fallback paths are gone — the
+structured pipeline either succeeds or fails.
+
+### Stage E — Long-lived process, arena, incremental builds
+
+**Goal:** Hit the <5 min build target from `docs/build-performance.md`.
 
 - Arena allocator from `docs/runtime_architecture.md` §4.4 lands. The
   driver resets the arena between modules rather than exiting the
   process.
-- Cache hit rate becomes a measured metric in CI.
-- Parallel builds default-on.
+- In-process import-context cache: parsed `.layout-manifest` structs
+  live in-memory for the duration of a build.
+- Parallel builds default to `--jobs=nproc`.
+- Cache hit rate becomes a measured metric in CI with a floor that
+  fails the build if hits drop unexpectedly.
+- Determinism check (`sfn build --check-determinism`) runs on every PR.
 
-### Stage F — Runtime rewrite consumes the build system
+**Exit criteria:** Clean build <5 min; incremental no-op build <5 s;
+determinism gate in CI.
 
-- The Sailfin-native runtime lands as `sfn/runtime-sailfin`. The compiler
-  workspace depends on it instead of `sfn/runtime-native`. The driver's
-  link phase loses its `kind = "runtime"` special case (or keeps it only
-  for C FFI capsules).
+### Stage F — Runtime rewrite; no special cases left
+
+**Goal:** The last `kind = "runtime"` special case either retires or
+is fully declarative.
+
+- The Sailfin-native runtime lands as `sfn/runtime-sailfin`
+  (per `docs/runtime_architecture.md` M2/M3). The compiler workspace
+  depends on it instead of `sfn/runtime-native`.
+- The driver's link phase loses its `c-sources` branch — or keeps it
+  only for C FFI capsules users might ship (e.g., a `sfn/zlib` binding).
+- The `prelude-entry` special case in `sfn/runtime-native`'s manifest
+  is deleted; `sfn/prelude` is a normal capsule dep of the runtime.
+
+### Stage G (optional, post-1.0) — Compiler decomposition
+
+**Goal:** Split the compiler into sub-capsules for parallelism and
+tooling reuse.
+
+- `compiler/` restructures into `sfn/compiler`, `sfn/compiler-parser`,
+  `sfn/compiler-typecheck`, `sfn/compiler-emit`, `sfn/compiler-llvm`,
+  each with its own `capsule.toml`.
+- `sfn check` and `sfn lsp` depend on `sfn/compiler-parser` +
+  `sfn/compiler-typecheck` only, skipping emit and LLVM entirely.
+- Parallel builds gain another level of parallelism (sub-capsules
+  in parallel, modules within each in parallel).
+
+Not on the 1.0 critical path. Schema supports it from Stage A, but the
+actual split is an ecosystem-maturity cleanup.
 
 ---
 
@@ -610,12 +981,28 @@ itself and the test suite still passes.
    entry. Either all `src/**/*.sfn` are part of the public surface, or
    capsules declare an explicit `[exports]` list. Proposal leans toward
    explicit exports to keep the ABI surface small.
-6. **Migration of `sfn test`.** The test runner today weakens the
-   compiler's own object file to satisfy cross-module symbols. That hack
-   goes away when tests are real modules linked against a real
-   `sfn/test` library. Some existing tests may rely on symbols that only
-   exist in the compiler binary; they need to declare `sfn/compiler`
-   (or a narrower library capsule) as a test dep.
+6. **`sfn/compiler-lib` scope.** Stage B extracts a library capsule from
+   `compiler/src/` so tests can depend on it without weakening the
+   binary. What goes in? Proposal says everything except `cli_main.sfn`,
+   `cli_commands.sfn`, `cli_commands_utils.sfn` (which become
+   `sfn/compiler`'s binary-specific code). Needs a symbol audit to
+   confirm no test today needs CLI internals.
+7. **Implicit-dep semantics.** `[build].implicit = true` on `sfn/prelude`
+   adds it to every build's dep graph. Does that apply to test binaries,
+   benchmarks, and `--emit=ir` outputs too? Proposal says yes for all
+   compilation targets; no for documentation-only outputs.
+8. **`make` as a user-facing affordance.** Some users will want `make`
+   muscle memory to keep working. Do we ship a 5-line convenience
+   Makefile in Stage D, or insist on `sfn` only? The minimalist choice
+   removes one layer; the pragmatic choice reduces migration friction.
+9. **`install.sh` vs `sfn bootstrap`.** When a user already has `sfn`,
+   `sfn bootstrap` is the right update path. When they don't, they need
+   `curl | sh` to get the first binary. Keep both, document the split.
+10. **Link-error recognizer surface.** The structured link diagnostics
+    in §4.11 require mapping clang stderr lines to error kinds. What's
+    the minimum recognizer set for 1.0? Proposal: undefined symbol,
+    multiple definition, missing object. Unknown errors fall through
+    with raw stderr attached.
 
 ---
 
@@ -630,4 +1017,5 @@ itself and the test suite still passes.
   `sfn add` semantics. This proposal extends the manifest schema it
   defines.
 - `docs/proposals/tooling.md` — `sfn check`, `sfn doc`, `sfn fix` all
-  depend on the in-process driver landing in Stage C.
+  depend on the in-process driver landing in Stage C. `sfn lsp`
+  specifically benefits from the Stage G sub-capsule decomposition.
