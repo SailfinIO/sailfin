@@ -34,11 +34,7 @@
 // Consumers then call `_clang_link_multi` with the main .ll and the
 // capsule .ll paths, and clang produces a linked binary with all
 // capsule symbols resolved.
-
-import {
-    write_native_text_file_with_module,
-    compile_to_llvm_file_with_module,
-} from "./main";
+import { compile_to_llvm_file_with_module, write_native_text_file_with_module } from "./main";
 import { substring } from "./string_utils";
 import { toml_get_dependencies } from "./toml_parser";
 
@@ -48,18 +44,17 @@ export {
     enumerate_capsule_sources,
     stage_capsule_imports,
     compile_capsule_modules,
-    mangle_slug,
+    mangle_slug
 };
 
 struct CapsuleSource {
-    spec: string;          // e.g. "sfn/cli" — the dep key from capsule.toml
-    source_path: string;   // absolute path to the .sfn file
-    slug: string;          // e.g. "sfn/cli/mod" — used for staging + symbol mangling
-    ll_path: string;       // e.g. "build/sailfin/capsules/sfn__cli__mod.ll"
+    spec: string;  // e.g. "sfn/cli" — the dep key from capsule.toml
+    source_path: string;  // absolute path to the .sfn file
+    slug: string;  // e.g. "sfn/cli/mod" — used for staging + symbol mangling
+    ll_path: string;  // e.g. "build/sailfin/capsules/sfn__cli__mod.ll"
 }
 
 // ---- Path helpers ----
-
 fn _cr_dirname(path: string) -> string {
     let mut last_slash: number = -1;
     let mut i: number = 0;
@@ -121,9 +116,7 @@ fn _cr_get_home() -> string ![io] {
 }
 
 fn _cr_ensure_dir(path: string) -> void ![io] {
-    if !fs.exists(path) {
-        process.run(["mkdir", "-p", path]);
-    }
+    if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
 }
 
 // Validate a capsule.toml path segment is safe (no traversal).
@@ -151,7 +144,6 @@ fn _cr_is_safe_version(value: string) -> boolean {
 }
 
 // ---- Slug mangling ----
-
 // Convert a slug like "sfn/cli/mod" to "sfn__cli__mod" for use as a
 // filesystem-safe identifier (e.g. in .ll filenames).
 fn mangle_slug(slug: string) -> string {
@@ -160,18 +152,13 @@ fn mangle_slug(slug: string) -> string {
     loop {
         if i >= slug.length { break; }
         let ch = substring(slug, i, i + 1);
-        if ch == "/" {
-            out = out + "__";
-        } else {
-            out = out + ch;
-        }
+        if ch == "/" { out = out + "__"; } else { out = out + ch; }
         i += 1;
     }
     return out;
 }
 
 // ---- Project discovery ----
-
 // Walk up from start_dir looking for capsule.toml. Returns the directory
 // containing it, or "" if no manifest is found within 16 levels.
 fn discover_project_root(start_dir: string) -> string ![io] {
@@ -181,9 +168,7 @@ fn discover_project_root(start_dir: string) -> string ![io] {
     loop {
         if depth >= 16 { break; }
         let manifest = _cr_path_join(dir, "capsule.toml");
-        if fs.exists(manifest) {
-            return dir;
-        }
+        if fs.exists(manifest) { return dir; }
         let parent = _cr_dirname(dir);
         if strings_equal(parent, dir) { break; }
         if parent.length == 0 { break; }
@@ -194,7 +179,6 @@ fn discover_project_root(start_dir: string) -> string ![io] {
 }
 
 // ---- Dependency enumeration ----
-
 // Parse "name=version\n" lines from toml_get_dependencies output, skipping
 // blanks and returning one dep spec per line. Each returned spec is the
 // scope/name key (e.g. "sfn/cli") — versions live in dep_versions[i].
@@ -255,20 +239,19 @@ fn _cr_locate_capsule_src(project_root: string, spec: string, version: string) -
     if !_cr_is_safe_segment(name) { return ""; }
 
     // Prefer in-tree source if we're inside a sailfin repo checkout.
-    let in_tree = _cr_path_join(project_root, "capsules/" + scope + "/" + name + "/src");
-    if fs.exists(in_tree) {
-        return in_tree;
-    }
+    let in_tree = _cr_path_join(project_root, "capsules/" + scope + "/" + name
+        + "/src");
+    if fs.exists(in_tree) { return in_tree; }
 
     // Fall back to the user cache populated by `sfn add`.
     if version.length == 0 { return ""; }
     if !_cr_is_safe_version(version) { return ""; }
     let home = _cr_get_home();
     if home.length == 0 { return ""; }
-    let cached = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version + "/src";
-    if fs.exists(cached) {
-        return cached;
-    }
+    let cached = home + "/.sfn/cache/capsules/" + scope + "/" + name + "/"
+        + version
+        + "/src";
+    if fs.exists(cached) { return cached; }
     return "";
 }
 
@@ -307,10 +290,7 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[]
                 let slug = slug_prefix + "/" + stem;
                 let ll = "build/sailfin/capsules/" + mangle_slug(slug) + ".ll";
                 out.push(CapsuleSource {
-                    spec: spec,
-                    source_path: full,
-                    slug: slug,
-                    ll_path: ll,
+                    spec: spec, source_path: full, slug: slug, ll_path: ll
                 });
             } else {
                 // Treat anything without a .sfn suffix as a potential
@@ -352,7 +332,10 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
                 fi += 1;
             }
         } else {
-            print.err("capsule-resolver: could not locate source for \"" + entry.spec + "\" — run `sfn add " + entry.spec + "` to populate the cache");
+            print.err("capsule-resolver: could not locate source for \"" + entry.spec
+                + "\" — run `sfn add "
+                + entry.spec
+                + "` to populate the cache");
         }
         i += 1;
     }
@@ -360,13 +343,13 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
 }
 
 // ---- Import-context staging ----
-
 // Emit .sfn-asm + .layout-manifest for a single capsule source. The
 // compiler's normal import resolver (llvm/imports.sfn:_resolve_layout_manifest_path_for_slug)
 // looks in build/native/import-context/<slug>.* so that's where we write.
 fn _cr_stage_one(src: CapsuleSource) -> boolean ![io] {
     let asm_path = "build/native/import-context/" + src.slug + ".sfn-asm";
-    let manifest_path = "build/native/import-context/" + src.slug + ".layout-manifest";
+    let manifest_path = "build/native/import-context/" + src.slug
+        + ".layout-manifest";
     let asm_dir = _cr_dirname(asm_path);
     _cr_ensure_dir(asm_dir);
 
@@ -393,12 +376,15 @@ fn _cr_stage_one(src: CapsuleSource) -> boolean ![io] {
             let mut line_end: number = line_start;
             loop {
                 if line_end >= len { break; }
-                if substring(asm_text, line_end, line_end + 1) == "\n" { break; }
+                if substring(asm_text, line_end, line_end + 1) == "\n" {
+                    break;
+                }
                 line_end += 1;
             }
             if line_end >= line_start + 7 {
                 if substring(asm_text, line_start, line_start + 7) == ".layout" {
-                    manifest = manifest + substring(asm_text, line_start, line_end) + "\n";
+                    manifest = manifest + substring(asm_text, line_start, line_end)
+                        + "\n";
                 }
             }
             line_start = line_end + 1;
@@ -426,7 +412,6 @@ fn stage_capsule_imports(sources: CapsuleSource[]) -> boolean ![io] {
 }
 
 // ---- Capsule module compilation ----
-
 // Lower a single capsule source to its own .ll so the final link can
 // resolve the main module's external declarations to the capsule's
 // definitions.
@@ -440,7 +425,8 @@ fn _cr_compile_one(src: CapsuleSource) -> boolean ![io] {
     _cr_ensure_dir(ll_dir);
     let ok = compile_to_llvm_file_with_module(source, src.slug, src.ll_path);
     if !ok {
-        print.err("capsule-resolver: failed to lower " + src.slug + " to LLVM IR");
+        print.err("capsule-resolver: failed to lower " + src.slug
+            + " to LLVM IR");
         return false;
     }
     return true;

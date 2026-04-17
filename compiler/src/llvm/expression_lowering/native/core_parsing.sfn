@@ -1,43 +1,39 @@
 // compiler/src/llvm/expression_lowering/native/core_parsing.sfn
 //
 // Parsing helpers for expression lowering extracted from core.sfn.
-
-import { substring, char_at } from "../../../string_utils";
-
+import { char_at, substring } from "../../../string_utils";
+import { array_struct_type_for_element } from "../../type_mapping";
+import { map_type_annotation } from "../../type_mapping";
 import {
-    TypeContext,
-    BorrowParseResult,
-    BorrowArgumentParse,
-    TernaryParseResult,
-    RawAddressParseResult,
-    CastParseResult,
     ArrayLiteralMetadata,
+    BorrowArgumentParse,
+    BorrowParseResult,
+    CastParseResult,
+    RawAddressParseResult,
+    TernaryParseResult,
+    TypeContext
 } from "../../types";
-
 import {
-    trim_text,
-    starts_with,
     append_string,
     is_effect_delimiter,
-    is_identifier_start_char,
     is_identifier_part_char,
+    is_identifier_start_char,
+    starts_with,
+    trim_text
 } from "../../utils";
-
-import { array_struct_type_for_element } from "../../type_mapping";
-
-import {
-    map_type_annotation,
-} from "../../type_mapping";
-
-import {
-    map_primitive_type,
-} from "./core_type_mapping";
+import { map_primitive_type } from "./core_type_mapping";
 
 fn parse_borrow_expression(expression: string) -> BorrowParseResult {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
-        return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+        return BorrowParseResult {
+            recognized: false,
+            success: false,
+            target: "",
+            mutable: false,
+            diagnostics: diagnostics
+        };
     }
     // Support both prefix borrows (`&x`, `&mut x`) and the historical built-in
     // call forms (`borrow(x)`, `borrow_mut(x)`).
@@ -47,7 +43,13 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
 
     if starts_with(trimmed, "&") {
         if starts_with(trimmed, "&&") {
-            return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+            return BorrowParseResult {
+                recognized: false,
+                success: false,
+                target: "",
+                mutable: false,
+                diagnostics: diagnostics
+            };
         }
         is_prefix_form = true;
         remainder = trim_text(substring(trimmed, 1, trimmed.length));
@@ -61,13 +63,25 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
         } else if starts_with(trimmed, "borrow") {
             after_keyword = trim_text(substring(trimmed, 6, trimmed.length));
         } else {
-            return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+            return BorrowParseResult {
+                recognized: false,
+                success: false,
+                target: "",
+                mutable: false,
+                diagnostics: diagnostics
+            };
         }
         let mut _if116: boolean = false;
         if after_keyword.length == 0 { _if116 = true; }
         if substring(after_keyword, 0, 1) != "(" { _if116 = true; }
         if _if116 {
-            return BorrowParseResult { recognized: false, success: false, target: "", mutable: false, diagnostics: diagnostics };
+            return BorrowParseResult {
+                recognized: false,
+                success: false,
+                target: "",
+                mutable: false,
+                diagnostics: diagnostics
+            };
         }
         remainder = after_keyword;
     }
@@ -82,7 +96,13 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
     }
     if remainder.length == 0 {
         let issue = append_string(diagnostics, "llvm lowering: borrow expression missing target");
-        return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: issue };
+        return BorrowParseResult {
+            recognized: true,
+            success: false,
+            target: "",
+            mutable: mutable_flag,
+            diagnostics: issue
+        };
     }
 
     if remainder.length > 0 {
@@ -96,7 +116,13 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
                 _ci0 += 1;
             }
             if !argument_parse.success {
-                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+                return BorrowParseResult {
+                    recognized: true,
+                    success: false,
+                    target: "",
+                    mutable: mutable_flag,
+                    diagnostics: messages
+                };
             }
             let mut argument_text: string = argument_parse.argument;
             if starts_with(argument_text, "mut") {
@@ -109,23 +135,59 @@ fn parse_borrow_expression(expression: string) -> BorrowParseResult {
             }
             if argument_text.length == 0 {
                 messages.push("llvm lowering: borrow expression missing target");
-                return BorrowParseResult { recognized: true, success: false, target: "", mutable: mutable_flag, diagnostics: messages };
+                return BorrowParseResult {
+                    recognized: true,
+                    success: false,
+                    target: "",
+                    mutable: mutable_flag,
+                    diagnostics: messages
+                };
             }
             if !is_valid_borrow_target(argument_text) {
-                return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+                return BorrowParseResult {
+                    recognized: false,
+                    success: false,
+                    target: "",
+                    mutable: mutable_flag,
+                    diagnostics: diagnostics
+                };
             }
-            return BorrowParseResult { recognized: true, success: true, target: argument_text, mutable: mutable_flag, diagnostics: messages };
+            return BorrowParseResult {
+                recognized: true,
+                success: true,
+                target: argument_text,
+                mutable: mutable_flag,
+                diagnostics: messages
+            };
         }
     }
 
     let simple_parse = extract_simple_borrow_target(remainder);
     if !simple_parse.success {
-        return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+        return BorrowParseResult {
+            recognized: false,
+            success: false,
+            target: "",
+            mutable: mutable_flag,
+            diagnostics: diagnostics
+        };
     }
     if !is_valid_borrow_target(simple_parse.argument) {
-        return BorrowParseResult { recognized: false, success: false, target: "", mutable: mutable_flag, diagnostics: diagnostics };
+        return BorrowParseResult {
+            recognized: false,
+            success: false,
+            target: "",
+            mutable: mutable_flag,
+            diagnostics: diagnostics
+        };
     }
-    return BorrowParseResult { recognized: true, success: true, target: simple_parse.argument, mutable: mutable_flag, diagnostics: diagnostics };
+    return BorrowParseResult {
+        recognized: true,
+        success: true,
+        target: simple_parse.argument,
+        mutable: mutable_flag,
+        diagnostics: diagnostics
+    };
 }
 
 fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
@@ -134,9 +196,7 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
     let mut index: number = 0;
     let mut closing_index: number = -1;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = substring(text, index, index + 1);
         if ch == "(" {
             depth += 1;
@@ -146,7 +206,11 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
         if ch == ")" {
             if depth == 0 {
                 diagnostics.push("llvm lowering: borrow expression missing opening `(`");
-                return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+                return BorrowArgumentParse {
+                    success: false,
+                    argument: "",
+                    diagnostics: diagnostics
+                };
             }
             depth -= 1;
             let current_index = index;
@@ -161,15 +225,29 @@ fn extract_borrow_argument(text: string) -> BorrowArgumentParse {
     }
     if closing_index < 0 {
         diagnostics.push("llvm lowering: borrow expression missing closing `)`");
-        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+        return BorrowArgumentParse {
+            success: false,
+            argument: "",
+            diagnostics: diagnostics
+        };
     }
     let inner = substring(text, 1, closing_index);
     let remainder = trim_text(substring(text, closing_index + 1, text.length));
     if remainder.length > 0 {
-        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
-        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+        diagnostics.push("llvm lowering: borrow expression trailing content `"
+            + remainder
+            + "`");
+        return BorrowArgumentParse {
+            success: false,
+            argument: "",
+            diagnostics: diagnostics
+        };
     }
-    return BorrowArgumentParse { success: true, argument: trim_text(inner), diagnostics: diagnostics };
+    return BorrowArgumentParse {
+        success: true,
+        argument: trim_text(inner),
+        diagnostics: diagnostics
+    };
 }
 
 fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
@@ -177,55 +255,61 @@ fn extract_simple_borrow_target(text: string) -> BorrowArgumentParse {
     let trimmed = trim_text(text);
     if trimmed.length == 0 {
         diagnostics.push("llvm lowering: borrow expression missing target");
-        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+        return BorrowArgumentParse {
+            success: false,
+            argument: "",
+            diagnostics: diagnostics
+        };
     }
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
-        if is_effect_delimiter(ch) {
-            break;
-        }
+        if is_effect_delimiter(ch) { break; }
         index += 1;
     }
     let target = trim_text(substring(trimmed, 0, index));
     if target.length == 0 {
         diagnostics.push("llvm lowering: borrow expression missing target");
-        return BorrowArgumentParse { success: false, argument: "", diagnostics: diagnostics };
+        return BorrowArgumentParse {
+            success: false,
+            argument: "",
+            diagnostics: diagnostics
+        };
     }
     let remainder = trim_text(substring(trimmed, index, trimmed.length));
     if remainder.length > 0 {
-        diagnostics.push("llvm lowering: borrow expression trailing content `" + remainder + "`");
-        return BorrowArgumentParse { success: false, argument: target, diagnostics: diagnostics };
+        diagnostics.push("llvm lowering: borrow expression trailing content `"
+            + remainder
+            + "`");
+        return BorrowArgumentParse {
+            success: false,
+            argument: target,
+            diagnostics: diagnostics
+        };
     }
-    return BorrowArgumentParse { success: true, argument: target, diagnostics: diagnostics };
+    return BorrowArgumentParse {
+        success: true,
+        argument: target,
+        diagnostics: diagnostics
+    };
 }
 
 fn is_valid_borrow_target(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         if ch == "." {
             index += 1;
             continue;
         }
         if index == 0 {
-            if !is_identifier_start_char(ch) {
-                return false;
-            }
+            if !is_identifier_start_char(ch) { return false; }
         } else {
-            if !is_identifier_part_char(ch) {
-                return false;
-            }
+            if !is_identifier_part_char(ch) { return false; }
         }
         index += 1;
     }
@@ -235,23 +319,27 @@ fn is_valid_borrow_target(text: string) -> boolean {
 fn parse_ternary_expression(text: string) -> TernaryParseResult {
     let mut diagnostics: string[] = [];
     let trimmed = trim_text(text);
-    
+
     if trimmed.length == 0 {
-        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+        return TernaryParseResult {
+            success: false,
+            condition: "",
+            true_value: "",
+            false_value: "",
+            diagnostics: diagnostics
+        };
     }
-    
+
     // Find '?' and ':' at the same nesting level (depth 0)
     let mut depth: number = 0;
     let mut question_index: number = -1;
     let mut colon_index: number = -1;
     let mut index: number = 0;
-    
+
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
-        
+
         let mut _if117: boolean = false;
         if ch == "(" { _if117 = true; }
         if ch == "[" { _if117 = true; }
@@ -270,7 +358,7 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
             index += 1;
             continue;
         }
-        
+
         if depth == 0 {
             if ch == "?" {
                 if question_index < 0 {
@@ -289,59 +377,115 @@ fn parse_ternary_expression(text: string) -> TernaryParseResult {
                 }
             }
         }
-        
+
         index += 1;
     }
-    
+
     let mut _if119: boolean = false;
     if question_index < 0 { _if119 = true; }
     if colon_index < 0 { _if119 = true; }
     if _if119 {
-        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+        return TernaryParseResult {
+            success: false,
+            condition: "",
+            true_value: "",
+            false_value: "",
+            diagnostics: diagnostics
+        };
     }
-    
+
     if question_index >= colon_index {
         diagnostics.push("llvm lowering: malformed ternary expression - `:` before `?`");
-        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+        return TernaryParseResult {
+            success: false,
+            condition: "",
+            true_value: "",
+            false_value: "",
+            diagnostics: diagnostics
+        };
     }
-    
+
     let condition = trim_text(substring(trimmed, 0, question_index));
     let true_value = trim_text(substring(trimmed, question_index + 1, colon_index));
     let false_value = trim_text(substring(trimmed, colon_index + 1, trimmed.length));
-    
+
     if condition.length == 0 {
         diagnostics.push("llvm lowering: ternary expression missing condition");
-        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+        return TernaryParseResult {
+            success: false,
+            condition: "",
+            true_value: "",
+            false_value: "",
+            diagnostics: diagnostics
+        };
     }
     if true_value.length == 0 {
         diagnostics.push("llvm lowering: ternary expression missing true branch value");
-        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+        return TernaryParseResult {
+            success: false,
+            condition: "",
+            true_value: "",
+            false_value: "",
+            diagnostics: diagnostics
+        };
     }
     if false_value.length == 0 {
         diagnostics.push("llvm lowering: ternary expression missing false branch value");
-        return TernaryParseResult { success: false, condition: "", true_value: "", false_value: "", diagnostics: diagnostics };
+        return TernaryParseResult {
+            success: false,
+            condition: "",
+            true_value: "",
+            false_value: "",
+            diagnostics: diagnostics
+        };
     }
-    
-    return TernaryParseResult { success: true, condition: condition, true_value: true_value, false_value: false_value, diagnostics: diagnostics };
+
+    return TernaryParseResult {
+        success: true,
+        condition: condition,
+        true_value: true_value,
+        false_value: false_value,
+        diagnostics: diagnostics
+    };
 }
 
 fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
-        return RawAddressParseResult { recognized: false, success: false, target: "", diagnostics: diagnostics };
+        return RawAddressParseResult {
+            recognized: false,
+            success: false,
+            target: "",
+            diagnostics: diagnostics
+        };
     }
     if !starts_with(trimmed, "&") {
-        return RawAddressParseResult { recognized: false, success: false, target: "", diagnostics: diagnostics };
+        return RawAddressParseResult {
+            recognized: false,
+            success: false,
+            target: "",
+            diagnostics: diagnostics
+        };
     }
     // Support `&raw x` and `& raw x`.
     if starts_with(trimmed, "&raw") {
         let remainder = trim_text(substring(trimmed, 4, trimmed.length));
         if remainder.length == 0 {
             diagnostics.push("llvm lowering: &raw expression missing target");
-            return RawAddressParseResult { recognized: true, success: false, target: "", diagnostics: diagnostics };
+            return RawAddressParseResult {
+                recognized: true,
+                success: false,
+                target: "",
+                diagnostics: diagnostics
+            };
         }
-        return RawAddressParseResult { recognized: true, success: true, target: remainder, diagnostics: diagnostics };
+        return RawAddressParseResult {
+            recognized: true,
+            success: true,
+            target: remainder,
+            diagnostics: diagnostics
+        };
     }
     if starts_with(trimmed, "&") {
         let after_amp = trim_text(substring(trimmed, 1, trimmed.length));
@@ -349,19 +493,40 @@ fn parse_raw_address_expression(text: string) -> RawAddressParseResult {
             let remainder = trim_text(substring(after_amp, 3, after_amp.length));
             if remainder.length == 0 {
                 diagnostics.push("llvm lowering: &raw expression missing target");
-                return RawAddressParseResult { recognized: true, success: false, target: "", diagnostics: diagnostics };
+                return RawAddressParseResult {
+                    recognized: true,
+                    success: false,
+                    target: "",
+                    diagnostics: diagnostics
+                };
             }
-            return RawAddressParseResult { recognized: true, success: true, target: remainder, diagnostics: diagnostics };
+            return RawAddressParseResult {
+                recognized: true,
+                success: true,
+                target: remainder,
+                diagnostics: diagnostics
+            };
         }
     }
-    return RawAddressParseResult { recognized: false, success: false, target: "", diagnostics: diagnostics };
+    return RawAddressParseResult {
+        recognized: false,
+        success: false,
+        target: "",
+        diagnostics: diagnostics
+    };
 }
 
 fn parse_cast_expression(text: string) -> CastParseResult {
     let trimmed = trim_text(text);
     let mut diagnostics: string[] = [];
     if trimmed.length == 0 {
-        return CastParseResult { recognized: false, success: false, value: "", type_annotation: "", diagnostics: diagnostics };
+        return CastParseResult {
+            recognized: false,
+            success: false,
+            value: "",
+            type_annotation: "",
+            diagnostics: diagnostics
+        };
     }
 
     // Scan for a top-level ` as ` outside of brackets/strings.
@@ -375,9 +540,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     let mut index: number = 0;
     let mut match_index: number = -1;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = char_at(trimmed, index);
         if in_double {
             if escape_next {
@@ -390,9 +553,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
                 index += 1;
                 continue;
             }
-            if ch == "\"" {
-                in_double = false;
-            }
+            if ch == "\"" { in_double = false; }
             index += 1;
             continue;
         }
@@ -407,9 +568,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
                 index += 1;
                 continue;
             }
-            if ch == "'" {
-                in_single = false;
-            }
+            if ch == "'" { in_single = false; }
             index += 1;
             continue;
         }
@@ -429,9 +588,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -441,9 +598,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -453,9 +608,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == "}" {
-            if brace_depth > 0 {
-                brace_depth -= 1;
-            }
+            if brace_depth > 0 { brace_depth -= 1; }
             index += 1;
             continue;
         }
@@ -465,9 +618,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
             continue;
         }
         if ch == ">" {
-            if angle_depth > 0 {
-                angle_depth -= 1;
-            }
+            if angle_depth > 0 { angle_depth -= 1; }
             index += 1;
             continue;
         }
@@ -479,9 +630,7 @@ fn parse_cast_expression(text: string) -> CastParseResult {
                         let _as_end = index + 4;
                         if _as_end <= trimmed.length {
                             let window = substring(trimmed, index, _as_end);
-                            if window == " as " {
-                                match_index = index;
-                            }
+                            if window == " as " { match_index = index; }
                         }
                     }
                 }
@@ -491,7 +640,13 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     }
 
     if match_index < 0 {
-        return CastParseResult { recognized: false, success: false, value: "", type_annotation: "", diagnostics: diagnostics };
+        return CastParseResult {
+            recognized: false,
+            success: false,
+            value: "",
+            type_annotation: "",
+            diagnostics: diagnostics
+        };
     }
     let value = trim_text(substring(trimmed, 0, match_index));
     let annotation = trim_text(substring(trimmed, match_index + 4, trimmed.length));
@@ -499,10 +654,23 @@ fn parse_cast_expression(text: string) -> CastParseResult {
     if value.length == 0 { _if120 = true; }
     if annotation.length == 0 { _if120 = true; }
     if _if120 {
-        diagnostics.push("llvm lowering: malformed cast expression `" + text + "`");
-        return CastParseResult { recognized: true, success: false, value: value, type_annotation: annotation, diagnostics: diagnostics };
+        diagnostics.push("llvm lowering: malformed cast expression `" + text
+            + "`");
+        return CastParseResult {
+            recognized: true,
+            success: false,
+            value: value,
+            type_annotation: annotation,
+            diagnostics: diagnostics
+        };
     }
-    return CastParseResult { recognized: true, success: true, value: value, type_annotation: annotation, diagnostics: diagnostics };
+    return CastParseResult {
+        recognized: true,
+        success: true,
+        value: value,
+        type_annotation: annotation,
+        diagnostics: diagnostics
+    };
 }
 
 fn parse_array_literal_metadata(entries: string[], context: TypeContext) -> ArrayLiteralMetadata {
@@ -527,22 +695,16 @@ fn parse_array_literal_metadata(entries: string[], context: TypeContext) -> Arra
 
 fn map_metadata_annotation(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return "";
-    }
+    if trimmed.length == 0 { return ""; }
     let primitive = map_primitive_type(context, trimmed);
-    if primitive.length > 0 {
-        return primitive;
-    }
+    if primitive.length > 0 { return primitive; }
     // Check if this is an array type annotation (e.g., "Color[]")
     if trimmed.length > 2 {
         let suffix = substring(trimmed, trimmed.length - 2, trimmed.length);
         if suffix == "[]" {
             let inner_annotation = trim_text(substring(trimmed, 0, trimmed.length - 2));
             let inner_type = map_metadata_annotation(context, inner_annotation);
-            if inner_type.length == 0 {
-                return "";
-            }
+            if inner_type.length == 0 { return ""; }
             let struct_type = array_struct_type_for_element(inner_type);
             return struct_type + "*";
         }

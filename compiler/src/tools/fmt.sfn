@@ -2,16 +2,14 @@
 //
 // Canonical formatter for .sfn files. Operates on the token stream
 // (not the AST) to preserve comments. One style, no configuration.
-
-import { Token } from "../token";
 import { lex } from "../lexer";
-import { char_at, substring, strings_equal } from "../string_utils";
-import { wraps_at_threshold, import_group } from "./fmt_rules";
+import { char_at, strings_equal, substring } from "../string_utils";
+import { Token } from "../token";
+import { import_group, wraps_at_threshold } from "./fmt_rules";
 
 // ═══════════════════════════════════════════════════════════════════
 // Enriched token for formatting
 // ═══════════════════════════════════════════════════════════════════
-
 struct FmtToken {
     token: Token;
     leading_comments: Token[];
@@ -23,7 +21,6 @@ struct FmtToken {
 // ═══════════════════════════════════════════════════════════════════
 // Formatting context (state carried through the emit phase)
 // ═══════════════════════════════════════════════════════════════════
-
 struct FmtContext {
     indent: number;
     line_pos: number;
@@ -35,15 +32,12 @@ struct FmtContext {
 // ═══════════════════════════════════════════════════════════════════
 // Helpers
 // ═══════════════════════════════════════════════════════════════════
-
 fn _count_newlines(text: string) -> number {
     let mut count = 0;
     let mut i = 0;
     loop {
         if i >= text.length { break; }
-        if char_at(text, i) == "\n" {
-            count += 1;
-        }
+        if char_at(text, i) == "\n" { count += 1; }
         i += 1;
     }
     return count;
@@ -145,7 +139,6 @@ fn _is_top_level_decl(lexeme: string) -> boolean {
 // ═══════════════════════════════════════════════════════════════════
 // Phase 2: Strip whitespace, classify tokens, attach comments
 // ═══════════════════════════════════════════════════════════════════
-
 fn _classify_role(token: Token, prev_lexeme: string, next_lexeme: string) -> string {
     let kind = token.kind.variant;
     let lex = token.lexeme;
@@ -170,6 +163,7 @@ fn _classify_role(token: Token, prev_lexeme: string, next_lexeme: string) -> str
             return "operator";
         }
         if strings_equal(lex, "@") { return "decorator"; }
+        if strings_equal(lex, "?") { return "optional_suffix"; }
         if _is_assign_op(lex) { return "assign"; }
         if _is_binary_op(lex) { return "operator"; }
         return "symbol";
@@ -199,9 +193,7 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
         // Skip whitespace, but track blank lines
         if strings_equal(kind, "Whitespace") {
             let nl = _count_newlines(token.lexeme);
-            if nl >= 2 {
-                blank_lines = 1;
-            }
+            if nl >= 2 { blank_lines = 1; }
             i += 1;
             continue;
         }
@@ -227,7 +219,7 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
                         leading_comments: prev_ft.leading_comments,
                         trailing_comment: updated_trailing,
                         blank_lines_before: prev_ft.blank_lines_before,
-                        role: prev_ft.role,
+                        role: prev_ft.role
                     };
                     i += 1;
                     continue;
@@ -249,8 +241,14 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
         loop {
             if ni >= tokens.length { break; }
             let nk = tokens[ni].kind.variant;
-            if strings_equal(nk, "Whitespace") { ni += 1; continue; }
-            if strings_equal(nk, "Comment") { ni += 1; continue; }
+            if strings_equal(nk, "Whitespace") {
+                ni += 1;
+                continue;
+            }
+            if strings_equal(nk, "Comment") {
+                ni += 1;
+                continue;
+            }
             next_lex = tokens[ni].lexeme;
             break;
         }
@@ -258,11 +256,7 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
         let role = _classify_role(token, prev_lex, next_lex);
 
         result.push(FmtToken {
-                token: token,
-                leading_comments: pending_comments,
-                trailing_comment: [],
-                blank_lines_before: blank_lines,
-                role: role,
+            token: token, leading_comments: pending_comments, trailing_comment: [], blank_lines_before: blank_lines, role: role
         });
 
         last_structural_line = token.line;
@@ -289,7 +283,7 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
                 leading_comments: last_ft.leading_comments,
                 trailing_comment: merged,
                 blank_lines_before: last_ft.blank_lines_before,
-                role: last_ft.role,
+                role: last_ft.role
             };
         }
     }
@@ -297,10 +291,232 @@ fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
     return result;
 }
 
+// Reclassify unary ! and - operators: when preceded by an operator, assignment,
+// open delimiter, keyword, separator, colon, arrow, or semicolon, the token is
+// a unary prefix operator, not binary.  This changes the role from "operator"
+// to "unary_op" so the emit phase omits the space after it.
+fn _reclassify_unary_ops(fmt_tokens: FmtToken[]) -> FmtToken[] {
+    let mut i = 0;
+    loop {
+        if i >= fmt_tokens.length { break; }
+        let ft = fmt_tokens[i];
+        if strings_equal(ft.role, "operator") {
+            let lex = ft.token.lexeme;
+            if strings_equal(lex, "!") {
+                let prev_role = "";
+                if i > 0 { prev_role = fmt_tokens[i - 1].role; }
+                if strings_equal(prev_role, "") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "assign") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "operator") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "paren_open") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "bracket_open") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "separator") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "keyword") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "colon") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "arrow") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "semicolon") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "unary_op") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+            }
+            if strings_equal(lex, "-") {
+                let prev_role = "";
+                if i > 0 { prev_role = fmt_tokens[i - 1].role; }
+                if strings_equal(prev_role, "") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "assign") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "operator") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "paren_open") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "bracket_open") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "separator") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "keyword") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "colon") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "arrow") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "semicolon") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+                if strings_equal(prev_role, "unary_op") {
+                    fmt_tokens[i] = FmtToken {
+                        token: ft.token,
+                        leading_comments: ft.leading_comments,
+                        trailing_comment: ft.trailing_comment,
+                        blank_lines_before: ft.blank_lines_before,
+                        role: "unary_op"
+                    };
+                }
+            }
+        }
+        i += 1;
+    }
+    return fmt_tokens;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Phase 3: Emit formatted output
 // ═══════════════════════════════════════════════════════════════════
-
 // Measure the single-line length of tokens from start (inclusive, should be
 // block_open) to its matching block_close.  Returns -1 if the span contains
 // nested blocks (not a simple inline candidate) or if no matching close is
@@ -312,6 +528,8 @@ fn _measure_inline_block(fmt_tokens: FmtToken[], start: number) -> number {
     let mut length = 0;
     let mut items = 1;
     let mut has_content = false;
+    let mut semicolons = 0;
+    let mut has_colon = false;
     let mut j = start;
     loop {
         if j >= fmt_tokens.length { return -1; }
@@ -335,6 +553,13 @@ fn _measure_inline_block(fmt_tokens: FmtToken[], start: number) -> number {
         if strings_equal(role, "block_close") {
             if depth == 1 {
                 if !has_content { items = 0; }
+                // Multi-statement code blocks (2+ semicolons) should not inline
+                if semicolons > 1 { return -1; }
+                // Blocks with both colons and semicolons are field declarations
+                // (struct/enum), not code blocks — do not inline
+                if has_colon {
+                    if semicolons > 0 { return -1; }
+                }
                 length = length + 1 + lex.length;
                 let encoded = length * 1000 + items;
                 return encoded;
@@ -344,16 +569,25 @@ fn _measure_inline_block(fmt_tokens: FmtToken[], start: number) -> number {
 
         has_content = true;
         if strings_equal(role, "separator") {
-            items += 1;
-            length = length + lex.length + 1;
+            // Don't count trailing comma (separator before block_close) as an item or length
+            let is_trailing = false;
+            if j + 1 < fmt_tokens.length {
+                if strings_equal(fmt_tokens[j + 1].role, "block_close") {
+                    is_trailing = true;
+                }
+            }
+            if !is_trailing {
+                items += 1;
+                length = length + lex.length + 1;
+            }
         } else if strings_equal(role, "colon") {
+            has_colon = true;
             length = length + lex.length + 1;
         } else if strings_equal(role, "semicolon") {
+            semicolons += 1;
             length = length + lex.length;
         } else {
-            if j > start + 1 {
-                length = length + 1;
-            }
+            if j > start + 1 { length = length + 1; }
             length = length + lex.length;
         }
         j += 1;
@@ -362,17 +596,40 @@ fn _measure_inline_block(fmt_tokens: FmtToken[], start: number) -> number {
 }
 
 fn _is_inline_block_context(fmt_tokens: FmtToken[], block_open_idx: number) -> boolean {
-    // A block is inlineable if it's a struct literal or import specifier list.
-    // Check what precedes the {: if it's a value (struct name) or keyword
-    // "import", it's a candidate.
+    // A block is inlineable if it fits on one line. The measure function
+    // rejects nested blocks, comments, blank lines, and multi-statement
+    // blocks. Here we just check that the context is reasonable.
     if block_open_idx == 0 { return false; }
     let prev = fmt_tokens[block_open_idx - 1];
     // import { ... }
     if strings_equal(prev.token.lexeme, "import") { return true; }
+    // export { ... }
+    if strings_equal(prev.token.lexeme, "export") { return true; }
     // StructName { ... }  — value followed by {
-    if strings_equal(prev.role, "value") { return true; }
+    // BUT exclude struct/enum declarations: struct Foo { ... }
+    if strings_equal(prev.role, "value") {
+        if block_open_idx >= 2 {
+            let prev2 = fmt_tokens[block_open_idx - 2];
+            if strings_equal(prev2.token.lexeme, "struct") { return false; }
+            if strings_equal(prev2.token.lexeme, "enum") { return false; }
+            if strings_equal(prev2.token.lexeme, "interface") { return false; }
+        }
+        return true;
+    }
     // Type parameter close: GenericStruct<T> { ... }
     if strings_equal(prev.role, "bracket_close") { return true; }
+    // After closing paren: if cond() { ... }, fn foo() { ... }
+    if strings_equal(prev.role, "paren_close") { return true; }
+    // After keywords: else { ... }, loop { ... }, try { ... }, catch { ... }
+    // BUT exclude struct/enum/interface keyword followed by name followed by {
+    if strings_equal(prev.role, "keyword") {
+        if strings_equal(prev.token.lexeme, "struct") { return false; }
+        if strings_equal(prev.token.lexeme, "enum") { return false; }
+        if strings_equal(prev.token.lexeme, "interface") { return false; }
+        return true;
+    }
+    // Match arms: Pattern => { body; }
+    if strings_equal(prev.role, "arrow") { return true; }
     return false;
 }
 
@@ -409,6 +666,12 @@ fn _needs_newline_before(role: string, prev_role: string, lexeme: string, prev_l
 fn _needs_space_before(role: string, prev_role: string, lexeme: string, prev_lexeme: string) -> boolean {
     // No space at start of output
     if strings_equal(prev_role, "") { return false; }
+
+    // No space after unary operator (!, -)
+    if strings_equal(prev_role, "unary_op") { return false; }
+
+    // Optional suffix ?: no space before
+    if strings_equal(role, "optional_suffix") { return false; }
 
     // Compound assignment: operator followed by = (lexer splits += into + and =)
     if strings_equal(role, "assign") {
@@ -480,6 +743,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
     let mut paren_depth = 0;
     let mut inline_block_depth = 0;
     let mut inline_block_end = -1;
+    let mut wrap_operators = false;
 
     let mut i = 0;
     loop {
@@ -499,14 +763,11 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                         let item_count = measure % 1000;
                         // Current line position (bounded scan, O(1))
                         let cur_line_pos = _line_pos_from_end(out);
-                        if !wraps_at_threshold(item_count, cur_line_pos + line_len) {
-                            inline_block_depth = 1;
-                        }
+                        if !wraps_at_threshold(item_count, cur_line_pos
+                            + line_len) { inline_block_depth = 1; }
                     }
                 }
-            } else {
-                inline_block_depth += 1;
-            }
+            } else { inline_block_depth += 1; }
         }
 
         // ── Emit blank line ──
@@ -518,15 +779,11 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                     suppress_blank = true;
                 }
                 // Suppress blank lines at block end (before })
-                if strings_equal(role, "block_close") {
-                    suppress_blank = true;
-                }
+                if strings_equal(role, "block_close") { suppress_blank = true; }
 
                 if ft.blank_lines_before > 0 {
                     if !suppress_blank {
-                        if !at_line_start {
-                            out = out + "\n";
-                        }
+                        if !at_line_start { out = out + "\n"; }
                         out = out + "\n";
                         at_line_start = true;
                     }
@@ -545,9 +802,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                                     need_blank = true;
                                 }
                                 if need_blank {
-                                    if !at_line_start {
-                                        out = out + "\n";
-                                    }
+                                    if !at_line_start { out = out + "\n"; }
                                     out = out + "\n";
                                     at_line_start = true;
                                 }
@@ -557,16 +812,12 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                         if strings_equal(role, "decorator") {
                             if !strings_equal(prev_role, "") {
                                 if strings_equal(prev_role, "semicolon") {
-                                    if !at_line_start {
-                                        out = out + "\n";
-                                    }
+                                    if !at_line_start { out = out + "\n"; }
                                     out = out + "\n";
                                     at_line_start = true;
                                 }
                                 if strings_equal(prev_role, "block_close") {
-                                    if !at_line_start {
-                                        out = out + "\n";
-                                    }
+                                    if !at_line_start { out = out + "\n"; }
                                     out = out + "\n";
                                     at_line_start = true;
                                 }
@@ -583,9 +834,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             loop {
                 if ci >= ft.leading_comments.length { break; }
                 let comment = ft.leading_comments[ci];
-                if !at_line_start {
-                    out = out + "\n";
-                }
+                if !at_line_start { out = out + "\n"; }
                 out = out + _emit_indent(indent) + comment.lexeme + "\n";
                 at_line_start = true;
                 ci += 1;
@@ -615,13 +864,9 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                 // Space before { in inline mode (e.g., "StructName {")
                 if !at_line_start {
                     let needs_sp = _needs_space_before(role, prev_role, lexeme, prev_lexeme);
-                    if needs_sp {
-                        out = out + " ";
-                    }
+                    if needs_sp { out = out + " "; }
                 }
-            } else if strings_equal(role, "block_close") {
-                out = out + " ";
-            } else if strings_equal(role, "separator") {
+            } else if strings_equal(role, "block_close") { out = out + " "; } else if strings_equal(role, "separator") {
                 // No space before comma
             } else if strings_equal(role, "semicolon") {
                 // No space before semicolon
@@ -633,36 +878,74 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
                 // No space after dot
             } else if strings_equal(prev_role, "block_open") {
                 out = out + " ";
-            } else if strings_equal(prev_role, "separator") {
+            } else if strings_equal(prev_role, "separator") { out = out + " "; } else if strings_equal(prev_role, "colon") {
                 out = out + " ";
-            } else if strings_equal(prev_role, "colon") {
-                out = out + " ";
+            } else if strings_equal(prev_role, "unary_op") {
+                // No space after unary operator
             } else {
                 let needs_sp = _needs_space_before(role, prev_role, lexeme, prev_lexeme);
-                if needs_sp {
-                    out = out + " ";
-                }
+                if needs_sp { out = out + " "; }
             }
             at_line_start = false;
         } else {
             let needs_nl = _needs_newline_before(role, prev_role, lexeme, prev_lexeme);
             if needs_nl {
-                if !at_line_start {
-                    out = out + "\n";
-                }
+                if !at_line_start { out = out + "\n"; }
                 out = out + _emit_indent(indent);
                 at_line_start = false;
             } else {
                 if at_line_start {
-                    if i > 0 {
-                        out = out + _emit_indent(indent);
-                    }
+                    if i > 0 { out = out + _emit_indent(indent); }
                     at_line_start = false;
                 } else {
                     let needs_sp = _needs_space_before(role, prev_role, lexeme, prev_lexeme);
                     if needs_sp {
-                        out = out + " ";
+                        // Expression wrapping: break before binary operator when line gets long
+                        let mut should_wrap = false;
+                        if strings_equal(role, "operator") {
+                            // Only wrap at chain-style operators, not arithmetic
+                            let is_wrappable = false;
+                            if strings_equal(lexeme, "+") {
+                                is_wrappable = true;
+                            }
+                            if strings_equal(lexeme, "&&") {
+                                is_wrappable = true;
+                            }
+                            if strings_equal(lexeme, "||") {
+                                is_wrappable = true;
+                            }
+                            if is_wrappable {
+                                if wrap_operators { should_wrap = true; } else {
+                                    let cur_pos = _line_pos_from_end(out);
+                                    let mut next_len = 0;
+                                    if i + 1 < fmt_tokens.length {
+                                        next_len = fmt_tokens[i + 1].token.lexeme.length;
+                                    }
+                                    if cur_pos + 1 + lexeme.length + 1
+                                        + next_len > 80 { should_wrap = true; }
+                                }
+                            }
+                        }
+                        if should_wrap {
+                            out = out + "\n" + _emit_indent(indent + 1);
+                            wrap_operators = true;
+                        } else { out = out + " "; }
                     }
+                }
+            }
+        }
+
+        // ── Skip trailing comma before closing delimiter ──
+        // Strips trailing commas in single-line imports: { a, b, } → { a, b }
+        if strings_equal(role, "separator") {
+            if i + 1 < fmt_tokens.length {
+                let next_role = fmt_tokens[i + 1].role;
+                if strings_equal(next_role, "block_close") {
+                    // Skip this comma — don't emit it
+                    prev_role = role;
+                    prev_lexeme = lexeme;
+                    i += 1;
+                    continue;
                 }
             }
         }
@@ -672,22 +955,14 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
 
         // ── Adjust indent after opening tokens (skip in inline mode) ──
         if inline_block_depth == 0 {
-            if strings_equal(role, "block_open") {
-                indent += 1;
-            }
+            if strings_equal(role, "block_open") { indent += 1; }
         }
-        if strings_equal(role, "paren_open") {
-            paren_depth += 1;
-        }
-        if strings_equal(role, "bracket_open") {
-            paren_depth += 1;
-        }
+        if strings_equal(role, "paren_open") { paren_depth += 1; }
+        if strings_equal(role, "bracket_open") { paren_depth += 1; }
 
         // ── Track inline block exit ──
         if strings_equal(role, "block_close") {
-            if inline_block_depth > 0 {
-                inline_block_depth -= 1;
-            }
+            if inline_block_depth > 0 { inline_block_depth -= 1; }
         }
 
         // ── Emit trailing comments ──
@@ -704,6 +979,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             if strings_equal(role, "semicolon") {
                 out = out + "\n";
                 at_line_start = true;
+                wrap_operators = false;
             }
 
             // ── Newline after comma at statement level ──
@@ -715,6 +991,10 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
             }
         }
 
+        // Reset expression wrapping at block boundaries
+        if strings_equal(role, "block_open") { wrap_operators = false; }
+        if strings_equal(role, "block_close") { wrap_operators = false; }
+
         prev_role = role;
         prev_lexeme = lexeme;
         i += 1;
@@ -722,9 +1002,7 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
 
     // Ensure file ends with exactly one newline
     if out.length > 0 {
-        if !at_line_start {
-            out = out + "\n";
-        }
+        if !at_line_start { out = out + "\n"; }
     }
 
     return out;
@@ -733,11 +1011,9 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
 // ═══════════════════════════════════════════════════════════════════
 // Import sorting
 // ═══════════════════════════════════════════════════════════════════
-
 // An import statement is a contiguous range of FmtTokens from
 // "import" to ";".  We collect these, extract the path, sort, and
 // rebuild the token list.
-
 struct ImportSpan {
     start: number;
     end: number;
@@ -751,9 +1027,7 @@ fn _extract_import_path(fmt_tokens: FmtToken[], start: number, end: number) -> s
     loop {
         if j > end { break; }
         if strings_equal(fmt_tokens[j].token.lexeme, "from") {
-            if j + 1 <= end {
-                return fmt_tokens[j + 1].token.lexeme;
-            }
+            if j + 1 <= end { return fmt_tokens[j + 1].token.lexeme; }
         }
         j += 1;
     }
@@ -774,7 +1048,9 @@ fn _find_import_spans(fmt_tokens: FmtToken[]) -> ImportSpan[] {
                 if strings_equal(fmt_tokens[j].role, "semicolon") {
                     let path = _extract_import_path(fmt_tokens, start, j);
                     let grp = import_group(path);
-                    spans.push(ImportSpan { start: start, end: j, path: path, group: grp });
+                    spans.push(ImportSpan {
+                        start: start, end: j, path: path, group: grp
+                    });
                     i = j + 1;
                     break;
                 }
@@ -802,9 +1078,7 @@ fn _are_consecutive_imports(fmt_tokens: FmtToken[], spans: ImportSpan[]) -> bool
             if j >= next_start { break; }
             let ft = fmt_tokens[j];
             // If we hit a non-import structural token, imports are not consecutive
-            if !strings_equal(ft.role, "comment") {
-                return false;
-            }
+            if !strings_equal(ft.role, "comment") { return false; }
             j += 1;
         }
         k += 1;
@@ -830,9 +1104,7 @@ fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
             if j <= 0 { break; }
             let prev = sorted[j - 1];
             let mut should_swap = false;
-            if prev.group > key.group {
-                should_swap = true;
-            } else if prev.group == key.group {
+            if prev.group > key.group { should_swap = true; } else if prev.group == key.group {
                 // Compare paths lexicographically
                 let mut ci = 0;
                 let a = prev.path;
@@ -844,8 +1116,14 @@ fn _sort_import_spans(spans: ImportSpan[]) -> ImportSpan[] {
                     if ci >= min_len { break; }
                     let ca = char_at(a, ci);
                     let cb = char_at(b, ci);
-                    if ca < cb { cmp = -1; break; }
-                    if ca > cb { cmp = 1; break; }
+                    if ca < cb {
+                        cmp = -1;
+                        break;
+                    }
+                    if ca > cb {
+                        cmp = 1;
+                        break;
+                    }
                     ci += 1;
                 }
                 if cmp == 0 {
@@ -872,9 +1150,7 @@ fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: number, end: number) -
     let mut j = start;
     loop {
         if j > end { break; }
-        if strings_equal(fmt_tokens[j].role, "block_open") {
-            brace_open = j;
-        }
+        if strings_equal(fmt_tokens[j].role, "block_open") { brace_open = j; }
         if strings_equal(fmt_tokens[j].role, "block_close") {
             brace_close = j;
             break;
@@ -914,8 +1190,14 @@ fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: number, end: number) -
                 if ci >= min_len { break; }
                 let ca = char_at(prev_name, ci);
                 let cb = char_at(key_name, ci);
-                if ca < cb { cmp = -1; break; }
-                if ca > cb { cmp = 1; break; }
+                if ca < cb {
+                    cmp = -1;
+                    break;
+                }
+                if ca > cb {
+                    cmp = 1;
+                    break;
+                }
                 ci += 1;
             }
             if cmp == 0 {
@@ -931,6 +1213,80 @@ fn _sort_import_specifiers(fmt_tokens: FmtToken[], start: number, end: number) -
     }
 
     return names;
+}
+
+// Push tokens from span.start+1 to span.end into result, sorting specifier
+// names inside { ... } alphabetically.
+fn _push_span_sorted(result: FmtToken[], fmt_tokens: FmtToken[], span_start: number, span_end: number) -> FmtToken[] {
+    let sorted_names = _sort_import_specifiers(fmt_tokens, span_start, span_end);
+    if sorted_names.length == 0 {
+        // No braces or no specifiers — copy as-is
+        let mut j = span_start + 1;
+        loop {
+            if j > span_end { break; }
+            result.push(fmt_tokens[j]);
+            j += 1;
+        }
+        return result;
+    }
+
+    // Find the brace region
+    let mut brace_open = -1;
+    let mut brace_close = -1;
+    let mut j = span_start;
+    loop {
+        if j > span_end { break; }
+        if strings_equal(fmt_tokens[j].role, "block_open") { brace_open = j; }
+        if strings_equal(fmt_tokens[j].role, "block_close") {
+            brace_close = j;
+            break;
+        }
+        j += 1;
+    }
+
+    // Collect positions of value tokens inside braces
+    let mut value_positions: number[] = [];
+    let mut k = brace_open + 1;
+    loop {
+        if k >= brace_close { break; }
+        if strings_equal(fmt_tokens[k].role, "value") {
+            value_positions.push(k);
+        }
+        k += 1;
+    }
+
+    // Copy tokens, replacing value tokens with sorted names
+    let mut name_idx = 0;
+    let mut ti = span_start + 1;
+    loop {
+        if ti > span_end { break; }
+        // Check if this is a value token inside the braces that needs reordering
+        let mut is_specifier = false;
+        if ti > brace_open {
+            if ti < brace_close {
+                if strings_equal(fmt_tokens[ti].role, "value") {
+                    is_specifier = true;
+                }
+            }
+        }
+        if is_specifier {
+            if name_idx < sorted_names.length {
+                let orig = fmt_tokens[ti];
+                let new_token = Token {
+                    kind: orig.token.kind,
+                    lexeme: sorted_names[name_idx],
+                    line: orig.token.line,
+                    column: orig.token.column
+                };
+                result.push(FmtToken {
+                    token: new_token, leading_comments: orig.leading_comments, trailing_comment: orig.trailing_comment, blank_lines_before: orig.blank_lines_before, role: orig.role
+                });
+                name_idx += 1;
+            }
+        } else { result.push(fmt_tokens[ti]); }
+        ti += 1;
+    }
+    return result;
 }
 
 fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
@@ -984,58 +1340,29 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
         if si == 0 {
             use_comments = header_comments;
             use_blanks = header_blanks;
-        } else if span.start == orig_first_start {
-            use_comments = [];
-        }
+        } else if span.start == orig_first_start { use_comments = []; }
 
         // Insert blank line between import groups
         if prev_group >= 0 {
             if span.group != prev_group {
                 // Add blank_lines_before to the first token of this import
                 result.push(FmtToken {
-                        token: first_ft.token,
-                        leading_comments: use_comments,
-                        trailing_comment: first_ft.trailing_comment,
-                        blank_lines_before: 1,
-                        role: first_ft.role,
+                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 1, role: first_ft.role
                 });
-                let mut j = span.start + 1;
-                loop {
-                    if j > span.end { break; }
-                    result.push(fmt_tokens[j]);
-                    j += 1;
-                }
+                result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
             } else {
                 // Same group: clear any blank lines between
                 result.push(FmtToken {
-                        token: first_ft.token,
-                        leading_comments: use_comments,
-                        trailing_comment: first_ft.trailing_comment,
-                        blank_lines_before: 0,
-                        role: first_ft.role,
+                    token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: 0, role: first_ft.role
                 });
-                let mut j = span.start + 1;
-                loop {
-                    if j > span.end { break; }
-                    result.push(fmt_tokens[j]);
-                    j += 1;
-                }
+                result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
             }
         } else {
             // First emitted import: use header comments/blanks
             result.push(FmtToken {
-                    token: first_ft.token,
-                    leading_comments: use_comments,
-                    trailing_comment: first_ft.trailing_comment,
-                    blank_lines_before: use_blanks,
-                    role: first_ft.role,
+                token: first_ft.token, leading_comments: use_comments, trailing_comment: first_ft.trailing_comment, blank_lines_before: use_blanks, role: first_ft.role
             });
-            let mut j = span.start + 1;
-            loop {
-                if j > span.end { break; }
-                result.push(fmt_tokens[j]);
-                j += 1;
-            }
+            result = _push_span_sorted(result, fmt_tokens, span.start, span.end);
         }
 
         prev_group = span.group;
@@ -1056,11 +1383,8 @@ fn sort_imports(fmt_tokens: FmtToken[]) -> FmtToken[] {
 // ═══════════════════════════════════════════════════════════════════
 // Public entry point
 // ═══════════════════════════════════════════════════════════════════
-
 fn format_source(source: string) -> string {
-    if source.length == 0 {
-        return "";
-    }
+    if source.length == 0 { return ""; }
     let tokens = lex(source);
     let fmt_tokens = strip_and_classify(tokens);
     if fmt_tokens.length == 0 {
@@ -1077,7 +1401,8 @@ fn format_source(source: string) -> string {
         }
         return out;
     }
-    let sorted = sort_imports(fmt_tokens);
+    let classified = _reclassify_unary_ops(fmt_tokens);
+    let sorted = sort_imports(classified);
     return emit_formatted(sorted);
 }
 

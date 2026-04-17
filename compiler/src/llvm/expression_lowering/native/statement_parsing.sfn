@@ -5,18 +5,9 @@
 // Contains `parse_assignment_expression` (splits `target = value` and compound
 // assignments like `x += y`) and `parse_inline_let_expression` (parses
 // `let [mut] name [: type] = init`).
-
-import {
-    AssignmentParseResult, InlineLetParseResult,
-} from "../../types";
-
-import {
-    trim_text,
-    index_of,
-} from "../../utils";
-
 import { substring } from "../../../string_utils";
-
+import { AssignmentParseResult, InlineLetParseResult } from "../../types";
+import { index_of, trim_text } from "../../utils";
 
 fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let trimmed = trim_text(expression);
@@ -24,9 +15,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
     let mut bracket_depth: number = 0;
     let mut index: number = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         if ch == "(" {
             paren_depth += 1;
@@ -34,9 +23,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
             continue;
         }
         if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth -= 1;
-            }
+            if paren_depth > 0 { paren_depth -= 1; }
             index += 1;
             continue;
         }
@@ -46,9 +33,7 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
             continue;
         }
         if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth -= 1;
-            }
+            if bracket_depth > 0 { bracket_depth -= 1; }
             index += 1;
             continue;
         }
@@ -85,9 +70,19 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
                 if target.length == 0 { _if165 = true; }
                 if value.length == 0 { _if165 = true; }
                 if _if165 {
-                    return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
+                    return AssignmentParseResult {
+                        success: false,
+                        target: "",
+                        value: "",
+                        operator: ""
+                    };
                 }
-                return AssignmentParseResult { success: true, target: target, value: value, operator: previous };
+                return AssignmentParseResult {
+                    success: true,
+                    target: target,
+                    value: value,
+                    operator: previous
+                };
             }
 
             // Skip comparison operators and other non-assignment uses of =
@@ -115,25 +110,56 @@ fn parse_assignment_expression(expression: string) -> AssignmentParseResult {
             if target.length == 0 { _if145 = true; }
             if value.length == 0 { _if145 = true; }
             if _if145 {
-                return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
+                return AssignmentParseResult {
+                    success: false,
+                    target: "",
+                    value: "",
+                    operator: ""
+                };
             }
-            return AssignmentParseResult { success: true, target: target, value: value, operator: "" };
+            return AssignmentParseResult {
+                success: true,
+                target: target,
+                value: value,
+                operator: ""
+            };
         }
         index += 1;
     }
-    return AssignmentParseResult { success: false, target: "", value: "", operator: "" };
+    return AssignmentParseResult {
+        success: false,
+        target: "",
+        value: "",
+        operator: ""
+    };
 }
 
 fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
     let mut diagnostics: string[] = [];
     let trimmed = trim_text(expression);
     if trimmed.length < 4 {
-        diagnostics.push("llvm lowering: malformed let expression `" + expression + "`");
-        return InlineLetParseResult { success: false, name: "", mutable: false, type_annotation: "", initializer: null, diagnostics: diagnostics };
+        diagnostics.push("llvm lowering: malformed let expression `"
+            + expression
+            + "`");
+        return InlineLetParseResult {
+            success: false,
+            name: "",
+            mutable: false,
+            type_annotation: "",
+            initializer: null,
+            diagnostics: diagnostics
+        };
     }
     let prefix = substring(trimmed, 0, 4);
     if prefix != "let " {
-        return InlineLetParseResult { success: false, name: "", mutable: false, type_annotation: "", initializer: null, diagnostics: diagnostics };
+        return InlineLetParseResult {
+            success: false,
+            name: "",
+            mutable: false,
+            type_annotation: "",
+            initializer: null,
+            diagnostics: diagnostics
+        };
     }
     let mut remainder: string = trim_text(substring(trimmed, 4, trimmed.length));
     let mut is_mutable: boolean = false;
@@ -145,31 +171,45 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
         }
     }
     if remainder.length == 0 {
-        diagnostics.push("llvm lowering: let expression missing binding name in `" + expression + "`");
-        return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: null, diagnostics: diagnostics };
+        diagnostics.push("llvm lowering: let expression missing binding name in `"
+            + expression
+            + "`");
+        return InlineLetParseResult {
+            success: false,
+            name: "",
+            mutable: is_mutable,
+            type_annotation: "",
+            initializer: null,
+            diagnostics: diagnostics
+        };
     }
     let mut name: string = "";
     let mut index: number = 0;
     loop {
-        if index >= remainder.length {
-            break;
-        }
+        if index >= remainder.length { break; }
         let ch = substring(remainder, index, index + 1);
         let mut _if146: boolean = false;
         if ch == " " { _if146 = true; }
         if ch == ":" { _if146 = true; }
         if ch == "-" { _if146 = true; }
         if ch == "=" { _if146 = true; }
-        if _if146 {
-            break;
-        }
+        if _if146 { break; }
         name = name + ch;
         index += 1;
     }
     name = trim_text(name);
     if name.length == 0 {
-        diagnostics.push("llvm lowering: let expression missing binding name in `" + expression + "`");
-        return InlineLetParseResult { success: false, name: "", mutable: is_mutable, type_annotation: "", initializer: null, diagnostics: diagnostics };
+        diagnostics.push("llvm lowering: let expression missing binding name in `"
+            + expression
+            + "`");
+        return InlineLetParseResult {
+            success: false,
+            name: "",
+            mutable: is_mutable,
+            type_annotation: "",
+            initializer: null,
+            diagnostics: diagnostics
+        };
     }
     let mut tail: string = trim_text(substring(remainder, index, remainder.length));
     let mut type_annotation: string = "";
@@ -183,52 +223,52 @@ fn parse_inline_let_expression(expression: string) -> InlineLetParseResult {
                 if assign_index >= 0 {
                     type_annotation = trim_text(substring(tail, 0, assign_index));
                     let value_text = trim_text(substring(tail, assign_index + 1, tail.length));
-                    if value_text.length > 0 {
-                        initializer = value_text;
-                    }
-                } else {
-                    type_annotation = trim_text(tail);
-                }
+                    if value_text.length > 0 { initializer = value_text; }
+                } else { type_annotation = trim_text(tail); }
             } else if substring(tail, 0, 1) == ":" {
                 tail = trim_text(substring(tail, 1, tail.length));
                 let assign_index = index_of(tail, "=");
                 if assign_index >= 0 {
                     type_annotation = trim_text(substring(tail, 0, assign_index));
                     let value_text = trim_text(substring(tail, assign_index + 1, tail.length));
-                    if value_text.length > 0 {
-                        initializer = value_text;
-                    }
-                } else {
-                    type_annotation = trim_text(tail);
-                }
+                    if value_text.length > 0 { initializer = value_text; }
+                } else { type_annotation = trim_text(tail); }
             } else if substring(tail, 0, 1) == "=" {
                 let value_text = trim_text(substring(tail, 1, tail.length));
-                if value_text.length > 0 {
-                    initializer = value_text;
-                }
+                if value_text.length > 0 { initializer = value_text; }
             } else {
                 let value_text = trim_text(tail);
-                if value_text.length > 0 {
-                    initializer = value_text;
-                }
+                if value_text.length > 0 { initializer = value_text; }
             }
         } else {
             if substring(tail, 0, 1) == "=" {
                 let value_text = trim_text(substring(tail, 1, tail.length));
-                if value_text.length > 0 {
-                    initializer = value_text;
-                }
+                if value_text.length > 0 { initializer = value_text; }
             } else {
                 let value_text = trim_text(tail);
-                if value_text.length > 0 {
-                    initializer = value_text;
-                }
+                if value_text.length > 0 { initializer = value_text; }
             }
         }
     }
     if initializer == null {
-        diagnostics.push("llvm lowering: let expression missing initializer for `" + name + "`");
-        return InlineLetParseResult { success: false, name: name, mutable: is_mutable, type_annotation: type_annotation, initializer: null, diagnostics: diagnostics };
+        diagnostics.push("llvm lowering: let expression missing initializer for `"
+            + name
+            + "`");
+        return InlineLetParseResult {
+            success: false,
+            name: name,
+            mutable: is_mutable,
+            type_annotation: type_annotation,
+            initializer: null,
+            diagnostics: diagnostics
+        };
     }
-    return InlineLetParseResult { success: true, name: name, mutable: is_mutable, type_annotation: type_annotation, initializer: initializer, diagnostics: diagnostics };
+    return InlineLetParseResult {
+        success: true,
+        name: name,
+        mutable: is_mutable,
+        type_annotation: type_annotation,
+        initializer: initializer,
+        diagnostics: diagnostics
+    };
 }

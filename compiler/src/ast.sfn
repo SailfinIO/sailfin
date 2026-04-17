@@ -3,7 +3,6 @@
 // Shared abstract syntax tree definitions for the Sailfin self-hosting effort.
 // The structures mirror a pragmatic subset of the bootstrap compiler AST so we
 // can progressively port parsing and analysis logic into Sailfin.
-
 import { Token } from "./token";
 
 struct Program {
@@ -47,9 +46,13 @@ enum Expression {
     Array { elements: Expression[] },
     Object { fields: ObjectField[] },
     Struct { type_name: string[], fields: ObjectField[] },
-    Lambda { parameters: Parameter[], body: Block, return_type: TypeAnnotation? },
+    Lambda {
+        parameters: Parameter[],
+        body: Block,
+        return_type: TypeAnnotation?
+    },
     Range { start: Expression, end: Expression },
-    Raw { text: string },
+    Raw { text: string }
 }
 
 struct Parameter {
@@ -162,9 +165,7 @@ fn decorator_names(decorators: Decorator[]) -> string[] {
     let mut names: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= decorators.length {
-            break;
-        }
+        if index >= decorators.length { break; }
         names.push(decorators[index].name);
         index += 1;
     }
@@ -322,5 +323,5 @@ enum Statement {
     Unknown {
         tokens: Token[];
         text: string;
-    },
+    }
 }

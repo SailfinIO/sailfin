@@ -4,9 +4,8 @@
 // implementation is intentionally modest: it tokenises identifier-like runs and
 // individual punctuation characters, preserving whitespace and comments so the
 // parser can decide what to ignore.
-
-import { Token, TokenKind, eof_token } from "./token";
 import { char_code } from "./string_utils";
+import { Token, TokenKind, eof_token } from "./token";
 
 struct LexerState {
     source: string;
@@ -23,7 +22,7 @@ fn lex(source: string) -> Token[] {
         source_len: length,
         index: 0,
         line: 1,
-        column: 1,
+        column: 1
     };
 
     let tokens: Token[] = [];
@@ -36,9 +35,7 @@ fn lex(source: string) -> Token[] {
             print.err("lexer: guard limit exceeded");
             break;
         }
-        if state.index >= state.source_len {
-            break;
-        }
+        if state.index >= state.source_len { break; }
 
         let ch = byte_at(state.source, state.index);
 
@@ -47,12 +44,8 @@ fn lex(source: string) -> Token[] {
             let start_line = state.line;
             let start_column = state.column;
             loop {
-                if state.index >= state.source_len {
-                    break;
-                }
-                if !is_whitespace(byte_at(state.source, state.index)) {
-                    break;
-                }
+                if state.index >= state.source_len { break; }
+                if !is_whitespace(byte_at(state.source, state.index)) { break; }
                 if byte_at(state.source, state.index) == "\n" {
                     state.index += 1;
                     state.line += 1;
@@ -64,10 +57,7 @@ fn lex(source: string) -> Token[] {
             }
             let lexeme = slice(state.source, start_index, state.index);
             tokens = append(tokens, Token {
-                kind: TokenKind.Whitespace(),
-                lexeme: lexeme,
-                line: start_line,
-                column: start_column,
+                kind: TokenKind.Whitespace(), lexeme: lexeme, line: start_line, column: start_column
             });
             continue;
         }
@@ -77,82 +67,72 @@ fn lex(source: string) -> Token[] {
             if has_next {
                 let next = byte_at(state.source, state.index + 1);
                 if next == "/" {
-                let start_index = state.index;
-                let start_line = state.line;
-                let start_column = state.column;
+                    let start_index = state.index;
+                    let start_line = state.line;
+                    let start_column = state.column;
 
-                state.index += 2;
-                state.column += 2;
+                    state.index += 2;
+                    state.column += 2;
 
-                let mut comment_end: number = state.source_len;
-                let mut scan_index: number = state.index;
-                loop {
-                    if scan_index >= state.source_len {
-                        break;
+                    let mut comment_end: number = state.source_len;
+                    let mut scan_index: number = state.index;
+                    loop {
+                        if scan_index >= state.source_len { break; }
+                        let scan_character = byte_at(state.source, scan_index);
+                        let mut _if35: boolean = false;
+                        if scan_character == "\n" { _if35 = true; }
+                        if scan_character == "\r" { _if35 = true; }
+                        if _if35 {
+                            comment_end = scan_index;
+                            break;
+                        }
+                        scan_index += 1;
                     }
-                    let scan_character = byte_at(state.source, scan_index);
-                    let mut _if35: boolean = false;
-                    if scan_character == "\n" { _if35 = true; }
-                    if scan_character == "\r" { _if35 = true; }
-                    if _if35 {
-                        comment_end = scan_index;
-                        break;
-                    }
-                    scan_index += 1;
-                }
 
-                let lexeme = slice(state.source, start_index, comment_end);
-                let consumed_columns: number = comment_end - state.index;
-                state.index = comment_end;
-                state.column += consumed_columns;
-                tokens = append(tokens, Token {
-                    kind: TokenKind.Comment(),
-                    lexeme: lexeme,
-                    line: start_line,
-                    column: start_column,
-                });
-                continue;
+                    let lexeme = slice(state.source, start_index, comment_end);
+                    let consumed_columns: number = comment_end - state.index;
+                    state.index = comment_end;
+                    state.column += consumed_columns;
+                    tokens = append(tokens, Token {
+                        kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column
+                    });
+                    continue;
                 }
                 if next == "*" {
-                let start_index = state.index;
-                let start_line = state.line;
-                let start_column = state.column;
+                    let start_index = state.index;
+                    let start_line = state.line;
+                    let start_column = state.column;
 
-                state.index += 2;
-                state.column += 2;
+                    state.index += 2;
+                    state.column += 2;
 
-                loop {
-                    if state.index >= state.source_len {
-                        break;
-                    }
-                    let _next_idx = state.index + 1;
-                    if byte_at(state.source, state.index) == "*" {
-                        if _next_idx < state.source_len {
-                            if byte_at(state.source, _next_idx) == "/" {
-                                state.index += 2;
-                                state.column += 2;
-                                break;
+                    loop {
+                        if state.index >= state.source_len { break; }
+                        let _next_idx = state.index + 1;
+                        if byte_at(state.source, state.index) == "*" {
+                            if _next_idx < state.source_len {
+                                if byte_at(state.source, _next_idx) == "/" {
+                                    state.index += 2;
+                                    state.column += 2;
+                                    break;
+                                }
                             }
                         }
+                        if byte_at(state.source, state.index) == "\n" {
+                            state.index += 1;
+                            state.line += 1;
+                            state.column = 1;
+                        } else {
+                            state.index += 1;
+                            state.column += 1;
+                        }
                     }
-                    if byte_at(state.source, state.index) == "\n" {
-                        state.index += 1;
-                        state.line += 1;
-                        state.column = 1;
-                    } else {
-                        state.index += 1;
-                        state.column += 1;
-                    }
-                }
 
-                let lexeme = slice(state.source, start_index, state.index);
-                tokens = append(tokens, Token {
-                    kind: TokenKind.Comment(),
-                    lexeme: lexeme,
-                    line: start_line,
-                    column: start_column,
-                });
-                continue;
+                    let lexeme = slice(state.source, start_index, state.index);
+                    tokens = append(tokens, Token {
+                        kind: TokenKind.Comment(), lexeme: lexeme, line: start_line, column: start_column
+                    });
+                    continue;
                 }
             }
         }
@@ -171,9 +151,7 @@ fn lex(source: string) -> Token[] {
             let escaped: boolean = false;
 
             loop {
-                if state.index >= state.source_len {
-                    break;
-                }
+                if state.index >= state.source_len { break; }
                 let current = byte_at(state.source, state.index);
                 if !escaped {
                     if is_double_quote(current) {
@@ -190,9 +168,7 @@ fn lex(source: string) -> Token[] {
                         continue;
                     }
                 }
-                if escaped {
-                    escaped = false;
-                }
+                if escaped { escaped = false; }
 
                 if current == "\n" {
                     state.index += 1;
@@ -205,11 +181,8 @@ fn lex(source: string) -> Token[] {
             }
 
             let lexeme = slice(state.source, start_index, state.index);
-                tokens = append(tokens, Token {
-                    kind: TokenKind.StringLiteral(),
-                lexeme: lexeme,
-                line: start_line,
-                column: start_column,
+            tokens = append(tokens, Token {
+                kind: TokenKind.StringLiteral(), lexeme: lexeme, line: start_line, column: start_column
             });
             continue;
         }
@@ -223,12 +196,8 @@ fn lex(source: string) -> Token[] {
             state.column += 1;
 
             loop {
-                if state.index >= state.source_len {
-                    break;
-                }
-                if !is_digit(byte_at(state.source, state.index)) {
-                    break;
-                }
+                if state.index >= state.source_len { break; }
+                if !is_digit(byte_at(state.source, state.index)) { break; }
                 state.index += 1;
                 state.column += 1;
             }
@@ -246,9 +215,7 @@ fn lex(source: string) -> Token[] {
                         state.index += 1;
                         state.column += 1;
                         loop {
-                            if state.index >= state.source_len {
-                                break;
-                            }
+                            if state.index >= state.source_len { break; }
                             if !is_digit(byte_at(state.source, state.index)) {
                                 break;
                             }
@@ -261,10 +228,7 @@ fn lex(source: string) -> Token[] {
 
             let lexeme = slice(state.source, start_index, state.index);
             tokens = append(tokens, Token {
-                kind: TokenKind.NumberLiteral(),
-                lexeme: lexeme,
-                line: start_line,
-                column: start_column,
+                kind: TokenKind.NumberLiteral(), lexeme: lexeme, line: start_line, column: start_column
             });
             continue;
         }
@@ -276,9 +240,7 @@ fn lex(source: string) -> Token[] {
             state.index += 1;
             state.column += 1;
             loop {
-                if state.index >= state.source_len {
-                    break;
-                }
+                if state.index >= state.source_len { break; }
                 if !is_identifier_part(byte_at(state.source, state.index)) {
                     break;
                 }
@@ -291,17 +253,11 @@ fn lex(source: string) -> Token[] {
             if value == "false" { _if36 = true; }
             if _if36 {
                 tokens = append(tokens, Token {
-                    kind: TokenKind.BooleanLiteral(),
-                    lexeme: value,
-                    line: start_line,
-                    column: start_column,
+                    kind: TokenKind.BooleanLiteral(), lexeme: value, line: start_line, column: start_column
                 });
             } else {
                 tokens = append(tokens, Token {
-                    kind: TokenKind.Identifier(),
-                    lexeme: value,
-                    line: start_line,
-                    column: start_column,
+                    kind: TokenKind.Identifier(), lexeme: value, line: start_line, column: start_column
                 });
             }
             continue;
@@ -323,10 +279,7 @@ fn lex(source: string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
                 tokens = append(tokens, Token {
-                    kind: TokenKind.Symbol(),
-                    lexeme: lexeme,
-                    line: start_line,
-                    column: start_column,
+                    kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
                 });
                 continue;
             }
@@ -335,10 +288,7 @@ fn lex(source: string) -> Token[] {
                 state.index += 2;
                 state.column += 2;
                 tokens = append(tokens, Token {
-                    kind: TokenKind.Symbol(),
-                    lexeme: lexeme,
-                    line: start_line,
-                    column: start_column,
+                    kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
                 });
                 continue;
             }
@@ -348,15 +298,10 @@ fn lex(source: string) -> Token[] {
         if ch == "\n" {
             state.line += 1;
             state.column = 1;
-        } else {
-            state.column += 1;
-        }
+        } else { state.column += 1; }
 
         tokens = append(tokens, Token {
-            kind: TokenKind.Symbol(),
-            lexeme: lexeme,
-            line: start_line,
-            column: start_column,
+            kind: TokenKind.Symbol(), lexeme: lexeme, line: start_line, column: start_column
         });
     }
 
@@ -391,14 +336,10 @@ fn is_letter(ch: string) -> boolean {
     let c = char_code(ch);
     let mut _ret41: boolean = false;
     if c >= 65 {
-        if c <= 90 {
-            _ret41 = true;
-        }
+        if c <= 90 { _ret41 = true; }
     }
     if c >= 97 {
-        if c <= 122 {
-            _ret41 = true;
-        }
+        if c <= 122 { _ret41 = true; }
     }
     return _ret41;
 }
@@ -407,51 +348,31 @@ fn is_digit(ch: string) -> boolean {
     let c = char_code(ch);
     let mut _ret42: boolean = false;
     if c >= 48 {
-        if c <= 57 {
-            _ret42 = true;
-        }
+        if c <= 57 { _ret42 = true; }
     }
     return _ret42;
 }
 
-fn is_double_quote(ch: string) -> boolean {
-    return ch == "\"";
-}
+fn is_double_quote(ch: string) -> boolean { return ch == "\""; }
 
-fn is_backslash(ch: string) -> boolean {
-    return ch == "\\";
-}
+fn is_backslash(ch: string) -> boolean { return ch == "\\"; }
 
 fn slice(text: string, start: number, end: number) -> string {
     let text_len = text.length;
     let mut safe_start = start;
     let mut safe_end = end;
-    if safe_start < 0 {
-        safe_start = 0;
-    }
-    if safe_end < safe_start {
-        safe_end = safe_start;
-    }
-    if safe_start > text_len {
-        safe_start = text_len;
-    }
-    if safe_end > text_len {
-        safe_end = text_len;
-    }
+    if safe_start < 0 { safe_start = 0; }
+    if safe_end < safe_start { safe_end = safe_start; }
+    if safe_start > text_len { safe_start = text_len; }
+    if safe_end > text_len { safe_end = text_len; }
     return substring_unchecked(text, safe_start, safe_end);
 }
 
 fn byte_at(text: string, index: number) -> string {
     let text_len = text.length;
-    if text_len == 0 {
-        return "";
-    }
-    if index < 0 {
-        return "";
-    }
-    if index >= text_len {
-        return "";
-    }
+    if text_len == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= text_len { return ""; }
     return substring_unchecked(text, index, index + 1);
 }
 
@@ -461,32 +382,14 @@ fn append(tokens: Token[], token: Token) -> Token[] {
 }
 
 fn is_two_char_symbol(value: string) -> boolean {
-    if value == "->" {
-        return true;
-    }
-    if value == "=>" {
-        return true;
-    }
-    if value == "==" {
-        return true;
-    }
-    if value == "!=" {
-        return true;
-    }
-    if value == "<=" {
-        return true;
-    }
-    if value == ">=" {
-        return true;
-    }
-    if value == "&&" {
-        return true;
-    }
-    if value == "||" {
-        return true;
-    }
-    if value == ".." {
-        return true;
-    }
+    if value == "->" { return true; }
+    if value == "=>" { return true; }
+    if value == "==" { return true; }
+    if value == "!=" { return true; }
+    if value == "<=" { return true; }
+    if value == ">=" { return true; }
+    if value == "&&" { return true; }
+    if value == "||" { return true; }
+    if value == ".." { return true; }
     return false;
 }

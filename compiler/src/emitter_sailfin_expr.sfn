@@ -2,65 +2,53 @@
 //
 // Expression formatting helpers for the Sailfin-to-Sailfin code emitter.
 // Extracted from emitter_sailfin.sfn to keep modules focused and under size.
-
 import {
-    Expression, Parameter, Statement, Block, TypeAnnotation,
+    Block,
+    Expression,
+    Parameter,
+    Statement,
+    TypeAnnotation
 } from "./ast";
 import {
-    join_with_separator, quote_string, trim_text, collapse_whitespace,
+    collapse_whitespace,
+    join_with_separator,
+    quote_string,
+    trim_text
 } from "./emitter_sailfin_utils";
 
 fn format_optional_expression(expression: Expression?) -> string {
-    if expression == null {
-        return "";
-    }
+    if expression == null { return ""; }
     let value: Expression = expression;
     return format_expression(value);
 }
 
 fn format_type_annotation(annotation: TypeAnnotation?) -> string {
-    if annotation == null {
-        return "";
-    }
+    if annotation == null { return ""; }
     return ": " + annotation.text;
 }
 
 fn format_return_type_annotation(annotation: TypeAnnotation?) -> string {
-    if annotation == null {
-        return "";
-    }
+    if annotation == null { return ""; }
     return " -> " + annotation.text;
 }
 
 fn format_initializer(initializer: Expression?) -> string {
     let value = format_optional_expression(initializer);
-    if value.length == 0 {
-        return "";
-    }
+    if value.length == 0 { return ""; }
     return " = " + value;
 }
 
 fn format_expression(expression: Expression) -> string {
-    if expression.variant == "Identifier" {
-        return expression.name;
-    }
-    if expression.variant == "NumberLiteral" {
-        return expression.value;
-    }
-    if expression.variant == "BooleanLiteral" {
-        return expression.value;
-    }
-    if expression.variant == "NullLiteral" {
-        return "null";
-    }
+    if expression.variant == "Identifier" { return expression.name; }
+    if expression.variant == "NumberLiteral" { return expression.value; }
+    if expression.variant == "BooleanLiteral" { return expression.value; }
+    if expression.variant == "NullLiteral" { return "null"; }
     if expression.variant == "StringLiteral" {
         return quote_string(expression.value);
     }
     if expression.variant == "Unary" {
         let operand = format_expression(expression.operand);
-        if expression.operator == "!" {
-            return "!" + operand;
-        }
+        if expression.operator == "!" { return "!" + operand; }
         return expression.operator + operand;
     }
     if expression.variant == "Binary" {
@@ -77,9 +65,7 @@ fn format_expression(expression: Expression) -> string {
         let mut rendered: string[] = [];
         let mut index: number = 0;
         loop {
-            if index >= expression.arguments.length {
-                break;
-            }
+            if index >= expression.arguments.length { break; }
             rendered.push(format_expression(expression.arguments[index]));
             index += 1;
         }
@@ -95,9 +81,7 @@ fn format_expression(expression: Expression) -> string {
         let mut rendered: string[] = [];
         let mut index: number = 0;
         loop {
-            if index >= expression.elements.length {
-                break;
-            }
+            if index >= expression.elements.length { break; }
             rendered.push(format_expression(expression.elements[index]));
             index += 1;
         }
@@ -108,9 +92,7 @@ fn format_expression(expression: Expression) -> string {
         let mut rendered: string[] = [];
         let mut index: number = 0;
         loop {
-            if index >= expression.fields.length {
-                break;
-            }
+            if index >= expression.fields.length { break; }
             let field = expression.fields[index];
             let value = format_expression(field.value);
             rendered.push(field.name + ": " + value);
@@ -124,9 +106,7 @@ fn format_expression(expression: Expression) -> string {
         let mut rendered: string[] = [];
         let mut index: number = 0;
         loop {
-            if index >= expression.fields.length {
-                break;
-            }
+            if index >= expression.fields.length { break; }
             let field = expression.fields[index];
             let value = format_expression(field.value);
             rendered.push(field.name + ": " + value);
@@ -144,9 +124,7 @@ fn format_expression(expression: Expression) -> string {
     if expression.variant == "Lambda" {
         return format_lambda_expression(expression);
     }
-    if expression.variant == "Raw" {
-        return trim_text(expression.text);
-    }
+    if expression.variant == "Raw" { return trim_text(expression.text); }
     return "";
 }
 
@@ -163,9 +141,7 @@ fn format_lambda_parameters(parameters: Parameter[]) -> string {
     let mut rendered: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= parameters.length {
-            break;
-        }
+        if index >= parameters.length { break; }
         let param = parameters[index];
         let mut entry: string = param.name;
         entry = entry + format_type_annotation(param.type_annotation);
@@ -178,14 +154,10 @@ fn format_lambda_parameters(parameters: Parameter[]) -> string {
 
 fn format_lambda_body(body: Block) -> string {
     let mut lines: string[] = [];
-    if body.statements.length == 0 {
-        lines.push("// empty body");
-    } else {
+    if body.statements.length == 0 { lines.push("// empty body"); } else {
         let mut index: number = 0;
         loop {
-            if index >= body.statements.length {
-                break;
-            }
+            if index >= body.statements.length { break; }
             lines.push(format_lambda_statement(body.statements[index]));
             index += 1;
         }
@@ -198,9 +170,7 @@ fn format_lambda_body(body: Block) -> string {
 fn format_lambda_statement(statement: Statement) -> string {
     if statement.variant == "ReturnStatement" {
         let rendered = format_optional_expression(statement.expression);
-        if rendered.length == 0 {
-            return "return;";
-        }
+        if rendered.length == 0 { return "return;"; }
         return "return " + rendered + ";";
     }
     if statement.variant == "ExpressionStatement" {
@@ -208,9 +178,7 @@ fn format_lambda_statement(statement: Statement) -> string {
     }
     if statement.variant == "VariableDeclaration" {
         let mut line: string = "let ";
-        if statement.mutable {
-            line = line + "mut ";
-        }
+        if statement.mutable { line = line + "mut "; }
         line = line + statement.name;
         line = line + format_type_annotation(statement.type_annotation);
         line = line + format_initializer(statement.initializer);
@@ -226,15 +194,11 @@ fn indent_lines(lines: string[], depth: number) -> string[] {
     let mut result: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let mut prefix: string = "";
         let mut count: number = 0;
         loop {
-            if count >= depth {
-                break;
-            }
+            if count >= depth { break; }
             prefix = prefix + "    ";
             count += 1;
         }

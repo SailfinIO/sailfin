@@ -157,6 +157,16 @@ root:
         "reveal": "always",
         "panel": "shared"
       }
+    },
+    {
+      "label": "Sailfin: Format current file",
+      "type": "shell",
+      "command": "sfn fmt --write ${file}",
+      "group": "none",
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
     }
   ]
 }
@@ -173,6 +183,66 @@ With this configuration:
 
 Compiler output appears in the **Terminal** panel. Errors include file paths and
 line numbers, so you can click through to the relevant location.
+
+---
+
+## Formatting with `sfn fmt`
+
+Sailfin ships a built-in code formatter. One canonical style, no configuration —
+like `gofmt` for Go. All Sailfin compiler sources and the runtime are formatted
+with `sfn fmt` and CI enforces it on every pull request.
+
+### Quick start
+
+```bash
+# Format a file and see the result in stdout
+sfn fmt src/main.sfn
+
+# Format a file in place
+sfn fmt --write src/main.sfn
+
+# Format all .sfn files in a directory
+sfn fmt --write src/
+
+# Check formatting without modifying (CI mode)
+sfn fmt --check src/
+```
+
+### Format-on-save in VS Code
+
+Until the Sailfin language server is available, you can approximate format-on-save
+by binding a keyboard shortcut to the format task above. Open **Keyboard Shortcuts**
+(`Ctrl+K Ctrl+S`) and bind the **Sailfin: Format current file** task to your
+preferred key.
+
+Alternatively, add a `runOnSave` extension (e.g.,
+[emeraldwalk.RunOnSave](https://marketplace.visualstudio.com/items?itemName=emeraldwalk.RunOnSave))
+with this configuration in `.vscode/settings.json`:
+
+```json
+{
+  "emeraldwalk.runonsave": {
+    "commands": [
+      {
+        "match": "\\.sfn$",
+        "cmd": "sfn fmt --write ${file}"
+      }
+    ]
+  }
+}
+```
+
+### What the formatter does
+
+- 4-space indentation, K&R braces
+- Spaces around operators and after keywords; no space before `:`, `;`, `?`
+- No space after unary `!` and `-`
+- Imports sorted by path, specifiers sorted alphabetically
+- One blank line between top-level declarations
+- Single-statement blocks stay inline when they fit
+
+See the [CLI Reference](/docs/reference/cli) for the full list of formatting rules
+and known limitations.
 
 ---
 

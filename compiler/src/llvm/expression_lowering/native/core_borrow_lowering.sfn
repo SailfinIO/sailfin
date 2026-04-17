@@ -1,53 +1,101 @@
 // compiler/src/llvm/expression_lowering/native/core_borrow_lowering.sfn
 //
 // Borrow-expression lowering extracted from core.sfn.
-
-import { ParameterBinding, LocalBinding, BorrowParseResult, ExpressionResult, LLVMOperand } from "../../types";
-
-import { trim_text, append_string, ends_with } from "../../utils";
-
-import { strip_enclosing_parentheses } from "./core_operators";
-
 import { empty_string_constant_set } from "../../strings";
-
+import {
+    BorrowParseResult,
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding
+} from "../../types";
+import { append_string, ends_with, trim_text } from "../../utils";
 import { find_parameter_binding } from "./core_bindings";
+import { strip_enclosing_parentheses } from "./core_operators";
 import { find_local_binding } from "./core_scopes";
 
 fn lower_borrow_expression(parse: BorrowParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[]) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
 
     let mut target = strip_enclosing_parentheses(parse.target);
     target = trim_text(target);
     if target.length == 0 {
         diagnostics.push("llvm lowering: borrow expression missing target");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
 
     let local = find_local_binding(locals, target);
     if local == null {
         let parameter = find_parameter_binding(bindings, target);
         if parameter == null {
-            diagnostics.push("llvm lowering: borrow target `" + target + "` not found");
-            return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+            diagnostics.push("llvm lowering: borrow target `" + target
+                + "` not found");
+            return ExpressionResult {
+                lines: lines,
+                temp_index: temp_index,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: empty_constants
+            };
         }
 
         // If the parameter is already a reference/pointer type, borrowing it is an identity.
         if ends_with(parameter.llvm_type, "*") {
-            let operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
-            return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+            let operand = LLVMOperand {
+                llvm_type: parameter.llvm_type,
+                value: parameter.llvm_name
+            };
+            return ExpressionResult {
+                lines: lines,
+                temp_index: temp_index,
+                operand: operand,
+                diagnostics: diagnostics,
+                string_constants: empty_constants
+            };
         }
 
-        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `" + target + "` (type `" + parameter.llvm_type + "`)");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        diagnostics.push("llvm lowering: cannot borrow non-addressable parameter `"
+            + target
+            + "` (type `"
+            + parameter.llvm_type
+            + "`)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
 
     let pointer_type = local.llvm_type + "*";
-    let operand = LLVMOperand { llvm_type: pointer_type, value: local.pointer };
-    return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+    let operand = LLVMOperand {
+        llvm_type: pointer_type,
+        value: local.pointer
+    };
+    return ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: operand,
+        diagnostics: diagnostics,
+        string_constants: empty_constants
+    };
 }
 
 export { lower_borrow_expression };

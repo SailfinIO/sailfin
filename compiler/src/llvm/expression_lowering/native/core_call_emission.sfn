@@ -2,60 +2,38 @@
 //
 // Call emission extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
-
 import { NativeFunction } from "../../../native_ir";
-
+import { find_last_index_of_char, substring } from "../../../string_utils";
+import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
+import { merge_string_constants } from "../../strings";
+import { find_interface_info_by_name } from "../../type_context_queries";
+import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
-    TypeContext,
-    ParameterBinding,
-    LocalBinding,
     ExpressionResult,
     LLVMOperand,
-    StringConstant,
-    RuntimeHelperDescriptor,
+    LocalBinding,
     MemberAccessParse,
+    ParameterBinding,
+    RuntimeHelperDescriptor,
+    StringConstant,
+    TypeContext
 } from "../../types";
-
 import {
-    trim_text,
-    starts_with,
-    number_to_string,
-    join_with_separator,
     extend_string_array,
+    join_with_separator,
+    number_to_string,
+    starts_with,
+    trim_text
 } from "../../utils";
-
-import { substring, find_last_index_of_char } from "../../../string_utils";
-
-import { merge_string_constants } from "../../strings";
-
-import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
-
-import {
-    ends_with_pointer_suffix,
-    strip_pointer_suffix,
-} from "../../type_mapping";
-
-import {
-    find_interface_info_by_name,
-} from "../../type_context_queries";
-
 import {
     array_pointer_element_type,
-    lower_struct_array_concat,
     lower_array_push_in_place,
+    lower_struct_array_concat
 } from "../arrays";
-
-import {
-    parse_member_access,
-} from "./core_parse";
-
-import {
-    find_local_binding,
-} from "./core_scopes";
-
-import { sanitize_symbol } from "./core_text";
-
 import { coerce_operand_to_type } from "./core_operands";
+import { parse_member_access } from "./core_parse";
+import { find_local_binding } from "./core_scopes";
+import { sanitize_symbol } from "./core_text";
 
 fn _write_emission_result_lines(result_lines: string[], result_temp: number) -> void ![io] {
     // Dead IPC files removed — .call_result_line_count and .call_result_temp_index have no reader.
@@ -63,27 +41,7 @@ fn _write_emission_result_lines(result_lines: string[], result_temp: number) -> 
 
 // Coerce operands to expected types and emit the final call instruction.
 // Handles array concat/push, trait dispatch, and normal function calls.
-fn coerce_and_emit_call(
-    trimmed_target: string,
-    operands: LLVMOperand[],
-    expected_params: string[],
-    llvm_return: string,
-    is_trait_dispatch: boolean,
-    is_array_concat: boolean,
-    array_concat_element_type: string,
-    is_array_push: boolean,
-    array_push_element_type: string,
-    method_operand: LLVMOperand?,
-    helper_descriptor: RuntimeHelperDescriptor?,
-    function_entry: NativeFunction?,
-    current_temp: number,
-    current_lines: string[],
-    diagnostics: string[],
-    collected_string_constants: StringConstant[],
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    context: TypeContext
-) -> ExpressionResult ![io] {
+fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: number, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
     let mut result_lines = current_lines;
     let mut result_temp: number = current_temp;
     let mut result_diagnostics = diagnostics;
@@ -91,17 +49,23 @@ fn coerce_and_emit_call(
 
     // Coerce operands to expected parameter types
     if _trace_ccl {
-        print.err("call_lowering: pre-coerce operands=" + number_to_string(operands.length) + " expected_params=" + number_to_string(expected_params.length) + " llvm_return=" + llvm_return);
+        print.err("call_lowering: pre-coerce operands=" + number_to_string(operands.length)
+            + " expected_params="
+            + number_to_string(expected_params.length)
+            + " llvm_return="
+            + llvm_return);
     }
     let mut coerced_operands: LLVMOperand[] = [];
     let mut index: number = 0;
     loop {
-        if index >= operands.length {
-            break;
-        }
+        if index >= operands.length { break; }
         let operand = operands[index];
         if _trace_ccl {
-            print.err("call_lowering: coerce-loop idx=" + number_to_string(index) + " operand_type=" + operand.llvm_type + " operand_value=" + operand.value);
+            print.err("call_lowering: coerce-loop idx=" + number_to_string(index)
+                + " operand_type="
+                + operand.llvm_type
+                + " operand_value="
+                + operand.value);
         }
         let mut target_type: string = "";
         if expected_params.length > index {
@@ -109,13 +73,9 @@ fn coerce_and_emit_call(
         }
         let mut _if55: boolean = false;
         if is_trait_dispatch {
-            if index == 0 {
-                _if55 = true;
-            }
+            if index == 0 { _if55 = true; }
         }
-        if _if55 {
-            coerced_operands.push(operand);
-        } else if target_type.length == 0 {
+        if _if55 { coerced_operands.push(operand); } else if target_type.length == 0 {
             coerced_operands.push(operand);
         } else {
             let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines);
@@ -123,11 +83,13 @@ fn coerce_and_emit_call(
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
             if coerced.operand == null {
-                result_diagnostics.push("llvm lowering: unable to coerce argument " + number_to_string(index) + " for call to `" + trimmed_target + "`: passing original operand");
+                result_diagnostics.push("llvm lowering: unable to coerce argument "
+                    + number_to_string(index)
+                    + " for call to `"
+                    + trimmed_target
+                    + "`: passing original operand");
                 coerced_operands.push(operand);
-            } else {
-                coerced_operands.push(coerced.operand);
-            }
+            } else { coerced_operands.push(coerced.operand); }
         }
         index += 1;
     }
@@ -137,7 +99,9 @@ fn coerce_and_emit_call(
     }
 
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-A is_concat=" + number_to_string(0) + " is_push=" + number_to_string(0));
+        print.err("call_lowering: checkpoint-A is_concat=" + number_to_string(0)
+            + " is_push="
+            + number_to_string(0));
     }
 
     // Array concat inline lowering
@@ -158,15 +122,33 @@ fn coerce_and_emit_call(
                         _write_emission_result_lines(result_lines, result_temp);
                         fs.writeFile("build/sailfin/.call_result_type", "");
                         fs.writeFile("build/sailfin/.call_result_value", "");
-                        return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                        return ExpressionResult {
+                            lines: result_lines,
+                            temp_index: result_temp,
+                            operand: null,
+                            diagnostics: result_diagnostics,
+                            string_constants: collected_string_constants
+                        };
                     }
                     _write_emission_result_lines(result_lines, result_temp);
                     fs.writeFile("build/sailfin/.call_result_type", concat_result.operand.llvm_type);
                     fs.writeFile("build/sailfin/.call_result_value", concat_result.operand.value);
-                    return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: concat_result.operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: concat_result.operand,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
                 } else {
                     result_diagnostics.push("llvm lowering: concat requires two operands");
-                    return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: null,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
                 }
             }
         }
@@ -189,7 +171,13 @@ fn coerce_and_emit_call(
                     _write_emission_result_lines(result_lines, result_temp);
                     fs.writeFile("build/sailfin/.call_result_type", "");
                     fs.writeFile("build/sailfin/.call_result_value", "");
-                    return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: null,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
                 }
                 if array_push_element_type == "i8*" {
                     let method_parse = parse_member_access(trimmed_target);
@@ -197,23 +185,42 @@ fn coerce_and_emit_call(
                         let push_receiver_name = trim_text(method_parse.base);
                         let push_receiver_local = find_local_binding(locals, push_receiver_name);
                         if push_receiver_local != null {
-                            result_lines.push("  store " + push_result.operand.llvm_type + " " + push_result.operand.value + ", " + push_result.operand.llvm_type + "* " + push_receiver_local.pointer);
+                            result_lines.push("  store " + push_result.operand.llvm_type
+                                + " "
+                                + push_result.operand.value
+                                + ", "
+                                + push_result.operand.llvm_type
+                                + "* "
+                                + push_receiver_local.pointer);
                         }
                     }
                 }
                 _write_emission_result_lines(result_lines, result_temp);
                 fs.writeFile("build/sailfin/.call_result_type", push_result.operand.llvm_type);
                 fs.writeFile("build/sailfin/.call_result_value", push_result.operand.value);
-                return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: push_result.operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                return ExpressionResult {
+                    lines: result_lines,
+                    temp_index: result_temp,
+                    operand: push_result.operand,
+                    diagnostics: result_diagnostics,
+                    string_constants: collected_string_constants
+                };
             } else {
                 result_diagnostics.push("llvm lowering: push requires two operands");
-                return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                return ExpressionResult {
+                    lines: result_lines,
+                    temp_index: result_temp,
+                    operand: null,
+                    diagnostics: result_diagnostics,
+                    string_constants: collected_string_constants
+                };
             }
         }
     }
 
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-B fn_entry_null=" + number_to_string(0));
+        print.err("call_lowering: checkpoint-B fn_entry_null="
+            + number_to_string(0));
     }
     let mut _if56: boolean = false;
     if function_entry != null { _if56 = true; }
@@ -223,7 +230,11 @@ fn coerce_and_emit_call(
     }
     if _if56 {
         if expected_params.length != final_operands.length {
-            result_diagnostics.push("llvm lowering: call to `" + trimmed_target + "` expected " + number_to_string(expected_params.length) + " arguments but received " + number_to_string(final_operands.length));
+            result_diagnostics.push("llvm lowering: call to `" + trimmed_target
+                + "` expected "
+                + number_to_string(expected_params.length)
+                + " arguments but received "
+                + number_to_string(final_operands.length));
         }
     }
 
@@ -233,9 +244,7 @@ fn coerce_and_emit_call(
     let mut rendered_args: string[] = [];
     index = 0;
     loop {
-        if index >= final_operands.length {
-            break;
-        }
+        if index >= final_operands.length { break; }
         if _trace_ccl {
             print.err("call_lowering: render-arg idx=" + number_to_string(index));
         }
@@ -269,11 +278,19 @@ fn coerce_and_emit_call(
 
                 let data_ptr_temp = "%t" + number_to_string(result_temp);
                 result_temp += 1;
-                result_lines.push("  " + data_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 0");
+                result_lines.push("  " + data_ptr_temp + " = extractvalue "
+                    + trait_object.llvm_type
+                    + " "
+                    + trait_object.value
+                    + ", 0");
 
                 let vtable_ptr_temp = "%t" + number_to_string(result_temp);
                 result_temp += 1;
-                result_lines.push("  " + vtable_ptr_temp + " = extractvalue " + trait_object.llvm_type + " " + trait_object.value + ", 1");
+                result_lines.push("  " + vtable_ptr_temp + " = extractvalue "
+                    + trait_object.llvm_type
+                    + " "
+                    + trait_object.value
+                    + ", 1");
 
                 let interface_info3 = find_interface_info_by_name(context, interface_name);
                 if interface_info3 != null {
@@ -294,86 +311,129 @@ fn coerce_and_emit_call(
                         let mut fp_param_types: string[] = ["i8*"];
                         let mut arg_idx: number = 1;
                         loop {
-                            if arg_idx >= final_operands.length {
-                                break;
-                            }
+                            if arg_idx >= final_operands.length { break; }
                             fp_param_types.push(final_operands[arg_idx].llvm_type);
                             arg_idx += 1;
                         }
                         let fp_params = join_with_separator(fp_param_types, ", ");
-                        let function_type = llvm_return + " (" + fp_params + ")*";
+                        let function_type = llvm_return + " (" + fp_params
+                            + ")*";
 
                         let vtable_slots_temp = "%t" + number_to_string(result_temp);
                         result_temp += 1;
-                        result_lines.push("  " + vtable_slots_temp + " = bitcast i8* " + vtable_ptr_temp + " to i8**");
+                        result_lines.push("  " + vtable_slots_temp
+                            + " = bitcast i8* "
+                            + vtable_ptr_temp
+                            + " to i8**");
 
                         let slot_ptr_temp = "%t" + number_to_string(result_temp);
                         result_temp += 1;
-                        result_lines.push("  " + slot_ptr_temp + " = getelementptr i8*, i8** " + vtable_slots_temp + ", i64 " + number_to_string(method_index));
+                        result_lines.push("  " + slot_ptr_temp
+                            + " = getelementptr i8*, i8** "
+                            + vtable_slots_temp
+                            + ", i64 "
+                            + number_to_string(method_index));
 
                         let raw_ptr_temp = "%t" + number_to_string(result_temp);
                         result_temp += 1;
-                        result_lines.push("  " + raw_ptr_temp + " = load i8*, i8** " + slot_ptr_temp);
+                        result_lines.push("  " + raw_ptr_temp
+                            + " = load i8*, i8** "
+                            + slot_ptr_temp);
 
                         let method_ptr_temp = "%t" + number_to_string(result_temp);
                         result_temp += 1;
-                        result_lines.push("  " + method_ptr_temp + " = bitcast i8* " + raw_ptr_temp + " to " + function_type);
+                        result_lines.push("  " + method_ptr_temp
+                            + " = bitcast i8* "
+                            + raw_ptr_temp
+                            + " to "
+                            + function_type);
 
                         let mut call_args: string[] = ["i8* " + data_ptr_temp];
                         arg_idx = 1;
                         loop {
-                            if arg_idx >= rendered_args.length {
-                                break;
-                            }
+                            if arg_idx >= rendered_args.length { break; }
                             call_args.push(rendered_args[arg_idx]);
                             arg_idx += 1;
                         }
                         let call_arg_text = join_with_separator(call_args, ", ");
 
                         if llvm_return == "void" {
-                            result_lines.push("  call void " + method_ptr_temp + "(" + call_arg_text + ")");
-                            return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                            result_lines.push("  call void " + method_ptr_temp
+                                + "("
+                                + call_arg_text
+                                + ")");
+                            return ExpressionResult {
+                                lines: result_lines,
+                                temp_index: result_temp,
+                                operand: null,
+                                diagnostics: result_diagnostics,
+                                string_constants: collected_string_constants
+                            };
                         } else {
                             let result_temp_name = format_temp_name(result_temp);
-                            result_lines.push("  " + result_temp_name + " = call " + llvm_return + " " + method_ptr_temp + "(" + call_arg_text + ")");
-                            let result_operand = LLVMOperand { llvm_type: llvm_return, value: result_temp_name };
-                            return ExpressionResult { lines: result_lines, temp_index: result_temp + 1, operand: result_operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+                            result_lines.push("  " + result_temp_name
+                                + " = call "
+                                + llvm_return
+                                + " "
+                                + method_ptr_temp
+                                + "("
+                                + call_arg_text
+                                + ")");
+                            let result_operand = LLVMOperand {
+                                llvm_type: llvm_return,
+                                value: result_temp_name
+                            };
+                            return ExpressionResult {
+                                lines: result_lines,
+                                temp_index: result_temp + 1,
+                                operand: result_operand,
+                                diagnostics: result_diagnostics,
+                                string_constants: collected_string_constants
+                            };
                         }
                     } else {
-                        result_diagnostics.push("llvm lowering: method `" + method_name + "` not found in interface `" + interface_name + "`");
+                        result_diagnostics.push("llvm lowering: method `"
+                            + method_name
+                            + "` not found in interface `"
+                            + interface_name
+                            + "`");
                     }
                 } else {
-                    result_diagnostics.push("llvm lowering: interface `" + interface_name + "` not found for trait dispatch");
+                    result_diagnostics.push("llvm lowering: interface `"
+                        + interface_name
+                        + "` not found for trait dispatch");
                 }
             } else {
                 result_diagnostics.push("llvm lowering: trait dispatch requires at least one argument (the trait object)");
             }
         } else {
-            result_diagnostics.push("llvm lowering: malformed trait dispatch target `" + trimmed_target + "`");
+            result_diagnostics.push("llvm lowering: malformed trait dispatch target `"
+                + trimmed_target
+                + "`");
         }
     }
 
     // Standard function call
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-F call_symbol target=" + trimmed_target);
+        print.err("call_lowering: checkpoint-F call_symbol target="
+            + trimmed_target);
     }
     let mut call_symbol = sanitize_symbol(trimmed_target);
-    if helper_descriptor != null {
-        call_symbol = helper_descriptor.symbol;
-    }
+    if helper_descriptor != null { call_symbol = helper_descriptor.symbol; }
     // When concat resolves with no helper_descriptor (common for method
     // dispatch paths that set helper_descriptor: null), fall back to the
     // canonical runtime symbol so we don't emit a bare @concat.
     if trimmed_target == "concat" {
-        if call_symbol == "concat" {
-            call_symbol = "sailfin_runtime_concat";
-        }
+        if call_symbol == "concat" { call_symbol = "sailfin_runtime_concat"; }
     }
     if _trace_ccl {
-        print.err("call_lowering: checkpoint-G llvm_return=" + llvm_return + " call_symbol=" + call_symbol);
+        print.err("call_lowering: checkpoint-G llvm_return=" + llvm_return
+            + " call_symbol="
+            + call_symbol);
     }
     if llvm_return == "void" {
-        let call_line = "  call void @" + call_symbol + "(" + argument_text + ")";
+        let call_line = "  call void @" + call_symbol + "(" + argument_text
+            + ")";
         result_lines.push(call_line);
         if _trace_ccl {
             print.err("call_lowering: checkpoint-H void return");
@@ -381,14 +441,24 @@ fn coerce_and_emit_call(
         _write_emission_result_lines(result_lines, result_temp);
         fs.writeFile("build/sailfin/.call_result_type", "");
         fs.writeFile("build/sailfin/.call_result_value", "");
-        return ExpressionResult { lines: result_lines, temp_index: result_temp, operand: null, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+        return ExpressionResult {
+            lines: result_lines,
+            temp_index: result_temp,
+            operand: null,
+            diagnostics: result_diagnostics,
+            string_constants: collected_string_constants
+        };
     }
 
     let temp_name = format_temp_name(result_temp);
     if _trace_ccl {
         print.err("call_lowering: checkpoint-I temp_name=" + temp_name);
     }
-    let call_line = "  " + temp_name + " = call " + llvm_return + " @" + call_symbol + "(" + argument_text + ")";
+    let call_line = "  " + temp_name + " = call " + llvm_return + " @"
+        + call_symbol
+        + "("
+        + argument_text
+        + ")";
     result_lines.push(call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
     if _trace_ccl {
@@ -397,10 +467,14 @@ fn coerce_and_emit_call(
     _write_emission_result_lines(result_lines, result_temp + 1);
     fs.writeFile("build/sailfin/.call_result_type", llvm_return);
     fs.writeFile("build/sailfin/.call_result_value", temp_name);
-    if _trace_ccl {
-        print.err("call_lowering: checkpoint-K returning");
-    }
-    return ExpressionResult { lines: result_lines, temp_index: result_temp + 1, operand: operand, diagnostics: result_diagnostics, string_constants: collected_string_constants };
+    if _trace_ccl { print.err("call_lowering: checkpoint-K returning"); }
+    return ExpressionResult {
+        lines: result_lines,
+        temp_index: result_temp + 1,
+        operand: operand,
+        diagnostics: result_diagnostics,
+        string_constants: collected_string_constants
+    };
 }
 
 export { coerce_and_emit_call };

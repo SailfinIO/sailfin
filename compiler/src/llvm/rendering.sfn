@@ -2,51 +2,52 @@
 //
 // LLVM IR rendering functions for declarations and metadata comments.
 // Handles trait metadata comments, runtime helper declarations, and function declarations.
-
 import { NativeFunction, NativeParameter } from "../native_ir";
 import { substring } from "../string_utils";
-import { TypeContext, TraitMetadata, RuntimeHelperDescriptor } from "./types";
-import { trim_text, append_string, join_with_separator, string_array_contains, sanitize_symbol, number_to_string, index_of } from "./utils";
+import {
+    collect_parameter_types,
+    extract_struct_type_from_llvm,
+    render_interface_signature
+} from "./rendering_helpers";
 import { runtime_helper_descriptors } from "./runtime_helpers";
-import { map_return_type, map_parameter_type } from "./type_mapping";
-import { render_interface_signature, collect_parameter_types, extract_struct_type_from_llvm } from "./rendering_helpers";
+import { map_parameter_type, map_return_type } from "./type_mapping";
+import { RuntimeHelperDescriptor, TraitMetadata, TypeContext } from "./types";
+import {
+    append_string,
+    index_of,
+    join_with_separator,
+    number_to_string,
+    sanitize_symbol,
+    string_array_contains,
+    trim_text
+} from "./utils";
 
 fn clamp_collection_length(value: number, max: number) -> number {
-    if value != value {
-        return 0;
-    }
-    if value < 0 {
-        return 0;
-    }
-    if value > max {
-        return max;
-    }
+    if value != value { return 0; }
+    if value < 0 { return 0; }
+    if value > max { return max; }
     return value;
 }
 
 // =============================================================================
 // Trait Metadata Comments
 // =============================================================================
-
 fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
     let mut interface_lines: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= metadata.interfaces.length {
-            break;
-        }
+        if index >= metadata.interfaces.length { break; }
         let interface = metadata.interfaces[index];
         let mut header: string = "; interface " + interface.name;
         if interface.type_parameters.length > 0 {
-            header = header + "<" + join_with_separator(interface.type_parameters, ", ") + ">";
+            header = header + "<" + join_with_separator(interface.type_parameters, ", ")
+                + ">";
         }
         interface_lines.push(header);
 
         let mut signature_index: number = 0;
         loop {
-            if signature_index >= interface.signatures.length {
-                break;
-            }
+            if signature_index >= interface.signatures.length { break; }
             let signature = interface.signatures[signature_index];
             let rendered = render_interface_signature(signature);
             interface_lines.push(";   " + rendered);
@@ -61,19 +62,17 @@ fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
     let mut struct_lines: string[] = [];
     index = 0;
     loop {
-        if index >= metadata.implementations.length {
-            break;
-        }
+        if index >= metadata.implementations.length { break; }
         let implementation = metadata.implementations[index];
-        let mut line: string = "; struct " + implementation.struct_name + " implements " + join_with_separator(implementation.interfaces, ", ");
+        let mut line: string = "; struct " + implementation.struct_name
+            + " implements "
+            + join_with_separator(implementation.interfaces, ", ");
         struct_lines.push(line);
         index += 1;
     }
 
     if interface_lines.length == 0 {
-        if struct_lines.length == 0 {
-            return [];
-        }
+        if struct_lines.length == 0 { return []; }
     }
 
     let mut lines: string[] = [];
@@ -85,9 +84,7 @@ fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
         _ci0 += 1;
     }
     if interface_lines.length > 0 {
-        if struct_lines.length > 0 {
-            lines.push(";");
-        }
+        if struct_lines.length > 0 { lines.push(";"); }
     }
     let mut _ci1: number = 0;
     loop {
@@ -102,18 +99,13 @@ fn render_trait_metadata_comments(metadata: TraitMetadata) -> string[] {
 // =============================================================================
 // Runtime Helper Declarations
 // =============================================================================
-
 fn render_runtime_helper_declarations(used_targets: string[], local_functions: NativeFunction[]) -> string[] {
-    if used_targets.length == 0 {
-        return [];
-    }
+    if used_targets.length == 0 { return []; }
     // Build list of local function symbols to avoid declaring helpers that are defined locally
     let mut local_symbols: string[] = [];
     let mut local_index: number = 0;
     loop {
-        if local_index >= local_functions.length {
-            break;
-        }
+        if local_index >= local_functions.length { break; }
         local_symbols.push(sanitize_symbol(local_functions[local_index].name));
         local_index += 1;
     }
@@ -123,9 +115,7 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
     let descriptors = runtime_helper_descriptors();
     let mut index: number = 0;
     loop {
-        if index >= descriptors.length {
-            break;
-        }
+        if index >= descriptors.length { break; }
         let descriptor = descriptors[index];
         if string_array_contains(used_targets, descriptor.target) {
             // Skip if this helper is actually defined locally (not just a runtime intrinsic)
@@ -142,13 +132,19 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             // Emit capability metadata comment if the intrinsic has effects
             if descriptor.effects.length > 0 {
                 let effects_text = join_with_separator(descriptor.effects, ", ");
-                lines.push("; intrinsic " + descriptor.symbol + " requires capabilities: ![" + effects_text + "]");
+                lines.push("; intrinsic " + descriptor.symbol
+                    + " requires capabilities: !["
+                    + effects_text
+                    + "]");
             }
             let mut parameter_text: string = "";
             if descriptor.parameter_types.length > 0 {
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ");
             }
-            let line = "declare " + descriptor.return_type + " @" + descriptor.symbol + "(" + parameter_text + ")";
+            let line = "declare " + descriptor.return_type + " @" + descriptor.symbol
+                + "("
+                + parameter_text
+                + ")";
             lines.push(line);
             declared_symbols.push(descriptor.symbol);
             // Also declare the target name if it differs from the symbol.
@@ -159,7 +155,12 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
                 if sanitized_target != descriptor.symbol {
                     if !string_array_contains(declared_symbols, sanitized_target) {
                         if !string_array_contains(local_symbols, sanitized_target) {
-                            let alias_line = "declare " + descriptor.return_type + " @" + sanitized_target + "(" + parameter_text + ")";
+                            let alias_line = "declare " + descriptor.return_type
+                                + " @"
+                                + sanitized_target
+                                + "("
+                                + parameter_text
+                                + ")";
                             lines.push(alias_line);
                             declared_symbols.push(sanitized_target);
                         }
@@ -175,19 +176,14 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
 // =============================================================================
 // Imported Function Declarations
 // =============================================================================
-
 fn render_imported_function_declarations(imported_functions: NativeFunction[], local_functions: NativeFunction[], context: TypeContext) -> string[] {
-    if imported_functions.length == 0 {
-        return [];
-    }
+    if imported_functions.length == 0 { return []; }
     // Get all runtime helper symbols to avoid duplicates
     let helper_descriptors = runtime_helper_descriptors();
     let mut helper_symbols: string[] = [];
     let mut helper_index: number = 0;
     loop {
-        if helper_index >= helper_descriptors.length {
-            break;
-        }
+        if helper_index >= helper_descriptors.length { break; }
         helper_symbols.push(helper_descriptors[helper_index].symbol);
         let helper_target = sanitize_symbol(helper_descriptors[helper_index].target);
         if !string_array_contains(helper_symbols, helper_target) {
@@ -200,9 +196,7 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
     let mut local_symbols: string[] = [];
     let mut local_index: number = 0;
     loop {
-        if local_index >= local_functions.length {
-            break;
-        }
+        if local_index >= local_functions.length { break; }
         local_symbols.push(sanitize_symbol(local_functions[local_index].name));
         local_index += 1;
     }
@@ -211,15 +205,17 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
     let mut emitted_declarations: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= imported_functions.length {
-            break;
-        }
+        if index >= imported_functions.length { break; }
         let function = imported_functions[index];
         let sanitized_name = sanitize_symbol(function.name);
         // Skip if this function is already declared as a runtime helper or defined locally
         let mut _if285: boolean = false;
-        if string_array_contains(helper_symbols, sanitized_name) { _if285 = true; }
-        if string_array_contains(local_symbols, sanitized_name) { _if285 = true; }
+        if string_array_contains(helper_symbols, sanitized_name) {
+            _if285 = true;
+        }
+        if string_array_contains(local_symbols, sanitized_name) {
+            _if285 = true;
+        }
         if _if285 {
             index += 1;
             continue;
@@ -236,7 +232,9 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
         }
         let param_types = collect_parameter_types(context, function.parameters, function.name);
         let param_text = join_with_separator(param_types, ", ");
-        let line = "declare " + return_type + " @" + sanitized_name + "(" + param_text + ")";
+        let line = "declare " + return_type + " @" + sanitized_name + "("
+            + param_text
+            + ")";
         lines.push(line);
         index += 1;
     }
@@ -246,44 +244,30 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
 // =============================================================================
 // Struct Type Definitions
 // =============================================================================
-
 fn render_struct_type_definitions(context: TypeContext, functions: NativeFunction[]) -> string[] {
     let mut _if286: boolean = false;
     if context.structs == null { _if286 = true; }
     if context.enums == null { _if286 = true; }
-    if _if286 {
-        return [];
-    }
+    if _if286 { return []; }
     let mut _if287: boolean = false;
     if context.structs.length > 10000 { _if287 = true; }
     if context.enums.length > 10000 { _if287 = true; }
-    if _if287 {
-        return [];
-    }
-    if functions == null {
-        return [];
-    }
-    if functions.length > 20000 {
-        return [];
-    }
+    if _if287 { return []; }
+    if functions == null { return []; }
+    if functions.length > 20000 { return []; }
     let mut lines: string[] = [];
-
 
     // First pass: collect all referenced struct types
     let mut referenced_types: string[] = [];
     let mut struct_index: number = 0;
     let struct_count = clamp_collection_length(context.structs.length, 10000);
     loop {
-        if struct_index >= struct_count {
-            break;
-        }
+        if struct_index >= struct_count { break; }
         let info = context.structs[struct_index];
         let mut field_index: number = 0;
         let field_count = clamp_collection_length(info.fields.length, 10000);
         loop {
-            if field_index >= field_count {
-                break;
-            }
+            if field_index >= field_count { break; }
             let field_type = info.fields[field_index].llvm_type;
             let extracted = extract_struct_type_from_llvm(field_type);
             if extracted.length > 0 {
@@ -300,24 +284,18 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
     let mut enum_index: number = 0;
     let enum_count = clamp_collection_length(context.enums.length, 10000);
     loop {
-        if enum_index >= enum_count {
-            break;
-        }
+        if enum_index >= enum_count { break; }
         let enum_info = context.enums[enum_index];
         let mut variant_index: number = 0;
         let variant_count = clamp_collection_length(enum_info.variants.length, 10000);
         loop {
-            if variant_index >= variant_count {
-                break;
-            }
+            if variant_index >= variant_count { break; }
             let variant = enum_info.variants[variant_index];
             // Check each field in the variant for struct references
             let mut variant_field_index: number = 0;
             let variant_field_count = clamp_collection_length(variant.fields.length, 10000);
             loop {
-                if variant_field_index >= variant_field_count {
-                    break;
-                }
+                if variant_field_index >= variant_field_count { break; }
                 let field_type = variant.fields[variant_field_index].llvm_type;
                 let extracted = extract_struct_type_from_llvm(field_type);
                 if extracted.length > 0 {
@@ -336,22 +314,14 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
     let mut func_index: number = 0;
     let function_count = clamp_collection_length(functions.length, 20000);
     loop {
-        if func_index >= function_count {
-            break;
-        }
+        if func_index >= function_count { break; }
         let func = functions[func_index];
         let mut safe_return_type = func.return_type;
-        if safe_return_type == null {
-            safe_return_type = "";
-        }
+        if safe_return_type == null { safe_return_type = ""; }
         let mut safe_params = func.parameters;
-        if safe_params == null {
-            safe_params = [];
-        }
+        if safe_params == null { safe_params = []; }
         let safe_param_count = clamp_collection_length(safe_params.length, 2000);
-        if safe_param_count == 0 {
-            safe_params = [];
-        }
+        if safe_param_count == 0 { safe_params = []; }
         // Check return type
         let return_llvm_type = map_return_type(context, safe_return_type);
         let extracted_return = extract_struct_type_from_llvm(return_llvm_type);
@@ -363,9 +333,7 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
         // Check each parameter type
         let mut param_index: number = 0;
         loop {
-            if param_index >= safe_param_count {
-                break;
-            }
+            if param_index >= safe_param_count { break; }
             let param_llvm_type = map_parameter_type(context, safe_params[param_index].type_annotation);
             let extracted_param = extract_struct_type_from_llvm(param_llvm_type);
             if extracted_param.length > 0 {
@@ -382,17 +350,13 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
     let mut ref_index: number = 0;
     let referenced_count = clamp_collection_length(referenced_types.length, 20000);
     loop {
-        if ref_index >= referenced_count {
-            break;
-        }
+        if ref_index >= referenced_count { break; }
         let ref_type = referenced_types[ref_index];
         // Check if this type is defined in our context (structs or enums)
         let mut is_defined: boolean = false;
         let mut check_index: number = 0;
         loop {
-            if check_index >= struct_count {
-                break;
-            }
+            if check_index >= struct_count { break; }
             if context.structs[check_index].llvm_name == ref_type {
                 is_defined = true;
                 break;
@@ -403,9 +367,7 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
         if !is_defined {
             check_index = 0;
             loop {
-                if check_index >= enum_count {
-                    break;
-                }
+                if check_index >= enum_count { break; }
                 let enum_llvm_name = "%" + sanitize_symbol(context.enums[check_index].name);
                 if enum_llvm_name == ref_type {
                     is_defined = true;
@@ -425,9 +387,7 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
     let mut index: number = 0;
     let mut emitted_types: string[] = [];
     loop {
-        if index >= struct_count {
-            break;
-        }
+        if index >= struct_count { break; }
         let info = context.structs[index];
         // Skip if we already emitted this type
         if string_array_contains(emitted_types, info.llvm_name) {
@@ -440,16 +400,12 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
         let mut field_index: number = 0;
         let safe_field_count = clamp_collection_length(info.fields.length, 10000);
         loop {
-            if field_index >= safe_field_count {
-                break;
-            }
+            if field_index >= safe_field_count { break; }
             field_types.push(info.fields[field_index].llvm_type);
             field_index += 1;
         }
         let mut body: string = "";
-        if field_types.length == 0 {
-            body = "{}";
-        } else {
+        if field_types.length == 0 { body = "{}"; } else {
             body = "{ " + join_with_separator(field_types, ", ") + " }";
         }
         lines.push(info.llvm_name + " = type " + body);
@@ -461,16 +417,13 @@ fn render_struct_type_definitions(context: TypeContext, functions: NativeFunctio
 // =============================================================================
 // Enum Type Definitions
 // =============================================================================
-
 fn render_enum_type_definitions(context: TypeContext) -> string[] {
     let mut lines: string[] = [];
     let mut emitted_types: string[] = [];
     let mut index: number = 0;
     let enum_count = clamp_collection_length(context.enums.length, 10000);
     loop {
-        if index >= enum_count {
-            break;
-        }
+        if index >= enum_count { break; }
         let enum_info = context.enums[index];
         let enum_llvm_name = "%" + sanitize_symbol(enum_info.name);
 
@@ -483,27 +436,17 @@ fn render_enum_type_definitions(context: TypeContext) -> string[] {
 
         // Map tag type to LLVM type
         let mut llvm_tag_type: string = "i32";
-        if enum_info.tag_type == "i8" {
-            llvm_tag_type = "i8";
-        }
-        if enum_info.tag_type == "i16" {
-            llvm_tag_type = "i16";
-        }
-        if enum_info.tag_type == "i32" {
-            llvm_tag_type = "i32";
-        }
-        if enum_info.tag_type == "i64" {
-            llvm_tag_type = "i64";
-        }
+        if enum_info.tag_type == "i8" { llvm_tag_type = "i8"; }
+        if enum_info.tag_type == "i16" { llvm_tag_type = "i16"; }
+        if enum_info.tag_type == "i32" { llvm_tag_type = "i32"; }
+        if enum_info.tag_type == "i64" { llvm_tag_type = "i64"; }
 
         // Calculate the maximum payload size across all variants
         let mut max_payload_size: number = 0;
         let mut variant_idx: number = 0;
         let variant_count = clamp_collection_length(enum_info.variants.length, 10000);
         loop {
-            if variant_idx >= variant_count {
-                break;
-            }
+            if variant_idx >= variant_count { break; }
             let variant = enum_info.variants[variant_idx];
             if variant.size > max_payload_size {
                 max_payload_size = variant.size;
@@ -524,9 +467,7 @@ fn render_enum_type_definitions(context: TypeContext) -> string[] {
         let mut payload_repr: string = "";
         if max_payload_size > 0 {
             let mut enum_align = enum_info.align;
-            if enum_align <= 0 {
-                enum_align = 1;
-            }
+            if enum_align <= 0 { enum_align = 1; }
 
             // Payload offset = align_to(tag_size, enum_align)
             let mut payload_offset = enum_info.tag_size;
@@ -565,7 +506,9 @@ fn render_enum_type_definitions(context: TypeContext) -> string[] {
                 payload_storage_size += (elem_size - remainder);
             }
             let elem_count = payload_storage_size / elem_size;
-            payload_repr = ", [" + number_to_string(elem_count) + " x " + elem_type + "]";
+            payload_repr = ", [" + number_to_string(elem_count) + " x "
+                + elem_type
+                + "]";
         }
 
         let body = "{ " + llvm_tag_type + pad_repr + payload_repr + " }";

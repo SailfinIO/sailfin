@@ -2,21 +2,17 @@
 //
 // General utility functions for the LLVM lowering pass. These are basic
 // string manipulation, array helpers, and parsing utilities.
-
-import { substring, char_code } from "../string_utils";
+import { char_code, substring } from "../string_utils";
 import { ParameterBinding } from "./types";
 
 // =============================================================================
 // String manipulation
 // =============================================================================
-
 fn trim_text(value: string) -> string {
     let mut start: number = 0;
     let mut end: number = value.length;
     loop {
-        if start >= end {
-            break;
-        }
+        if start >= end { break; }
         let ch = char_at(value, start);
         if is_trim_char(ch) {
             start += 1;
@@ -25,9 +21,7 @@ fn trim_text(value: string) -> string {
         break;
     }
     loop {
-        if end <= start {
-            break;
-        }
+        if end <= start { break; }
         let ch = char_at(value, end - 1);
         if is_trim_char(ch) {
             end -= 1;
@@ -36,9 +30,7 @@ fn trim_text(value: string) -> string {
         break;
     }
     if start == 0 {
-        if end == value.length {
-            return value;
-        }
+        if end == value.length { return value; }
     }
     return substring(value, start, end);
 }
@@ -62,87 +54,59 @@ fn is_trim_char(ch: string) -> boolean {
 }
 
 fn starts_with(value: string, prefix: string) -> boolean {
-    if prefix.length == 0 {
-        return true;
-    }
-    if value.length < prefix.length {
-        return false;
-    }
+    if prefix.length == 0 { return true; }
+    if value.length < prefix.length { return false; }
     let head = substring(value, 0, prefix.length);
     return head == prefix;
 }
 
 fn ends_with(value: string, suffix: string) -> boolean {
-    if suffix.length == 0 {
-        return true;
-    }
-    if value.length < suffix.length {
-        return false;
-    }
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
     let start_index = value.length - suffix.length;
     let tail = substring(value, start_index, value.length);
     return tail == suffix;
 }
 
 fn contains_text(haystack: string, needle: string) -> boolean {
-    if needle.length == 0 {
-        return true;
-    }
-    if haystack.length < needle.length {
-        return false;
-    }
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
     let _search_limit = haystack.length - needle.length;
     let mut index: number = 0;
     loop {
-        if index > _search_limit {
-            break;
-        }
+        if index > _search_limit { break; }
         let candidate = substring(haystack, index, index + needle.length);
-        if candidate == needle {
-            return true;
-        }
+        if candidate == needle { return true; }
         index += 1;
     }
     return false;
 }
 
 fn index_of(value: string, target: string) -> number {
-    if target.length == 0 {
-        return 0;
-    }
+    if target.length == 0 { return 0; }
     // Use substring + == instead of char_code_at_text comparisons.
     // char_code_at_text is miscompiled by older seeds, but substring
     // (backed by the C runtime grapheme_at) and == both work correctly.
     let _search_limit = value.length - target.length;
     let mut index: number = 0;
     loop {
-        if index > _search_limit {
-            break;
-        }
+        if index > _search_limit { break; }
         let candidate = substring(value, index, index + target.length);
-        if candidate == target {
-            return index;
-        }
+        if candidate == target { return index; }
         index += 1;
     }
     return -1;
 }
 
 fn find_last_index_of_char(value: string, target: string) -> number {
-    if target.length != 1 {
-        return -1;
-    }
+    if target.length != 1 { return -1; }
     // Use substring + == instead of char_code_at_text.
     let mut index: number = value.length;
     loop {
-        if index <= 0 {
-            break;
-        }
+        if index <= 0 { break; }
         index -= 1;
         let ch = substring(value, index, index + 1);
-        if ch == target {
-            return index;
-        }
+        if ch == target { return index; }
     }
     return -1;
 }
@@ -153,9 +117,7 @@ fn char_code_at_text(text: string, index: number) -> number {
 
 fn strip_mut_prefix(value: string) -> string {
     let trimmed = trim_text(value);
-    if trimmed.length < 4 {
-        return trimmed;
-    }
+    if trimmed.length < 4 { return trimmed; }
     let prefix = substring(trimmed, 0, 4);
     if prefix == "mut " {
         return trim_text(substring(trimmed, 4, trimmed.length));
@@ -166,30 +128,10 @@ fn strip_mut_prefix(value: string) -> string {
 // =============================================================================
 // Number utilities
 // =============================================================================
-
 fn number_to_string(value: number) -> string {
-    if value == 0 {
-        return "0";
-    }
+    if value == 0 { return "0"; }
     let digits = "0123456789";
-    let powers: number[] = [
-        1000000000000000,
-        100000000000000,
-        10000000000000,
-        1000000000000,
-        100000000000,
-        10000000000,
-        1000000000,
-        100000000,
-        10000000,
-        1000000,
-        100000,
-        10000,
-        1000,
-        100,
-        10,
-        1
-    ];
+    let powers: number[] = [1000000000000000, 100000000000000, 10000000000000, 1000000000000, 100000000000, 10000000000, 1000000000, 100000000, 10000000, 1000000, 100000, 10000, 1000, 100, 10, 1];
     let mut remaining: number = value;
     let mut is_negative: boolean = false;
     if remaining < 0 {
@@ -200,15 +142,11 @@ fn number_to_string(value: number) -> string {
     let mut index: number = 0;
     let mut started: boolean = false;
     loop {
-        if index >= powers.length {
-            break;
-        }
+        if index >= powers.length { break; }
         let power = powers[index];
         let mut count: number = 0;
         loop {
-            if remaining < power {
-                break;
-            }
+            if remaining < power { break; }
             remaining -= power;
             count += 1;
         }
@@ -222,12 +160,8 @@ fn number_to_string(value: number) -> string {
         }
         index += 1;
     }
-    if output.length == 0 {
-        output = "0";
-    }
-    if is_negative {
-        return "-" + output;
-    }
+    if output.length == 0 { output = "0"; }
+    if is_negative { return "-" + output; }
     return output;
 }
 
@@ -244,21 +178,15 @@ fn lower_char_code(code: number) -> number {
 }
 
 fn matches_case_insensitive(value: string, expected: string) -> boolean {
-    if value.length != expected.length {
-        return false;
-    }
+    if value.length != expected.length { return false; }
     let mut index: number = 0;
     loop {
-        if index >= value.length {
-            break;
-        }
+        if index >= value.length { break; }
         let value_ch = substring(value, index, index + 1);
         let expected_ch = substring(expected, index, index + 1);
         let value_code = lower_char_code(char_code(value_ch));
         let expected_code = lower_char_code(char_code(expected_ch));
-        if value_code != expected_code {
-            return false;
-        }
+        if value_code != expected_code { return false; }
         index += 1;
     }
     return true;
@@ -267,35 +195,24 @@ fn matches_case_insensitive(value: string, expected: string) -> boolean {
 // =============================================================================
 // Literal detection
 // =============================================================================
-
 fn is_boolean_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if matches_case_insensitive(trimmed, "true") {
-        return true;
-    }
-    if matches_case_insensitive(trimmed, "false") {
-        return true;
-    }
+    if matches_case_insensitive(trimmed, "true") { return true; }
+    if matches_case_insensitive(trimmed, "false") { return true; }
     return false;
 }
 
 fn is_integer_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     let mut index: number = 0;
     if substring(trimmed, 0, 1) == "-" {
-        if trimmed.length == 1 {
-            return false;
-        }
+        if trimmed.length == 1 { return false; }
         index = 1;
     }
     let mut has_digit: boolean = false;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         let mut _if335: boolean = false;
         if ch == "0" { _if335 = true; }
@@ -323,19 +240,13 @@ fn is_number_literal(text: string) -> boolean {
     let mut has_digit: boolean = false;
     let mut has_decimal: boolean = false;
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     if substring(trimmed, 0, 1) == "-" {
-        if trimmed.length == 1 {
-            return false;
-        }
+        if trimmed.length == 1 { return false; }
         index = 1;
     }
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         let mut _if336: boolean = false;
         if ch == "0" { _if336 = true; }
@@ -354,9 +265,7 @@ fn is_number_literal(text: string) -> boolean {
             continue;
         }
         if ch == "." {
-            if has_decimal {
-                return false;
-            }
+            if has_decimal { return false; }
             has_decimal = true;
             index += 1;
             continue;
@@ -372,82 +281,53 @@ fn is_digit_char(ch: string) -> boolean {
     let nine = char_code("9");
     let mut _ret337: boolean = false;
     if code >= zero {
-        if code <= nine {
-            _ret337 = true;
-        }
+        if code <= nine { _ret337 = true; }
     }
     return _ret337;
 }
 
 fn is_simple_identifier(value: string) -> boolean {
     let trimmed = trim_text(value);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     let first = substring(trimmed, 0, 1);
     if first >= "0" {
-        if first <= "9" {
-            return false;
-        }
+        if first <= "9" { return false; }
     }
     let sanitized = sanitize_symbol(trimmed);
-    if sanitized != trimmed {
-        return false;
-    }
+    if sanitized != trimmed { return false; }
     return true;
 }
 
 // =============================================================================
 // Identifier and keyword helpers
 // =============================================================================
-
 fn is_identifier_start_char(ch: string) -> boolean {
-    if ch == "_" {
-        return true;
-    }
-    if index_of("abcdefghijklmnopqrstuvwxyz", ch) != -1 {
-        return true;
-    }
-    if index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) != -1 {
-        return true;
-    }
+    if ch == "_" { return true; }
+    if index_of("abcdefghijklmnopqrstuvwxyz", ch) != -1 { return true; }
+    if index_of("ABCDEFGHIJKLMNOPQRSTUVWXYZ", ch) != -1 { return true; }
     return false;
 }
 
 fn is_identifier_part_char(ch: string) -> boolean {
-    if is_identifier_start_char(ch) {
-        return true;
-    }
-    if index_of("0123456789", ch) != -1 {
-        return true;
-    }
+    if is_identifier_start_char(ch) { return true; }
+    if index_of("0123456789", ch) != -1 { return true; }
     return false;
 }
 
 fn matches_keyword(value: string, start_index: number, keyword: string) -> boolean {
     let remaining = value.length - start_index;
-    if remaining < keyword.length {
-        return false;
-    }
+    if remaining < keyword.length { return false; }
     let slice = substring(value, start_index, start_index + keyword.length);
-    if slice != keyword {
-        return false;
-    }
+    if slice != keyword { return false; }
     let _keyword_end = start_index + keyword.length;
-    if _keyword_end >= value.length {
-        return true;
-    }
+    if _keyword_end >= value.length { return true; }
     let next = substring(value, _keyword_end, _keyword_end + 1);
-    if is_identifier_part_char(next) {
-        return false;
-    }
+    if is_identifier_part_char(next) { return false; }
     return true;
 }
 
 fn is_effect_prefix_char(ch: string) -> boolean {
-    if is_trim_char(ch) {
-        return true;
-    }
+    if is_trim_char(ch) { return true; }
     let mut _ret338: boolean = false;
     if ch == "(" { _ret338 = true; }
     if ch == "," { _ret338 = true; }
@@ -459,9 +339,7 @@ fn is_effect_prefix_char(ch: string) -> boolean {
 }
 
 fn is_effect_delimiter(ch: string) -> boolean {
-    if is_trim_char(ch) {
-        return true;
-    }
+    if is_trim_char(ch) { return true; }
     let mut _ret339: boolean = false;
     if ch == "(" { _ret339 = true; }
     if ch == ")" { _ret339 = true; }
@@ -476,67 +354,46 @@ fn is_effect_delimiter(ch: string) -> boolean {
 // =============================================================================
 // Symbol sanitization
 // =============================================================================
-
 // Duplicated from string_utils to avoid cross-module function call issues in Stage2
 fn is_symbol_char(ch: string) -> boolean {
-    if ch.length == 0 {
-        return false;
-    }
-    if ch == "_" {
-        return true;
-    }
+    if ch.length == 0 { return false; }
+    if ch == "_" { return true; }
     let code = char_code(ch);
     let lower_a = char_code("a");
     let lower_z = char_code("z");
     if code >= lower_a {
-        if code <= lower_z {
-            return true;
-        }
+        if code <= lower_z { return true; }
     }
     let upper_a = char_code("A");
     let upper_z = char_code("Z");
     if code >= upper_a {
-        if code <= upper_z {
-            return true;
-        }
+        if code <= upper_z { return true; }
     }
     let zero = char_code("0");
     let nine = char_code("9");
     if code >= zero {
-        if code <= nine {
-            return true;
-        }
+        if code <= nine { return true; }
     }
     return false;
 }
 
 fn sanitize_symbol(name: string) -> string {
-    if name.length == 0 {
-        return "_";
-    }
+    if name.length == 0 { return "_"; }
     let mut result: string = "";
     let mut index: number = 0;
     loop {
-        if index >= name.length {
-            break;
-        }
+        if index >= name.length { break; }
         let ch = substring(name, index, index + 1);
-        if is_symbol_char(ch) {
-            result = result + ch;
-        }
+        if is_symbol_char(ch) { result = result + ch; }
         index += 1;
     }
-    if result.length == 0 {
-        return "_";
-    }
+    if result.length == 0 { return "_"; }
     let first = substring(result, 0, 1);
     let first_code = char_code(first);
     let zero = char_code("0");
     let nine = char_code("9");
     if first_code >= zero {
-        if first_code <= nine {
-            result = "_" + result;
-        }
+        if first_code <= nine { result = "_" + result; }
     }
     return result;
 }
@@ -544,30 +401,21 @@ fn sanitize_symbol(name: string) -> string {
 // =============================================================================
 // Array utilities
 // =============================================================================
-
 fn append_string(values: string[], value: string) -> string[] {
     let mut out = values;
-    if out == null {
-        out = [];
-    }
+    if out == null { out = []; }
     out = out.push(value);
     return out;
 }
 
 fn extend_string_array(values: string[], additions: string[]) -> string[] {
     let mut out = values;
-    if out == null {
-        out = [];
-    }
+    if out == null { out = []; }
     let mut safe_additions = additions;
-    if safe_additions == null {
-        safe_additions = [];
-    }
+    if safe_additions == null { safe_additions = []; }
     let mut index: number = 0;
     loop {
-        if index >= safe_additions.length {
-            break;
-        }
+        if index >= safe_additions.length { break; }
         out = out.push(safe_additions[index]);
         index += 1;
     }
@@ -577,14 +425,10 @@ fn extend_string_array(values: string[], additions: string[]) -> string[] {
 fn copy_string_array(values: string[]) -> string[] {
     let mut result: string[] = [];
     let mut safe_values = values;
-    if safe_values == null {
-        safe_values = [];
-    }
+    if safe_values == null { safe_values = []; }
     let mut index: number = 0;
     loop {
-        if index >= safe_values.length {
-            break;
-        }
+        if index >= safe_values.length { break; }
         result.push(safe_values[index]);
         index += 1;
     }
@@ -598,71 +442,47 @@ fn string_arrays_equal(first: string[], second: string[]) -> boolean {
     if _if340 {
         let mut _ret342: boolean = false;
         if first == null {
-            if second == null {
-                _ret342 = true;
-            }
+            if second == null { _ret342 = true; }
         }
         return _ret342;
     }
-    if first.length != second.length {
-        return false;
-    }
+    if first.length != second.length { return false; }
     let mut index: number = 0;
     loop {
-        if index >= first.length {
-            break;
-        }
-        if first[index] != second[index] {
-            return false;
-        }
+        if index >= first.length { break; }
+        if first[index] != second[index] { return false; }
         index += 1;
     }
     return true;
 }
 
 fn string_array_contains(values: string[], target: string) -> boolean {
-    if values == null {
-        return false;
-    }
+    if values == null { return false; }
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
-        if values[index] == target {
-            return true;
-        }
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
         index += 1;
     }
     return false;
 }
 
 fn join_with_separator(values: string[], separator: string) -> string {
-    if values == null {
-        return "";
-    }
-    if values.length == 0 {
-        return "";
-    }
-    if values.length == 1 {
-        return values[0];
-    }
+    if values == null { return ""; }
+    if values.length == 0 { return ""; }
+    if values.length == 1 { return values[0]; }
 
     // Balanced join to avoid repeatedly concatenating an ever-growing prefix.
     // This keeps intermediate strings smaller and prevents runtime corruption
     // observed in large LLVM IR modules (notably the test harness build).
     let mut parts: string[] = values;
     loop {
-        if parts.length <= 1 {
-            break;
-        }
+        if parts.length <= 1 { break; }
 
         let mut next: string[] = [];
         let mut index: number = 0;
         loop {
-            if index >= parts.length {
-                break;
-            }
+            if index >= parts.length { break; }
             let _jn_next = index + 1;
             if _jn_next < parts.length {
                 let combined = parts[index] + separator + parts[_jn_next];
@@ -682,16 +502,11 @@ fn join_with_separator(values: string[], separator: string) -> string {
 // =============================================================================
 // Parameter binding helpers
 // =============================================================================
-
 fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     let mut index: number = 0;
     loop {
-        if index >= bindings.length {
-            break;
-        }
-        if bindings[index].name == name {
-            return bindings[index];
-        }
+        if index >= bindings.length { break; }
+        if bindings[index].name == name { return bindings[index]; }
         index += 1;
     }
     return null;
@@ -714,7 +529,7 @@ fn _merge_copy_parameter_binding(primary: ParameterBinding, consumed_flag: boole
         llvm_type: primary.llvm_type,
         type_annotation: primary.type_annotation,
         consumed: consumed_flag,
-        span: primary.span,
+        span: primary.span
     };
 }
 
@@ -722,9 +537,7 @@ fn merge_parameter_bindings(first: ParameterBinding[], second: ParameterBinding[
     let mut result: ParameterBinding[] = [];
     let mut index: number = 0;
     loop {
-        if index >= first.length {
-            break;
-        }
+        if index >= first.length { break; }
         let primary = first[index];
         let mut consumed_flag: boolean = primary.consumed;
         let counterpart = find_parameter_binding(second, primary.name);
@@ -743,21 +556,14 @@ fn merge_parameter_bindings(first: ParameterBinding[], second: ParameterBinding[
 // =============================================================================
 // Parsing helpers
 // =============================================================================
-
 fn skip_string_literal(text: string, start_index: number) -> number {
     let mut index: number = start_index;
     let mut escaped: boolean = false;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let current = substring(text, index, index + 1);
-        if escaped {
-            escaped = false;
-        } else {
-            if current == "\\" {
-                escaped = true;
-            } else if current == "\"" {
+        if escaped { escaped = false; } else {
+            if current == "\\" { escaped = true; } else if current == "\"" {
                 index += 1;
                 break;
             }

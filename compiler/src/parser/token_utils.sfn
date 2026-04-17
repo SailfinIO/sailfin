@@ -2,24 +2,28 @@
 //
 // Token manipulation utilities - functions for working with token arrays,
 // parser state management, trivia handling, and token-to-text conversion.
-
-import { Token, eof_token } from "../token";
 import { SourceSpan } from "../ast";
-import { substring, char_code, char_at, strings_equal } from "../string_utils";
-import { Parser, CaptureResult, ParenthesizedParseResult, PatternCaptureResult } from "./types";
+import {
+    char_at,
+    char_code,
+    strings_equal,
+    substring
+} from "../string_utils";
+import { Token, eof_token } from "../token";
+import {
+    CaptureResult,
+    ParenthesizedParseResult,
+    Parser,
+    PatternCaptureResult
+} from "./types";
 import { string_array_contains, trim_text } from "./utils";
 
 // ============================================================================
 // Parser State Operations
 // ============================================================================
-
 fn parser_peek_raw(parser: Parser) -> Token {
-    if parser.tokens == null {
-        return eof_token(0, 0);
-    }
-    if parser.tokens.length == 0 {
-        return eof_token(0, 0);
-    }
+    if parser.tokens == null { return eof_token(0, 0); }
+    if parser.tokens.length == 0 { return eof_token(0, 0); }
     if parser.index >= parser.tokens.length {
         return parser.tokens[parser.tokens.length - 1];
     }
@@ -27,27 +31,16 @@ fn parser_peek_raw(parser: Parser) -> Token {
 }
 
 fn parser_advance_raw(parser: Parser) -> Parser {
-    if parser.tokens == null {
-        return parser;
-    }
-    if parser.index + 1 > parser.tokens.length {
-        return parser;
-    }
-    return Parser {
-        tokens: parser.tokens,
-        index: parser.index + 1,
-    };
+    if parser.tokens == null { return parser; }
+    if parser.index + 1 > parser.tokens.length { return parser; }
+    return Parser { tokens: parser.tokens, index: parser.index + 1 };
 }
 
 fn skip_trivia(parser: Parser) -> Parser {
     let mut current = parser;
     loop {
-        if current.tokens == null {
-            break;
-        }
-        if current.index >= current.tokens.length {
-            break;
-        }
+        if current.tokens == null { break; }
+        if current.index >= current.tokens.length { break; }
         let token = current.tokens[current.index];
         if is_trivia_token(token) {
             current = parser_advance_raw(current);
@@ -62,9 +55,7 @@ fn is_end_of_file(parser: Parser, token: Token) -> boolean {
     // Avoid relying on `token.kind.variant` in native mode.
     // The lexer appends a final EOF token; treat the last token with an empty
     // lexeme as end-of-file.
-    if parser.tokens == null {
-        return true;
-    }
+    if parser.tokens == null { return true; }
     if parser.index + 1 >= parser.tokens.length {
         return token.lexeme.length == 0;
     }
@@ -74,14 +65,11 @@ fn is_end_of_file(parser: Parser, token: Token) -> boolean {
 // ============================================================================
 // Token Matching
 // ============================================================================
-
 fn identifier_matches(token: Token, expected: string) -> boolean {
     let lexeme = token.lexeme;
     let mut _ret414: boolean = false;
     if lexeme.length > 0 {
-        if strings_equal(lexeme, expected) {
-            _ret414 = true;
-        }
+        if strings_equal(lexeme, expected) { _ret414 = true; }
     }
     return _ret414;
 }
@@ -90,16 +78,12 @@ fn symbol_matches(token: Token, expected: string) -> boolean {
     let lexeme = token.lexeme;
     let mut _ret415: boolean = false;
     if lexeme.length > 0 {
-        if strings_equal(lexeme, expected) {
-            _ret415 = true;
-        }
+        if strings_equal(lexeme, expected) { _ret415 = true; }
     }
     return _ret415;
 }
 
-fn identifier_text(token: Token) -> string {
-    return token.lexeme;
-}
+fn identifier_text(token: Token) -> string { return token.lexeme; }
 
 fn string_literal_value(token: Token) -> string {
     let lexeme = token.lexeme;
@@ -108,29 +92,21 @@ fn string_literal_value(token: Token) -> string {
 }
 
 fn strip_surrounding_quotes_local(text: string) -> string {
-    if text.length < 2 {
-        return text;
-    }
+    if text.length < 2 { return text; }
     let first = char_code(char_at(text, 0));
     let last = char_code(char_at(text, text.length - 1));
     if first == 34 {
-        if last == 34 {
-            return substring(text, 1, text.length - 1);
-        }
+        if last == 34 { return substring(text, 1, text.length - 1); }
     }
     return text;
 }
 
 fn decode_string_literal_escapes_local(text: string) -> string {
-    if text.length == 0 {
-        return "";
-    }
+    if text.length == 0 { return ""; }
     let mut decoded: string = "";
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = char_at(text, index);
         if ch == "\\" {
             let next_index = index + 1;
@@ -140,17 +116,11 @@ fn decode_string_literal_escapes_local(text: string) -> string {
                 continue;
             }
             let escaped = char_at(text, next_index);
-            if escaped == "n" {
-                decoded = decoded + "\n";
-            } else if escaped == "t" {
+            if escaped == "n" { decoded = decoded + "\n"; } else if escaped == "t" {
                 decoded = decoded + "\t";
-            } else if escaped == "r" {
-                decoded = decoded + "\r";
-            } else if escaped == "\"" {
+            } else if escaped == "r" { decoded = decoded + "\r"; } else if escaped == "\"" {
                 decoded = decoded + "\"";
-            } else if escaped == "\\" {
-                decoded = decoded + "\\";
-            } else {
+            } else if escaped == "\\" { decoded = decoded + "\\"; } else {
                 decoded = decoded + escaped;
             }
             index += 2;
@@ -165,7 +135,6 @@ fn decode_string_literal_escapes_local(text: string) -> string {
 // ============================================================================
 // Keyword/Symbol Consumption
 // ============================================================================
-
 fn consume_keyword(initial_parser: Parser, keyword: string) -> Parser {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -180,9 +149,7 @@ fn consume_symbol(initial_parser: Parser, symbol: string) -> Parser {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
     let token = parser_peek_raw(parser);
-    if symbol_matches(token, symbol) {
-        return parser_advance_raw(parser);
-    }
+    if symbol_matches(token, symbol) { return parser_advance_raw(parser); }
     return parser;
 }
 
@@ -191,16 +158,10 @@ fn advance_to_symbol(parser: Parser, symbol: string) -> Parser {
     loop {
         current = skip_trivia(current);
         let token = parser_peek_raw(current);
-        if symbol_matches(token, symbol) {
-            return current;
-        }
-        if token.kind.variant == "EndOfFile" {
-            return current;
-        }
+        if symbol_matches(token, symbol) { return current; }
+        if token.kind.variant == "EndOfFile" { return current; }
         let next = parser_advance_raw(current);
-        if next.index == current.index {
-            return current;
-        }
+        if next.index == current.index { return current; }
         current = next;
     }
     return current;
@@ -209,46 +170,31 @@ fn advance_to_symbol(parser: Parser, symbol: string) -> Parser {
 // ============================================================================
 // Trivia Detection
 // ============================================================================
-
 fn is_trivia_token(token: Token) -> boolean {
     let mut _if416: boolean = false;
     if token.kind.variant == "Whitespace" { _if416 = true; }
     if token.kind.variant == "Comment" { _if416 = true; }
-    if _if416 {
-        return true;
-    }
+    if _if416 { return true; }
     let text = token.lexeme;
-    if text.length == 0 {
-        return false;
-    }
-    if is_whitespace_lexeme(text) {
-        return true;
-    }
+    if text.length == 0 { return false; }
+    if is_whitespace_lexeme(text) { return true; }
     if text.length >= 2 {
         let prefix = substring(text, 0, 2);
         let mut _if417: boolean = false;
         if strings_equal(prefix, "//") { _if417 = true; }
         if strings_equal(prefix, "/*") { _if417 = true; }
-        if _if417 {
-            return true;
-        }
+        if _if417 { return true; }
     }
     return false;
 }
 
 fn is_whitespace_lexeme(text: string) -> boolean {
-    if text.length == 0 {
-        return false;
-    }
+    if text.length == 0 { return false; }
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = char_at(text, index);
-        if !is_trim_whitespace_local(ch) {
-            return false;
-        }
+        if !is_trim_whitespace_local(ch) { return false; }
         index += 1;
     }
     return true;
@@ -266,14 +212,11 @@ fn is_trim_whitespace_local(ch: string) -> boolean {
 // ============================================================================
 // Token Array Operations
 // ============================================================================
-
 fn token_slice(tokens: Token[], start: number, end: number) -> Token[] {
     let mut result: Token[] = [];
     let mut index: number = start;
     loop {
-        if index >= end {
-            break;
-        }
+        if index >= end { break; }
         result = append_token(result, tokens[index]);
         index += 1;
     }
@@ -285,9 +228,7 @@ fn trim_token_edges(tokens: Token[]) -> Token[] {
     let mut end: number = tokens.length;
 
     loop {
-        if start >= end {
-            break;
-        }
+        if start >= end { break; }
         let token = tokens[start];
         if is_trivia_token(token) {
             start += 1;
@@ -297,9 +238,7 @@ fn trim_token_edges(tokens: Token[]) -> Token[] {
     }
 
     loop {
-        if end <= start {
-            break;
-        }
+        if end <= start { break; }
         let token = tokens[end - 1];
         if is_trivia_token(token) {
             end -= 1;
@@ -316,18 +255,12 @@ fn trim_block_tokens(tokens: Token[]) -> Token[] {
     let mut index: number = 0;
     let mut end: number = tokens.length;
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            if strings_equal(sym, "{") {
-                depth += 1;
-            } else if strings_equal(sym, "}") {
-                if depth > 0 {
-                    depth -= 1;
-                }
+            if strings_equal(sym, "{") { depth += 1; } else if strings_equal(sym, "}") {
+                if depth > 0 { depth -= 1; }
                 if depth == 0 {
                     end = index + 1;
                     break;
@@ -344,9 +277,7 @@ fn filter_trivia(tokens: Token[]) -> Token[] {
     let mut filtered: Token[] = [];
 
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         let token = tokens[index];
         if token.kind.variant != "Whitespace" {
             if token.kind.variant != "Comment" {
@@ -364,7 +295,6 @@ fn filter_trivia(tokens: Token[]) -> Token[] {
 // ============================================================================
 // Token-to-Text Conversion
 // ============================================================================
-
 fn tokens_to_text(tokens: Token[]) -> string {
     let mut text: string = "";
     let mut index: number = 0;
@@ -372,9 +302,7 @@ fn tokens_to_text(tokens: Token[]) -> string {
     let max_tokens: number = 512;
     let mut truncated: boolean = false;
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         if index >= max_tokens {
             truncated = true;
             break;
@@ -388,25 +316,18 @@ fn tokens_to_text(tokens: Token[]) -> string {
         }
     }
     if truncated {
-        if text.length > limit {
-            text = substring(text, 0, limit);
-        }
+        if text.length > limit { text = substring(text, 0, limit); }
     }
-    if truncated {
-        text = text + "... (truncated)";
-    }
+    if truncated { text = text + "... (truncated)"; }
     return text;
 }
 
 // ============================================================================
 // Source Span Construction
 // ============================================================================
-
 fn source_span_from_tokens(tokens: Token[]) -> SourceSpan? {
     let trimmed = trim_token_edges(tokens);
-    if trimmed.length == 0 {
-        return null;
-    }
+    if trimmed.length == 0 { return null; }
 
     let start = trimmed[0];
     let last = trimmed[trimmed.length - 1];
@@ -416,16 +337,12 @@ fn source_span_from_tokens(tokens: Token[]) -> SourceSpan? {
     let lexeme = last.lexeme;
     let mut index: number = 0;
     loop {
-        if index >= lexeme.length {
-            break;
-        }
+        if index >= lexeme.length { break; }
         let ch = char_at(lexeme, index);
         if ch == "\n" {
             end_line += 1;
             end_column = 1;
-        } else {
-            end_column += 1;
-        }
+        } else { end_column += 1; }
         index += 1;
     }
 
@@ -433,14 +350,13 @@ fn source_span_from_tokens(tokens: Token[]) -> SourceSpan? {
         start_line: start.line,
         start_column: start.column,
         end_line: end_line,
-        end_column: end_column,
+        end_column: end_column
     };
 }
 
 // ============================================================================
 // Token Collection Functions
 // ============================================================================
-
 fn collect_until(parser: Parser, terminators: string[]) -> CaptureResult {
     let mut current = parser;
     let mut captured: Token[] = [];
@@ -450,16 +366,12 @@ fn collect_until(parser: Parser, terminators: string[]) -> CaptureResult {
 
     loop {
         let token = parser_peek_raw(current);
-        if token.kind.variant == "EndOfFile" {
-            break;
-        }
+        if token.kind.variant == "EndOfFile" { break; }
 
         let mut _let418: boolean = false;
         if paren_depth == 0 {
             if brace_depth == 0 {
-                if bracket_depth == 0 {
-                    _let418 = true;
-                }
+                if bracket_depth == 0 { _let418 = true; }
             }
         }
         let is_balanced = _let418;
@@ -470,39 +382,23 @@ fn collect_until(parser: Parser, terminators: string[]) -> CaptureResult {
                 should_stop = string_array_contains(terminators, token.lexeme);
             }
         }
-        if should_stop {
-            break;
-        }
+        if should_stop { break; }
 
         captured = append_token(captured, token);
 
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            if strings_equal(sym, "(") {
-                paren_depth += 1;
-            } else if strings_equal(sym, ")") {
-                if paren_depth > 0 {
-                    paren_depth -= 1;
-                }
-            } else if strings_equal(sym, "{") {
-                brace_depth += 1;
-            } else if strings_equal(sym, "}") {
-                if brace_depth > 0 {
-                    brace_depth -= 1;
-                }
-            } else if strings_equal(sym, "[") {
-                bracket_depth += 1;
-            } else if strings_equal(sym, "]") {
-                if bracket_depth > 0 {
-                    bracket_depth -= 1;
-                }
+            if strings_equal(sym, "(") { paren_depth += 1; } else if strings_equal(sym, ")") {
+                if paren_depth > 0 { paren_depth -= 1; }
+            } else if strings_equal(sym, "{") { brace_depth += 1; } else if strings_equal(sym, "}") {
+                if brace_depth > 0 { brace_depth -= 1; }
+            } else if strings_equal(sym, "[") { bracket_depth += 1; } else if strings_equal(sym, "]") {
+                if bracket_depth > 0 { bracket_depth -= 1; }
             }
         }
 
         let advanced = parser_advance_raw(current);
-        if advanced.index == current.index {
-            break;
-        }
+        if advanced.index == current.index { break; }
         current = advanced;
     }
 
@@ -513,7 +409,11 @@ fn collect_parenthesized(parser: Parser) -> ParenthesizedParseResult {
     let mut current = skip_trivia(parser);
     let start = parser_peek_raw(current);
     if !symbol_matches(start, "(") {
-        return ParenthesizedParseResult { parser: parser, tokens: [], success: false };
+        return ParenthesizedParseResult {
+            parser: parser,
+            tokens: [],
+            success: false
+        };
     }
 
     current = parser_advance_raw(current);
@@ -523,14 +423,16 @@ fn collect_parenthesized(parser: Parser) -> ParenthesizedParseResult {
     loop {
         let token = parser_peek_raw(current);
         if token.kind.variant == "EndOfFile" {
-            return ParenthesizedParseResult { parser: parser, tokens: [], success: false };
+            return ParenthesizedParseResult {
+                parser: parser,
+                tokens: [],
+                success: false
+            };
         }
 
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            if strings_equal(sym, "(") {
-                depth += 1;
-            } else if strings_equal(sym, ")") {
+            if strings_equal(sym, "(") { depth += 1; } else if strings_equal(sym, ")") {
                 depth -= 1;
                 if depth == 0 {
                     current = parser_advance_raw(current);
@@ -543,7 +445,11 @@ fn collect_parenthesized(parser: Parser) -> ParenthesizedParseResult {
         current = parser_advance_raw(current);
     }
 
-    return ParenthesizedParseResult { parser: current, tokens: tokens, success: true };
+    return ParenthesizedParseResult {
+        parser: current,
+        tokens: tokens,
+        success: true
+    };
 }
 
 fn collect_pattern_until_arrow(parser: Parser) -> PatternCaptureResult {
@@ -553,7 +459,11 @@ fn collect_pattern_until_arrow(parser: Parser) -> PatternCaptureResult {
     loop {
         let token = parser_peek_raw(current);
         if token.kind.variant == "EndOfFile" {
-            return PatternCaptureResult { parser: parser, tokens: [], success: false };
+            return PatternCaptureResult {
+                parser: parser,
+                tokens: [],
+                success: false
+            };
         }
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
@@ -568,18 +478,25 @@ fn collect_pattern_until_arrow(parser: Parser) -> PatternCaptureResult {
         tokens = append_token(tokens, token);
         let advanced = parser_advance_raw(current);
         if advanced.index == current.index {
-            return PatternCaptureResult { parser: parser, tokens: [], success: false };
+            return PatternCaptureResult {
+                parser: parser,
+                tokens: [],
+                success: false
+            };
         }
         current = advanced;
     }
 
-    return PatternCaptureResult { parser: current, tokens: tokens, success: true };
+    return PatternCaptureResult {
+        parser: current,
+        tokens: tokens,
+        success: true
+    };
 }
 
 // ============================================================================
 // Token Splitting Functions
 // ============================================================================
-
 fn split_tokens_by_comma(tokens: Token[]) -> string[] {
     let mut parts: string[] = [];
     let mut segment: string = "";
@@ -590,36 +507,18 @@ fn split_tokens_by_comma(tokens: Token[]) -> string[] {
 
     let mut index: number = 0;
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            if strings_equal(sym, "<") {
-                angle += 1;
-            } else if strings_equal(sym, ">") {
-                if angle > 0 {
-                    angle -= 1;
-                }
-            } else if strings_equal(sym, "(") {
-                paren += 1;
-            } else if strings_equal(sym, ")") {
-                if paren > 0 {
-                    paren -= 1;
-                }
-            } else if strings_equal(sym, "{") {
-                brace += 1;
-            } else if strings_equal(sym, "}") {
-                if brace > 0 {
-                    brace -= 1;
-                }
-            } else if strings_equal(sym, "[") {
-                bracket += 1;
-            } else if strings_equal(sym, "]") {
-                if bracket > 0 {
-                    bracket -= 1;
-                }
+            if strings_equal(sym, "<") { angle += 1; } else if strings_equal(sym, ">") {
+                if angle > 0 { angle -= 1; }
+            } else if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                if paren > 0 { paren -= 1; }
+            } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                if brace > 0 { brace -= 1; }
+            } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                if bracket > 0 { bracket -= 1; }
             }
 
             if strings_equal(sym, ",") {
@@ -645,9 +544,7 @@ fn split_tokens_by_comma(tokens: Token[]) -> string[] {
     }
 
     let tail = trim_text(segment);
-    if tail.length > 0 {
-        parts = append_string_local(parts, tail);
-    }
+    if tail.length > 0 { parts = append_string_local(parts, tail); }
     return parts;
 }
 
@@ -661,36 +558,18 @@ fn split_token_slices_by_comma(tokens: Token[]) -> Token[][] {
 
     let mut index: number = 0;
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            if strings_equal(sym, "<") {
-                angle += 1;
-            } else if strings_equal(sym, ">") {
-                if angle > 0 {
-                    angle -= 1;
-                }
-            } else if strings_equal(sym, "(") {
-                paren += 1;
-            } else if strings_equal(sym, ")") {
-                if paren > 0 {
-                    paren -= 1;
-                }
-            } else if strings_equal(sym, "{") {
-                brace += 1;
-            } else if strings_equal(sym, "}") {
-                if brace > 0 {
-                    brace -= 1;
-                }
-            } else if strings_equal(sym, "[") {
-                bracket += 1;
-            } else if strings_equal(sym, "]") {
-                if bracket > 0 {
-                    bracket -= 1;
-                }
+            if strings_equal(sym, "<") { angle += 1; } else if strings_equal(sym, ">") {
+                if angle > 0 { angle -= 1; }
+            } else if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                if paren > 0 { paren -= 1; }
+            } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                if brace > 0 { brace -= 1; }
+            } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                if bracket > 0 { bracket -= 1; }
             }
 
             if strings_equal(sym, ",") {
@@ -712,16 +591,13 @@ fn split_token_slices_by_comma(tokens: Token[]) -> Token[][] {
         index += 1;
     }
 
-    if segment.length > 0 {
-        parts = append_token_array(parts, segment);
-    }
+    if segment.length > 0 { parts = append_token_array(parts, segment); }
     return parts;
 }
 
 // ============================================================================
 // Top-Level Search Functions
 // ============================================================================
-
 fn find_top_level_symbol(tokens: Token[], symbol: string) -> number {
     let mut angle: number = 0;
     let mut paren: number = 0;
@@ -730,45 +606,25 @@ fn find_top_level_symbol(tokens: Token[], symbol: string) -> number {
 
     let mut index: number = 0;
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            if strings_equal(sym, "<") {
-                angle += 1;
-            } else if strings_equal(sym, ">") {
-                if angle > 0 {
-                    angle -= 1;
-                }
-            } else if strings_equal(sym, "(") {
-                paren += 1;
-            } else if strings_equal(sym, ")") {
-                if paren > 0 {
-                    paren -= 1;
-                }
-            } else if strings_equal(sym, "{") {
-                brace += 1;
-            } else if strings_equal(sym, "}") {
-                if brace > 0 {
-                    brace -= 1;
-                }
-            } else if strings_equal(sym, "[") {
-                bracket += 1;
-            } else if strings_equal(sym, "]") {
-                if bracket > 0 {
-                    bracket -= 1;
-                }
+            if strings_equal(sym, "<") { angle += 1; } else if strings_equal(sym, ">") {
+                if angle > 0 { angle -= 1; }
+            } else if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                if paren > 0 { paren -= 1; }
+            } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                if brace > 0 { brace -= 1; }
+            } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                if bracket > 0 { bracket -= 1; }
             }
 
             if strings_equal(sym, symbol) {
                 if angle == 0 {
                     if paren == 0 {
                         if brace == 0 {
-                            if bracket == 0 {
-                                return index;
-                            }
+                            if bracket == 0 { return index; }
                         }
                     }
                 }
@@ -787,36 +643,18 @@ fn find_top_level_identifier(tokens: Token[], keyword: string) -> number {
 
     let mut index: number = 0;
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            if strings_equal(sym, "<") {
-                angle += 1;
-            } else if strings_equal(sym, ">") {
-                if angle > 0 {
-                    angle -= 1;
-                }
-            } else if strings_equal(sym, "(") {
-                paren += 1;
-            } else if strings_equal(sym, ")") {
-                if paren > 0 {
-                    paren -= 1;
-                }
-            } else if strings_equal(sym, "{") {
-                brace += 1;
-            } else if strings_equal(sym, "}") {
-                if brace > 0 {
-                    brace -= 1;
-                }
-            } else if strings_equal(sym, "[") {
-                bracket += 1;
-            } else if strings_equal(sym, "]") {
-                if bracket > 0 {
-                    bracket -= 1;
-                }
+            if strings_equal(sym, "<") { angle += 1; } else if strings_equal(sym, ">") {
+                if angle > 0 { angle -= 1; }
+            } else if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                if paren > 0 { paren -= 1; }
+            } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                if brace > 0 { brace -= 1; }
+            } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                if bracket > 0 { bracket -= 1; }
             }
         }
 
@@ -825,9 +663,7 @@ fn find_top_level_identifier(tokens: Token[], keyword: string) -> number {
                 if angle == 0 {
                     if paren == 0 {
                         if brace == 0 {
-                            if bracket == 0 {
-                                return index;
-                            }
+                            if bracket == 0 { return index; }
                         }
                     }
                 }
@@ -846,51 +682,29 @@ fn find_top_level_colon(tokens: Token[]) -> number {
 
     let mut index: number = 0;
     loop {
-        if index >= tokens.length {
-            break;
-        }
+        if index >= tokens.length { break; }
         let token = tokens[index];
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            if strings_equal(sym, "<") {
-                angle += 1;
-            } else if strings_equal(sym, ">") {
-                if angle > 0 {
-                    angle -= 1;
-                }
-            } else if strings_equal(sym, "(") {
-                paren += 1;
-            } else if strings_equal(sym, ")") {
-                if paren > 0 {
-                    paren -= 1;
-                }
-            } else if strings_equal(sym, "{") {
-                brace += 1;
-            } else if strings_equal(sym, "}") {
-                if brace > 0 {
-                    brace -= 1;
-                }
-            } else if strings_equal(sym, "[") {
-                bracket += 1;
-            } else if strings_equal(sym, "]") {
-                if bracket > 0 {
-                    bracket -= 1;
-                }
+            if strings_equal(sym, "<") { angle += 1; } else if strings_equal(sym, ">") {
+                if angle > 0 { angle -= 1; }
+            } else if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                if paren > 0 { paren -= 1; }
+            } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                if brace > 0 { brace -= 1; }
+            } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                if bracket > 0 { bracket -= 1; }
             } else if strings_equal(sym, ":") {
                 let mut _let432: boolean = false;
                 if angle == 0 {
                     if paren == 0 {
                         if brace == 0 {
-                            if bracket == 0 {
-                                _let432 = true;
-                            }
+                            if bracket == 0 { _let432 = true; }
                         }
                     }
                 }
                 let at_top = _let432;
-                if at_top {
-                    return index;
-                }
+                if at_top { return index; }
             }
         }
         index += 1;
@@ -901,28 +715,21 @@ fn find_top_level_colon(tokens: Token[]) -> number {
 // ============================================================================
 // Skip Functions
 // ============================================================================
-
 fn skip_struct_member(parser: Parser) -> Parser {
     let mut current = parser;
     loop {
         let next = parser_advance_raw(current);
-        if next.index == current.index {
-            return current;
-        }
+        if next.index == current.index { return current; }
         current = next;
         let token = parser_peek_raw(current);
-        if token.kind.variant == "EndOfFile" {
-            return current;
-        }
+        if token.kind.variant == "EndOfFile" { return current; }
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
             if strings_equal(sym, ";") {
                 current = parser_advance_raw(current);
                 return current;
             }
-            if strings_equal(sym, "}") {
-                return current;
-            }
+            if strings_equal(sym, "}") { return current; }
         }
     }
     return current;
@@ -932,23 +739,17 @@ fn skip_enum_variant_entry(parser: Parser) -> Parser {
     let mut current = parser;
     loop {
         let next = parser_advance_raw(current);
-        if next.index == current.index {
-            return current;
-        }
+        if next.index == current.index { return current; }
         current = next;
         let token = parser_peek_raw(current);
-        if token.kind.variant == "EndOfFile" {
-            return current;
-        }
+        if token.kind.variant == "EndOfFile" { return current; }
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
             if strings_equal(sym, ",") {
                 current = parser_advance_raw(current);
                 return current;
             }
-            if strings_equal(sym, "}") {
-                return current;
-            }
+            if strings_equal(sym, "}") { return current; }
         }
     }
     return current;
@@ -957,16 +758,13 @@ fn skip_enum_variant_entry(parser: Parser) -> Parser {
 fn skip_trailing_comma(parser: Parser) -> Parser {
     let mut current = skip_trivia(parser);
     let token = parser_peek_raw(current);
-    if symbol_matches(token, ",") {
-        current = parser_advance_raw(current);
-    }
+    if symbol_matches(token, ",") { current = parser_advance_raw(current); }
     return current;
 }
 
 // ============================================================================
 // Append Helpers
 // ============================================================================
-
 fn append_token(tokens: Token[], token: Token) -> Token[] {
     tokens.push(token);
     return tokens;

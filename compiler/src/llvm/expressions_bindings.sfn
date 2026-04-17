@@ -1,26 +1,18 @@
 // compiler/src/llvm/expressions_bindings.sfn
 //
 // Local and parameter binding lookup and mutation helpers.
-
-import {
-    LocalBinding, ParameterBinding,
-} from "./types";
+import { LocalBinding, ParameterBinding } from "./types";
 
 // =============================================================================
 // Local and Parameter Binding Lookup
 // =============================================================================
-
 fn find_local_binding(locals: LocalBinding[], name: string) -> LocalBinding? {
     let mut index: number = locals.length;
     loop {
-        if index <= 0 {
-            break;
-        }
+        if index <= 0 { break; }
         index -= 1;
         let entry = locals[index];
-        if entry.name == name {
-            return entry;
-        }
+        if entry.name == name { return entry; }
     }
     return null;
 }
@@ -28,13 +20,9 @@ fn find_local_binding(locals: LocalBinding[], name: string) -> LocalBinding? {
 fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     let mut index: number = 0;
     loop {
-        if index >= bindings.length {
-            break;
-        }
+        if index >= bindings.length { break; }
         let binding = bindings[index];
-        if binding.name == name {
-            return binding;
-        }
+        if binding.name == name { return binding; }
         index += 1;
     }
     return null;
@@ -44,9 +32,7 @@ fn mark_parameter_consumed(bindings: ParameterBinding[], name: string) -> Parame
     let mut result: ParameterBinding[] = [];
     let mut index: number = 0;
     loop {
-        if index >= bindings.length {
-            break;
-        }
+        if index >= bindings.length { break; }
         let binding = bindings[index];
         if binding.name == name {
             let updated = ParameterBinding {
@@ -55,12 +41,10 @@ fn mark_parameter_consumed(bindings: ParameterBinding[], name: string) -> Parame
                 llvm_type: binding.llvm_type,
                 type_annotation: binding.type_annotation,
                 consumed: true,
-                span: binding.span,
+                span: binding.span
             };
             result.push(updated);
-        } else {
-            result.push(binding);
-        }
+        } else { result.push(binding); }
         index += 1;
     }
     return result;
@@ -70,9 +54,7 @@ fn mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
     let mut index: number = 0;
     loop {
-        if index >= locals.length {
-            break;
-        }
+        if index >= locals.length { break; }
         let entry = locals[index];
         if entry.name == name {
             let updated = LocalBinding {
@@ -83,12 +65,10 @@ fn mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
                 ownership: entry.ownership,
                 consumed: true,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
+                scope_depth: entry.scope_depth
             };
             result.push(updated);
-        } else {
-            result.push(entry);
-        }
+        } else { result.push(entry); }
         index += 1;
     }
     return result;
@@ -98,9 +78,7 @@ fn reset_local_consumption(locals: LocalBinding[], name: string) -> LocalBinding
     let mut result: LocalBinding[] = [];
     let mut index: number = 0;
     loop {
-        if index >= locals.length {
-            break;
-        }
+        if index >= locals.length { break; }
         let entry = locals[index];
         if entry.name == name {
             let updated = LocalBinding {
@@ -111,12 +89,10 @@ fn reset_local_consumption(locals: LocalBinding[], name: string) -> LocalBinding
                 ownership: entry.ownership,
                 consumed: false,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth,
+                scope_depth: entry.scope_depth
             };
             result.push(updated);
-        } else {
-            result.push(entry);
-        }
+        } else { result.push(entry); }
         index += 1;
     }
     return result;

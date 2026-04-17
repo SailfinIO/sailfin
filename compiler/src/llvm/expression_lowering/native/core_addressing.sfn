@@ -1,57 +1,78 @@
 // compiler/src/llvm/expression_lowering/native/core_addressing.sfn
 //
 // Addressing helpers for Stage2 expression lowering.
-
+import { is_simple_identifier } from "../../expressions_helpers";
+import { empty_string_constant_set } from "../../strings";
 import {
-    ParameterBinding,
-    LocalBinding,
-    RawAddressParseResult,
-    LLVMOperand,
     ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    RawAddressParseResult
 } from "../../types";
-
-import {
-    trim_text,
-    append_string,
-} from "../../utils";
-
-import {
-    empty_string_constant_set,
-} from "../../strings";
-
-import {
-    is_simple_identifier,
-} from "../../expressions_helpers";
-
-import {
-    find_local_binding,
-} from "./core_scopes";
-
-import {
-    find_parameter_binding,
-} from "./core_bindings";
+import { append_string, trim_text } from "../../utils";
+import { find_parameter_binding } from "./core_bindings";
+import { find_local_binding } from "./core_scopes";
 
 fn lower_raw_address_expression(parse: RawAddressParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[]) -> ExpressionResult {
     let mut diagnostics = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
     if !parse.success {
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
     let target = trim_text(parse.target);
     if !is_simple_identifier(target) {
-        diagnostics.push("llvm lowering: &raw currently supports only simple identifiers (got `" + target + "`)");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        diagnostics.push("llvm lowering: &raw currently supports only simple identifiers (got `"
+            + target
+            + "`)");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
     let local = find_local_binding(locals, target);
     if local != null {
-        let operand = LLVMOperand { llvm_type: local.llvm_type + "*", value: local.pointer };
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: operand, diagnostics: diagnostics, string_constants: empty_constants };
+        let operand = LLVMOperand {
+            llvm_type: local.llvm_type + "*",
+            value: local.pointer
+        };
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: operand,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
     let param = find_parameter_binding(bindings, target);
     if param != null {
-        diagnostics.push("llvm lowering: cannot take raw address of parameter `" + target + "` yet");
-        return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+        diagnostics.push("llvm lowering: cannot take raw address of parameter `"
+            + target
+            + "` yet");
+        return ExpressionResult {
+            lines: lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
     }
-    diagnostics.push("llvm lowering: &raw target `" + target + "` is not a local");
-    return ExpressionResult { lines: lines, temp_index: temp_index, operand: null, diagnostics: diagnostics, string_constants: empty_constants };
+    diagnostics.push("llvm lowering: &raw target `" + target
+        + "` is not a local");
+    return ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: empty_constants
+    };
 }

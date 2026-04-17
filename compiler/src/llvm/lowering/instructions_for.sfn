@@ -1,133 +1,53 @@
 // compiler/src/llvm/lowering/instructions_for.sfn
 //
 // Control flow handler: for-loop instruction lowering (range and array iteration).
-
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { lower_for_range, build_loop_exit_mutations } from "./instructions_for_range";
-import { substring, char_code, grapheme_at } from "../../string_utils";
-
-import {
-    TypeContext,
-    LocalBinding,
-    ParameterBinding,
-    LLVMOperand,
-    BlockLoweringResult,
-    LoopContext,
-    LifetimeRegionMetadata,
-    LocalMutation,
-    StringConstant,
-    LoopStructure,
-} from "../types";
-
-import {
-    trim_text,
-    extend_string_array,
-    number_to_string,
-    strip_mut_prefix,
-    is_simple_identifier,
-} from "../utils";
-
-import {
-    empty_string_constant_set,
-    merge_string_constants,
-} from "../strings";
-
-import { array_struct_type_for_element } from "../type_mapping";
-
-import {
-    find_local_binding,
-} from "../expressions_bindings";
-
-import {
-    is_number_literal,
-    normalise_number_literal,
-} from "../expressions_literals";
-
-import {
-    default_return_literal,
-    format_local_pointer_name,
-    format_temp_name,
-} from "../expressions_helpers";
-
-import {
-    lower_expression,
-} from "../expression_lowering/native/core";
-
+import { char_code, grapheme_at, substring } from "../../string_utils";
+import { array_pointer_element_type } from "../expression_lowering/arrays";
+import { lower_expression } from "../expression_lowering/native/core";
 import {
     coerce_operand_to_type,
     emit_comparison_instruction,
-    load_local_operand,
+    load_local_operand
 } from "../expression_lowering/native/core_operands";
-
+import { parse_range_iterable } from "../expression_lowering/native/core_parse";
+import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { find_local_binding } from "../expressions_bindings";
+import { default_return_literal, format_local_pointer_name, format_temp_name } from "../expressions_helpers";
+import { is_number_literal, normalise_number_literal } from "../expressions_literals";
+import { make_child_scope_id } from "../lifetime";
+import { empty_string_constant_set, merge_string_constants } from "../strings";
+import { array_struct_type_for_element } from "../type_mapping";
 import {
-    append_local_binding,
-} from "../expression_lowering/native/core_scopes";
-
+    BlockLoweringResult,
+    LLVMOperand,
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LocalMutation,
+    LoopContext,
+    LoopStructure,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "../types";
 import {
-    parse_range_iterable,
-} from "../expression_lowering/native/core_parse";
-
-import {
-    array_pointer_element_type,
-} from "../expression_lowering/arrays";
-
-import {
-    make_child_scope_id,
-} from "../lifetime";
-
-import {
-    collect_mutation_names,
-    find_mutation_for_name,
-} from "./phi";
-
-import {
-    lower_instruction_range,
-} from "./instructions";
-
-import {
-    extend_lifetime_regions,
-    extend_mutations,
-    _parse_int_from_string,
-} from "./instructions_helpers";
-
-import {
-    allocate_block_label,
-} from "./instructions_condition";
-
-import {
-    collect_loop_structure,
-    append_loop_context,
-} from "./instructions_loops";
-
-import {
-    get_instruction_for_target,
-    get_instruction_for_iterable,
-} from "./lowering_native_helpers";
+    extend_string_array,
+    is_simple_identifier,
+    number_to_string,
+    strip_mut_prefix,
+    trim_text
+} from "../utils";
+import { lower_instruction_range } from "./instructions";
+import { allocate_block_label } from "./instructions_condition";
+import { build_loop_exit_mutations, lower_for_range } from "./instructions_for_range";
+import { _parse_int_from_string, extend_lifetime_regions, extend_mutations } from "./instructions_helpers";
+import { append_loop_context, collect_loop_structure } from "./instructions_loops";
+import { get_instruction_for_iterable, get_instruction_for_target } from "./lowering_native_helpers";
+import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
 // Lower a range-based for loop (e.g., `for i in 0..10`).
 // Returns null if the iterable is not a recognized range pattern.
-fn lower_for_array(
-    function: NativeFunction,
-    structure: LoopStructure,
-    raw_target: string,
-    instruction: NativeInstruction,
-    iterable_operand: LLVMOperand,
-    llvm_return: string,
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    allocas: string[],
-    lines: string[],
-    temp_index: number,
-    block_counter: number,
-    next_local_id: number,
-    next_region_id: number,
-    functions: NativeFunction[],
-    loop_stack: LoopContext[],
-    context: TypeContext,
-    scope_id: string,
-    scope_depth: number,
-    next_index: number
-) -> BlockLoweringResult {
+fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_target: string, instruction: NativeInstruction, iterable_operand: LLVMOperand, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, block_counter: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], loop_stack: LoopContext[], context: TypeContext, scope_id: string, scope_depth: number, next_index: number) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -147,22 +67,45 @@ fn lower_for_array(
     let data_pointer_pointer_type = data_pointer_type + "*";
 
     let length_pointer_name = format_temp_name(current_temp);
-    current_lines.push("  " + length_pointer_name + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + iterable_operand.value + ", i32 0, i32 1");
+    current_lines.push("  " + length_pointer_name + " = getelementptr "
+        + array_struct_type
+        + ", "
+        + array_struct_type
+        + "* "
+        + iterable_operand.value
+        + ", i32 0, i32 1");
     current_temp += 1;
 
     let length_load_name = format_temp_name(current_temp);
-    current_lines.push("  " + length_load_name + " = load i64, i64* " + length_pointer_name);
+    current_lines.push("  " + length_load_name + " = load i64, i64* "
+        + length_pointer_name);
     current_temp += 1;
-    let length_operand = LLVMOperand { llvm_type: "i64", value: length_load_name };
+    let length_operand = LLVMOperand {
+        llvm_type: "i64",
+        value: length_load_name
+    };
 
     let data_pointer_name = format_temp_name(current_temp);
-    current_lines.push("  " + data_pointer_name + " = getelementptr " + array_struct_type + ", " + array_struct_type + "* " + iterable_operand.value + ", i32 0, i32 0");
+    current_lines.push("  " + data_pointer_name + " = getelementptr "
+        + array_struct_type
+        + ", "
+        + array_struct_type
+        + "* "
+        + iterable_operand.value
+        + ", i32 0, i32 0");
     current_temp += 1;
 
     let data_load_name = format_temp_name(current_temp);
-    current_lines.push("  " + data_load_name + " = load " + data_pointer_type + ", " + data_pointer_pointer_type + " " + data_pointer_name);
+    current_lines.push("  " + data_load_name + " = load " + data_pointer_type
+        + ", "
+        + data_pointer_pointer_type
+        + " "
+        + data_pointer_name);
     current_temp += 1;
-    let data_operand = LLVMOperand { llvm_type: data_pointer_type, value: data_load_name };
+    let data_operand = LLVMOperand {
+        llvm_type: data_pointer_type,
+        value: data_load_name
+    };
 
     let loop_header_alloc = allocate_block_label("for", current_block_counter);
     let loop_header_label = loop_header_alloc.label;
@@ -188,61 +131,82 @@ fn lower_for_array(
     let iteration_pointer = format_local_pointer_name(current_next_local);
     current_next_local += 1;
     current_allocas.push("  " + iteration_pointer + " = alloca " + element_type);
-    current_lines.push("  store " + element_type + " " + default_return_literal(element_type) + ", " + element_type + "* " + iteration_pointer);
+    current_lines.push("  store " + element_type + " " + default_return_literal(element_type)
+        + ", "
+        + element_type
+        + "* "
+        + iteration_pointer);
 
     current_lines.push("  br label %" + loop_header_label);
     current_lines.push(loop_header_label + ":");
 
     let header_index_name = format_temp_name(current_temp);
-    current_lines.push("  " + header_index_name + " = load i64, i64* " + index_pointer);
+    current_lines.push("  " + header_index_name + " = load i64, i64* "
+        + index_pointer);
     current_temp += 1;
 
     let comparison_name = format_temp_name(current_temp);
-    current_lines.push("  " + comparison_name + " = icmp slt i64 " + header_index_name + ", " + length_operand.value);
+    current_lines.push("  " + comparison_name + " = icmp slt i64 "
+        + header_index_name
+        + ", "
+        + length_operand.value);
     current_temp += 1;
-    current_lines.push("  br i1 " + comparison_name + ", label %" + loop_body_label + ", label %" + loop_exit_label);
+    current_lines.push("  br i1 " + comparison_name + ", label %"
+        + loop_body_label
+        + ", label %"
+        + loop_exit_label);
     current_lines.push(loop_body_label + ":");
 
     let body_index_name = format_temp_name(current_temp);
-    current_lines.push("  " + body_index_name + " = load i64, i64* " + index_pointer);
+    current_lines.push("  " + body_index_name + " = load i64, i64* "
+        + index_pointer);
     current_temp += 1;
 
     let element_pointer_name = format_temp_name(current_temp);
-    current_lines.push("  " + element_pointer_name + " = getelementptr " + element_type + ", " + element_type + "* " + data_operand.value + ", i64 " + body_index_name);
+    current_lines.push("  " + element_pointer_name + " = getelementptr "
+        + element_type
+        + ", "
+        + element_type
+        + "* "
+        + data_operand.value
+        + ", i64 "
+        + body_index_name);
     current_temp += 1;
 
     let element_load_name = format_temp_name(current_temp);
-    current_lines.push("  " + element_load_name + " = load " + element_type + ", " + element_type + "* " + element_pointer_name);
+    current_lines.push("  " + element_load_name + " = load " + element_type
+        + ", "
+        + element_type
+        + "* "
+        + element_pointer_name);
     current_temp += 1;
 
-    current_lines.push("  store " + element_type + " " + element_load_name + ", " + element_type + "* " + iteration_pointer);
+    current_lines.push("  store " + element_type + " " + element_load_name
+        + ", "
+        + element_type
+        + "* "
+        + iteration_pointer);
 
-    let loop_context = LoopContext { break_label: loop_exit_label, continue_label: loop_increment_label };
+    let loop_context = LoopContext {
+        break_label: loop_exit_label,
+        continue_label: loop_increment_label
+    };
     let stacked = append_loop_context(loop_stack, loop_context);
 
     let element_loop_scope_id = make_child_scope_id(scope_id, loop_body_label);
-    let iteration_binding = LocalBinding { name: raw_target, pointer: iteration_pointer, llvm_type: element_type, type_annotation: "", ownership: null, consumed: false, scope_id: element_loop_scope_id, scope_depth: scope_depth + 1 };
+    let iteration_binding = LocalBinding {
+        name: raw_target,
+        pointer: iteration_pointer,
+        llvm_type: element_type,
+        type_annotation: "",
+        ownership: null,
+        consumed: false,
+        scope_id: element_loop_scope_id,
+        scope_depth: scope_depth + 1
+    };
     let body_locals = append_local_binding(current_locals, iteration_binding);
-    let body_result = lower_instruction_range(
-        function,
-        structure.body_start,
-        structure.body_end,
-        llvm_return,
-        current_bindings,
-        body_locals,
-        current_allocas,
-        [],
-        current_temp,
-        current_block_counter,
-        current_next_local,
-        current_next_region,
-        functions,
-        stacked,
-        context,
-        element_loop_scope_id,
-        scope_depth + 1,
-        loop_body_label
-    );
+    let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, stacked, context, element_loop_scope_id, scope_depth
+        + 1, loop_body_label);
     let mut _ci24: number = 0;
     loop {
         if _ci24 >= body_result.diagnostics.length { break; }
@@ -267,23 +231,27 @@ fn lower_for_array(
     current_lines.push(loop_increment_label + ":");
 
     let increment_index_name = format_temp_name(current_temp);
-    current_lines.push("  " + increment_index_name + " = load i64, i64* " + index_pointer);
+    current_lines.push("  " + increment_index_name + " = load i64, i64* "
+        + index_pointer);
     current_temp += 1;
 
     let next_index_name = format_temp_name(current_temp);
-    current_lines.push("  " + next_index_name + " = add i64 " + increment_index_name + ", 1");
+    current_lines.push("  " + next_index_name + " = add i64 "
+        + increment_index_name
+        + ", 1");
     current_temp += 1;
 
-    current_lines.push("  store i64 " + next_index_name + ", i64* " + index_pointer);
-        current_lines.push("  br label %" + loop_header_label);
-        current_lines.push(loop_exit_label + ":");
+    current_lines.push("  store i64 " + next_index_name + ", i64* "
+        + index_pointer);
+    current_lines.push("  br label %" + loop_header_label);
+    current_lines.push(loop_exit_label + ":");
 
     let exit_result = build_loop_exit_mutations(collected_mutations, locals, current_lines, current_temp, loop_exit_label);
     current_lines = exit_result.lines;
     current_temp = exit_result.temp_index;
     collected_mutations = exit_result.mutations;
 
-        current_locals = locals;
+    current_locals = locals;
 
     return BlockLoweringResult {
         lines: current_lines,
@@ -298,31 +266,13 @@ fn lower_for_array(
         lifetime_regions: lifetime_regions,
         next_lifetime_region_id: current_next_region,
         next_index: next_index,
-        mutations: collected_mutations, string_constants: collected_string_constants,
+        mutations: collected_mutations,
+        string_constants: collected_string_constants
     };
 }
 
 // Shared helper: build exit mutations for loop locals after the loop exit label.
-fn lower_for_instruction(
-    function: NativeFunction,
-    start_index: number,
-    llvm_return: string,
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    allocas: string[],
-    lines: string[],
-    temp_index: number,
-    block_counter: number,
-    next_local_id: number,
-    next_region_id: number,
-    functions: NativeFunction[],
-    loop_stack: LoopContext[],
-    end: number,
-    context: TypeContext,
-    scope_id: string,
-    scope_depth: number,
-    current_label: string
-) -> BlockLoweringResult {
+fn lower_for_instruction(function: NativeFunction, start_index: number, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, block_counter: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], loop_stack: LoopContext[], end: number, context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
@@ -353,7 +303,9 @@ fn lower_for_instruction(
     let mut raw_target = trim_text(for_target_text);
     raw_target = strip_mut_prefix(raw_target);
     if raw_target.length == 0 {
-        diagnostics.push("llvm lowering: `.for` loop missing iteration binding in `" + function.name + "`");
+        diagnostics.push("llvm lowering: `.for` loop missing iteration binding in `"
+            + function.name
+            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -367,12 +319,16 @@ fn lower_for_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: next_index,
-            mutations: collected_mutations, string_constants: collected_string_constants,
+            mutations: collected_mutations,
+            string_constants: collected_string_constants
         };
     }
 
     if !is_simple_identifier(raw_target) {
-        diagnostics.push("llvm lowering: `.for` loop target `" + raw_target + "` is not a simple identifier in `" + function.name + "`");
+        diagnostics.push("llvm lowering: `.for` loop target `" + raw_target
+            + "` is not a simple identifier in `"
+            + function.name
+            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -386,12 +342,16 @@ fn lower_for_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: next_index,
-            mutations: collected_mutations, string_constants: collected_string_constants,
+            mutations: collected_mutations,
+            string_constants: collected_string_constants
         };
     }
 
     if find_local_binding(current_locals, raw_target) != null {
-        diagnostics.push("llvm lowering: `.for` loop target `" + raw_target + "` shadows existing local in `" + function.name + "`");
+        diagnostics.push("llvm lowering: `.for` loop target `" + raw_target
+            + "` shadows existing local in `"
+            + function.name
+            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -405,20 +365,14 @@ fn lower_for_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: next_index,
-            mutations: collected_mutations, string_constants: collected_string_constants,
+            mutations: collected_mutations,
+            string_constants: collected_string_constants
         };
     }
 
     // Try range-based for loop first.
-    let range_result = lower_for_range(
-        function, structure, raw_target, for_iterable_text,
-        llvm_return, bindings, locals, allocas, lines,
-        temp_index, block_counter, next_local_id, next_region_id,
-        functions, loop_stack, context, scope_id, scope_depth, next_index
-    );
-    if range_result != null {
-        return range_result;
-    }
+    let range_result = lower_for_range(function, structure, raw_target, for_iterable_text, llvm_return, bindings, locals, allocas, lines, temp_index, block_counter, next_local_id, next_region_id, functions, loop_stack, context, scope_id, scope_depth, next_index);
+    if range_result != null { return range_result; }
 
     // Fall through to array-based for loop.
     let range_parse = parse_range_iterable(for_iterable_text);
@@ -440,7 +394,9 @@ fn lower_for_instruction(
             diagnostics.push(range_parse.diagnostics[_ci22]);
             _ci22 += 1;
         }
-        diagnostics.push("llvm lowering: unable to lower `.for` iterable in `" + function.name + "`");
+        diagnostics.push("llvm lowering: unable to lower `.for` iterable in `"
+            + function.name
+            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -454,7 +410,8 @@ fn lower_for_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: next_index,
-            mutations: collected_mutations, string_constants: collected_string_constants,
+            mutations: collected_mutations,
+            string_constants: collected_string_constants
         };
     }
 
@@ -467,7 +424,9 @@ fn lower_for_instruction(
             diagnostics.push(range_parse.diagnostics[_ci23]);
             _ci23 += 1;
         }
-        diagnostics.push("llvm lowering: `.for` iterable must resolve to an array value in `" + function.name + "`");
+        diagnostics.push("llvm lowering: `.for` iterable must resolve to an array value in `"
+            + function.name
+            + "`");
         return BlockLoweringResult {
             lines: current_lines,
             allocas: current_allocas,
@@ -481,14 +440,10 @@ fn lower_for_instruction(
             lifetime_regions: lifetime_regions,
             next_lifetime_region_id: current_next_region,
             next_index: next_index,
-            mutations: collected_mutations, string_constants: collected_string_constants,
+            mutations: collected_mutations,
+            string_constants: collected_string_constants
         };
     }
 
-    return lower_for_array(
-        function, structure, raw_target, instruction, iterable_operand,
-        llvm_return, bindings, locals, allocas, current_lines,
-        current_temp, current_block_counter, current_next_local, current_next_region,
-        functions, loop_stack, context, scope_id, scope_depth, next_index
-    );
+    return lower_for_array(function, structure, raw_target, instruction, iterable_operand, llvm_return, bindings, locals, allocas, current_lines, current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, scope_id, scope_depth, next_index);
 }

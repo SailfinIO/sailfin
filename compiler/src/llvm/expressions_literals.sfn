@@ -1,40 +1,33 @@
 // compiler/src/llvm/expressions_literals.sfn
 //
 // Literal detection helpers: boolean, null, integer, number, string, character.
-
-import { substring, char_code, char_at, index_of } from "../string_utils";
+import {
+    char_at,
+    char_code,
+    index_of,
+    substring
+} from "../string_utils";
 import { trim_text } from "./utils";
 
 // =============================================================================
 // Case-Insensitive Matching
 // =============================================================================
-
 fn matches_case_insensitive(text: string, target: string) -> boolean {
-    if text.length != target.length {
-        return false;
-    }
+    if text.length != target.length { return false; }
     let mut index: number = 0;
     loop {
-        if index >= text.length {
-            break;
-        }
+        if index >= text.length { break; }
         let ch = char_code(char_at(text, index));
         let target_ch = char_code(char_at(target, index));
         let mut text_lower = ch;
         let mut target_lower = target_ch;
         if ch >= 65 {
-            if ch <= 90 {
-                text_lower = ch + 32;
-            }
+            if ch <= 90 { text_lower = ch + 32; }
         }
         if target_ch >= 65 {
-            if target_ch <= 90 {
-                target_lower = target_ch + 32;
-            }
+            if target_ch <= 90 { target_lower = target_ch + 32; }
         }
-        if text_lower != target_lower {
-            return false;
-        }
+        if text_lower != target_lower { return false; }
         index += 1;
     }
     return true;
@@ -43,23 +36,16 @@ fn matches_case_insensitive(text: string, target: string) -> boolean {
 // =============================================================================
 // Literal Detection
 // =============================================================================
-
 fn is_boolean_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if matches_case_insensitive(trimmed, "true") {
-        return true;
-    }
-    if matches_case_insensitive(trimmed, "false") {
-        return true;
-    }
+    if matches_case_insensitive(trimmed, "true") { return true; }
+    if matches_case_insensitive(trimmed, "false") { return true; }
     return false;
 }
 
 fn is_null_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if matches_case_insensitive(trimmed, "null") {
-        return true;
-    }
+    if matches_case_insensitive(trimmed, "null") { return true; }
     return false;
 }
 
@@ -69,9 +55,7 @@ fn is_digit_char(ch: string) -> boolean {
     let nine = char_code("9");
     let mut _ret167: boolean = false;
     if code >= zero {
-        if code <= nine {
-            _ret167 = true;
-        }
+        if code <= nine { _ret167 = true; }
     }
     return _ret167;
 }
@@ -82,21 +66,15 @@ fn char_code_at_text(text: string, index: number) -> number {
 
 fn is_integer_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     let mut index: number = 0;
     if substring(trimmed, 0, 1) == "-" {
-        if trimmed.length == 1 {
-            return false;
-        }
+        if trimmed.length == 1 { return false; }
         index = 1;
     }
     let mut has_digit: boolean = false;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         let mut _if168: boolean = false;
         if ch == "0" { _if168 = true; }
@@ -124,19 +102,13 @@ fn is_number_literal(text: string) -> boolean {
     let mut has_digit: boolean = false;
     let mut has_decimal: boolean = false;
     let trimmed = trim_text(text);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     if substring(trimmed, 0, 1) == "-" {
-        if trimmed.length == 1 {
-            return false;
-        }
+        if trimmed.length == 1 { return false; }
         index = 1;
     }
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = substring(trimmed, index, index + 1);
         let mut _if169: boolean = false;
         if ch == "0" { _if169 = true; }
@@ -155,9 +127,7 @@ fn is_number_literal(text: string) -> boolean {
             continue;
         }
         if ch == "." {
-            if has_decimal {
-                return false;
-            }
+            if has_decimal { return false; }
             has_decimal = true;
             index += 1;
             continue;
@@ -169,20 +139,14 @@ fn is_number_literal(text: string) -> boolean {
 
 fn normalise_number_literal(text: string) -> string {
     let trimmed = trim_text(text);
-    if index_of(trimmed, ".") >= 0 {
-        return trimmed;
-    }
+    if index_of(trimmed, ".") >= 0 { return trimmed; }
     return trimmed + ".0";
 }
 
 fn is_string_literal(text: string) -> boolean {
     let trimmed = trim_text(text);
-    if trimmed.length < 2 {
-        return false;
-    }
-    if substring(trimmed, 0, 1) != "\"" {
-        return false;
-    }
+    if trimmed.length < 2 { return false; }
+    if substring(trimmed, 0, 1) != "\"" { return false; }
     if substring(trimmed, trimmed.length - 1, trimmed.length) != "\"" {
         return false;
     }
@@ -192,9 +156,7 @@ fn is_string_literal(text: string) -> boolean {
     let mut escape: boolean = false;
     let mut index: number = 1;
     loop {
-        if index >= trimmed.length - 1 {
-            break;
-        }
+        if index >= trimmed.length - 1 { break; }
         let ch = char_at(trimmed, index);
         if escape {
             escape = false;
@@ -206,34 +168,24 @@ fn is_string_literal(text: string) -> boolean {
             index += 1;
             continue;
         }
-        if ch == "\"" {
-            return false;
-        }
+        if ch == "\"" { return false; }
         index += 1;
     }
-    if escape {
-        return false;
-    }
+    if escape { return false; }
     return true;
 }
 
 fn is_character_literal(text: string) -> boolean {
     // Check if this is a single-character string literal like "a", "t", "\n"
-    if text.length < 2 {
-        return false;
-    }
+    if text.length < 2 { return false; }
     let mut _if170: boolean = false;
     if substring(text, 0, 1) != "\"" { _if170 = true; }
     if substring(text, text.length - 1, text.length) != "\"" { _if170 = true; }
-    if _if170 {
-        return false;
-    }
+    if _if170 { return false; }
     let inner = substring(text, 1, text.length - 1);
     // Handle escape sequences
     if inner.length == 2 {
-        if substring(inner, 0, 1) == "\\" {
-            return true;
-        }
+        if substring(inner, 0, 1) == "\\" { return true; }
     }
     // Single character
     return inner.length == 1;
@@ -241,17 +193,13 @@ fn is_character_literal(text: string) -> boolean {
 
 fn get_character_literal_value(text: string) -> number {
     let inner = substring(text, 1, text.length - 1);
-    if inner.length == 0 {
-        return 0;
-    }
+    if inner.length == 0 { return 0; }
     // Handle escape sequences
     if inner.length == 2 {
         if substring(inner, 0, 1) == "\\" {
             let escape = char_at(inner, 1);
             let escape_code = char_code(escape);
-            if escape_code == char_code("n") {
-                return char_code("\n");
-            } else if escape_code == char_code("r") {
+            if escape_code == char_code("n") { return char_code("\n"); } else if escape_code == char_code("r") {
                 return char_code("\r");
             } else if escape_code == char_code("t") {
                 return char_code("\t");
@@ -259,9 +207,7 @@ fn get_character_literal_value(text: string) -> number {
                 return char_code("\"");
             } else if escape_code == char_code("\\") {
                 return char_code("\\");
-            } else if escape_code == char_code("0") {
-                return 0;
-            }
+            } else if escape_code == char_code("0") { return 0; }
             return escape_code;
         }
     }

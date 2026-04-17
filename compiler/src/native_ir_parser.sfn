@@ -2,32 +2,27 @@
 //
 // Parser for textual `.sfn-asm` artifacts. Type definitions live in
 // native_ir.sfn; utilities and layout parsers in native_ir_utils.sfn.
-
-import { substring, char_code } from "./string_utils";
-
 import {
-    NativeInstruction,
-    NativeSourceSpan,
+    NativeBinding,
+    NativeEnum,
     NativeFunction,
     NativeImport,
-    NativeStruct,
+    NativeInstruction,
     NativeInterface,
-    NativeEnum,
-    NativeBinding,
-    ParseNativeResult,
+    NativeSourceSpan,
+    NativeStruct,
+    ParseNativeResult
 } from "./native_ir";
-
 import {
-    index_of,
-    split_lines,
-    starts_with,
-    strip_prefix,
-    strip_quotes,
-    trim_text,
-} from "./native_ir_utils_text";
-
+    append_instruction,
+    append_parameter,
+    apply_meta,
+    parse_enum_definition,
+    parse_source_span,
+    parse_struct_definition
+} from "./native_ir_parser_defs";
+import { gather_instruction, parse_instruction } from "./native_ir_parser_instructions";
 import { parse_decimal_number } from "./native_ir_utils_layout";
-
 import {
     line_looks_like_parameter_entry,
     parse_decorator_name,
@@ -35,22 +30,17 @@ import {
     parse_import_entry,
     parse_interface_definition,
     parse_parameter_entry,
-    split_parameter_entries,
+    split_parameter_entries
 } from "./native_ir_utils_parse";
-
 import {
-    parse_instruction,
-    gather_instruction,
-} from "./native_ir_parser_instructions";
-
-import {
-    parse_struct_definition,
-    parse_enum_definition,
-    parse_source_span,
-    apply_meta,
-    append_parameter,
-    append_instruction,
-} from "./native_ir_parser_defs";
+    index_of,
+    split_lines,
+    starts_with,
+    strip_prefix,
+    strip_quotes,
+    trim_text
+} from "./native_ir_utils_text";
+import { char_code, substring } from "./string_utils";
 
 fn parse_native_artifact_impl(text: string, include_instructions: boolean, include_top_level_bindings: boolean) -> ParseNativeResult {
     let lines = split_lines(text);
@@ -68,9 +58,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
 
     let mut index: number = 0;
     loop {
-        if index >= lines.length {
-            break;
-        }
+        if index >= lines.length { break; }
         let raw_line = lines[index];
         let line = trim_text(raw_line);
         if line.length == 0 {
@@ -89,9 +77,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
             let parsed_import = parse_import_entry("import", strip_prefix(line, ".import "));
             if parsed_import == null {
                 diagnostics.push("unable to parse import: " + line);
-            } else {
-                imports.push(parsed_import);
-            }
+            } else { imports.push(parsed_import); }
             index += 1;
             continue;
         }
@@ -99,9 +85,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
             let parsed_export = parse_import_entry("export", strip_prefix(line, ".export "));
             if parsed_export == null {
                 diagnostics.push("unable to parse export: " + line);
-            } else {
-                imports.push(parsed_export);
-            }
+            } else { imports.push(parsed_export); }
             index += 1;
             continue;
         }
@@ -109,19 +93,16 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
             let parsed_span = parse_source_span(strip_prefix(line, ".span "));
             if parsed_span == null {
                 diagnostics.push("unable to parse span metadata: " + line);
-            } else {
-                pending_span = parsed_span;
-            }
+            } else { pending_span = parsed_span; }
             index += 1;
             continue;
         }
         if starts_with(line, ".init-span ") {
             let parsed_init_span = parse_source_span(strip_prefix(line, ".init-span "));
             if parsed_init_span == null {
-                diagnostics.push("unable to parse initializer span metadata: " + line);
-            } else {
-                pending_value_span = parsed_init_span;
-            }
+                diagnostics.push("unable to parse initializer span metadata: "
+                    + line);
+            } else { pending_value_span = parsed_init_span; }
             index += 1;
             continue;
         }
@@ -181,14 +162,14 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
         }
         if starts_with(line, ".decorator") {
             if current != null {
-                diagnostics.push("decorator directive encountered inside function body: " + line);
+                diagnostics.push("decorator directive encountered inside function body: "
+                    + line);
             } else {
                 let decorator_name = parse_decorator_name(line);
                 if decorator_name == null {
-                    diagnostics.push("unable to parse decorator directive: " + line);
-                } else {
-                    pending_decorators.push(decorator_name);
-                }
+                    diagnostics.push("unable to parse decorator directive: "
+                        + line);
+                } else { pending_decorators.push(decorator_name); }
             }
             index += 1;
             continue;
@@ -200,9 +181,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
             let header = strip_prefix(line, ".fn ");
             let mut is_async: boolean = false;
             let trimmed_header = trim_text(header);
-            if starts_with(trimmed_header, "async ") {
-                is_async = true;
-            }
+            if starts_with(trimmed_header, "async ") { is_async = true; }
             current = NativeFunction {
                 name: parse_function_name(header),
                 is_async: is_async,
@@ -211,7 +190,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 effects: [],
                 decorators: pending_decorators,
                 is_extern: false,
-                instructions: [],
+                instructions: []
             };
             pending_decorators = [];
             index += 1;
@@ -244,9 +223,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 let mut scan: number = 1;
                 let mut escaping: boolean = false;
                 loop {
-                    if scan >= trimmed.length {
-                        break;
-                    }
+                    if scan >= trimmed.length { break; }
                     let ch = trimmed[scan];
                     if escaping {
                         escaping = false;
@@ -266,9 +243,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 }
             } else {
                 let space_index = index_of(trimmed, " ");
-                if space_index < 0 {
-                    raw_name = trimmed;
-                } else {
+                if space_index < 0 { raw_name = trimmed; } else {
                     raw_name = trim_text(substring(trimmed, 0, space_index));
                 }
             }
@@ -288,7 +263,7 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 effects: [],
                 decorators: [],
                 is_extern: false,
-                instructions: [],
+                instructions: []
             };
             index += 1;
             continue;
@@ -327,13 +302,9 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 let mut combined: string = strip_prefix(line, ".param ");
                 let mut lookahead: number = index + 1;
                 loop {
-                    if lookahead >= lines.length {
-                        break;
-                    }
+                    if lookahead >= lines.length { break; }
                     let continuation_raw = lines[lookahead];
-                    if continuation_raw.length == 0 {
-                        break;
-                    }
+                    if continuation_raw.length == 0 { break; }
                     let continuation_trimmed = trim_text(continuation_raw);
                     if continuation_trimmed.length == 0 {
                         lookahead += 1;
@@ -354,22 +325,17 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                     let mut entry_index: number = 0;
                     let mut span_consumed: boolean = false;
                     loop {
-                        if entry_index >= entries.length {
-                            break;
-                        }
+                        if entry_index >= entries.length { break; }
                         let entry = entries[entry_index];
                         let mut parameter_span: NativeSourceSpan? = pending_span;
-                        if span_consumed {
-                            parameter_span = null;
-                        }
+                        if span_consumed { parameter_span = null; }
                         let parameter = parse_parameter_entry(entry, parameter_span);
                         if parameter == null {
-                            diagnostics.push("unable to parse parameter entry: " + entry);
+                            diagnostics.push("unable to parse parameter entry: "
+                                + entry);
                         } else {
                             current = append_parameter(current, parameter);
-                            if parameter.span != null {
-                                span_consumed = true;
-                            }
+                            if parameter.span != null { span_consumed = true; }
                         }
                         entry_index += 1;
                     }
@@ -394,24 +360,20 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
                 pending_value_span = null;
                 let mut scan = index;
                 loop {
-                    if scan >= lines.length {
-                        break;
-                    }
+                    if scan >= lines.length { break; }
                     let candidate = trim_text(lines[scan]);
                     let mut _if392: boolean = false;
                     if starts_with(candidate, ".endfn") { _if392 = true; }
                     if starts_with(candidate, ".endtest") { _if392 = true; }
-                    if _if392 {
-                        break;
-                    }
+                    if _if392 { break; }
                     scan += 1;
                 }
                 index = scan;
                 continue;
             }
         }
-        // Instruction line (or top-level binding) handling.
 
+        // Instruction line (or top-level binding) handling.
         let gather = gather_instruction(lines, index);
         let gathered_line = gather.text;
         // Always advance by at least one line; `gather.lines_consumed` counts
@@ -419,16 +381,13 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
         index += gather.lines_consumed + 1;
         let instruction_result = parse_instruction(gathered_line, pending_span, pending_value_span);
         let instructions = instruction_result.instructions;
-        if instruction_result.span_consumed {
-            pending_span = null;
-        } else if pending_span != null {
+        if instruction_result.span_consumed { pending_span = null; } else if pending_span != null {
             diagnostics.push("unused span metadata before: " + gathered_line);
             pending_span = null;
         }
-        if instruction_result.value_span_consumed {
-            pending_value_span = null;
-        } else if pending_value_span != null {
-            diagnostics.push("unused initializer span metadata before: " + gathered_line);
+        if instruction_result.value_span_consumed { pending_value_span = null; } else if pending_value_span != null {
+            diagnostics.push("unused initializer span metadata before: "
+                + gathered_line);
             pending_value_span = null;
         }
 
@@ -436,23 +395,20 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
             if include_top_level_bindings {
                 let mut _if359: boolean = false;
                 if instructions.length == 1 {
-                    if instructions[0].variant == "Let" {
-                        _if359 = true;
-                    }
+                    if instructions[0].variant == "Let" { _if359 = true; }
                 }
                 if _if359 {
                     bindings.push(binding_from_instruction(instructions[0]));
                 } else {
-                    diagnostics.push("top-level directive not supported in lowering: " + gathered_line);
+                    diagnostics.push("top-level directive not supported in lowering: "
+                        + gathered_line);
                 }
             }
             continue;
         }
         let mut instruction_index: number = 0;
         loop {
-            if instruction_index >= instructions.length {
-                break;
-            }
+            if instruction_index >= instructions.length { break; }
             current = append_instruction(current, instructions[instruction_index]);
             instruction_index += 1;
         }
@@ -468,7 +424,15 @@ fn parse_native_artifact_impl(text: string, include_instructions: boolean, inclu
         diagnostics.push("dangling decorator directives at end of artifact");
     }
 
-    return ParseNativeResult { functions: functions, imports: imports, structs: structs, interfaces: interfaces, enums: enums, bindings: bindings, diagnostics: diagnostics };
+    return ParseNativeResult {
+        functions: functions,
+        imports: imports,
+        structs: structs,
+        interfaces: interfaces,
+        enums: enums,
+        bindings: bindings,
+        diagnostics: diagnostics
+    };
 }
 
 fn binding_from_instruction(instruction: NativeInstruction) -> NativeBinding {
@@ -476,7 +440,7 @@ fn binding_from_instruction(instruction: NativeInstruction) -> NativeBinding {
         name: instruction.name,
         mutable: instruction.mutable,
         type_annotation: instruction.type_annotation,
-        value: instruction.value,
+        value: instruction.value
     };
 }
 

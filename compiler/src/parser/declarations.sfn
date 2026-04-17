@@ -2,93 +2,99 @@
 //
 // Top-level declaration parsing - functions, structs, enums, interfaces,
 // imports, exports, models, pipelines, tools, tests, and type aliases.
-
-import { Token } from "../token";
 import {
     Block,
     Decorator,
     DecoratorArgument,
+    EnumVariant,
+    ExportSpecifier,
     Expression,
     FieldDeclaration,
     FunctionSignature,
-    EnumVariant,
+    ImportSpecifier,
     MethodDeclaration,
     ModelProperty,
     Parameter,
     Statement,
-    ImportSpecifier,
-    ExportSpecifier,
-    TypeParameter,
     TypeAnnotation,
-    decorator_names,
+    TypeParameter,
+    decorator_names
 } from "../ast";
 import { infer_effects } from "../decorator_semantics";
-import { substring, char_code, char_at, strings_equal } from "../string_utils";
 import {
-    Parser,
-    StatementParseResult,
-    ParameterParseResult,
-    ParameterListParseResult,
-    StructFieldParseResult,
-    ModelPropertyParseResult,
-    MethodParseResult,
-    InterfaceMemberParseResult,
-    EnumVariantParseResult,
-    TypeParameterParseResult,
-    ImplementsParseResult,
-    DecoratorParseResult,
-    EffectParseResult,
-    TypeSeparatorParseResult,
-    SpecifierListParseResult,
-    NamedSpecifier,
-    BlockParseResult,
-} from "./types";
-import {
-    trim_text,
-    strip_surrounding_quotes,
-    strip_loose_quotes,
-    looks_like_number,
-    normalize_test_name,
-} from "./utils";
-import {
-    parser_peek_raw,
-    parser_advance_raw,
-    skip_trivia,
-    identifier_matches,
-    symbol_matches,
-    identifier_text,
-    string_literal_value,
-    consume_keyword,
-    consume_symbol,
-    advance_to_symbol,
-    collect_until,
-    collect_parenthesized,
-    token_slice,
-    trim_token_edges,
-    filter_trivia,
-    tokens_to_text,
-    source_span_from_tokens,
-    append_token,
-    find_top_level_symbol,
-    find_top_level_colon,
-    split_tokens_by_comma,
-    split_token_slices_by_comma,
-    skip_struct_member,
-    skip_enum_variant_entry,
-    skip_trailing_comma,
-    is_end_of_file,
-} from "./token_utils";
+    char_at,
+    char_code,
+    strings_equal,
+    substring
+} from "../string_utils";
+import { Token } from "../token";
 import { expression_from_tokens, normalize_expression } from "./expressions";
 import { parse_block } from "./statements";
+import {
+    advance_to_symbol,
+    append_token,
+    collect_parenthesized,
+    collect_until,
+    consume_keyword,
+    consume_symbol,
+    filter_trivia,
+    find_top_level_colon,
+    find_top_level_symbol,
+    identifier_matches,
+    identifier_text,
+    is_end_of_file,
+    parser_advance_raw,
+    parser_peek_raw,
+    skip_enum_variant_entry,
+    skip_struct_member,
+    skip_trailing_comma,
+    skip_trivia,
+    source_span_from_tokens,
+    split_token_slices_by_comma,
+    split_tokens_by_comma,
+    string_literal_value,
+    symbol_matches,
+    token_slice,
+    tokens_to_text,
+    trim_token_edges
+} from "./token_utils";
+import {
+    BlockParseResult,
+    DecoratorParseResult,
+    EffectParseResult,
+    EnumVariantParseResult,
+    ImplementsParseResult,
+    InterfaceMemberParseResult,
+    MethodParseResult,
+    ModelPropertyParseResult,
+    NamedSpecifier,
+    ParameterListParseResult,
+    ParameterParseResult,
+    Parser,
+    SpecifierListParseResult,
+    StatementParseResult,
+    StructFieldParseResult,
+    TypeParameterParseResult,
+    TypeSeparatorParseResult
+} from "./types";
+import {
+    looks_like_number,
+    normalize_test_name,
+    strip_loose_quotes,
+    strip_surrounding_quotes,
+    trim_text
+} from "./utils";
 
 // ============================================================================
 // Type Separator
 // ============================================================================
-
 fn consume_annotation_separator(parser: Parser) -> TypeSeparatorParseResult {
     let token = parser_peek_raw(parser);
     if symbol_matches(token, ":") {
-        return TypeSeparatorParseResult { parser: parser_advance_raw(parser), found: true };
+        return TypeSeparatorParseResult {
+            parser: parser_advance_raw(parser),
+            found: true
+        };
     }
     return TypeSeparatorParseResult { parser: parser, found: false };
 }
@@ -96,7 +102,10 @@ fn consume_annotation_separator(parser: Parser) -> TypeSeparatorParseResult {
 fn consume_return_type_separator(parser: Parser) -> TypeSeparatorParseResult {
     let token = parser_peek_raw(parser);
     if symbol_matches(token, "->") {
-        return TypeSeparatorParseResult { parser: parser_advance_raw(parser), found: true };
+        return TypeSeparatorParseResult {
+            parser: parser_advance_raw(parser),
+            found: true
+        };
     }
     // Tolerate a lexer/runtime bug where `->` is split into `-` and `>`.
     if symbol_matches(token, "-") {
@@ -113,7 +122,6 @@ fn consume_return_type_separator(parser: Parser) -> TypeSeparatorParseResult {
 // ============================================================================
 // Decorator Parsing
 // ============================================================================
-
 fn parse_decorators(parser: Parser) -> DecoratorParseResult {
     let mut current = parser;
     let mut decorators: Decorator[] = [];
@@ -121,9 +129,7 @@ fn parse_decorators(parser: Parser) -> DecoratorParseResult {
     loop {
         current = skip_trivia(current);
         let token = parser_peek_raw(current);
-        if !symbol_matches(token, "@") {
-            break;
-        }
+        if !symbol_matches(token, "@") { break; }
 
         let decorator_start = current;
         current = parser_advance_raw(current);
@@ -152,45 +158,25 @@ fn parse_decorators(parser: Parser) -> DecoratorParseResult {
 
                 let mut index: number = 0;
                 loop {
-                    if index >= paren_result.tokens.length {
-                        break;
-                    }
+                    if index >= paren_result.tokens.length { break; }
                     let tok = paren_result.tokens[index];
                     if tok.kind.variant == "Symbol" {
                         let sym = tok.lexeme;
-                        if strings_equal(sym, "<") {
-                            angle += 1;
-                        } else if strings_equal(sym, ">") {
-                            if angle > 0 {
-                                angle -= 1;
-                            }
-                        } else if strings_equal(sym, "(") {
-                            paren += 1;
-                        } else if strings_equal(sym, ")") {
-                            if paren > 0 {
-                                paren -= 1;
-                            }
-                        } else if strings_equal(sym, "{") {
-                            brace += 1;
-                        } else if strings_equal(sym, "}") {
-                            if brace > 0 {
-                                brace -= 1;
-                            }
-                        } else if strings_equal(sym, "[") {
-                            bracket += 1;
-                        } else if strings_equal(sym, "]") {
-                            if bracket > 0 {
-                                bracket -= 1;
-                            }
+                        if strings_equal(sym, "<") { angle += 1; } else if strings_equal(sym, ">") {
+                            if angle > 0 { angle -= 1; }
+                        } else if strings_equal(sym, "(") { paren += 1; } else if strings_equal(sym, ")") {
+                            if paren > 0 { paren -= 1; }
+                        } else if strings_equal(sym, "{") { brace += 1; } else if strings_equal(sym, "}") {
+                            if brace > 0 { brace -= 1; }
+                        } else if strings_equal(sym, "[") { bracket += 1; } else if strings_equal(sym, "]") {
+                            if bracket > 0 { bracket -= 1; }
                         }
 
                         let mut _let397: boolean = false;
                         if angle == 0 {
                             if paren == 0 {
                                 if brace == 0 {
-                                    if bracket == 0 {
-                                        _let397 = true;
-                                    }
+                                    if bracket == 0 { _let397 = true; }
                                 }
                             }
                         }
@@ -224,23 +210,21 @@ fn parse_decorators(parser: Parser) -> DecoratorParseResult {
             }
         }
 
-        decorators = append_decorator(decorators, Decorator { name: name, arguments: decorator_arguments });
+        decorators = append_decorator(decorators, Decorator {
+            name: name, arguments: decorator_arguments
+        });
     }
 
     return DecoratorParseResult { parser: current, decorators: decorators };
 }
 
 fn parse_decorator_argument(tokens: Token[]) -> DecoratorArgument? {
-    if tokens.length == 0 {
-        return null;
-    }
+    if tokens.length == 0 { return null; }
 
     let colon_index = find_top_level_colon(tokens);
     if colon_index == -1 {
         let trimmed_tokens = trim_token_edges(tokens);
-        if trimmed_tokens.length == 0 {
-            return null;
-        }
+        if trimmed_tokens.length == 0 { return null; }
         let expr = normalize_expression(trimmed_tokens, expression_from_tokens(trimmed_tokens));
         return DecoratorArgument { name: null, expression: expr };
     }
@@ -248,14 +232,10 @@ fn parse_decorator_argument(tokens: Token[]) -> DecoratorArgument? {
     let name_tokens = trim_token_edges(token_slice(tokens, 0, colon_index));
     let value_tokens = trim_token_edges(token_slice(tokens, colon_index + 1, tokens.length));
 
-    if value_tokens.length == 0 {
-        return null;
-    }
+    if value_tokens.length == 0 { return null; }
 
     let name_text = trim_text(tokens_to_text(name_tokens));
-    if name_text.length == 0 {
-        return null;
-    }
+    if name_text.length == 0 { return null; }
 
     let mut expr = normalize_expression(value_tokens, expression_from_tokens(value_tokens));
     if expr.variant == "Raw" {
@@ -285,7 +265,6 @@ fn parse_decorator_argument(tokens: Token[]) -> DecoratorArgument? {
 // ============================================================================
 // Effect List Parsing
 // ============================================================================
-
 fn parse_effect_list(initial_parser: Parser) -> EffectParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -329,7 +308,6 @@ fn parse_effect_list(initial_parser: Parser) -> EffectParseResult {
 // ============================================================================
 // Type Parameter Clause
 // ============================================================================
-
 fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
     let mut current = skip_trivia(parser);
     let token = parser_peek_raw(current);
@@ -343,14 +321,10 @@ fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
 
     loop {
         let tok = parser_peek_raw(current);
-        if tok.kind.variant == "EndOfFile" {
-            break;
-        }
+        if tok.kind.variant == "EndOfFile" { break; }
         if tok.kind.variant == "Symbol" {
             let sym = tok.lexeme;
-            if strings_equal(sym, "<") {
-                depth += 1;
-            } else if strings_equal(sym, ">") {
+            if strings_equal(sym, "<") { depth += 1; } else if strings_equal(sym, ">") {
                 depth -= 1;
                 if depth == 0 {
                     current = parser_advance_raw(current);
@@ -366,9 +340,7 @@ fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
     let mut parameters: TypeParameter[] = [];
     let mut index: number = 0;
     loop {
-        if index >= slices.length {
-            break;
-        }
+        if index >= slices.length { break; }
         let slice_tokens = trim_token_edges(slices[index]);
         if slice_tokens.length > 0 {
             let colon_index = find_top_level_symbol(slice_tokens, ":");
@@ -389,24 +361,34 @@ fn parse_type_parameter_clause(parser: Parser) -> TypeParameterParseResult {
                     }
                 }
                 let name_span = source_span_from_tokens(name_tokens);
-                let parameter = TypeParameter { name: name_text, bound: bound, span: name_span };
+                let parameter = TypeParameter {
+                    name: name_text,
+                    bound: bound,
+                    span: name_span
+                };
                 parameters.push(parameter);
             }
         }
         index += 1;
     }
 
-    return TypeParameterParseResult { parser: current, parameters: parameters };
+    return TypeParameterParseResult {
+        parser: current,
+        parameters: parameters
+    };
 }
 
 // ============================================================================
 // Implements Clause
 // ============================================================================
-
 fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
     let mut current = skip_trivia(parser);
     if !identifier_matches(parser_peek_raw(current), "implements") {
-        return ImplementsParseResult { parser: parser, types: [], found: false };
+        return ImplementsParseResult {
+            parser: parser,
+            types: [],
+            found: false
+        };
     }
 
     current = consume_keyword(current, "implements");
@@ -419,12 +401,12 @@ fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
     let entries = split_tokens_by_comma(capture.tokens);
     let mut index: number = 0;
     loop {
-        if index >= entries.length {
-            break;
-        }
+        if index >= entries.length { break; }
         let text = trim_text(entries[index]);
         if text.length > 0 {
-            implements_types = append_type_annotation(implements_types, TypeAnnotation { text: text });
+            implements_types = append_type_annotation(implements_types, TypeAnnotation {
+                text: text
+            });
         }
         index += 1;
     }
@@ -432,14 +414,13 @@ fn parse_implements_clause(parser: Parser) -> ImplementsParseResult {
     return ImplementsParseResult {
         parser: current,
         types: implements_types,
-        found: true,
+        found: true
     };
 }
 
 // ============================================================================
 // Parameter Parsing
 // ============================================================================
-
 fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -448,7 +429,10 @@ fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
     let token = parser_peek_raw(parser);
     if symbol_matches(token, ")") {
         parser = parser_advance_raw(parser);
-        return ParameterListParseResult { parser: parser, parameters: parameters };
+        return ParameterListParseResult {
+            parser: parser,
+            parameters: parameters
+        };
     }
 
     loop {
@@ -466,12 +450,13 @@ fn parse_parameter_list(initial_parser: Parser) -> ParameterListParseResult {
             parser = parser_advance_raw(parser);
             break;
         }
-        if separator.kind.variant == "EndOfFile" {
-            break;
-        }
+        if separator.kind.variant == "EndOfFile" { break; }
     }
 
-    return ParameterListParseResult { parser: parser, parameters: parameters };
+    return ParameterListParseResult {
+        parser: parser,
+        parameters: parameters
+    };
 }
 
 fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
@@ -524,7 +509,7 @@ fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
         type_annotation: type_annotation,
         default_value: default_value,
         mutable: is_mutable,
-        span: span,
+        span: span
     };
     return ParameterParseResult { parser: parser, parameter: parameter };
 }
@@ -532,7 +517,6 @@ fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
 // ============================================================================
 // Import/Export Parsing
 // ============================================================================
-
 fn parse_import(initial_parser: Parser) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -550,9 +534,7 @@ fn parse_import(initial_parser: Parser) -> StatementParseResult {
     let text = token.lexeme;
     let mut _if399: boolean = false;
     if text.length > 0 {
-        if strings_equal(char_at(text, 0), "\"") {
-            _if399 = true;
-        }
+        if strings_equal(char_at(text, 0), "\"") { _if399 = true; }
     }
     if _if399 {
         source = string_literal_value(token);
@@ -572,7 +554,7 @@ fn parse_import(initial_parser: Parser) -> StatementParseResult {
 
     let statement = Statement.ImportDeclaration {
         import_specifiers: import_specifiers,
-        source: source,
+        source: source
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -594,9 +576,7 @@ fn parse_export(initial_parser: Parser) -> StatementParseResult {
     let text = token.lexeme;
     let mut _if400: boolean = false;
     if text.length > 0 {
-        if strings_equal(char_at(text, 0), "\"") {
-            _if400 = true;
-        }
+        if strings_equal(char_at(text, 0), "\"") { _if400 = true; }
     }
     if _if400 {
         source = string_literal_value(token);
@@ -616,7 +596,7 @@ fn parse_export(initial_parser: Parser) -> StatementParseResult {
 
     let statement = Statement.ExportDeclaration {
         export_specifiers: export_specifiers,
-        source: source,
+        source: source
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -636,9 +616,7 @@ fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
             parser = parser_advance_raw(parser);
             break;
         }
-        if current.kind.variant != "Identifier" {
-            break;
-        }
+        if current.kind.variant != "Identifier" { break; }
 
         let name = identifier_text(current);
         parser = parser_advance_raw(parser);
@@ -658,9 +636,7 @@ fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
         }
 
         spec_names.push(name);
-        if alias != null {
-            spec_aliases.push(alias);
-        } else {
+        if alias != null { spec_aliases.push(alias); } else {
             spec_aliases.push("");
         }
         spec_count += 1;
@@ -680,10 +656,10 @@ fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
     loop {
         if _si >= spec_count { break; }
         let mut _a: string? = null;
-        if spec_aliases[_si].length > 0 {
-            _a = spec_aliases[_si];
-        }
-        specifiers = specifiers.concat([NamedSpecifier { name: spec_names[_si], alias: _a }]);
+        if spec_aliases[_si].length > 0 { _a = spec_aliases[_si]; }
+        specifiers = specifiers.concat([NamedSpecifier {
+            name: spec_names[_si], alias: _a
+        }]);
         _si += 1;
     }
 
@@ -692,18 +668,21 @@ fn parse_specifier_list(initial_parser: Parser) -> SpecifierListParseResult {
         parser = parser_advance_raw(parser);
     }
 
-    return SpecifierListParseResult { parser: parser, specifiers: specifiers };
+    return SpecifierListParseResult {
+        parser: parser,
+        specifiers: specifiers
+    };
 }
 
 fn build_import_specifiers(values: NamedSpecifier[]) -> ImportSpecifier[] {
     let mut result: ImportSpecifier[] = [];
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
+        if index >= values.length { break; }
         let entry = values[index];
-        result.push(ImportSpecifier { name: entry.name, alias: entry.alias });
+        result.push(ImportSpecifier {
+            name: entry.name, alias: entry.alias
+        });
         index += 1;
     }
     return result;
@@ -713,11 +692,11 @@ fn build_export_specifiers(values: NamedSpecifier[]) -> ExportSpecifier[] {
     let mut result: ExportSpecifier[] = [];
     let mut index: number = 0;
     loop {
-        if index >= values.length {
-            break;
-        }
+        if index >= values.length { break; }
         let entry = values[index];
-        result.push(ExportSpecifier { name: entry.name, alias: entry.alias });
+        result.push(ExportSpecifier {
+            name: entry.name, alias: entry.alias
+        });
         index += 1;
     }
     return result;
@@ -726,7 +705,6 @@ fn build_export_specifiers(values: NamedSpecifier[]) -> ExportSpecifier[] {
 // ============================================================================
 // Variable Declaration
 // ============================================================================
-
 fn parse_variable(initial_parser: Parser) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -760,9 +738,7 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
         let capture = collect_until(skip_trivia(parser), ["=", ";"]);
         let mut index: number = 0;
         loop {
-            if index >= capture.tokens.length {
-                break;
-            }
+            if index >= capture.tokens.length { break; }
             statement_tokens = append_token(statement_tokens, capture.tokens[index]);
             index += 1;
         }
@@ -783,9 +759,7 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
         let capture = collect_until(skip_trivia(parser), [";"]);
         let mut index: number = 0;
         loop {
-            if index >= capture.tokens.length {
-                break;
-            }
+            if index >= capture.tokens.length { break; }
             statement_tokens = append_token(statement_tokens, capture.tokens[index]);
             index += 1;
         }
@@ -811,7 +785,7 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
         type_annotation: type_annotation,
         initializer: initializer,
         span: span,
-        initializer_span: initializer_span,
+        initializer_span: initializer_span
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -819,7 +793,6 @@ fn parse_variable(initial_parser: Parser) -> StatementParseResult {
 // ============================================================================
 // Function Declaration
 // ============================================================================
-
 fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -903,13 +876,13 @@ fn parse_function(initial_parser: Parser, starts_with_async: boolean, decorators
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
-        name_span: name_span,
+        name_span: name_span
     };
 
     let statement = Statement.FunctionDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -988,13 +961,13 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
-        name_span: name_span,
+        name_span: name_span
     };
 
     let statement = Statement.ExternFunctionDeclaration {
         signature: signature,
         unsafe: is_unsafe,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1002,7 +975,6 @@ fn parse_extern_function(initial_parser: Parser, starts_with_unsafe: boolean, de
 // ============================================================================
 // Struct Declaration
 // ============================================================================
-
 fn parse_struct(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -1043,9 +1015,7 @@ fn parse_struct(initial_parser: Parser, decorators: Decorator[]) -> StatementPar
             parser = parser_advance_raw(parser);
             break;
         }
-        if token.kind.variant == "EndOfFile" {
-            break;
-        }
+        if token.kind.variant == "EndOfFile" { break; }
 
         let field_result = parse_struct_field(parser);
         if field_result.success {
@@ -1077,7 +1047,7 @@ fn parse_struct(initial_parser: Parser, decorators: Decorator[]) -> StatementPar
         implements_types: implements_types,
         fields: fields,
         methods: methods,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1096,7 +1066,11 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
     }
 
     if token_to_use.kind.variant != "Identifier" {
-        return StructFieldParseResult { parser: parser, field: null, success: false };
+        return StructFieldParseResult {
+            parser: parser,
+            field: null,
+            success: false
+        };
     }
 
     let name = identifier_text(token_to_use);
@@ -1107,20 +1081,32 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
     let separator_result = consume_annotation_separator(current);
     current = separator_result.parser;
     if !separator_result.found {
-        return StructFieldParseResult { parser: parser, field: null, success: false };
+        return StructFieldParseResult {
+            parser: parser,
+            field: null,
+            success: false
+        };
     }
 
     let capture = collect_until(skip_trivia(current), [";", ",", "}"]);
     current = capture.parser;
     let type_text = trim_text(tokens_to_text(capture.tokens));
     if type_text.length == 0 {
-        return StructFieldParseResult { parser: parser, field: null, success: false };
+        return StructFieldParseResult {
+            parser: parser,
+            field: null,
+            success: false
+        };
     }
 
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
     if !symbol_matches(terminator, ";") {
-        return StructFieldParseResult { parser: parser, field: null, success: false };
+        return StructFieldParseResult {
+            parser: parser,
+            field: null,
+            success: false
+        };
     }
     current = parser_advance_raw(current);
 
@@ -1128,13 +1114,13 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
         name: name,
         type_annotation: TypeAnnotation { text: type_text },
         mutable: is_mutable,
-        name_span: name_span,
+        name_span: name_span
     };
 
     return StructFieldParseResult {
         parser: current,
         field: field,
-        success: true,
+        success: true
     };
 }
 
@@ -1153,14 +1139,22 @@ fn parse_struct_method(parser: Parser, decorators: Decorator[]) -> MethodParseRe
 
     current = skip_trivia(current);
     if !identifier_matches(parser_peek_raw(current), "fn") {
-        return MethodParseResult { parser: parser, method: null, success: false };
+        return MethodParseResult {
+            parser: parser,
+            method: null,
+            success: false
+        };
     }
     current = consume_keyword(current, "fn");
 
     current = skip_trivia(current);
     let name_token = parser_peek_raw(current);
     if name_token.kind.variant != "Identifier" {
-        return MethodParseResult { parser: parser, method: null, success: false };
+        return MethodParseResult {
+            parser: parser,
+            method: null,
+            success: false
+        };
     }
     let name = identifier_text(name_token);
     let name_span = source_span_from_tokens([name_token]);
@@ -1205,26 +1199,25 @@ fn parse_struct_method(parser: Parser, decorators: Decorator[]) -> MethodParseRe
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
-        name_span: name_span,
+        name_span: name_span
     };
 
     let method = MethodDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators,
+        decorators: decorators
     };
 
     return MethodParseResult {
         parser: current,
         method: method,
-        success: true,
+        success: true
     };
 }
 
 // ============================================================================
 // Enum Declaration
 // ============================================================================
-
 fn parse_enum(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     let original = parser;
@@ -1256,9 +1249,7 @@ fn parse_enum(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
             parser = parser_advance_raw(parser);
             break;
         }
-        if token.kind.variant == "EndOfFile" {
-            break;
-        }
+        if token.kind.variant == "EndOfFile" { break; }
 
         let variant_result = parse_enum_variant(parser);
         if variant_result.success {
@@ -1278,7 +1269,7 @@ fn parse_enum(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
         name_span: name_span,
         type_parameters: type_parameters,
         variants: variants,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1288,7 +1279,11 @@ fn parse_enum_variant(parser: Parser) -> EnumVariantParseResult {
     let mut current = skip_trivia(parser);
     let name_token = parser_peek_raw(current);
     if name_token.kind.variant != "Identifier" {
-        return EnumVariantParseResult { parser: original, variant: null, success: false };
+        return EnumVariantParseResult {
+            parser: original,
+            variant: null,
+            success: false
+        };
     }
     let name = identifier_text(name_token);
     let name_span = source_span_from_tokens([name_token]);
@@ -1306,9 +1301,7 @@ fn parse_enum_variant(parser: Parser) -> EnumVariantParseResult {
                 current = parser_advance_raw(current);
                 break;
             }
-            if token.kind.variant == "EndOfFile" {
-                break;
-            }
+            if token.kind.variant == "EndOfFile" { break; }
 
             let field_result = parse_enum_variant_field(current);
             if field_result.success {
@@ -1334,13 +1327,13 @@ fn parse_enum_variant(parser: Parser) -> EnumVariantParseResult {
     let variant = EnumVariant {
         name: name,
         fields: fields,
-        name_span: name_span,
+        name_span: name_span
     };
 
     return EnumVariantParseResult {
         parser: current,
         variant: variant,
-        success: true,
+        success: true
     };
 }
 
@@ -1358,7 +1351,11 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
     }
 
     if token_to_use.kind.variant != "Identifier" {
-        return StructFieldParseResult { parser: parser, field: null, success: false };
+        return StructFieldParseResult {
+            parser: parser,
+            field: null,
+            success: false
+        };
     }
 
     let name = identifier_text(token_to_use);
@@ -1368,7 +1365,11 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
     current = skip_trivia(current);
     let sep_result = consume_annotation_separator(current);
     if !sep_result.found {
-        return StructFieldParseResult { parser: parser, field: null, success: false };
+        return StructFieldParseResult {
+            parser: parser,
+            field: null,
+            success: false
+        };
     }
     current = sep_result.parser;
 
@@ -1376,18 +1377,18 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
     current = capture.parser;
     let mut type_text = trim_text(tokens_to_text(capture.tokens));
     loop {
-        if type_text.length == 0 {
-            break;
-        }
+        if type_text.length == 0 { break; }
         let last = char_at(type_text, type_text.length - 1);
-        if last != ";" {
-            break;
-        }
+        if last != ";" { break; }
         let trimmed = substring(type_text, 0, type_text.length - 1);
         type_text = trim_text(trimmed);
     }
     if type_text.length == 0 {
-        return StructFieldParseResult { parser: parser, field: null, success: false };
+        return StructFieldParseResult {
+            parser: parser,
+            field: null,
+            success: false
+        };
     }
 
     current = skip_trivia(current);
@@ -1407,20 +1408,19 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
         name: name,
         type_annotation: TypeAnnotation { text: type_text },
         mutable: is_mutable,
-        name_span: name_span,
+        name_span: name_span
     };
 
     return StructFieldParseResult {
         parser: current,
         field: field,
-        success: true,
+        success: true
     };
 }
 
 // ============================================================================
 // Interface Declaration
 // ============================================================================
-
 fn parse_interface(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     let original = parser;
@@ -1452,9 +1452,7 @@ fn parse_interface(initial_parser: Parser, decorators: Decorator[]) -> Statement
             parser = parser_advance_raw(parser);
             break;
         }
-        if token.kind.variant == "EndOfFile" {
-            break;
-        }
+        if token.kind.variant == "EndOfFile" { break; }
 
         let member_start = parser;
         let decorator_result = parse_decorators(parser);
@@ -1479,7 +1477,7 @@ fn parse_interface(initial_parser: Parser, decorators: Decorator[]) -> Statement
         name_span: name_span,
         type_parameters: type_parameters,
         members: members,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1500,14 +1498,22 @@ fn parse_interface_member(parser: Parser, decorators: Decorator[]) -> InterfaceM
 
     current = skip_trivia(current);
     if !identifier_matches(parser_peek_raw(current), "fn") {
-        return InterfaceMemberParseResult { parser: original, signature: null, success: false };
+        return InterfaceMemberParseResult {
+            parser: original,
+            signature: null,
+            success: false
+        };
     }
     current = consume_keyword(current, "fn");
 
     current = skip_trivia(current);
     let name_token = parser_peek_raw(current);
     if name_token.kind.variant != "Identifier" {
-        return InterfaceMemberParseResult { parser: original, signature: null, success: false };
+        return InterfaceMemberParseResult {
+            parser: original,
+            signature: null,
+            success: false
+        };
     }
     let name = identifier_text(name_token);
     let name_span = source_span_from_tokens([name_token]);
@@ -1528,7 +1534,7 @@ fn parse_interface_member(parser: Parser, decorators: Decorator[]) -> InterfaceM
     let separator_result = consume_return_type_separator(current);
     if separator_result.found {
         current = separator_result.parser;
-        let capture = collect_until(skip_trivia(current), ["!", ";", "{" ]);
+        let capture = collect_until(skip_trivia(current), ["!", ";", "{"]);
         current = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
@@ -1556,20 +1562,19 @@ fn parse_interface_member(parser: Parser, decorators: Decorator[]) -> InterfaceM
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: type_parameters,
-        name_span: name_span,
+        name_span: name_span
     };
 
     return InterfaceMemberParseResult {
         parser: current,
         signature: signature,
-        success: true,
+        success: true
     };
 }
 
 // ============================================================================
 // Type Alias Declaration
 // ============================================================================
-
 fn parse_type_alias(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     let original = parser;
@@ -1591,17 +1596,13 @@ fn parse_type_alias(initial_parser: Parser, decorators: Decorator[]) -> Statemen
 
     parser = skip_trivia(parser);
     let equals = parser_peek_raw(parser);
-    if !symbol_matches(equals, "=") {
-        return parse_unknown(original);
-    }
+    if !symbol_matches(equals, "=") { return parse_unknown(original); }
     parser = parser_advance_raw(parser);
 
     let capture = collect_until(skip_trivia(parser), [";"]);
     parser = capture.parser;
     let aliased_text = trim_text(tokens_to_text(capture.tokens));
-    if aliased_text.length == 0 {
-        return parse_unknown(original);
-    }
+    if aliased_text.length == 0 { return parse_unknown(original); }
     let aliased_type = TypeAnnotation { text: aliased_text };
 
     parser = skip_trivia(parser);
@@ -1615,7 +1616,7 @@ fn parse_type_alias(initial_parser: Parser, decorators: Decorator[]) -> Statemen
         name_span: name_span,
         type_parameters: type_parameters,
         aliased_type: aliased_type,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1623,7 +1624,6 @@ fn parse_type_alias(initial_parser: Parser, decorators: Decorator[]) -> Statemen
 // ============================================================================
 // Model Declaration
 // ============================================================================
-
 fn parse_model(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     let original = parser;
@@ -1643,9 +1643,7 @@ fn parse_model(initial_parser: Parser, decorators: Decorator[]) -> StatementPars
     let type_capture = collect_until(skip_trivia(parser), ["!", "{"]);
     parser = type_capture.parser;
     let type_text = trim_text(tokens_to_text(type_capture.tokens));
-    if type_text.length == 0 {
-        return parse_unknown(original);
-    }
+    if type_text.length == 0 { return parse_unknown(original); }
     let model_type = TypeAnnotation { text: type_text };
 
     let effect_result = parse_effect_list(parser);
@@ -1664,9 +1662,7 @@ fn parse_model(initial_parser: Parser, decorators: Decorator[]) -> StatementPars
             parser = parser_advance_raw(parser);
             break;
         }
-        if token.kind.variant == "EndOfFile" {
-            break;
-        }
+        if token.kind.variant == "EndOfFile" { break; }
 
         let entry_start = parser;
         let property_result = parse_model_property(parser);
@@ -1685,9 +1681,7 @@ fn parse_model(initial_parser: Parser, decorators: Decorator[]) -> StatementPars
             parser = parser_advance_raw(parser);
             break;
         }
-        if maybe_close.kind.variant == "EndOfFile" {
-            break;
-        }
+        if maybe_close.kind.variant == "EndOfFile" { break; }
     }
 
     let statement = Statement.ModelDeclaration {
@@ -1696,7 +1690,7 @@ fn parse_model(initial_parser: Parser, decorators: Decorator[]) -> StatementPars
         model_type: model_type,
         properties: properties,
         effects: effects,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1705,7 +1699,11 @@ fn parse_model_property(parser: Parser) -> ModelPropertyParseResult {
     let mut current = skip_trivia(parser);
     let name_token = parser_peek_raw(current);
     if name_token.kind.variant != "Identifier" {
-        return ModelPropertyParseResult { parser: parser, property: null, success: false };
+        return ModelPropertyParseResult {
+            parser: parser,
+            property: null,
+            success: false
+        };
     }
     let name = identifier_text(name_token);
     current = parser_advance_raw(current);
@@ -1713,7 +1711,11 @@ fn parse_model_property(parser: Parser) -> ModelPropertyParseResult {
     current = skip_trivia(current);
     let equals = parser_peek_raw(current);
     if !symbol_matches(equals, "=") {
-        return ModelPropertyParseResult { parser: parser, property: null, success: false };
+        return ModelPropertyParseResult {
+            parser: parser,
+            property: null,
+            success: false
+        };
     }
     current = parser_advance_raw(current);
 
@@ -1724,23 +1726,30 @@ fn parse_model_property(parser: Parser) -> ModelPropertyParseResult {
     current = skip_trivia(current);
     let terminator = parser_peek_raw(current);
     if !symbol_matches(terminator, ";") {
-        return ModelPropertyParseResult { parser: parser, property: null, success: false };
+        return ModelPropertyParseResult {
+            parser: parser,
+            property: null,
+            success: false
+        };
     }
     current = parser_advance_raw(current);
 
     let property = ModelProperty {
         name: name,
         value: value_expression,
-        span: source_span_from_tokens([name_token]),
+        span: source_span_from_tokens([name_token])
     };
 
-    return ModelPropertyParseResult { parser: current, property: property, success: true };
+    return ModelPropertyParseResult {
+        parser: current,
+        property: property,
+        success: true
+    };
 }
 
 // ============================================================================
 // Pipeline Declaration
 // ============================================================================
-
 fn parse_pipeline(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -1806,13 +1815,13 @@ fn parse_pipeline(initial_parser: Parser, decorators: Decorator[]) -> StatementP
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: [],
-        name_span: name_span,
+        name_span: name_span
     };
 
     let statement = Statement.PipelineDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1820,7 +1829,6 @@ fn parse_pipeline(initial_parser: Parser, decorators: Decorator[]) -> StatementP
 // ============================================================================
 // Tool Declaration
 // ============================================================================
-
 fn parse_tool(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -1882,13 +1890,13 @@ fn parse_tool(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
         return_type: return_type,
         effects: inferred_effects,
         type_parameters: [],
-        name_span: name_span,
+        name_span: name_span
     };
 
     let statement = Statement.ToolDeclaration {
         signature: signature,
         body: body,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1896,7 +1904,6 @@ fn parse_tool(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
 // ============================================================================
 // Test Declaration
 // ============================================================================
-
 fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     let original = parser;
@@ -1906,9 +1913,7 @@ fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
     let name_capture = collect_until(skip_trivia(parser), ["!", "{"]);
     parser = name_capture.parser;
     let name_text = trim_text(tokens_to_text(name_capture.tokens));
-    if name_text.length == 0 {
-        return parse_unknown(original);
-    }
+    if name_text.length == 0 { return parse_unknown(original); }
     let name_span = source_span_from_tokens(name_capture.tokens);
     let name = normalize_test_name(name_text);
 
@@ -1926,7 +1931,7 @@ fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
         name_span: name_span,
         body: body,
         effects: inferred_effects,
-        decorators: decorators,
+        decorators: decorators
     };
     return StatementParseResult { parser: parser, statement: statement };
 }
@@ -1934,7 +1939,6 @@ fn parse_test(initial_parser: Parser, decorators: Decorator[]) -> StatementParse
 // ============================================================================
 // Unknown Statement (fallback)
 // ============================================================================
-
 fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
     let mut parser: Parser = initial_parser;
     parser = skip_trivia(parser);
@@ -1955,12 +1959,8 @@ fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
         let tok = parser_peek_raw(current);
         tokens = append_token(tokens, tok);
 
-        if symbol_matches(tok, "{") {
-            depth += 1;
-        } else if symbol_matches(tok, "}") {
-            if depth > 0 {
-                depth -= 1;
-            }
+        if symbol_matches(tok, "{") { depth += 1; } else if symbol_matches(tok, "}") {
+            if depth > 0 { depth -= 1; }
             if depth == 0 {
                 current = parser_advance_raw(current);
                 break;
@@ -1968,9 +1968,7 @@ fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
         } else {
             let mut _elif401: boolean = false;
             if depth == 0 {
-                if symbol_matches(tok, ";") {
-                    _elif401 = true;
-                }
+                if symbol_matches(tok, ";") { _elif401 = true; }
             }
             if _elif401 {
                 current = parser_advance_raw(current);
@@ -1987,9 +1985,7 @@ fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
     }
 
     let mut text: string = tokens_to_text(tokens);
-    if truncated {
-        text = text + " /* parse_unknown truncated */";
-    }
+    if truncated { text = text + " /* parse_unknown truncated */"; }
     let block = Statement.Unknown { tokens: tokens, text: text };
     parser = skip_trivia(current);
     return StatementParseResult { parser: parser, statement: block };
@@ -1998,7 +1994,6 @@ fn parse_unknown(initial_parser: Parser) -> StatementParseResult {
 // ============================================================================
 // Append Helpers
 // ============================================================================
-
 fn append_string(values: string[], value: string) -> string[] {
     values.push(value);
     return values;

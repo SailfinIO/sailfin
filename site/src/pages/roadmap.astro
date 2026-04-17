@@ -85,7 +85,8 @@ const v1Categories: RoadmapCategory[] = [
     items: [
       { label: "Eliminate the Python fixup script", status: "done" },
       { label: "Make build.sh the sole clean build path with no post-processing", status: "done" },
-      { label: "Pass make check with no fallbacks", status: "planned" },
+      { label: "Pass make check with no fallbacks", status: "done" },
+      { label: "Deterministic self-hosting — stage2 == stage3 fixed-point verified", status: "done" },
       { label: "Stabilize control-flow LLVM lowering (loop/if/break headers)", status: "planned" },
       { label: "Richer diagnostics — multi-span, severity levels, fix-it hints", status: "planned" },
     ],
@@ -94,7 +95,7 @@ const v1Categories: RoadmapCategory[] = [
     title: "Tooling & Developer Workflow",
     description: "CLI tools and build toolchain modernization.",
     items: [
-      { label: "sfn fmt — code formatter", status: "planned" },
+      { label: "sfn fmt — code formatter (token-stream, one style, CI-enforced)", status: "done" },
       { label: "sfn check — fast type and effect analysis", status: "planned" },
       { label: "sfn vet — static analyzer", status: "planned" },
       { label: "sfn audit — dependency capability surface analysis", status: "planned" },

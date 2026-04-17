@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 16, 2026
+Updated: April 17, 2026
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -18,6 +18,9 @@ feature availability.
   compiler uses on itself. No text-level inlining for declared capsule deps.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
+- **Deterministic self-hosting**: the compiler is a verified fixed point —
+  stage2 and stage3 produce byte-identical LLVM IR across all modules.
+  `make check` enforces this.
 - The legacy Python fixup script (`selfhost_native.py`) was removed after the
   compiler reached clean LLVM IR output (v0.5.0-alpha.22+).
 
@@ -85,7 +88,7 @@ feature availability.
 | `scope.with_timeout(...)` | **Not implemented** | |
 | `unsafe` / `extern` | Parsed only | Syntax accepted; enforcement not active |
 | Policy decorators (`@policy(...)`) | Parsed only | No compiler or runtime effect |
-| `sfn fmt` (formatter) | Partial (Steps 1-4 of 5) | CLI wiring, token-stream formatting with indentation/spacing/inline blocks, import sorting, blank line normalization; see `docs/proposals/fmt-architecture.md` |
+| `sfn fmt` (formatter) | **Shipped** | Token-stream formatter: indentation, spacing, inline blocks, unary operator handling, import sorting & specifier reordering, blank line normalization, `--check`/`--write` modes, CI enforcement; see `docs/proposals/fmt-architecture.md` for architecture and known limitations |
 | `sfn check` (fast analysis) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |

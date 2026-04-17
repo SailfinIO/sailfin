@@ -2,97 +2,61 @@
 //
 // Call target resolution extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
-
 import { NativeFunction, NativeParameter } from "../../../native_ir";
-
 import {
-    TypeContext,
-    ParameterBinding,
-    LocalBinding,
-    ExpressionResult,
-    LLVMOperand,
-    StringConstant,
-    RuntimeHelperDescriptor,
-    CallTargetResolution,
-    CallSignatureResolution,
-    MemberAccessParse,
-    StructTypeInfo,
-} from "../../types";
-
-import {
-    trim_text,
-    starts_with,
-    ends_with,
-    number_to_string,
-} from "../../utils";
-
-import { substring, index_of, find_last_index_of_char, char_at, char_code } from "../../../string_utils";
-
+    char_at,
+    char_code,
+    find_last_index_of_char,
+    index_of,
+    substring
+} from "../../../string_utils";
+import { is_simple_identifier } from "../../expressions_helpers";
+import { find_function_by_name } from "../../rendering_helpers";
+import { find_runtime_helper } from "../../runtime_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
-
-import {
-    ends_with_pointer_suffix,
-} from "../../type_mapping";
-
 import {
     find_interface_info_by_name,
-    resolve_struct_info_for_method_target,
     resolve_interface_info_for_method_target,
+    resolve_struct_info_for_method_target
 } from "../../type_context_queries";
-
-import { find_function_by_name } from "../../rendering_helpers";
-
-import { find_runtime_helper } from "../../runtime_helpers";
-
+import { ends_with_pointer_suffix } from "../../type_mapping";
 import {
-    collect_parameter_types,
-} from "./core_helpers";
-
+    CallSignatureResolution,
+    CallTargetResolution,
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    MemberAccessParse,
+    ParameterBinding,
+    RuntimeHelperDescriptor,
+    StringConstant,
+    StructTypeInfo,
+    TypeContext
+} from "../../types";
 import {
-    map_return_type,
-    map_parameter_type,
-    future_pointer_type_for_return_type,
-} from "./core_type_mapping";
-
-import { is_simple_identifier } from "../../expressions_helpers";
-
-import {
-    array_pointer_element_type,
-} from "../arrays";
-
-import {
-    parse_member_access,
-} from "./core_parse";
-
-import {
-    find_local_binding,
-    find_parameter_binding,
-} from "./core_scopes";
-
-import {
-    load_local_operand,
-} from "./core_operands";
-
-import { sanitize_symbol } from "./core_text";
-
+    ends_with,
+    number_to_string,
+    starts_with,
+    trim_text
+} from "../../utils";
+import { array_pointer_element_type } from "../arrays";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
+import { collect_parameter_types } from "./core_helpers";
+import { load_local_operand } from "./core_operands";
+import { parse_member_access } from "./core_parse";
+import { find_local_binding, find_parameter_binding } from "./core_scopes";
+import { sanitize_symbol } from "./core_text";
+import {
+    future_pointer_type_for_return_type,
+    map_parameter_type,
+    map_return_type
+} from "./core_type_mapping";
 
 // Resolve fused concat/push targets (e.g. `valuesconcat(xs)` → `concat`).
 // Also handles file-based method resolution and parse_member_access dispatch.
 // Returns a CallTargetResolution with the resolved target, method operand, etc.
-fn resolve_call_method_target(
-    trimmed_target: string,
-    arguments: string[],
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    current_temp: number,
-    current_lines: string[],
-    functions: NativeFunction[],
-    context: TypeContext,
-    diagnostics: string[],
-    collected_string_constants: StringConstant[]
-) -> CallTargetResolution ![io] {
+fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: number, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], collected_string_constants: StringConstant[]) -> CallTargetResolution ![io] {
     let mut result_target = trimmed_target;
     let mut result_lines = current_lines;
     let mut result_temp: number = current_temp;
@@ -136,7 +100,10 @@ fn resolve_call_method_target(
                         result_temp = load_result.temp_index;
                         receiver_operand = load_result.operand;
                     } else if parameter != null {
-                        receiver_operand = LLVMOperand { llvm_type: parameter.llvm_type, value: parameter.llvm_name };
+                        receiver_operand = LLVMOperand {
+                            llvm_type: parameter.llvm_type,
+                            value: parameter.llvm_name
+                        };
                     }
 
                     if receiver_operand != null {
@@ -156,7 +123,7 @@ fn resolve_call_method_target(
                                     symbol: "",
                                     return_type: receiver_operand.llvm_type,
                                     parameter_types: [receiver_operand.llvm_type, receiver_operand.llvm_type],
-                                    effects: [],
+                                    effects: []
                                 };
                             }
                         }
@@ -202,7 +169,10 @@ fn resolve_call_method_target(
     }
     if _push_param != null {
         if _push_receiver_operand == null {
-            _push_receiver_operand = LLVMOperand { llvm_type: _push_param.llvm_type, value: _push_param.llvm_name };
+            _push_receiver_operand = LLVMOperand {
+                llvm_type: _push_param.llvm_type,
+                value: _push_param.llvm_name
+            };
         }
     }
     if _push_receiver_operand != null {
@@ -235,22 +205,31 @@ fn resolve_call_method_target(
                                         let mut _pre_pos: number = 0;
                                         let mut _pre_struct: string = "";
                                         loop {
-                                            if _pre_pos >= _pre_raw.length { break; }
+                                            if _pre_pos >= _pre_raw.length {
+                                                break;
+                                            }
                                             let _pre_nl = index_of(substring(_pre_raw, _pre_pos, _pre_raw.length), "\n");
                                             let mut _pre_line: string = "";
                                             if _pre_nl < 0 {
                                                 _pre_line = substring(_pre_raw, _pre_pos, _pre_raw.length);
                                                 _pre_pos = _pre_raw.length;
                                             } else {
-                                                _pre_line = substring(_pre_raw, _pre_pos, _pre_pos + _pre_nl);
-                                                _pre_pos = _pre_pos + _pre_nl + 1;
+                                                _pre_line = substring(_pre_raw, _pre_pos, _pre_pos
+                                                    + _pre_nl);
+                                                _pre_pos = _pre_pos + _pre_nl
+                                                    + 1;
                                             }
-                                            if _pre_line.length == 0 { continue; }
+                                            if _pre_line.length == 0 {
+                                                continue;
+                                            }
                                             let _pre_t1 = index_of(_pre_line, "\t");
                                             if _pre_t1 < 0 { continue; }
                                             let _pre_name = substring(_pre_line, 0, _pre_t1);
-                                            if _pre_name != _pre_base { continue; }
-                                            let _pre_rest = substring(_pre_line, _pre_t1 + 1, _pre_line.length);
+                                            if _pre_name != _pre_base {
+                                                continue;
+                                            }
+                                            let _pre_rest = substring(_pre_line, _pre_t1
+                                                + 1, _pre_line.length);
                                             let _pre_t2 = index_of(_pre_rest, "\t");
                                             if _pre_t2 < 0 { continue; }
                                             _pre_struct = substring(_pre_rest, 0, _pre_t2);
@@ -260,7 +239,9 @@ fn resolve_call_method_target(
                                             let _pre_lowered = lower_expression(_pre_base, bindings, locals, result_temp, result_lines, functions, context, "");
                                             let mut _ci1: number = 0;
                                             loop {
-                                                if _ci1 >= _pre_lowered.diagnostics.length { break; }
+                                                if _ci1 >= _pre_lowered.diagnostics.length {
+                                                    break;
+                                                }
                                                 result_diagnostics.push(_pre_lowered.diagnostics[_ci1]);
                                                 _ci1 += 1;
                                             }
@@ -269,7 +250,8 @@ fn resolve_call_method_target(
                                             result_temp = _pre_lowered.temp_index;
                                             if _pre_lowered.operand != null {
                                                 method_operand = _pre_lowered.operand;
-                                                result_target = _pre_struct + _pre_field;
+                                                result_target = _pre_struct
+                                                    + _pre_field;
                                                 injected_argument_count = 1;
                                             }
                                         }
@@ -285,35 +267,12 @@ fn resolve_call_method_target(
 
     // Delegate parse_member_access dispatch to a separate function to keep
     // each function under ~500 .sfn-asm instructions.
-    return resolve_parsed_method_dispatch(
-        result_target, arguments, bindings, locals, result_temp, result_lines,
-        functions, context, result_diagnostics, result_string_constants,
-        method_operand, helper_descriptor, injected_argument_count,
-        is_array_concat, array_concat_element_type, is_array_push, array_push_element_type
-    );
+    return resolve_parsed_method_dispatch(result_target, arguments, bindings, locals, result_temp, result_lines, functions, context, result_diagnostics, result_string_constants, method_operand, helper_descriptor, injected_argument_count, is_array_concat, array_concat_element_type, is_array_push, array_push_element_type);
 }
 
 // Resolves method calls via parse_member_access (struct methods, interface dispatch,
 // runtime helpers, array concat/push).
-fn resolve_parsed_method_dispatch(
-    result_target: string,
-    arguments: string[],
-    bindings: ParameterBinding[],
-    locals: LocalBinding[],
-    result_temp: number,
-    result_lines: string[],
-    functions: NativeFunction[],
-    context: TypeContext,
-    result_diagnostics: string[],
-    result_string_constants: StringConstant[],
-    method_operand: LLVMOperand?,
-    helper_descriptor: RuntimeHelperDescriptor?,
-    injected_argument_count: number,
-    is_array_concat: boolean,
-    array_concat_element_type: string,
-    is_array_push: boolean,
-    array_push_element_type: string
-) -> CallTargetResolution ![io] {
+fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], result_temp: number, result_lines: string[], functions: NativeFunction[], context: TypeContext, result_diagnostics: string[], result_string_constants: StringConstant[], method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, injected_argument_count: number, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string) -> CallTargetResolution ![io] {
     let mut r_target = result_target;
     let mut r_lines = result_lines;
     let mut r_temp: number = result_temp;
@@ -345,13 +304,22 @@ fn resolve_parsed_method_dispatch(
                 r_lines = lowered_self.lines;
                 r_temp = lowered_self.temp_index;
                 if lowered_self.operand == null {
-                    r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    r_diagnostics.push("llvm lowering: method call base `"
+                        + method_parse.base
+                        + "` produced no value");
                     return CallTargetResolution {
-                        trimmed_target: r_target, method_operand: null, helper_descriptor: null,
-                        injected_argument_count: 0, is_array_concat: false, array_concat_element_type: "",
-                        is_array_push: false, array_push_element_type: "",
-                        current_lines: r_lines, current_temp: r_temp,
-                        diagnostics: r_diagnostics, string_constants: r_string_constants,
+                        trimmed_target: r_target,
+                        method_operand: null,
+                        helper_descriptor: null,
+                        injected_argument_count: 0,
+                        is_array_concat: false,
+                        array_concat_element_type: "",
+                        is_array_push: false,
+                        array_push_element_type: "",
+                        current_lines: r_lines,
+                        current_temp: r_temp,
+                        diagnostics: r_diagnostics,
+                        string_constants: r_string_constants
                     };
                 }
 
@@ -371,7 +339,7 @@ fn resolve_parsed_method_dispatch(
                                 symbol: "",
                                 return_type: base_operand.llvm_type,
                                 parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                effects: [],
+                                effects: []
                             };
                         }
                     } else {
@@ -385,7 +353,7 @@ fn resolve_parsed_method_dispatch(
                             symbol: "",
                             return_type: base_operand.llvm_type,
                             parameter_types: [base_operand.llvm_type, array_element_type],
-                            effects: [],
+                            effects: []
                         };
                     }
                 }
@@ -402,9 +370,7 @@ fn resolve_parsed_method_dispatch(
                     let bound_param = find_parameter_binding(bindings, base_name);
                     let mut _if59: boolean = false;
                     if bound_local == null {
-                        if bound_param == null {
-                            _if59 = true;
-                        }
+                        if bound_param == null { _if59 = true; }
                     }
                     if _if59 {
                         r_target = method_info.name + method_parse.field;
@@ -413,7 +379,9 @@ fn resolve_parsed_method_dispatch(
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
                         let mut _ci3: number = 0;
                         loop {
-                            if _ci3 >= lowered_self.diagnostics.length { break; }
+                            if _ci3 >= lowered_self.diagnostics.length {
+                                break;
+                            }
                             r_diagnostics.push(lowered_self.diagnostics[_ci3]);
                             _ci3 += 1;
                         }
@@ -425,13 +393,22 @@ fn resolve_parsed_method_dispatch(
                             r_target = method_info.name + method_parse.field;
                             r_injected_count = 1;
                         } else {
-                            r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                            r_diagnostics.push("llvm lowering: method call base `"
+                                + method_parse.base
+                                + "` produced no value");
                             return CallTargetResolution {
-                                trimmed_target: r_target, method_operand: null, helper_descriptor: null,
-                                injected_argument_count: 0, is_array_concat: false, array_concat_element_type: "",
-                                is_array_push: false, array_push_element_type: "",
-                                current_lines: r_lines, current_temp: r_temp,
-                                diagnostics: r_diagnostics, string_constants: r_string_constants,
+                                trimmed_target: r_target,
+                                method_operand: null,
+                                helper_descriptor: null,
+                                injected_argument_count: 0,
+                                is_array_concat: false,
+                                array_concat_element_type: "",
+                                is_array_push: false,
+                                array_push_element_type: "",
+                                current_lines: r_lines,
+                                current_temp: r_temp,
+                                diagnostics: r_diagnostics,
+                                string_constants: r_string_constants
                             };
                         }
                     }
@@ -451,13 +428,22 @@ fn resolve_parsed_method_dispatch(
                         r_target = method_info.name + method_parse.field;
                         r_injected_count = 1;
                     } else {
-                        r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                        r_diagnostics.push("llvm lowering: method call base `"
+                            + method_parse.base
+                            + "` produced no value");
                         return CallTargetResolution {
-                            trimmed_target: r_target, method_operand: null, helper_descriptor: null,
-                            injected_argument_count: 0, is_array_concat: false, array_concat_element_type: "",
-                            is_array_push: false, array_push_element_type: "",
-                            current_lines: r_lines, current_temp: r_temp,
-                            diagnostics: r_diagnostics, string_constants: r_string_constants,
+                            trimmed_target: r_target,
+                            method_operand: null,
+                            helper_descriptor: null,
+                            injected_argument_count: 0,
+                            is_array_concat: false,
+                            array_concat_element_type: "",
+                            is_array_push: false,
+                            array_push_element_type: "",
+                            current_lines: r_lines,
+                            current_temp: r_temp,
+                            diagnostics: r_diagnostics,
+                            string_constants: r_string_constants
                         };
                     }
                 }
@@ -474,16 +460,26 @@ fn resolve_parsed_method_dispatch(
                 r_temp = lowered_self.temp_index;
                 if lowered_self.operand != null {
                     r_method_operand = lowered_self.operand;
-                    r_target = "trait_dispatch__" + interface_info.name + "__" + method_parse.field;
+                    r_target = "trait_dispatch__" + interface_info.name + "__"
+                        + method_parse.field;
                     r_injected_count = 1;
                 } else {
-                    r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                    r_diagnostics.push("llvm lowering: method call base `"
+                        + method_parse.base
+                        + "` produced no value");
                     return CallTargetResolution {
-                        trimmed_target: r_target, method_operand: null, helper_descriptor: null,
-                        injected_argument_count: 0, is_array_concat: false, array_concat_element_type: "",
-                        is_array_push: false, array_push_element_type: "",
-                        current_lines: r_lines, current_temp: r_temp,
-                        diagnostics: r_diagnostics, string_constants: r_string_constants,
+                        trimmed_target: r_target,
+                        method_operand: null,
+                        helper_descriptor: null,
+                        injected_argument_count: 0,
+                        is_array_concat: false,
+                        array_concat_element_type: "",
+                        is_array_push: false,
+                        array_push_element_type: "",
+                        current_lines: r_lines,
+                        current_temp: r_temp,
+                        diagnostics: r_diagnostics,
+                        string_constants: r_string_constants
                     };
                 }
             } else {
@@ -522,13 +518,22 @@ fn resolve_parsed_method_dispatch(
                         r_target = _struct_fallback_info.name + method_parse.field;
                         r_injected_count = 1;
                     } else {
-                        r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                        r_diagnostics.push("llvm lowering: method call base `"
+                            + method_parse.base
+                            + "` produced no value");
                         return CallTargetResolution {
-                            trimmed_target: r_target, method_operand: null, helper_descriptor: null,
-                            injected_argument_count: 0, is_array_concat: false, array_concat_element_type: "",
-                            is_array_push: false, array_push_element_type: "",
-                            current_lines: r_lines, current_temp: r_temp,
-                            diagnostics: r_diagnostics, string_constants: r_string_constants,
+                            trimmed_target: r_target,
+                            method_operand: null,
+                            helper_descriptor: null,
+                            injected_argument_count: 0,
+                            is_array_concat: false,
+                            array_concat_element_type: "",
+                            is_array_push: false,
+                            array_push_element_type: "",
+                            current_lines: r_lines,
+                            current_temp: r_temp,
+                            diagnostics: r_diagnostics,
+                            string_constants: r_string_constants
                         };
                     }
                 } else {
@@ -540,7 +545,9 @@ fn resolve_parsed_method_dispatch(
                         let lowered_self = lower_expression(method_parse.base, bindings, locals, r_temp, r_lines, functions, context, "");
                         let mut _ci6: number = 0;
                         loop {
-                            if _ci6 >= lowered_self.diagnostics.length { break; }
+                            if _ci6 >= lowered_self.diagnostics.length {
+                                break;
+                            }
                             r_diagnostics.push(lowered_self.diagnostics[_ci6]);
                             _ci6 += 1;
                         }
@@ -548,13 +555,22 @@ fn resolve_parsed_method_dispatch(
                         r_lines = lowered_self.lines;
                         r_temp = lowered_self.temp_index;
                         if lowered_self.operand == null {
-                            r_diagnostics.push("llvm lowering: method call base `" + method_parse.base + "` produced no value");
+                            r_diagnostics.push("llvm lowering: method call base `"
+                                + method_parse.base
+                                + "` produced no value");
                             return CallTargetResolution {
-                                trimmed_target: r_target, method_operand: null, helper_descriptor: null,
-                                injected_argument_count: 0, is_array_concat: false, array_concat_element_type: "",
-                                is_array_push: false, array_push_element_type: "",
-                                current_lines: r_lines, current_temp: r_temp,
-                                diagnostics: r_diagnostics, string_constants: r_string_constants,
+                                trimmed_target: r_target,
+                                method_operand: null,
+                                helper_descriptor: null,
+                                injected_argument_count: 0,
+                                is_array_concat: false,
+                                array_concat_element_type: "",
+                                is_array_push: false,
+                                array_push_element_type: "",
+                                current_lines: r_lines,
+                                current_temp: r_temp,
+                                diagnostics: r_diagnostics,
+                                string_constants: r_string_constants
                             };
                         }
 
@@ -569,9 +585,7 @@ fn resolve_parsed_method_dispatch(
                         let array_element_type = array_pointer_element_type(base_operand.llvm_type);
                         let mut _if60: boolean = false;
                         if array_element_type.length > 0 {
-                            if method_parse.field == "concat" {
-                                _if60 = true;
-                            }
+                            if method_parse.field == "concat" { _if60 = true; }
                         }
                         if _if60 {
                             r_method_operand = base_operand;
@@ -586,7 +600,7 @@ fn resolve_parsed_method_dispatch(
                                     symbol: "",
                                     return_type: base_operand.llvm_type,
                                     parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                    effects: [],
+                                    effects: []
                                 };
                             }
                         } else {
@@ -608,13 +622,13 @@ fn resolve_parsed_method_dispatch(
                                     symbol: "",
                                     return_type: base_operand.llvm_type,
                                     parameter_types: [base_operand.llvm_type, array_element_type],
-                                    effects: [],
+                                    effects: []
                                 };
                             }
                         }
                     }
                 }
-            } // close struct fallback else
+            }  // close struct fallback else
         }
     }
 
@@ -630,7 +644,7 @@ fn resolve_parsed_method_dispatch(
         current_lines: r_lines,
         current_temp: r_temp,
         diagnostics: r_diagnostics,
-        string_constants: r_string_constants,
+        string_constants: r_string_constants
     };
 }
 
@@ -644,9 +658,7 @@ fn _parse_int_res(text: string) -> number {
         let ch = char_at(text, i);
         let code = char_code(ch);
         if code >= 48 {
-            if code <= 57 {
-                result = result * 10 + (code - 48);
-            }
+            if code <= 57 { result = result * 10 + (code - 48); }
         }
         i = i + 1;
     }
@@ -654,9 +666,7 @@ fn _parse_int_res(text: string) -> number {
 }
 
 fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
-    if !fs.exists("build/sailfin/.ctx_func_count") {
-        return null;
-    }
+    if !fs.exists("build/sailfin/.ctx_func_count") { return null; }
     let count_str = fs.readFile("build/sailfin/.ctx_func_count");
     let count = _parse_int_res(count_str);
     let mut suffix_match: NativeFunction? = null;
@@ -682,16 +692,19 @@ fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
                 let pname = fs.readFile(pp + "_name");
                 let ptype = fs.readFile(pp + "_type");
                 params.push(NativeParameter {
-                            name: pname, type_annotation: ptype,
-                            mutable: false, default_value: null, span: null,
+                    name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null
                 });
                 j += 1;
             }
             return NativeFunction {
-                name: fname, return_type: ret_type,
-                is_async: is_async, parameters: params,
-                effects: [], decorators: [], is_extern: false,
-                instructions: [],
+                name: fname,
+                return_type: ret_type,
+                is_async: is_async,
+                parameters: params,
+                effects: [],
+                decorators: [],
+                is_extern: false,
+                instructions: []
             };
         }
         if starts_with(fname, suffix_prefix) {
@@ -710,36 +723,33 @@ fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
                     let pname = fs.readFile(pp + "_name");
                     let ptype = fs.readFile(pp + "_type");
                     params.push(NativeParameter {
-                                name: pname, type_annotation: ptype,
-                                mutable: false, default_value: null, span: null,
+                        name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null
                     });
                     j += 1;
                 }
                 suffix_match = NativeFunction {
-                    name: fname, return_type: ret_type,
-                    is_async: is_async, parameters: params,
-                    effects: [], decorators: [], is_extern: false,
-                    instructions: [],
+                    name: fname,
+                    return_type: ret_type,
+                    is_async: is_async,
+                    parameters: params,
+                    effects: [],
+                    decorators: [],
+                    is_extern: false,
+                    instructions: []
                 };
             }
         }
         idx += 1;
     }
-    if suffix_match_count == 1 {
-        return suffix_match;
-    }
+    if suffix_match_count == 1 { return suffix_match; }
     return null;
 }
 
 fn _find_function_by_name_or_import(functions: NativeFunction[], target: string) -> NativeFunction? ![io] {
     let file_result = _find_function_from_files_res(target);
-    if file_result != null {
-        return file_result;
-    }
+    if file_result != null { return file_result; }
     let exact = find_function_by_name(functions, target);
-    if exact != null {
-        return exact;
-    }
+    if exact != null { return exact; }
     let suffix_prefix = target + "__";
     let mut match_result: NativeFunction? = null;
     let mut idx: number = 0;
@@ -747,9 +757,7 @@ fn _find_function_by_name_or_import(functions: NativeFunction[], target: string)
         if idx >= functions.length { break; }
         let candidate = functions[idx];
         if starts_with(candidate.name, suffix_prefix) {
-            if match_result != null {
-                return null;
-            }
+            if match_result != null { return null; }
             match_result = candidate;
         }
         idx += 1;
@@ -759,15 +767,7 @@ fn _find_function_by_name_or_import(functions: NativeFunction[], target: string)
 
 // Resolve the function signature for a call target: return type, expected parameter
 // types, whether it's a trait dispatch, and the resolved function entry.
-fn resolve_call_signature(
-    trimmed_target: string,
-    helper_descriptor: RuntimeHelperDescriptor?,
-    method_operand: LLVMOperand?,
-    is_array_concat: boolean,
-    array_concat_element_type: string,
-    functions: NativeFunction[],
-    context: TypeContext
-) -> CallSignatureResolution ![io] {
+fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution ![io] {
     let mut result_target = trimmed_target;
     let mut function_entry: NativeFunction? = null;
     let mut llvm_return: string = "i8*";
@@ -804,9 +804,7 @@ fn resolve_call_signature(
                         let sig = interface_info2.signatures[sig_idx];
                         if sig.name == method_name {
                             llvm_return = map_return_type(context, sig.return_type);
-                            if llvm_return.length == 0 {
-                                llvm_return = "i8*";
-                            }
+                            if llvm_return.length == 0 { llvm_return = "i8*"; }
                             expected_params = ["i8*"];
                             break;
                         }
@@ -840,12 +838,14 @@ fn resolve_call_signature(
                 let mut _fl_i: number = 0;
                 loop {
                     if _fl_i >= _fl_count { break; }
-                    let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_i);
+                    let _fl_prefix = "build/sailfin/.ctx_func_"
+                        + number_to_string(_fl_i);
                     if !fs.exists(_fl_prefix + "_name") { break; }
                     let _fl_name = fs.readFile(_fl_prefix + "_name");
                     if _fl_name == result_target {
                         _file_fn_name = _fl_name;
-                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
+                        _file_fn_return_type = fs.readFile(_fl_prefix
+                            + "_return_type");
                         let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
                         _file_fn_is_async = _fl_async_str == "1";
                         let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
@@ -853,7 +853,9 @@ fn resolve_call_signature(
                         let mut _fl_j: number = 0;
                         loop {
                             if _fl_j >= _fl_pc { break; }
-                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
+                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_"
+                                + number_to_string(_fl_j)
+                                + "_type");
                             let _fl_mapped = map_parameter_type(context, _fl_ptype);
                             _file_fn_param_types.push(_fl_mapped);
                             _fl_j += 1;
@@ -869,9 +871,11 @@ fn resolve_call_signature(
                 }
                 if !_file_fn_found {
                     if _fl_suffix_count == 1 {
-                        let _fl_prefix = "build/sailfin/.ctx_func_" + number_to_string(_fl_suffix_idx);
+                        let _fl_prefix = "build/sailfin/.ctx_func_"
+                            + number_to_string(_fl_suffix_idx);
                         _file_fn_name = fs.readFile(_fl_prefix + "_name");
-                        _file_fn_return_type = fs.readFile(_fl_prefix + "_return_type");
+                        _file_fn_return_type = fs.readFile(_fl_prefix
+                            + "_return_type");
                         let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
                         _file_fn_is_async = _fl_async_str == "1";
                         let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
@@ -879,7 +883,9 @@ fn resolve_call_signature(
                         let mut _fl_j: number = 0;
                         loop {
                             if _fl_j >= _fl_pc { break; }
-                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_" + number_to_string(_fl_j) + "_type");
+                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_"
+                                + number_to_string(_fl_j)
+                                + "_type");
                             let _fl_mapped = map_parameter_type(context, _fl_ptype);
                             _file_fn_param_types.push(_fl_mapped);
                             _fl_j += 1;
@@ -903,18 +909,22 @@ fn resolve_call_signature(
             if _file_fn_is_async {
                 let future_return = future_pointer_type_for_return_type(_file_fn_return_type);
                 if future_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: async function `" + result_target + "` has unsupported return type `" + _file_fn_return_type + "`");
+                    result_diagnostics.push("llvm lowering: async function `"
+                        + result_target
+                        + "` has unsupported return type `"
+                        + _file_fn_return_type
+                        + "`");
                     llvm_return = "i8*";
-                } else {
-                    llvm_return = future_return;
-                }
+                } else { llvm_return = future_return; }
                 // Store the underlying return type so await can unbox structs
                 fs.writeFile("build/sailfin/.async_inner_return_type", _file_fn_return_type);
                 expected_params = _file_fn_param_types;
             } else {
                 llvm_return = map_return_type(context, _file_fn_return_type);
                 if llvm_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: unsupported return type in call to `" + result_target + "`");
+                    result_diagnostics.push("llvm lowering: unsupported return type in call to `"
+                        + result_target
+                        + "`");
                     llvm_return = "i8*";
                 }
                 expected_params = _file_fn_param_types;
@@ -924,24 +934,30 @@ fn resolve_call_signature(
             if function_entry.is_async {
                 let future_return = future_pointer_type_for_return_type(function_entry.return_type);
                 if future_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: async function `" + result_target + "` has unsupported return type `" + function_entry.return_type + "`");
+                    result_diagnostics.push("llvm lowering: async function `"
+                        + result_target
+                        + "` has unsupported return type `"
+                        + function_entry.return_type
+                        + "`");
                     llvm_return = "i8*";
-                } else {
-                    llvm_return = future_return;
-                }
+                } else { llvm_return = future_return; }
                 // Store the underlying return type so await can unbox structs
                 fs.writeFile("build/sailfin/.async_inner_return_type", function_entry.return_type);
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
             } else {
                 llvm_return = map_return_type(context, function_entry.return_type);
                 if llvm_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: unsupported return type in call to `" + result_target + "`");
+                    result_diagnostics.push("llvm lowering: unsupported return type in call to `"
+                        + result_target
+                        + "`");
                     llvm_return = "i8*";
                 }
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
             }
         } else {
-            result_diagnostics.push("llvm lowering: call to unknown function `" + result_target + "`");
+            result_diagnostics.push("llvm lowering: call to unknown function `"
+                + result_target
+                + "`");
         }
     }
 
@@ -967,8 +983,12 @@ fn resolve_call_signature(
         llvm_return: llvm_return,
         expected_params: expected_params,
         is_trait_dispatch: is_trait_dispatch,
-        diagnostics: result_diagnostics,
+        diagnostics: result_diagnostics
     };
 }
 
-export { resolve_call_method_target, resolve_parsed_method_dispatch, resolve_call_signature };
+export {
+    resolve_call_method_target,
+    resolve_parsed_method_dispatch,
+    resolve_call_signature
+};

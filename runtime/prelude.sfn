@@ -3,7 +3,6 @@
 // Runtime facade for Sailfin programs emitted by the self-hosted compiler.
 // These helpers delegate to the bootstrap runtime so Sailfin sources can run
 // without bespoke Python shims once the compiler self-hosts.
-
 let console = runtime.console;
 let fs = runtime.fs;
 let http = runtime.http;
@@ -85,15 +84,13 @@ struct TypeDescriptor {
     items: TypeDescriptor[];
 }
 
-fn sleep(milliseconds: number) ![clock] {
-    runtime_sleep_fn(milliseconds);
-}
+fn sleep(milliseconds: number) ![clock] { runtime_sleep_fn(milliseconds); }
 
 fn monotonic_millis() -> number ![clock] {
     return runtime_monotonic_millis_fn();
 }
 
-fn channel<T>(capacity: number = 0) -> any ![io] {
+fn channel < T > (capacity: number = 0) -> any ![io] {
     return runtime_channel_fn(capacity);
 }
 
@@ -122,15 +119,9 @@ fn array_reduce(items: any[], initial: any, reducer: any) -> any {
 }
 
 fn char_at(value: string, index: number) -> string {
-    if value.length == 0 {
-        return "";
-    }
-    if index < 0 {
-        return "";
-    }
-    if index >= value.length {
-        return "";
-    }
+    if value.length == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= value.length { return ""; }
     return runtime_grapheme_at_fn(value, index);
 }
 
@@ -143,7 +134,10 @@ fn enum_field(name: string, value: any) -> EnumField {
 }
 
 fn enum_define_variant(enum_type: EnumType, variant_name: string, field_names: string[]) -> EnumType {
-    let variant = EnumVariantDefinition { name: variant_name, field_names: field_names };
+    let variant = EnumVariantDefinition {
+        name: variant_name,
+        field_names: field_names
+    };
     let updated = enum_type.variants.concat([variant]);
     return EnumType { name: enum_type.name, variants: updated };
 }
@@ -151,13 +145,9 @@ fn enum_define_variant(enum_type: EnumType, variant_name: string, field_names: s
 fn enum_lookup_field(fields: EnumField[], name: string) -> EnumField? {
     let mut index = 0;
     loop {
-        if index >= fields.length {
-            break;
-        }
+        if index >= fields.length { break; }
         let field = fields[index];
-        if field.name == name {
-            return field;
-        }
+        if field.name == name { return field; }
         index = index + 1;
     }
     return null;
@@ -166,39 +156,29 @@ fn enum_lookup_field(fields: EnumField[], name: string) -> EnumField? {
 fn enum_find_variant(enum_type: EnumType, variant_name: string) -> EnumVariantDefinition? {
     let mut index = 0;
     loop {
-        if index >= enum_type.variants.length {
-            break;
-        }
+        if index >= enum_type.variants.length { break; }
         let variant = enum_type.variants[index];
-        if variant.name == variant_name {
-            return variant;
-        }
+        if variant.name == variant_name { return variant; }
         index = index + 1;
     }
     return null;
 }
 
 fn enum_normalize_fields(definition: EnumVariantDefinition?, provided: EnumField[]) -> EnumField[] {
-    if definition == null {
-        return provided;
-    }
+    if definition == null { return provided; }
     let expected = definition.field_names;
-    if expected.length == 0 {
-        return [];
-    }
+    if expected.length == 0 { return []; }
     let mut normalized: EnumField[] = [];
     let mut index = 0;
     loop {
-        if index >= expected.length {
-            break;
-        }
+        if index >= expected.length { break; }
         let field_name = expected[index];
         let candidate = enum_lookup_field(provided, field_name);
         let value = null;
-        if candidate != null {
-            value = candidate.value;
-        }
-        normalized = normalized.concat([EnumField { name: field_name, value: value }]);
+        if candidate != null { value = candidate.value; }
+        normalized = normalized.concat([EnumField {
+            name: field_name, value: value
+        }]);
         index = index + 1;
     }
     return normalized;
@@ -207,19 +187,19 @@ fn enum_normalize_fields(definition: EnumVariantDefinition?, provided: EnumField
 fn enum_instantiate(enum_type: EnumType, variant_name: string, provided: EnumField[]) -> EnumInstance {
     let definition = enum_find_variant(enum_type, variant_name);
     let fields = enum_normalize_fields(definition, provided);
-    return EnumInstance { type: enum_type, variant: variant_name, fields: fields };
+    return EnumInstance {
+        type: enum_type,
+        variant: variant_name,
+        fields: fields
+    };
 }
 
 fn enum_get_field(instance: EnumInstance, name: string) -> any {
     let mut index = 0;
     loop {
-        if index >= instance.fields.length {
-            break;
-        }
+        if index >= instance.fields.length { break; }
         let field = instance.fields[index];
-        if field.name == name {
-            return field.value;
-        }
+        if field.name == name { return field.value; }
         index = index + 1;
     }
     return null;
@@ -233,12 +213,8 @@ fn struct_repr(name: string, fields: StructField[]) -> string {
     let mut result = name + "(";
     let mut index = 0;
     loop {
-        if index >= fields.length {
-            break;
-        }
-        if index > 0 {
-            result = result + ", ";
-        }
+        if index >= fields.length { break; }
+        if index > 0 { result = result + ", "; }
         let field = fields[index];
         let value_text = to_debug_string(field.value);
         result = result + field.name + "=" + value_text;
@@ -256,9 +232,7 @@ fn format_interpolated(parts: string[], values: any[]) -> string {
     let mut result = "";
     let mut index = 0;
     loop {
-        if index >= parts.length {
-            break;
-        }
+        if index >= parts.length { break; }
         result = result + parts[index];
         if index < values.length {
             result = result + to_debug_string(values[index]);
@@ -304,9 +278,7 @@ fn descriptor_trim(value: string) -> string {
     let mut start = 0;
     let mut end = value.length;
     loop {
-        if start >= end {
-            break;
-        }
+        if start >= end { break; }
         let ch = grapheme_at(value, start);
         if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
             start = start + 1;
@@ -315,9 +287,7 @@ fn descriptor_trim(value: string) -> string {
         break;
     }
     loop {
-        if end <= start {
-            break;
-        }
+        if end <= start { break; }
         let ch = grapheme_at(value, end - 1);
         if ch == " " || ch == "\n" || ch == "\t" || ch == "\r" {
             end = end - 1;
@@ -329,39 +299,27 @@ fn descriptor_trim(value: string) -> string {
 }
 
 fn string_starts_with(value: string, prefix: string) -> boolean {
-    if prefix.length > value.length {
-        return false;
-    }
+    if prefix.length > value.length { return false; }
     let mut index = 0;
     loop {
-        if index >= prefix.length {
-            break;
-        }
+        if index >= prefix.length { break; }
         let value_ch = grapheme_at(value, index);
         let prefix_ch = grapheme_at(prefix, index);
-        if value_ch != prefix_ch {
-            return false;
-        }
+        if value_ch != prefix_ch { return false; }
         index = index + 1;
     }
     return true;
 }
 
 fn string_ends_with(value: string, suffix: string) -> boolean {
-    if suffix.length > value.length {
-        return false;
-    }
+    if suffix.length > value.length { return false; }
     let mut offset = value.length - suffix.length;
     let mut index = 0;
     loop {
-        if index >= suffix.length {
-            break;
-        }
+        if index >= suffix.length { break; }
         let value_ch = grapheme_at(value, offset + index);
         let suffix_ch = grapheme_at(suffix, index);
-        if value_ch != suffix_ch {
-            return false;
-        }
+        if value_ch != suffix_ch { return false; }
         index = index + 1;
     }
     return true;
@@ -369,37 +327,21 @@ fn string_ends_with(value: string, suffix: string) -> boolean {
 
 fn descriptor_find_top_level(value: string, needle: string) -> number {
     let trimmed = descriptor_trim(value);
-    if needle.length != 1 {
-        return -1;
-    }
+    if needle.length != 1 { return -1; }
     let target = grapheme_at(needle, 0);
     let mut index = 0;
     let mut paren_depth = 0;
     let mut angle_depth = 0;
     let mut bracket_depth = 0;
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = grapheme_at(trimmed, index);
-        if ch == "(" {
-            paren_depth = paren_depth + 1;
-        } else if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth = paren_depth - 1;
-            }
-        } else if ch == "<" {
-            angle_depth = angle_depth + 1;
-        } else if ch == ">" {
-            if angle_depth > 0 {
-                angle_depth = angle_depth - 1;
-            }
-        } else if ch == "[" {
-            bracket_depth = bracket_depth + 1;
-        } else if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth = bracket_depth - 1;
-            }
+        if ch == "(" { paren_depth = paren_depth + 1; } else if ch == ")" {
+            if paren_depth > 0 { paren_depth = paren_depth - 1; }
+        } else if ch == "<" { angle_depth = angle_depth + 1; } else if ch == ">" {
+            if angle_depth > 0 { angle_depth = angle_depth - 1; }
+        } else if ch == "[" { bracket_depth = bracket_depth + 1; } else if ch == "]" {
+            if bracket_depth > 0 { bracket_depth = bracket_depth - 1; }
         }
         if ch == target && paren_depth == 0 && angle_depth == 0 && bracket_depth == 0 {
             return index;
@@ -412,26 +354,16 @@ fn descriptor_find_top_level(value: string, needle: string) -> number {
 fn descriptor_strip_outer_parens(value: string) -> string {
     let mut current = descriptor_trim(value);
     loop {
-        if current.length < 2 {
-            return current;
-        }
-        if grapheme_at(current, 0) != "(" {
-            return current;
-        }
-        if grapheme_at(current, current.length - 1) != ")" {
-            return current;
-        }
+        if current.length < 2 { return current; }
+        if grapheme_at(current, 0) != "(" { return current; }
+        if grapheme_at(current, current.length - 1) != ")" { return current; }
         let mut depth = 0;
         let mut index = 0;
         let mut valid = true;
         loop {
-            if index >= current.length {
-                break;
-            }
+            if index >= current.length { break; }
             let ch = grapheme_at(current, index);
-            if ch == "(" {
-                depth = depth + 1;
-            } else if ch == ")" {
+            if ch == "(" { depth = depth + 1; } else if ch == ")" {
                 depth = depth - 1;
                 if depth < 0 {
                     valid = false;
@@ -444,9 +376,7 @@ fn descriptor_strip_outer_parens(value: string) -> string {
             }
             index = index + 1;
         }
-        if !valid || depth != 0 {
-            return current;
-        }
+        if !valid || depth != 0 { return current; }
         current = descriptor_trim(substring(current, 1, current.length - 1));
     }
     return current;
@@ -454,9 +384,7 @@ fn descriptor_strip_outer_parens(value: string) -> string {
 
 fn split_descriptor(value: string, separator: string) -> string[] {
     let trimmed = descriptor_trim(value);
-    if separator.length != 1 {
-        return [trimmed];
-    }
+    if separator.length != 1 { return [trimmed]; }
     let mut parts: string[] = [];
     let mut start = 0;
     let mut index = 0;
@@ -465,28 +393,14 @@ fn split_descriptor(value: string, separator: string) -> string[] {
     let mut bracket_depth = 0;
     let target = grapheme_at(separator, 0);
     loop {
-        if index >= trimmed.length {
-            break;
-        }
+        if index >= trimmed.length { break; }
         let ch = grapheme_at(trimmed, index);
-        if ch == "(" {
-            paren_depth = paren_depth + 1;
-        } else if ch == ")" {
-            if paren_depth > 0 {
-                paren_depth = paren_depth - 1;
-            }
-        } else if ch == "<" {
-            angle_depth = angle_depth + 1;
-        } else if ch == ">" {
-            if angle_depth > 0 {
-                angle_depth = angle_depth - 1;
-            }
-        } else if ch == "[" {
-            bracket_depth = bracket_depth + 1;
-        } else if ch == "]" {
-            if bracket_depth > 0 {
-                bracket_depth = bracket_depth - 1;
-            }
+        if ch == "(" { paren_depth = paren_depth + 1; } else if ch == ")" {
+            if paren_depth > 0 { paren_depth = paren_depth - 1; }
+        } else if ch == "<" { angle_depth = angle_depth + 1; } else if ch == ">" {
+            if angle_depth > 0 { angle_depth = angle_depth - 1; }
+        } else if ch == "[" { bracket_depth = bracket_depth + 1; } else if ch == "]" {
+            if bracket_depth > 0 { bracket_depth = bracket_depth - 1; }
         }
         if ch == target && paren_depth == 0 && angle_depth == 0 && bracket_depth == 0 {
             let segment = substring(trimmed, start, index);
@@ -507,9 +421,7 @@ fn parse_descriptor_list(parts: string[]) -> TypeDescriptor[] {
     let mut descriptors: TypeDescriptor[] = [];
     let mut index = 0;
     loop {
-        if index >= parts.length {
-            break;
-        }
+        if index >= parts.length { break; }
         let entry = parts[index];
         if entry.length > 0 {
             descriptors = descriptors.concat([parse_type_descriptor(entry)]);
@@ -521,9 +433,7 @@ fn parse_descriptor_list(parts: string[]) -> TypeDescriptor[] {
 
 fn parse_type_descriptor(text: string) -> TypeDescriptor {
     let trimmed = descriptor_strip_outer_parens(text);
-    if trimmed.length == 0 {
-        return type_descriptor_unknown();
-    }
+    if trimmed.length == 0 { return type_descriptor_unknown(); }
     let union_parts = split_descriptor(trimmed, "|");
     if union_parts.length > 1 {
         return type_descriptor_union(parse_descriptor_list(union_parts));
@@ -553,41 +463,30 @@ fn parse_type_descriptor(text: string) -> TypeDescriptor {
     if string_starts_with(normalized, "runtime.") {
         normalized = descriptor_trim(substring(normalized, 8, normalized.length));
     }
-    if normalized == "string" || normalized == "number" || normalized == "boolean" || normalized == "void" {
+    if normalized == "string" || normalized == "number" || normalized == "boolean"
+        || normalized == "void" {
         return type_descriptor_primitive(normalized);
     }
     return type_descriptor_named(normalized);
 }
 
 fn check_type_primitive(value: any, name: string) -> boolean {
-    if name == "string" {
-        return runtime_is_string_fn(value);
-    }
-    if name == "number" {
-        return runtime_is_number_fn(value);
-    }
-    if name == "boolean" {
-        return runtime_is_boolean_fn(value);
-    }
-    if name == "void" {
-        return runtime_is_void_fn(value);
-    }
+    if name == "string" { return runtime_is_string_fn(value); }
+    if name == "number" { return runtime_is_number_fn(value); }
+    if name == "boolean" { return runtime_is_boolean_fn(value); }
+    if name == "void" { return runtime_is_void_fn(value); }
     return false;
 }
 
 fn check_type_descriptor(value: any, descriptor: TypeDescriptor) -> boolean {
     if descriptor.kind == "primitive" {
-        if descriptor.name == null {
-            return false;
-        }
+        if descriptor.name == null { return false; }
         return check_type_primitive(value, descriptor.name);
     }
     if descriptor.kind == "union" {
         let mut index = 0;
         loop {
-            if index >= descriptor.items.length {
-                break;
-            }
+            if index >= descriptor.items.length { break; }
             if check_type_descriptor(value, descriptor.items[index]) {
                 return true;
             }
@@ -598,9 +497,7 @@ fn check_type_descriptor(value: any, descriptor: TypeDescriptor) -> boolean {
     if descriptor.kind == "intersection" {
         let mut index = 0;
         loop {
-            if index >= descriptor.items.length {
-                break;
-            }
+            if index >= descriptor.items.length { break; }
             if !check_type_descriptor(value, descriptor.items[index]) {
                 return false;
             }
@@ -612,15 +509,11 @@ fn check_type_descriptor(value: any, descriptor: TypeDescriptor) -> boolean {
         if descriptor.items.length == 0 {
             return runtime_is_array_fn(value);
         }
-        if !runtime_is_array_fn(value) {
-            return false;
-        }
+        if !runtime_is_array_fn(value) { return false; }
         let element_descriptor = descriptor.items[0];
         let mut index = 0;
         loop {
-            if index >= value.length {
-                break;
-            }
+            if index >= value.length { break; }
             if !check_type_descriptor(value[index], element_descriptor) {
                 return false;
             }
@@ -632,15 +525,11 @@ fn check_type_descriptor(value: any, descriptor: TypeDescriptor) -> boolean {
         return runtime_is_callable_fn(value);
     }
     if descriptor.kind == "named" {
-        if descriptor.name == null {
-            return false;
-        }
+        if descriptor.name == null { return false; }
         let resolved = runtime_resolve_runtime_type_fn(descriptor.name);
         return runtime_instance_of_fn(value, resolved);
     }
-    if descriptor.kind == "unknown" {
-        return false;
-    }
+    if descriptor.kind == "unknown" { return false; }
     return false;
 }
 
@@ -654,25 +543,17 @@ fn serve(handler: any, config: any? = null) -> void ![io, net] {
 }
 
 fn clamp(value: number, minimum: number, maximum: number) -> number {
-    if value < minimum {
-        return minimum;
-    }
-    if value > maximum {
-        return maximum;
-    }
+    if value < minimum { return minimum; }
+    if value > maximum { return maximum; }
     return value;
 }
 
 fn substring(text: string, start: number, end: number) -> string {
     let length = text.length;
-    if length == 0 {
-        return "";
-    }
+    if length == 0 { return ""; }
     let mut normalized_start = clamp(start, 0, length);
     let mut normalized_end = clamp(end, 0, length);
-    if normalized_start >= normalized_end {
-        return "";
-    }
+    if normalized_start >= normalized_end { return ""; }
     // Use the O(N) runtime intrinsic. The prior Sailfin-level loop did
     // `result = result + grapheme_at(text, i)` per index, which is O(N^2)
     // memory under the zero-GC runtime. grapheme_at is byte-indexed in the
@@ -683,14 +564,10 @@ fn substring(text: string, start: number, end: number) -> string {
 }
 
 fn strings_equal(left: string, right: string) -> boolean {
-    if left.length != right.length {
-        return false;
-    }
+    if left.length != right.length { return false; }
     let mut index = 0;
     loop {
-        if index >= left.length {
-            break;
-        }
+        if index >= left.length { break; }
         let left_char = grapheme_at(left, index);
         let right_char = grapheme_at(right, index);
         if runtime_char_code_fn(left_char) != runtime_char_code_fn(right_char) {
@@ -703,38 +580,24 @@ fn strings_equal(left: string, right: string) -> boolean {
 
 fn find_char(text: string, character: string, start: number = 0) -> number {
     let length = text.length;
-    if length == 0 {
-        return -1;
-    }
+    if length == 0 { return -1; }
 
     let mut normalized_start = start;
-    if normalized_start < 0 {
-        normalized_start = 0;
-    }
-    if normalized_start >= length {
-        return -1;
-    }
+    if normalized_start < 0 { normalized_start = 0; }
+    if normalized_start >= length { return -1; }
 
     let mut target = character;
     if target.length == 2 && grapheme_at(target, 0) == "\\" {
         let escape = grapheme_at(target, 1);
-        if escape == "n" {
-            target = "\n";
-        } else if escape == "r" {
+        if escape == "n" { target = "\n"; } else if escape == "r" {
             target = "\r";
-        } else if escape == "t" {
-            target = "\t";
-        }
+        } else if escape == "t" { target = "\t"; }
     }
 
     let mut index = normalized_start;
     loop {
-        if index >= length {
-            break;
-        }
-        if strings_equal(grapheme_at(text, index), target) {
-            return index;
-        }
+        if index >= length { break; }
+        if strings_equal(grapheme_at(text, index), target) { return index; }
         index = index + 1;
     }
 
@@ -747,9 +610,7 @@ fn match_exhaustive_failed(value: any) -> void {
 }
 
 fn char_code(character: string) -> number {
-    if character.length == 0 {
-        return -1;
-    }
+    if character.length == 0 { return -1; }
 
     // Performance note: this function sits on hot paths in the compiler.
     // Prefer the runtime intrinsic instead of scanning through ASCII tables.
@@ -757,7 +618,6 @@ fn char_code(character: string) -> number {
     // corresponding Unicode code point.
     return runtime_char_code_fn(grapheme_at(character, 0));
 }
-
 
 fn grapheme_count(text: string) -> number {
     return runtime_grapheme_count_fn(text);
@@ -767,4 +627,26 @@ fn grapheme_at(text: string, index: number) -> string {
     return runtime_grapheme_at_fn(text, index);
 }
 
-export { capability_grant, fs_bridge, http_bridge, model_bridge, clamp, substring, find_char, grapheme_count, grapheme_at, char_code, match_exhaustive_failed, enum_type, enum_define_variant, enum_field, enum_instantiate, enum_get_field, struct_field, struct_repr, check_type, parse_type_descriptor, format_interpolated };
+export {
+    capability_grant,
+    fs_bridge,
+    http_bridge,
+    model_bridge,
+    clamp,
+    substring,
+    find_char,
+    grapheme_count,
+    grapheme_at,
+    char_code,
+    match_exhaustive_failed,
+    enum_type,
+    enum_define_variant,
+    enum_field,
+    enum_instantiate,
+    enum_get_field,
+    struct_field,
+    struct_repr,
+    check_type,
+    parse_type_descriptor,
+    format_interpolated
+};

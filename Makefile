@@ -563,6 +563,8 @@ ci-cross-windows:
 	fi; \
 	\
 	echo "[cross-windows] compiling C runtime..."; \
+	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_arena.c \
+		-o "$$WIN_OBJ/sailfin_arena.o"; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_runtime.c \
 		-o "$$WIN_OBJ/sailfin_runtime.o"; \
 	$(MINGW_CC) -O2 -I runtime/native/include -c runtime/native/src/sailfin_sha256.c \
@@ -585,6 +587,7 @@ ci-cross-windows:
 	\
 	echo "[cross-windows] linking sailfin.exe..."; \
 	$(MINGW_CC) -static -o "$$WIN_OUT" \
+		"$$WIN_OBJ/sailfin_arena.o" \
 		"$$WIN_OBJ/sailfin_runtime.o" \
 		"$$WIN_OBJ/sailfin_sha256.o" \
 		"$$WIN_OBJ/sailfin_base64.o" \

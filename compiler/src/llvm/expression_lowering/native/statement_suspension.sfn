@@ -4,59 +4,39 @@
 //
 // Detects when mutable borrows remain active across `await`/`yield` suspension
 // points, and provides future type / spawn symbol mapping for the async runtime.
-
 import { NativeSourceSpan } from "../../../native_ir";
-
+import { substring } from "../../../string_utils";
+import { LocalBinding, ParameterBinding } from "../../types";
 import {
-    LocalBinding, ParameterBinding,
-} from "../../types";
-
-import {
-    trim_text, starts_with,
     is_identifier_part_char,
     matches_keyword,
+    starts_with,
+    trim_text
 } from "../../utils";
-
-import { substring } from "../../../string_utils";
-
 import { format_suspension_location } from "./core";
 import { unwrap_move_wrapper } from "./statement_type_mapping";
-
 
 // ---------------------------------------------------------------------------
 // Keyword scanning
 // ---------------------------------------------------------------------------
-
 fn contains_keyword_outside_strings(value: string, keyword: string) -> boolean {
-    if value.length == 0 {
-        return false;
-    }
+    if value.length == 0 { return false; }
     let mut index: number = 0;
     let mut in_single: boolean = false;
     let mut in_double: boolean = false;
     let mut escape: boolean = false;
     loop {
-        if index >= value.length {
-            break;
-        }
+        if index >= value.length { break; }
         let ch = substring(value, index, index + 1);
         if in_single {
-            if escape {
-                escape = false;
-            } else if ch == "\\" {
-                escape = true;
-            } else if ch == "'" {
+            if escape { escape = false; } else if ch == "\\" { escape = true; } else if ch == "'" {
                 in_single = false;
             }
             index += 1;
             continue;
         }
         if in_double {
-            if escape {
-                escape = false;
-            } else if ch == "\\" {
-                escape = true;
-            } else if ch == "\"" {
+            if escape { escape = false; } else if ch == "\\" { escape = true; } else if ch == "\"" {
                 in_double = false;
             }
             index += 1;
@@ -80,9 +60,7 @@ fn contains_keyword_outside_strings(value: string, keyword: string) -> boolean {
                     continue;
                 }
             }
-            if matches_keyword(value, index, keyword) {
-                return true;
-            }
+            if matches_keyword(value, index, keyword) { return true; }
         }
         index += 1;
     }
@@ -90,48 +68,30 @@ fn contains_keyword_outside_strings(value: string, keyword: string) -> boolean {
 }
 
 fn find_suspension_keyword(expression: string) -> string {
-    if contains_keyword_outside_strings(expression, "await") {
-        return "await";
-    }
-    if contains_keyword_outside_strings(expression, "yield") {
-        return "yield";
-    }
+    if contains_keyword_outside_strings(expression, "await") { return "await"; }
+    if contains_keyword_outside_strings(expression, "yield") { return "yield"; }
     return "";
 }
-
 
 // ---------------------------------------------------------------------------
 // Borrow annotation helpers
 // ---------------------------------------------------------------------------
-
 fn is_mutable_borrow_annotation(annotation: string) -> boolean {
     let trimmed = trim_text(annotation);
-    if trimmed.length == 0 {
-        return false;
-    }
+    if trimmed.length == 0 { return false; }
     let normalized = unwrap_move_wrapper(trimmed);
-    if normalized.length == 0 {
-        return false;
-    }
-    if substring(normalized, 0, 1) != "&" {
-        return false;
-    }
+    if normalized.length == 0 { return false; }
+    if substring(normalized, 0, 1) != "&" { return false; }
     let remainder = trim_text(substring(normalized, 1, normalized.length));
-    if remainder.length == 0 {
-        return false;
-    }
-    if starts_with(remainder, "mut") {
-        return true;
-    }
+    if remainder.length == 0 { return false; }
+    if starts_with(remainder, "mut") { return true; }
     return false;
 }
 
 fn normalise_borrow_base(raw_base: string) -> string {
     let mut trimmed = trim_text(raw_base);
     loop {
-        if trimmed.length == 0 {
-            break;
-        }
+        if trimmed.length == 0 { break; }
         if substring(trimmed, 0, 1) == "*" {
             trimmed = trim_text(substring(trimmed, 1, trimmed.length));
             continue;
@@ -142,27 +102,21 @@ fn normalise_borrow_base(raw_base: string) -> string {
         if substring(trimmed, 0, 1) == "(" {
             if substring(trimmed, trimmed.length - 1, trimmed.length) == ")" {
                 let inner = trim_text(substring(trimmed, 1, trimmed.length - 1));
-                if inner.length > 0 {
-                    return inner;
-                }
+                if inner.length > 0 { return inner; }
             }
         }
     }
     return trimmed;
 }
 
-
 // ---------------------------------------------------------------------------
 // Suspension conflict detection
 // ---------------------------------------------------------------------------
-
 fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
     let mut diagnostics: string[] = [];
     let mut index: number = 0;
     loop {
-        if index >= locals.length {
-            break;
-        }
+        if index >= locals.length { break; }
         let local = locals[index];
         if !local.consumed {
             if local.ownership != null {
@@ -171,7 +125,15 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
                     if details.mutable {
                         let base_name = normalise_borrow_base(details.base);
                         let location = format_suspension_location(keyword, details.span, suspension_span);
-                        diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow `" + local.name + "` of `" + base_name + "` remains active in `" + function_name + "`" + location);
+                        diagnostics.push("llvm lowering: " + keyword
+                            + " suspends while mutable borrow `"
+                            + local.name
+                            + "` of `"
+                            + base_name
+                            + "` remains active in `"
+                            + function_name
+                            + "`"
+                            + location);
                     }
                 }
             }
@@ -180,14 +142,18 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
     }
     let mut parameter_index: number = 0;
     loop {
-        if parameter_index >= bindings.length {
-            break;
-        }
+        if parameter_index >= bindings.length { break; }
         let binding = bindings[parameter_index];
         if !binding.consumed {
             if is_mutable_borrow_annotation(binding.type_annotation) {
                 let location = format_suspension_location(keyword, binding.span, suspension_span);
-                diagnostics.push("llvm lowering: " + keyword + " suspends while mutable borrow parameter `" + binding.name + "` remains active in `" + function_name + "`" + location);
+                diagnostics.push("llvm lowering: " + keyword
+                    + " suspends while mutable borrow parameter `"
+                    + binding.name
+                    + "` remains active in `"
+                    + function_name
+                    + "`"
+                    + location);
             }
         }
         parameter_index += 1;
@@ -196,46 +162,30 @@ fn collect_suspension_conflicts(keyword: string, locals: LocalBinding[], binding
 }
 
 fn detect_suspension_conflicts(expression: string?, locals: LocalBinding[], bindings: ParameterBinding[], function_name: string, suspension_span: NativeSourceSpan?) -> string[] {
-    if expression == null {
-        return [];
-    }
+    if expression == null { return []; }
     let trimmed = trim_text(expression);
-    if trimmed.length == 0 {
-        return [];
-    }
+    if trimmed.length == 0 { return []; }
     let keyword = find_suspension_keyword(trimmed);
-    if keyword.length == 0 {
-        return [];
-    }
+    if keyword.length == 0 { return []; }
     return collect_suspension_conflicts(keyword, locals, bindings, function_name, suspension_span);
 }
-
 
 // ---------------------------------------------------------------------------
 // Async ABI helpers
 // ---------------------------------------------------------------------------
-
 fn future_pointer_type_for_return_type(return_type: string) -> string {
     let trimmed = trim_text(return_type);
     let mut _if157: boolean = false;
     if trimmed.length == 0 { _if157 = true; }
     if trimmed == "void" { _if157 = true; }
-    if _if157 {
-        return "%SailfinFutureVoid*";
-    }
+    if _if157 { return "%SailfinFutureVoid*"; }
     let normalized = unwrap_move_wrapper(trimmed);
-    if normalized == "number" {
-        return "%SailfinFutureNumber*";
-    }
+    if normalized == "number" { return "%SailfinFutureNumber*"; }
     let mut _if158: boolean = false;
     if normalized == "boolean" { _if158 = true; }
     if normalized == "bool" { _if158 = true; }
-    if _if158 {
-        return "%SailfinFutureBool*";
-    }
-    if normalized == "string" {
-        return "%SailfinFutureString*";
-    }
+    if _if158 { return "%SailfinFutureBool*"; }
+    if normalized == "string" { return "%SailfinFutureString*"; }
     // Default: treat unknown/user types as an opaque pointer.
     return "%SailfinFuturePtr*";
 }
@@ -245,22 +195,14 @@ fn spawn_symbol_for_return_type(return_type: string) -> string {
     let mut _if159: boolean = false;
     if trimmed.length == 0 { _if159 = true; }
     if trimmed == "void" { _if159 = true; }
-    if _if159 {
-        return "sailfin_runtime_spawn_void";
-    }
+    if _if159 { return "sailfin_runtime_spawn_void"; }
     let normalized = unwrap_move_wrapper(trimmed);
-    if normalized == "number" {
-        return "sailfin_runtime_spawn_number";
-    }
+    if normalized == "number" { return "sailfin_runtime_spawn_number"; }
     let mut _if160: boolean = false;
     if normalized == "boolean" { _if160 = true; }
     if normalized == "bool" { _if160 = true; }
-    if _if160 {
-        return "sailfin_runtime_spawn_bool";
-    }
-    if normalized == "string" {
-        return "sailfin_runtime_spawn_string";
-    }
+    if _if160 { return "sailfin_runtime_spawn_bool"; }
+    if normalized == "string" { return "sailfin_runtime_spawn_string"; }
     return "sailfin_runtime_spawn_ptr";
 }
 
@@ -269,22 +211,14 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
     let mut _if161: boolean = false;
     if trimmed.length == 0 { _if161 = true; }
     if trimmed == "void" { _if161 = true; }
-    if _if161 {
-        return "sailfin_runtime_spawn_void_ctx";
-    }
+    if _if161 { return "sailfin_runtime_spawn_void_ctx"; }
     let normalized = unwrap_move_wrapper(trimmed);
-    if normalized == "number" {
-        return "sailfin_runtime_spawn_number_ctx";
-    }
+    if normalized == "number" { return "sailfin_runtime_spawn_number_ctx"; }
     let mut _if162: boolean = false;
     if normalized == "boolean" { _if162 = true; }
     if normalized == "bool" { _if162 = true; }
-    if _if162 {
-        return "sailfin_runtime_spawn_bool_ctx";
-    }
-    if normalized == "string" {
-        return "sailfin_runtime_spawn_string_ctx";
-    }
+    if _if162 { return "sailfin_runtime_spawn_bool_ctx"; }
+    if normalized == "string" { return "sailfin_runtime_spawn_string_ctx"; }
     return "sailfin_runtime_spawn_ptr_ctx";
 }
 
