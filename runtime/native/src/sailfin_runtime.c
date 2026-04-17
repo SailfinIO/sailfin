@@ -627,6 +627,8 @@ static inline void *_rt_calloc(size_t count, size_t size)
     if (sfn_arena_enabled())
     {
         size_t total = count * size;
+        if (count != 0 && total / count != size)
+            return NULL; /* overflow */
         void *p = sfn_arena_alloc(sfn_arena_global(), total, 8);
         if (p)
             memset(p, 0, total);
@@ -2847,9 +2849,13 @@ char *sailfin_runtime_string_append(char *buf, char *suffix)
     char *out;
     if (sfn_arena_enabled())
     {
-        /* Arena realloc: grow-if-at-tip, else alloc+copy. */
+        /* Arena realloc: grow-if-at-tip, else alloc+copy.
+         * old_size uses the full prior allocation (buf_len + 1 + pad) so the
+         * grow-at-tip check matches the actual bump pointer position. For the
+         * first append (unknown prior padding), fall back to buf_len + 1. */
+        size_t old_alloc = buf_len + 1 + pad;
         out = (char *)sfn_arena_realloc(sfn_arena_global(), buf,
-                                        buf_len + 1, alloc_size, 8);
+                                        old_alloc, alloc_size, 8);
     }
     else
     {
@@ -3806,7 +3812,8 @@ SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value)
         }
         array->data = fresh->data;
         array->len = fresh->len;
-        // Leak the temporary struct; stage2-native does not reliably free arrays.
+        // Free the temporary wrapper in malloc mode; in arena mode _rt_free()
+        // is a no-op and the backing store stays attached to `array`.
         _rt_free(fresh);
 
         capacity = (size_t)(uintptr_t)array->data[-1];

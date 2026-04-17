@@ -7,6 +7,7 @@
 
 #include "sailfin_arena.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,6 +18,7 @@
 
 static inline size_t _align_up(size_t value, size_t align)
 {
+    /* align must be a non-zero power of two (all internal callers pass 8). */
     return (value + align - 1) & ~(align - 1);
 }
 
@@ -113,7 +115,7 @@ void *sfn_arena_alloc(SfnArena *arena, size_t size, size_t align)
     SfnArenaPage *page = arena->current;
     size_t offset = _align_up(page->used, align);
 
-    if (offset + size <= page->capacity)
+    if (offset <= page->capacity && size <= page->capacity - offset)
     {
         page->used = offset + size;
         arena->total_allocated += size;
@@ -187,29 +189,35 @@ void *sfn_arena_realloc(SfnArena *arena, void *ptr, size_t old_size,
 
 static SfnArena *_global_arena = NULL;
 static int _arena_enabled = -1; /* -1 = unchecked */
+static pthread_once_t _arena_enabled_once = PTHREAD_ONCE_INIT;
+static pthread_once_t _arena_global_once = PTHREAD_ONCE_INIT;
+
+static void _init_arena_enabled(void)
+{
+    const char *env = getenv("SAILFIN_USE_ARENA");
+    _arena_enabled = (env && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+}
 
 bool sfn_arena_enabled(void)
 {
-    if (_arena_enabled < 0)
-    {
-        const char *env = getenv("SAILFIN_USE_ARENA");
-        _arena_enabled = (env && env[0] != '\0' && env[0] != '0') ? 1 : 0;
-    }
+    pthread_once(&_arena_enabled_once, _init_arena_enabled);
     return _arena_enabled == 1;
+}
+
+static void _init_global_arena(void)
+{
+    /* 4 MiB pages for the compiler — modules can be large. */
+    _global_arena = sfn_arena_create(4 * 1024 * 1024);
+    if (!_global_arena)
+    {
+        fprintf(stderr, "[sailfin-arena] fatal: failed to create global arena\n");
+        abort();
+    }
 }
 
 SfnArena *sfn_arena_global(void)
 {
-    if (!_global_arena)
-    {
-        /* 4 MiB pages for the compiler — modules can be large. */
-        _global_arena = sfn_arena_create(4 * 1024 * 1024);
-        if (!_global_arena)
-        {
-            fprintf(stderr, "[sailfin-arena] fatal: failed to create global arena\n");
-            abort();
-        }
-    }
+    pthread_once(&_arena_global_once, _init_global_arena);
     return _global_arena;
 }
 
