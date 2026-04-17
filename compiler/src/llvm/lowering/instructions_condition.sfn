@@ -34,27 +34,6 @@ fn allocate_block_label(prefix: string, counter: number) -> BlockLabelResult {
 
 fn lower_condition_to_i1(function_name: string, expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ConditionConversion {
     let mut diagnostics: string[] = detect_suspension_conflicts(expression, locals, bindings, function_name, null);
-    // Write local type annotations to a file so the cross-module expression
-    // lowering can resolve struct types for method calls.  The v0.1.1 seed
-    // corrupts the locals array when passed across module boundaries, so
-    // resolve_struct_info_for_method_target can't inspect local.type_annotation.
-    let mut _lta_lines: string[] = [];
-    let mut _lta_i: number = 0;
-    loop {
-        if _lta_i >= locals.length { break; }
-        let mut _lta_name = locals[_lta_i].name;
-        if _lta_name == null { _lta_name = ""; }
-        let mut _lta_type = locals[_lta_i].type_annotation;
-        if _lta_type == null { _lta_type = ""; }
-        let mut _lta_llvm = locals[_lta_i].llvm_type;
-        if _lta_llvm == null { _lta_llvm = ""; }
-        let mut _lta_ptr = locals[_lta_i].pointer;
-        if _lta_ptr == null { _lta_ptr = ""; }
-        _lta_lines.push(_lta_name + "\t" + _lta_type + "\t" + _lta_llvm + "\t"
-            + _lta_ptr);
-        _lta_i += 1;
-    }
-    fs.writeLines("build/sailfin/.condition_locals", _lta_lines);
     let lowered = lower_expression(expression, bindings, locals, temp_index, lines, functions, context, "");
     let mut _ci11: number = 0;
     loop {

@@ -3,6 +3,7 @@
 // Member access lowering extracted from core.sfn.
 import { NativeFunction } from "../../../native_ir";
 import { index_of, substring } from "../../../string_utils";
+import { find_local_binding } from "../../expressions_bindings";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import {
     append_string_constant,
@@ -665,7 +666,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
             if base_type_trimmed == "i8*" {
-                let _igep_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, current_temp, current_lines, diagnostics, collected_string_constants);
+                let _igep_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diagnostics, collected_string_constants);
                 if _igep_result != null { return _igep_result; }
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
@@ -694,7 +695,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
             if base_type_trimmed == "i8*" {
-                let _igep2_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, current_temp, current_lines, diagnostics, collected_string_constants);
+                let _igep2_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diagnostics, collected_string_constants);
                 if _igep2_result != null { return _igep2_result; }
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
@@ -908,32 +909,10 @@ fn try_file_based_struct_field_access(base_name: string, field_name: string, bas
         _bi += 1;
     }
     if struct_type_ann.length == 0 {
-        // Check condition_locals file for locals
-        if fs.exists("build/sailfin/.condition_locals") {
-            let _cl_raw = fs.readFile("build/sailfin/.condition_locals");
-            let mut _cl_pos: number = 0;
-            loop {
-                if _cl_pos >= _cl_raw.length { break; }
-                let _cl_nl = index_of(substring(_cl_raw, _cl_pos, _cl_raw.length), "\n");
-                let mut _cl_line: string = "";
-                if _cl_nl < 0 {
-                    _cl_line = substring(_cl_raw, _cl_pos, _cl_raw.length);
-                    _cl_pos = _cl_raw.length;
-                } else {
-                    _cl_line = substring(_cl_raw, _cl_pos, _cl_pos + _cl_nl);
-                    _cl_pos = _cl_pos + _cl_nl + 1;
-                }
-                if _cl_line.length == 0 { continue; }
-                let _cl_t1 = index_of(_cl_line, "\t");
-                if _cl_t1 < 0 { continue; }
-                let _cl_name = substring(_cl_line, 0, _cl_t1);
-                if _cl_name != trimmed_base { continue; }
-                let _cl_rest = substring(_cl_line, _cl_t1 + 1, _cl_line.length);
-                let _cl_t2 = index_of(_cl_rest, "\t");
-                if _cl_t2 > 0 {
-                    struct_type_ann = substring(_cl_rest, 0, _cl_t2);
-                }
-                break;
+        let local = find_local_binding(locals, trimmed_base);
+        if local != null {
+            if local.type_annotation != null {
+                struct_type_ann = local.type_annotation;
             }
         }
     }
