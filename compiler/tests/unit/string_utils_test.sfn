@@ -1,0 +1,130 @@
+// Unit tests for string_utils.sfn — starts_with, ends_with, strip_prefix,
+// contains_string.  Self-contained: re-implements the functions locally to
+// avoid pulling in runtime/prelude transitive dependencies that the test
+// runner's import inliner cannot link.
+
+fn starts_with(value: string, prefix: string) -> boolean {
+    if prefix.length > value.length { return false; }
+    let mut index: number = 0;
+    loop {
+        if index >= prefix.length { break; }
+        if value[index] != prefix[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn ends_with(value: string, suffix: string) -> boolean {
+    if suffix.length == 0 { return true; }
+    if value.length < suffix.length { return false; }
+    let start = value.length - suffix.length;
+    let mut index: number = 0;
+    loop {
+        if index >= suffix.length { break; }
+        let _cmp_pos = start + index;
+        if value[_cmp_pos] != suffix[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn _substring(value: string, start: number, end: number) -> string {
+    if start >= end { return ""; }
+    if start >= value.length { return ""; }
+    let mut result: string = "";
+    let mut i: number = start;
+    loop {
+        if i >= end { break; }
+        if i >= value.length { break; }
+        result = result + value[i];
+        i += 1;
+    }
+    return result;
+}
+
+fn strip_prefix(value: string, prefix: string) -> string {
+    if starts_with(value, prefix) {
+        return _substring(value, prefix.length, value.length);
+    }
+    return value;
+}
+
+fn contains_string(values: string[], target: string) -> boolean {
+    let mut index: number = 0;
+    loop {
+        if index >= values.length { break; }
+        if values[index] == target { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+test "starts_with: matching prefix" {
+    assert starts_with("hello world", "hello") == true;
+}
+
+test "starts_with: non-matching prefix" {
+    assert starts_with("hello world", "world") == false;
+}
+
+test "starts_with: empty prefix" {
+    assert starts_with("hello", "") == true;
+}
+
+test "starts_with: prefix longer than value" {
+    assert starts_with("hi", "hello") == false;
+}
+
+test "starts_with: exact match" {
+    assert starts_with("hello", "hello") == true;
+}
+
+test "ends_with: matching suffix" {
+    assert ends_with("hello world", "world") == true;
+}
+
+test "ends_with: non-matching suffix" {
+    assert ends_with("hello world", "hello") == false;
+}
+
+test "ends_with: empty suffix" {
+    assert ends_with("hello", "") == true;
+}
+
+test "ends_with: suffix longer than value" {
+    assert ends_with("hi", "hello") == false;
+}
+
+test "ends_with: exact match" {
+    assert ends_with("hello", "hello") == true;
+}
+
+test "strip_prefix: removes matching prefix" {
+    let result = strip_prefix("hello world", "hello ");
+    assert result == "world";
+}
+
+test "strip_prefix: no match returns original" {
+    let result = strip_prefix("hello world", "goodbye");
+    assert result == "hello world";
+}
+
+test "strip_prefix: empty prefix returns original" {
+    let result = strip_prefix("hello", "");
+    assert result == "hello";
+}
+
+test "contains_string: found" {
+    let items: string[] = ["apple", "banana", "cherry"];
+    assert contains_string(items, "banana") == true;
+}
+
+test "contains_string: not found" {
+    let items: string[] = ["apple", "banana", "cherry"];
+    assert contains_string(items, "grape") == false;
+}
+
+test "contains_string: empty array" {
+    let items: string[] = [];
+    assert contains_string(items, "anything") == false;
+}

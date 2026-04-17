@@ -2,7 +2,7 @@
 //
 // Pure string utility functions used across the native IR parser modules.
 // No dependencies on native_ir types.
-import { substring } from "./string_utils";
+import { starts_with, strip_prefix, substring } from "./string_utils";
 
 export {
     is_trim_char,
@@ -53,24 +53,6 @@ fn trim_text(value: string) -> string {
         if end == value.length { return value; }
     }
     return substring(value, start, end);
-}
-
-fn starts_with(value: string, prefix: string) -> boolean {
-    if prefix.length > value.length { return false; }
-    let mut index: number = 0;
-    loop {
-        if index >= prefix.length { break; }
-        if value[index] != prefix[index] { return false; }
-        index += 1;
-    }
-    return true;
-}
-
-fn strip_prefix(value: string, prefix: string) -> string {
-    if starts_with(value, prefix) {
-        return substring(value, prefix.length, value.length);
-    }
-    return value;
 }
 
 fn index_of(value: string, target: string) -> number {
