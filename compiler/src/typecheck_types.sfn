@@ -488,4 +488,3 @@ fn make_missing_interface_member_diagnostic(struct_name: string, interface_name:
         primary: null
     };
 }
-
