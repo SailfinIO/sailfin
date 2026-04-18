@@ -189,43 +189,43 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
                 let msg_arr_len = number_to_string(msg.length + 1);
                 let escaped = escape_string_for_llvm(msg);
                 harness_globals = extend_string_lines(harness_globals, ["@.tname."
-                        + idx_s
-                        + " = private unnamed_addr constant ["
-                        + msg_arr_len
-                        + " x i8] c\""
-                        + escaped
-                        + "\\00\"",]);
+                    + idx_s
+                    + " = private unnamed_addr constant ["
+                    + msg_arr_len
+                    + " x i8] c\""
+                    + escaped
+                    + "\\00\"",]);
                 harness = extend_string_lines(harness, ["  %tn" + idx_s
-                        + " = getelementptr ["
-                        + msg_arr_len
-                        + " x i8], ["
-                        + msg_arr_len
-                        + " x i8]* @.tname."
-                        + idx_s
-                        + ", i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tn"
-                        + idx_s
-                        + ")", "  call void @"
-                        + sym
-                        + "()",]);
+                    + " = getelementptr ["
+                    + msg_arr_len
+                    + " x i8], ["
+                    + msg_arr_len
+                    + " x i8]* @.tname."
+                    + idx_s
+                    + ", i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tn"
+                    + idx_s
+                    + ")", "  call void @"
+                    + sym
+                    + "()",]);
                 test_idx += 1;
             }
         }
         ti += 1;
     }
     let pass_msg = "  PASS  (all " + number_to_string(test_idx)
-    + " tests passed)";
+        + " tests passed)";
     let pass_escaped = escape_string_for_llvm(pass_msg);
     let pass_len_s = number_to_string(pass_msg.length + 1);
     harness_globals = extend_string_lines(harness_globals, ["@.tpass = private unnamed_addr constant ["
-            + pass_len_s
-            + " x i8] c\""
-            + pass_escaped
-            + "\\00\"",]);
+        + pass_len_s
+        + " x i8] c\""
+        + pass_escaped
+        + "\\00\"",]);
     harness = extend_string_lines(harness, ["  %tp = getelementptr ["
-            + pass_len_s
-            + " x i8], ["
-            + pass_len_s
-            + " x i8]* @.tpass, i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tp)", "  ret i32 0", "}",]);
+        + pass_len_s
+        + " x i8], ["
+        + pass_len_s
+        + " x i8]* @.tpass, i64 0, i64 0", "  call void @sailfin_runtime_print_err(i8* %tp)", "  ret i32 0", "}",]);
 
     let mut updated = base;
     if updated.lines.length > 0 {
@@ -241,7 +241,7 @@ fn make_native_module_for_emit(module_name: string, native_text: string) -> Nati
     return NativeModule {
         module_name: module_name,
         artifacts: [NativeArtifact {
-                name: module_name, format: "sailfin-native-text", contents: native_text
+            name: module_name, format: "sailfin-native-text", contents: native_text
         }],
         entry_points: [],
         symbol_count: 0

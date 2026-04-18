@@ -166,9 +166,7 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
             has_round_decl = true;
         }
         if starts_with(trimmed, "define") {
-            if index_of(trimmed, "@round(") >= 0 {
-                has_round_define = true;
-            }
+            if index_of(trimmed, "@round(") >= 0 { has_round_define = true; }
         }
         index += 1;
     }
