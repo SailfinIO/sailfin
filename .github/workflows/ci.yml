@@ -2,9 +2,10 @@ name: CI (PR)
 
 env:
   # Pinned seed used for self-host bootstrap in CI.
-  # 0.5.3-alpha.1: Step-5 formatter changes (unary ops, optional suffix,
-  # declaration inlining guard, import specifier sorting).
-  SEED_VERSION: 0.5.3-alpha.1
+  # 0.5.7: first release whose binary image does not carry the
+  # re-export miscompilation — see
+  # docs/rca/2026-04-18-reexport-diagnostic-gep.md.
+  SEED_VERSION: 0.5.7
 
 permissions:
   contents: read

@@ -12,7 +12,8 @@ name: Nightly self-host check
 #   - when the release-tag workflow runs (see release-tag.yml)
 
 env:
-  SEED_VERSION: 0.5.3-alpha.1
+  # Keep aligned with ci.yml's seed pin.
+  SEED_VERSION: 0.5.7
 
 on:
   schedule:

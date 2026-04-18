@@ -4,8 +4,8 @@
 - **Author:** Opus (with Michael Curtis)
 - **Severity:** High — blocked triple-pass `make check`, blocked seed advancement past 0.5.3-alpha.1
 - **Affected releases:** 0.5.4, 0.5.5, 0.5.6 (the binary artifacts, not the source history)
-- **Fix (merged via `dc3c40e`, as part of `claude/integrate-cli-capsule-6yxod`):** define `starts_with` and `strip_prefix` locally in `native_ir_utils_text.sfn` instead of re-exporting them from `./string_utils`. This gives the `.sfn-asm` real `.fn` entries that consumers' lowering can resolve against.
-- **Status:** Workaround merged; underlying compiler bug (re-exports of imported symbols don't emit `.fn` signatures in the re-exporting module's `.sfn-asm`) still present in the binary and needs a real fix tracked as a 1.0 blocker.
+- **Resolved by:** [`v0.5.7`](https://github.com/SailfinIO/sailfin/releases/tag/v0.5.7) — first release built from a source tree where `native_ir_utils_text.sfn` defines `starts_with`/`strip_prefix` locally (`dc3c40e`), so the re-exporter's `.sfn-asm` emits real `.fn` entries consumers can resolve against.
+- **Status:** Immediate blocker cleared; `0.5.7` is now the canonical seed across CI, release-tag, and nightly. Underlying compiler bug (the emitter does not produce `.fn` signatures for re-exported imports) is still present in the binary and is tracked as a 1.0-blocker follow-up.
 
 ## TL;DR
 
@@ -233,7 +233,9 @@ visible validation failure.
 | 04-17 16:43 | `162f46e` removes `.condition_locals` IPC. Unrelated, but the determinism gains it claims are real — it is not this bug. |
 | 04-18 00:17 | 0.5.5 and then 0.5.6 released. Same bug baked in. |
 | 04-18 | User attempts to advance the local seed to 0.5.6, hits `llvm-as` failure on `main.sfn`, files this investigation. |
-| 04-18 | `dc3c40e` on `claude/integrate-cli-capsule-6yxod` defines `starts_with`/`strip_prefix` locally in `native_ir_utils_text.sfn` — making the re-exporter's `.sfn-asm` emit real `.fn` entries consumers can resolve. `make check` passes end-to-end on that branch. This is the workaround that ships as the eventual 0.5.7 seed. |
+| 04-18 | `dc3c40e` on `claude/integrate-cli-capsule-6yxod` defines `starts_with`/`strip_prefix` locally in `native_ir_utils_text.sfn` — making the re-exporter's `.sfn-asm` emit real `.fn` entries consumers can resolve. `make check` passes end-to-end on that branch. |
+| 04-18 | `claude/integrate-cli-capsule-6yxod` merges to `main` (PR #161, merge commit `4b2d7f3`). |
+| 04-18 | `0.5.7` released (`02802ba` / [`v0.5.7`](https://github.com/SailfinIO/sailfin/releases/tag/v0.5.7)) — the first release whose binary image does not carry the re-export miscompilation. CI, `release-tag.yml`, and `nightly-selfhost.yml` are pinned to `0.5.7` as the new canonical seed. |
 
 
 ## How This Reached Production (Q1)
@@ -282,12 +284,16 @@ only the first rung:
   cost (~30 min on beefy CI hardware) is acceptable for a release-blocking
   gate.
 
-- **Advance the CI seed on a cadence and fail loudly if it regresses.** Right
-  now `SEED_VERSION: 0.5.3-alpha.1` (CI) and `SEED_VERSION: 0.5.2-alpha.1`
-  (release-tag) are two separate pins drifting independently. Add a weekly
-  "seed rotation" job that tries the latest release tag as seed and runs
-  `make check`. If it fails, investigate *before* cutting the next release
-  from that seed.
+- **Advance the CI seed on a cadence and fail loudly if it regresses.** At
+  the time this RCA was originally written, `SEED_VERSION: 0.5.3-alpha.1`
+  (CI) and `SEED_VERSION: 0.5.2-alpha.1` (release-tag) were two separate
+  pins drifting independently — the release workflow was shipping from an
+  *older* binary than the one CI tested against. This PR aligns both on
+  `0.5.7` (and the new `nightly-selfhost.yml` on the same pin). Going
+  forward, add a weekly "seed rotation" job that tries the latest release
+  tag as the seed and runs `make check`; if it fails, investigate *before*
+  cutting the next release from that seed, and keep all three pins
+  (`ci.yml`, `release-tag.yml`, `nightly-selfhost.yml`) moving together.
 
 - **Gate releases on `make check`, not just single-pass tests.** The release
   workflow should do what `make check` does and fail hard if the three passes
