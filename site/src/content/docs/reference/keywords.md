@@ -857,9 +857,9 @@ Refer to the current struct instance inside a method body.
 
 ```sfn
 struct Counter {
-    value -> Int;
+    value: number;
 
-    fn increment() -> Counter {
+    fn increment(self) -> Counter {
         return Counter { value: self.value + 1 };
     }
 }
