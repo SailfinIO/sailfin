@@ -162,6 +162,9 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.run", symbol: "sailfin_runtime_process_run", return_type: "double", parameter_types: ["{ i8**, i64 }*"], effects: ["io"]
     });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "process.exit", symbol: "sailfin_runtime_process_exit", return_type: "void", parameter_types: ["double"], effects: ["io"]
+    });
 
     // Filesystem adapters
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
@@ -283,6 +286,9 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "char_code", symbol: "char_code", return_type: "double", parameter_types: ["i8*"], effects: []
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "number_to_string", symbol: "number_to_string", return_type: "i8*", parameter_types: ["double"], effects: []
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_grapheme_count_fn", symbol: "sailfin_runtime_grapheme_count", return_type: "double", parameter_types: ["i8*"], effects: []

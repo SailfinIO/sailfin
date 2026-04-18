@@ -2952,6 +2952,11 @@ char *sailfin_runtime_number_to_string(double value)
     return out;
 }
 
+char *number_to_string(double value)
+{
+    return sailfin_runtime_number_to_string(value);
+}
+
 double sailfin_runtime_string_to_number(char *text)
 {
     if (!text)
@@ -5086,6 +5091,12 @@ double sailfin_runtime_process_run(SailfinPtrArray *argv)
     }
     return 127.0;
 #endif
+}
+
+void sailfin_runtime_process_exit(double code)
+{
+    int exit_code = (int)code;
+    exit(exit_code);
 }
 
 bool sailfin_runtime_is_callable(char *value)

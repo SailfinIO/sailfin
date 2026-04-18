@@ -436,44 +436,50 @@ fn resolve_cached_capsule_source(module: string, deps: string, home_dir: string)
     if name == ".." { _safe = false; }
     if !_safe { return ""; }
 
-    // Look up the display name in deps. For sfn-scoped capsules, the dep
-    // key is the bare name (e.g. "cli" for "sfn/cli").  For third-party
-    // capsules, the key is the full scoped name (e.g. "acme/router").
-    let mut dep_name: string = module;
-    if starts_with(module, "sfn/") { dep_name = name; }
-
-    // Search deps for the matching entry
+    // Look up by the scoped module name first (the canonical storage key
+    // written by `sfn add`). Fall back to the bare name for backward
+    // compat with capsule.toml files written by older sfn add versions
+    // that stripped the sfn/ scope for stdlib capsules.
     let mut version: string = "";
-    let mut start: number = 0;
-    let dep_len = deps.length;
+    let mut lookup_keys: string[] = [module];
+    if starts_with(module, "sfn/") { lookup_keys.push(name); }
+    let mut key_idx: number = 0;
     loop {
-        if start >= dep_len { break; }
-        let mut end: number = start;
+        if key_idx >= lookup_keys.length { break; }
+        if version.length > 0 { break; }
+        let dep_name = lookup_keys[key_idx];
+        let mut start: number = 0;
+        let dep_len = deps.length;
         loop {
-            if end >= dep_len { break; }
-            let ch = substring(deps, end, end + 1);
-            if ch == "\n" { break; }
-            end += 1;
-        }
-        let mut eq_pos: number = -1;
-        let mut ei: number = start;
-        loop {
-            if ei >= end { break; }
-            let ch = substring(deps, ei, ei + 1);
-            if ch == "=" {
-                eq_pos = ei;
-                break;
+            if start >= dep_len { break; }
+            let mut end: number = start;
+            loop {
+                if end >= dep_len { break; }
+                let ch = substring(deps, end, end + 1);
+                if ch == "\n" { break; }
+                end += 1;
             }
-            ei += 1;
-        }
-        if eq_pos > start {
-            let entry_name = substring(deps, start, eq_pos);
-            if entry_name == dep_name {
-                version = substring(deps, eq_pos + 1, end);
-                break;
+            let mut eq_pos: number = -1;
+            let mut ei: number = start;
+            loop {
+                if ei >= end { break; }
+                let ch = substring(deps, ei, ei + 1);
+                if ch == "=" {
+                    eq_pos = ei;
+                    break;
+                }
+                ei += 1;
             }
+            if eq_pos > start {
+                let entry_name = substring(deps, start, eq_pos);
+                if entry_name == dep_name {
+                    version = substring(deps, eq_pos + 1, end);
+                    break;
+                }
+            }
+            start = end + 1;
         }
-        start = end + 1;
+        key_idx += 1;
     }
     if version.length == 0 { return ""; }
     // Reject path traversal in version
