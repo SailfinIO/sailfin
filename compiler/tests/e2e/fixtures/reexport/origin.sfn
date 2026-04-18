@@ -1,0 +1,24 @@
+// compiler/tests/e2e/fixtures/reexport/origin.sfn
+//
+// Origin module for the re-export golden test.  Defines a boolean-
+// returning helper (the dangerous case — i1 return) and a string-
+// returning helper (the accidentally-ok case — i8* return).
+fn reexport_is_yes(value: string) -> boolean { return value == "yes"; }
+
+fn reexport_strip_prefix_xyz(value: string) -> string {
+    if value.length < 3 { return value; }
+    let head = value[0] + value[1] + value[2];
+    if head == "xyz" {
+        let mut rest: string = "";
+        let mut index: number = 3;
+        loop {
+            if index >= value.length { break; }
+            rest = rest + value[index];
+            index += 1;
+        }
+        return rest;
+    }
+    return value;
+}
+
+export { reexport_is_yes, reexport_strip_prefix_xyz };

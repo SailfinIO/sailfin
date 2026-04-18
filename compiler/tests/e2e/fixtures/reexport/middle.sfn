@@ -1,0 +1,15 @@
+// compiler/tests/e2e/fixtures/reexport/middle.sfn
+//
+// Middle module for the re-export golden test.  Only imports the
+// helpers from ./origin and re-exports them via its `export { ... }`
+// block.  If the compiler does not emit `.fn` signatures for these
+// re-exported imports in this module's `.sfn-asm`, any consumer
+// will lose the `i1` return type on reexport_is_yes and the
+// subsequent `if` guard will be miscompiled.
+//
+// This is the exact shape that broke in b9499f1 and was worked
+// around by dc3c40e — see
+// docs/rca/2026-04-18-reexport-diagnostic-gep.md.
+import { reexport_is_yes, reexport_strip_prefix_xyz } from "./origin";
+
+export { reexport_is_yes, reexport_strip_prefix_xyz };
