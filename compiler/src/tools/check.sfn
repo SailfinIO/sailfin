@@ -7,23 +7,36 @@
 // validate_effects. No new analysis logic is introduced here.
 //
 // See docs/proposals/check-architecture.md for design rationale.
-import { EffectRequirement, EffectViolation, validate_effects } from "../effect_checker";
+import {
+    EffectRequirement,
+    EffectViolation,
+    validate_effects
+} from "../effect_checker";
 import {
     join_lines,
     number_to_string,
     repeat_character,
     split_source_lines
 } from "../main";
-import { parse_program } from "../parser/mod";
-import { substring } from "../string_utils";
-import { Token } from "../token";
-import { Diagnostic } from "../typecheck_types";
-import { typecheck_diagnostics } from "../typecheck";
+import {
+    parse_program
+} from "../parser/mod";
+import {
+    substring
+} from "../string_utils";
+import {
+    Token
+} from "../token";
+import {
+    Diagnostic
+} from "../typecheck_types";
+import {
+    typecheck_diagnostics
+} from "../typecheck";
 
 // -------------------------------------------------------------------
 // Result types
 // -------------------------------------------------------------------
-
 struct CheckResult {
     file_path: string;
     diagnostics: Diagnostic[];
@@ -39,13 +52,16 @@ struct CheckSummary {
 // -------------------------------------------------------------------
 // Effect violation → Diagnostic normalization
 // -------------------------------------------------------------------
-
 fn _join_effects(effects: string[]) -> string {
-    if effects.length == 0 { return ""; }
+    if effects.length == 0 {
+        return "";
+    }
     let mut out = effects[0];
     let mut i: number = 1;
     loop {
-        if i >= effects.length { break; }
+        if i >= effects.length {
+            break;
+        }
         out = out + ", " + effects[i];
         i += 1;
     }
@@ -57,10 +73,14 @@ fn _code_for_missing_effect(missing_effects: string[], requirements: EffectRequi
     // E0401 — decorator-implied effect missing
     let mut i: number = 0;
     loop {
-        if i >= requirements.length { break; }
+        if i >= requirements.length {
+            break;
+        }
         let desc = requirements[i].description;
         if desc.length > 0 {
-            if desc[0] == "@" { return "E0401"; }
+            if desc[0] == "@" {
+                return "E0401";
+            }
         }
         i += 1;
     }
@@ -69,16 +89,15 @@ fn _code_for_missing_effect(missing_effects: string[], requirements: EffectRequi
 
 fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
     let effects_text = _join_effects(violation.missing_effects);
-    let mut message = "function `" + violation.routine_name
-        + "` is missing required effects: !["
-        + effects_text
-        + "]";
+    let mut message = "function `" + violation.routine_name + "` is missing required effects: ![" + effects_text + "]";
 
     if violation.requirements.length > 0 {
         message = message + "\nrequired by:";
         let mut i: number = 0;
         loop {
-            if i >= violation.requirements.length { break; }
+            if i >= violation.requirements.length {
+                break;
+            }
             let req = violation.requirements[i];
             message = message + "\n  - " + req.description + " requires ![" + req.effect + "]";
             i += 1;
@@ -86,40 +105,52 @@ fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
     }
 
     if violation.missing_effects.length > 0 {
-        message = message + "\nsuggestion: add ![" + effects_text
-            + "] to the function signature";
+        message = message + "\nsuggestion: add ![" + effects_text + "] to the function signature";
     }
 
     let code = _code_for_missing_effect(violation.missing_effects, violation.requirements);
-    return Diagnostic { code: code, message: message, primary: null };
+    return Diagnostic {
+        code: code,
+        message: message,
+        primary: null
+    };
 }
 
 // -------------------------------------------------------------------
 // Rendering
 // -------------------------------------------------------------------
-
 fn _render_message_lines(message: string) -> string[] {
     return split_source_lines(message);
 }
 
 fn _pad_number_string(value: string, width: number) -> string {
-    if value.length >= width { return value; }
+    if value.length >= width {
+        return value;
+    }
     let pad_count = width - value.length;
     return repeat_character(" ", pad_count) + value;
 }
 
 fn _build_pointer_prefix(column: number, line_text: string) -> string {
-    if column <= 1 { return ""; }
+    if column <= 1 {
+        return "";
+    }
     let mut prefix: string = "";
     let mut index: number = 1;
     loop {
-        if index >= column { break; }
+        if index >= column {
+            break;
+        }
         if index <= line_text.length {
             let ch = substring(line_text, index - 1, index);
-            if ch == "\t" { prefix = prefix + "\t"; } else {
+            if ch == "\t" {
+                prefix = prefix + "\t";
+            } else {
                 prefix = prefix + " ";
             }
-        } else { prefix = prefix + " "; }
+        } else {
+            prefix = prefix + " ";
+        }
         index += 1;
     }
     return prefix;
@@ -127,14 +158,22 @@ fn _build_pointer_prefix(column: number, line_text: string) -> string {
 
 fn _build_caret(lexeme: string, line_text: string, column: number) -> string {
     let mut highlight: number = lexeme.length;
-    if highlight <= 0 { highlight = 1; }
+    if highlight <= 0 {
+        highlight = 1;
+    }
     let mut remaining: number = line_text.length - (column - 1);
-    if remaining <= 0 { remaining = 1; }
-    if highlight > remaining { highlight = remaining; }
+    if remaining <= 0 {
+        remaining = 1;
+    }
+    if highlight > remaining {
+        highlight = remaining;
+    }
     let mut out: string = "";
     let mut i: number = 0;
     loop {
-        if i >= highlight { break; }
+        if i >= highlight {
+            break;
+        }
         out = out + "^";
         i += 1;
     }
@@ -145,7 +184,9 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], file_path: string, k
     let mut parts: string[] = [];
     let msg_lines = _render_message_lines(d.message);
     let mut header: string = "error[" + d.code + "]: ";
-    if msg_lines.length > 0 { header = header + msg_lines[0]; }
+    if msg_lines.length > 0 {
+        header = header + msg_lines[0];
+    }
     parts.push(header);
 
     let mut padding_width: number = 1;
@@ -158,7 +199,7 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], file_path: string, k
     let mut column_number: number = 1;
     let mut lexeme: string = "";
     if d.primary != null {
-        let token: Token? = d.primary;
+        let token: Token ? = d.primary;
         line_number = token.line;
         column_number = token.column;
         lexeme = token.lexeme;
@@ -170,9 +211,7 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], file_path: string, k
     }
 
     if has_location {
-        let loc = "  --> " + file_path + ":" + number_to_string(line_number)
-            + ":"
-            + number_to_string(column_number);
+        let loc = "  --> " + file_path + ":" + number_to_string(line_number) + ":" + number_to_string(column_number);
         parts.push(loc);
         let gutter = repeat_character(" ", padding_width);
         parts.push(" " + gutter + " |");
@@ -188,7 +227,9 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], file_path: string, k
 
     let mut i: number = 1;
     loop {
-        if i >= msg_lines.length { break; }
+        if i >= msg_lines.length {
+            break;
+        }
         parts.push("  = " + msg_lines[i]);
         i += 1;
     }
@@ -204,9 +245,10 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], file_path: string, k
 // -------------------------------------------------------------------
 // Orchestration
 // -------------------------------------------------------------------
-
 fn _is_sfn_file(path: string) -> boolean {
-    if path.length < 4 { return false; }
+    if path.length < 4 {
+        return false;
+    }
     let start = path.length - 4;
     return substring(path, start, path.length) == ".sfn";
 }
@@ -222,7 +264,9 @@ fn check_source(source: string, file_path: string) -> CheckResult {
 
     let mut ti: number = 0;
     loop {
-        if ti >= type_diags.length { break; }
+        if ti >= type_diags.length {
+            break;
+        }
         let diag = type_diags[ti];
         combined.push(diag);
         rendered.push(render_diagnostic(diag, source_lines, file_path, "typecheck"));
@@ -231,7 +275,9 @@ fn check_source(source: string, file_path: string) -> CheckResult {
 
     let mut ei: number = 0;
     loop {
-        if ei >= effect_violations.length { break; }
+        if ei >= effect_violations.length {
+            break;
+        }
         let diag = effect_violation_to_diagnostic(effect_violations[ei]);
         combined.push(diag);
         rendered.push(render_diagnostic(diag, source_lines, file_path, "effect"));
@@ -253,7 +299,6 @@ fn check_file(path: string, inlined_source: string) -> CheckResult {
 // -------------------------------------------------------------------
 // Summary
 // -------------------------------------------------------------------
-
 fn render_summary(summary: CheckSummary) -> string {
     let files_str = number_to_string(summary.files_checked);
     if summary.total_errors == 0 {
@@ -261,7 +306,9 @@ fn render_summary(summary: CheckSummary) -> string {
     }
     let errors_str = number_to_string(summary.total_errors);
     let mut label: string = " errors";
-    if summary.total_errors == 1 { label = " error"; }
+    if summary.total_errors == 1 {
+        label = " error";
+    }
     return "checked " + files_str + " files: " + errors_str + label;
 }
 
@@ -269,7 +316,9 @@ fn summarize(results: CheckResult[]) -> CheckSummary {
     let mut total: number = 0;
     let mut i: number = 0;
     loop {
-        if i >= results.length { break; }
+        if i >= results.length {
+            break;
+        }
         total += results[i].error_count;
         i += 1;
     }

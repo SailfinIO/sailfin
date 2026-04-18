@@ -6,8 +6,13 @@
 // the seed compiler can emit within its per-module timeout.
 //
 // See docs/proposals/check-architecture.md for the end-to-end design.
-import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
-import { inline_imports_for_source } from "./cli_commands";
+import {
+    _collect_sfn_files_cmd,
+    _dirname_cmd
+} from "./cli_commands_utils";
+import {
+    inline_imports_for_source
+} from "./cli_commands";
 import {
     CheckResult,
     check_source,
@@ -16,15 +21,21 @@ import {
 } from "./tools/check";
 
 fn _emit_check_header(path: string, quiet: boolean) ![io] {
-    if quiet { return; }
+    if quiet {
+        return;
+    }
     print.err("[check] " + path);
 }
 
 fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
-    if quiet { return; }
+    if quiet {
+        return;
+    }
     let mut i: number = 0;
     loop {
-        if i >= result.rendered.length { break; }
+        if i >= result.rendered.length {
+            break;
+        }
         print.err(result.rendered[i]);
         i += 1;
     }
@@ -36,7 +47,9 @@ fn handle_check_command(args: string[]) -> number ![io] {
 
     let mut argi: number = 1;
     loop {
-        if argi >= args.length { break; }
+        if argi >= args.length {
+            break;
+        }
         let arg = args[argi];
         if strings_equal(arg, "--quiet") {
             quiet = true;
@@ -54,21 +67,27 @@ fn handle_check_command(args: string[]) -> number ![io] {
         argi += 1;
     }
 
-    if paths.length == 0 { paths.push("."); }
+    if paths.length == 0 {
+        paths.push(".");
+    }
 
     let mut files: string[] = [];
     let mut pi: number = 0;
     loop {
-        if pi >= paths.length { break; }
+        if pi >= paths.length {
+            break;
+        }
         let p = paths[pi];
-        if !fs.exists(p) {
+        if ! fs.exists(p) {
             print.err("[check] path not found: " + p);
             return 2;
         }
         let collected = _collect_sfn_files_cmd(p, 20);
         let mut ci: number = 0;
         loop {
-            if ci >= collected.length { break; }
+            if ci >= collected.length {
+                break;
+            }
             files.push(collected[ci]);
             ci += 1;
         }
@@ -84,7 +103,9 @@ fn handle_check_command(args: string[]) -> number ![io] {
     let mut total_errors: number = 0;
     let mut fi: number = 0;
     loop {
-        if fi >= files.length { break; }
+        if fi >= files.length {
+            break;
+        }
         let path = files[fi];
         let source = fs.readFile(path);
         let base_dir = _dirname_cmd(path);
@@ -101,8 +122,12 @@ fn handle_check_command(args: string[]) -> number ![io] {
 
     let summary = summarize(results);
     print(render_summary(summary));
-    if total_errors > 0 { return 1; }
+    if total_errors > 0 {
+        return 1;
+    }
     return 0;
 }
 
-export { handle_check_command };
+export {
+    handle_check_command
+};
