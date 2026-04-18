@@ -1,9 +1,9 @@
 // compiler/src/cli_main.sfn
 //
 // Sailfin-native CLI entrypoint invoked by the native C shim.
+import { handle_check_command } from "./cli_check";
 import {
     handle_add_command,
-    handle_check_command,
     handle_fmt_command,
     handle_guillermo_command,
     handle_init_command,
