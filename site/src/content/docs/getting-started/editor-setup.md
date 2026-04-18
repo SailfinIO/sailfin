@@ -59,8 +59,8 @@ release. In the meantime, use a terminal build task (see
 Open any `.sfn` file in VS Code. You should see:
 
 - **Syntax coloring** — keywords like `fn`, `let`, `struct`, and `match` are
-  highlighted. Effect annotations like `![io]` render distinctly. Struct field
-  arrows (`->`) are colored as operators.
+  highlighted. Effect annotations like `![io]` render distinctly. Return-type
+  arrows (`->`) and type-annotation colons (`:`) are colored as operators.
 - **Status bar language indicator** — the bottom-right of the VS Code window
   shows **Sailfin** as the active language when a `.sfn` file is focused.
 - **Bracket matching** — placing your cursor next to `{` or `}` highlights the
@@ -273,7 +273,7 @@ contributors:
   another extension.
 - **`editor.fontFamily` and `editor.fontLigatures`** — Sailfin's syntax uses
   several character sequences that render better with a ligature-capable monospace
-  font. `->` (field separator), `![...]` (effect annotations), and `=>` (match
+  font. `->` (return-type arrow), `![...]` (effect annotations), and `=>` (match
   arms) all benefit from ligatures. Fira Code, Cascadia Code, and JetBrains Mono
   are all freely available.
 - **`editor.tabSize: 4`** — the Sailfin standard library and compiler source use
@@ -288,8 +288,9 @@ contributors:
 The Sailfin extension uses standard TextMate grammar scopes, so it works with any
 VS Code color theme. A few recommendations:
 
-- **High-contrast themes** make `->` field arrows and `![...]` effect annotations
-  especially readable by coloring them as operators distinct from identifiers.
+- **High-contrast themes** make `->` return-type arrows and `![...]` effect
+  annotations especially readable by coloring them as operators distinct from
+  identifiers.
 - Themes that distinguish **keywords**, **types**, **operators**, and **strings**
   with clearly different hues work best for Sailfin's dense type and effect syntax.
 - Themes known to work well: **One Dark Pro**, **Tokyo Night**, **Catppuccin**,
@@ -329,8 +330,8 @@ autocmd BufRead,BufNewFile *.sfn set filetype=rust
 ```
 
 This is an approximation — Rust highlighting will not correctly color Sailfin's
-`->` field syntax or `![...]` effect annotations, but it provides better
-readability than plain text.
+`![...]` effect annotations or `:` type-annotation syntax, but it provides
+better readability than plain text.
 
 For Neovim, you can also set the filetype in `init.lua`:
 

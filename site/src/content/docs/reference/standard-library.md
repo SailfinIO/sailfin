@@ -23,7 +23,7 @@ Write a value to stdout followed by a newline. Accepts any type; non-string valu
 
 ```sfn
 fn greet(name: string) ![io] {
-    print("Hello, " + name + "!");
+    print("Hello, {{name}}!");
 }
 ```
 
@@ -58,7 +58,7 @@ The following functions are still recognized by the runtime for backward compati
 
 These functions operate on Sailfin strings using Unicode grapheme clusters as the unit of indexing. "Index" always means a grapheme-cluster index, not a byte offset or code-unit index.
 
-#### `substring(text: string, start: int, end: int) -> string`
+#### `substring(text: string, start: number, end: number) -> string`
 
 Extract the substring from grapheme index `start` (inclusive) to `end` (exclusive). Both bounds are clamped to `[0, text.length]`. Returns `""` when the resulting range is empty or inverted.
 
@@ -77,7 +77,7 @@ let clamped = substring(s, 0, 999); // "Hello, world!" (end clamped)
 
 ---
 
-#### `find_char(text: string, character: string, start: int = 0) -> int`
+#### `find_char(text: string, character: string, start: number = 0) -> number`
 
 Find the first occurrence of a single grapheme `character` in `text`, beginning the search at grapheme index `start`. Returns the index of the first match, or `-1` if not found.
 
@@ -100,7 +100,7 @@ let missing = find_char("abc", "z");       // -1
 
 ---
 
-#### `grapheme_count(text: string) -> int`
+#### `grapheme_count(text: string) -> number`
 
 Return the number of Unicode grapheme clusters in `text`. For ASCII strings this equals the byte length. For strings containing multi-byte characters, emoji, or combined sequences this may differ from `.length`.
 
@@ -119,7 +119,7 @@ grapheme_count(empty);       // 0
 
 ---
 
-#### `grapheme_at(text: string, index: int) -> string`
+#### `grapheme_at(text: string, index: number) -> string`
 
 Return the grapheme cluster at the given index. Returns `""` for an out-of-range index (negative or beyond the end of the string). Never panics.
 
@@ -132,7 +132,7 @@ grapheme_at(s, 99); // ""
 
 ---
 
-#### `char_code(character: string) -> int`
+#### `char_code(character: string) -> number`
 
 Return the Unicode code point of the first grapheme cluster in `character`. Returns `-1` for an empty string or an invalid input.
 
@@ -160,7 +160,7 @@ strings_equal("hello", "Hello");  // false
 
 ---
 
-#### `clamp(value: int, minimum: int, maximum: int) -> int`
+#### `clamp(value: number, minimum: number, maximum: number) -> number`
 
 Return `value` clamped to the range `[minimum, maximum]`. Works with both integers and floating-point numbers.
 
@@ -188,8 +188,8 @@ Produce a human-readable debug representation of a struct. The output format is 
 
 ```sfn
 struct Point {
-    x -> int;
-    y -> int;
+    x: number;
+    y: number;
 }
 
 fn point_repr(p: Point) -> string {
@@ -247,17 +247,19 @@ You should not call this function directly. It appears in generated code and in 
 
 > **Status:** The concurrency primitives below are present in the prelude and parseable, but full structured-concurrency semantics are planned for a future release. `spawn` and `channel` are available today as runtime-level hooks; `routine`/`scope`/`await` are planned language keywords.
 
-#### `sleep(milliseconds: int) ![clock]`
+#### `sleep(milliseconds: number) ![clock]`
 
 Suspend the current execution context for at least `milliseconds` milliseconds. Requires the `clock` effect.
 
 ```sfn
+import { sleep } from "time";
+
 fn wait_a_bit() ![clock] {
     sleep(500);  // pause for 500 ms
 }
 ```
 
-#### `monotonic_millis() -> int ![clock]`
+#### `monotonic_millis() -> number ![clock]`
 
 Return the current value of a monotonic clock in milliseconds. Useful for measuring elapsed time. The absolute value is not meaningful; only differences between two calls are useful.
 
@@ -266,11 +268,11 @@ fn timed_operation() ![io, clock] {
     let start = monotonic_millis();
     do_work();
     let elapsed = monotonic_millis() - start;
-    print("elapsed: " + elapsed + " ms");
+    print("elapsed: {{elapsed}} ms");
 }
 ```
 
-#### `channel<T>(capacity: int = 0) -> Channel<T> ![io]`
+#### `channel<T>(capacity: number = 0) -> Channel<T> ![io]`
 
 Create a buffered or unbuffered channel for passing values between concurrent tasks. `capacity = 0` produces an unbuffered (synchronous) channel. Requires the `io` effect.
 
@@ -289,7 +291,7 @@ Run an array of zero-argument callables concurrently and collect their return va
 ```sfn
 fn fetch_all(urls: string[]) -> string[] ![io, net] {
     let tasks = array_map(urls, fn(url: string) -> any {
-        return fn() -> any ![net] { return http.get(url); };
+        return fn() -> any ![net] { return http.get(url).body; };
     });
     return parallel(tasks);
 }
@@ -305,7 +307,7 @@ Apply `mapper` to each element and return a new array of results.
 
 ```sfn
 let numbers = [1, 2, 3, 4];
-let doubled = array_map(numbers, fn(n: int) -> int { return n * 2; });
+let doubled = array_map(numbers, fn(n: number) -> number { return n * 2; });
 // [2, 4, 6, 8]
 ```
 
@@ -315,7 +317,7 @@ Return a new array containing only the elements for which `predicate` returns `t
 
 ```sfn
 let numbers = [1, 2, 3, 4, 5];
-let evens = array_filter(numbers, fn(n: int) -> boolean { return n % 2 == 0; });
+let evens = array_filter(numbers, fn(n: number) -> boolean { return n % 2 == 0; });
 // [2, 4]
 ```
 
@@ -325,7 +327,7 @@ Fold `items` into a single value using `reducer`, starting from `initial`.
 
 ```sfn
 let numbers = [1, 2, 3, 4, 5];
-let sum = array_reduce(numbers, 0, fn(acc: int, n: int) -> int { return acc + n; });
+let sum = array_reduce(numbers, 0, fn(acc: number, n: number) -> number { return acc + n; });
 // 15
 ```
 
@@ -365,8 +367,8 @@ These structs are defined in the prelude and may appear in user-facing APIs or d
 
 ```sfn
 struct StructField {
-    name -> string;
-    value -> any;
+    name: string;
+    value: any;
 }
 ```
 
@@ -374,8 +376,8 @@ struct StructField {
 
 ```sfn
 struct EnumField {
-    name -> string;
-    value -> any;
+    name: string;
+    value: any;
 }
 ```
 
@@ -383,8 +385,8 @@ struct EnumField {
 
 ```sfn
 struct EnumVariantDefinition {
-    name -> string;
-    field_names -> string[];
+    name: string;
+    field_names: string[];
 }
 ```
 
@@ -392,8 +394,8 @@ struct EnumVariantDefinition {
 
 ```sfn
 struct EnumType {
-    name -> string;
-    variants -> EnumVariantDefinition[];
+    name: string;
+    variants: EnumVariantDefinition[];
 }
 ```
 
@@ -401,9 +403,9 @@ struct EnumType {
 
 ```sfn
 struct EnumInstance {
-    type -> EnumType;
-    variant -> string;
-    fields -> EnumField[];
+    type: EnumType;
+    variant: string;
+    fields: EnumField[];
 }
 ```
 
@@ -411,9 +413,9 @@ struct EnumInstance {
 
 ```sfn
 struct TypeDescriptor {
-    kind -> string;
-    name -> string?;
-    items -> TypeDescriptor[];
+    kind: string;
+    name: string?;
+    items: TypeDescriptor[];
 }
 ```
 
@@ -427,13 +429,13 @@ The `fs` module provides filesystem access. All operations require the `![io]` e
 
 ---
 
-#### `fs.read(path: string) -> string ![io]`
+#### `fs.readFile(path: string) -> string ![io]`
 
 Read the entire contents of the file at `path` and return them as a string. Raises a runtime error if the file does not exist or cannot be read.
 
 ```sfn
 fn load_config(path: string) -> string ![io] {
-    return fs.read(path);
+    return fs.readFile(path);
 }
 ```
 
@@ -444,13 +446,13 @@ fn load_config(path: string) -> string ![io] {
 
 ---
 
-#### `fs.write(path: string, content: string) ![io]`
+#### `fs.writeFile(path: string, content: string) ![io]`
 
 Write `content` to the file at `path`, creating the file if it does not exist and overwriting it completely if it does. Parent directories must already exist.
 
 ```sfn
 fn save_result(path: string, data: string) ![io] {
-    fs.write(path, data);
+    fs.writeFile(path, data);
 }
 ```
 
@@ -475,7 +477,7 @@ Return `true` if a file or directory exists at `path`, `false` otherwise. Does n
 ```sfn
 fn ensure_config(path: string) ![io] {
     if !fs.exists(path) {
-        fs.write(path, "{}");
+        fs.writeFile(path, "{}");
     }
 }
 ```
@@ -499,7 +501,7 @@ fn write_report(path: string, lines: string[]) ![io] {
 The following filesystem helpers are planned for a future release and are not available today:
 
 - `fs.readLines(path: string) -> string[] ![io]` — read file as an array of lines
-- `fs.delete(path: string) ![io]` — delete a file
+- `fs.deleteFile(path: string) ![io]` — delete a file
 - `fs.listDir(path: string) -> string[] ![io]` — list directory contents
 - `fs.makeDir(path: string) ![io]` — create a directory (and parents)
 - `fs.move(src: string, dst: string) ![io]` — rename or move a file
@@ -546,7 +548,7 @@ The `Response` object returned by `http.get` and `http.post` has the following f
 | Field | Type | Description |
 |---|---|---|
 | `body` | `string` | Response body as a UTF-8 string |
-| `status` | `int` | HTTP status code (e.g. `200`, `404`) |
+| `status` | `number` | HTTP status code (e.g. `200`, `404`) |
 
 > **Note:** The full response shape (headers, streaming body, redirect policy, timeouts) is planned. The current `Response` exposes `body` and `status` only.
 
@@ -584,8 +586,8 @@ All `log` functions require the `![io]` effect.
 Write an informational message to stdout with an `[INFO]` prefix. Use for routine operational messages.
 
 ```sfn
-fn start_server(port: int) ![io] {
-    log.info("Server starting on port " + port);
+fn start_server(port: number) ![io] {
+    log.info("Server starting on port {{port}}");
 }
 ```
 
@@ -598,10 +600,10 @@ Write a warning message to **stderr** with a `[WARN]` prefix. Use when something
 ```sfn
 fn load_optional(path: string) -> string ![io] {
     if !fs.exists(path) {
-        log.warn("optional config not found: " + path);
+        log.warn("optional config not found: {{path}}");
         return "";
     }
-    return fs.read(path);
+    return fs.readFile(path);
 }
 ```
 
@@ -613,9 +615,9 @@ Write an error message to **stderr** with an `[ERROR]` prefix. Use for failures 
 
 ```sfn
 fn connect(host: string) ![io, net] {
-    let response = http.get("http://" + host + "/health");
+    let response = http.get("http://{{host}}/health");
     if response.status != 200 {
-        log.error("health check failed: status " + response.status);
+        log.error("health check failed: status {{response.status}}");
     }
 }
 ```
@@ -628,7 +630,7 @@ Write a debug message to stdout with a `[DEBUG]` prefix. Use for verbose diagnos
 
 ```sfn
 fn parse_token(raw: string) -> string ![io] {
-    log.debug("parsing token: " + raw);
+    log.debug("parsing token: {{raw}}");
     // ...
     return raw;
 }
@@ -638,7 +640,18 @@ fn parse_token(raw: string) -> string ![io] {
 
 ## Collections — Planned
 
-> **Status:** The collections API described below reflects the planned design. `Vec<T>`, `Map<K, V>`, and `Set<T>` are not yet available as generic types. Array literals (`[1, 2, 3]`) and the prelude array utilities (`array_map`, `array_filter`, `array_reduce`) are available today.
+> **Coming in 1.0:** Generic containers (`Map<K, V>`, `Set<T>`, and an explicit growable `Vec<T>`) depend on generic type constraints landing first. See the [roadmap](/roadmap) for sequencing.
+>
+> Today, array literals (`[1, 2, 3]`) with `T[]` types, `.length`, `.push(item)`, and the prelude array utilities (`array_map`, `array_filter`, `array_reduce`) are the shipped collection surface.
+
+### Arrays (available today)
+
+```sfn
+let numbers: number[] = [1, 2, 3];
+numbers.push(4);
+let n = numbers.length;        // 4
+let first = numbers[0];         // 1
+```
 
 ### Planned `Vec<T>`
 
@@ -647,12 +660,12 @@ fn parse_token(raw: string) -> string ![io] {
 Vec<T>.new() -> Vec<T>
 Vec<T>.push(item: T) -> void
 Vec<T>.pop() -> T?
-Vec<T>.get(index: int) -> T?
-Vec<T>.len() -> int
+Vec<T>.get(index: number) -> T?
+Vec<T>.len() -> number
 Vec<T>.is_empty() -> boolean
 Vec<T>.contains(item: T) -> boolean
-Vec<T>.remove(index: int) -> T
-Vec<T>.slice(start: int, end: int) -> Vec<T>
+Vec<T>.remove(index: number) -> T
+Vec<T>.slice(start: number, end: number) -> Vec<T>
 ```
 
 ### Planned `Map<K, V>`
@@ -666,7 +679,7 @@ Map<K, V>.has(key: K) -> boolean
 Map<K, V>.delete(key: K) -> void
 Map<K, V>.keys() -> K[]
 Map<K, V>.values() -> V[]
-Map<K, V>.len() -> int
+Map<K, V>.len() -> number
 ```
 
 ### Planned `Set<T>`
@@ -677,7 +690,7 @@ Set<T>.new() -> Set<T>
 Set<T>.add(item: T) -> void
 Set<T>.has(item: T) -> boolean
 Set<T>.delete(item: T) -> void
-Set<T>.size() -> int
+Set<T>.size() -> number
 ```
 
 ---
@@ -690,12 +703,12 @@ The modules below are on the roadmap and are documented here to give a preview o
 
 ### `rand` module — Planned (`![rand]` effect)
 
-Random number generation. All functions require the `![rand]` effect.
+> **Coming in 1.0:** Random-number helpers as a standard module. The `rand` effect token is parsed today but no `rand.*` APIs ship yet. See the [roadmap](/roadmap).
 
 ```sfn
 // Planned — not yet implemented
-rand.int(min: int, max: int) -> int ![rand]
-rand.float() -> Float ![rand]          // uniform in [0.0, 1.0)
+rand.int(min: number, max: number) -> number ![rand]
+rand.float() -> number ![rand]          // uniform in [0.0, 1.0)
 rand.bool() -> boolean ![rand]
 rand.shuffle<T>(items: T[]) -> T[] ![rand]
 rand.choice<T>(items: T[]) -> T? ![rand]
@@ -705,13 +718,13 @@ rand.choice<T>(items: T[]) -> T? ![rand]
 
 ### `time` / `clock` module — Planned (`![clock]` effect)
 
-Wall-clock access and date/time utilities. The `sleep` and `monotonic_millis` prelude functions are available today; the structured date/time API is planned.
+> **Coming in 1.0:** A structured date/time API on top of the existing `clock` effect. The `sleep` and `monotonic_millis` prelude functions are available today; richer wall-clock access is planned. See the [roadmap](/roadmap).
 
 ```sfn
 // Planned — not yet implemented
 clock.now() -> Timestamp ![clock]
 clock.utc_now() -> Timestamp ![clock]
-Timestamp.unix_millis() -> int
+Timestamp.unix_millis() -> number
 Timestamp.format(pattern: string) -> string
 ```
 
@@ -719,17 +732,17 @@ Timestamp.format(pattern: string) -> string
 
 ### `process` module — Planned (`![io]` effect)
 
-Subprocess execution and process lifecycle. Requires `![io]`.
+> **Coming in 1.0:** Subprocess execution and process lifecycle helpers. See the [roadmap](/roadmap).
 
 ```sfn
 // Planned — not yet implemented
 process.exec(command: string) -> ProcessResult ![io]
-process.exit(code: int) -> never ![io]
+process.exit(code: number) -> never ![io]
 
 struct ProcessResult {
-    stdout -> string;
-    stderr -> string;
-    exit_code -> int;
+    stdout: string;
+    stderr: string;
+    exit_code: number;
 }
 ```
 
@@ -737,11 +750,21 @@ struct ProcessResult {
 
 ### Concurrency module — Planned
 
-Structured concurrency primitives to complement the `routine`/`scope` keywords.
+> **Coming in 1.0:** Structured concurrency primitives to complement `routine`, `spawn`, `await`, and `parallel`. The `channel()` prelude function and `Channel<T>` type from the `sync` module are callable today; the full send/recv/close surface below is planned. See the [roadmap](/roadmap).
+
+```sfn
+import { Channel, channel } from "sync";
+
+// Available today — unbuffered channel, typed
+async fn main() ![io] {
+    let messages: Channel<number> = channel();
+    // send and recv are planned keywords / methods
+}
+```
 
 ```sfn
 // Planned — not yet implemented
-channel<T>(capacity: int = 0) -> Channel<T> ![io]
+channel<T>(capacity: number = 0) -> Channel<T> ![io]
 Channel<T>.send(value: T) -> void ![io]
 Channel<T>.recv() -> T ![io]
 Channel<T>.close() -> void ![io]
@@ -751,20 +774,21 @@ Channel<T>.close() -> void ![io]
 
 ### AI / Model adapters — Planned (`![model]` effect)
 
-First-class model invocation. `model` and `prompt` blocks are parsed and emit metadata today; actual `.call()` execution is planned.
+> **Coming in 1.0:** First-class model invocation via the `sfn/ai` capsule. `model` and `prompt` blocks are parsed and emit metadata today; actual `.call()` execution is planned. See the [roadmap](/roadmap).
 
 ```sfn
 // Planned — not yet implemented
 model MyModel {
-    provider: "anthropic";
-    model_id: "claude-sonnet-4-20250514";
-    max_tokens: 1024;
+    provider = "anthropic";
+    model_id = "claude-sonnet-4-20250514";
+    max_tokens = 1024;
 }
 
 fn classify(text: string) -> string ![model] {
-    prompt MyModel {
-        user: "Classify the following: " + text;
+    prompt user {
+        "Classify the following: {{text}}";
     }
+    return "";
 }
 ```
 

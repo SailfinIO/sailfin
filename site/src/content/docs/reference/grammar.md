@@ -63,22 +63,30 @@ StructDeclaration  = "struct" Identifier [ TypeParameters ]
 
 StructMember       = FieldDeclaration | MethodDeclaration ;
 
-TypeSep            = "->" | ":" ;
-FieldDeclaration   = [ "mut" ] Identifier TypeSep Type ";" ;
+TypeAnnotation     = ":" Type ;
+ReturnType         = "->" Type ;
+FieldDeclaration   = [ "mut" ] Identifier TypeAnnotation ";" ;
 
 MethodDeclaration  = { Decorator } [ "async" ] "fn" Identifier [ TypeParameters ]
-                     "(" [ Parameters ] ")" [ TypeSep Type ] [ EffectList ] Block ;
+                     "(" [ Parameters ] ")" [ ReturnType ] [ EffectList ] Block ;
 
 InterfaceDeclaration = "interface" Identifier [ TypeParameters ]
                         "{" { FunctionSignature | PropertySignature } "}" ;
 
-PropertySignature   = Identifier TypeSep Type ";" ;
+PropertySignature   = Identifier TypeAnnotation ";" ;
 
 FunctionSignature   = "fn" Identifier "(" [ Parameters ] ")"
-                      [ TypeSep Type ] [ EffectList ] ";" ;
+                      [ ReturnType ] [ EffectList ] ";" ;
 ```
 
-`TypeSep` accepts both `->` and `:`. The `->` separator is idiomatic for struct fields; `:` is common for function parameters. Both are valid in all positions.
+Variables, parameters, and struct fields use `:` to introduce the type.
+Function return types use `->`. The parser's `TypeSep` production still
+accepts `->` in annotation positions for backward compatibility with early
+code, but all new code should use `:` for annotations and `->` only for
+return types. Methods are declared inside the struct body; the first
+parameter is bare `self` (no `&self` or `&mut self`). There are no
+`impl Foo { }` blocks — conformance is declared with `implements` on the
+struct. Multiple interfaces: `implements A, B, C`.
 
 ### Functions
 
@@ -86,7 +94,7 @@ FunctionSignature   = "fn" Identifier "(" [ Parameters ] ")"
 FunctionDeclaration = { Decorator } { FunctionModifier }
                       "fn" Identifier [ TypeParameters ]
                       "(" [ Parameters ] ")"
-                      [ TypeSep Type ] [ EffectList ] ( Block | ";" ) ;
+                      [ ReturnType ] [ EffectList ] ( Block | ";" ) ;
 
 FunctionModifier    = "async" | "unsafe" | "extern" ;
 ```
@@ -95,15 +103,15 @@ When both `unsafe` and `extern` modifiers are present, the declaration introduce
 a foreign C symbol and terminates with `;` instead of a block body:
 
 ```sfn
-unsafe extern fn malloc(size -> usize) -> *u8;
-unsafe extern fn free(ptr -> *u8) -> void;
+unsafe extern fn malloc(size: usize) -> *u8;
+unsafe extern fn free(ptr: *u8) -> void;
 ```
 
 ### Parameters, Type Parameters, and Effects
 
 ```ebnf
 Parameters         = Parameter { "," Parameter } ;
-Parameter          = [ "mut" ] Identifier [ TypeSep Type ] [ "=" Expression ] ;
+Parameter          = [ "mut" ] Identifier [ TypeAnnotation ] [ "=" Expression ] ;
 
 TypeParameters     = "<" TypeParameter { "," TypeParameter } ">" ;
 TypeParameter      = Identifier [ ":" Type ] ;
@@ -114,6 +122,9 @@ EffectList         = "![" EffectIdentifier { "," EffectIdentifier } "]" ;
 EffectIdentifier   = Identifier ;
 ```
 
+Canonical effect identifiers: `io`, `net`, `model`, `gpu`, `rand`, `clock`,
+plus `unsafe`, `read`, `mut`.
+
 The effect list attaches after the parameter list and optional return type, before the function body.
 
 ### Type Aliases and Other Declarations
@@ -121,7 +132,7 @@ The effect list attaches after the parameter list and optional return type, befo
 ```ebnf
 TypeAliasDeclaration = "type" Identifier [ TypeParameters ] "=" Type ";" ;
 
-VariableDeclaration  = "let" [ "mut" ] Identifier [ TypeSep Type ]
+VariableDeclaration  = "let" [ "mut" ] Identifier [ TypeAnnotation ]
                        [ "=" Expression ] ";" ;
 ```
 
@@ -134,10 +145,10 @@ ModelProperty       = Identifier "=" ModelValue ";" ;
 ModelValue          = Expression | Type ;
 
 PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
-                      [ TypeSep Type ] [ EffectList ] Block ;
+                      [ ReturnType ] [ EffectList ] Block ;
 
 ToolDeclaration     = "tool" Identifier "(" [ Parameters ] ")"
-                      [ TypeSep Type ] [ EffectList ] Block ;
+                      [ ReturnType ] [ EffectList ] Block ;
 
 TestDeclaration     = "test" ( Identifier | StringLiteral ) [ EffectList ] Block ;
 ```
@@ -176,10 +187,9 @@ AssertStatement    = "assert" Expression ";" ;
 IfStatement        = "if" Expression Block [ "else" ( IfStatement | Block ) ] ;
 
 MatchStatement     = "match" Expression "{" { MatchCase [ "," ] } "}" ;
-MatchCase          = Pattern [ "if" Expression ] MatchSeparator
+MatchCase          = Pattern [ "if" Expression ] "=>"
                      ( Block | InlineExpression ) ;
 InlineExpression   = Expression [ ";" ] ;
-MatchSeparator     = "=>" | "->" ;
 
 TryStatement       = "try" Block [ "catch" [ "(" Identifier ")" ] Block ]
                      [ "finally" Block ] ;
@@ -200,7 +210,9 @@ Assignment         = Expression ( "=" | "+=" | "-=" | "*=" | "/=" ) Expression ;
 ExpressionStatement = Expression ";" ;
 ```
 
-> **Note**: `RoutineDeclaration` (`routine { }`) is in the grammar but is **not yet parsed** by the compiler. It is included as the design-stage specification for 1.0 concurrency work.
+> **Note**: `RoutineDeclaration` (`routine { }`, `routine "name" { }`) appears in
+> example code today, but full runtime support (scheduling, joins) is planned for
+> 1.0. See the [roadmap](/roadmap).
 
 ### Prompt Statements
 
@@ -230,7 +242,7 @@ Canonical channel names are `system`, `user`, `assistant`, and `tool`. Any ident
 ```ebnf
 Expression         = LambdaExpression | PipelineExpression ;
 
-LambdaExpression   = "fn" "(" [ Parameters ] ")" [ TypeSep Type ] Block ;
+LambdaExpression   = "fn" "(" [ Parameters ] ")" [ ReturnType ] Block ;
 
 PipelineExpression = LogicalOr { "|>" LogicalOr } ;
 // Note: |> is not yet implemented.
@@ -314,12 +326,16 @@ QualifiedName      = Identifier { "." Identifier } ;
 | `null` | Explicit absence of value |
 | `T?` | Optional (`T` or `null`) |
 | `A \| B` | Union type |
-| `Vec<T>` | Growable collection |
-| `&T` | Shared borrow (read-only) |
-| `&mut T` | Exclusive mutable borrow |
+| `T[]` | Array / growable collection |
+| `&T` | Shared borrow (read-only) — parsed, not enforced ([roadmap](/roadmap)) |
+| `&mut T` | Exclusive mutable borrow — parsed, not enforced ([roadmap](/roadmap)) |
 | `*T` | Raw read-only pointer (unsafe only) |
 | `*mut T` | Raw mutable pointer (unsafe only) |
 | `*opaque` | Opaque foreign pointer (`void*`) |
+
+Sized numeric types for FFI / low-level code: `i8`–`i64`, `u8`–`u64`, `f32`,
+`f64`, `usize`. The split of `number` into `int` (i64) / `float` (f64) is on
+the [roadmap](/roadmap).
 
 **Context-sensitivity of `&`**: In type position `A & B` is type intersection;
 in expression position `&x` is a borrow. The grammar resolves this unambiguously.
@@ -338,7 +354,7 @@ ConstructorPattern = Identifier "{" [ PatternField { "," PatternField } ] "}" ;
 PatternField       = Identifier [ ":" Pattern ] ;
 ```
 
-Guards attach to any match case: `Pattern [ "if" Expression ] "->" ...`
+Guards attach to any match case: `Pattern [ "if" Expression ] "=>" ...`
 
 ## Literals
 
@@ -379,4 +395,5 @@ The following identifiers are reserved and may not appear where a plain
 `tool` `pipeline` `test` `prompt` `system` `user` `assistant` `routine`
 `scope` `with` `true` `false` `null` `assert`
 
-The array shorthand `Type[]` is deprecated; use `Vec<Type>` instead.
+The array syntax is `Type[]` (e.g. `number[]`, `string[]`). Arrays expose
+`.length` and `.push(value)`.

@@ -27,7 +27,7 @@ The trade-off is clear: inside an `unsafe` block, the compiler cannot verify mem
 An `unsafe { ... }` block is a lexical scope inside which raw pointer operations and calls to foreign functions are permitted. Outside this scope, none of those operations are legal — the compiler rejects them.
 
 ```sfn
-fn allocate_buffer(bytes: Int) ![unsafe] -> *u8 {
+fn allocate_buffer(bytes: usize) -> *u8 ![unsafe] {
     unsafe {
         let ptr = malloc(bytes);
         // Dereferencing raw pointers is only legal inside this block.
@@ -62,14 +62,15 @@ External C functions are declared using `unsafe extern fn`. This tells the compi
 - Calling it requires an active `![unsafe]` capability
 
 ```sfn
-unsafe extern fn malloc(size -> usize) -> *u8;
-unsafe extern fn free(ptr -> *u8) -> void;
-unsafe extern fn memcpy(dest -> *u8, src -> *u8, n -> usize) -> *u8;
-unsafe extern fn memset(dest -> *u8, val -> i32, n -> usize) -> *u8;
-unsafe extern fn strlen(s -> *u8) -> usize;
+unsafe extern fn malloc(size: usize) -> *u8;
+unsafe extern fn free(ptr: *u8) -> void;
+unsafe extern fn memcpy(dest: *u8, src: *u8, n: usize) -> *u8;
+unsafe extern fn memset(dest: *u8, val: i32, n: usize) -> *u8;
+unsafe extern fn strlen(s: *u8) -> usize;
 ```
 
-Note the parameter syntax: extern function parameters use `name -> Type` (with `->`) to match the struct field declaration style. Regular function parameters use `name: Type` (with `:`). Both forms are accepted by the parser in all positions.
+Extern function parameters follow the same `name: Type` syntax as regular Sailfin
+parameters. The return type uses `->`.
 
 Key properties of `unsafe extern fn` declarations:
 
@@ -109,15 +110,15 @@ Raw pointers do not appear in safe Sailfin code. They are only valid in `unsafe`
 
 ```sfn
 // Both callee and caller must declare ![unsafe]
-fn read_word(ptr: *u32) ![unsafe] -> u32 {
+fn read_word(ptr: *u32) -> u32 ![unsafe] {
     unsafe {
         return *ptr;
     }
 }
 
-fn inspect_memory(base: *u32, offset: usize) ![unsafe] -> u32 {
-    let target_ptr = base + offset;  // pointer arithmetic — must be in unsafe block
+fn inspect_memory(base: *u32, offset: usize) -> u32 ![unsafe] {
     unsafe {
+        let target_ptr = base + offset;  // pointer arithmetic — must be in unsafe block
         return *target_ptr;
     }
 }
@@ -150,7 +151,7 @@ When writing extern declarations, use the Sailfin types that correspond to the C
 | `isize` | `ssize_t` | `i64` (platform-dependent) |
 | `f32` | `float` | `float` |
 | `f64` | `double` | `double` |
-| `bool` | `_Bool` / `bool` | `i1` |
+| `boolean` | `_Bool` / `bool` | `i1` |
 | `*T` | `const T*` | `T*` |
 | `*mut T` | `T*` | `T*` |
 | `*opaque` | `void*` | `i8*` |
@@ -164,18 +165,18 @@ When passing structs across FFI boundaries, Sailfin's default struct layout may 
 ```sfn
 @repr(C)
 struct Point {
-    x -> f64;
-    y -> f64;
+    x: f64;
+    y: f64;
 }
 
 @repr(C)
 struct Rectangle {
-    top_left -> Point;
-    bottom_right -> Point;
+    top_left: Point;
+    bottom_right: Point;
 }
 
-unsafe extern fn distance(p1 -> *Point, p2 -> *Point) -> f64;
-unsafe extern fn rect_area(r -> *Rectangle) -> f64;
+unsafe extern fn distance(p1: *Point, p2: *Point) -> f64;
+unsafe extern fn rect_area(r: *Rectangle) -> f64;
 ```
 
 Without `@repr(C)`, the compiler may reorder or pack fields for Sailfin-native efficiency, which would produce an incorrect memory layout when the struct is passed to a C function.
@@ -193,7 +194,7 @@ Sailfin-internal structs that never cross the FFI boundary do not need `@repr(C)
 Inside `unsafe` blocks, pointer arithmetic follows C semantics. Offsets are in units of the pointed-to type's size (not bytes), matching how C pointer arithmetic works.
 
 ```sfn
-fn pointer_example() ![unsafe] -> void {
+fn pointer_example() ![unsafe, io] {
     unsafe {
         // Allocate 10 i32 values (40 bytes on a 32-bit i32)
         let arr = malloc(10 * 4) as *i32;  // Cast *u8 to *i32
@@ -204,7 +205,7 @@ fn pointer_example() ![unsafe] -> void {
         }
 
         let third = *(arr + 2);  // Read the third element (index 2)
-        print(third);            // prints 4
+        print("{{third}}");      // prints 4
 
         free(arr as *u8);  // Cast back to *u8 for free()
     }
@@ -237,39 +238,40 @@ Here is the `ManagedBuffer` example from the specification:
 
 ```sfn
 // Unsafe internals — not exported
-unsafe extern fn malloc(size -> usize) -> *u8;
-unsafe extern fn free(ptr -> *u8) -> void;
-unsafe extern fn memset(dest -> *u8, val -> i32, n -> usize) -> *u8;
+unsafe extern fn malloc(size: usize) -> *u8;
+unsafe extern fn free(ptr: *u8) -> void;
+unsafe extern fn memset(dest: *u8, val: i32, n: usize) -> *u8;
 
 // Internal struct — not exported
 struct ManagedBuffer {
-    ptr -> *u8;
-    capacity -> usize;
-    length -> usize;
+    ptr: *u8;
+    capacity: usize;
+    length: usize;
 }
 
-// Error type for unsafe operations
-enum UnsafeResult<T> {
-    Ok { value -> T },
-    Err { code -> i32, message -> String },
+// Error type for allocation failures
+struct AllocError {
+    code: i32;
+    message: string;
 }
 
-// Safe allocation: wraps malloc, zero-initializes, returns Linear for cleanup enforcement
-export fn allocate_buffer(size: usize) ![unsafe] -> UnsafeResult<Linear<ManagedBuffer>> {
+// Safe allocation: wraps malloc, zero-initializes, returns a buffer or an error.
+// `Linear<T>` is parsed but not yet enforced; see the roadmap.
+export fn allocate_buffer(size: usize) -> Linear<ManagedBuffer> | AllocError ![unsafe] {
     unsafe {
         let ptr = malloc(size);
         if ptr == null {
-            return UnsafeResult.Err { code: -1, message: "allocation failed" };
+            return AllocError { code: -1, message: "allocation failed" };
         }
         memset(ptr, 0, size);
-        return UnsafeResult.Ok {
-            value: Linear(ManagedBuffer { ptr: ptr, capacity: size, length: 0 })
-        };
+        return Linear<ManagedBuffer>(ManagedBuffer {
+            ptr: ptr, capacity: size, length: 0
+        });
     }
 }
 
 // Safe deallocation: consumes the Linear wrapper, preventing double-free
-export fn free_buffer(buffer: Linear<ManagedBuffer>) ![unsafe] -> void {
+export fn free_buffer(buffer: Linear<ManagedBuffer>) -> void ![unsafe] {
     unsafe {
         let inner = consume(buffer);
         if inner.ptr != null {
@@ -279,12 +281,15 @@ export fn free_buffer(buffer: Linear<ManagedBuffer>) ![unsafe] -> void {
 }
 ```
 
-The `Linear<ManagedBuffer>` return type is the key safety mechanism. A `Linear<T>` value must be consumed exactly once — it cannot be dropped silently. This means:
+The `Linear<ManagedBuffer>` return type is the intended safety mechanism: once
+enforcement ships, a `Linear<T>` value must be consumed exactly once — it
+cannot be dropped silently. Until that lands, treat the wrapper as
+documentation for the intended ownership discipline.
 
-- The caller cannot forget to call `free_buffer`. The compiler will reject the program if the buffer escapes its scope without being consumed.
-- The caller cannot call `free_buffer` twice on the same buffer. `Linear<T>` is consumed on first use.
-
-**Note:** `Linear<T>` enforcement is parsed but not yet enforced in the current compiler. The native compiler will enforce linear type consumption.
+> **Current status**: `Linear<T>`, `Affine<T>`, and related borrow-checker
+> enforcement are **parsed but not yet enforced**. See the
+> [roadmap](/roadmap) for the post-1.0 sequencing. Do not rely on the
+> compiler rejecting double-free or forget-to-free today.
 
 ## Error Handling Across FFI
 
@@ -297,44 +302,43 @@ C functions do not have exceptions or Sailfin's type-safe results. They signal e
 The pattern is to translate these C conventions into Sailfin's type-safe `enum` results inside the wrapper:
 
 ```sfn
-// Enum mirroring POSIX result conventions
-enum PosixResult<T> {
-    Ok { value -> T },
-    Err { errno -> i32 },
+// Tagged-union error type mirroring POSIX conventions
+struct PosixError {
+    errno: i32;
 }
 
 // Extern declarations for POSIX open and errno
-unsafe extern fn c_open(path -> *u8, flags -> i32) -> i32;
+unsafe extern fn c_open(path: *u8, flags: i32) -> i32;
 unsafe extern fn c_errno() -> i32;
 
-// Safe wrapper: hides the unsafe internals, returns a typed result
-fn open_file(path: String, flags: i32) ![unsafe, io] -> PosixResult<i32> {
+// Safe wrapper: hides the unsafe internals, returns a union
+fn open_file(path: string, flags: i32) -> i32 | PosixError ![unsafe, io] {
     unsafe {
         let fd = c_open(path.as_c_str(), flags);
         if fd < 0 {
-            return PosixResult.Err { errno: c_errno() };
+            return PosixError { errno: c_errno() };
         }
-        return PosixResult.Ok { value: fd };
+        return fd;
     }
 }
 ```
 
-After the wrapper, callers use idiomatic Sailfin pattern matching:
+After the wrapper, callers use idiomatic Sailfin pattern matching. Because
+`Result<T, E>` is still on the roadmap, today's wrappers return a union
+(`T | ErrorStruct`):
 
 ```sfn
-fn read_config(path: String) ![unsafe, io] {
-    match open_file(path, 0) {
-        PosixResult.Ok { value: fd } => {
-            // use fd
-        },
-        PosixResult.Err { errno } => {
-            print.err("Failed to open file, errno: " + errno);
-        },
+fn read_config(path: string) ![unsafe, io] {
+    let result = open_file(path, 0);
+    match result {
+        PosixError { errno } => print.err("Failed to open file, errno: {{errno}}"),
+        _ => { /* `result` is the file descriptor */ },
     }
 }
 ```
 
-This keeps the `errno`-handling logic in one place, inside the wrapper. The rest of the codebase sees a clean `PosixResult<i32>`.
+This keeps the `errno`-handling logic in one place, inside the wrapper. The
+rest of the codebase sees a clean `i32 | PosixError` result.
 
 ## Capability Manifest for Unsafe
 
@@ -363,7 +367,7 @@ With `require_annotation = "@security-reviewed"`, every function containing an `
 
 ```sfn
 @security-reviewed
-fn allocate_buffer(size: usize) ![unsafe] -> *u8 {
+fn allocate_buffer(size: usize) -> *u8 ![unsafe] {
     unsafe {
         return malloc(size);
     }
@@ -402,13 +406,13 @@ These examples require `![unsafe]` and the `"unsafe"` capability in their capsul
 
 | Concept | Quick reference |
 |---|---|
-| Declare a C function | `unsafe extern fn name(param -> Type) -> ReturnType;` |
+| Declare a C function | `unsafe extern fn name(param: Type) -> ReturnType;` |
 | Unsafe block | `unsafe { ... }` — required for all pointer operations and extern calls |
 | Required effect | `![unsafe]` on any function with an unsafe block |
 | Read-only pointer | `*T` |
 | Mutable pointer | `*mut T` |
 | Opaque pointer | `*opaque` |
-| C-layout struct | `@repr(C) struct Foo { field -> Type; }` |
+| C-layout struct | `@repr(C) struct Foo { field: Type; }` |
 | Pointer advance | `ptr + n` (scaled by element size) |
 | Null check | `ptr == null` |
 | Raw address of value | `&raw value` |

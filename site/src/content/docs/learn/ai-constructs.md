@@ -5,9 +5,9 @@ section: learn
 order: 8
 ---
 
-Sailfin gates AI operations through the `![model]` effect — the same capability system used for IO, networking, and other side effects. AI-specific constructs (model invocation, prompt templating, generation provenance) are being delivered as the `sfn/ai` library capsule rather than language-level syntax. This keeps the language grammar stable while letting AI integration iterate independently of compiler releases.
+Sailfin gates AI operations through the `![model]` effect — the same capability system used for IO, networking, and other side effects. The `![model]` effect **is** a shipped language-level capability gate: the effect checker rejects any function that contains a `prompt` block without it. The surrounding AI constructs (`model`, `prompt`, `pipeline`, `tool`) are being delivered as the `sfn/ai` library capsule rather than language-level syntax. This keeps the language grammar stable while letting AI integration iterate independently of compiler releases.
 
-> **Current status:** The compiler parses `model`, `prompt`, `pipeline`, and `tool` blocks and emits them to `.sfn-asm` IR. The `![model]` effect is enforced at compile time. However, **no runtime execution exists** — these constructs emit metadata only. They are being migrated to the `sfn/ai` capsule for post-1.0 delivery. The syntax documented below reflects the current parser; the library API may differ.
+> **Current status:** The compiler parses `model`, `prompt`, `pipeline`, and `tool` blocks and emits them to `.sfn-asm` IR. The `![model]` effect is enforced at compile time **today**. However, **no runtime execution exists for the blocks themselves** — `model`/`prompt`/`tool`/`pipeline` emit metadata only. They are being migrated to the `sfn/ai` capsule for post-1.0 delivery. The syntax documented below reflects the current parser; the library API may differ.
 
 ---
 
@@ -31,13 +31,13 @@ model Summarizer : Model<Text, Summary> {
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `engine` | String | Provider and model version string (e.g. `"openai:gpt-4o@2025-01"`) |
-| `schema` | Type | Expected output struct type; planned for enforcement post-1.0 |
-| `max_tok` | Int | Token budget for the completion |
-| `cost_cap` | Float | Maximum cost in USD per call |
-| `temperature` | Float | Sampling temperature (0.0–2.0) |
-| `seed` | Int | Random seed for reproducible generation |
-| `evaluators` | Array | Named evaluators to run on each output (planned) |
+| `engine` | string | Provider and model version string (e.g. `"openai:gpt-4o@2025-01"`) |
+| `schema` | type | Expected output struct type; planned for enforcement post-1.0 |
+| `max_tok` | number | Token budget for the completion |
+| `cost_cap` | number | Maximum cost in USD per call |
+| `temperature` | number | Sampling temperature (0.0–2.0) |
+| `seed` | number | Random seed for reproducible generation |
+| `evaluators` | identifier[] | Named evaluators to run on each output (planned) |
 
 The type parameters `Model<I, O>` declare the input type `I` and output type `O`. These will be enforced by the type checker in the post-1.0 AI milestone.
 
@@ -56,10 +56,15 @@ The type parameters `Model<I, O>` declare the input type `I` and output type `O`
 Prompt blocks compose multi-part instructions for a model. They are valid only inside functions that declare the `model` effect.
 
 ```sfn
-fn summarize(text: String) -> Summary ![model] {
-    prompt system { "You are a precise technical summarizer." }
-    prompt user   { "Summarize the following document:\n\n{{ text }}" }
-    // Summarizer.call() — execution planned for post-1.0
+fn summarize(text: string) -> Summary ![model] {
+    prompt system {
+        "You are a precise technical summarizer.";
+    }
+    prompt user {
+        "Summarize the following document:\n\n{{text}}";
+    }
+    return call_model("summarizer", text);
+    // Summarizer.call() — wiring to a real provider is planned for post-1.0
 }
 ```
 
@@ -81,9 +86,14 @@ Prompt blocks are emitted in source order. The runtime will send them to the mod
 Prompt content supports `{{ variable }}` interpolation. Any variable in scope at the call site can be interpolated:
 
 ```sfn
-fn classify(input: String, categories: Array<String>) -> Category ![model] {
-    prompt system { "Classify into one of: {{ categories.join(\", \") }}." }
-    prompt user   { "Input: {{ input }}" }
+fn classify(input: string, categories: string[]) -> Category ![model] {
+    prompt system {
+        "Classify into one of: {{categories.join(\", \")}}.";
+    }
+    prompt user {
+        "Input: {{input}}";
+    }
+    return call_model("classifier", input);
 }
 ```
 
@@ -103,9 +113,13 @@ The `model` effect is enforced **today** by the effect checker. Any function tha
 
 ```sfn
 // ERROR: missing ![model]
-fn summarize(text: String) -> String {
-    prompt system { "Summarize." }
-    prompt user   { "{{ text }}" }
+fn summarize(text: string) -> string {
+    prompt system {
+        "Summarize.";
+    }
+    prompt user {
+        "{{text}}";
+    }
 }
 ```
 
@@ -114,7 +128,7 @@ The compiler will produce:
 ```
 effects.missing: function `summarize` uses a prompt block, which requires ![model],
                  but `summarize` has no effect annotation
-  = help: add `model` to the effect list: `fn summarize(text: String) -> String ![model]`
+  = help: add `model` to the effect list: `fn summarize(text: string) -> string ![model]`
 ```
 
 This enforcement is active now because it is a property of the _syntax_, not the runtime. Even though no inference happens today, any code that declares a `prompt` must be clearly marked as requiring model capabilities.
@@ -123,7 +137,7 @@ If `summarize` is called from another function that also uses model-related APIs
 
 ```sfn
 fn analyze(doc: Document) -> Report ![io, model] {
-    let summary = summarize(doc.body);  // OK: model is declared
+    let summary: string = summarize(doc.body);  // OK: model is declared
     print("Summary done");
     return build_report(summary);
 }
@@ -136,10 +150,10 @@ fn analyze(doc: Document) -> Report ![io, model] {
 Pipelines declare named data-processing workflows. The syntax is parsed today and treated as a function declaration.
 
 ```sfn
-pipeline index_corpus(docs: Array<String>) ![io] {
+pipeline index_corpus(docs: string[]) -> void ![io] {
     // |> operator is planned — use function calls for now
-    let chunks   = chunk(docs);
-    let embedded = embed(chunks);
+    let chunks: string[]   = chunk(docs);
+    let embedded: Vec[]    = embed(chunks);
     upsert(embedded, "docs_idx");
 }
 ```
@@ -147,9 +161,9 @@ pipeline index_corpus(docs: Array<String>) ![io] {
 Pipelines that involve model calls declare both `![io, model]`:
 
 ```sfn
-pipeline enrich_records(records: Array<Record>) ![io, model] {
-    let tagged   = tag_entities(records);
-    let scored   = score_sentiment(tagged);
+pipeline enrich_records(records: Record[]) -> void ![io, model] {
+    let tagged: Record[]   = tag_entities(records);
+    let scored: Record[]   = score_sentiment(tagged);
     save_all(scored);
 }
 ```
@@ -164,7 +178,7 @@ The `|>` (pipe) operator will allow steps to be composed declaratively:
 
 ```sfn
 // PLANNED — |> is not yet implemented
-pipeline enrich(records: Array<Record>) ![io, model] {
+pipeline enrich(records: Record[]) -> void ![io, model] {
     records
     |> tag_entities
     |> score_sentiment
@@ -178,28 +192,29 @@ The `|>` operator is not yet parsed. Use intermediate `let` bindings today (as s
 
 ## `tool` Declarations
 
-Tools are typed capabilities that models can invoke. A `tool` block declares the function signature, a description for the model, and the effect set it requires.
+Tools are typed capabilities that models can invoke. A `tool` declaration is a
+function-shaped block: a name, a parameter list, a return type, and an effect
+set. The parser treats a tool exactly like a function with a `tool` keyword
+marker, so any effect discipline that applies to `fn` applies to `tool`.
 
 ```sfn
-tool lookup_order {
-    description "Look up an order by its ID and return status and items."
-
-    fn execute(order_id: String) -> Order ![io] {
-        return db.find_order(order_id);
-    }
+tool lookup_order(order_id: string) -> Order ![io] {
+    return db.find_order(order_id);
 }
 
-tool send_notification {
-    description "Send a notification to a user."
-
-    fn execute(user_id: String, message: String) -> Bool ![net] {
-        return http.post("https://notify.example.com/send", {
-            to:   user_id,
-            body: message,
-        });
-    }
+tool send_notification(user_id: string, message: string) -> boolean ![net] {
+    let payload: Notification = Notification {
+        to: user_id,
+        body: message,
+    };
+    return http.post("https://notify.example.com/send", payload);
 }
 ```
+
+> **Coming in 1.0:** a dedicated `description "..."` field so the `sfn/ai`
+> dispatcher can expose tool prose to the model is planned — see the
+> [roadmap](/roadmap). Today, document the tool's purpose with a `//` comment
+> above the declaration.
 
 ### What works today
 
@@ -236,9 +251,9 @@ The `schema = Summary` field in a `model` block declares that the model's output
 
 ```sfn
 struct Summary {
-    headline   -> String;
-    key_points -> Array<String>;
-    word_count -> Int;
+    headline: string;
+    key_points: string[];
+    word_count: number;
 }
 
 model Summarizer : Model<Text, Summary> {
@@ -272,8 +287,8 @@ The effect system and AI constructs are integrated by design. This integration i
 | Construct | Required effect | Enforced today |
 |-----------|----------------|----------------|
 | `prompt` blocks | `model` | Yes |
-| `http.*` in tool `execute` | `net` | Yes |
-| `fs.*` in tool `execute` | `io` | Yes |
+| `http.*` in a `tool` body | `net` | Yes |
+| `fs.*` in a `tool` body | `io` | Yes |
 | `print(...)` in a pipeline | `io` | Yes |
 | Model `.call()` (planned) | `model` | Yes (syntax level) |
 
@@ -281,25 +296,30 @@ This means the _capability surface_ of any AI-enabled function is fully visible 
 
 ```sfn
 // Pure transformation — no effects needed
-fn chunk(text: String) -> Array<String> {
+fn chunk(text: string) -> string[] {
     return text.split_by_words(512);
 }
 
 // Uses a model — must declare ![model]
-fn embed(chunks: Array<String>) -> Array<Vec> ![model] {
-    prompt system { "Embed the following text." }
-    prompt user   { "{{ chunks.join(\"\n\") }}" }
+fn embed(chunks: string[]) -> Vec[] ![model] {
+    prompt system {
+        "Embed the following text.";
+    }
+    prompt user {
+        "{{chunks.join(\"\n\")}}";
+    }
+    return call_model("embedder", chunks.join("\n"));
 }
 
 // Writes to storage — must declare ![io]
-fn upsert(vecs: Array<Vec>, index: String) ![io] {
+fn upsert(vecs: Vec[], index: string) -> void ![io] {
     fs.write(index, vecs.serialize());
 }
 
 // Full pipeline — union of all used effects
-pipeline build_index(docs: Array<String>) ![io, model] {
-    let chunks = chunk(docs);
-    let vecs   = embed(chunks);
+pipeline build_index(docs: string[]) -> void ![io, model] {
+    let chunks: string[] = chunk(docs);
+    let vecs: Vec[]      = embed(chunks);
     upsert(vecs, "index.bin");
 }
 ```
