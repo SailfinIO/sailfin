@@ -8,6 +8,7 @@ import {
     enumerate_capsule_sources,
     stage_capsule_imports
 } from "./capsule_resolver";
+import { handle_check_command } from "./cli_check";
 import {
     handle_add_command,
     handle_fmt_command,
@@ -40,6 +41,7 @@ fn _usage() -> string {
     out = out + "  sfn run <file.sfn>\n";
     out = out + "  sfn run <exe>\n";
     out = out + "  sfn test [path]\n";
+    out = out + "  sfn check [--quiet] [path...]\n";
     out = out + "  sfn fmt [--check] [--write] [path...]\n";
     out = out + "  sfn init\n";
     out = out + "  sfn publish [path]\n";
@@ -54,6 +56,7 @@ fn _usage() -> string {
     out = out + "  sfn run examples/basics/hello-world.sfn\n";
     out = out + "  sfn run build/native/examples/hello\n";
     out = out + "  sfn test .\n";
+    out = out + "  sfn check compiler/src\n";
     out = out + "  sfn init\n";
     out = out + "  sfn publish [path]\n";
     out = out + "  sfn add http\n";
@@ -406,6 +409,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     let is_add = strings_equal(cmd, "add");
     let is_login = strings_equal(cmd, "login");
     let is_fmt = strings_equal(cmd, "fmt");
+    let is_check = strings_equal(cmd, "check");
     if trace_argv {
         if is_emit { print.err("cli: cmd_is_emit=true"); }
         if is_version { print.err("cli: cmd_is_version=true"); }
@@ -655,6 +659,8 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     if is_login { return handle_login_command(args); }
 
     if is_fmt { return handle_fmt_command(args); }
+
+    if is_check { return handle_check_command(args); }
 
     if strings_equal(cmd, "guillermo") { return handle_guillermo_command(); }
 

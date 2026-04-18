@@ -16,35 +16,35 @@ Consistent naming reduces the mental overhead of reading unfamiliar code.
 ### Types, structs, enums, interfaces — `PascalCase`
 
 ```sfn
-struct HttpClient { ... }
+struct HttpClient { /* ... */ }
 enum Direction { North, South, East, West }
-interface Serializable { ... }
-type UserId = String;
+interface Serializable { /* ... */ }
+type UserId = string;
 ```
 
 ### Functions, methods, variables, fields — `snake_case`
 
 ```sfn
-fn fetch_and_parse(url: String) -> Document ![io, net] { ... }
+fn fetch_and_parse(url: string) -> Document ![io, net] { /* ... */ }
 
-let retry_count = 3;
-let mut pending_jobs: Vec<Job> = Vec.new();
+let retry_count: number = 3;
+let mut pending_jobs: Job[] = [];
 ```
 
 ```sfn
 struct UserProfile {
-    display_name -> String;
-    email_address -> String;
-    created_at -> Int;
+    display_name: string;
+    email_address: string;
+    created_at: number;
 }
 ```
 
 ### Constants — `UPPER_SNAKE_CASE`
 
 ```sfn
-let MAX_RETRIES = 3;
-let DEFAULT_TIMEOUT_MS = 5000;
-let BASE_URL = "https://api.example.com";
+let MAX_RETRIES: number = 3;
+let DEFAULT_TIMEOUT_MS: number = 5000;
+let BASE_URL: string = "https://api.example.com";
 ```
 
 ### Files — `snake_case.sfn`
@@ -61,13 +61,13 @@ Test files end in `_test.sfn`. Module entry points are named `mod.sfn`.
 
 ```sfn
 // Wrong: functions should not be PascalCase
-fn FetchData(url: String) -> String ![net] { ... }
+fn FetchData(url: string) -> string ![net] { /* ... */ }
 
 // Wrong: types should not be snake_case
-struct user_profile { ... }
+struct user_profile { /* ... */ }
 
 // Wrong: constants should not be camelCase
-let maxRetries = 3;
+let maxRetries: number = 3;
 ```
 
 ---
@@ -82,15 +82,20 @@ Only list the effects a function actually needs. This is not just style — it i
 
 ```sfn
 // Too broad
-fn format_report(data: Array<Record>) -> String ![io, net, model] {
-    return data.map(|r| "{{r.name}}: {{r.value}}").join("\n");
+fn format_report(data: Record[]) -> string ![io, net, model] {
+    return data.map(fn(r: Record) -> string { return "{{r.name}}: {{r.value}}"; }).join("\n");
 }
 
 // Correct — this function is pure
-fn format_report(data: Array<Record>) -> String {
-    return data.map(|r| "{{r.name}}: {{r.value}}").join("\n");
+fn format_report(data: Record[]) -> string {
+    return data.map(fn(r: Record) -> string { return "{{r.name}}: {{r.value}}"; }).join("\n");
 }
 ```
+
+> **Coming in 1.0:** closures with captures are on the [roadmap](/roadmap). The
+> lambda-capture support that lets `.map(...)` read surrounding state is not
+> shipped today; treat the two examples above as illustrative of the declared
+> effect set, not as runnable code.
 
 ### Separate pure computation from effectful operations
 
@@ -98,22 +103,26 @@ Write your logic as pure functions, then call them from effectful entry points. 
 
 ```sfn
 // Before: computation and IO tangled together
-fn process_and_save(records: Array<Record>, path: String) ![io] {
-    let mut output = "";
+fn process_and_save(records: Record[], path: string) -> void ![io] {
+    let mut output: string = "";
     for r in records {
-        let line = "{{r.name}},{{r.value}}\n";
+        let line: string = "{{r.name}},{{r.value}}\n";
         output = output + line;
     }
     fs.write(path, output);
 }
 
 // After: pure function + thin effectful wrapper
-fn format_csv(records: Array<Record>) -> String {
-    return records.map(|r| "{{r.name}},{{r.value}}").join("\n");
+fn format_csv(records: Record[]) -> string {
+    let mut output: string = "";
+    for r in records {
+        output = output + "{{r.name}},{{r.value}}\n";
+    }
+    return output;
 }
 
-fn save_csv(records: Array<Record>, path: String) ![io] {
-    let content = format_csv(records);
+fn save_csv(records: Record[], path: string) -> void ![io] {
+    let content: string = format_csv(records);
     fs.write(path, content);
 }
 ```
@@ -125,38 +134,44 @@ fn save_csv(records: Array<Record>, path: String) ![io] {
 Push effects toward the edges of your system — main functions, HTTP handlers, event loops. The more of your codebase that is pure, the more of it can be tested without infrastructure.
 
 ```sfn
-// Pure domain logic
-fn validate_order(order: Order) -> Result<Order, ValidationError> { ... }
-fn calculate_total(order: Order) -> Float { ... }
-fn apply_discount(order: Order, code: String) -> Order { ... }
+// Pure domain logic — returns a union of success / error for typed failures.
+fn validate_order(order: Order) -> Order | ValidationError { /* ... */ }
+fn calculate_total(order: Order) -> number { /* ... */ }
+fn apply_discount(order: Order, code: string) -> Order { /* ... */ }
 
 // Thin effectful entry point
 fn handle_order_request(req: HttpRequest) -> HttpResponse ![io, net] {
-    let order = Order.from_request(req);
-    let validated = match validate_order(order) {
-        Ok(o) => o,
-        Err(e) => return HttpResponse.bad_request(e.message),
-    };
-    let total = calculate_total(apply_discount(validated, req.discount_code));
+    let order: Order = Order.from_request(req);
+    let validated: Order | ValidationError = validate_order(order);
+    if validated is ValidationError {
+        return HttpResponse.bad_request(validated.message);
+    }
+    let total: number = calculate_total(apply_discount(validated, req.discount_code));
     db.save_order(validated);
     return HttpResponse.ok("Total: {{total}}");
 }
 ```
 
+> **Coming in 1.0:** `Result<T, E>` plus the `?` propagation operator is
+> planned — see the [roadmap](/roadmap). Today, model typed failures with a
+> union return type and use `is` type guards to discriminate, as shown above.
+
 ---
 
 ## Struct Design
 
-### Use `->` for field declarations
+### Use `:` for field declarations
 
-Sailfin uses `name -> Type;` syntax for struct fields (semicolon-terminated). This visually distinguishes struct field declarations from function parameter lists.
+Sailfin uses `name: Type;` syntax for struct fields (semicolon-terminated) — the
+same `:` separator used for variable and parameter annotations. Only return
+types use `->`.
 
 ```sfn
 struct Connection {
-    host -> String;
-    port -> Int;
-    timeout_ms -> Int;
-    is_tls -> Bool;
+    host: string;
+    port: number;
+    timeout_ms: number;
+    is_tls: boolean;
 }
 ```
 
@@ -167,16 +182,16 @@ Most fields do not need to change after construction. Marking a field mutable is
 ```sfn
 // Good: fields are immutable by default
 struct Config {
-    host -> String;
-    port -> Int;
-    max_connections -> Int;
+    host: string;
+    port: number;
+    max_connections: number;
 }
 
 // Only when mutation is genuinely required
 struct RateLimiter {
-    max_per_second -> Int;
-    mut current_count -> Int;
-    mut window_start -> Int;
+    max_per_second: number;
+    mut current_count: number;
+    mut window_start: number;
 }
 ```
 
@@ -187,33 +202,33 @@ A struct that does one thing is easier to test and reuse than one that does many
 ```sfn
 // Hard to work with — mixes concerns
 struct Request {
-    url -> String;
-    method -> String;
-    headers -> Array<Header>;
-    body -> String;
-    retry_count -> Int;
-    timeout_ms -> Int;
-    auth_token -> String;
-    log_requests -> Bool;
+    url: string;
+    method: string;
+    headers: Header[];
+    body: string;
+    retry_count: number;
+    timeout_ms: number;
+    auth_token: string;
+    log_requests: boolean;
 }
 
 // Better: separate what belongs together
 struct Request {
-    url -> String;
-    method -> String;
-    headers -> Array<Header>;
-    body -> String;
+    url: string;
+    method: string;
+    headers: Header[];
+    body: string;
 }
 
 struct RetryPolicy {
-    max_attempts -> Int;
-    timeout_ms -> Int;
+    max_attempts: number;
+    timeout_ms: number;
 }
 
 struct HttpClient {
-    auth_token -> String;
-    retry_policy -> RetryPolicy;
-    log_requests -> Bool;
+    auth_token: string;
+    retry_policy: RetryPolicy;
+    log_requests: boolean;
 }
 ```
 
@@ -224,22 +239,22 @@ Define interfaces for any type you want to substitute or test in isolation. Smal
 ```sfn
 // Too large — forces implementers to provide everything at once
 interface Store {
-    fn get(key: String) -> String;
-    fn set(key: String, value: String) ![io];
-    fn delete(key: String) ![io];
-    fn list_keys() -> Array<String> ![io];
-    fn flush() ![io];
-    fn compact() ![io];
+    fn get(self, key: string) -> string ![io];
+    fn set(self, key: string, value: string) -> void ![io];
+    fn delete(self, key: string) -> void ![io];
+    fn list_keys(self) -> string[] ![io];
+    fn flush(self) -> void ![io];
+    fn compact(self) -> void ![io];
 }
 
 // Better: split by usage pattern
 interface Reader {
-    fn get(key: String) -> String ![io];
+    fn get(self, key: string) -> string ![io];
 }
 
 interface Writer {
-    fn set(key: String, value: String) ![io];
-    fn delete(key: String) ![io];
+    fn set(self, key: string, value: string) -> void ![io];
+    fn delete(self, key: string) -> void ![io];
 }
 ```
 
@@ -249,33 +264,51 @@ Code that only reads can accept a `Reader`. Code that reads and writes accepts b
 
 ## Error Handling Idioms
 
-### Use `Result<T, E>` for expected failures
+### Use union return types for expected failures
 
-If a function can fail in a way that callers should be prepared to handle, return a `Result`. This makes the failure mode part of the function's type signature and forces callers to acknowledge it.
+If a function can fail in a way that callers should be prepared to handle,
+return a union of the success value and a typed error. This makes the failure
+mode part of the function's type signature and forces callers to discriminate
+with `is` or `match`.
 
 ```sfn
 enum ConfigError {
-    NotFound(String),
-    ParseFailed(String),
+    NotFound { path: string },
+    ParseFailed { message: string },
     PermissionDenied,
 }
 
-fn load_config(path: String) -> Result<Config, ConfigError> ![io] { ... }
+fn load_config(path: string) -> Config | ConfigError ![io] { /* ... */ }
 ```
+
+Discriminate with `is` type guards or `match`:
+
+```sfn
+let loaded: Config | ConfigError = load_config("app.toml");
+if loaded is ConfigError {
+    print.err("Config error: {{loaded}}");
+    return;
+}
+run(loaded);
+```
+
+> **Coming in 1.0:** `Result<T, E>` plus the `?` propagation operator is
+> planned — see the [roadmap](/roadmap). Until it ships, union return types
+> give you the same compile-time exhaustiveness without the sugar.
 
 ### Use `try/catch` for exceptional conditions
 
 `try/catch` is for situations that are not expected in normal operation and cannot easily be threaded through return types — corrupted files, out-of-memory conditions, unexpected network resets.
 
 ```sfn
-fn main() ![io] {
+fn main() -> void ![io] {
     try {
-        let config = load_config("app.toml");
+        let config: Config = load_config_or_throw("app.toml");
         run(config);
-    } catch (e: ConfigError) {
-        print.err("Configuration error: {{e.message}}");
     } catch (e) {
-        print.err("Unexpected error: {{e.message}}");
+        print.err("Configuration error: {{e}}");
+    } finally {
+        print("Shutting down.");
     }
 }
 ```
@@ -286,10 +319,10 @@ An error message that says "file not found" is harder to debug than one that say
 
 ```sfn
 // Bad
-throw IoError { message: "file not found" };
+throw "file not found";
 
 // Good
-throw IoError { message: "config file not found: {{path}}" };
+throw "config file not found: {{path}}";
 ```
 
 ### Don't silently swallow errors
@@ -314,7 +347,7 @@ try {
 try {
     cache.invalidate(key);
 } catch (e) {
-    print.err("Cache invalidation failed for {{key}}: {{e.message}}");
+    print.err("Cache invalidation failed for {{key}}: {{e}}");
 }
 ```
 
@@ -328,12 +361,12 @@ A function should do one thing. If you find yourself writing "and" in a function
 
 ```sfn
 // Does too much
-fn fetch_validate_and_save(url: String, path: String) ![io, net] { ... }
+fn fetch_validate_and_save(url: string, path: string) -> void ![io, net] { /* ... */ }
 
 // Better: separate responsibilities
-fn fetch(url: String) -> Response ![net] { ... }
-fn validate(response: Response) -> Result<Data, ValidationError> { ... }
-fn save(data: Data, path: String) ![io] { ... }
+fn fetch(url: string) -> Response ![net] { /* ... */ }
+fn validate(response: Response) -> Data | ValidationError { /* ... */ }
+fn save(data: Data, path: string) -> void ![io] { /* ... */ }
 ```
 
 ### Pure functions where possible
@@ -346,10 +379,10 @@ Parameter names at a call site communicate intent. Single-letter names save typi
 
 ```sfn
 // Unclear at the call site: rotate(img, 90, true)
-fn rotate(i: Image, d: Int, c: Bool) -> Image { ... }
+fn rotate(i: Image, d: number, c: boolean) -> Image { /* ... */ }
 
-// Clear: rotate(avatar, 90, clockwise: true)
-fn rotate(image: Image, degrees: Int, clockwise: Bool) -> Image { ... }
+// Clear: the name does the documenting at the call site.
+fn rotate(image: Image, degrees: number, clockwise: boolean) -> Image { /* ... */ }
 ```
 
 ### Avoid deeply nested effects — extract helpers
@@ -358,35 +391,40 @@ When a function has many effects and a long body, it becomes difficult to unders
 
 ```sfn
 // Hard to follow — a wall of effects and steps
-fn deploy(config: Config) ![io, net, clock] {
+fn deploy(config: Config) -> void ![io, net, clock] {
     print("Validating...");
-    let validation = validate_config(config);
-    if validation.is_err() { throw validation.unwrap_err(); }
+    let validation: Config | ValidationError = validate_config(config);
+    if validation is ValidationError {
+        throw "invalid config: {{validation.message}}";
+    }
     print("Uploading artifacts...");
-    let upload_result = http.post(config.registry_url, config.artifact);
-    if upload_result.status != 200 { throw DeployError { message: "upload failed" }; }
+    let upload_result: Response = http.post(config.registry_url, config.artifact);
+    if upload_result.status != 200 {
+        throw "upload failed: {{upload_result.status}}";
+    }
     print("Waiting for health check...");
-    let mut attempts = 0;
+    let mut attempts: number = 0;
     loop {
         runtime.sleep(2000);
-        let health = http.get("{{config.base_url}}/health");
+        let health: Response = http.get("{{config.base_url}}/health");
         if health.status == 200 { break; }
         attempts = attempts + 1;
-        if attempts > 10 { throw DeployError { message: "health check timed out" }; }
+        if attempts > 10 { throw "health check timed out"; }
     }
     print("Deploy complete.");
 }
 
 // Better: named helpers make each phase clear
-fn upload_artifact(config: Config) ![net] { ... }
-fn await_healthy(base_url: String) ![net, clock] { ... }
+fn validate_or_throw(config: Config) -> Config ![io] { /* ... */ }
+fn upload_artifact(config: Config) -> void ![net] { /* ... */ }
+fn await_healthy(base_url: string) -> void ![net, clock] { /* ... */ }
 
-fn deploy(config: Config) ![io, net, clock] {
-    validate_config(config).unwrap_or_throw();
+fn deploy(config: Config) -> void ![io, net, clock] {
+    let validated: Config = validate_or_throw(config);
     print("Uploading artifacts...");
-    upload_artifact(config);
+    upload_artifact(validated);
     print("Waiting for service to become healthy...");
-    await_healthy(config.base_url);
+    await_healthy(validated.base_url);
     print("Deploy complete.");
 }
 ```
@@ -404,37 +442,42 @@ enum Status {
     Pending,
     Running,
     Succeeded,
-    Failed(String),
+    Failed { reason: string },
 }
 
-fn describe(status: Status) -> String {
+fn describe(status: Status) -> string {
     match status {
-        Pending    => "waiting to start",
-        Running    => "currently executing",
-        Succeeded  => "finished successfully",
-        Failed(msg) => "failed: {{msg}}",
+        Status.Pending                   => return "waiting to start",
+        Status.Running                   => return "currently executing",
+        Status.Succeeded                 => return "finished successfully",
+        Status.Failed { reason }         => return "failed: {{reason}}",
     }
 }
 ```
 
+> **Coming in 1.0:** simple tuple-style variants (e.g. `Failed(string)`) are not
+> supported today. Use struct-style variants with named fields as shown above.
+
 ### Prefer `match` over chains of `if/else` for type discrimination
 
 ```sfn
-// Hard to read — repeated variable extraction
-if result.is_ok() {
-    let value = result.unwrap();
-    process(value);
+// Hard to read — repeated type guards and rebinding
+if result is ParseError {
+    print.err("Error: {{result.message}}");
 } else {
-    let err = result.unwrap_err();
-    print.err("Error: {{err}}");
+    process(result);
 }
 
 // Better — clear and exhaustive
 match result {
-    Ok(value) => process(value),
-    Err(err)  => print.err("Error: {{err}}"),
+    ParseError { message } => print.err("Error: {{message}}"),
+    Document { body }      => process(body),
 }
 ```
+
+> **Coming in 1.0:** `Result<T, E>` plus dedicated `Ok(...)`/`Err(...)`
+> patterns are on the [roadmap](/roadmap). Today, model success/failure as a
+> union return type and discriminate with `match` on the tagged variants.
 
 ### Use guard conditions to narrow cases
 
@@ -442,11 +485,11 @@ Guards let you add a boolean condition to a match arm, expressed with `if`:
 
 ```sfn
 match event {
-    Click { x, y } if x < 0 || y < 0 => handle_out_of_bounds(x, y),
-    Click { x, y }                    => handle_click(x, y),
-    KeyPress { key } if key == "Escape" => close_dialog(),
-    KeyPress { key }                    => handle_key(key),
-    Resize { width, height }            => handle_resize(width, height),
+    Event.Click { x, y } if x < 0 || y < 0 => handle_out_of_bounds(x, y),
+    Event.Click { x, y }                   => handle_click(x, y),
+    Event.KeyPress { key } if key == "Escape" => close_dialog(),
+    Event.KeyPress { key }                 => handle_key(key),
+    Event.Resize { width, height }         => handle_resize(width, height),
 }
 ```
 
@@ -457,17 +500,17 @@ The wildcard `_` matches any value. Overusing it can hide the fact that a case i
 ```sfn
 // Risky: if a new Direction variant is added, this silently falls through
 match direction {
-    North => move_up(),
-    South => move_down(),
-    _     => move_sideways(),   // catches East and West, but also any future variants
+    Direction.North => move_up(),
+    Direction.South => move_down(),
+    _               => move_sideways(),   // catches East and West, but also any future variants
 }
 
 // Better: explicit
 match direction {
-    North => move_up(),
-    South => move_down(),
-    East  => move_right(),
-    West  => move_left(),
+    Direction.North => move_up(),
+    Direction.South => move_down(),
+    Direction.East  => move_right(),
+    Direction.West  => move_left(),
 }
 ```
 
@@ -543,17 +586,23 @@ import { validate_order } from "./validation";
 
 ## Performance Patterns
 
-### Avoid unnecessary copies — use borrows
+### Avoid unnecessary copies
 
-When a function only needs to read a value, take a borrow (`&T`) rather than ownership. Taking ownership forces the caller to give up the value or clone it.
+When a function only needs to read a value, shape your API so callers can pass
+the value by reference without surrendering it. The plan is to expose this via
+explicit borrow syntax (`&T`), but ownership and borrowing are deferred until
+after 1.0 — see the [roadmap](/roadmap). Today, prefer small structs and arrays
+passed by value; the compiler is free to share underlying storage.
 
 ```sfn
-// Takes ownership — caller can't use records afterwards
-fn summarise(records: Array<Record>) -> String { ... }
-
-// Takes a borrow — caller retains ownership
-fn summarise(records: &Array<Record>) -> String { ... }
+// Today: pass-by-value, compiler shares storage where it can
+fn summarise(records: Record[]) -> string { /* ... */ }
 ```
+
+> **Coming in 1.0:** explicit borrow annotations (`&T`, `&mut T`) and
+> `Affine<T>`/`Linear<T>` ownership markers parse today but are not enforced;
+> they are tracked on the [roadmap](/roadmap). Do not rely on borrow-checker
+> semantics yet.
 
 ### Batch effectful operations
 
@@ -561,18 +610,26 @@ Each effectful call has overhead. When writing to a file or making a network req
 
 ```sfn
 // Slow: one filesystem write per line
-fn write_log_lines(lines: Array<String>, path: String) ![io] {
+fn write_log_lines(lines: string[], path: string) -> void ![io] {
     for line in lines {
-        fs.appendFile(path, line + "\n");
+        fs.append(path, line + "\n");
     }
 }
 
 // Better: build the content first, write once
-fn write_log_lines(lines: Array<String>, path: String) ![io] {
-    let content = lines.map(|l| l + "\n").join("");
+fn write_log_lines(lines: string[], path: string) -> void ![io] {
+    let mut content: string = "";
+    for line in lines {
+        content = content + line + "\n";
+    }
     fs.write(path, content);
 }
 ```
+
+> **Coming in 1.0:** closures that capture enclosing variables (needed for
+> `.map(fn(l) -> string { return l + "\n"; })` to read surrounding state)
+> are on the [roadmap](/roadmap). Until then, use explicit `for` loops when
+> the body references captured bindings.
 
 ### Effect minimization enables optimizer improvements
 
@@ -588,14 +645,14 @@ Do not rewrite code for performance without measuring first. A profile will tell
 
 ### Use type aliases for domain concepts
 
-A bare `String` carrying a user ID and a bare `String` carrying an email address look identical to the compiler. A type alias makes the distinction explicit and catches transposed arguments.
+A bare `string` carrying a user ID and a bare `string` carrying an email address look identical to the compiler. A type alias makes the distinction explicit and catches transposed arguments.
 
 ```sfn
-type UserId = String;
-type EmailAddress = String;
-type OrderId = String;
+type UserId = string;
+type EmailAddress = string;
+type OrderId = string;
 
-fn send_receipt(user: UserId, order: OrderId, email: EmailAddress) ![io, net] { ... }
+fn send_receipt(user: UserId, order: OrderId, email: EmailAddress) -> void ![io, net] { /* ... */ }
 
 // Compiler can now catch: send_receipt(order_id, user_id, email)  — arguments transposed
 ```
@@ -607,17 +664,17 @@ If a struct has fields that are only valid in certain combinations, model those 
 ```sfn
 // Hard to reason about — which fields are set in which states?
 struct Connection {
-    state -> String;         // "connecting", "connected", "failed"
-    socket -> Option<Socket>;
-    error -> Option<String>;
-    retry_count -> Int;
+    state: string;           // "connecting", "connected", "failed"
+    socket: Socket?;
+    error: string?;
+    retry_count: number;
 }
 
 // Better: each variant carries exactly the data it needs
 enum Connection {
-    Connecting { attempt -> Int },
-    Connected { socket -> Socket },
-    Failed { reason -> String },
+    Connecting { attempt: number },
+    Connected { socket: Socket },
+    Failed { reason: string },
 }
 ```
 
@@ -628,25 +685,25 @@ An interface with two methods is easier to implement, test, and substitute than 
 ```sfn
 // Too many methods — hard to implement a test double
 interface Database {
-    fn find_user(id: UserId) -> Option<User> ![io];
-    fn save_user(user: User) ![io];
-    fn delete_user(id: UserId) ![io];
-    fn list_users(filter: UserFilter) -> Array<User> ![io];
-    fn find_order(id: OrderId) -> Option<Order> ![io];
-    fn save_order(order: Order) ![io];
-    fn list_orders(user_id: UserId) -> Array<Order> ![io];
+    fn find_user(self, id: UserId) -> User? ![io];
+    fn save_user(self, user: User) -> void ![io];
+    fn delete_user(self, id: UserId) -> void ![io];
+    fn list_users(self, filter: UserFilter) -> User[] ![io];
+    fn find_order(self, id: OrderId) -> Order? ![io];
+    fn save_order(self, order: Order) -> void ![io];
+    fn list_orders(self, user_id: UserId) -> Order[] ![io];
 }
 
 // Better: split by domain
 interface UserStore {
-    fn find(id: UserId) -> Option<User> ![io];
-    fn save(user: User) ![io];
+    fn find(self, id: UserId) -> User? ![io];
+    fn save(self, user: User) -> void ![io];
 }
 
 interface OrderStore {
-    fn find(id: OrderId) -> Option<Order> ![io];
-    fn save(order: Order) ![io];
-    fn list_for_user(user_id: UserId) -> Array<Order> ![io];
+    fn find(self, id: OrderId) -> Order? ![io];
+    fn save(self, order: Order) -> void ![io];
+    fn list_for_user(self, user_id: UserId) -> Order[] ![io];
 }
 ```
 
@@ -655,12 +712,16 @@ interface OrderStore {
 Generics are valuable when a function's logic genuinely applies to any type that satisfies a constraint. Don't reach for generics just because a type could theoretically vary — wait until it actually does.
 
 ```sfn
-// Overly generic — this is only ever called with String
-fn first<T>(items: Array<T>) -> Option<T> { ... }
+// Overly generic — this is only ever called with string
+fn first<T>(items: T[]) -> T? { /* ... */ }
 
 // Fine as concrete until it needs to be generic
-fn first_string(items: Array<String>) -> Option<String> { ... }
+fn first_string(items: string[]) -> string? { /* ... */ }
 ```
+
+> **Coming in 1.0:** generic type constraints (`fn sort<T: Comparable>`) and
+> a first-class `Option<T>` type are tracked on the [roadmap](/roadmap). Today,
+> use the `T?` optional-type sugar (which lowers to a `T | null` union).
 
 ---
 
@@ -684,15 +745,15 @@ If your tests break when you refactor internals without changing behavior, the t
 ```sfn
 // Tests implementation detail (internal data structure layout)
 test "parser stores tokens in internal buffer" {
-    let p = Parser.new("fn main() {}");
-    assert(p._token_buffer.length == 7);  // fragile
+    let p: Parser = Parser.new("fn main() {}");
+    assert p._token_buffer.length == 7;  // fragile
 }
 
 // Tests observable behavior
 test "parser produces a function declaration from valid source" {
-    let program = parse("fn main() {}");
-    assert(program.statements.length == 1);
-    assert(program.statements[0].is_function_decl());
+    let program: Program = parse("fn main() {}");
+    assert program.statements.length == 1;
+    assert program.statements[0].is_function_decl();
 }
 ```
 
@@ -722,26 +783,29 @@ The most common error for new Sailfin programmers. The compiler message includes
 ```
 effects.missing: function `process` calls `fetch` which requires ![net],
                  but `process` only declares ![io]
-  = help: add `net` to the effect list: `fn process(url: String) ![io, net]`
+  = help: add `net` to the effect list: `fn process(url: string) ![io, net]`
 ```
 
 The fix: add the missing effect to the function signature.
 
-### Taking ownership when a borrow was intended
+### Anticipating borrow semantics
 
-If a helper function only reads from a value, take `&T` rather than `T`. Requiring ownership is a stronger contract and forces callers to either transfer ownership permanently or clone the value.
+Ownership and borrow annotations (`&T`, `&mut T`, `Affine<T>`, `Linear<T>`)
+are parsed today but not enforced — they are scheduled for the post-1.0
+ownership milestone (see the [roadmap](/roadmap)). Until then, write signatures
+in terms of plain types and design for reference semantics in your head. When
+borrows ship, reserve `&T` for read-only access and `&mut T` for mutation:
 
 ```sfn
-// Takes ownership — caller loses access to `name`
-fn greet(name: String) ![io] {
-    print("Hello, {{name}}!");
-}
-
-// Takes a borrow — caller keeps `name`
-fn greet(name: &String) ![io] {
+// Today: plain pass-by-value signature
+fn greet(name: string) -> void ![io] {
     print("Hello, {{name}}!");
 }
 ```
+
+> **Coming in 1.0:** explicit borrow annotations will let callers keep access
+> to `name` while `greet` merely reads it. Do not ship code today that relies
+> on borrow-checker enforcement — there is none.
 
 ### Deeply nested match expressions
 
@@ -750,30 +814,43 @@ When match arms contain match expressions that contain match expressions, the co
 ```sfn
 // Hard to follow
 match request.method {
-    "GET" => match parse_id(request.path) {
-        Ok(id) => match db.find(id) {
-            Some(record) => respond_ok(record),
-            None         => respond_not_found(),
-        },
-        Err(e) => respond_bad_request(e.message),
+    "GET" => {
+        let parsed: Id | ParseError = parse_id(request.path);
+        if parsed is ParseError {
+            return respond_bad_request(parsed.message);
+        }
+        let record: Record? = db.find(parsed);
+        if record == null {
+            return respond_not_found();
+        }
+        return respond_ok(record);
     },
-    _ => respond_method_not_allowed(),
+    _ => return respond_method_not_allowed(),
 }
 
 // Better: named helpers
 fn handle_get(request: Request) -> Response ![io] {
-    let id = parse_id(request.path).map_err(|e| respond_bad_request(e.message))?;
-    match db.find(id) {
-        Some(record) => respond_ok(record),
-        None         => respond_not_found(),
+    let parsed: Id | ParseError = parse_id(request.path);
+    if parsed is ParseError {
+        return respond_bad_request(parsed.message);
     }
+    let record: Record? = db.find(parsed);
+    if record == null {
+        return respond_not_found();
+    }
+    return respond_ok(record);
 }
 
 match request.method {
-    "GET" => handle_get(request),
-    _     => respond_method_not_allowed(),
+    "GET" => return handle_get(request),
+    _     => return respond_method_not_allowed(),
 }
 ```
+
+> **Coming in 1.0:** `Result<T, E>`, the `?` propagation operator, and a
+> first-class `Option<T>` (with `Some`/`None` patterns) are on the
+> [roadmap](/roadmap). Today, discriminate union returns with `is` and compare
+> optional values to `null`.
 
 ### Using `print.info()` — it is deprecated
 

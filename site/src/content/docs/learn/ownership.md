@@ -11,7 +11,7 @@ Languages have tackled this problem in different ways. Garbage-collected languag
 
 Sailfin takes the same third path. The ownership system is central to the language, not bolted on. Once you understand it, code that seemed strange starts to read naturally, and a class of bugs you'd otherwise spend hours debugging simply doesn't compile.
 
-> **Implementation status**: The ownership syntax described in this guide — `&T`, `&mut T`, `Affine<T>`, `Linear<T>` — is fully parsed and tracked by the compiler today. Full enforcement (exclusivity checking, use-after-move errors, must-consume verification) is being implemented in the native runtime and will become a hard compiler error in an upcoming release. The sections below note precisely what is enforced now vs. what is coming.
+> **Implementation status:** The ownership syntax in this guide — `&T`, `&mut T`, `borrow(...)`, `Affine<T>`, `Linear<T>` — is parsed by the compiler today and flows through to the IR, but **no enforcement runs yet**. Use-after-move, exclusivity, and must-consume violations all compile without error. Full enforcement is deferred to post-1.0; see the [roadmap](/roadmap). Treat the rules in this guide as the design intent, not as behavior you can rely on today.
 
 ---
 
@@ -51,15 +51,15 @@ In Sailfin, values are **moved** by default when you assign them to a new bindin
 
 ```sfn
 struct Config {
-    host -> String;
-    port -> Int;
+    host: string;
+    port: number;
 }
 
 fn main() ![io] {
     let config = Config { host: "localhost", port: 8080 };
     let server_config = config;   // ownership moves to server_config
 
-    // print(config.host);        // would be a use-after-move error
+    // print(config.host);        // would be a use-after-move error (once enforced)
     print(server_config.host);    // OK: server_config is the owner
 }
 ```
@@ -78,7 +78,7 @@ fn main() ![io] {
     let config = Config { host: "localhost", port: 8080 };
     start_server(config);         // config moves into start_server
 
-    // start_server(config);      // ERROR: config was already moved
+    // start_server(config);      // would be: config was already moved (once enforced)
 }
 ```
 
@@ -86,7 +86,7 @@ If you want to call `start_server` a second time with the same data, you either 
 
 ### Copy types vs. move types
 
-Not all types move. Primitive types — `Int`, `Float`, `Bool`, `String` — are **copied** on assignment. Copy is cheap and semantically clean for small, self-contained values:
+Not all types move. Primitive types — `number`, `boolean`, `string` — are **copied** on assignment. Copy is cheap and semantically clean for small, self-contained values:
 
 ```sfn
 fn main() ![io] {
@@ -173,7 +173,7 @@ A mutable borrow lets you modify a value temporarily. The constraint is strict: 
 
 ```sfn
 struct Counter {
-    value -> Int;
+    value: number;
 }
 
 fn increment(counter: &mut Counter) {
@@ -230,9 +230,9 @@ Stated precisely:
 
 These three rules together eliminate dangling pointers, data races, and use-after-free.
 
-> **Current enforcement**: The compiler parses `&T` and `&mut T` syntax and records borrow metadata. Full exclusivity checking — rejecting code that has simultaneous `&T` and `&mut T`, or that moves while borrowed — is being implemented in the native runtime. In the current release, violations compile without error but will become hard errors in an upcoming release. Write code as if the rules are enforced; the diagnostic pass will flag violations when it lands.
+> **Current enforcement:** The compiler parses `&T` and `&mut T` syntax and threads borrow metadata through the IR, but full exclusivity checking is deferred to post-1.0. Violations compile without error today. See the [roadmap](/roadmap) for when enforcement lands.
 
-The examples throughout this guide show what the rules require, even where enforcement is not yet complete. Building correct habits now means your code will pass the strict checker without changes.
+The examples throughout this guide show what the rules will require. Building correct habits now means your code will pass the strict checker without changes.
 
 ---
 
@@ -244,16 +244,16 @@ Not every value fits neatly into the primitive/composite divide. Some values rep
 
 ```sfn
 struct FileHandle {
-    path -> String;
-    fd -> Int;
+    path: string;
+    fd: number;
 }
 
-fn open_file(path: String) -> Affine<FileHandle> ![io] {
-    // Opens the file, returns an affine wrapper around the handle
-    return Affine.wrap(FileHandle { path: path, fd: syscall_open(path) });
+fn open_file(path: string) -> Affine<FileHandle> ![io] {
+    // Opens the file, returns an affine handle
+    return FileHandle { path: path, fd: syscall_open(path) };
 }
 
-fn read_contents(handle: Affine<FileHandle>) -> String ![io] {
+fn read_contents(handle: Affine<FileHandle>) -> string ![io] {
     // Consumes the handle; file is closed when handle is dropped
     return syscall_read(handle.fd);
 }
@@ -262,7 +262,7 @@ fn main() ![io] {
     let handle = open_file("data.csv");
     let contents = read_contents(handle);   // handle is moved (consumed)
 
-    // let contents2 = read_contents(handle);  // ERROR: handle was already moved
+    // let contents2 = read_contents(handle);  // would be: handle was already moved (once enforced)
 
     print(contents);
 }
@@ -277,7 +277,7 @@ Typical uses for `Affine<T>`:
 
 `Affine<T>` is also the right choice when you want the compiler to enforce that a destructor runs — i.e., you want a guarantee that cleanup code fires before the value is abandoned.
 
-> **Current enforcement**: `Affine<T>` syntax is accepted and the compiler records annotations. The rule "cannot be copied" is **not yet enforced at compile time**. This will become a hard error in an upcoming release. Treat your code as if the restriction is active.
+> **Current enforcement:** `Affine<T>` syntax is accepted and the compiler records annotations. The rule "cannot be copied" is **not yet enforced at compile time**. See the [roadmap](/roadmap) for enforcement sequencing. Treat your code as if the restriction is active.
 
 ---
 
@@ -289,17 +289,17 @@ This is useful when forgetting to act on something is a bug, not just a missed o
 
 ```sfn
 struct AuthToken {
-    value -> String;
-    expiry -> Int;
+    value: string;
+    expiry: number;
 }
 
-fn mint_token(user_id: String) -> Linear<AuthToken> ![io, net] {
+fn mint_token(user_id: string) -> Linear<AuthToken> ![io, net] {
     // Creates a one-time auth token; must be used or explicitly invalidated
     let token_value = generate_secure_random_token();
-    return Linear.wrap(AuthToken { value: token_value, expiry: now() + 3600 });
+    return AuthToken { value: token_value, expiry: now() + 3600 };
 }
 
-fn submit_request(token: Linear<AuthToken>, payload: String) -> Response ![net] {
+fn submit_request(token: Linear<AuthToken>, payload: string) -> Response ![net] {
     // Consuming the token here is intentional: tokens are single-use
     let auth_header = token.value;
     return http.post_with_auth(auth_header, payload);
@@ -320,7 +320,7 @@ fn main() ![io, net] {
         invalidate(token);   // must consume token even on the no-submit path
     }
 
-    // Falling out of scope without consuming token would be a compile error
+    // Falling out of scope without consuming token would be a compile error (once enforced)
 }
 ```
 
@@ -333,7 +333,7 @@ The must-consume rule catches an entire category of logic errors:
 
 ```sfn
 // Another example: database transaction
-fn update_balance(conn: &mut DbConn, user_id: Int, delta: Float) ![io] {
+fn update_balance(conn: &mut DbConn, user_id: number, delta: number) ![io] {
     let txn: Linear<Transaction> = conn.begin_transaction();
 
     let balance = conn.query_balance(user_id);
@@ -344,11 +344,11 @@ fn update_balance(conn: &mut DbConn, user_id: Int, delta: Float) ![io] {
 
     conn.execute_update(user_id, balance + delta);
     txn.commit();            // consume txn on the success path
-    // If neither rollback nor commit is called, the compiler will reject this
+    // Once must-consume is enforced, failing to call either rollback or commit is a compile error
 }
 ```
 
-> **Current enforcement**: `Linear<T>` syntax is accepted and the compiler records annotations. The "must be consumed" rule is **not yet enforced at compile time**. This will become a hard error in an upcoming release. Write consume-patterns now so your code is correct by construction.
+> **Current enforcement:** `Linear<T>` syntax is accepted and the compiler records annotations. The "must be consumed" rule is **not yet enforced at compile time**. See the [roadmap](/roadmap). Write consume-patterns now so your code is correct by construction.
 
 ---
 
@@ -359,7 +359,7 @@ fn update_balance(conn: &mut DbConn, user_id: Int, delta: Float) ![io] {
 A function can create a value and return ownership to the caller:
 
 ```sfn
-fn make_greeting(name: String) -> String {
+fn make_greeting(name: string) -> string {
     return "Hello, {{name}}!";
 }
 
@@ -399,8 +399,8 @@ When you access a field of a struct you own, you get a reference to that field, 
 
 ```sfn
 struct Pipeline {
-    config -> Config;
-    name -> String;
+    config: Config;
+    name: string;
 }
 
 fn run(pipeline: Pipeline) ![io] {
@@ -443,10 +443,10 @@ A function signature with `param: T` takes ownership. If you meant to inspect wi
 
 ```sfn
 // This takes ownership — caller loses the config
-fn validate(cfg: Config) -> Bool { ... }
+fn validate(cfg: Config) -> boolean { ... }
 
 // This borrows — caller keeps the config
-fn validate(cfg: &Config) -> Bool { ... }
+fn validate(cfg: &Config) -> boolean { ... }
 ```
 
 When in doubt, start with borrows. You can always change to owned if you find you need to store or transform the value.
@@ -470,7 +470,7 @@ The fix is usually to end the shared borrow before taking the mutable one:
 ```sfn
 fn main() ![io] {
     let mut items = [1, 2, 3, 4, 5];
-    let first_val = items[0];       // copy the value out (Int is Copy)
+    let first_val = items[0];       // copy the value out (number is Copy)
     items.push(6);                  // mutable borrow; no conflict
     print("first: {{first_val}}");
 }
@@ -481,23 +481,23 @@ fn main() ![io] {
 Long-lived borrows inside loops can conflict with mutations in the same loop:
 
 ```sfn
-fn main() {
-    let mut cache = {};
+fn main() ![io] {
+    let mut cache: Cache = Cache.new();
     for item in items {
-        let existing = &cache[item.key];    // shared borrow
+        let existing: &Entry = cache.get(item.key);   // shared borrow
         if should_update(existing) {
-            cache[item.key] = new_value();  // mutable — conflicts with existing
+            cache.set(item.key, new_value());         // mutable — conflicts with existing
         }
     }
 }
 
 // Fix: end the shared borrow before mutating
-fn main() {
-    let mut cache = {};
+fn main() ![io] {
+    let mut cache: Cache = Cache.new();
     for item in items {
-        let needs_update = should_update(&cache[item.key]);
+        let needs_update = should_update(cache.get(item.key));
         if needs_update {
-            cache[item.key] = new_value();
+            cache.set(item.key, new_value());
         }
     }
 }
@@ -515,7 +515,7 @@ The effect system and the ownership system compose naturally. Borrowing carries 
 The `examples/basics/borrowing.sfn` example shows this in action, with functions annotated `![read]` and `![mut]`:
 
 ```sfn
-fn read_counter(counter: &Counter) ![read] -> Int {
+fn read_counter(counter: &Counter) ![read] -> number {
     return counter.value;
 }
 
@@ -534,13 +534,13 @@ The intersection of ownership and effects is where Sailfin's safety story comes 
 
 | Concept | Syntax | Meaning | Enforced today? |
 |---------|--------|---------|----------------|
-| Move | `let b = a` | Ownership transfers; `a` is no longer valid | Yes (tracked) |
+| Move | `let b = a` | Ownership transfers; `a` is no longer valid | Syntax only |
 | Shared borrow | `&T` | Read-only reference; many can coexist | Syntax only |
 | Exclusive borrow | `&mut T` | Read-write reference; must be sole borrow | Syntax only |
 | Affine type | `Affine<T>` | Can be dropped, cannot be duplicated | Syntax only |
 | Linear type | `Linear<T>` | Must be consumed exactly once | Syntax only |
 
-Full exclusivity checking and must-consume enforcement are actively being implemented in the native compiler. The syntax is stable — code you write today using these annotations will work correctly once enforcement lands.
+Full ownership enforcement — move tracking, exclusivity checking, must-consume verification — is deferred to post-1.0. The syntax is stable and recorded in the IR; code you write today using these annotations will work correctly once enforcement lands. See the [roadmap](/roadmap) for sequencing.
 
 ---
 

@@ -115,20 +115,20 @@ fn greet_twice(name: string) ![io] {
 
 ## Structs
 
-Structs group related data together. Fields use `name -> Type;` syntax:
+Structs group related data together. Fields use `name: Type;` syntax:
 
 ```sfn
 struct Point {
-    x -> number;
-    y -> number;
+    x: number;
+    y: number;
 }
 ```
 
 Create a struct literal by naming the fields:
 
 ```sfn
-let origin = Point { x: 0.0, y: 0.0 };
-let p = Point { x: 3.0, y: 4.0 };
+let origin: Point = Point { x: 0.0, y: 0.0 };
+let p: Point = Point { x: 3.0, y: 4.0 };
 ```
 
 Access fields with dot notation:
@@ -137,24 +137,47 @@ Access fields with dot notation:
 print("x = {{p.x}}, y = {{p.y}}");
 ```
 
-Add methods in an `impl` block:
+Methods are declared **inside the struct body**. The first parameter is
+conventionally named `self` and receives the instance:
 
 ```sfn
-impl Point {
-    fn distance_from_origin(&self) -> number {
-        return (self.x * self.x + self.y * self.y).sqrt();
+struct Point {
+    x: number;
+    y: number;
+
+    fn distance_from_origin(self) -> number {
+        return math.sqrt(self.x * self.x + self.y * self.y);
     }
 
-    fn translate(&mut self, dx: number, dy: number) {
-        self.x = self.x + dx;
-        self.y = self.y + dy;
+    fn describe(self) -> string {
+        return "Point({{self.x}}, {{self.y}})";
     }
 }
 
+let p: Point = Point { x: 3.0, y: 4.0 };
 let dist = p.distance_from_origin();    // 5.0
 ```
 
-`&self` is a read-only borrow of the receiver. `&mut self` is a mutable borrow. Methods that only read prefer `&self`; methods that modify state take `&mut self`.
+Constructor-style (static) methods omit `self` and can be called as
+`TypeName.new(...)`:
+
+```sfn
+struct Point {
+    x: number;
+    y: number;
+
+    fn new(x: number, y: number) -> Point {
+        return Point { x: x, y: y };
+    }
+
+    fn origin() -> Point {
+        return Point { x: 0.0, y: 0.0 };
+    }
+}
+
+let origin = Point.origin();
+let p = Point.new(3.0, 4.0);
+```
 
 ---
 
@@ -173,32 +196,23 @@ enum Direction {
 let heading = Direction.North;
 ```
 
-Enum variants can carry data:
+Enum variants can carry data as named fields:
 
 ```sfn
 enum Shape {
-    Circle { radius -> number },
-    Rectangle { width -> number, height -> number },
-    Triangle { base -> number, height -> number },
+    Circle { radius: number },
+    Rectangle { width: number, height: number },
+    Triangle { base: number, height: number },
 }
 
-let c = Shape.Circle { radius: 5.0 };
-let r = Shape.Rectangle { width: 3.0, height: 4.0 };
+let c: Shape = Shape.Circle { radius: 5.0 };
+let r: Shape = Shape.Rectangle { width: 3.0, height: 4.0 };
 ```
 
-The standard `Option` and `Result` types are also enums:
-
-```sfn
-enum Option<T> {
-    Some(T),
-    None,
-}
-
-enum Result<T, E> {
-    Ok(T),
-    Err(E),
-}
-```
+> **Current status:** Optional values today are written with the `T?` syntax
+> (for example, `TreeNode?`) and handled via `null` checks or `match`. A
+> `Result<T, E>` type with a `?` propagation operator is on the
+> [roadmap](/roadmap) and is tracked in the 1.0 readiness checklist.
 
 ---
 
@@ -209,36 +223,38 @@ enum Result<T, E> {
 ```sfn
 fn area(shape: Shape) -> number {
     match shape {
-        Circle { radius }         => 3.14159 * radius * radius,
-        Rectangle { width, height } => width * height,
-        Triangle { base, height } => 0.5 * base * height,
+        Shape.Circle { radius } => return 3.14159 * radius * radius,
+        Shape.Rectangle { width, height } => return width * height,
+        Shape.Triangle { base, height } => return 0.5 * base * height,
     }
 }
 ```
 
-If you add a new variant to `Shape` and forget to update `area`, the compiler produces an error: _"match is not exhaustive: missing variant `Pentagon`"_.
+If you add a new variant to `Shape` and forget to update `area`, the compiler
+produces a non-exhaustive-match diagnostic.
 
-Use guard conditions to add extra constraints on a matched pattern:
+Use guard conditions to add extra constraints on a matched pattern. Each arm is
+followed by `=>` and either a single expression with `return`, or a block:
 
 ```sfn
 fn classify_score(score: number) -> string {
     match score {
-        s if s >= 90 => "A",
-        s if s >= 80 => "B",
-        s if s >= 70 => "C",
-        s if s >= 60 => "D",
-        _            => "F",
+        s if s >= 90 => { return "A"; }
+        s if s >= 80 => { return "B"; }
+        s if s >= 70 => { return "C"; }
+        s if s >= 60 => { return "D"; }
+        _ => { return "F"; }
     }
 }
 ```
 
-Match on `Option` and `Result` to safely handle absent values and errors:
+Match on optional types (`T?`) to safely handle absent values:
 
 ```sfn
-fn greet_user(id: UserId) ![io] {
-    match find_user(id) {
-        Some(user) => print("Hello, {{user.name}}!"),
-        None       => print.err("User {{id}} not found"),
+fn describe(user: User?) ![io] {
+    match user {
+        null => print.err("no user"),
+        _ => print("Hello, {{user.name}}!"),
     }
 }
 ```
@@ -307,38 +323,41 @@ Generics let you write functions and types that work over any type that satisfie
 A generic function:
 
 ```sfn
-fn first<T>(items: Array<T>) -> Option<T> {
+fn first<T>(items: T[]) -> T? {
     if items.length == 0 {
-        return Option.None;
+        return null;
     }
-    return Option.Some(items[0]);
+    return items[0];
 }
 
-let n = first([1, 2, 3]);    // Option.Some(1)
-let s = first(["a", "b"]);   // Option.Some("a")
-let e = first([]);            // Option.None
+let n = first([1, 2, 3]);    // 1
+let s = first(["a", "b"]);   // "a"
 ```
 
 A generic struct:
 
 ```sfn
 struct Pair<A, B> {
-    first -> A;
-    second -> B;
+    first: A;
+    second: B;
 }
 
-let coords = Pair { first: 10, second: 20 };
-let labeled = Pair { first: "latitude", second: 51.5 };
+let coords = Pair<number, number> { first: 10, second: 20 };
+let labeled = Pair<string, number> { first: "latitude", second: 51.5 };
 ```
 
-Generics work with interfaces to express constraints — a generic function can require that its type parameter implements a specific interface:
+Generics work with interfaces to express constraints — a generic function can
+require that its type parameter implements a specific interface. Generic
+constraints (`T: Interface`) are part of the
+[roadmap](/roadmap) pre-1.0 work; today, generic functions accept any type and
+rely on structural usage of methods inside the body:
 
 ```sfn
 interface Displayable {
-    fn display(&self) -> string;
+    fn display(self) -> string;
 }
 
-fn print_all<T: Displayable>(items: Array<T>) ![io] {
+fn print_all<T>(items: T[]) ![io] {
     for item in items {
         print(item.display());
     }
@@ -351,91 +370,104 @@ fn print_all<T: Displayable>(items: Array<T>) ![io] {
 
 Sailfin has two complementary error handling mechanisms.
 
-### `Result` for expected failures
+### Tagged-union return types
 
-Use `Result<T, E>` when failure is a normal part of a function's contract — something callers should handle:
+Model failure as part of a function's return type using a union (`T | Error`)
+or an explicit enum. Callers use `match` to handle each case:
 
 ```sfn
-enum ParseError {
-    EmptyInput,
-    InvalidCharacter { pos -> number, char -> string },
-    Overflow,
+struct DivisionError {
+    message: string;
 }
 
-fn parse_int(s: string) -> Result<number, ParseError> {
-    if s.length == 0 {
-        return Result.Err(ParseError.EmptyInput);
+fn safe_divide(a: number, b: number) -> number | DivisionError {
+    if b == 0 {
+        return DivisionError { message: "Cannot divide by zero" };
     }
-    // ...
+    return a / b;
 }
 
-match parse_int(input) {
-    Ok(n)  => print("Parsed: {{n}}"),
-    Err(ParseError.EmptyInput) => print.err("Input was empty"),
-    Err(ParseError.Overflow)   => print.err("Number too large"),
-    Err(ParseError.InvalidCharacter { pos, char }) =>
-        print.err("Bad character '{{char}}' at position {{pos}}"),
+fn main() ![io] {
+    let result = safe_divide(10, 0);
+
+    match result {
+        DivisionError { message } => print("Error: {{message}}"),
+        _ => print("Result: {{result}}"),
+    }
 }
 ```
+
+> **Coming in 1.0:** A generic `Result<T, E>` type plus a `?` propagation
+> operator are on the [roadmap](/roadmap) under the Syntax Reform track. Until
+> they land, prefer the tagged-union pattern above for expected failures.
 
 ### `try/catch/finally` for exceptional conditions
 
-Use `try/catch` for failures that are not part of normal operation and cannot easily be threaded through return types:
+Use `try/catch` for failures that are not part of normal operation and cannot
+easily be threaded through return types:
 
 ```sfn
-fn load_config(path: string) -> Config ![io] {
+fn perform_risky_operation() -> void {
+    throw "Simulated failure";
+}
+
+fn main() ![io] {
     try {
-        let content = fs.read(path);
-        return Config.parse(content);
-    } catch (e: IoError) {
-        print.err("Cannot read config at {{path}}: {{e.message}}");
-        throw e;
+        perform_risky_operation();
+    } catch (err) {
+        print("Something went wrong: {{err}}");
     } finally {
-        print("Config load attempted for {{path}}");
+        print("Shutting down cleanly.");
     }
 }
 ```
 
-`finally` runs whether or not an exception was thrown — useful for cleanup that must happen regardless.
+`finally` runs whether or not an exception was thrown — useful for cleanup that
+must happen regardless.
 
 ---
 
 ## Interfaces
 
-An interface defines a set of methods that a type must provide. Any struct that implements those methods satisfies the interface.
+An interface defines a set of methods that a type must provide. A struct
+declares conformance inline with the `implements` keyword, and provides the
+methods in its body:
 
 ```sfn
 interface Serializable {
-    fn to_json(&self) -> string;
-    fn from_json(s: string) -> Self;
+    fn to_json(self) -> string;
 }
 
-struct User {
-    name -> string;
-    email -> string;
-}
+struct User implements Serializable {
+    name: string;
+    email: string;
 
-impl Serializable for User {
-    fn to_json(&self) -> string {
+    fn to_json(self) -> string {
         return "{\"name\":\"{{self.name}}\",\"email\":\"{{self.email}}\"}";
-    }
-
-    fn from_json(s: string) -> Self {
-        // parse s and return a User
     }
 }
 ```
 
-Use an interface as a parameter type to write code that works with any conforming type:
+A struct can implement multiple interfaces by listing them:
 
 ```sfn
-fn write_record<T: Serializable>(record: T, path: string) ![io] {
+struct Account implements Serializable, Auditable {
+    // fields and methods satisfying both interfaces
+}
+```
+
+Use an interface as a parameter type to write code that works with any
+conforming type:
+
+```sfn
+fn write_record(record: Serializable, path: string) ![io] {
     let json = record.to_json();
     fs.write(path, json);
 }
 ```
 
-Now `write_record` works for `User`, `Order`, `Config`, or anything else that implements `Serializable`.
+Now `write_record` works for `User`, `Order`, `Config`, or anything else that
+implements `Serializable`.
 
 ---
 
@@ -449,9 +481,9 @@ fn add(a: number, b: number) -> number {
 }
 
 test "add returns the correct sum" {
-    assert(add(2, 3) == 5);
-    assert(add(-1, 1) == 0);
-    assert(add(0, 0) == 0);
+    assert add(2, 3) == 5;
+    assert add(-1, 1) == 0;
+    assert add(0, 0) == 0;
 }
 ```
 
@@ -466,7 +498,7 @@ Tests declare effects just like functions. The compiler enforces capability disc
 ```sfn
 test "config file can be read" ![io] {
     let content = fs.read("tests/fixtures/sample.toml");
-    assert(content.length > 0);
+    assert content.length > 0;
 }
 ```
 
@@ -484,23 +516,28 @@ See the [Testing guide](/docs/learn/testing) for patterns, organization, and int
 
 ## Type Safety Wrappers
 
-Sailfin provides four special wrapper types for expressing stronger safety guarantees. They parse and type-check today; enforcement of the stronger semantics is coming before 1.0.
+Sailfin parses four special wrapper types that express stronger safety
+guarantees. They are recognised by the parser today but **enforcement is
+deferred to post-1.0** — treat them as documentation for the roadmap, not as
+shipped safety features.
 
 ### `PII<T>` — Personally Identifiable Information
 
-Marks a value as PII. Future runtime enforcement will require explicit declassification before the value can be used in non-PII contexts, preventing accidental logging or exposure.
+Marks a value as PII. Future runtime enforcement will require explicit
+declassification before the value can be used in non-PII contexts, preventing
+accidental logging or exposure.
 
 ```sfn
 struct UserProfile {
-    display_name -> string;
-    email -> PII<string>;          // cannot be logged without declassification
-    date_of_birth -> PII<string>;
+    display_name: string;
+    email: PII<string>;          // future: cannot be logged without declassification
+    date_of_birth: PII<string>;
 }
 ```
 
 ### `Secret<T>` — Secret values
 
-Similar to `PII<T>` but for credentials and tokens. Prevents secrets from appearing in logs, error messages, or network responses.
+Similar to `PII<T>` but for credentials and tokens.
 
 ```sfn
 let api_key: Secret<string> = Secret.wrap("sk-abc123");
@@ -508,25 +545,26 @@ let api_key: Secret<string> = Secret.wrap("sk-abc123");
 
 ### `Affine<T>` — May be dropped, not duplicated
 
-An affine type can be used zero or one times. It can be dropped (like a file you decide not to open), but it cannot be copied or cloned.
+An affine type can be used zero or one times. It can be dropped, but it cannot
+be copied or cloned.
 
 ```sfn
 let handle: Affine<FileHandle> = fs.open("data.bin");
-// handle can be used once or dropped — never duplicated
 ```
 
 ### `Linear<T>` — Must be consumed exactly once
 
-A linear type is stronger: it must be consumed. The compiler will eventually reject code that drops a `Linear<T>` without using it.
+A linear type is stronger: it must be consumed.
 
 ```sfn
 let token: Linear<AuthToken> = auth.mint_token(user_id);
-// token must be used exactly once — dropping it would be an error
 ```
 
-These types encode resource management and security properties directly in the type system, where the compiler can check them instead of relying on runtime guards or programmer discipline.
-
-> **Current status**: `Affine<T>` and `Linear<T>` are parsed and tracked but not yet enforced by the borrow checker. `PII<T>` and `Secret<T>` parse and carry metadata but runtime enforcement is planned for after 1.0.
+> **Current status**: `Affine<T>`, `Linear<T>`, `PII<T>`, and `Secret<T>` all
+> parse and type-check, but none of the additional guarantees are enforced yet.
+> See the [roadmap](/roadmap) for the post-1.0 sequencing. Sailfin's shipped
+> safety story today is the effect system and capability-based capsules, not
+> ownership or taint tracking.
 
 ---
 

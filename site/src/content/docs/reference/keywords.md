@@ -23,19 +23,19 @@ This page lists every reserved keyword in Sailfin. For each keyword, the impleme
 Declare a named function. Parameters use `name: Type` syntax. The return type follows `->`. Effect annotations follow the return type using `![effect, ...]`.
 
 ```sfn
-fn add(x: Int, y: Int) -> Int {
+fn add(x: number, y: number) -> number {
     return x + y;
 }
 
-fn greet(name: String) ![io] {
-    print("Hello, " + name + "!");
+fn greet(name: string) ![io] {
+    print("Hello, {{ name }}!");
 }
 ```
 
 Default parameter values and generic type parameters are supported:
 
 ```sfn
-fn find_char(text: String, ch: String, start: Int = 0) -> Int {
+fn find_char(text: string, ch: string, start: number = 0) -> number {
     // ...
 }
 
@@ -53,9 +53,9 @@ fn identity<T>(value: T) -> T {
 Mark a function as asynchronous. The `async` modifier is recognized by the parser and captured in the AST, but `await` is not yet parsed or enforced. Currently, `async fn` is structurally identical to `fn` at runtime.
 
 ```sfn
-async fn fetch_user(id: Int) -> User ![net] {
+async fn fetch_user(id: string) -> User ![net] {
     // async/await semantics are planned; currently runs synchronously
-    return http.get("/users/" + id);
+    return http.get("/users/{{ id }}");
 }
 ```
 
@@ -71,8 +71,8 @@ Declare an immutable variable binding. Variables declared with `let` cannot be r
 
 ```sfn
 let name = "Sailfin";
-let count: Int = 0;
-let message: String;   // initialized to null
+let count: number = 0;
+let message: string;   // initialized to null
 ```
 
 ---
@@ -87,8 +87,8 @@ Combined with `let`, allows a binding to be reassigned after declaration. A `mut
 let mut counter = 0;
 counter = counter + 1;
 
-let mut results: String[] = [];
-results = results.concat(["new item"]);
+let mut results: string[] = [];
+results.push("new item");
 ```
 
 ---
@@ -97,30 +97,30 @@ results = results.concat(["new item"]);
 
 **Status: Implemented**
 
-Define a named product type with labeled fields. Field declarations use `name -> Type;` syntax. Structs may carry generic type parameters and may implement interfaces.
+Define a named product type with labeled fields. Field declarations use `name: Type;` syntax. Structs may carry generic type parameters and may implement interfaces.
 
 ```sfn
 struct Point {
-    x -> Int;
-    y -> Int;
+    x: number;
+    y: number;
 }
 
 struct Response<T> {
-    status -> Int;
-    body -> T;
+    status: number;
+    body: T;
 }
 
 struct User implements Printable {
-    id -> Int;
-    name -> String;
-    email -> String;
+    id: number;
+    name: string;
+    email: string;
 }
 ```
 
 Instantiation uses `StructName { field: value, ... }`:
 
 ```sfn
-let p = Point { x: 3, y: 7 };
+let p: Point = Point { x: 3.0, y: 7.0 };
 ```
 
 ---
@@ -133,16 +133,16 @@ Define a sum type (algebraic data type). Each variant may carry zero or more pay
 
 ```sfn
 enum Shape {
-    Circle { radius: Float }
-    Rectangle { width: Float, height: Float }
-    Point
+    Circle { radius: number },
+    Rectangle { width: number, height: number },
+    Point,
 }
 
-fn area(shape: Shape) -> Float {
+fn area(shape: Shape) -> number {
     match shape {
-        Circle { radius } => 3.14159 * radius * radius,
-        Rectangle { width, height } => width * height,
-        Point => 0.0,
+        Shape.Circle { radius } => return 3.14159 * radius * radius,
+        Shape.Rectangle { width, height } => return width * height,
+        Shape.Point => return 0.0,
     }
 }
 ```
@@ -157,13 +157,13 @@ Declare a named set of method signatures that a struct must fulfill. Structs opt
 
 ```sfn
 interface Printable {
-    fn display() -> String;
+    fn display(self) -> string;
 }
 
 struct Greeting implements Printable {
-    message -> String;
+    message: string;
 
-    fn display() -> String {
+    fn display(self) -> string {
         return self.message;
     }
 }
@@ -178,10 +178,11 @@ struct Greeting implements Printable {
 Introduce a type alias. Aliases may carry generic type parameters.
 
 ```sfn
-type UserId = Int;
-type Result<T> = T | Error;
-type Handler = fn(Request) -> Response ![io, net];
+type UserId = string;
+type MaybeError<T> = T | ParseError;
 ```
+
+> **Note:** `Result<T, E>` and function type aliases (`type Handler = fn(...) -> ...`) are on the [roadmap](/roadmap); use union return types (`number | MyError`) today.
 
 ---
 
@@ -189,11 +190,11 @@ type Handler = fn(Request) -> Response ![io, net];
 
 **Status: Parsed**
 
-Declare an external symbol provided by the native runtime or a linked library. The `extern` modifier is parsed and recorded in the AST; FFI enforcement is not yet active.
+Declare an external symbol provided by the native runtime or a linked library. `extern fn` declarations must be combined with `unsafe` and terminate with `;` instead of a block body.
 
 ```sfn
-extern fn malloc(size: Int) -> any;
-extern fn free(ptr: any) -> void;
+unsafe extern fn malloc(size: usize) -> *u8;
+unsafe extern fn free(ptr: *u8) -> void;
 ```
 
 ---
@@ -205,7 +206,7 @@ extern fn free(ptr: any) -> void;
 Mark a block or function as opting out of Sailfin's safety guarantees. Recognized by the parser; semantic restrictions are not yet enforced.
 
 ```sfn
-unsafe fn write_raw(ptr: any, value: Int) -> void {
+unsafe fn write_raw(ptr: *mut u8, value: u8) -> void {
     // raw memory access — safety not enforced yet
 }
 ```
@@ -219,10 +220,10 @@ unsafe fn write_raw(ptr: any, value: Int) -> void {
 Declare a model artifact with metadata (provider, model identifier, parameters). The compiler emits a `.model` directive in `.sfn-asm` IR. Model execution via `.call()` is not yet implemented. This construct is being migrated to the `sfn/ai` library capsule.
 
 ```sfn
-model Summarizer {
-    provider: "anthropic";
-    model_id: "claude-sonnet-4-20250514";
-    max_tokens: 512;
+model Summarizer : Model<Text, Summary> {
+    engine = "openai:gpt-4o@2025-06";
+    schema = Summary;
+    max_tok = 2000;
 }
 ```
 
@@ -235,9 +236,9 @@ model Summarizer {
 Declare a data-processing pipeline. Parsed as a function-like declaration and lowered to `.sfn-asm`. The `|>` pipeline operator is not yet implemented.
 
 ```sfn
-pipeline ProcessOrder {
-    fn run(order: Order) -> Receipt ![io, model] {
-        // pipeline steps go here
+pipeline process_orders(orders: Order[]) -> void ![io, model] {
+    for order in orders {
+        process(order);
     }
 }
 ```
@@ -251,12 +252,8 @@ pipeline ProcessOrder {
 Declare a callable tool that can be exposed to a model. Recorded as metadata in `.sfn-asm`; no dispatcher is implemented yet.
 
 ```sfn
-tool GetWeather {
-    description: "Fetch current weather for a location";
-
-    fn call(location: String) -> String ![net] {
-        return http.get("https://api.weather.example/current?q=" + location).body;
-    }
+tool GetWeather(location: string) -> string ![net] {
+    return http.get("https://api.weather.example/current?q={{ location }}").body;
 }
 ```
 
@@ -308,16 +305,15 @@ if score >= 90 {
 
 **Status: Implemented**
 
-Iterate over a collection. The iteration variable is immutable by default; add `mut` to allow mutation within the loop body.
+Iterate over a collection. The iteration variable is immutable within the loop body.
 
 ```sfn
 for item in items {
-    print(item);
+    print("{{ item }}");
 }
 
-for mut i in 0..10 {
-    i = i * 2;
-    print(i);
+for i in 0..10 {
+    print("{{ i }}");
 }
 ```
 
@@ -325,13 +321,17 @@ for mut i in 0..10 {
 
 ### `while`
 
-**Status: Implemented**
+**Status: Planned**
 
-Loop while a condition is true.
+> **Note:** `while` is reserved but **not yet implemented** in the parser. Use `loop` with an explicit `break` instead. Tracked on the [roadmap](/roadmap).
 
 ```sfn
-let mut n = 1;
-while n < 100 {
+// Planned — not yet parsed. Use `loop { if cond { break; } ... }` today.
+let mut n: number = 1;
+loop {
+    if n >= 100 {
+        break;
+    }
     n = n * 2;
 }
 ```
@@ -345,12 +345,12 @@ while n < 100 {
 Unconditional loop. Use `break` to exit. This is the primary looping construct used in the self-hosted compiler internals.
 
 ```sfn
-let mut index = 0;
+let mut index: number = 0;
 loop {
     if index >= items.length {
         break;
     }
-    print(items[index]);
+    print("{{ items[index] }}");
     index = index + 1;
 }
 ```
@@ -398,8 +398,8 @@ for item in items {
 Return a value from a function. An unadorned `return` with no expression is valid in `void` functions.
 
 ```sfn
-fn find(items: Int[], target: Int) -> Int {
-    let mut i = 0;
+fn find(items: number[], target: number) -> number {
+    let mut i: number = 0;
     loop {
         if i >= items.length {
             return -1;
@@ -425,13 +425,13 @@ match status {
     200 => print("OK"),
     404 => print("Not found"),
     500 => print("Server error"),
-    _ => print("Unknown: " + status),
+    _ => print("Unknown: {{ status }}"),
 }
 
 match shape {
-    Circle { radius } => 3.14159 * radius * radius,
-    Rectangle { width, height } => width * height,
-    _ => 0.0,
+    Shape.Circle { radius } => return 3.14159 * radius * radius,
+    Shape.Rectangle { width, height } => return width * height,
+    _ => return 0.0,
 }
 ```
 
@@ -444,11 +444,11 @@ match shape {
 Structured exception handling. The `finally` block runs whether or not an exception was thrown. The `catch` clause binds the caught value.
 
 ```sfn
-fn read_config(path: String) -> String ![io] {
+fn read_config(path: string) -> string ![io] {
     try {
         return fs.read(path);
     } catch (err) {
-        print.err("failed to read config: " + err);
+        print.err("failed to read config: {{ err }}");
         return "{}";
     } finally {
         print("config read attempted");
@@ -465,7 +465,7 @@ fn read_config(path: String) -> String ![io] {
 Raise an exception value. The thrown value can be caught by an enclosing `catch` block.
 
 ```sfn
-fn divide(a: Int, b: Int) -> Int {
+fn divide(a: number, b: number) -> number {
     if b == 0 {
         throw "division by zero";
     }
@@ -477,18 +477,27 @@ fn divide(a: Int, b: Int) -> Int {
 
 ## Concurrency
 
-> **Status:** All concurrency keywords below are **Planned** unless noted. The current runtime provides `spawn`, `channel`, and `parallel` as prelude functions (see [Standard Library](/docs/reference/standard-library)), but the language-level `routine`/`scope`/`await` keywords are not yet implemented.
+> **Status:** `routine { }` is parsed today and appears in example code; `channel()` and `parallel [...]` are available as prelude-backed primitives (see [Standard Library](/docs/reference/standard-library)). Full structured-concurrency semantics (`scope`, `await`, joined shutdown) are on the [roadmap](/roadmap).
 
 ### `routine`
 
-**Status: Planned**
+**Status: Parsed**
 
-Declare a concurrent task that runs in a structured scope. Part of the planned structured-concurrency model.
+Introduce a concurrent task block. The surface syntax is `routine { body }` or
+`routine "name" { body }` — anonymous or named. Full scheduler and join
+semantics are on the [roadmap](/roadmap).
 
 ```sfn
-// Planned — not yet implemented
-routine fetch_data(url: String) -> String ![io, net] {
-    return http.get(url).body;
+import { Channel, channel } from "sync";
+
+fn main() ![io] {
+    let messages: Channel<string> = channel();
+    routine {
+        messages.send("hello");
+    }
+    routine "consumer" {
+        print(await messages.receive());
+    }
 }
 ```
 
@@ -503,8 +512,8 @@ Define a structured-concurrency scope. All routines spawned inside a `scope` blo
 ```sfn
 // Planned — not yet implemented
 scope {
-    spawn fetch_data("https://api.example.com/a");
-    spawn fetch_data("https://api.example.com/b");
+    routine { fetch_data("https://api.example.com/a"); }
+    routine { fetch_data("https://api.example.com/b"); }
 }
 // both tasks complete here
 ```
@@ -519,8 +528,8 @@ Await the result of an `async fn` or a concurrent future. Not yet parsed.
 
 ```sfn
 // Planned — not yet implemented
-async fn load_user(id: Int) -> User ![net] {
-    let response = await http.get("/users/" + id);
+async fn load_user(id: string) -> User ![net] {
+    let response = await http.get("/users/{{ id }}");
     return response.body;
 }
 ```
@@ -552,10 +561,14 @@ spawn {
 Send a prompt to a model declared in the enclosing scope. Requires the `![model]` effect. Prompt blocks emit a `.prompt` directive in `.sfn-asm` IR. Runtime execution is not yet implemented.
 
 ```sfn
-fn summarize(text: String) -> String ![model] {
-    prompt Summarizer {
-        user: "Summarize the following in one sentence: " + text;
+fn summarize(text: string) -> string ![model] {
+    prompt system {
+        "You are a precise summarizer.";
     }
+    prompt user {
+        "Summarize the following in one sentence: {{ text }}";
+    }
+    return call_model("summarizer", text);
 }
 ```
 
@@ -565,26 +578,30 @@ fn summarize(text: String) -> String ![model] {
 
 **Status: Parsed + IR**
 
-Named message channels within a `prompt` block, corresponding to the standard `system`, `user`, and `assistant` roles in language model APIs.
+Canonical channel identifiers used immediately after `prompt`. They correspond
+to the standard `system`, `user`, and `assistant` roles in language model APIs.
+Each `prompt CHANNEL { body }` block emits one `.prompt` directive.
 
 ```sfn
-fn classify(input: String) -> String ![model] {
-    prompt Classifier {
-        system: "You are a helpful classifier. Respond with a single category.";
-        user: input;
+fn classify(input: string) -> string ![model] {
+    prompt system {
+        "You are a helpful classifier. Respond with a single category.";
     }
+    prompt user {
+        input;
+    }
+    return call_model("classifier", input);
 }
 ```
 
-The `assistant` channel seeds the model's reply context (few-shot examples):
+The `assistant` channel seeds the model's reply context (few-shot examples) by
+appending another prompt block:
 
 ```sfn
-prompt Translator {
-    system: "Translate English to French.";
-    user: "Good morning";
-    assistant: "Bonjour";
-    user: text_to_translate;
-}
+prompt system { "Translate English to French."; }
+prompt user { "Good morning"; }
+prompt assistant { "Bonjour"; }
+prompt user { text_to_translate; }
 ```
 
 > **Typed prompt channels** (`prompt user<MyType> { }`) are a design-stage feature and are not yet implemented.
@@ -651,8 +668,8 @@ export { add as plus };
 Boolean literal values.
 
 ```sfn
-let is_valid: Boolean = true;
-let is_done: Boolean = false;
+let is_valid: boolean = true;
+let is_done: boolean = false;
 
 if is_valid && !is_done {
     print("still running");
@@ -665,12 +682,12 @@ if is_valid && !is_done {
 
 **Status: Implemented**
 
-The absence of a value. A type suffixed with `?` is a union with `null` (e.g., `String?` means `String | null`).
+The absence of a value. A type suffixed with `?` is a union with `null` (e.g., `string?` means `string | null`).
 
 ```sfn
 let user: User? = null;
 
-fn find_user(id: Int) -> User? {
+fn find_user(id: string) -> User? {
     // ...
     return null;
 }
@@ -719,8 +736,8 @@ fn send_message(msg: Linear<Message>) ![net] {
 Marks a value as containing personally identifiable information. Planned to prevent PII from flowing to `net` or `model` effects without explicit declassification. No taint enforcement today.
 
 ```sfn
-fn render_invoice(user: PII<User>) -> Html ![io] {
-    // PII<T> is a nominal type today; no enforcement
+fn render_invoice(user: PII<User>) -> string ![io] {
+    // PII<T> is a nominal type today; no enforcement ([roadmap](/roadmap))
     return build_html(user.name, user.email);
 }
 ```
@@ -734,9 +751,9 @@ fn render_invoice(user: PII<User>) -> Html ![io] {
 Marks a value as a secret (e.g., API key, password). Planned to prevent secrets from appearing in logs or being transmitted without explicit handling. No taint enforcement today.
 
 ```sfn
-fn connect(api_key: Secret<String>) ![net] {
-    // Secret<T> is a nominal type today; no enforcement
-    let response = http.get("https://api.example.com?key=" + api_key);
+fn connect(api_key: Secret<string>) ![net] {
+    // Secret<T> is a nominal type today; no enforcement ([roadmap](/roadmap))
+    let response = http.get("https://api.example.com?key={{ api_key }}");
 }
 ```
 
@@ -751,7 +768,7 @@ fn connect(api_key: Secret<String>) ![net] {
 Opt out of Sailfin's safety guarantees for a block or function. Syntax is accepted; no additional permissions are granted or revoked at this time.
 
 ```sfn
-unsafe fn write_ptr(ptr: any, offset: Int, value: Int) -> void {
+unsafe fn write_ptr(ptr: *mut u8, offset: usize, value: u8) -> void {
     // raw pointer arithmetic — not enforced yet
 }
 ```
@@ -765,7 +782,7 @@ unsafe fn write_ptr(ptr: any, offset: Int, value: Int) -> void {
 Declare a symbol that is provided by the native linker or runtime. Enforcement is not yet active.
 
 ```sfn
-extern fn platform_clock() -> Int;
+unsafe extern fn platform_clock() -> i64;
 ```
 
 ---
@@ -774,10 +791,15 @@ extern fn platform_clock() -> Int;
 
 **Status: Parsed**
 
-Annotate a type or expression as a raw (unmanaged) pointer. Parsed and recorded; no additional semantics enforced.
+Used in the `&raw x` borrow form to create a raw pointer from a value. Raw
+pointer expressions and the matching pointer types are only usable inside an
+`unsafe { }` block.
 
 ```sfn
-let ptr: raw Int = allocate(4);
+unsafe {
+    let ptr: *u8 = &raw buffer;
+    // ... raw pointer operations
+}
 ```
 
 ---
@@ -786,10 +808,11 @@ let ptr: raw Int = allocate(4);
 
 **Status: Parsed**
 
-Declare a type whose internals are hidden from importers. Parsed; module-level privacy rules are not yet enforced.
+Used in the pointer type `*opaque` to denote an opaque foreign pointer
+(equivalent to C's `void*`) — most often in FFI declarations.
 
 ```sfn
-opaque type Handle = Int;
+unsafe extern fn fopen(path: *u8, mode: *u8) -> *opaque;
 ```
 
 ---
@@ -834,9 +857,9 @@ Refer to the current struct instance inside a method body.
 
 ```sfn
 struct Counter {
-    value -> Int;
+    value: number;
 
-    fn increment() -> Counter {
+    fn increment(self) -> Counter {
         return Counter { value: self.value + 1 };
     }
 }

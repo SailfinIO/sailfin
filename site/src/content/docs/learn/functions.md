@@ -14,7 +14,7 @@ Functions are the unit of computation in Sailfin. They are first-class values, s
 The basic form:
 
 ```sfn
-fn add(a: Int, b: Int) -> Int {
+fn add(a: number, b: number) -> number {
     return a + b;
 }
 ```
@@ -23,28 +23,31 @@ fn add(a: Int, b: Int) -> Int {
 - The return type follows `->` after the parameter list.
 - `return` exits the function with a value.
 
-### Implicit Returns
+> `number` is Sailfin's single numeric type today. Separate `int` (i64) and `float` (f64) types are on the [roadmap](/roadmap).
 
-The last expression in a function body (without a trailing semicolon) is automatically the return value. This is idiomatic Sailfin for short functions:
+### Explicit Returns
+
+Every function body uses an explicit `return` statement to yield a value. Short helpers still need the keyword:
 
 ```sfn
-fn square(n: Int) -> Int {
-    n * n
+fn square(n: number) -> number {
+    return n * n;
 }
 
-fn max(a: Int, b: Int) -> Int {
-    if a > b { a } else { b }
+fn max(a: number, b: number) -> number {
+    if a > b {
+        return a;
+    }
+    return b;
 }
 ```
-
-Both `return expr;` and the trailing expression form are valid — use whichever reads more clearly for the function. Long functions with multiple exit points typically benefit from explicit `return`.
 
 ### Void Functions
 
 Functions that perform side effects and return nothing use `![effect]` annotations (covered in the next section) and omit the return type or write `-> void`:
 
 ```sfn
-fn greet(name: String) ![io] {
+fn greet(name: string) ![io] {
     print("Hello, {{name}}!");
 }
 ```
@@ -52,8 +55,8 @@ fn greet(name: String) ![io] {
 ### Multiple Parameters
 
 ```sfn
-fn format_name(first: String, last: String, title: String) -> String {
-    "{{title}} {{first}} {{last}}"
+fn format_name(first: string, last: string, title: string) -> string {
+    return "{{title}} {{first}} {{last}}";
 }
 
 let full = format_name("Jane", "Smith", "Dr.");
@@ -65,17 +68,21 @@ A **pure function** has no effect annotations. It cannot read or write files, ma
 
 ```sfn
 // Pure — safe to call anywhere, easy to test, trivially parallelizable
-fn clamp(value: Int, min: Int, max: Int) -> Int {
-    if value < min { min }
-    else if value > max { max }
-    else { value }
+fn clamp(value: number, min: number, max: number) -> number {
+    if value < min {
+        return min;
+    }
+    if value > max {
+        return max;
+    }
+    return value;
 }
 
 // Effectful — declares exactly what it does
-fn log_and_clamp(value: Int, min: Int, max: Int) -> Int ![io] {
+fn log_and_clamp(value: number, min: number, max: number) -> number ![io] {
     let result = clamp(value, min, max);
     print("clamped {{value}} -> {{result}}");
-    result
+    return result;
 }
 ```
 
@@ -88,23 +95,24 @@ Prefer pure functions wherever possible. Reserve effects for the boundary layers
 Every Sailfin function either is pure (no `![]`) or declares precisely which capabilities it exercises. This is not documentation — it is enforced by the compiler.
 
 ```sfn
-fn read_config(path: String) -> String ![io] {
-    fs.read(path)
+fn read_config(path: string) -> string ![io] {
+    return fs.read(path);
 }
 
-fn fetch_price(symbol: String) -> Float ![net] {
+fn fetch_price(symbol: string) -> number ![net] {
     let resp = http.get("https://api.example.com/price/{{symbol}}");
-    Float.parse(resp.body)
+    return number.parse(resp.body);
 }
 
-fn analyze(text: String) -> Summary ![model] {
-    let result = prompt gpt4o ![model] {
-        system "You are a precise analyst."
-        user "Summarize the following:\n{{text}}"
-    };
-    result
+fn analyze(text: string) -> string ![model] {
+    // Call into the `sfn/ai` capsule; the ![model] effect is the capability gate.
+    return ai.complete("gpt4o", text);
 }
 ```
+
+> Language-level `prompt`/`model`/`tool` blocks are being migrated to the
+> `sfn/ai` capsule. The `![model]` effect stays as the compile-time capability
+> gate. See the [roadmap](/roadmap).
 
 The six canonical effects are:
 
@@ -112,7 +120,7 @@ The six canonical effects are:
 |--------|-----------------|
 | `io` | Filesystem (`fs.*`), console (`print`, `console.*`), logging, decorators like `@logExecution` |
 | `net` | HTTP (`http.*`), WebSocket (`websocket.*`), `serve` |
-| `model` | AI model invocation (`prompt` blocks) |
+| `model` | AI model invocation (`sfn/ai` capsule) |
 | `gpu` | GPU/accelerator operations, tensor compute |
 | `rand` | Random number generation (`rand.*`) |
 | `clock` | Wall clock, timers, `sleep` |
@@ -122,17 +130,15 @@ The six canonical effects are:
 Combine effects in a single annotation. Order does not matter:
 
 ```sfn
-fn fetch_and_log(url: String) -> String ![io, net] {
+fn fetch_and_log(url: string) -> string ![io, net] {
     let resp = http.get(url);
     print("Status: {{resp.status}}");
-    resp.body
+    return resp.body;
 }
 
-fn run_experiment(prompt_text: String) ![io, model, clock] {
+fn run_experiment(prompt_text: string) ![io, model, clock] {
     let start = clock.now();
-    let result = prompt gpt4o ![model] {
-        user "{{prompt_text}}"
-    };
+    let result = ai.complete("gpt4o", prompt_text);
     let elapsed = clock.now() - start;
     print("Completed in {{elapsed}}ms: {{result}}");
 }
@@ -143,18 +149,18 @@ fn run_experiment(prompt_text: String) ![io, model, clock] {
 If function `A` directly calls an effectful API (like `fs.write` or `http.get`), `A` must declare the required effect. The compiler checks direct API usage — if you call a helper function `B` that uses `![io]`, you must also declare `![io]` on `A`:
 
 ```sfn
-fn write_log(msg: String) ![io] {
+fn write_log(msg: string) ![io] {
     fs.appendFile("app.log", msg + "\n");
 }
 
-fn process(data: String) ![io] {
+fn process(data: string) ![io] {
     // OK: process declares ![io], which covers write_log's requirement
     write_log("Processing: {{data}}");
 }
 
 // COMPILE ERROR — save() calls write_log() which needs ![io],
 // but save() only declares ![net]
-fn save(url: String, data: String) ![net] {
+fn save(url: string, data: string) ![net] {
     let resp = http.post(url, data);
     write_log("Saved to {{url}}");    // ERROR: missing ![io]
 }
@@ -167,7 +173,7 @@ When a required effect is missing, the compiler produces a precise diagnostic wi
 ```
 effects.missing: function `save` calls `write_log` which requires ![io],
                  but `save` only declares ![net]
-  = help: add `io` to the effect list: `fn save(url: String, data: String) ![io, net]`
+  = help: add `io` to the effect list: `fn save(url: string, data: string) ![io, net]`
 ```
 
 Apply the fix, recompile, and the error is gone. The compiler never guesses — it tells you exactly which call site is the problem and which effect to add.
@@ -180,12 +186,12 @@ Test blocks also declare effects:
 test "reads and parses config" ![io] {
     let raw = fs.read("test/fixtures/config.toml");
     let config = Config.parse(raw);
-    assert(config.host == "localhost");
+    assert config.host == "localhost";
 }
 
 test "pure addition" {
     // No effects declared — this test cannot call any effectful function
-    assert(add(2, 3) == 5);
+    assert add(2, 3) == 5;
 }
 ```
 
@@ -196,19 +202,19 @@ test "pure addition" {
 Functions can declare default values for trailing parameters. Callers may omit them:
 
 ```sfn
-fn connect(host: String, port: Int = 8080, timeout_ms: Int = 5000) ![net] {
-    http.connect(host, port, timeout_ms)
+fn connect(host: string, port: number = 8080, timeout_ms: number = 5000) ![net] {
+    return http.connect(host, port, timeout_ms);
 }
 
 connect("localhost");                    // port=8080, timeout_ms=5000
 connect("example.com", 443);            // port=443, timeout_ms=5000
-connect("example.com", 443, 10_000);   // all explicit
+connect("example.com", 443, 10000);     // all explicit
 ```
 
 Default parameters must come after all required parameters. You cannot skip a defaulted parameter to provide a later one by position — use named argument style in that case:
 
 ```sfn
-connect("example.com", timeout_ms: 10_000);   // port stays at default 8080
+connect("example.com", timeout_ms: 10000);   // port stays at default 8080
 ```
 
 ---
@@ -219,132 +225,104 @@ Generic functions work over a family of types. The type parameter is declared in
 
 ```sfn
 fn identity<T>(value: T) -> T {
-    value
+    return value;
 }
 
-let n = identity(42);          // T inferred as Int
-let s = identity("hello");     // T inferred as String
+let n = identity(42);          // T inferred as number
+let s = identity("hello");     // T inferred as string
 ```
 
 ### Multiple Type Parameters
 
 ```sfn
-fn zip<A, B>(a: Vec<A>, b: Vec<B>) -> Vec<(A, B)> {
-    let mut result = Vec.new();
-    let len = if a.len() < b.len() { a.len() } else { b.len() };
-    for i in 0..len {
-        result.push((a[i], b[i]));
-    }
-    result
+fn pair<A, B>(a: A, b: B) -> (A, B) {
+    return (a, b);
 }
+
+let p = pair(1, "one");
 ```
 
 ### Type Bounds
 
-Constrain a type parameter to only types that implement a specific interface. Use `:` after the type parameter name:
+> Generic type bounds (`T: Interface`) are on the [roadmap](/roadmap) and not yet accepted by the parser. For now, write monomorphic helpers or use concrete types; once bounds ship, the intent is:
 
 ```sfn
+// PLANNED — not yet available
 interface Comparable {
-    fn compare(&self, other: &Self) -> Int;
+    fn compare(self, other: Comparable) -> number;
 }
 
 fn min<T: Comparable>(a: T, b: T) -> T {
-    if a.compare(&b) <= 0 { a } else { b }
+    if a.compare(b) <= 0 {
+        return a;
+    }
+    return b;
 }
 ```
 
-Multiple bounds use `+`:
-
-```sfn
-interface Printable {
-    fn display(&self) -> String;
-}
-
-fn show_min<T: Comparable + Printable>(items: Vec<T>) ![io] {
-    let m = items.reduce(items[0], |acc, x| min(acc, x));
-    print(m.display());
-}
-```
+See the [roadmap](/roadmap) for the generic bounds workstream.
 
 ### Real Examples: Map, Filter, Find
 
-These patterns illustrate generic functions working with closures (covered in full below):
+These patterns illustrate higher-order functions working with Sailfin's lambda syntax:
 
 ```sfn
-fn map<T, U>(items: Vec<T>, f: fn(T) -> U) -> Vec<U> {
-    let mut result = Vec.new();
-    for item in items {
-        result.push(f(item));
-    }
-    result
-}
+fn main() ![io] {
+    let numbers = [1, 2, 3, 4, 5];
 
-fn filter<T>(items: Vec<T>, pred: fn(&T) -> Bool) -> Vec<T> {
-    let mut result = Vec.new();
-    for item in items {
-        if pred(&item) {
-            result.push(item);
-        }
-    }
-    result
-}
+    let squares = numbers.map(fn(x) -> number { return x * x; });
+    let sum = squares.reduce(0, fn(acc, x) -> number { return acc + x; });
 
-fn find<T>(items: Vec<T>, pred: fn(&T) -> Bool) -> T? {
-    for item in items {
-        if pred(&item) {
-            return Some(item);
-        }
-    }
-    None
+    print("Sum of squares: {{sum}}"); // Outputs: 55
 }
 ```
 
-Usage:
+You can also pass a named function where a function value is expected:
 
 ```sfn
-let numbers = [1, 2, 3, 4, 5, 6];
-let doubled  = map(numbers, |n| n * 2);
-let evens    = filter(numbers, |n| n % 2 == 0);
-let first_gt3 = find(numbers, |n| *n > 3);
+fn double(x: number) -> number {
+    return x * 2;
+}
+
+fn apply(value: number, transformer: (number) -> number) -> number {
+    return transformer(value);
+}
+
+fn main() ![io] {
+    let result = apply(5, double);
+    print("Result: {{result}}");
+}
 ```
 
 ---
 
 ## Methods on Structs
 
-Methods are functions associated with a struct type. They are defined inline in the struct body or in a separate `impl` block. Methods access the struct instance through `self`.
+Methods are functions associated with a struct type. They are defined **inline inside the struct body** — Sailfin has no separate `impl` block today. Methods access the struct instance through a bare `self` first parameter.
 
-### Receiver Types
-
-| Receiver | Meaning |
-|----------|---------|
-| `self` | Takes ownership of the instance (consumes it) |
-| `&self` | Shared (read-only) borrow — can read fields, cannot mutate |
-| `&mut self` | Exclusive mutable borrow — can read and write fields |
+> Ownership receivers (`&self`, `&mut self`, `Affine<T>`, `Linear<T>`) are parsed but not enforced. The borrow/ownership story is deferred to post-1.0 and is on the [roadmap](/roadmap). Until then, all methods take `self` by value.
 
 ```sfn
 struct Counter {
-    mut value -> Int;
-}
+    value: number;
 
-impl Counter {
     fn new() -> Counter {
-        Counter { value: 0 }
+        return Counter { value: 0 };
     }
 
-    fn current(&self) -> Int {
-        self.value
+    fn current(self) -> number {
+        return self.value;
     }
 
-    fn increment(&mut self) {
-        self.value += 1;
+    fn increment(self) {
+        self.value = self.value + 1;
     }
 
-    fn add(&mut self, n: Int) {
-        self.value += n;
+    fn add(self, n: number) {
+        self.value = self.value + n;
     }
 
-    fn reset(&mut self) {
+    fn reset(self) {
         self.value = 0;
     }
 }
@@ -353,7 +331,7 @@ impl Counter {
 Usage:
 
 ```sfn
-let mut c = Counter.new();
+let c: Counter = Counter.new();
 c.increment();
 c.increment();
 c.add(10);
@@ -368,36 +346,34 @@ Methods with no receiver are called as `TypeName.method()`. The convention is to
 
 ```sfn
 struct Point {
-    x -> Float;
-    y -> Float;
-}
+    x: number;
+    y: number;
 
-impl Point {
-    fn new(x: Float, y: Float) -> Point {
-        Point { x: x, y: y }
+    fn new(x: number, y: number) -> Point {
+        return Point { x: x, y: y };
     }
 
     fn origin() -> Point {
-        Point { x: 0.0, y: 0.0 }
+        return Point { x: 0.0, y: 0.0 };
     }
 
-    fn distance(&self, other: &Point) -> Float {
+    fn distance(self, other: Point) -> number {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
-        (dx * dx + dy * dy).sqrt()
+        return math.sqrt(dx * dx + dy * dy);
     }
 
-    fn translate(&mut self, dx: Float, dy: Float) {
-        self.x += dx;
-        self.y += dy;
+    fn translate(self, dx: number, dy: number) {
+        self.x = self.x + dx;
+        self.y = self.y + dy;
     }
 }
 
-let mut p = Point.new(3.0, 4.0);
-let o = Point.origin();
-print(p.distance(&o));    // 5.0
+let p: Point = Point.new(3.0, 4.0);
+let o: Point = Point.origin();
+print(p.distance(o));    // 5.0
 p.translate(1.0, 0.0);
-print(p.distance(&o));    // ~5.099
+print(p.distance(o));    // ~5.099
 ```
 
 ### Methods with Effects
@@ -405,13 +381,16 @@ print(p.distance(&o));    // ~5.099
 Methods can declare effects just like free functions:
 
 ```sfn
-impl Config {
-    fn load(path: String) -> Config ![io] {
+struct Config {
+    host: string;
+    port: number;
+
+    fn load(path: string) -> Config ![io] {
         let raw = fs.read(path);
-        Config.parse(raw)
+        return Config.parse(raw);
     }
 
-    fn save(&self, path: String) ![io] {
+    fn save(self, path: string) ![io] {
         fs.write(path, self.serialize());
     }
 }
@@ -425,30 +404,35 @@ Functions are values in Sailfin. You can store them in variables, pass them as a
 
 ### Function Types
 
-The type of a function is written `fn(Param1, Param2, ...) -> ReturnType`:
+The type of a function is written `(Param1, Param2, ...) -> ReturnType`:
 
 ```sfn
-let op: fn(Int, Int) -> Int = add;
+let op: (number, number) -> number = add;
 let result = op(3, 4);    // 7
 ```
 
 ### Passing Functions as Arguments
 
 ```sfn
-fn apply_twice(f: fn(Int) -> Int, x: Int) -> Int {
-    f(f(x))
+fn apply_twice(f: (number) -> number, x: number) -> number {
+    return f(f(x));
 }
 
-fn double(n: Int) -> Int { n * 2 }
+fn double(n: number) -> number {
+    return n * 2;
+}
 
 let result = apply_twice(double, 3);    // double(double(3)) = 12
 ```
 
 ### Returning Functions
 
+> Closures that capture values from the enclosing scope are on the [roadmap](/roadmap). Today a lambda can reference values that are already in scope, but capturing mutable state across calls is not yet guaranteed. When closure capture ships, a curried adder looks like this:
+
 ```sfn
-fn make_adder(n: Int) -> fn(Int) -> Int {
-    |x| x + n
+// PLANNED — depends on closure capture
+fn make_adder(n: number) -> (number) -> number {
+    return fn(x: number) -> number { return x + n; };
 }
 
 let add5 = make_adder(5);
@@ -460,82 +444,68 @@ print(add5(20));    // 25
 
 ## Closures and Lambdas
 
-Closures are anonymous functions defined inline with `|params| body` syntax. They can capture bindings from the enclosing scope.
+Anonymous functions are written with the same `fn` keyword as named functions — there is no `|x| body` pipe-closure syntax in Sailfin. A lambda is simply an `fn` literal you can store in a variable, pass as an argument, or return from another function.
 
 ### Basic Syntax
 
 ```sfn
-let double = |x: Int| x * 2;
-let greet  = |name: String| "Hello, {{name}}!";
+let double = fn(x: number) -> number { return x * 2; };
+let greet  = fn(name: string) -> string { return "Hello, {{name}}!"; };
 
 print(double(5));         // 10
 print(greet("world"));    // "Hello, world!"
 ```
 
-For a multi-statement body, use a block:
+For a multi-statement body, use additional statements inside the block:
 
 ```sfn
-let process = |item: String| {
+let process = fn(item: string) -> string {
     let trimmed = item.trim();
     let upper = trimmed.to_upper();
-    "processed: {{upper}}"
+    return "processed: {{upper}}";
 };
 ```
 
-### Type Inference in Closures
-
-Parameter and return types are usually inferred from context:
+### Lambdas in map / filter / reduce
 
 ```sfn
 let numbers = [1, 2, 3, 4, 5];
 
-let doubled = numbers.map(|n| n * 2);          // n: Int inferred
-let evens   = numbers.filter(|n| n % 2 == 0);  // Bool return inferred
-let sum     = numbers.reduce(0, |acc, n| acc + n);
+let doubled = numbers.map(fn(n) -> number { return n * 2; });
+let evens   = numbers.filter(fn(n) -> boolean { return n % 2 == 0; });
+let sum     = numbers.reduce(0, fn(acc, n) -> number { return acc + n; });
 ```
 
 ### Capturing from Outer Scope
 
-Closures capture variables from the enclosing scope. Captured bindings follow the same ownership rules as other uses — if the closure takes ownership, the binding is moved:
+> Closures that capture enclosing variables are on the [roadmap](/roadmap). Today a lambda can reference values that are already in scope during a single synchronous call (for example, inside `map`/`filter`/`reduce`), but storing a closure that keeps mutable state across calls is not yet guaranteed.
+
+For mutation across iterations, use an explicit loop rather than a closure:
 
 ```sfn
-let prefix = ">>>";
-
-let annotate = |line: String| "{{prefix}} {{line}}";
-
-let lines = ["one", "two", "three"];
-let annotated = lines.map(annotate);
-```
-
-Capturing a mutable binding requires care — only one closure may hold a mutable reference at a time:
-
-```sfn
-let mut total = 0;
+let mut total: number = 0;
 
 for n in numbers {
-    total += n;    // direct mutation — no closure needed here
+    total = total + n;
 }
 
 print(total);
 ```
 
-### Closures in Sorting and Transformations
+### Lambdas in Sorting and Transformations
 
 ```sfn
-let mut people = [
+let people = [
     Person { name: "Carol", age: 31 },
     Person { name: "Alice", age: 25 },
     Person { name: "Bob",   age: 28 },
 ];
 
 // Sort by age
-people.sort_by(|a, b| a.age - b.age);
-
-// Sort by name
-people.sort_by(|a, b| a.name.compare(&b.name));
+people.sort_by(fn(a, b) -> number { return a.age - b.age; });
 
 // Extract names
-let names = people.map(|p| p.name);
+let names = people.map(fn(p) -> string { return p.name; });
 ```
 
 ---
@@ -547,16 +517,18 @@ Sailfin functions can call themselves. The compiler does not automatically optim
 ### Simple Recursion
 
 ```sfn
-fn factorial(n: Int) -> Int {
-    if n <= 1 { 1 }
-    else { n * factorial(n - 1) }
+fn factorial(n: number) -> number {
+    if n <= 1 {
+        return 1;
+    }
+    return n * factorial(n - 1);
 }
 
-fn fibonacci(n: Int) -> Int {
+fn fibonacci(n: number) -> number {
     match n {
-        0 => 0,
-        1 => 1,
-        _ => fibonacci(n - 1) + fibonacci(n - 2),
+        0: return 0,
+        1: return 1,
+        _: return fibonacci(n - 1) + fibonacci(n - 2),
     }
 }
 ```
@@ -566,34 +538,42 @@ fn fibonacci(n: Int) -> Int {
 Two functions can call each other as long as both are declared before the call site, or forward declarations are available:
 
 ```sfn
-fn is_even(n: Int) -> Bool {
-    if n == 0 { true } else { is_odd(n - 1) }
+fn is_even(n: number) -> boolean {
+    if n == 0 {
+        return true;
+    }
+    return is_odd(n - 1);
 }
 
-fn is_odd(n: Int) -> Bool {
-    if n == 0 { false } else { is_even(n - 1) }
+fn is_odd(n: number) -> boolean {
+    if n == 0 {
+        return false;
+    }
+    return is_even(n - 1);
 }
 ```
 
 ### Recursive Data Structures
 
-Recursion is natural for tree-shaped data:
+Recursion is natural for tree-shaped data. Self-referential fields use the nullable type operator `T?`:
 
 ```sfn
-enum Tree<T> {
-    Leaf(T),
-    Node(T, Box<Tree<T>>, Box<Tree<T>>),
+struct TreeNode {
+    value: number;
+    left: TreeNode?;
+    right: TreeNode?;
 }
 
-fn depth<T>(tree: &Tree<T>) -> Int {
-    match tree {
-        Leaf(_)           => 1,
-        Node(_, l, r)     => {
-            let ld = depth(l);
-            let rd = depth(r);
-            1 + if ld > rd { ld } else { rd }
-        },
+fn depth(node: TreeNode?) -> number {
+    if node == null {
+        return 0;
     }
+    let ld = depth(node.left);
+    let rd = depth(node.right);
+    if ld > rd {
+        return 1 + ld;
+    }
+    return 1 + rd;
 }
 ```
 
@@ -605,13 +585,13 @@ Decorators apply metadata or behavior modifications to functions. They are writt
 
 ```sfn
 @logExecution
-fn compute(input: Vec<Float>) -> Float ![io] {
-    input.reduce(0.0, |acc, x| acc + x)
+fn compute(input: number[]) -> number ![io] {
+    return input.reduce(0.0, fn(acc, x) -> number { return acc + x; });
 }
 
 @deprecated("Use compute_v2 instead")
-fn compute_legacy(input: Vec<Float>) -> Float {
-    input.reduce(0.0, |acc, x| acc + x)
+fn compute_legacy(input: number[]) -> number {
+    return input.reduce(0.0, fn(acc, x) -> number { return acc + x; });
 }
 ```
 
@@ -633,26 +613,28 @@ Custom decorators are planned for a future release as part of the macro system.
 Declare an async function with `async fn`. Async functions return a `Future<T>` — a value that represents a computation that will complete later.
 
 ```sfn
-async fn fetch_user(id: String) -> User ![net] {
+async fn fetch_user(id: string) -> User ![net] {
     let resp = http.get("https://api.example.com/users/{{id}}");
-    User.from_json(resp.body)
+    return User.from_json(resp.body);
 }
 ```
 
-> **Note: `await` is not yet implemented.** The `async fn` syntax is parsed and included in the IR, but the `await` keyword and the async executor are planned features. Do not use `await` in current code — it will produce a compile error.
-
-When `await` lands, the calling pattern will be:
+`async fn` and `await` are both shipped. Awaiting a future unwraps its value:
 
 ```sfn
-// PLANNED — not yet available
-async fn load_dashboard(user_id: String) -> Dashboard ![net] {
-    let user    = await fetch_user(user_id);
-    let orders  = await fetch_orders(user_id);
-    Dashboard { user: user, orders: orders }
+async fn load_dashboard(user_id: string) -> Dashboard ![net] {
+    let user_future   = fetch_user(user_id);
+    let orders_future = fetch_orders(user_id);
+
+    let user   = await user_future;
+    let orders = await orders_future;
+    return Dashboard { user: user, orders: orders };
 }
 ```
 
-For now, concurrent I/O is handled through synchronous calls with the `net` effect. See the [Concurrency](/docs/learn/concurrency) page for the current state of async and the `routine` primitive (also planned).
+Structured concurrency primitives such as `routine`, `spawn`, and `channel`
+are on the [roadmap](/roadmap). See the [Concurrency](/docs/learn/concurrency)
+page for the current state and the `routine` keyword preview.
 
 ---
 
@@ -663,32 +645,37 @@ Sailfin does not support traditional overloading — you cannot define two funct
 **Use distinct names:**
 
 ```sfn
-fn parse_int(s: String) -> Int { ... }
-fn parse_float(s: String) -> Float { ... }
-fn parse_bool(s: String) -> Bool { ... }
+fn parse_int(s: string) -> number { ... }
+fn parse_float(s: string) -> number { ... }
+fn parse_bool(s: string) -> boolean { ... }
 ```
 
 **Use generics when behavior is truly uniform across types:**
 
 ```sfn
-fn parse<T: Parseable>(s: String) -> T {
-    T.from_string(s)
+// PLANNED — generic bounds are on the /roadmap.
+// Today, write a monomorphic helper per type, or accept the value by concrete type.
+fn parse<T: Parseable>(s: string) -> T {
+    return T.from_string(s);
 }
 ```
 
-**Use interface methods when types should define their own behavior:**
+**Use interface methods when types should define their own behavior.** Interfaces are implemented inline on structs with `implements` — there is no separate `impl Trait for Type` block:
 
 ```sfn
 interface FromString {
-    fn from_string(s: String) -> Self;
+    fn from_string(s: string) -> FromString;
 }
 
-impl FromString for Int {
-    fn from_string(s: String) -> Int { Int.parse(s) }
-}
+struct Version implements FromString {
+    major: number;
+    minor: number;
 
-impl FromString for Float {
-    fn from_string(s: String) -> Float { Float.parse(s) }
+    fn from_string(s: string) -> Version {
+        // parse "major.minor"
+        let parts = s.split(".");
+        return Version { major: number.parse(parts[0]), minor: number.parse(parts[1]) };
+    }
 }
 ```
 
@@ -697,7 +684,7 @@ impl FromString for Float {
 Sailfin supports named arguments at the call site for any parameter. This is especially useful for boolean flags or when passing the same type multiple times:
 
 ```sfn
-fn create_user(name: String, role: String, active: Bool) -> User { ... }
+fn create_user(name: string, role: string, active: boolean) -> User { ... }
 
 // Without named args — the reader must count parameters
 let u1 = create_user("Alice", "admin", true);
@@ -714,50 +701,47 @@ This example pulls together effects, generics, methods, closures, and pattern ma
 
 ```sfn
 struct Pipeline<T> {
-    steps -> Vec<fn(T) -> T>;
-}
+    steps: ((T) -> T)[];
 
-impl Pipeline<T> {
     fn new() -> Pipeline<T> {
-        Pipeline { steps: Vec.new() }
+        return Pipeline<T> { steps: [] };
     }
 
-    fn add_step(&mut self, step: fn(T) -> T) {
-        self.steps.push(step);
+    fn add_step(self, step: (T) -> T) {
+        self.steps.append(step);
     }
 
-    fn run(&self, input: T) -> T {
-        self.steps.reduce(input, |acc, step| step(acc))
+    fn run(self, input: T) -> T {
+        let mut acc: T = input;
+        for step in self.steps {
+            acc = step(acc);
+        }
+        return acc;
     }
 }
 
-fn normalize(s: String) -> String {
-    s.trim().to_lower()
+fn normalize(s: string) -> string {
+    return s.trim().to_lower();
 }
 
-fn remove_punctuation(s: String) -> String {
-    s.filter_chars(|c| c.is_alphanumeric() || c == ' ')
+fn collapse_spaces(s: string) -> string {
+    return s.split(" ").filter(fn(w) -> boolean { return w.length > 0; }).join(" ");
 }
 
-fn collapse_spaces(s: String) -> String {
-    s.split(" ").filter(|w| w.len() > 0).join(" ")
-}
-
-fn clean_text(input: String) -> String {
-    let mut pipe: Pipeline<String> = Pipeline.new();
+fn clean_text(input: string) -> string {
+    let pipe: Pipeline<string> = Pipeline.new();
     pipe.add_step(normalize);
-    pipe.add_step(remove_punctuation);
     pipe.add_step(collapse_spaces);
-    pipe.run(input)
+    return pipe.run(input);
 }
 
 test "text cleaning pipeline" {
-    let result = clean_text("  Hello, World!!!  ");
-    assert(result == "hello world");
+    let result = clean_text("  Hello   World  ");
+    assert result == "hello world";
 }
 
 fn main() ![io] {
-    let raw = "  The Quick Brown Fox...  ";
+    let raw = "  The Quick Brown Fox  ";
     print(clean_text(raw));    // "the quick brown fox"
 }
 ```
@@ -770,4 +754,4 @@ fn main() ![io] {
 - [The Effect System](/docs/learn/effects) — Deep dive into capability-based security and effect inference
 - [Error Handling](/docs/learn/error-handling) — `try/catch`, result types, and propagation
 - [Testing](/docs/learn/testing) — Writing unit and integration tests
-- [Ownership & Borrowing](/docs/learn/ownership) — Move semantics, borrows, `Affine<T>`, and `Linear<T>`
+- [Ownership & Borrowing](/docs/learn/ownership) — Move semantics, borrows, `Affine<T>`, and `Linear<T>` (parsed today, enforcement on the [roadmap](/roadmap))

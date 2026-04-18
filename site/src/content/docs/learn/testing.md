@@ -12,12 +12,12 @@ This design reflects a core belief: the closer tests live to the code they verif
 ## Your First Test
 
 ```sfn
-fn add(a: Int, b: Int) -> Int {
+fn add(a: number, b: number) -> number {
     return a + b;
 }
 
 test "add returns the sum of two integers" {
-    assert(add(2, 3) == 5);
+    assert add(2, 3) == 5;
 }
 ```
 
@@ -57,8 +57,8 @@ Test names are documentation. A reader scanning a test file should be able to un
 
 ```sfn
 // Good — describes observable behavior
-test "parse_int returns Err on empty string" { ... }
-test "Vec.push increases length by one" { ... }
+test "parse_int returns error variant on empty string" { ... }
+test "array push increases length by one" { ... }
 test "Config.load reads from XDG_CONFIG_HOME when set" { ... }
 
 // Avoid — too vague
@@ -74,51 +74,51 @@ test "edge case" { ... }
 ```sfn
 test "string length" {
     let s = "hello";
-    assert(s.length == 5);
+    assert s.length == 5;
 }
 ```
 
-Most assertions compare two values with `==`. When the assertion fails, Sailfin prints both sides so you can see the mismatch without adding debug output yourself.
+`assert` is a statement, not a function call — there are no parentheses around the expression. When the assertion fails, Sailfin prints both sides of the comparison so you can see the mismatch without adding debug output yourself.
 
 You can include multiple assertions in one test:
 
 ```sfn
 test "normalise_email lowercases and trims" {
     let result = normalise_email("  Alice@Example.COM  ");
-    assert(result == "alice@example.com");
-    assert(result.length == 17);
+    assert result == "alice@example.com";
+    assert result.length == 17;
 }
 ```
 
 When there are multiple assertions, execution stops at the first failure. If you want to verify several independent properties, consider separate tests — each will give a clear, isolated failure message.
 
-> **Planned**: richer assertion helpers such as `assert_eq`, `assert_ne`, `assert_contains`, and `assert_throws` are on the roadmap. For now, express these as boolean expressions passed to `assert`.
+> **Coming in 1.0:** Richer assertion helpers such as `assert_eq`, `assert_ne`, `assert_contains`, and `assert_throws` are on the [roadmap](/roadmap). For now, express these as boolean expressions following `assert`.
 
 ## Pure Computation Tests
 
 Tests for pure functions need no effects. These are the easiest to write, the fastest to run, and the most valuable to have.
 
 ```sfn
-fn clamp(value: Int, min: Int, max: Int) -> Int {
+fn clamp(value: number, min: number, max: number) -> number {
     if value < min { return min; }
     if value > max { return max; }
     return value;
 }
 
 test "clamp returns value when within range" {
-    assert(clamp(5, 0, 10) == 5);
+    assert clamp(5, 0, 10) == 5;
 }
 
 test "clamp returns min when value is below range" {
-    assert(clamp(-3, 0, 10) == 0);
+    assert clamp(-3, 0, 10) == 0;
 }
 
 test "clamp returns max when value is above range" {
-    assert(clamp(99, 0, 10) == 10);
+    assert clamp(99, 0, 10) == 10;
 }
 
 test "clamp handles equal min and max" {
-    assert(clamp(7, 5, 5) == 5);
+    assert clamp(7, 5, 5) == 5;
 }
 ```
 
@@ -129,12 +129,12 @@ Tests declare effects exactly like functions do. This is intentional: the compil
 ```sfn
 test "config file loads successfully" ![io] {
     let content = fs.read("tests/fixtures/sample.toml");
-    assert(content.length > 0);
+    assert content.length > 0;
 }
 
 test "HTTP endpoint returns 200" ![io, net] {
     let response = http.get("https://httpbin.org/get");
-    assert(response.status == 200);
+    assert response.status == 200;
 }
 ```
 
@@ -153,17 +153,17 @@ For small modules, put tests in the same file as the code they test. This is the
 ```sfn
 // src/math.sfn
 
-fn factorial(n: Int) -> Int {
+fn factorial(n: number) -> number {
     if n <= 1 { return 1; }
     return n * factorial(n - 1);
 }
 
 test "factorial of zero is one" {
-    assert(factorial(0) == 1);
+    assert factorial(0) == 1;
 }
 
 test "factorial of five is 120" {
-    assert(factorial(5) == 120);
+    assert factorial(5) == 120;
 }
 ```
 
@@ -267,13 +267,17 @@ When you have many similar cases to verify, use an array of test-case structs an
 
 ```sfn
 struct ParseCase {
-    input -> String;
-    expected -> Int;
-    should_fail -> Bool;
+    input: string;
+    expected: number;
+    should_fail: boolean;
+}
+
+struct ParseError {
+    message: string;
 }
 
 test "parse_int handles all cases" {
-    let cases: Array<ParseCase> = [
+    let cases: ParseCase[] = [
         ParseCase { input: "0",    expected: 0,  should_fail: false },
         ParseCase { input: "42",   expected: 42, should_fail: false },
         ParseCase { input: "-7",   expected: -7, should_fail: false },
@@ -283,12 +287,13 @@ test "parse_int handles all cases" {
     ];
 
     for c in cases {
-        let result = parse_int(c.input);
-        if c.should_fail {
-            assert(result.is_err());
-        } else {
-            assert(result.is_ok());
-            assert(result.unwrap() == c.expected);
+        let result = parse_int(c.input);   // returns number | ParseError
+        match result {
+            ParseError { message } => assert c.should_fail,
+            _ => {
+                assert !c.should_fail;
+                assert result == c.expected;
+            },
         }
     }
 }
@@ -299,36 +304,43 @@ test "parse_int handles all cases" {
 Always test the boundaries of your domain. For a function that works on collections, test the empty case, the one-element case, and a representative multi-element case.
 
 ```sfn
-fn median(values: Array<Float>) -> Float { ... }
+fn median(values: number[]) -> number { ... }
 
 test "median of empty array returns 0.0" {
-    assert(median([]) == 0.0);
+    assert median([]) == 0.0;
 }
 
 test "median of single element returns that element" {
-    assert(median([7.0]) == 7.0);
+    assert median([7.0]) == 7.0;
 }
 
 test "median of even-length array averages middle two" {
-    assert(median([1.0, 2.0, 3.0, 4.0]) == 2.5);
+    assert median([1.0, 2.0, 3.0, 4.0]) == 2.5;
 }
 
 test "median of odd-length array returns middle element" {
-    assert(median([1.0, 3.0, 5.0]) == 3.0);
+    assert median([1.0, 3.0, 5.0]) == 3.0;
 }
 ```
 
 ### Testing with enums
 
-When a function returns an enum, match against it rather than using `.unwrap()` in tests. This gives you a clearer failure message.
+When a function returns a tagged enum, match against it directly. This gives you a clearer failure message than unwrapping.
 
 ```sfn
+enum Direction {
+    North,
+    South,
+    East,
+    West,
+}
+
 test "parse_direction recognises north" {
-    let result = parse_direction("north");
+    let result = parse_direction("north");   // returns Direction | ParseError
     match result {
-        Ok(Direction.North) => { /* pass */ },
-        Ok(other) => assert(false),  // wrong variant
-        Err(e) => assert(false),     // unexpected error
+        Direction.North => { /* pass */ },
+        ParseError { message } => assert false,   // unexpected error
+        _ => assert false,                        // wrong variant
     }
 }
 ```
@@ -345,7 +357,7 @@ test "round-trip: write then read returns original content" ![io] {
     try {
         fs.write(path, original);
         let recovered = fs.read(path);
-        assert(recovered == original);
+        assert recovered == original;
     } finally {
         fs.delete(path);
     }
@@ -362,7 +374,7 @@ Put static test files in a `tests/fixtures/` directory and read them in tests th
 test "config parser handles multi-section TOML" ![io] {
     let source = fs.read("tests/fixtures/multi_section.toml");
     let config = Config.parse(source);
-    assert(config.sections.length == 3);
+    assert config.sections.length == 3;
 }
 ```
 
@@ -373,20 +385,20 @@ Keep fixtures small and purpose-built. A fixture that exists to test one behavio
 Sailfin does not have `beforeEach`/`afterEach` hooks. Instead, extract setup into a helper function and call it at the top of each test that needs it. Use `try/finally` for teardown:
 
 ```sfn
-fn create_temp_dir() -> String ![io] {
+fn create_temp_dir() -> string ![io, rand] {
     let path = "tests/temp/{{rand.uuid()}}";
     fs.mkdir(path);
     return path;
 }
 
-test "compiler emits expected IR" ![io] {
+test "compiler emits expected IR" ![io, rand] {
     let dir = create_temp_dir();
     try {
         let source = "fn main() ![io] { print(\"hi\"); }";
         let out_path = "{{dir}}/out.sfn-asm";
         compile_to_file(source, out_path);
         let ir = fs.read(out_path);
-        assert(ir.contains("define void @main"));
+        assert ir.contains("define void @main");
     } finally {
         fs.remove_all(dir);
     }
@@ -402,44 +414,51 @@ test "divide throws on zero divisor" {
     let threw = false;
     try {
         let _ = divide(10, 0);
-    } catch (e) {
+    } catch (err) {
         threw = true;
     }
-    assert(threw);
+    assert threw;
 }
 ```
 
-To verify that the _right_ exception is thrown, inspect the caught error:
+To verify that the _right_ kind of error is thrown, dispatch on the error's shape inside the `catch` block using `match`:
 
 ```sfn
 test "parse_config throws ParseError on malformed input" {
     let got_parse_error = false;
     try {
         let _ = parse_config("{{ not valid toml }}}");
-    } catch (e: ParseError) {
-        got_parse_error = true;
-    } catch (e) {
-        // A different exception type — fail the test
-        assert(false);
+    } catch (err) {
+        match err {
+            ParseError { message } => { got_parse_error = true; },
+            _ => assert false,   // unexpected error shape
+        }
     }
-    assert(got_parse_error);
+    assert got_parse_error;
 }
 ```
 
-## Testing with `Result` Types
+> **Coming in 1.0:** Typed `catch` clauses — `catch (err: ParseError) { ... }` — are on the [roadmap](/roadmap).
 
-Functions that return `Result<T, E>` don't throw — they return an error value. Test these by inspecting the result:
+## Testing Union Return Types
+
+Functions that return `T | ErrorType` don't throw — they return an error value in the union. Test these by matching against the result:
 
 ```sfn
-test "parse_int returns Ok for valid input" {
+test "parse_int returns success for valid input" {
     let result = parse_int("42");
-    assert(result.is_ok());
-    assert(result.unwrap() == 42);
+    match result {
+        ParseError { message } => assert false,
+        _ => assert result == 42,
+    }
 }
 
-test "parse_int returns Err for non-numeric input" {
+test "parse_int returns error for non-numeric input" {
     let result = parse_int("not a number");
-    assert(result.is_err());
+    match result {
+        ParseError { message } => assert message.contains("not a number"),
+        _ => assert false,
+    }
 }
 ```
 
@@ -450,10 +469,10 @@ test "parse_int returns Err for non-numeric input" {
 When model execution lands, prompt-based functions will require `![model]` effects and will be testable using a `seed` parameter for reproducibility:
 
 ```sfn
-// Planned syntax — not yet executable
+// Planned execution — parses today; model invocation lands post-1.0
 test "summarize returns a short string" ![model] {
     let result = summarize("A very long article about the history of programming languages...");
-    assert(result.length < 200);
+    assert result.length < 200;
 }
 ```
 
@@ -482,20 +501,20 @@ For now, use the discipline of writing tests first to drive coverage naturally.
 ```sfn
 // Prefer: one behavior per test
 test "trim removes leading whitespace" {
-    assert(trim("  hello") == "hello");
+    assert trim("  hello") == "hello";
 }
 
 test "trim removes trailing whitespace" {
-    assert(trim("hello  ") == "hello");
+    assert trim("hello  ") == "hello";
 }
 
 // Avoid: too many behaviors in one test
 test "trim works" {
-    assert(trim("  hello") == "hello");
-    assert(trim("hello  ") == "hello");
-    assert(trim("  hello  ") == "hello");
-    assert(trim("") == "");
-    assert(trim("no spaces") == "no spaces");
+    assert trim("  hello") == "hello";
+    assert trim("hello  ") == "hello";
+    assert trim("  hello  ") == "hello";
+    assert trim("") == "";
+    assert trim("no spaces") == "no spaces";
 }
 ```
 

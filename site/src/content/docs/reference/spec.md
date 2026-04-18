@@ -49,6 +49,8 @@ Time literals (`1s`, `150ms`) are **not yet parsed** — use numeric millisecond
 fn fetch(url: string) -> string ![io, net] { ... }
 ```
 
+Canonical effects: `io`, `net`, `model`, `gpu`, `rand`, `clock`, plus `unsafe`, `read`, `mut`.
+
 ### §2 Modules and Imports
 
 ```sfn
@@ -73,20 +75,20 @@ Modules may re-export items from other modules. Specifiers support aliasing with
 
 ```sfn
 let name = "Sailfin";             // immutable, type inferred
-let x: int = 42;                  // immutable, explicit type
-let x -> int = 42;                // alternative annotation syntax
+let x: number = 42;               // immutable, explicit type
 let mut counter = 0;              // mutable
 counter = counter + 1;            // OK
 // name = "Other";                // ERROR: immutable binding
 ```
 
 Type annotations are optional; the compiler infers types where possible.
-Uninitialized bindings default to `null`.
+Uninitialized bindings default to `null`. Variables, parameters, and struct
+fields use `:` for type annotations; only function return types use `->`.
 
 #### §3.2 Functions
 
 ```sfn
-fn add(x: int, y: int) -> int {
+fn add(x: number, y: number) -> number {
     return x + y;
 }
 
@@ -107,35 +109,35 @@ async fn fetch(url: string) -> string ![net] {
 - Effect annotations `![...]` come after the parameter list and optional return type
 - `async fn` records the `is_async` flag; `await` is not yet parsed (Part B)
 - Decorators `@name` are parsed as metadata (no semantic enforcement today)
-- Default parameter values: `fn f(x: int = 0)`
-- Generic functions: `fn first<T>(items: Vec<T>) -> T?`
+- Default parameter values: `fn f(x: number = 0)`
+- Generic functions: `fn first<T>(items: T[]) -> T?`
 
 #### §3.3 Structs
 
 ```sfn
 struct Point {
-    x -> Float;
-    mut y -> Float;
+    x: number;
+    mut y: number;
 }
 
 struct User implements Greeter {
-    id   -> int;
-    name -> string;
+    id: number;
+    name: string;
 
     fn greet(self) -> string {
         return "Hi, {{ self.name }}!";
     }
 
-    fn rename(&mut self, new_name: string) {
+    fn rename(self, new_name: string) {
         self.name = new_name;
     }
 }
 ```
 
 - Fields default to immutable; `mut` allows reassignment
-- Both `name -> Type` and `name: Type` syntax are accepted
-- Methods are defined with `fn` inside the struct body
-- The `implements` clause lists interfaces the struct satisfies
+- Fields end with `;` and use `:` for the type annotation
+- Methods are defined with `fn` inside the struct body; the first parameter is bare `self`
+- The `implements` clause lists interfaces the struct satisfies (comma-separated for multiple)
 - Struct literals: `Point { x: 1.0, y: 2.0 }`
 
 #### §3.4 Enums
@@ -144,11 +146,14 @@ struct User implements Greeter {
 enum Direction { North, South, East, West }
 
 enum Response {
-    Ok { value -> string },
+    Ok { value: string },
     NotFound,
-    Error { code -> int, message -> string },
+    Error { code: number, message: string },
 }
 ```
+
+Variant payloads use named fields with `:` type annotations. Construct variants as
+`Response.Ok { value: "hi" }` and destructure them with `match`.
 
 Variants may be unit (no payload) or carry named fields. Enum values are
 matched exhaustively with `match`.
@@ -161,8 +166,8 @@ interface Serializable {
 }
 
 interface Container<T> {
-    fn get(self, index: int) -> T?;
-    fn len(self) -> int;
+    fn get(self, index: number) -> T?;
+    fn len(self) -> number;
 }
 ```
 
@@ -173,9 +178,12 @@ by implementing all its methods and declaring `implements InterfaceName`.
 
 ```sfn
 type UserId = string;
-type Result<T> = Response | T;
-type Matrix = Vec<Vec<Float>>;
+type MaybeResponse<T> = Response | T;
+type Row = number[];
 ```
+
+> `Result<T, E>` and function type aliases are on the [roadmap](/roadmap);
+> use union return types (`T | MyError`) and plain function signatures today.
 
 #### §3.7 Model Declarations
 
@@ -220,10 +228,10 @@ Prompt blocks execute in source order. Canonical channel names: `system`, `user`
 
 #### §3.9 Pipeline Declarations
 
-> **Status**: Parsed as plain functions. The `|>` operator is not yet implemented.
+> **Status**: Parsed as plain functions. The `|>` operator is not yet implemented (see [roadmap](/roadmap)).
 
 ```sfn
-pipeline process_docs(docs: Vec<string>) ![io] {
+pipeline process_docs(docs: string[]) -> void ![io] {
     // Use function calls until |> is implemented
     let chunked = chunk(docs);
     let embedded = embed(chunked);
@@ -245,12 +253,12 @@ tool FetchUser(id: string) -> User ![net] {
 
 ```sfn
 test "basic arithmetic" {
-    assert(2 + 2 == 4);
+    assert 2 + 2 == 4;
 }
 
 test "reads a file" ![io] {
     let content = fs.read("fixtures/sample.txt");
-    assert(content.length > 0);
+    assert content.length > 0;
 }
 ```
 
@@ -275,8 +283,11 @@ for item in items {
     process(item);
 }
 
-// While loop
-while queue.len() > 0 {
+// Loop with break condition (Sailfin has no `while` — see Part B)
+loop {
+    if queue.length == 0 {
+        break;
+    }
     handle(queue.pop());
 }
 
@@ -295,13 +306,13 @@ match status {
     _         => print.err("Unknown: {{ status }}"),
 }
 
-// Try / catch / finally
+// Try / catch / finally (err is bare, no type annotation)
 try {
     let data = fs.read(path);
     process(data);
-} catch (e: IoError) {
-    print.err("Read failed: {{ e.message }}");
-    throw e;
+} catch (err) {
+    print.err("Read failed: {{ err }}");
+    throw err;
 } finally {
     cleanup();
 }
@@ -340,15 +351,20 @@ Operator precedence: unary > multiplicative > additive > comparison > equality >
 | `null` | Absence of a value | — |
 
 **Integer and float types** (for FFI and low-level use):
-`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize`, `isize`, `f32`, `f64`
+`i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize`, `f32`, `f64`
 
-**Composite types**: structs, enums, `Vec<T>`, `Map<K,V>`, arrays
+> `int` (i64) and `float` (f64) will replace the single `number` type in a
+> future release — tracked on the [roadmap](/roadmap).
+
+**Composite types**: structs, enums, arrays (`T[]`)
 
 **Optional types**: `T?` — the value is `T` or `null`
 
 **Union types**: `A | B` — the value is either type; matched with `match`
 
-**Generic types**: `Vec<T>`, `Pair<A,B>`, `Result<T, E>`
+**Generic types**: user-declared generics (`fn first<T>(items: T[]) -> T?`).
+`Result<T, E>` is on the [roadmap](/roadmap); use union return types
+(`T | MyError`) today.
 
 **Wrapper types** (syntax accepted; enforcement planned for 1.0+):
 
@@ -373,10 +389,10 @@ Operator precedence: unary > multiplicative > additive > comparison > equality >
 Every function that performs side effects must declare them with `![...]`:
 
 ```sfn
-fn pure(x: int) -> int { x * 2 }           // no effects — guaranteed pure
-fn read_file(path: string) ![io] { ... }    // requires io capability
-fn fetch(url: string) ![net] { ... }        // requires net capability
-fn analyze(text: string) ![io, model] { }  // multiple effects
+fn pure(x: number) -> number { return x * 2; } // no effects — guaranteed pure
+fn read_file(path: string) ![io] { ... }       // requires io capability
+fn fetch(url: string) ![net] { ... }           // requires net capability
+fn analyze(text: string) ![io, model] { }      // multiple effects
 ```
 
 **Canonical effects**:
@@ -461,15 +477,15 @@ See [Standard Library](/docs/reference/standard-library) for full signatures.
 
 ```sfn
 test "name" ![effects] {
-    assert(expression);
-    assert(actual == expected);
+    assert expression;
+    assert actual == expected;
 }
 ```
 
 - `test` is a first-class keyword — no external framework needed
 - Effects are declared just like on functions
 - Test files are named `*_test.sfn` and discovered automatically by `sfn test`
-- `assert(expr)` fails with the expression text on failure
+- `assert expr;` is a statement form (no parens) and fails with the expression text
 
 ---
 
@@ -481,16 +497,18 @@ are tracked as 1.0 or post-1.0 milestones on the [roadmap](/roadmap).
 ### Concurrency
 
 ```sfn
-// All of these are planned — not yet parsed by the compiler
+// `routine { }` and channels parse today; `await` does not.
+
+import { Channel, channel } from "sync";
 
 async fn fetch(url: string) -> string ![net] {
     return await http.get(url);   // await not yet implemented
 }
 
-fn process_batch(items: Vec<Item>) ![io] {
-    let messages: Channel<string> = channel(capacity: 32);
+fn process_batch(items: Item[]) ![io] {
+    let messages: Channel<string> = channel();
 
-    routine {                      // routine not yet implemented
+    routine {
         messages.send("hello");
     }
 
@@ -498,7 +516,8 @@ fn process_batch(items: Vec<Item>) ![io] {
 }
 ```
 
-**Planned for 1.0**: `await`, `routine { }`, `channel()`, `spawn`.
+**Planned for 1.0**: `await`, full `routine` runtime, channel runtime, `spawn`.
+See the [roadmap](/roadmap).
 
 ### Model Execution
 
@@ -521,7 +540,7 @@ fn summarize(text: string) -> Summary ![io, model] {
 ```sfn
 // |> is not yet implemented; use function calls
 
-pipeline index_corpus(docs: Vec<string>) ![io, gpu] {
+pipeline index_corpus(docs: string[]) -> void ![io, gpu] {
     docs
         |> chunk(by: "semantic", target_tokens: 512)   // planned
         |> embed(with: "e5-large")

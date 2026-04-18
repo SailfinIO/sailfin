@@ -10,9 +10,11 @@ Every program encounters things that go wrong. A file that isn't there. An API t
 Sailfin gives you two complementary tools for errors, suited to different situations:
 
 - **Exceptions** (`throw`, `try/catch/finally`) — for conditions that are genuinely exceptional, where the calling code can't reasonably proceed and control needs to unwind to a handler somewhere up the call stack.
-- **Result values** — for expected failures, where the calling code should inspect the outcome and decide what to do. Representing errors as values is explicit: the compiler enforces that callers acknowledge them.
+- **Union return types** — for expected failures, where the calling code should inspect the outcome and decide what to do. A function that can succeed or return an error struct declares a union return type like `number | DivisionError`, and callers use `match` to handle each variant.
 
 Understanding which tool to reach for in a given situation makes error handling code both safer and cleaner.
+
+> **Coming in 1.0:** A built-in `Result<T, E>` type plus a `?` operator for automatic error propagation are on the [roadmap](/roadmap). Until they ship, use union return types (shown throughout this page) for expected failures.
 
 ---
 
@@ -24,7 +26,7 @@ Before the mechanics, a useful distinction:
 
 **Exceptional conditions** are outcomes that indicate something is wrong with the program itself, or with a system the program depends on. An invariant that shouldn't be violatable was violated. A service that is always up is down. A file that must exist doesn't. These warrant unwinding to a recovery point (or exiting cleanly with an error message).
 
-Sailfin's `throw`/`try/catch` is designed for the second category. The `Result` pattern is designed for the first. In practice, many programs use both.
+Sailfin's `throw`/`try/catch` is designed for the second category. Union return types are designed for the first. In practice, many programs use both.
 
 ---
 
@@ -33,16 +35,13 @@ Sailfin's `throw`/`try/catch` is designed for the second category. The `Result` 
 The basic structure mirrors familiar syntax in other languages, with Sailfin specifics:
 
 ```sfn
-fn load_config(path: String) -> Config ![io] {
+fn load_config(path: string) -> Config ![io] {
     try {
         let content = fs.read(path);
         return Config.parse(content);
-    } catch (e: ParseError) {
-        print.err("Config file has invalid syntax: {{e.message}}");
-        throw e;
-    } catch (e: IoError) {
-        print.err("Cannot read config at {{path}}: {{e.message}}");
-        throw e;
+    } catch (err) {
+        print.err("Could not load config at {{path}}: {{err}}");
+        throw err;
     } finally {
         print("Config load attempt completed for {{path}}");
     }
@@ -50,40 +49,37 @@ fn load_config(path: String) -> Config ![io] {
 ```
 
 - The `try` block contains the code that might fail.
-- Each `catch` clause names a variable and optionally a type. Multiple `catch` clauses are checked in order; the first matching type wins.
-- `finally` always runs, whether the `try` block succeeded, threw, or a `catch` clause threw. Use it for cleanup that must happen regardless of outcome.
+- The `catch` clause names a binding for the thrown value. Sailfin's `catch` does not currently take a type annotation — dispatch on the error's shape inside the block, typically with `match` against a tagged enum.
+- `finally` always runs, whether the `try` block succeeded, threw, or the `catch` clause threw. Use it for cleanup that must happen regardless of outcome.
 
-### Catching without a type annotation
+### Dispatching on error kind
 
-You can catch any error by omitting the type:
+Because `catch` captures the error bare, inspect it inside the block using `match` or struct/enum pattern matching:
 
 ```sfn
 fn attempt_operation() ![io] {
     try {
         risky_operation();
-    } catch (e) {
-        // catches anything thrown
-        print("Something went wrong: {{e}}");
+    } catch (err) {
+        // catches anything thrown; decide how to respond here
+        print("Something went wrong: {{err}}");
     }
 }
 ```
 
-This is convenient for top-level handlers or logging shims. For anything deeper, catching specific types is better — it prevents silently swallowing errors you didn't anticipate.
+This is convenient for top-level handlers or logging shims. For anything deeper, prefer returning a union type so the caller cannot accidentally ignore the failure.
 
-### Catching multiple types
+### Multiple failure modes
 
 ```sfn
-fn fetch_and_store(url: String, path: String) ![io, net] {
+fn fetch_and_store(url: string, path: string) ![io, net] {
     try {
         let data = http.get(url);
         fs.write(path, data);
-    } catch (e: NetworkError) {
-        print.err("Network error fetching {{url}}: {{e.message}}");
-    } catch (e: IoError) {
-        print.err("Disk error writing {{path}}: {{e.message}}");
-    } catch (e) {
-        print.err("Unexpected error: {{e}}");
-        throw e;   // re-throw things we didn't expect
+    } catch (err) {
+        // Inspect the error inside the block; an enum or struct makes this ergonomic.
+        print.err("fetch_and_store failed: {{err}}");
+        throw err;   // re-throw if the caller should still see it
     } finally {
         // always runs — good for releasing locks, closing progress indicators, etc.
         print("fetch_and_store finished");
@@ -91,19 +87,26 @@ fn fetch_and_store(url: String, path: String) ![io, net] {
 }
 ```
 
+> **Coming in 1.0:** Typed `catch` clauses (`catch (err: NetworkError) { ... }`) are on the [roadmap](/roadmap). Today a single `catch` block captures the thrown value bare, and you discriminate inside — typically with `match`.
+
 ### Re-throwing
 
-`throw e` inside a `catch` block re-throws the error. You can also throw a new, more informative error:
+`throw err` inside a `catch` block re-throws the error. You can also throw a new, more informative error:
 
 ```sfn
-fn read_user_config(user_id: Int) -> UserConfig ![io] {
+struct ConfigError {
+    message: string;
+    cause: string;
+}
+
+fn read_user_config(user_id: number) -> UserConfig ![io] {
     try {
         let path = "/etc/myapp/users/{{user_id}}.toml";
         return parse_toml(fs.read(path));
-    } catch (e: IoError) {
+    } catch (err) {
         throw ConfigError {
             message: "No configuration found for user {{user_id}}",
-            cause: e.message,
+            cause: "{{err}}",
         };
     }
 }
@@ -116,7 +119,7 @@ Wrapping and re-throwing lets you add context at each layer without losing the o
 `finally` is the right place for cleanup that must happen regardless of what the `try` block does: closing connections, releasing locks, flushing buffers, decrementing reference counts.
 
 ```sfn
-fn process_with_lock(resource: String) ![io] {
+fn process_with_lock(resource: string) ![io] {
     acquire_lock(resource);
     try {
         do_work(resource);
@@ -135,7 +138,7 @@ If `do_work` throws, `finally` still runs before the exception propagates. The c
 Use `throw` to signal an error condition. You can throw any value:
 
 ```sfn
-fn divide(a: Float, b: Float) -> Float {
+fn divide(a: number, b: number) -> number {
     if b == 0.0 {
         throw "Division by zero";
     }
@@ -151,14 +154,14 @@ Define an error type as a struct with a `message` field and whatever additional 
 
 ```sfn
 struct ValidationError {
-    message -> String;
-    field -> String;
-    received -> String;
+    message: string;
+    field: string;
+    received: string;
 }
 
-fn validate_email(email: String) -> String {
+fn validate_email(email: string) -> string | ValidationError {
     if !email.contains("@") {
-        throw ValidationError {
+        return ValidationError {
             message: "Invalid email address",
             field: "email",
             received: email,
@@ -168,137 +171,159 @@ fn validate_email(email: String) -> String {
 }
 ```
 
-Callers can catch `ValidationError` specifically:
+Callers inspect the union with `match`:
 
 ```sfn
-fn register_user(email: String, name: String) ![io] {
-    try {
-        let valid_email = validate_email(email);
-        create_account(valid_email, name);
-    } catch (e: ValidationError) {
-        print.err("Bad input for field '{{e.field}}': {{e.message}} (got: {{e.received}})");
+fn register_user(email: string, name: string) ![io] {
+    let result = validate_email(email);
+    match result {
+        ValidationError { field, message, received } => {
+            print.err("Bad input for field '{{field}}': {{message}} (got: {{received}})");
+        },
+        _ => {
+            create_account(result, name);
+        },
     }
 }
 ```
+
+> **Coming in 1.0:** Typed `catch` clauses (e.g. `catch (e: ValidationError)`) are on the [roadmap](/roadmap). Until they land, either use union return types (above) or catch bare and dispatch with `match` inside.
 
 ### Error hierarchies with enums
 
-When a subsystem can fail in multiple structured ways, an enum is cleaner than a family of structs:
+When a subsystem can fail in multiple structured ways, a tagged enum is cleaner than a family of structs:
 
 ```sfn
 enum DatabaseError {
-    ConnectionFailed { host -> String; port -> Int; },
-    QueryFailed { sql -> String; reason -> String; },
-    TransactionAborted { reason -> String; },
-    ConstraintViolation { constraint -> String; table -> String; },
+    ConnectionFailed { host: string, port: number },
+    QueryFailed { sql: string, reason: string },
+    TransactionAborted { reason: string },
+    ConstraintViolation { constraint: string, table: string },
 }
 
-fn find_user(id: Int) -> User ![io] {
-    try {
-        return db.query("SELECT * FROM users WHERE id = {{id}}");
-    } catch (e: DatabaseError) {
-        match e {
-            DatabaseError.QueryFailed { sql, reason } =>
-                print.err("Query failed: {{reason}}\nSQL: {{sql}}"),
-            DatabaseError.ConnectionFailed { host, port } =>
-                print.err("Cannot reach database at {{host}}:{{port}}"),
-            _ => print.err("Database error: {{e}}"),
-        }
-        throw e;
+fn find_user(id: number) -> User | DatabaseError ![io] {
+    let raw = db.query("SELECT * FROM users WHERE id = {{id}}");
+    if raw == null {
+        return DatabaseError.QueryFailed {
+            sql: "SELECT * FROM users WHERE id = {{id}}",
+            reason: "no rows returned",
+        };
+    }
+    return User.from_row(raw);
+}
+
+fn render_user(id: number) ![io] {
+    let result = find_user(id);
+    match result {
+        DatabaseError.QueryFailed { sql, reason } =>
+            print.err("Query failed: {{reason}}\nSQL: {{sql}}"),
+        DatabaseError.ConnectionFailed { host, port } =>
+            print.err("Cannot reach database at {{host}}:{{port}}"),
+        DatabaseError.TransactionAborted { reason } =>
+            print.err("Transaction aborted: {{reason}}"),
+        DatabaseError.ConstraintViolation { constraint, table } =>
+            print.err("Constraint {{constraint}} violated on {{table}}"),
+        _ => print("Found user {{id}}"),
     }
 }
 ```
 
-Using an enum for errors makes `match` exhaustiveness checking useful: if you add a new variant, the compiler will remind you anywhere you match on it without a wildcard.
+Using a tagged enum for errors makes `match` exhaustiveness checking useful: if you add a new variant, the compiler will remind you anywhere you match on it without a wildcard.
 
 ---
 
-## `Result<T, E>` — errors as values
+## Union return types — errors as values
 
-Some functions return errors as part of their normal output rather than throwing. This is the **Result pattern**: represent success and failure as distinct enum variants.
+Some functions return errors as part of their normal output rather than throwing. In Sailfin today, the idiomatic way to express this is a **union return type**: the function returns either the success value or an error struct/enum, and the caller uses `match` to discriminate.
 
-Define a result enum for your domain:
+This is the pattern used in `examples/basics/error-handling.sfn`:
 
 ```sfn
-enum ParseResult<T> {
-    Ok(T),
-    Err(String),
+struct DivisionError {
+    message: string;
+}
+
+fn safe_divide(a: number, b: number) -> number | DivisionError {
+    if b == 0 {
+        return DivisionError { message: "Cannot divide by zero!" };
+    }
+    return a / b;
+}
+
+fn main() ![io] {
+    let result = safe_divide(10, 0);
+    match result {
+        DivisionError { message } => print("Error: {{message}}"),
+        _ => print("Result: {{result}}"),
+    }
 }
 ```
 
-Or define a generic one and reuse it:
+For a richer error surface, combine a success type with a tagged enum:
 
 ```sfn
-enum Result<T, E> {
-    Ok(T),
-    Err(E),
+enum PortError {
+    NotAnInteger { input: string },
+    OutOfRange { value: number },
 }
-```
 
-Return it from functions that can fail in expected ways:
-
-```sfn
-fn parse_port(s: String) -> Result<Int, String> {
-    let n = Int.parse(s);
+fn parse_port(s: string) -> number | PortError {
+    let n = to_number(s);
     if n == null {
-        return Result.Err("Not a valid integer: {{s}}");
+        return PortError.NotAnInteger { input: s };
     }
     if n < 1 || n > 65535 {
-        return Result.Err("Port out of range: {{n}}");
+        return PortError.OutOfRange { value: n };
     }
-    return Result.Ok(n);
+    return n;
 }
-```
 
-Callers use `match` to handle both cases:
-
-```sfn
 fn main() ![io] {
-    match parse_port("8080") {
-        Result.Ok(port) => print("Listening on port {{port}}"),
-        Result.Err(msg) => print.err("Bad port: {{msg}}"),
+    let result = parse_port("8080");
+    match result {
+        PortError.NotAnInteger { input } => print.err("Bad port: not a number: {{input}}"),
+        PortError.OutOfRange { value } => print.err("Bad port: out of range: {{value}}"),
+        _ => print("Listening on port {{result}}"),
     }
 }
 ```
 
-### When to use `Result` vs. `throw`
+> **Coming in 1.0:** A built-in `Result<T, E>` type and the `?` operator for automatic error propagation are on the [roadmap](/roadmap). `Result` will compose better than unions (no ambiguity when the success type is itself a struct) and the `?` operator will let you write `parse_port(s)?` instead of the explicit `match`-and-return. Until they ship, use union return types as shown above.
+
+### When to use union returns vs. `throw`
 
 | Situation | Prefer |
 |-----------|--------|
-| Caller should always check the outcome | `Result<T, E>` |
+| Caller should always check the outcome | Union return type |
 | Failure is a programming error or invariant violation | `throw` |
-| Multiple failure modes need to be returned with data | `Result` with enum `E` |
+| Multiple failure modes need to be returned with data | Union with a tagged enum |
 | The error needs to propagate many layers without being inspected | `throw` |
-| Working with a library that models errors as values | `Result` |
+| Working with a library that models errors as values | Union return type |
 | Simple scripts or top-level orchestration | Either; `throw` is often cleaner |
 
-The two approaches are compatible. You can `throw` from inside a `Result`-returning function on truly unexpected conditions, and you can catch exceptions and convert them to `Result.Err(...)` at API boundaries.
+The two approaches are compatible. You can `throw` from inside a union-returning function on truly unexpected conditions, and you can catch exceptions and convert them to an error variant at API boundaries.
 
-### Chaining Results
+### Chaining union returns
 
-When multiple operations each return a `Result`, you can chain them with `match` or early returns:
+When multiple operations each return a union, you can chain them with `match` and early returns:
 
 ```sfn
-fn load_server_config(path: String) -> Result<ServerConfig, String> ![io] {
-    let read_result = fs.try_read(path);
-    let content = match read_result {
-        Result.Ok(c) => c,
-        Result.Err(e) => return Result.Err("Cannot read file: {{e}}"),
-    };
+struct LoadError {
+    message: string;
+}
 
-    let parse_result = ServerConfig.try_parse(content);
-    let config = match parse_result {
-        Result.Ok(c) => c,
-        Result.Err(e) => return Result.Err("Invalid config format: {{e}}"),
-    };
+fn load_server_config(path: string) -> ServerConfig | LoadError ![io] {
+    let content = fs.read(path);  // may throw IoError; wrap with try/catch if needed
 
-    return Result.Ok(config);
+    let parsed = ServerConfig.try_parse(content);
+    match parsed {
+        LoadError { message } => return LoadError { message: "Invalid config format: {{message}}" },
+        _ => return parsed,
+    }
 }
 ```
 
 The early-return pattern keeps the happy path linear while handling errors explicitly.
-
-> **Planned feature**: The `?` operator for automatic error propagation is on the roadmap. It will allow `fs.try_read(path)?` as shorthand for the match-and-return pattern above, automatically unwrapping `Ok` values and returning `Err` from the current function. This is not yet implemented; use the explicit `match` pattern today.
 
 ---
 
@@ -308,24 +333,28 @@ Errors typically need to travel from where they occur to where they can be meani
 
 **Exception propagation** is automatic. An uncaught `throw` unwinds the call stack until it hits a `catch` block or reaches the top of the program (causing a runtime error message and non-zero exit code).
 
-**Result propagation** is explicit. The caller must decide what to do with `Result.Err`. The early-return pattern above is the standard approach.
+**Union-return propagation** is explicit. The caller must decide what to do with the error variant. The early-return pattern above is the standard approach.
 
-For deep call stacks where most intermediate layers have nothing useful to do with an error, exceptions are often cleaner — the error propagates without every layer needing to handle it. For shallow call stacks or library APIs where callers need to inspect and handle errors, `Result` makes the failure modes explicit in the type signature.
+For deep call stacks where most intermediate layers have nothing useful to do with an error, exceptions are often cleaner — the error propagates without every layer needing to handle it. For shallow call stacks or library APIs where callers need to inspect and handle errors, a union return type makes the failure modes explicit in the type signature.
 
-A common pattern at system boundaries: throw internally, but expose a `Result`-returning wrapper for external callers:
+A common pattern at system boundaries: throw internally, but expose a union-returning wrapper for external callers:
 
 ```sfn
-fn fetch_order_internal(id: Int) -> Order ![io, net] {
+struct FetchError {
+    message: string;
+}
+
+fn fetch_order_internal(id: number) -> Order ![io, net] {
     // can throw NetworkError, ParseError, etc.
     let response = http.get("/orders/{{id}}");
     return Order.parse(response.body);
 }
 
-fn fetch_order(id: Int) -> Result<Order, String> ![io, net] {
+fn fetch_order(id: number) -> Order | FetchError ![io, net] {
     try {
-        return Result.Ok(fetch_order_internal(id));
-    } catch (e) {
-        return Result.Err("Failed to fetch order {{id}}: {{e}}");
+        return fetch_order_internal(id);
+    } catch (err) {
+        return FetchError { message: "Failed to fetch order {{id}}: {{err}}" };
     }
 }
 ```
@@ -338,10 +367,10 @@ Catching errors from effectful operations requires the function to declare the a
 
 ```sfn
 // This requires ![io] because fs.read needs it — the try block doesn't change that
-fn read_optional(path: String) -> String ![io] {
+fn read_optional(path: string) -> string ![io] {
     try {
         return fs.read(path);
-    } catch (e: IoError) {
+    } catch (err) {
         return "";
     }
 }
@@ -364,7 +393,7 @@ A **panic** is an abrupt program termination caused by a programming error — s
 - **Explicit `panic(message)`** calls
 
 ```sfn
-fn get_first(items: Array<Int>) -> Int {
+fn get_first(items: number[]) -> number {
     assert items.length > 0;   // panics if items is empty
     return items[0];
 }
@@ -375,15 +404,17 @@ Use panics (via `assert`) for:
 - **Invariants**: conditions that must hold for your program to be correct. If they fail, something is fundamentally wrong — there's no recovery, only debugging.
 - **Type-system gaps**: places where the types can't express the constraint but the logic requires it.
 
-Do not use panics for expected failures. If a user can trigger a panic by providing bad input, replace the panic with a proper error or `Result`.
+Do not use panics for expected failures. If a user can trigger a panic by providing bad input, replace the panic with a proper error or a union return type.
 
 In tests, `assert` is idiomatic and correct — failing assertions should stop the test immediately:
 
 ```sfn
 test "parse_port accepts valid ports" {
-    match parse_port("8080") {
-        Result.Ok(n) => assert n == 8080,
-        Result.Err(msg) => assert false,   // test should not reach here
+    let result = parse_port("8080");
+    match result {
+        PortError.NotAnInteger { input } => assert false,
+        PortError.OutOfRange { value } => assert false,
+        _ => assert result == 8080,
     }
 }
 ```
@@ -396,34 +427,47 @@ Good test coverage includes the failure paths. Sailfin's `test` blocks integrate
 
 ```sfn
 test "validate_email rejects addresses without @" {
-    let threw = false;
-    try {
-        validate_email("not-an-email");
-    } catch (e: ValidationError) {
-        threw = true;
-        assert e.field == "email";
-        assert e.received == "not-an-email";
+    let result = validate_email("not-an-email");
+    match result {
+        ValidationError { field, received, message } => {
+            assert field == "email";
+            assert received == "not-an-email";
+        },
+        _ => assert false,  // should have returned an error
     }
-    assert threw;   // confirm the error was actually thrown
 }
 ```
 
-The pattern — set a flag in the `catch`, assert the flag was set after the block — is idiomatic. It fails the test both when no error is thrown and when the wrong error type is thrown.
+For functions that do throw, set a flag in `catch` and assert it afterwards:
 
-For `Result`-returning functions:
+```sfn
+test "divide throws on zero" {
+    let threw = false;
+    try {
+        let _ = divide(10, 0);
+    } catch (err) {
+        threw = true;
+    }
+    assert threw;
+}
+```
+
+For union-returning functions:
 
 ```sfn
 test "parse_port rejects port 0" {
-    match parse_port("0") {
-        Result.Ok(_) => assert false,   // should not succeed
-        Result.Err(msg) => assert msg.contains("out of range"),
+    let result = parse_port("0");
+    match result {
+        PortError.OutOfRange { value } => assert value == 0,
+        _ => assert false,
     }
 }
 
 test "parse_port rejects non-numeric input" {
-    match parse_port("abc") {
-        Result.Ok(_) => assert false,
-        Result.Err(msg) => assert msg.contains("Not a valid integer"),
+    let result = parse_port("abc");
+    match result {
+        PortError.NotAnInteger { input } => assert input == "abc",
+        _ => assert false,
     }
 }
 ```
@@ -440,15 +484,15 @@ Testing error messages in addition to error types gives you regression coverage:
 // Bad: exception is silently swallowed
 try {
     save_audit_log(event);
-} catch (e) {
+} catch (err) {
     // nothing
 }
 
 // Better: log and continue, or rethrow
 try {
     save_audit_log(event);
-} catch (e: IoError) {
-    print.err("Warning: audit log write failed: {{e.message}}");
+} catch (err) {
+    print.err("Warning: audit log write failed: {{err}}");
     // decide: continue anyway, or rethrow?
 }
 ```
@@ -457,51 +501,46 @@ try {
 
 ```sfn
 // Bad: original cause is lost
-} catch (e: IoError) {
-    throw ConfigError { message: "Config load failed" };
+} catch (err) {
+    throw ConfigError { message: "Config load failed", cause: "" };
 }
 
 // Better: include the cause
-} catch (e: IoError) {
+} catch (err) {
     throw ConfigError {
         message: "Config load failed",
-        cause: e.message,
+        cause: "{{err}}",
     };
 }
 ```
 
-**Match the abstraction level of the error to its catch site.** Low-level I/O errors (`IoError`, `NetworkError`) should typically be caught and wrapped at module boundaries, not bubbled raw to top-level application code. High-level errors (`ConfigError`, `AuthError`) are more meaningful to the code that can actually act on them.
+**Match the abstraction level of the error to its catch site.** Low-level I/O errors should typically be caught and wrapped at module boundaries, not bubbled raw to top-level application code. High-level errors (`ConfigError`, `AuthError`) are more meaningful to the code that can actually act on them.
 
-**Use `Result` for library APIs.** Libraries can't control how their callers handle exceptions. Returning `Result<T, E>` from public APIs makes the failure modes explicit in the type, forces callers to handle them, and avoids surprising exception propagation.
+**Use union return types for library APIs.** Libraries can't control how their callers handle exceptions. Returning `T | ErrorType` from public APIs makes the failure modes explicit in the type, forces callers to handle them, and avoids surprising exception propagation.
 
-**Prefer specific `catch` clauses over generic ones.** Catching a specific type (`catch (e: NetworkError)`) documents what you expect and prevents accidentally swallowing unrelated errors:
+**Dispatch on error shape inside the catch.** Typed `catch` clauses are on the [roadmap](/roadmap); today, a `catch` binds the error bare. Use `match` or struct/enum pattern matching inside the block to discriminate:
 
 ```sfn
-// Risky: catches everything, including unexpected errors
 try {
-    ...
-} catch (e) {
-    print.err("Error: {{e}}");
-    // application continues — may be in a broken state
+    risky_network_op();
+} catch (err) {
+    match err {
+        NetworkError { code } => handle_network_failure(code),
+        TimeoutError { elapsed_ms } => handle_timeout(elapsed_ms),
+        _ => {
+            print.err("Unexpected error: {{err}}");
+            throw err;   // re-raise anything we don't understand
+        },
+    }
 }
-
-// Safer: only handles what you understand; others propagate
-try {
-    ...
-} catch (e: NetworkError) {
-    handle_network_failure(e);
-} catch (e: TimeoutError) {
-    handle_timeout(e);
-}
-// Any other errors propagate to the caller
 ```
 
 **Log before rethrowing, not after.** If you're going to rethrow, log first — the log and the throw happen in the same stack frame, making correlation easier:
 
 ```sfn
-} catch (e: DatabaseError) {
-    print.err("Database error in payment processing: {{e.message}}");
-    throw e;   // log happened — safe to rethrow
+} catch (err) {
+    print.err("Database error in payment processing: {{err}}");
+    throw err;   // log happened — safe to rethrow
 }
 ```
 
@@ -512,10 +551,12 @@ try {
 | Tool | Use for | Type signature |
 |------|---------|----------------|
 | `throw` + `try/catch` | Exceptional conditions, deep propagation | Function may throw |
-| `Result<T, E>` | Expected failures, library APIs | `-> Result<T, E>` |
+| Union return (`T \| Err`) | Expected failures, library APIs | `-> T \| ErrorType` |
 | `assert` | Invariants and programmer errors | Panics on failure |
 
-The two main tools compose naturally. Use exceptions where propagation is the right model; use `Result` where the caller should inspect the outcome. Add context at layer boundaries. Don't swallow errors.
+The two main tools compose naturally. Use exceptions where propagation is the right model; use union returns where the caller should inspect the outcome. Add context at layer boundaries. Don't swallow errors.
+
+> **Coming in 1.0:** `Result<T, E>`, the `?` operator, and typed `catch` clauses are all on the [roadmap](/roadmap). They will replace the union-return pattern with a more ergonomic, non-ambiguous alternative and let you propagate errors without explicit `match`.
 
 ---
 

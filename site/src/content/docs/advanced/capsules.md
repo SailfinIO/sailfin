@@ -174,7 +174,7 @@ Use `"./path"` or `"../path"` to import from files within the same capsule:
 
 ```sfn
 // src/lib.sfn
-fn compute(x: Int) -> Int {
+fn compute(x: number) -> number {
     return x * x;
 }
 ```
@@ -183,9 +183,9 @@ fn compute(x: Int) -> Int {
 // src/mod.sfn
 import { compute } from "./lib";
 
-export fn process(values: List<Int>) -> List<Int> ![io] {
+export fn process(values: number[]) -> number[] ![io] {
     let results = values.map(compute);
-    print(results);
+    print("{{results}}");
     return results;
 }
 ```
@@ -200,7 +200,7 @@ Use the capsule's registry name to import from a declared dependency:
 import { log } from "sfn/log";
 import { get, post } from "sfn/http";
 
-fn fetch_data(url: String) -> String ![net, io] {
+fn fetch_data(url: string) -> string ![net, io] {
     log.info("fetching: " + url);
     let response = get(url);
     return response.body;
@@ -217,7 +217,7 @@ When capsules live in the same workspace, one capsule can import from another us
 // In capsule "api", importing from capsule "core"
 import { UserRecord, validate_user } from "core";
 
-fn handle_login(req: Request) -> Response ![io, net] {
+fn handle_login(req, res) ![io, net] {
     let user = validate_user(req.body);
     // ...
 }
@@ -244,19 +244,19 @@ import { format_output } from "./formatter";  // internal
 
 // This type is part of the public API
 export struct ComputeResult {
-    value -> Int;
-    steps -> Int;
+    value: number;
+    steps: number;
 }
 
 // This function is part of the public API
-export fn compute(input: Int) -> ComputeResult {
+export fn compute(input: number) -> ComputeResult {
     let raw = compute_inner(input);
     return ComputeResult { value: raw, steps: 1 };
 }
 
 // This helper is internal — NOT exported
-fn debug_repr(r: ComputeResult) -> String {
-    return "ComputeResult(" + r.value + ")";
+fn debug_repr(r: ComputeResult) -> string {
+    return "ComputeResult({{r.value}})";
 }
 ```
 
@@ -286,16 +286,16 @@ entry = "src/main.sfn"
 ```sfn
 // src/main.sfn
 import { log } from "sfn/log";
-import { serve } from "sfn/http";
+import { serve } from "http";
+
+fn handle_request(req, res) ![io] {
+    print("Received: {{req.path}}");
+    res.send("OK");
+}
 
 fn main() ![io, net] {
     log.info("Starting server on :8080");
-    serve(8080, handle_request);
-}
-
-fn handle_request(req: Request) -> Response ![io] {
-    print("Received: " + req.path);
-    return Response { status: 200, body: "OK" };
+    serve(handle_request, { port: 8080 });
 }
 ```
 
@@ -319,17 +319,17 @@ entry = "src/mod.sfn"
 ```sfn
 // src/mod.sfn
 export struct Config {
-    debug -> Bool;
-    log_level -> String;
+    debug: boolean;
+    log_level: string;
 }
 
-export fn load_config(path: String) -> Config ![io] {
+export fn load_config(path: string) -> Config ![io] {
     // read from filesystem
-    let raw = fs.read_file(path);
+    let raw = fs.read(path);
     return parse_config(raw);
 }
 
-fn parse_config(raw: String) -> Config {
+fn parse_config(raw: string) -> Config {
     // internal — not exported
     return Config { debug: false, log_level: "info" };
 }
@@ -354,13 +354,13 @@ required = ["io"]
 ```sfn
 import { log } from "sfn/log";
 
-fn process_order(order_id: Int) ![io] {
-    log.info("Processing order " + order_id);
+fn process_order(order_id: number) ![io] {
+    log.info("Processing order {{order_id}}");
 
     // ... processing logic ...
 
     if order_id < 0 {
-        log.error("Invalid order ID: " + order_id);
+        log.error("Invalid order ID: {{order_id}}");
         return;
     }
 

@@ -123,8 +123,8 @@ more interesting example that introduces variables, string interpolation, and a
 function call:
 
 ```sfn
-fn greet(name: String) -> String {
-    return "Hello, {{ name }}!";
+fn greet(name: string) -> string {
+    return "Hello, {{name}}!";
 }
 
 fn main() ![io] {
@@ -147,14 +147,14 @@ Hello, World!
 
 ### What is new here
 
-- `fn greet(name: String) -> String` — a function that takes a `String` parameter
-  and returns a `String`. Note that `greet` does not declare `![io]` because it
+- `fn greet(name: string) -> string` — a function that takes a `string` parameter
+  and returns a `string`. Note that `greet` does not declare `![io]` because it
   does not perform any IO itself — it just produces a value.
-- `"Hello, {{ name }}!"` — **string interpolation**. Any expression inside
+- `"Hello, {{name}}!"` — **string interpolation**. Any expression inside
   `{{ }}` is evaluated and inserted into the string at that position. This works
   with variables, function calls, and field accesses.
 - `let name = "World"` — declares an immutable local variable. The type is
-  inferred as `String`.
+  inferred as `string`.
 - `print(greet(name))` — calls `greet` with `name`, then passes the result to
   `print`. The `io` effect is declared on `main`, which is the function actually
   calling `print`, so the effect check passes.
@@ -168,16 +168,16 @@ Hello, World!
 
 ## Adding a Struct
 
-Sailfin structs group related data. Fields are declared with the `->` separator:
+Sailfin structs group related data. Fields are declared with `name: Type;`:
 
 ```sfn
 struct Person {
-    name -> String;
-    age  -> number;
+    name: string;
+    age: number;
 }
 
-fn greet(person: Person) -> String {
-    return "Hello, {{ person.name }}! You are {{ person.age }} years old.";
+fn greet(person: Person) -> string {
+    return "Hello, {{person.name}}! You are {{person.age}} years old.";
 }
 
 fn main() ![io] {
@@ -199,8 +199,8 @@ Hello, Bob! You are 25 years old.
 ### What is new here
 
 - `struct Person { ... }` — declares a struct type named `Person`.
-- `name -> String;` — a field named `name` of type `String`. The `->` arrow is
-  Sailfin's field separator syntax; it reads as "name maps to String".
+- `name: string;` — a field named `name` of type `string`. Field declarations
+  use `name: Type;` and end with a semicolon.
 - `Person { name: "Alice", age: 30 }` — struct instantiation. Fields are assigned
   by name. Order does not matter.
 - `person.name` — field access inside a string interpolation expression.
@@ -213,12 +213,12 @@ Sailfin has first-class test support. Add a `test` block to the same file:
 
 ```sfn
 struct Person {
-    name -> String;
-    age  -> number;
+    name: string;
+    age: number;
 }
 
-fn greet(person: Person) -> String {
-    return "Hello, {{ person.name }}! You are {{ person.age }} years old.";
+fn greet(person: Person) -> string {
+    return "Hello, {{person.name}}! You are {{person.age}} years old.";
 }
 
 fn main() ![io] {
@@ -228,12 +228,12 @@ fn main() ![io] {
 
 test "greet produces correct greeting" {
     let p = Person { name: "Alice", age: 30 };
-    assert(greet(p) == "Hello, Alice! You are 30 years old.");
+    assert greet(p) == "Hello, Alice! You are 30 years old.";
 }
 
 test "greet handles different names" {
     let p = Person { name: "Bob", age: 25 };
-    assert(greet(p) == "Hello, Bob! You are 25 years old.");
+    assert greet(p) == "Hello, Bob! You are 25 years old.";
 }
 ```
 
@@ -259,7 +259,7 @@ running 2 tests in hello.sfn
 - `test "name" { ... }` — a test block. The string is the test name displayed in
   output. Test blocks live in the same file as the code they test, or in a
   separate `*_test.sfn` file.
-- `assert(expression)` — fails the test if the expression evaluates to `false`.
+- `assert expression;` — fails the test if the expression evaluates to `false`.
   The compiler reports the failing assertion with a source span.
 - `sfn test hello.sfn` — runs all test blocks in the specified file. Run
   `sfn test` (no arguments) to run all `*_test.sfn` files in the project.
