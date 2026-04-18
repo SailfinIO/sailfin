@@ -2,7 +2,26 @@
 //
 // Pure string utility functions used across the native IR parser modules.
 // No dependencies on native_ir types.
-import { starts_with, strip_prefix, substring } from "./string_utils";
+import { substring } from "./string_utils";
+
+// Local implementations of starts_with / strip_prefix so that this module's
+// .sfn-asm contains real `.fn` definitions for them.  When these were pure
+// re-exports (import then export, no local `.fn`), the LLVM lowering of
+// consumer modules could not resolve the return type and fell back to `i8*`,
+// causing an ABI mismatch for the boolean return (`i1` vs `i8*`).
+fn starts_with(value: string, prefix: string) -> boolean {
+    if prefix.length == 0 { return true; }
+    if value.length < prefix.length { return false; }
+    let head = substring(value, 0, prefix.length);
+    return head == prefix;
+}
+
+fn strip_prefix(value: string, prefix: string) -> string {
+    if starts_with(value, prefix) {
+        return substring(value, prefix.length, value.length);
+    }
+    return value;
+}
 
 export {
     is_trim_char,
