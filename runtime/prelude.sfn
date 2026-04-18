@@ -177,7 +177,7 @@ fn enum_normalize_fields(definition: EnumVariantDefinition?, provided: EnumField
         let value = null;
         if candidate != null { value = candidate.value; }
         normalized = normalized.concat([EnumField {
-            name: field_name, value: value
+                    name: field_name, value: value
         }]);
         index = index + 1;
     }
@@ -464,7 +464,7 @@ fn parse_type_descriptor(text: string) -> TypeDescriptor {
         normalized = descriptor_trim(substring(normalized, 8, normalized.length));
     }
     if normalized == "string" || normalized == "number" || normalized == "boolean"
-        || normalized == "void" {
+    || normalized == "void" {
         return type_descriptor_primitive(normalized);
     }
     return type_descriptor_named(normalized);

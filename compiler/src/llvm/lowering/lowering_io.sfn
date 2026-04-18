@@ -155,6 +155,7 @@ fn module_source_filename(module_name: string) -> string {
 fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
     let mut uses_round: boolean = false;
     let mut has_round_decl: boolean = false;
+    let mut has_round_define: boolean = false;
     let mut index: number = 0;
     loop {
         if index >= lines.length { break; }
@@ -164,12 +165,18 @@ fn ensure_intrinsic_declarations(lines: string[]) -> string[] {
         if starts_with(trimmed, "declare double @round(double)") {
             has_round_decl = true;
         }
+        if starts_with(trimmed, "define") {
+            if index_of(trimmed, "@round(") >= 0 {
+                has_round_define = true;
+            }
+        }
         index += 1;
     }
 
     let mut _if258: boolean = false;
     if !uses_round { _if258 = true; }
     if has_round_decl { _if258 = true; }
+    if has_round_define { _if258 = true; }
     if _if258 { return lines; }
 
     let mut out = lines;
