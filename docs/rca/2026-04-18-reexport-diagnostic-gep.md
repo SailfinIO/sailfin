@@ -4,29 +4,41 @@
 - **Author:** Opus (with Michael Curtis)
 - **Severity:** High — blocked triple-pass `make check`, blocked seed advancement past 0.5.3-alpha.1
 - **Affected releases:** 0.5.4, 0.5.5, 0.5.6 (the binary artifacts, not the source history)
-- **Fix:** PR on branch `claude/debug-compiler-determinism-6GVN0` — imports `starts_with`/`strip_prefix` directly from `./string_utils` in six consumers instead of going through the `./native_ir_utils_text` re-export
-- **Status:** Workaround merged-ready; underlying compiler bug (re-exports) still present in the binary and needs a real fix
+- **Fix (merged via `dc3c40e`, as part of `claude/integrate-cli-capsule-6yxod`):** define `starts_with` and `strip_prefix` locally in `native_ir_utils_text.sfn` instead of re-exporting them from `./string_utils`. This gives the `.sfn-asm` real `.fn` entries that consumers' lowering can resolve against.
+- **Status:** Workaround merged; underlying compiler bug (re-exports of imported symbols don't emit `.fn` signatures in the re-exporting module's `.sfn-asm`) still present in the binary and needs a real fix tracked as a 1.0 blocker.
 
 ## TL;DR
 
-The seed `0.5.2-alpha.1` — used by `release-tag.yml` to build every published
-release — silently miscompiles any call to a function that is imported from a
-module whose `export { ... }` block only *re-exports* it. Six files in
-`compiler/src/native_ir_*` were converted to this pattern by `b9499f1` (the
-"string utils DRY" refactor). When 0.5.2-alpha.1 compiled the post-refactor
-source to produce `0.5.6`, every `starts_with(...)` call in
-`parse_layout_manifest` was dropped. The resulting `0.5.6` binary cannot load
-layout manifests for transitively-imported modules, so structs like
-`Diagnostic`, `SymbolEntry`, `LayoutManifest`, `NativeArtifact` never reach
-`context.structs`. `render_struct_type_definitions` emits `%Diagnostic = type
-opaque`. Any by-value use of `Diagnostic` (e.g.
+Re-exporting an imported symbol via `export { X }` without a local `fn X`
+definition does not emit a `.fn` signature for `X` in the re-exporting
+module's `.sfn-asm` artifact. Consumers that import `X` from that module
+therefore have no signature to resolve against, so the LLVM lowering falls
+back to an `i8*` return type for every call to `X`. When the true return type
+is `i1` (any boolean helper), the consumer's generated IR can't produce a
+valid conditional branch — the compiler emits `llvm lowering: unable to lower
+if condition ...` to `stderr` (non-fatal) and drops the `if` guard on the
+floor.
+
+Commit `b9499f1` (the "string utils DRY" refactor) converted
+`native_ir_utils_text.sfn` from a module that *defined* `starts_with` /
+`strip_prefix` locally into one that only re-exports them from
+`./string_utils`. Six files in `compiler/src/native_ir_*` import these
+symbols from `native_ir_utils_text`, so every one of their `starts_with(...)`
+calls got the `i8*`-return mis-lowering. `parse_layout_manifest` in
+`native_ir_api.sfn` is the hottest victim: every `if starts_with(line,
+".layout struct ")` / `.layout field ` / `.layout enum ` / etc. guard is
+dropped, so the function returns an empty `LayoutManifest` for every
+transitively-imported module. That cascade makes structs like `Diagnostic`,
+`SymbolEntry`, `LayoutManifest`, `NativeArtifact` never reach
+`context.structs`. `render_struct_type_definitions` emits them as
+`%Diagnostic = type opaque`. Any by-value use of `Diagnostic` (e.g.
 `format_typecheck_diagnostics(entries: Diagnostic[], ...)`) then emits
 `getelementptr %Diagnostic, %Diagnostic* ..., i64 ...` which `llvm-as` rejects
 with "base element of getelementptr must be sized."
 
-The bug was invisible to CI because CI only exercises a single-pass build with
-a pinned-older seed (`0.5.3-alpha.1`, built *before* the refactor) that does
-not itself have the re-export bug.
+The bug was invisible to CI because CI only exercises a single-pass build
+with a pinned-older seed (`0.5.3-alpha.1`, built *before* the refactor) that
+does not itself have the re-export bug in its own binary image.
 
 
 ## Impact
@@ -127,22 +139,38 @@ re-export:
 
 ### Layer 2 — compiler bug
 
-The 0.5.2-alpha.1 seed (used by `release-tag.yml`) does not correctly resolve
-import sites whose target is only re-exported by the named module. Instead of
-wiring the call to the *originating* module's mangled symbol, it emits nothing
-for the call: the call instruction disappears, and — where it appeared as an
-`if` condition — the compiler emits a diagnostic
-`llvm lowering: unable to lower if condition in X for starts_with(...)`
-and drops the guard entirely.
+The re-exporter's emitted `.sfn-asm` contains an `export` line for the
+re-exported name but **no corresponding `.fn` signature**. Consumers read
+imported `.sfn-asm` artifacts to resolve the return type and ABI of every
+imported call; when the signature is absent they fall back to `i8*` for the
+return type.
+
+For a `string`-returning helper (e.g. `strip_prefix`), that fallback happens
+to be numerically right (both `string` and the fallback are `i8*` in the
+current ABI), so those calls compile but lose type-checking guarantees.
+
+For a `boolean`-returning helper (e.g. `starts_with`), the real return type
+is `i1`. The consumer now has an `i8*` call feeding into a place that
+expects `i1`. The lowering gives up with
+`llvm lowering: unable to lower if condition in X for starts_with(...)`,
+which is emitted to `stderr` as a trace diagnostic — **not a hard error** —
+and the entire `if` guard is dropped from the output. The build continues
+and produces a binary that runs but is missing control flow.
+
+The visible "`call to unknown function \`starts_with\`" diagnostic comes
+from the same site: the consumer's mangler can't decide which module owns
+`starts_with` because no `.sfn-asm` actually provides a signature for it.
 
 A commit from earlier in the same week (`7f47f70`, "fix(emit_native_layout):
 import contains_string from string_utils") had already documented one half of
-this problem: it states that "without an export block, imported symbols aren't
-re-exported." The fix for that file was to import directly from the origin.
-The assumption that *having* an export block makes re-exports work held up
-under the 0.5.3-alpha.1 seed and was never exercised across a seed boundary
-— which is why nobody noticed that 0.5.2-alpha.1 and earlier seeds silently
-miscompile the re-export consumer side.
+this problem: it states that "without an export block, imported symbols
+aren't re-exported." The fix for that file was to import directly from the
+origin. The assumption that *having* an export block makes re-exports work
+held up well enough under `0.5.3-alpha.1` because that seed was itself
+compiled from sources that defined `contains_string`/`starts_with`/etc.
+locally — the broken path was never exercised across a seed boundary, so
+nobody noticed that the emitter simply skips `.fn` generation for
+re-exported imports.
 
 ### Layer 3 — why it cascades all the way to `getelementptr`
 
@@ -205,6 +233,7 @@ visible validation failure.
 | 04-17 16:43 | `162f46e` removes `.condition_locals` IPC. Unrelated, but the determinism gains it claims are real — it is not this bug. |
 | 04-18 00:17 | 0.5.5 and then 0.5.6 released. Same bug baked in. |
 | 04-18 | User attempts to advance the local seed to 0.5.6, hits `llvm-as` failure on `main.sfn`, files this investigation. |
+| 04-18 | `dc3c40e` on `claude/integrate-cli-capsule-6yxod` defines `starts_with`/`strip_prefix` locally in `native_ir_utils_text.sfn` — making the re-exporter's `.sfn-asm` emit real `.fn` entries consumers can resolve. `make check` passes end-to-end on that branch. This is the workaround that ships as the eventual 0.5.7 seed. |
 
 
 ## How This Reached Production (Q1)
@@ -287,20 +316,26 @@ subsystem needs a focused audit and a production-ready design before 1.0.
 
 ### Known issues with current import/export semantics
 
-1. **Re-export of an imported symbol via `export { X }` is not reliably
-   honoured.** Commit `7f47f70` states the inverse ("without an export block,
-   imports aren't re-exported") as if having one makes it work. This RCA
-   shows that *having* an export block is also insufficient under the
-   0.5.2-alpha.1 seed — the consumer side drops the call. We do not know
-   which of the following is actually implemented in the binary:
-   - Re-exports emit a local shim function that forwards to the origin.
-   - Re-exports rewrite the import in the consumer to point directly at the
-     origin.
-   - Re-exports do nothing, and consumers are expected to import from the
-     origin.
+1. **Re-exporting an imported symbol via `export { X }` does not emit a
+   `.fn` signature for `X` in the re-exporting module's `.sfn-asm`.**
+   Consumers that import `X` from that module therefore cannot resolve the
+   return type or the callee's mangled symbol, and the lowering silently
+   falls back to `i8*`. For `i8*`-returning callees (strings, pointers)
+   this is accidentally right. For `i1`-returning callees (booleans) the
+   lowering gives up on the enclosing `if` guard with a trace-level
+   diagnostic and drops it on the floor. No `.fn` forwarder is emitted,
+   no rewrite to the origin's mangled name is emitted, nothing. The
+   emitter simply omits re-exported imports from the artifact.
 
-   The behaviour is *different* across seed generations, which means it is
-   emergent rather than designed.
+   What the emitter *should* do is one of:
+   - (a) emit a local forwarder `.fn X(...)` that body-calls
+     `X__origin(...)` and returns its result; or
+   - (b) refuse compilation when an `export { X }` cannot be resolved to a
+     local definition, with a diagnostic telling the author to import from
+     the origin directly.
+
+   Both are defensible; neither is implemented today. Path (b) is simpler
+   and matches `7f47f70`'s implicit recommendation.
 
 2. **The module system has no explicit "public" vs "private" distinction.**
    Whether a function is importable depends on whether it appears in the
@@ -339,14 +374,21 @@ subsystem needs a focused audit and a production-ready design before 1.0.
 1. **Inventory every `export { ... }` block in `compiler/src/`** and
    classify each symbol as: (a) defined locally and exported, (b) imported
    and re-exported, (c) imported only. Category (b) is the landmine. Every
-   site in (b) is a production incident waiting to happen.
+   site in (b) is a production incident waiting to happen. The `dc3c40e`
+   workaround converted category (b) to (a) for `starts_with`/`strip_prefix`
+   in `native_ir_utils_text.sfn`; the same treatment should be applied (or
+   a direct-import rewrite performed in every consumer) wherever category
+   (b) is found today.
 
 2. **Write a golden test for re-exports.** Three small modules:
-   `origin.sfn` defines `foo()`, `middle.sfn` imports and re-exports `foo`,
-   `consumer.sfn` imports `foo` from `middle` and calls it. Assert that the
-   consumer's emitted IR contains a call that resolves, under every seed we
-   support. Run this on every PR. This test would have caught the current
-   bug on the commit that introduced it.
+   `origin.sfn` defines both a `string`-returning and a `boolean`-returning
+   helper, `middle.sfn` imports and re-exports them, `consumer.sfn` imports
+   from `middle` and uses each in an `if` guard. Assert that the consumer's
+   emitted IR contains calls that resolve to the origin's mangled symbols
+   and that the `if` guard survives. The boolean case is critical — that's
+   the one the `i8*` fallback masks for string-returning helpers. Run on
+   every PR. This test would have caught the current bug on the commit
+   that introduced it.
 
 3. **Decide on a canonical re-export semantics** and document it in
    `docs/spec.md` and the compiler:
