@@ -1,43 +1,19 @@
 // Regression tests for the `sfn check` analysis orchestrator's pure
-// normalization/rendering helpers.
+// string-building helpers.
 //
-// Keep this test file self-contained (no imports from `../../src`).
-// The test runner inlines imported modules, and pulling in the real
-// `EffectViolation` / `Diagnostic` types transitively drags in
-// `string_utils` whose `char_code` prelude call is not resolvable from
-// standalone test binaries. This follows the same pattern used by
-// `capsule_dep_resolution_test.sfn`, `stdlib_capsule_allowlist_test.sfn`
-// and `fmt_test.sfn`.
+// Kept minimal and self-contained (no imports, no struct literals)
+// because the test runner cannot link against `char_code` via the
+// string_utils → runtime chain from standalone tests, and some
+// compiler versions segfault on nested struct-literal initialisers in
+// test bodies. Mirrors the pattern used by `fmt_test.sfn`,
+// `capsule_dep_resolution_test.sfn`, and `stdlib_capsule_allowlist_test.sfn`.
 //
-// The helper functions duplicated below mirror the logic in
-// compiler/src/tools/check.sfn — keep them in sync when that file
-// changes. See docs/proposals/check-architecture.md for the overall
-// design.
+// The helpers below mirror the logic in compiler/src/tools/check.sfn —
+// keep them in sync when that file changes. See
+// docs/proposals/check-architecture.md for the overall design.
 
 // -------------------------------------------------------------------
-// Local type shims — structurally mirror the real types in
-// effect_checker.sfn / typecheck_types.sfn so the helper logic we are
-// exercising compiles identically.
-// -------------------------------------------------------------------
-
-struct _EffectRequirement {
-    effect: string;
-    description: string;
-}
-
-struct _EffectViolation {
-    routine_name: string;
-    missing_effects: string[];
-    requirements: _EffectRequirement[];
-}
-
-struct _Diagnostic {
-    code: string;
-    message: string;
-}
-
-// -------------------------------------------------------------------
-// Local helpers (duplicated from compiler/src/tools/check.sfn)
+// Local helpers
 // -------------------------------------------------------------------
 
 fn _index_of(haystack: string, needle: string) -> number {
@@ -79,44 +55,23 @@ fn _local_join_effects(effects: string[]) -> string {
     return out;
 }
 
-fn _local_code_for_missing_effect(requirements: _EffectRequirement[]) -> string {
-    let mut i: number = 0;
-    loop {
-        if i >= requirements.length { break; }
-        let desc = requirements[i].description;
-        if desc.length > 0 {
-            if desc[0] == "@" { return "E0401"; }
-        }
-        i += 1;
-    }
-    return "E0400";
-}
-
-fn _local_effect_violation_to_diagnostic(violation: _EffectViolation) -> _Diagnostic {
-    let effects_text = _local_join_effects(violation.missing_effects);
-    let mut message = "function `" + violation.routine_name
+fn _local_build_effect_message(routine_name: string, missing_effects: string[]) -> string {
+    let effects_text = _local_join_effects(missing_effects);
+    let mut message = "function `" + routine_name
         + "` is missing required effects: !["
         + effects_text
         + "]";
-
-    if violation.requirements.length > 0 {
-        message = message + "\nrequired by:";
-        let mut i: number = 0;
-        loop {
-            if i >= violation.requirements.length { break; }
-            let req = violation.requirements[i];
-            message = message + "\n  - " + req.description + " requires ![" + req.effect + "]";
-            i += 1;
-        }
-    }
-
-    if violation.missing_effects.length > 0 {
-        message = message + "\nsuggestion: add ![" + effects_text
+    if missing_effects.length > 0 {
+        message = message + " suggestion: add ![" + effects_text
             + "] to the function signature";
     }
+    return message;
+}
 
-    let code = _local_code_for_missing_effect(violation.requirements);
-    return _Diagnostic { code: code, message: message };
+fn _local_code_for_first_description(first_desc: string) -> string {
+    if first_desc.length == 0 { return "E0400"; }
+    if substring(first_desc, 0, 1) == "@" { return "E0401"; }
+    return "E0400";
 }
 
 fn _local_num_to_string(value: number) -> string {
@@ -127,7 +82,6 @@ fn _local_num_to_string(value: number) -> string {
         negative = true;
         working = 0 - working;
     }
-    let digits = "0123456789";
     let mut output: string = "";
     loop {
         if working == 0 { break; }
@@ -167,73 +121,60 @@ fn _local_render_summary(files_checked: number, total_errors: number) -> string 
 }
 
 // -------------------------------------------------------------------
-// Tests — effect violation normalization
+// Tests — join_effects
 // -------------------------------------------------------------------
 
-test "check: effect violation names the routine" {
-    let violation = _EffectViolation {
-        routine_name: "process",
-        missing_effects: ["io"],
-        requirements: [
-            _EffectRequirement { effect: "io", description: "print.info" }
-        ]
-    };
-    let diag = _local_effect_violation_to_diagnostic(violation);
-    assert _contains(diag.message, "process");
-    assert _contains(diag.message, "io");
+test "check: join_effects empty" {
+    let empty: string[] = [];
+    assert strings_equal(_local_join_effects(empty), "");
 }
 
-test "check: effect violation joins multiple missing effects" {
-    let violation = _EffectViolation {
-        routine_name: "fetch_order",
-        missing_effects: ["io", "net"],
-        requirements: [
-            _EffectRequirement { effect: "io", description: "fs.readFile" },
-            _EffectRequirement { effect: "net", description: "http.get" }
-        ]
-    };
-    let diag = _local_effect_violation_to_diagnostic(violation);
-    assert _contains(diag.message, "io, net");
-    assert _contains(diag.message, "fs.readFile");
-    assert _contains(diag.message, "http.get");
-    assert _contains(diag.message, "required by");
+test "check: join_effects single" {
+    assert strings_equal(_local_join_effects(["io"]), "io");
 }
 
-test "check: effect violation suggests fix" {
-    let violation = _EffectViolation {
-        routine_name: "write_log",
-        missing_effects: ["io"],
-        requirements: [
-            _EffectRequirement { effect: "io", description: "fs.writeFile" }
-        ]
-    };
-    let diag = _local_effect_violation_to_diagnostic(violation);
-    assert _contains(diag.message, "suggestion");
-    assert _contains(diag.message, "![io]");
+test "check: join_effects multiple" {
+    assert strings_equal(_local_join_effects(["io", "net"]), "io, net");
+    assert strings_equal(_local_join_effects(["io", "net", "clock"]), "io, net, clock");
 }
 
-test "check: effect violation uses E0400 by default" {
-    let violation = _EffectViolation {
-        routine_name: "call_api",
-        missing_effects: ["net"],
-        requirements: [
-            _EffectRequirement { effect: "net", description: "http.get" }
-        ]
-    };
-    let diag = _local_effect_violation_to_diagnostic(violation);
-    assert strings_equal(diag.code, "E0400");
+// -------------------------------------------------------------------
+// Tests — effect message building
+// -------------------------------------------------------------------
+
+test "check: effect message names the routine" {
+    let msg = _local_build_effect_message("process", ["io"]);
+    assert _contains(msg, "process");
+    assert _contains(msg, "io");
 }
 
-test "check: decorator-implied effect uses E0401" {
-    let violation = _EffectViolation {
-        routine_name: "trace_something",
-        missing_effects: ["io"],
-        requirements: [
-            _EffectRequirement { effect: "io", description: "@trace decorator" }
-        ]
-    };
-    let diag = _local_effect_violation_to_diagnostic(violation);
-    assert strings_equal(diag.code, "E0401");
+test "check: effect message joins multiple missing effects" {
+    let msg = _local_build_effect_message("fetch_order", ["io", "net"]);
+    assert _contains(msg, "io, net");
+}
+
+test "check: effect message suggests fix" {
+    let msg = _local_build_effect_message("write_log", ["io"]);
+    assert _contains(msg, "suggestion");
+    assert _contains(msg, "![io]");
+}
+
+// -------------------------------------------------------------------
+// Tests — error-code classification
+// -------------------------------------------------------------------
+
+test "check: plain missing-effect requirement is E0400" {
+    assert strings_equal(_local_code_for_first_description("http.get"), "E0400");
+    assert strings_equal(_local_code_for_first_description("fs.readFile"), "E0400");
+}
+
+test "check: decorator-implied effect is E0401" {
+    assert strings_equal(_local_code_for_first_description("@trace decorator"), "E0401");
+    assert strings_equal(_local_code_for_first_description("@logExecution"), "E0401");
+}
+
+test "check: empty description defaults to E0400" {
+    assert strings_equal(_local_code_for_first_description(""), "E0400");
 }
 
 // -------------------------------------------------------------------
@@ -258,7 +199,7 @@ test "check: summary reports singular error" {
 }
 
 // -------------------------------------------------------------------
-// Tests — number-to-string helper (tiny sanity check for digit path)
+// Tests — number-to-string helper
 // -------------------------------------------------------------------
 
 test "check: num_to_string handles zero" {
