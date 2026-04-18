@@ -1,0 +1,209 @@
+// Regression tests for the `sfn check` analysis orchestrator.
+// See compiler/src/tools/check.sfn and docs/proposals/check-architecture.md.
+
+import {
+    EffectRequirement,
+    EffectViolation
+} from "../../src/effect_checker";
+import {
+    CheckResult,
+    CheckSummary,
+    check_source,
+    effect_violation_to_diagnostic,
+    render_diagnostic,
+    render_summary,
+    summarize
+} from "../../src/tools/check";
+
+fn _index_of(haystack: string, needle: string) -> number {
+    if needle.length == 0 { return 0; }
+    if haystack.length < needle.length { return -1; }
+    let mut i: number = 0;
+    let limit = haystack.length - needle.length;
+    loop {
+        if i > limit { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return _index_of(haystack, needle) >= 0;
+}
+
+// -------------------------------------------------------------------
+// effect_violation_to_diagnostic
+// -------------------------------------------------------------------
+
+test "check: effect violation names the routine" {
+    let violation = EffectViolation {
+        routine_name: "process",
+        missing_effects: ["io"],
+        requirements: [
+            EffectRequirement { effect: "io", description: "print.info" }
+        ]
+    };
+    let diag = effect_violation_to_diagnostic(violation);
+    assert _contains(diag.message, "process");
+    assert _contains(diag.message, "io");
+}
+
+test "check: effect violation joins multiple missing effects" {
+    let violation = EffectViolation {
+        routine_name: "fetch_order",
+        missing_effects: ["io", "net"],
+        requirements: [
+            EffectRequirement { effect: "io", description: "fs.readFile" },
+            EffectRequirement { effect: "net", description: "http.get" }
+        ]
+    };
+    let diag = effect_violation_to_diagnostic(violation);
+    assert _contains(diag.message, "io, net");
+    assert _contains(diag.message, "fs.readFile");
+    assert _contains(diag.message, "http.get");
+    assert _contains(diag.message, "required by");
+}
+
+test "check: effect violation suggests fix" {
+    let violation = EffectViolation {
+        routine_name: "write_log",
+        missing_effects: ["io"],
+        requirements: [
+            EffectRequirement { effect: "io", description: "fs.writeFile" }
+        ]
+    };
+    let diag = effect_violation_to_diagnostic(violation);
+    assert _contains(diag.message, "suggestion");
+    assert _contains(diag.message, "![io]");
+}
+
+test "check: effect violation uses E0400 by default" {
+    let violation = EffectViolation {
+        routine_name: "call_api",
+        missing_effects: ["net"],
+        requirements: [
+            EffectRequirement { effect: "net", description: "http.get" }
+        ]
+    };
+    let diag = effect_violation_to_diagnostic(violation);
+    assert strings_equal(diag.code, "E0400");
+}
+
+test "check: decorator-implied effect uses E0401" {
+    let violation = EffectViolation {
+        routine_name: "trace_something",
+        missing_effects: ["io"],
+        requirements: [
+            EffectRequirement { effect: "io", description: "@trace decorator" }
+        ]
+    };
+    let diag = effect_violation_to_diagnostic(violation);
+    assert strings_equal(diag.code, "E0401");
+}
+
+// -------------------------------------------------------------------
+// render_diagnostic / render_summary
+// -------------------------------------------------------------------
+
+test "check: render diagnostic includes code and file path" {
+    let violation = EffectViolation {
+        routine_name: "speak",
+        missing_effects: ["io"],
+        requirements: [
+            EffectRequirement { effect: "io", description: "print.info" }
+        ]
+    };
+    let diag = effect_violation_to_diagnostic(violation);
+    let rendered = render_diagnostic(diag, ["fn speak() { print.info(\"hi\"); }"], "demo.sfn", "effect");
+    assert _contains(rendered, "error[E0400]");
+    assert _contains(rendered, "speak");
+    assert _contains(rendered, "[kind: effect]");
+}
+
+test "check: summary says ok when no errors" {
+    let summary = CheckSummary { files_checked: 3, total_errors: 0 };
+    let text = render_summary(summary);
+    assert _contains(text, "3 files");
+    assert _contains(text, "ok");
+}
+
+test "check: summary reports plural errors" {
+    let summary = CheckSummary { files_checked: 2, total_errors: 5 };
+    let text = render_summary(summary);
+    assert _contains(text, "5 errors");
+}
+
+test "check: summary reports singular error" {
+    let summary = CheckSummary { files_checked: 1, total_errors: 1 };
+    let text = render_summary(summary);
+    assert _contains(text, "1 error");
+    assert !_contains(text, "errors");
+}
+
+// -------------------------------------------------------------------
+// check_source end-to-end on a small snippet
+// -------------------------------------------------------------------
+
+test "check: clean snippet has zero diagnostics" {
+    let source = "fn greet() ![io] { print(\"hi\"); }\n";
+    let result = check_source(source, "greet.sfn");
+    assert result.error_count == 0;
+}
+
+test "check: missing effect is flagged" {
+    let source = "fn greet() { print(\"hi\"); }\n";
+    let result = check_source(source, "greet.sfn");
+    assert result.error_count > 0;
+    let mut found_io: boolean = false;
+    let mut i: number = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        if _contains(result.diagnostics[i].message, "io") { found_io = true; }
+        i += 1;
+    }
+    assert found_io;
+}
+
+test "check: duplicate function reported as typecheck error" {
+    let source = "fn foo() ![io] { print(\"a\"); }\nfn foo() ![io] { print(\"b\"); }\n";
+    let result = check_source(source, "dup.sfn");
+    assert result.error_count > 0;
+    let mut found_dup: boolean = false;
+    let mut i: number = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        let diag = result.diagnostics[i];
+        if strings_equal(diag.code, "E0001") { found_dup = true; }
+        i += 1;
+    }
+    assert found_dup;
+}
+
+test "check: summarize aggregates error counts" {
+    let a = CheckResult {
+        file_path: "a.sfn",
+        diagnostics: [],
+        rendered: [],
+        error_count: 2
+    };
+    let b = CheckResult {
+        file_path: "b.sfn",
+        diagnostics: [],
+        rendered: [],
+        error_count: 3
+    };
+    let summary = summarize([a, b]);
+    assert summary.files_checked == 2;
+    assert summary.total_errors == 5;
+}

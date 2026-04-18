@@ -49,6 +49,13 @@ import {
     toml_get_name,
     toml_get_version
 } from "./toml_parser";
+import {
+    CheckResult,
+    CheckSummary,
+    check_source,
+    render_summary,
+    summarize
+} from "./tools/check";
 import { format_source } from "./tools/fmt";
 
 struct _RelativeImportSpanCmd {
@@ -1334,6 +1341,108 @@ fn handle_fmt_command(args: string[]) -> number ![io] {
     return 0;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// sfn check — fast parse + typecheck + effect-check without codegen
+// ═══════════════════════════════════════════════════════════════════
+//
+// Runs the analysis passes on every .sfn file reachable from the given
+// paths. Produces no binary output — diagnostics only.  Exit codes:
+//   0 = no diagnostics found
+//   1 = one or more diagnostics found
+//   2 = usage error (bad arguments)
+//
+// See docs/proposals/check-architecture.md for architecture and
+// `compiler/src/tools/check.sfn` for the analysis orchestration.
+fn _emit_check_header(path: string, quiet: boolean) ![io] {
+    if quiet { return; }
+    print.err("[check] " + path);
+}
+
+fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
+    if quiet { return; }
+    let mut i: number = 0;
+    loop {
+        if i >= result.rendered.length { break; }
+        print.err(result.rendered[i]);
+        i += 1;
+    }
+}
+
+fn handle_check_command(args: string[]) -> number ![io] {
+    let mut quiet: boolean = false;
+    let mut paths: string[] = [];
+
+    let mut argi: number = 1;
+    loop {
+        if argi >= args.length { break; }
+        let arg = args[argi];
+        if strings_equal(arg, "--quiet") { quiet = true; } else if strings_equal(arg, "-q") {
+            quiet = true;
+        } else if strings_equal(arg, "-h") {
+            print("usage: sfn check [--quiet] [path...]");
+            return 0;
+        } else if strings_equal(arg, "--help") {
+            print("usage: sfn check [--quiet] [path...]");
+            return 0;
+        } else {
+            paths.push(arg);
+        }
+        argi += 1;
+    }
+
+    // Default to current directory if no paths given.
+    if paths.length == 0 { paths.push("."); }
+
+    // Collect .sfn files from each path.
+    let mut files: string[] = [];
+    let mut pi: number = 0;
+    loop {
+        if pi >= paths.length { break; }
+        let p = paths[pi];
+        if !fs.exists(p) {
+            print.err("[check] path not found: " + p);
+            return 2;
+        }
+        let collected = _collect_sfn_files_cmd(p, 20);
+        let mut ci: number = 0;
+        loop {
+            if ci >= collected.length { break; }
+            files.push(collected[ci]);
+            ci += 1;
+        }
+        pi += 1;
+    }
+
+    if files.length == 0 {
+        print.err("[check] no .sfn files found");
+        return 1;
+    }
+
+    let mut results: CheckResult[] = [];
+    let mut total_errors: number = 0;
+    let mut fi: number = 0;
+    loop {
+        if fi >= files.length { break; }
+        let path = files[fi];
+        let source = fs.readFile(path);
+        let base_dir = _dirname_cmd(path);
+        let inlined = _inline_relative_imports_cmd(source, base_dir, 10, []);
+        let result = check_source(inlined, path);
+        if result.error_count > 0 {
+            _emit_check_header(path, quiet);
+            _emit_check_diagnostics(result, quiet);
+        }
+        total_errors += result.error_count;
+        results.push(result);
+        fi += 1;
+    }
+
+    let summary = summarize(results);
+    print(render_summary(summary));
+    if total_errors > 0 { return 1; }
+    return 0;
+}
+
 // Inline all imports (relative, stdlib, and cached capsule deps) for a
 // source file.  Exposed so `sfn run` can resolve capsule deps before
 // compilation.
@@ -1349,5 +1458,6 @@ export {
     handle_login_command,
     handle_guillermo_command,
     handle_fmt_command,
+    handle_check_command,
     inline_imports_for_source
 };

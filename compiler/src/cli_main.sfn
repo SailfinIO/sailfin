@@ -3,6 +3,7 @@
 // Sailfin-native CLI entrypoint invoked by the native C shim.
 import {
     handle_add_command,
+    handle_check_command,
     handle_fmt_command,
     handle_guillermo_command,
     handle_init_command,
@@ -30,6 +31,7 @@ fn _usage() -> string {
         + "  sfn run <file.sfn>\n"
         + "  sfn run <exe>\n"
         + "  sfn test [path]\n"
+        + "  sfn check [--quiet] [path...]\n"
         + "  sfn fmt [--check] [--write] [path...]\n"
         + "  sfn init\n"
         + "  sfn publish [path]\n"
@@ -43,6 +45,7 @@ fn _usage() -> string {
         + "  sfn run examples/basics/hello-world.sfn\n"
         + "  sfn run build/native/examples/hello\n"
         + "  sfn test .\n"
+        + "  sfn check compiler/src\n"
         + "  sfn init\n"
         + "  sfn publish [path]\n"
         + "  sfn add http\n"
@@ -344,6 +347,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     let is_add = strings_equal(cmd, "add");
     let is_login = strings_equal(cmd, "login");
     let is_fmt = strings_equal(cmd, "fmt");
+    let is_check = strings_equal(cmd, "check");
     if trace_argv {
         if is_emit { print.err("cli: cmd_is_emit=true"); }
         if is_version { print.err("cli: cmd_is_version=true"); }
@@ -564,6 +568,8 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     if is_login { return handle_login_command(args); }
 
     if is_fmt { return handle_fmt_command(args); }
+
+    if is_check { return handle_check_command(args); }
 
     if strings_equal(cmd, "guillermo") { return handle_guillermo_command(); }
 

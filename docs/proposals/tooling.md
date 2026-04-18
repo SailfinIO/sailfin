@@ -160,6 +160,9 @@ the formatter is a token-stream printer with indentation tracking.
 
 ### 2. `sfn check` — Fast Analysis Without Codegen
 
+**Status:** Shipped (v1 — April 18, 2026). See [check-architecture.md](./check-architecture.md)
+and `compiler/src/tools/check.sfn`.
+
 **What it does:** Runs the front-end passes (parse, typecheck, effect check)
 without emitting `.sfn-asm` IR or LLVM IR. Returns diagnostics only.
 

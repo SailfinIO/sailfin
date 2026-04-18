@@ -1,8 +1,22 @@
 # Architecture: `sfn check` — Fast Analysis Without Codegen
 
-Status: Draft  
-Date: April 15, 2026  
+Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`)
+Date: April 15, 2026 (design); shipped April 18, 2026
 Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
+
+## Implementation Status
+
+The initial implementation ships in `compiler/src/tools/check.sfn` and is wired
+into the CLI as `sfn check`. Covered by `compiler/tests/unit/check_tool_test.sfn`.
+
+Still deferred to a follow-up:
+
+- Diagnostic struct enhancement (Phase 1 — `severity` and `file_path` fields).
+  The v1 renderer synthesises severity from the error code instead.
+- Fix-it suggestion edits (Phase 2 — `FixSuggestion`/`TextEdit` structs).
+- `make check-fast` target and CI pre-build wiring.
+- Parallel / cached multi-file checking.
+
 
 ## Overview
 
