@@ -82,7 +82,7 @@ feature availability.
 | `unsafe` / `extern` | Parsed only | Syntax accepted; enforcement not active |
 | Policy decorators (`@policy(...)`) | Parsed only | No compiler or runtime effect |
 | `sfn fmt` (formatter) | **Shipped** | Token-stream formatter: indentation, spacing, inline blocks, unary operator handling, import sorting & specifier reordering, blank line normalization, `--check`/`--write` modes, CI enforcement; see `docs/proposals/fmt-architecture.md` for architecture and known limitations |
-| `sfn check` (fast analysis) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
+| `sfn check` (fast analysis) | **Shipped** | Runs parse + typecheck + effect-check on `.sfn` sources without emitting IR or invoking `clang`. Reports diagnostics to stderr with a summary on stdout. Exits non-zero on findings. See `docs/proposals/check-architecture.md`. |
 | `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn doc` (doc generator) | Planned | 1.0; see `docs/proposals/tooling.md` |

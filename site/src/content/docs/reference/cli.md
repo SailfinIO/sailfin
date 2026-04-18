@@ -152,6 +152,65 @@ done
 
 ---
 
+### `sfn check [options] [path...]`
+
+Run the compiler's analysis passes — parse, typecheck, and effect-check — **without** emitting `.sfn-asm`, LLVM IR, or invoking `clang`. Used as a fast inner-loop "does this file still look sane?" gate. Returns in seconds rather than the minutes a full build takes.
+
+**Usage:**
+
+```bash
+sfn check                        # check every .sfn file under the current directory
+sfn check compiler/src           # check a specific directory
+sfn check compiler/src/main.sfn  # check a single file
+sfn check src lib                # check multiple paths in one invocation
+sfn check --quiet compiler/src   # suppress diagnostic output; exit code only
+```
+
+**Options:**
+
+| Flag | Description |
+|---|---|
+| `--quiet`, `-q` | Suppress diagnostic output; only the summary and exit code are produced |
+| `-h`, `--help` | Print usage and exit |
+
+**What gets checked:**
+
+1. **Parse** — `parse_program()` builds the AST (parser recovers from most errors; a future enhancement will surface parse-stage diagnostics).
+2. **Type check** — `typecheck_diagnostics()` reports duplicate symbols (`E0001`), missing interface members (`E0301`), interface type-argument mismatches (`E0302`), and scope violations.
+3. **Effect check** — `validate_effects()` reports routines that call effectful APIs (`print.*`, `fs.*`, `http.*`, `sleep`, `@logExecution`, …) without declaring the matching `![...]` effect.
+
+All three passes run regardless of earlier failures — you see every diagnostic in one pass rather than fix-one / rerun cycles.
+
+**Output format:**
+
+Diagnostics are printed to **stderr**, one `error[CODE]:` header per finding with source context and a caret. Effect violations list the triggering calls and a suggested fix. A summary line is printed to **stdout**:
+
+```
+checked 120 files: ok
+checked 120 files: 3 errors
+```
+
+**Error codes introduced by `sfn check`:**
+
+| Code | Meaning |
+|---|---|
+| `E0400` | Function calls effectful APIs without declaring `![...]` |
+| `E0401` | Decorator (`@trace`, `@logExecution`) requires `![io]` but function doesn't declare it |
+
+Typecheck codes (`E0001`, `E0301`, `E0302`) are shared with the regular compilation pipeline.
+
+**Exit codes:**
+
+| Code | Meaning |
+|---|---|
+| `0` | No diagnostics |
+| `1` | One or more diagnostics were produced (or no `.sfn` files were found) |
+| `2` | Usage error (bad flag or path not found) |
+
+**Why:** A full `make compile` takes many minutes; `sfn check` gives you the parse/typecheck/effect verdict in seconds. Use it during editing, wire it into pre-commit hooks, or run it from CI as an early-gate before the full build.
+
+---
+
 ### `sfn build <file>`
 
 Compile a Sailfin source file without running it. Writes an executable to the output path (default: the source filename without `.sfn` in the current directory).
@@ -218,7 +277,6 @@ The following commands are planned for a future release. They are not available 
 | `sfn init [name]` | Scaffold a new Sailfin capsule with a `capsule.toml` manifest |
 | `sfn add <capsule>` | Add a dependency to the current capsule |
 | `sfn publish` | Publish the current capsule to the package registry |
-| `sfn check [path]` | Type-check and effect-check without compiling to a binary |
 
 ---
 

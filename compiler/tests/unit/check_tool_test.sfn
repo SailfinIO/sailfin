@@ -1,0 +1,213 @@
+// Regression tests for the `sfn check` analysis orchestrator's pure
+// string-building helpers.
+//
+// Kept minimal and self-contained (no imports, no struct literals)
+// because the test runner cannot link against `char_code` via the
+// string_utils → runtime chain from standalone tests, and some
+// compiler versions segfault on nested struct-literal initialisers in
+// test bodies. Mirrors the pattern used by `fmt_test.sfn`,
+// `capsule_dep_resolution_test.sfn`, and `stdlib_capsule_allowlist_test.sfn`.
+//
+// The helpers below mirror the logic in compiler/src/tools/check.sfn —
+// keep them in sync when that file changes. See
+// docs/proposals/check-architecture.md for the overall design.
+
+// -------------------------------------------------------------------
+// Local helpers
+// -------------------------------------------------------------------
+
+fn _index_of(haystack: string, needle: string) -> number {
+    if needle.length == 0 { return 0; }
+    if haystack.length < needle.length { return -1; }
+    let mut i: number = 0;
+    let limit = haystack.length - needle.length;
+    loop {
+        if i > limit { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return _index_of(haystack, needle) >= 0;
+}
+
+fn _local_join_effects(effects: string[]) -> string {
+    if effects.length == 0 { return ""; }
+    let mut out = effects[0];
+    let mut i: number = 1;
+    loop {
+        if i >= effects.length { break; }
+        out = out + ", " + effects[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _local_build_effect_message(routine_name: string, missing_effects: string[]) -> string {
+    let effects_text = _local_join_effects(missing_effects);
+    let mut message = "function `" + routine_name
+        + "` is missing required effects: !["
+        + effects_text
+        + "]";
+    if missing_effects.length > 0 {
+        message = message + " suggestion: add ![" + effects_text
+            + "] to the function signature";
+    }
+    return message;
+}
+
+fn _local_code_for_first_description(first_desc: string) -> string {
+    if first_desc.length == 0 { return "E0400"; }
+    if substring(first_desc, 0, 1) == "@" { return "E0401"; }
+    return "E0400";
+}
+
+fn _local_num_to_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let mut working: number = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let mut output: string = "";
+    loop {
+        if working == 0 { break; }
+        let mut quotient: number = 0;
+        let mut remaining: number = working;
+        loop {
+            if remaining < 10 { break; }
+            remaining = remaining - 10;
+            quotient += 1;
+        }
+        let mut digit_char: string = "0";
+        if remaining == 1 { digit_char = "1"; }
+        if remaining == 2 { digit_char = "2"; }
+        if remaining == 3 { digit_char = "3"; }
+        if remaining == 4 { digit_char = "4"; }
+        if remaining == 5 { digit_char = "5"; }
+        if remaining == 6 { digit_char = "6"; }
+        if remaining == 7 { digit_char = "7"; }
+        if remaining == 8 { digit_char = "8"; }
+        if remaining == 9 { digit_char = "9"; }
+        output = digit_char + output;
+        working = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}
+
+fn _local_render_summary(files_checked: number, total_errors: number) -> string {
+    let files_str = _local_num_to_string(files_checked);
+    if total_errors == 0 {
+        return "checked " + files_str + " files: ok";
+    }
+    let errors_str = _local_num_to_string(total_errors);
+    let mut label: string = " errors";
+    if total_errors == 1 { label = " error"; }
+    return "checked " + files_str + " files: " + errors_str + label;
+}
+
+// -------------------------------------------------------------------
+// Tests — join_effects
+// -------------------------------------------------------------------
+
+test "check: join_effects empty" {
+    let empty: string[] = [];
+    assert strings_equal(_local_join_effects(empty), "");
+}
+
+test "check: join_effects single" {
+    assert strings_equal(_local_join_effects(["io"]), "io");
+}
+
+test "check: join_effects multiple" {
+    assert strings_equal(_local_join_effects(["io", "net"]), "io, net");
+    assert strings_equal(_local_join_effects(["io", "net", "clock"]), "io, net, clock");
+}
+
+// -------------------------------------------------------------------
+// Tests — effect message building
+// -------------------------------------------------------------------
+
+test "check: effect message names the routine" {
+    let msg = _local_build_effect_message("process", ["io"]);
+    assert _contains(msg, "process");
+    assert _contains(msg, "io");
+}
+
+test "check: effect message joins multiple missing effects" {
+    let msg = _local_build_effect_message("fetch_order", ["io", "net"]);
+    assert _contains(msg, "io, net");
+}
+
+test "check: effect message suggests fix" {
+    let msg = _local_build_effect_message("write_log", ["io"]);
+    assert _contains(msg, "suggestion");
+    assert _contains(msg, "![io]");
+}
+
+// -------------------------------------------------------------------
+// Tests — error-code classification
+// -------------------------------------------------------------------
+
+test "check: plain missing-effect requirement is E0400" {
+    assert strings_equal(_local_code_for_first_description("http.get"), "E0400");
+    assert strings_equal(_local_code_for_first_description("fs.readFile"), "E0400");
+}
+
+test "check: decorator-implied effect is E0401" {
+    assert strings_equal(_local_code_for_first_description("@trace decorator"), "E0401");
+    assert strings_equal(_local_code_for_first_description("@logExecution"), "E0401");
+}
+
+test "check: empty description defaults to E0400" {
+    assert strings_equal(_local_code_for_first_description(""), "E0400");
+}
+
+// -------------------------------------------------------------------
+// Tests — summary rendering
+// -------------------------------------------------------------------
+
+test "check: summary says ok when no errors" {
+    let text = _local_render_summary(3, 0);
+    assert _contains(text, "3 files");
+    assert _contains(text, "ok");
+}
+
+test "check: summary reports plural errors" {
+    let text = _local_render_summary(2, 5);
+    assert _contains(text, "5 errors");
+}
+
+test "check: summary reports singular error" {
+    let text = _local_render_summary(1, 1);
+    assert _contains(text, "1 error");
+    assert !_contains(text, "errors");
+}
+
+// -------------------------------------------------------------------
+// Tests — number-to-string helper
+// -------------------------------------------------------------------
+
+test "check: num_to_string handles zero" {
+    assert strings_equal(_local_num_to_string(0), "0");
+}
+
+test "check: num_to_string handles small positives" {
+    assert strings_equal(_local_num_to_string(7), "7");
+    assert strings_equal(_local_num_to_string(42), "42");
+    assert strings_equal(_local_num_to_string(120), "120");
+}
