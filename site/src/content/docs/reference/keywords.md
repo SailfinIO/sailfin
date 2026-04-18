@@ -477,18 +477,27 @@ fn divide(a: number, b: number) -> number {
 
 ## Concurrency
 
-> **Status:** All concurrency keywords below are **Planned** unless noted. The current runtime provides `spawn`, `channel`, and `parallel` as prelude functions (see [Standard Library](/docs/reference/standard-library)), but the language-level `routine`/`scope`/`await` keywords are not yet implemented.
+> **Status:** `routine { }` is parsed today and appears in example code; `channel()` and `parallel [...]` are available as prelude-backed primitives (see [Standard Library](/docs/reference/standard-library)). Full structured-concurrency semantics (`scope`, `await`, joined shutdown) are on the [roadmap](/roadmap).
 
 ### `routine`
 
-**Status: Planned**
+**Status: Parsed**
 
-Declare a concurrent task that runs in a structured scope. Part of the planned structured-concurrency model.
+Introduce a concurrent task block. The surface syntax is `routine { body }` or
+`routine "name" { body }` — anonymous or named. Full scheduler and join
+semantics are on the [roadmap](/roadmap).
 
 ```sfn
-// Planned — not yet implemented
-routine fetch_data(url: String) -> String ![io, net] {
-    return http.get(url).body;
+import { Channel, channel } from "sync";
+
+fn main() ![io] {
+    let messages: Channel<string> = channel();
+    routine {
+        messages.send("hello");
+    }
+    routine "consumer" {
+        print(messages.receive());
+    }
 }
 ```
 
@@ -503,8 +512,8 @@ Define a structured-concurrency scope. All routines spawned inside a `scope` blo
 ```sfn
 // Planned — not yet implemented
 scope {
-    spawn fetch_data("https://api.example.com/a");
-    spawn fetch_data("https://api.example.com/b");
+    routine { fetch_data("https://api.example.com/a"); }
+    routine { fetch_data("https://api.example.com/b"); }
 }
 // both tasks complete here
 ```
@@ -519,8 +528,8 @@ Await the result of an `async fn` or a concurrent future. Not yet parsed.
 
 ```sfn
 // Planned — not yet implemented
-async fn load_user(id: Int) -> User ![net] {
-    let response = await http.get("/users/" + id);
+async fn load_user(id: string) -> User ![net] {
+    let response = await http.get("/users/{{ id }}");
     return response.body;
 }
 ```
@@ -552,10 +561,14 @@ spawn {
 Send a prompt to a model declared in the enclosing scope. Requires the `![model]` effect. Prompt blocks emit a `.prompt` directive in `.sfn-asm` IR. Runtime execution is not yet implemented.
 
 ```sfn
-fn summarize(text: String) -> String ![model] {
-    prompt Summarizer {
-        user: "Summarize the following in one sentence: " + text;
+fn summarize(text: string) -> string ![model] {
+    prompt system {
+        "You are a precise summarizer.";
     }
+    prompt user {
+        "Summarize the following in one sentence: {{ text }}";
+    }
+    return call_model("summarizer", text);
 }
 ```
 
@@ -565,26 +578,30 @@ fn summarize(text: String) -> String ![model] {
 
 **Status: Parsed + IR**
 
-Named message channels within a `prompt` block, corresponding to the standard `system`, `user`, and `assistant` roles in language model APIs.
+Canonical channel identifiers used immediately after `prompt`. They correspond
+to the standard `system`, `user`, and `assistant` roles in language model APIs.
+Each `prompt CHANNEL { body }` block emits one `.prompt` directive.
 
 ```sfn
-fn classify(input: String) -> String ![model] {
-    prompt Classifier {
-        system: "You are a helpful classifier. Respond with a single category.";
-        user: input;
+fn classify(input: string) -> string ![model] {
+    prompt system {
+        "You are a helpful classifier. Respond with a single category.";
     }
+    prompt user {
+        input;
+    }
+    return call_model("classifier", input);
 }
 ```
 
-The `assistant` channel seeds the model's reply context (few-shot examples):
+The `assistant` channel seeds the model's reply context (few-shot examples) by
+appending another prompt block:
 
 ```sfn
-prompt Translator {
-    system: "Translate English to French.";
-    user: "Good morning";
-    assistant: "Bonjour";
-    user: text_to_translate;
-}
+prompt system { "Translate English to French."; }
+prompt user { "Good morning"; }
+prompt assistant { "Bonjour"; }
+prompt user { text_to_translate; }
 ```
 
 > **Typed prompt channels** (`prompt user<MyType> { }`) are a design-stage feature and are not yet implemented.
@@ -651,8 +668,8 @@ export { add as plus };
 Boolean literal values.
 
 ```sfn
-let is_valid: Boolean = true;
-let is_done: Boolean = false;
+let is_valid: boolean = true;
+let is_done: boolean = false;
 
 if is_valid && !is_done {
     print("still running");
@@ -665,12 +682,12 @@ if is_valid && !is_done {
 
 **Status: Implemented**
 
-The absence of a value. A type suffixed with `?` is a union with `null` (e.g., `String?` means `String | null`).
+The absence of a value. A type suffixed with `?` is a union with `null` (e.g., `string?` means `string | null`).
 
 ```sfn
 let user: User? = null;
 
-fn find_user(id: Int) -> User? {
+fn find_user(id: string) -> User? {
     // ...
     return null;
 }
@@ -719,8 +736,8 @@ fn send_message(msg: Linear<Message>) ![net] {
 Marks a value as containing personally identifiable information. Planned to prevent PII from flowing to `net` or `model` effects without explicit declassification. No taint enforcement today.
 
 ```sfn
-fn render_invoice(user: PII<User>) -> Html ![io] {
-    // PII<T> is a nominal type today; no enforcement
+fn render_invoice(user: PII<User>) -> string ![io] {
+    // PII<T> is a nominal type today; no enforcement ([roadmap](/roadmap))
     return build_html(user.name, user.email);
 }
 ```
@@ -734,9 +751,9 @@ fn render_invoice(user: PII<User>) -> Html ![io] {
 Marks a value as a secret (e.g., API key, password). Planned to prevent secrets from appearing in logs or being transmitted without explicit handling. No taint enforcement today.
 
 ```sfn
-fn connect(api_key: Secret<String>) ![net] {
-    // Secret<T> is a nominal type today; no enforcement
-    let response = http.get("https://api.example.com?key=" + api_key);
+fn connect(api_key: Secret<string>) ![net] {
+    // Secret<T> is a nominal type today; no enforcement ([roadmap](/roadmap))
+    let response = http.get("https://api.example.com?key={{ api_key }}");
 }
 ```
 
@@ -751,7 +768,7 @@ fn connect(api_key: Secret<String>) ![net] {
 Opt out of Sailfin's safety guarantees for a block or function. Syntax is accepted; no additional permissions are granted or revoked at this time.
 
 ```sfn
-unsafe fn write_ptr(ptr: any, offset: Int, value: Int) -> void {
+unsafe fn write_ptr(ptr: *mut u8, offset: usize, value: u8) -> void {
     // raw pointer arithmetic — not enforced yet
 }
 ```
@@ -765,7 +782,7 @@ unsafe fn write_ptr(ptr: any, offset: Int, value: Int) -> void {
 Declare a symbol that is provided by the native linker or runtime. Enforcement is not yet active.
 
 ```sfn
-extern fn platform_clock() -> Int;
+unsafe extern fn platform_clock() -> i64;
 ```
 
 ---
@@ -774,10 +791,15 @@ extern fn platform_clock() -> Int;
 
 **Status: Parsed**
 
-Annotate a type or expression as a raw (unmanaged) pointer. Parsed and recorded; no additional semantics enforced.
+Used in the `&raw x` borrow form to create a raw pointer from a value. Raw
+pointer expressions and the matching pointer types are only usable inside an
+`unsafe { }` block.
 
 ```sfn
-let ptr: raw Int = allocate(4);
+unsafe {
+    let ptr: *u8 = &raw buffer;
+    // ... raw pointer operations
+}
 ```
 
 ---
@@ -786,10 +808,11 @@ let ptr: raw Int = allocate(4);
 
 **Status: Parsed**
 
-Declare a type whose internals are hidden from importers. Parsed; module-level privacy rules are not yet enforced.
+Used in the pointer type `*opaque` to denote an opaque foreign pointer
+(equivalent to C's `void*`) — most often in FFI declarations.
 
 ```sfn
-opaque type Handle = Int;
+unsafe extern fn fopen(path: *u8, mode: *u8) -> *opaque;
 ```
 
 ---
