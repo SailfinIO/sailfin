@@ -101,6 +101,52 @@ jobs:
           fi
           echo "[fmt] all files formatted"
 
+      # Cheap pre-check: emit native_ir_api.sfn (the hottest consumer of
+      # cross-module helpers) and assert the lowering produced no
+      # "unknown function" or "unable to lower if condition" diagnostics.
+      # These diagnostics are currently non-fatal (they're written to
+      # stderr and the build continues), but they are a reliable signal
+      # that an import is resolving to a symbol with no `.fn` signature
+      # in the imported module's `.sfn-asm` — the exact shape described
+      # in docs/rca/2026-04-18-reexport-diagnostic-gep.md.
+      - name: Lowering-diagnostic canary (emit + grep)
+        shell: bash {0}
+        run: |
+          set -euo pipefail
+          mkdir -p build/sailfin
+          canary_files=(
+            compiler/src/native_ir_api.sfn
+            compiler/src/native_ir_parser.sfn
+            compiler/src/native_ir_parser_defs.sfn
+            compiler/src/native_ir_parser_instructions.sfn
+            compiler/src/native_ir_utils_layout.sfn
+            compiler/src/native_ir_utils_parse.sfn
+          )
+          fail=0
+          for f in "${canary_files[@]}"; do
+            if ! log="$(build/native/sailfin emit llvm "$f" 2>&1 1>/dev/null)"; then
+              echo "[canary] emit crashed for $f"
+              fail=$((fail + 1))
+              continue
+            fi
+            bad="$(echo "$log" | grep -E 'call to unknown function|unable to lower if condition' || true)"
+            if [ -n "$bad" ]; then
+              echo "[canary] lowering diagnostics in $f:"
+              echo "$bad"
+              fail=$((fail + 1))
+            fi
+          done
+          if [ "$fail" -gt 0 ]; then
+            echo ""
+            echo "[canary] $fail file(s) produced unsafe lowering diagnostics."
+            echo "[canary] This typically means an imported symbol has no .fn"
+            echo "[canary] signature in its origin's .sfn-asm — check for"
+            echo "[canary] re-exports of imported symbols."
+            echo "[canary] See docs/rca/2026-04-18-reexport-diagnostic-gep.md."
+            exit 1
+          fi
+          echo "[canary] all canary files emit cleanly"
+
       - name: Enable test runner trace (macOS)
         if: runner.os == 'macOS'
         shell: bash {0}
