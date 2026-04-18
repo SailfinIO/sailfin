@@ -496,7 +496,7 @@ fn main() ![io] {
         messages.send("hello");
     }
     routine "consumer" {
-        print(messages.receive());
+        print(await messages.receive());
     }
 }
 ```

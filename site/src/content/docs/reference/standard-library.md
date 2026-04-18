@@ -245,19 +245,10 @@ You should not call this function directly. It appears in generated code and in 
 
 ### Concurrency and Async Utilities
 
-> **Status:** The concurrency primitives below are present in the prelude and parseable, but full structured-concurrency semantics are planned for a future release. `spawn` and `channel` are available today as runtime-level hooks; `routine`/`scope`/`await` are planned language keywords.
-
-#### `sleep(milliseconds: number) ![clock]`
-
-Suspend the current execution context for at least `milliseconds` milliseconds. Requires the `clock` effect.
-
-```sfn
-import { sleep } from "time";
-
-fn wait_a_bit() ![clock] {
-    sleep(500);  // pause for 500 ms
-}
-```
+> **Status:** `routine`, `await`, and `parallel` are shipped language
+> constructs, and the `Channel<T>` type from the `sync` module works today
+> (see the examples below). Structured-concurrency supervision — scope
+> semantics, cancellation, and `spawn` — is on the [roadmap](/roadmap).
 
 #### `monotonic_millis() -> number ![clock]`
 
@@ -272,28 +263,79 @@ fn timed_operation() ![io, clock] {
 }
 ```
 
-#### `channel<T>(capacity: number = 0) -> Channel<T> ![io]`
+#### `channel<T>() -> Channel<T>` and `channel<T>(capacity: number) -> Channel<T>`
 
-Create a buffered or unbuffered channel for passing values between concurrent tasks. `capacity = 0` produces an unbuffered (synchronous) channel. Requires the `io` effect.
-
-> **Planned:** Full channel API with typed send/receive operations. Current behavior delegates to the runtime channel primitive.
-
-#### `spawn(task: () -> void, name: string = "") -> void ![io]`
-
-Spawn a concurrent task. `name` is used for diagnostics. Requires the `io` effect.
-
-> **Planned:** Structured concurrency via `routine`/`scope`.
-
-#### `parallel(tasks: (() -> any)[]) -> any[] ![io]`
-
-Run an array of zero-argument callables concurrently and collect their return values. Requires the `io` effect.
+Create an unbuffered or bounded channel for passing values between concurrent
+tasks. `capacity = 0` (the no-argument form) produces an unbuffered
+(synchronous) channel. Imported from the `sync` module.
 
 ```sfn
-fn fetch_all(urls: string[]) -> string[] ![io, net] {
-    let tasks = array_map(urls, fn(url: string) -> any {
-        return fn() -> any ![net] { return http.get(url).body; };
-    });
-    return parallel(tasks);
+import { Channel, channel } from "sync";
+
+async fn main() ![io] {
+    let messages: Channel<number> = channel();
+
+    routine {
+        messages.send(42);
+    }
+
+    let result: number = await messages.receive();
+    print("Received: {{result}}");
+}
+```
+
+#### `Channel<T>.send(value: T)` and `Channel<T>.receive() -> T`
+
+Send a value into the channel, or await the next value out. `send` returns
+immediately on a buffered channel (blocks when the buffer is full); `receive`
+yields via `await` until a value is available.
+
+```sfn
+import { Channel, channel } from "sync";
+import { sleep } from "time";
+
+fn main() ![clock, io] {
+    let buffer: Channel<number> = channel(10); // bounded buffer
+
+    routine {
+        for i in 1..20 {
+            print("Producing {{i}}");
+            buffer.send(i);
+            sleep(500);
+        }
+    }
+
+    routine {
+        loop {
+            let item = await buffer.receive();
+            print("Consumed {{item}}");
+            sleep(1000);
+        }
+    }
+}
+```
+
+> **Coming in 1.0:** `Channel<T>.close()` and explicit cancellation, plus a
+> structured `scope { ... }` supervisor for grouping routines. See the
+> [roadmap](/roadmap).
+
+#### `parallel [ ... ]` — language construct
+
+Run an array literal of zero-argument lambdas concurrently and collect their
+return values. `parallel` is a **keyword**, not a stdlib function — the
+operand is an array literal of `fn() -> T { ... }` expressions.
+
+```sfn
+fn computeTask1() -> number { return 21; }
+fn computeTask2() -> number { return 21; }
+
+fn main() ![io] {
+    let results = parallel [
+        fn() -> number { return computeTask1(); },
+        fn() -> number { return computeTask2(); },
+    ];
+
+    print("Results: {{results}}");
 }
 ```
 
@@ -716,9 +758,25 @@ rand.choice<T>(items: T[]) -> T? ![rand]
 
 ---
 
-### `time` / `clock` module — Planned (`![clock]` effect)
+### `time` module (`![clock]` effect)
 
-> **Coming in 1.0:** A structured date/time API on top of the existing `clock` effect. The `sleep` and `monotonic_millis` prelude functions are available today; richer wall-clock access is planned. See the [roadmap](/roadmap).
+#### `sleep(milliseconds: number) ![clock]`
+
+Imported from the `time` module. Suspend the current execution context for at
+least `milliseconds` milliseconds. Requires the `clock` effect.
+
+```sfn
+import { sleep } from "time";
+
+fn wait_a_bit() ![clock] {
+    sleep(500);  // pause for 500 ms
+}
+```
+
+> **Coming in 1.0:** A structured date/time API on top of the existing
+> `clock` effect. `sleep` (from `time`) and the `monotonic_millis` prelude
+> function are available today; richer wall-clock access is planned.
+> See the [roadmap](/roadmap).
 
 ```sfn
 // Planned — not yet implemented
@@ -748,27 +806,11 @@ struct ProcessResult {
 
 ---
 
-### Concurrency module — Planned
+### `sync` module
 
-> **Coming in 1.0:** Structured concurrency primitives to complement `routine`, `spawn`, `await`, and `parallel`. The `channel()` prelude function and `Channel<T>` type from the `sync` module are callable today; the full send/recv/close surface below is planned. See the [roadmap](/roadmap).
-
-```sfn
-import { Channel, channel } from "sync";
-
-// Available today — unbuffered channel, typed
-async fn main() ![io] {
-    let messages: Channel<number> = channel();
-    // send and recv are planned keywords / methods
-}
-```
-
-```sfn
-// Planned — not yet implemented
-channel<T>(capacity: number = 0) -> Channel<T> ![io]
-Channel<T>.send(value: T) -> void ![io]
-Channel<T>.recv() -> T ![io]
-Channel<T>.close() -> void ![io]
-```
+The `sync` module exposes `Channel<T>` and the `channel()` constructor. See
+the [Concurrency and Async Utilities](#concurrency-and-async-utilities)
+section above for the full API and examples.
 
 ---
 
