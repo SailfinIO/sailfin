@@ -31,31 +31,36 @@ import {
 import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
-    return "usage:\n" + "  sfn --version\n" + "  sfn version\n"
-        + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n"
-        + "  sfn build [-o OUTPUT] <file.sfn>\n"
-        + "  sfn run <file.sfn>\n"
-        + "  sfn run <exe>\n"
-        + "  sfn test [path]\n"
-        + "  sfn fmt [--check] [--write] [path...]\n"
-        + "  sfn init\n"
-        + "  sfn publish [path]\n"
-        + "  sfn add [--dev] <capsule>\n"
-        + "  sfn login [token]\n"
-        + "\n"
-        + "examples:\n"
-        + "  sfn emit llvm examples/basics/hello-world.sfn\n"
-        + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n"
-        + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n"
-        + "  sfn run examples/basics/hello-world.sfn\n"
-        + "  sfn run build/native/examples/hello\n"
-        + "  sfn test .\n"
-        + "  sfn init\n"
-        + "  sfn publish [path]\n"
-        + "  sfn add http\n"
-        + "  sfn add --dev test\n"
-        + "  sfn add acme/router\n"
-        + "  sfn login\n";
+    let mut out: string = "usage:\n";
+    out = out + "  sfn --version\n";
+    out = out + "  sfn version\n";
+    out = out
+        + "  sfn emit [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n";
+    out = out + "  sfn build [-o OUTPUT] <file.sfn>\n";
+    out = out + "  sfn run <file.sfn>\n";
+    out = out + "  sfn run <exe>\n";
+    out = out + "  sfn test [path]\n";
+    out = out + "  sfn fmt [--check] [--write] [path...]\n";
+    out = out + "  sfn init\n";
+    out = out + "  sfn publish [path]\n";
+    out = out + "  sfn add [--dev] <capsule>\n";
+    out = out + "  sfn login [token]\n";
+    out = out + "\n";
+    out = out + "examples:\n";
+    out = out + "  sfn emit llvm examples/basics/hello-world.sfn\n";
+    out = out + "  sfn emit -o hello.ll llvm examples/basics/hello-world.sfn\n";
+    out = out
+        + "  sfn build -o build/native/examples/hello examples/basics/hello-world.sfn\n";
+    out = out + "  sfn run examples/basics/hello-world.sfn\n";
+    out = out + "  sfn run build/native/examples/hello\n";
+    out = out + "  sfn test .\n";
+    out = out + "  sfn init\n";
+    out = out + "  sfn publish [path]\n";
+    out = out + "  sfn add http\n";
+    out = out + "  sfn add --dev test\n";
+    out = out + "  sfn add acme/router\n";
+    out = out + "  sfn login\n";
+    return out;
 }
 
 fn _ends_with(value: string, suffix: string) -> boolean {
