@@ -15,12 +15,14 @@ The effect system is a compile-time capability mechanism. Every function declare
 
 | Effect | Token | Grants Access To | Enforced Today | Examples |
 |--------|-------|-----------------|----------------|---------|
-| IO | `io` | Filesystem, console output, logging, decorators like `@logExecution` | Yes | `print()`, `print.err()`, `fs.read()`, `fs.write()`, `console.*` |
+| IO | `io` | Filesystem, console output, logging, decorators like `@logExecution` | Yes | `print()`, `print.err()`, `fs.readFile()`, `fs.writeFile()`, `console.*` |
 | Network | `net` | HTTP, WebSocket, serve | Yes | `http.get()`, `http.post()`, `websocket.*`, `serve` |
 | Model | `model` | AI model invocation | Yes (for `prompt` blocks) | `prompt` blocks; `.call()` execution is planned |
 | GPU | `gpu` | Tensor and accelerator operations | No (parsed only) | Tensor ops, `@gpu` blocks, GPU memory |
 | Random | `rand` | Random number generation | No (parsed only) | `rand.*` |
 | Clock | `clock` | Time operations | Partial | `sleep()`, `runtime.sleep()` |
+
+The tokens `unsafe`, `read`, and `mut` are also recognized by the parser for FFI and ownership annotations but are not part of the capability-surface set enforced by the effect checker today.
 
 ---
 
@@ -30,24 +32,25 @@ Effect annotations appear after the parameter list and optional return type, bef
 
 ```sfn
 // No effects declared — guaranteed pure
-fn pure_fn(x: int) -> int {
-    x * 2
+fn pure_fn(x: number) -> number {
+    return x * 2;
 }
 
 // Single effect
-fn log_value(x: int) ![io] {
-    print(x);
+fn log_value(x: number) ![io] {
+    print("{{x}}");
 }
 
 // Multiple effects
 fn fetch_and_log(url: string) ![io, net] {
-    let body = http.get(url);
-    print(body);
+    let response = http.get(url);
+    print(response.body);
 }
 
 // Full signature with return type and multiple effects
 fn fetch_order(url: string) -> string ![io, net, model] {
     // ...
+    return "";
 }
 ```
 
@@ -77,8 +80,8 @@ Required for all filesystem access, console output, structured logging, and IO-d
 | `print(value)` | Write to stdout |
 | `print.err(value)` | Write to stderr |
 | `print.warn(value)` | Write warning to stderr |
-| `fs.read(path)` | Read file contents |
-| `fs.write(path, content)` | Write file contents |
+| `fs.readFile(path)` | Read file contents |
+| `fs.writeFile(path, content)` | Write file contents |
 | `fs.appendFile(path, content)` | Append to a file |
 | `fs.exists(path)` | Check file existence |
 | `fs.writeLines(path, lines)` | Write an array of lines |
@@ -111,7 +114,7 @@ Required for any function containing a `prompt` block. Model execution via `.cal
 ```sfn
 fn summarize(text: string) -> string ![model] {
     prompt user {
-        "Summarize the following: {{ text }}"
+        "Summarize the following: {{text}}"
     }
 }
 ```
@@ -178,13 +181,15 @@ Declare the narrowest set of effects possible. Functions that mix pure computati
 
 ```sfn
 // Preferred: pure logic separated from IO
-fn compute_total(items: List<Item>) -> Float {
-    items.map(fn(i) -> Float { i.price }).sum()
+fn compute_total(items: Item[]) -> number {
+    return array_reduce(items, 0, fn(acc: number, i: Item) -> number {
+        return acc + i.price;
+    });
 }
 
-fn print_total(items: List<Item>) ![io] {
+fn print_total(items: Item[]) ![io] {
     let total = compute_total(items);
-    print(total);
+    print("{{total}}");
 }
 ```
 

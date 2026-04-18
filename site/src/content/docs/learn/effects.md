@@ -90,7 +90,7 @@ fn fetch_and_log(url: string) -> string ![io, net] {
 By default, the effect annotation goes after the return type: `fn f(...) -> T ![effects] { ... }`. The parser also accepts effects before `->`. The conventional style is effects after the return type:
 
 ```sfn
-fn load_user(id: int) -> User ![io, net] {
+fn load_user(id: number) -> User ![io, net] {
     let row = db.query("SELECT * FROM users WHERE id = {{id}}");
     return User.from_row(row);
 }
@@ -112,17 +112,17 @@ A function with no `![]` annotation is **pure**. The compiler enforces this: cal
 
 ```sfn
 // Pure — no effects declared, no effects allowed
-fn add(a: int, b: int) -> int {
+fn add(a: number, b: number) -> number {
     return a + b;
 }
 
-fn clamp(value: Float, low: Float, high: Float) -> Float {
+fn clamp(value: number, low: number, high: number) -> number {
     if value < low  { return low; }
     if value > high { return high; }
     return value;
 }
 
-fn format_currency(amount: Float) -> string {
+fn format_currency(amount: number) -> string {
     return "${{amount}}";
 }
 ```
@@ -266,9 +266,9 @@ A function that invokes a tool with a `prompt` block must declare `![model]`; an
 Closures capture the effect context of their enclosing scope. A lambda used inside an `![io]` function may call I/O operations; a lambda used inside a pure function may not.
 
 ```sfn
-fn process_files(paths: Array<string>) ![io] {
+fn process_files(paths: string[]) ![io] {
     // This lambda is used in an ![io] context — it can call fs.read
-    let contents = paths.map(fn(path) -> string { fs.read(path) });
+    let contents = paths.map(fn(path: string) -> string { return fs.read(path); });
     for content in contents {
         print(content);
     }
@@ -329,7 +329,7 @@ fn process_order(order_id: string) -> boolean ![io, net] {
     let order = Order.parse(raw);
     if order.total > 1000.0 {
         print("High-value order: {{order_id}}");
-        fs.appendFile("high_value.log", order_id);
+        fs.append("high_value.log", order_id);
     }
     let discount = order.total * 0.1;
     http.post("https://api.example.com/orders/{{order_id}}/discount",
@@ -342,7 +342,7 @@ fn process_order(order_id: string) -> boolean ![io, net] {
 
 ```sfn
 // Pure business logic — easily testable
-fn calculate_discount(order: Order) -> Float {
+fn calculate_discount(order: Order) -> number {
     return order.total * 0.1;
 }
 
@@ -399,12 +399,12 @@ fn validate_username(username: string) -> boolean {
 }
 
 struct ValidationResult {
-    valid -> boolean;
-    errors -> Array<string>;
+    valid: boolean;
+    errors: string[];
 }
 
 fn validate_registration(username: string, email: string) -> ValidationResult {
-    let mut errors: Array<string> = [];
+    let mut errors: string[] = [];
     if !validate_username(username) {
         errors.push("Username must be 3–32 characters");
     }
@@ -466,7 +466,7 @@ fn load_template(path: string) -> string ![io] {
 
 ```sfn
 // No effect — pure function
-fn pure_fn(x: int) -> int { ... }
+fn pure_fn(x: number) -> number { ... }
 
 // Single effect
 fn io_fn() ![io] { ... }
@@ -480,23 +480,18 @@ fn fetch_fn(url: string) -> string ![net] { ... }
 // Test with effects
 test "my test" ![io] { ... }
 
-// Pipeline step
-pipeline my_pipeline ![io, model] {
-    step fetch(url: string) -> string ![net] { ... }
-    step process(text: string) -> Result ![model] { ... }
-}
+// Pipeline
+pipeline my_pipeline(input: string) ![io, model] { ... }
 
 // Tool
-tool my_tool {
-    fn execute(id: string) -> Data ![io] { ... }
-}
+tool my_tool(id: string) -> Data ![io] { ... }
 ```
 
 ---
 
 ## Next Steps
 
-- [Ownership & Borrowing](/docs/learn/ownership) — Move semantics and `Affine<T>`/`Linear<T>` enforcement
+- [Ownership & Borrowing](/docs/learn/ownership) — Move semantics and `Affine<T>`/`Linear<T>` (syntax parsed today; enforcement on the [roadmap](/roadmap))
 - [Testing](/docs/learn/testing) — Writing pure and effectful tests
 - [AI Integration](/docs/learn/ai-constructs) — The `![model]` effect and the `sfn/ai` capsule
 - [Effect System Reference](/docs/reference/effects) — Complete specification and enforcement rules

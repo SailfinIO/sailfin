@@ -189,15 +189,11 @@ import { UserRecord, validate_user } from "core";
 import { log } from "sfn/log";
 
 fn handle_login(req: Request) -> Response ![io, net] {
-    let result = validate_user(req.body);
-    match result {
+    let user: UserRecord = validate_user(req.body);
+    match user {
         UserRecord { id, name } => {
-            log.info("Login success: " + name);
-            return Response { status: 200, body: "Welcome, " + name };
-        },
-        _ => {
-            log.warn("Login failed");
-            return Response { status: 401, body: "Unauthorized" };
+            log.info("Login success: {{name}}");
+            return Response { status: 200, body: "Welcome, {{name}}" };
         },
     }
 }

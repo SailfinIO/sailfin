@@ -39,7 +39,7 @@ tools/             # Developer tooling
 - `CamelCase` for types: `UserProfile`, `HttpResponse`
 - `snake_case` for functions and variables: `fetch_data`, `user_count`
 - `UPPER_SNAKE_CASE` for constants: `MAX_RETRIES`
-- Effect annotations on same line: `fn save(data: String) ![io] {`
+- Effect annotations on same line: `fn save(data: string) ![io] {`
 - Doc comments with `///`
 
 ## Import Conventions

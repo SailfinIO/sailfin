@@ -24,21 +24,23 @@ count += 1;                    // also OK (compound assignment)
 
 ### Type Annotations
 
-Type inference handles the common case. You can annotate explicitly when the type is ambiguous or you want to be explicit for documentation purposes. Both `:` and `->` work for type annotations on `let`:
+Type inference handles the common case. Annotate explicitly when the type is
+ambiguous or when you want the code to serve as documentation. Variable, field,
+and parameter type annotations use `:`:
 
 ```sfn
-let x: Int = 42;
-let y -> Float = 3.14;        // alternative annotation syntax
-let name: String = "Alice";
+let x: number = 42;
+let ratio: number = 3.14;
+let name: string = "Alice";
 
 // Without annotation — inferred from the right-hand side
-let z = 100;                  // z: Int
-let flag = true;              // flag: Bool
+let z = 100;                  // z: number
+let flag = true;              // flag: boolean
 ```
 
 Use explicit annotations when:
-- The initializer could produce multiple types (e.g., an integer literal used where `i32` vs `i64` matters)
-- You are declaring a binding with no initializer (forward declaration is not supported; annotate and initialize together)
+- The initializer could produce multiple types (e.g., you want `i32` rather than the default `number`)
+- You are declaring a binding with no initializer (not currently supported; annotate and initialize together)
 - You want the code to serve as documentation
 
 ### Shadowing
@@ -47,8 +49,8 @@ A new `let` binding can shadow an existing one within the same or a nested scope
 
 ```sfn
 let value = 5;
-let value = value * 2;        // shadows the first; value is now 10 (Int)
-let value = "{{value}}";      // shadows again; value is now a String
+let value = value * 2;        // shadows the first; value is now 10
+let value = "{{value}}";      // shadows again; value is now a string
 
 print(value);                 // prints "10"
 ```
@@ -85,31 +87,27 @@ print(x);                     // prints 1 — outer x is back
 
 ### Value vs Reference Semantics
 
-Sailfin uses **move-by-default** semantics. Assigning a struct or collection to a new binding moves ownership — the original binding becomes invalid. Primitive types (`Int`, `Float`, `Bool`, etc.) are copied implicitly.
+Sailfin's ownership story is part of the pre-1.0 roadmap — the borrow syntax
+below is **parsed but not yet enforced**. Today, values behave similarly to
+other modern systems languages: primitives are copied, and structs and
+collections are passed by reference at the implementation level. Treat this
+section as the direction of travel.
 
 ```sfn
 // Primitives are copied
 let a = 42;
 let b = a;
-print(a);    // still valid — a was copied into b
+print(a);
 print(b);
 
-// Structs and collections move
-let items = Vec.new();
-let moved = items;            // ownership transferred
-// items.push("x");           // COMPILE ERROR: use after move
-
-// Use a borrow to read without moving
-fn count(v: &Vec<String>) -> Int {
-    return v.len();
+// Borrow syntax (parsed today; enforcement post-1.0)
+fn count(v: &number[]) -> number {
+    return v.length;
 }
-let data = Vec.new();
-let n = count(&data);         // data is borrowed, not moved
-print(n);
-print(data.len());            // data is still valid
 ```
 
-See [Ownership & Borrowing](/docs/learn/ownership) for the full picture.
+See [Ownership & Borrowing](/docs/learn/ownership) and the
+[roadmap](/roadmap) for when full enforcement lands.
 
 ---
 
@@ -119,84 +117,77 @@ See [Ownership & Borrowing](/docs/learn/ownership) for the full picture.
 
 | Type | Description | Literal examples |
 |------|-------------|-----------------|
-| `Int` | 64-bit signed integer | `0`, `42`, `-7`, `1_000_000` |
-| `Float` | 64-bit floating-point (f64) | `0.0`, `3.14`, `-1.5e10` |
-| `Bool` | Boolean | `true`, `false` |
-| `String` | UTF-8 text | `"hello"`, `""` |
+| `number` | 64-bit numeric (the single numeric type today) | `0`, `42`, `-7`, `3.14` |
+| `boolean` | Boolean | `true`, `false` |
+| `string` | UTF-8 text | `"hello"`, `""` |
 | `void` | No value (return type only) | — |
 | `null` | Absence of a value | `null` |
 
-`Int` and `Float` are the everyday numeric types. Use `Int` for counts, indices, and integer arithmetic. Use `Float` for measurements, ratios, and anything that requires fractions.
+`number` is Sailfin's single numeric type today and covers both integer and
+floating-point values. A forthcoming split into distinct `int` (i64) and
+`float` (f64) types is tracked on the [roadmap](/roadmap); until that lands,
+use `number` for both counts and measurements.
 
 ```sfn
-let count: Int = 100;
-let ratio: Float = 0.75;
-let name: String = "Sailfin";
-let active: Bool = true;
+let count: number = 100;
+let ratio: number = 0.75;
+let name: string = "Sailfin";
+let active: boolean = true;
 ```
 
 ### FFI and Low-Level Integer Types
 
-When interfacing with C libraries, system calls, or serialization formats, Sailfin exposes sized integer and float types:
+When interfacing with C libraries, system calls, or serialization formats,
+Sailfin exposes sized integer and float types:
 
 | Type | Description |
 |------|-------------|
 | `i8` | 8-bit signed |
 | `i16` | 16-bit signed |
 | `i32` | 32-bit signed |
-| `i64` | 64-bit signed (same width as `Int`) |
+| `i64` | 64-bit signed |
 | `u8` | 8-bit unsigned |
 | `u16` | 16-bit unsigned |
 | `u32` | 32-bit unsigned |
 | `u64` | 64-bit unsigned |
 | `f32` | 32-bit float |
-| `f64` | 64-bit float (same width as `Float`) |
+| `f64` | 64-bit float |
 | `usize` | Platform-native pointer-sized unsigned integer |
 
-These are most useful in `extern` declarations and performance-sensitive code that must interoperate with C:
+These are most useful in `extern` declarations and performance-sensitive code
+that must interoperate with C:
 
 ```sfn
-extern fn c_write(fd: i32, buf: &u8, count: usize) -> i32 ![io];
+unsafe extern fn malloc(size: usize) -> *u8;
+unsafe extern fn free(ptr: *u8) -> void;
 ```
 
-For all ordinary application code, prefer `Int` and `Float`.
+For all ordinary application code, prefer `number`.
 
 ### Numeric Literals
 
-Underscores can be used as separators in numeric literals to improve readability:
+Numeric literals use ordinary decimal and floating-point forms. Hex and binary
+literals are supported for sized integer types:
 
 ```sfn
-let million: Int = 1_000_000;
-let pi: Float = 3.141_592_653;
+let count: number = 1000000;
+let pi: number = 3.141592653;
 let byte: u8 = 0xFF;          // hex literal
-let mask: u32 = 0b1111_0000;  // binary literal
-```
-
-### Conversions
-
-Sailfin does not implicitly coerce numeric types. Use explicit conversion functions:
-
-```sfn
-let n: Int = 42;
-let f: Float = Float.from(n);     // Int -> Float
-
-let x: Float = 9.9;
-let i: Int = Int.from(x);         // Float -> Int (truncates toward zero)
-
-let small: i32 = 7;
-let big: i64 = i64.from(small);
+let mask: u32 = 0b11110000;   // binary literal
 ```
 
 ### Booleans
 
-`Bool` has exactly two values: `true` and `false`. Sailfin has no implicit truthiness — numbers, strings, and null do not coerce to `Bool`. Every condition in an `if`, `while`, or `match` guard must be a `Bool` expression.
+`boolean` has exactly two values: `true` and `false`. Sailfin has no implicit
+truthiness — numbers, strings, and null do not coerce to `boolean`. Every
+condition in an `if` or `match` guard must be a `boolean` expression.
 
 ```sfn
 let ready = true;
 let done = false;
 
-// if 0 { ... }              // COMPILE ERROR: Int is not Bool
-if count == 0 { ... }        // OK — comparison produces Bool
+// if 0 { ... }              // COMPILE ERROR: number is not boolean
+if count == 0 { ... }        // OK — comparison produces boolean
 ```
 
 ---
@@ -214,24 +205,23 @@ let summary = "{{name}} is {{age}} years old.";   // "Alice is 30 years old."
 let math = "3 * 4 = {{3 * 4}}";                  // "3 * 4 = 12"
 ```
 
-Any expression works inside the braces, including function calls:
+Any expression works inside the braces, including function calls and field
+accesses:
 
 ```sfn
-fn initials(first: String, last: String) -> String {
-    return "{{first[0]}}.{{last[0]}}.";
+struct User {
+    name: string;
+    age: number;
 }
 
-let s = "Result: {{compute(x, y).to_string()}}";
-let padded = "Count: {{items.len()}} item(s)";
+fn format_user(user: User) -> string {
+    return "{{user.name}} ({{user.age}})";
+}
 ```
 
-### Escaping Braces
-
-To include a literal `{` or `}` in a string, double it:
-
-```sfn
-let json_template = "{{{{ \"key\": \"value\" }}}}";  // produces: { "key": "value" }
-```
+> **Coming in 1.0:** String interpolation will migrate from `{{ expr }}` to
+> `${ expr }`. The change is tracked on the [roadmap](/roadmap) under Syntax
+> Reform; today's examples still use `{{ }}`.
 
 ### Multi-line Strings
 
@@ -284,7 +274,9 @@ print(x / y);    // 3.5 (float division)
 | `<=` | Less than or equal |
 | `>=` | Greater than or equal |
 
-All comparison operators return `Bool`. They work on `Int`, `Float`, `String`, and `Bool`. Structs and enums require an explicit `Eq` interface implementation to use `==` and `!=`.
+All comparison operators return `boolean`. They work on `number`, `string`, and
+`boolean` primitives today. Structural equality for structs and enums is part
+of the pre-1.0 interface work tracked on the [roadmap](/roadmap).
 
 ```sfn
 let result = 3 * 4 == 12;       // true
@@ -319,16 +311,15 @@ These require `x` to be a `let mut` binding.
 
 ### Type-Check Operator
 
-The `is` operator tests whether a value is a specific type at runtime. It returns `Bool` and is most useful with interface types or enum variants:
+The `is` operator tests whether a value matches a particular type branch at
+runtime. It is most useful with union types:
 
 ```sfn
-fn describe(value: Any) -> String {
-    if value is Int {
-        return "an integer";
-    } else if value is String {
-        return "a string";
+fn describe(value: string | number) -> string ![io] {
+    if value is string {
+        return "a string: {{value}}";
     } else {
-        return "something else";
+        return "a number: {{value}}";
     }
 }
 ```
@@ -415,46 +406,28 @@ for (key, value) in config {
 }
 ```
 
-### While Loops
-
-```sfn
-let mut attempts = 0;
-
-while attempts < 3 {
-    let result = try_connect();
-    if result.is_ok() {
-        break;
-    }
-    attempts += 1;
-}
-```
-
 ### Loop
 
-`loop` runs until explicitly broken. Use `break` to exit, and optionally return a value from the loop:
+Sailfin has no `while` keyword today; use `loop` with an `if`/`break` pattern
+instead. `loop` runs until explicitly broken via `break`. Use `continue` to
+skip ahead to the next iteration:
 
 ```sfn
-let mut retries = 0;
+let mut attempts: number = 0;
 
 loop {
-    let result = try_operation();
-    if result.is_ok() || retries >= 5 {
+    attempts += 1;
+
+    if attempts == 1 {
+        continue;
+    }
+
+    if attempts > 3 {
         break;
     }
-    retries += 1;
+
+    print("loop iteration {{attempts}}");
 }
-```
-
-`loop` with a break value — the entire `loop` expression evaluates to the value passed to `break`:
-
-```sfn
-let connection = loop {
-    let attempt = try_connect(endpoint);
-    if attempt.is_ok() {
-        break attempt.unwrap();    // loop evaluates to the connection
-    }
-    wait_ms(500);
-};
 ```
 
 ### Break and Continue
@@ -502,26 +475,19 @@ When breaking or continuing an outer loop from inside a nested loop, use a label
 
 ### Return
 
-`return` exits the current function with a value. In a `void` function, `return` with no value exits early:
+`return` exits the current function with a value. In a `void` function,
+`return` with no value exits early:
 
 ```sfn
-fn find(items: Vec<String>, target: String) -> Int {
-    for (i, item) in items.enumerate() {
+fn find(items: string[], target: string) -> number {
+    let mut i: number = 0;
+    for item in items {
         if item == target {
             return i;
         }
+        i += 1;
     }
     return -1;    // not found
-}
-```
-
-Functions also support implicit returns: the last expression in a function body (without a semicolon) is the return value:
-
-```sfn
-fn clamp(value: Int, min: Int, max: Int) -> Int {
-    if value < min { min }
-    else if value > max { max }
-    else { value }
 }
 ```
 
@@ -580,99 +546,71 @@ match value {
 
 ### Enum Variant Matching
 
-This is the most powerful form. Enum variants can carry data, and pattern matching destructures that data:
+Enum variants can carry data as named fields, and pattern matching
+destructures that data:
 
 ```sfn
 enum Shape {
-    Circle(Float),           // radius
-    Rectangle(Float, Float), // width, height
-    Triangle(Float, Float, Float),
+    Circle { radius: number },
+    Rectangle { width: number, height: number },
+    Triangle { base: number, height: number },
 }
 
-fn area(shape: Shape) -> Float {
+fn area(shape: Shape) -> number {
     match shape {
-        Circle(r)        => 3.14159 * r * r,
-        Rectangle(w, h)  => w * h,
-        Triangle(a, b, c) => {
-            let s = (a + b + c) / 2.0;
-            // Heron's formula
-            (s * (s - a) * (s - b) * (s - c)).sqrt()
-        },
+        Shape.Circle { radius } => return 3.14159 * radius * radius,
+        Shape.Rectangle { width, height } => return width * height,
+        Shape.Triangle { base, height } => return 0.5 * base * height,
     }
 }
 ```
 
-```sfn
-enum Result<T, E> {
-    Ok(T),
-    Err(E),
-}
-
-match parse_int(input) {
-    Ok(n)    => print("Parsed: {{n}}"),
-    Err(msg) => print("Error: {{msg}}"),
-}
-```
-
-### Tuple Patterns
-
-Match on multiple values at once by wrapping them in a tuple:
+Match on a struct-wrapped error to handle union return types:
 
 ```sfn
-let point = (x, y);
+struct ParseError {
+    message: string;
+}
 
-match point {
-    (0, 0) => print("origin"),
-    (0, y) => print("on y-axis at {{y}}"),
-    (x, 0) => print("on x-axis at {{x}}"),
-    (x, y) => print("at ({{x}}, {{y}})"),
+fn parse_port(s: string) -> number | ParseError {
+    if s.length == 0 {
+        return ParseError { message: "input was empty" };
+    }
+    return 8080;
+}
+
+fn main() ![io] {
+    let result = parse_port("");
+    match result {
+        ParseError { message } => print("error: {{message}}"),
+        _ => print("port: {{result}}"),
+    }
 }
 ```
 
 ### Guard Conditions
 
-Add an `if` clause after a pattern to further filter matches. The arm only fires if both the pattern matches and the guard is true:
+Add an `if` clause after a pattern to further filter matches. The arm only
+fires if both the pattern matches and the guard is true:
 
 ```sfn
-match value {
-    n if n < 0    => print("negative: {{n}}"),
-    n if n == 0   => print("zero"),
-    n if n < 100  => print("small positive: {{n}}"),
-    n             => print("large positive: {{n}}"),
-}
-```
-
-Guards can reference bindings introduced by the pattern:
-
-```sfn
-match event {
-    Click(x, y) if x > 0 && y > 0 => handle_first_quadrant(x, y),
-    Click(x, y)                    => handle_other(x, y),
-    KeyPress(key) if key == "Enter" => submit(),
-    KeyPress(key)                   => print("Key: {{key}}"),
-}
-```
-
-### Match as Expression
-
-Because `match` is an expression, you can use it directly in assignments, function arguments, or return statements:
-
-```sfn
-let symbol = match direction {
-    North => "^",
-    South => "v",
-    East  => ">",
-    West  => "<",
-};
-
-fn grade(score: Int) -> String {
-    match score {
-        n if n >= 90 => "A",
-        n if n >= 80 => "B",
-        n if n >= 70 => "C",
-        n if n >= 60 => "D",
-        _            => "F",
+fn classify(n: number) ![io] {
+    match n {
+        v if v < 0 => print("negative: {{v}}"),
+        v if v == 0 => print("zero"),
+        v if v < 100 => print("small positive: {{v}}"),
+        v => print("large positive: {{v}}"),
     }
+}
+```
+
+Guards work alongside tagged-enum destructuring too:
+
+```sfn
+match user {
+    User { name, age } if age >= 18 => print("Adult user: {{name}}"),
+    User { name, age } => print("Minor user: {{name}}"),
+    _ => print("Unknown entity"),
 }
 ```
 
@@ -699,170 +637,92 @@ error[E0302]: non-exhaustive match on `Direction`
 Fixed-size, stack-allocated sequences. The size is part of the type.
 
 ```sfn
-let primes: Array<Int> = [2, 3, 5, 7, 11];
+let primes = [2, 3, 5, 7, 11];
 let first = primes[0];          // 2
-let len = primes.length;        // 5
+let count = primes.length;      // 5
 ```
 
-Arrays are best for small, fixed sets of values known at compile time (days of the week, a lookup table of fixed size, etc.).
-
-### Vec — Growable Sequences
-
-`Vec<T>` is the workhorse collection. It grows dynamically and supports most sequence operations.
+Arrays grow dynamically with `.push(...)`. Declare an array type with the
+`T[]` suffix syntax (same form used in the compiler's own source):
 
 ```sfn
-let mut items: Vec<String> = Vec.new();
+let mut items: string[] = [];
 items.push("alpha");
 items.push("beta");
 items.push("gamma");
 
-print(items.len());             // 3
-print(items[0]);                // "alpha"
-print(items[items.len() - 1]); // "gamma"
+print("{{items.length}} items; first is {{items[0]}}");
 
-items.pop();                    // removes and returns "gamma"
-print(items.len());             // 2
-```
-
-Common operations:
-
-```sfn
-// Iteration
-for item in items {
-    print(item);
-}
-
-// Indexed iteration
-for (i, item) in items.enumerate() {
-    print("{{i}}: {{item}}");
-}
-
-// Check membership
-let has_beta = items.contains("beta");
-
-// Find first match
-let found = items.find(|x| x.starts_with("a"));
-
-// Filter to a new Vec
-let long_names = items.filter(|name| name.len() > 4);
-
-// Transform to a new Vec
-let upper = items.map(|name| name.to_upper());
-
-// Reduce
-let total_len = items.reduce(0, |acc, name| acc + name.len());
-
-// Sort (requires Ord implementation)
-let mut nums = [5, 2, 8, 1, 9];
-nums.sort();
-```
-
-### Map — Key-Value Collections
-
-`Map<K, V>` stores key-value pairs with O(1) average lookup.
-
-```sfn
-let mut scores: Map<String, Int> = Map.new();
-scores.insert("Alice", 95);
-scores.insert("Bob", 87);
-scores.insert("Carol", 92);
-
-let alice_score = scores.get("Alice");    // returns Int? (optional)
-let has_dave = scores.contains_key("Dave");
-
-scores.remove("Bob");
-print(scores.len());    // 2
-```
-
-Iterating a `Map` yields `(key, value)` pairs. Iteration order is not guaranteed:
-
-```sfn
-for (name, score) in scores {
-    print("{{name}}: {{score}}");
+let mut totals: number[] = [];
+for n in [1, 2, 3] {
+    totals.push(n * n);
 }
 ```
 
-Common operations:
+Common operations — most functional collection helpers (`.map`, `.filter`,
+`.reduce`) accept lambda expressions:
 
 ```sfn
-// Get all keys
-let names = scores.keys();
+let numbers = [1, 2, 3, 4, 5];
 
-// Get all values
-let all_scores = scores.values();
+let squares = numbers.map(fn(x) -> number { return x * x; });
+let total = squares.reduce(0, fn(acc, x) -> number { return acc + x; });
 
-// Update a value in place
-scores.insert("Alice", scores.get("Alice").unwrap_or(0) + 5);
-
-// Get or insert a default
-let val = scores.get_or_insert("Dave", 0);
+print("sum of squares: {{total}}");
 ```
 
-### Accessing Elements Safely
-
-Direct indexing (`items[i]`) panics at runtime if the index is out of bounds. Use `.get(i)` to get an optional result instead:
-
-```sfn
-let item = items.get(5);   // returns String? — None if out of bounds
-
-match item {
-    Some(v) => print("Found: {{v}}"),
-    None    => print("Index out of range"),
-}
-```
+> **Coming in 1.0:** A richer standard-library surface — `Map<K, V>`,
+> iterator adapters, sort helpers — lands alongside the runtime migration
+> tracked on the [roadmap](/roadmap). Today the array type with built-in
+> helpers is the primary collection.
 
 ---
 
-## Null and Optionals
+## Optional Values
 
-Sailfin expresses "value may be absent" through optional types written as `T?` (equivalent to `Option<T>` in the standard library). The value `null` can be assigned to any optional binding.
+Sailfin expresses "value may be absent" through optional types written as
+`T?`. The value `null` can be assigned to any optional binding.
 
 ```sfn
-let middle_name: String? = null;          // no middle name
-let nickname: String? = "Ace";            // has a nickname
+let middle_name: string? = null;          // no middle name
+let nickname: string? = "Ace";            // has a nickname
 ```
 
 ### Working with Optionals
 
-The safe way to use an optional is `match`:
+Today, the idiomatic pattern is an explicit `null` check:
 
 ```sfn
-match middle_name {
-    Some(name) => print("Middle name: {{name}}"),
-    None       => print("No middle name"),
+fn describe(name: string?) ![io] {
+    if name == null {
+        print("no name");
+        return;
+    }
+    print("hello, {{name}}");
 }
 ```
 
-`unwrap_or` provides a default when the value is absent:
+`match` also destructures an optional struct — for example, a recursive tree:
 
 ```sfn
-let display = middle_name.unwrap_or("(none)");
-print("Middle name: {{display}}");
-```
-
-`unwrap` extracts the value and panics if it is `null`. Use it only when you are certain the value is present:
-
-```sfn
-let name = nickname.unwrap();    // panics if nickname is null
-```
-
-### Null Safety
-
-Sailfin does not allow using a `T?` value where a `T` is required without an explicit unwrap or guard. There is no null pointer dereference — null values can only exist in optional-typed positions.
-
-```sfn
-fn greet(name: String) ![io] {
-    print("Hello, {{name}}!");
+struct TreeNode {
+    value: number;
+    left: TreeNode?;
+    right: TreeNode?;
 }
 
-let maybe_name: String? = get_name();
-
-// greet(maybe_name);            // COMPILE ERROR: expected String, got String?
-
-if maybe_name != null {
-    greet(maybe_name.unwrap());   // safe: we checked above
+fn traverse(node: TreeNode?) ![io] {
+    if node == null { return; }
+    traverse(node.left);
+    print("{{node.value}}");
+    traverse(node.right);
 }
 ```
+
+> **Coming in 1.0:** A `Result<T, E>` type plus a `?` propagation operator are
+> on the [roadmap](/roadmap) under Syntax Reform. Until they land, prefer the
+> explicit `null` check or the tagged-union pattern shown in
+> [Error Handling](/docs/learn/error-handling).
 
 ---
 
@@ -891,7 +751,8 @@ Block comments do not nest by default.
 
 ### Documentation Comments
 
-Doc comments use `///` and are attached to the declaration that follows them. Tooling and the language server display them as hover documentation:
+Doc comments use `///` and are attached to the declaration that follows them.
+Tooling and the language server display them as hover documentation:
 
 ```sfn
 /// Returns the distance between two points in Euclidean space.
@@ -901,11 +762,11 @@ Doc comments use `///` and are attached to the declaration that follows them. To
 /// - `b`: The second point
 ///
 /// # Returns
-/// A non-negative `Float` representing the distance.
-fn distance(a: Point, b: Point) -> Float {
+/// A non-negative `number` representing the distance.
+fn distance(a: Point, b: Point) -> number {
     let dx = a.x - b.x;
     let dy = a.y - b.y;
-    return (dx * dx + dy * dy).sqrt();
+    return math.sqrt(dx * dx + dy * dy);
 }
 ```
 
@@ -914,13 +775,13 @@ For struct and interface fields, the doc comment goes above the field:
 ```sfn
 struct Config {
     /// Hostname or IP address of the target server.
-    host -> String;
+    host: string;
 
     /// Port number (1–65535).
-    port -> Int;
+    port: number;
 
     /// Maximum number of connection attempts before giving up.
-    mut max_retries -> Int;
+    mut max_retries: number;
 }
 ```
 
@@ -932,30 +793,28 @@ Here is a small program that uses all the concepts from this guide:
 
 ```sfn
 struct Student {
-    name -> String;
-    scores -> Vec<Int>;
+    name: string;
+    scores: number[];
 }
 
-fn average(scores: &Vec<Int>) -> Float {
-    if scores.len() == 0 {
+fn average(scores: number[]) -> number {
+    if scores.length == 0 {
         return 0.0;
     }
-    let sum = scores.reduce(0, |acc, s| acc + s);
-    return Float.from(sum) / Float.from(scores.len());
+    let sum = scores.reduce(0, fn(acc, s) -> number { return acc + s; });
+    return sum / scores.length;
 }
 
-fn letter_grade(avg: Float) -> String {
-    match avg {
-        n if n >= 90.0 => "A",
-        n if n >= 80.0 => "B",
-        n if n >= 70.0 => "C",
-        n if n >= 60.0 => "D",
-        _              => "F",
-    }
+fn letter_grade(avg: number) -> string {
+    if avg >= 90.0 { return "A"; }
+    if avg >= 80.0 { return "B"; }
+    if avg >= 70.0 { return "C"; }
+    if avg >= 60.0 { return "D"; }
+    return "F";
 }
 
-fn report(student: &Student) ![io] {
-    let avg = average(&student.scores);
+fn report(student: Student) ![io] {
+    let avg = average(student.scores);
     let grade = letter_grade(avg);
     print("{{student.name}}: avg={{avg}}, grade={{grade}}");
 }
@@ -968,7 +827,7 @@ fn main() ![io] {
     ];
 
     for student in students {
-        report(&student);
+        report(student);
     }
 }
 ```

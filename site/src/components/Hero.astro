@@ -1,8 +1,8 @@
 ---
 const exampleCode = `struct Config {
-    host: string,
-    port: number,
-    verbose: bool,
+    host: string;
+    port: number;
+    verbose: boolean;
 }
 
 fn load_config(path: string) -> Config ![io] {
@@ -10,16 +10,13 @@ fn load_config(path: string) -> Config ![io] {
     return Config.parse(raw);
 }
 
-fn handle(req: http.Request) -> http.Response ![net] {
-    return http.Response {
-        status: 200,
-        body: "Sailfin is running",
-    };
+fn handle(req, res) ![net] {
+    res.send("Sailfin is running");
 }
 
 fn main() ![io, net] {
     let config = load_config("app.toml");
-    print("Listening on " + config.host);
+    print("Listening on {{config.host}}");
     serve(handle, { port: config.port });
 }`;
 ---
