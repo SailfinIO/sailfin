@@ -94,6 +94,20 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# ---------------------------------------------------------------------------
+# Arena allocator default (Phase 0 / M0.5 — see docs/build-performance.md)
+# ---------------------------------------------------------------------------
+# The bump-allocator arena (runtime/native/src/sailfin_arena.c) is default-on
+# for selfhost builds. In arena mode _rt_malloc/_rt_calloc/_rt_realloc route
+# through a process-global arena that is freed in bulk at process exit — the
+# compiler trades per-object reclamation for elimination of the IPC-as-GC
+# dependency that was blocking Phase 2 channel removals. Measured on the
+# heaviest module (lowering_core): arena uses ~37% lower peak RSS than
+# malloc for byte-identical LLVM IR.
+#
+# Opt out for diagnostics or regression triage with `SAILFIN_USE_ARENA=0`.
+export SAILFIN_USE_ARENA="${SAILFIN_USE_ARENA:-1}"
+
 # Derived build directories (set after argument parsing so --work-dir takes effect)
 RAW_DIR="$WORK_DIR/raw"
 OBJ_DIR="$WORK_DIR/obj"
