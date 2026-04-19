@@ -35,9 +35,10 @@ to the 1.0 roadmap.
 | `sfn bench` | Benchmarking framework | P3 | Post-1.0 |
 
 Existing commands (`sfn test`, `sfn build`, `sfn run`) are shipped and stable.
-Package-management commands (`sfn init`, `sfn add`, `sfn publish`, `sfn login`)
-are implemented and functional against `registry.sailfin.dev`. None of these
-are covered here.
+Package-management commands (`sfn init`, `sfn add`, `sfn publish`, `sfn login`,
+`sfn config`) are implemented and functional against `pkg.sfn.dev` (the default
+registry, overridable per-user via `sfn config set registry <url>` or per-shell
+via `SFN_REGISTRY`). None of these are covered here.
 
 
 ## Architectural Decision: Where Does Tooling Live?

@@ -268,15 +268,116 @@ The version is read from `compiler/capsule.toml` at runtime. For installed binar
 
 ---
 
-## Planned CLI Commands
+## Package Management
 
-The following commands are planned for a future release. They are not available today.
+Sailfin ships with package-management commands that target a default public registry at [`pkg.sfn.dev`](https://pkg.sfn.dev). All registry-touching commands (`sfn add`, `sfn publish`) resolve the registry URL through the same three-tier precedence — see [`sfn config`](#sfn-config-getsetunsetlist-key-value) below for how to redirect the toolchain at a private registry.
 
-| Command | Description |
+### `sfn init`
+
+Scaffold a new Sailfin capsule in the current directory. Writes a `capsule.toml` manifest (with the capsule name inferred from the directory) and a starter `src/main.sfn`.
+
+**Usage:**
+
+```bash
+sfn init
+```
+
+Fails with a non-zero exit if `capsule.toml` already exists — `sfn init` never overwrites existing manifests.
+
+---
+
+### `sfn add [--dev] [--update] <capsule>`
+
+Add a capsule dependency to the current project. The manifest (`capsule.toml`) is updated, the package is pre-fetched into `~/.sfn/cache/capsules/<scope>/<name>/<version>/`, and `capsule.lock` records the resolved version and SHA-256 integrity hash.
+
+**Flags:**
+
+- `--dev` — add to `[dev-dependencies]` instead of `[dependencies]`.
+- `--update` — ignore the existing lockfile entry and resolve the latest version from the registry.
+
+**Usage:**
+
+```bash
+sfn add http                  # stdlib capsule (resolved to sfn/http)
+sfn add --dev test            # dev-only dependency
+sfn add acme/router           # third-party scoped capsule
+sfn add --update acme/router  # force a fresh lookup
+```
+
+If a `capsule.lock` entry already exists and `--update` is not passed, the locked version is used without contacting the registry.
+
+---
+
+### `sfn publish [path]`
+
+Package a capsule (current directory by default, or the provided path) into the SFNPKG format and upload it to the configured registry.
+
+**Usage:**
+
+```bash
+sfn publish                     # package and upload the capsule at cwd
+sfn publish path/to/capsule     # or publish a capsule elsewhere on disk
+```
+
+**Authentication:** the command reads your bearer token from the `SFN_TOKEN` environment variable first, then falls back to `~/.sfn/credentials` (written by `sfn login`). If neither is set, publishing fails with a clear error.
+
+**Payload:** the capsule's `capsule.toml` and every `src/**/*.sfn` file are concatenated into a SFNPKG/1 bundle, SHA-256 digested, base64-encoded, and POSTed as JSON to `<registry>/api/publish`. Non-2xx HTTP responses are surfaced with the server error message.
+
+---
+
+### `sfn login [token]`
+
+Store a registry bearer token at `~/.sfn/credentials` (mode 600, inside `~/.sfn/` which is created at mode 700). This is the token `sfn publish` uses when `SFN_TOKEN` is not set.
+
+**Usage:**
+
+```bash
+sfn login                       # prompts and reads one line from stdin
+sfn login <token>               # or pass the token as an argument
+echo "<token>" | sfn login      # or pipe it in
+```
+
+Rejects empty tokens. Overwrites any existing credentials file.
+
+---
+
+### `sfn config <get|set|unset|list> [key] [value]`
+
+Persist per-user toolchain settings to `~/.sfn/config.toml` (mode 600). The only supported key today is `registry`, which controls where `sfn add` and `sfn publish` look for capsules.
+
+**Subcommands:**
+
+| Form | Description |
 |---|---|
-| `sfn init [name]` | Scaffold a new Sailfin capsule with a `capsule.toml` manifest |
-| `sfn add <capsule>` | Add a dependency to the current capsule |
-| `sfn publish` | Publish the current capsule to the package registry |
+| `sfn config list` | Print every resolved setting. |
+| `sfn config get <key>` | Print the resolved value for a single key. |
+| `sfn config set <key> <value>` | Persist `<value>` for `<key>`. |
+| `sfn config unset <key>` | Remove the key from `~/.sfn/config.toml`, reverting to the default. |
+
+**Usage:**
+
+```bash
+sfn config set registry https://registry.acme.internal   # point at a private registry
+sfn config get registry                                   # https://registry.acme.internal
+sfn config list                                           # registry = https://registry.acme.internal
+sfn config unset registry                                 # back to the default
+```
+
+**Resolution order** for the registry URL (highest priority first):
+
+1. `SFN_REGISTRY` environment variable — a one-shot override useful for CI.
+2. `[registry] url` in `~/.sfn/config.toml` — persisted by `sfn config set`.
+3. Compiled-in default: `https://pkg.sfn.dev`.
+
+The URL must start with `http://` or `https://` and may not contain whitespace, quotes, or shell metacharacters. Invalid values are rejected at `sfn config set` and silently ignored (with a warning to stderr) when coming from the environment or a hand-edited config file.
+
+**Enterprise example:** host a mirror behind your firewall and opt everyone in by adding a single line to your shell profile:
+
+```bash
+export SFN_REGISTRY=https://registry.acme.internal
+```
+
+Or put it in `~/.sfn/config.toml` once per workstation with `sfn config set registry ...` — no shell changes required.
 
 ---
 
@@ -324,6 +425,8 @@ These environment variables influence the behavior of `sfn` and the Makefile bui
 | Variable | Scope | Description |
 |---|---|---|
 | `SAILFIN_RUNTIME_ROOT` | `sfn` binary | Override the directory where `sfn` looks for the bundled C runtime. By default, the runtime is resolved relative to the executable. |
+| `SFN_REGISTRY` | `sfn add` / `sfn publish` | Override the package registry base URL for this shell. Takes precedence over `~/.sfn/config.toml`. See [`sfn config`](#sfn-config-getsetunsetlist-key-value). |
+| `SFN_TOKEN` | `sfn publish` | Bearer token used when uploading a capsule. Takes precedence over `~/.sfn/credentials` written by `sfn login`. |
 | `PREFIX` | Makefile | Installation prefix. Defaults to `$HOME/.local`. The binary is installed to `$(PREFIX)/bin`. |
 | `GLOBAL_BIN_DIR` | Installer script | Override the installation bin directory directly (takes precedence over `PREFIX`). |
 | `GITHUB_TOKEN` | `make fetch-seed` | GitHub personal access token used to download seed releases from the `SailfinIO/sailfin` repository. Required for `make fetch-seed`. |

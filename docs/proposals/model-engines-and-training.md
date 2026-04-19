@@ -276,7 +276,7 @@ lock_engines  = true
 sign_cards    = true
 
 [registry]
-primary = "https://registry.sailfin.dev"
+primary = "https://pkg.sfn.dev"
 
 [engines.prefs]
 device = "auto"      # "cpu" | "gpu" | "auto"

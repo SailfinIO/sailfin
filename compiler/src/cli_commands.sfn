@@ -47,6 +47,7 @@ import {
     toml_generate,
     toml_get_dependencies,
     toml_get_name,
+    toml_get_string,
     toml_get_version
 } from "./toml_parser";
 import { format_source } from "./tools/fmt";
@@ -813,6 +814,200 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     return 0;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Registry configuration
+// ═══════════════════════════════════════════════════════════════════
+//
+// Registry URL resolution order (highest priority first):
+//   1. SFN_REGISTRY environment variable (one-shot override for CI)
+//   2. `[registry] url` in ~/.sfn/config.toml (persisted via `sfn config`)
+//   3. Compiled-in default: https://pkg.sfn.dev
+//
+// Per-project overrides (e.g. `[registry]` in capsule.toml) are intentionally
+// out of scope for now — can be added later without breaking this layering.
+fn _default_registry_url_cmd() -> string { return "https://pkg.sfn.dev"; }
+
+fn _strip_trailing_slash_cmd(url: string) -> string {
+    let mut end = url.length;
+    loop {
+        if end == 0 { break; }
+        if substring(url, end - 1, end) != "/" { break; }
+        end -= 1;
+    }
+    if end == url.length { return url; }
+    return substring(url, 0, end);
+}
+
+// Validate a registry URL before persisting or interpolating into shell/TOML.
+// Must be http:// or https://, contain no whitespace/control chars, no quotes,
+// no shell metacharacters that can escape a single-quoted context.
+fn _is_valid_registry_url_cmd(url: string) -> boolean {
+    if url.length == 0 { return false; }
+    let mut has_http = false;
+    if url.length >= 7 {
+        if strings_equal(substring(url, 0, 7), "http://") { has_http = true; }
+    }
+    if url.length >= 8 {
+        if strings_equal(substring(url, 0, 8), "https://") { has_http = true; }
+    }
+    if !has_http { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= url.length { break; }
+        let ch = url[i];
+        if ch == " " { return false; }
+        if ch == "\t" { return false; }
+        if ch == "\r" { return false; }
+        if ch == "\n" { return false; }
+        if ch == "\"" { return false; }
+        if ch == "'" { return false; }
+        if ch == "`" { return false; }
+        if ch == "$" { return false; }
+        if ch == "\\" { return false; }
+        if ch == ";" { return false; }
+        if ch == "|" { return false; }
+        if ch == "&" { return false; }
+        if ch == "<" { return false; }
+        if ch == ">" { return false; }
+        if ch == "(" { return false; }
+        if ch == ")" { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _config_file_path_cmd() -> string ![io] {
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    return home + "/.sfn/config.toml";
+}
+
+fn _config_registry_url_from_file_cmd() -> string ![io] {
+    let path = _config_file_path_cmd();
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    let text = fs.readFile(path);
+    return _toml_trim_cmd(toml_get_string(text, "registry", "url"));
+}
+
+// Returns resolved registry base URL (no trailing slash). Silently falls back
+// to the next source if a source is set but invalid — the config-set path
+// already rejects bad URLs, so this only matters for SFN_REGISTRY from the
+// environment and hand-edited config files.
+fn _resolve_registry_url_cmd() -> string ![io] {
+    let env_url = _strip_trailing_slash_cmd(_toml_trim_cmd(_get_env_cmd("SFN_REGISTRY")));
+    if env_url.length > 0 {
+        if _is_valid_registry_url_cmd(env_url) { return env_url; }
+        print.err("warning: SFN_REGISTRY is not a valid http(s) URL; ignoring");
+    }
+    let file_url = _strip_trailing_slash_cmd(_config_registry_url_from_file_cmd());
+    if file_url.length > 0 {
+        if _is_valid_registry_url_cmd(file_url) { return file_url; }
+        print.err("warning: ~/.sfn/config.toml registry.url is invalid; ignoring");
+    }
+    return _default_registry_url_cmd();
+}
+
+fn _write_config_registry_cmd(url: string) -> number ![io] {
+    let home = _get_home_cmd();
+    if home.length == 0 {
+        print("could not determine home directory");
+        return 1;
+    }
+    let sfn_dir = home + "/.sfn";
+    _ensure_dir_recursive_cmd(sfn_dir);
+    let dir_chmod_rc = process.run(["chmod", "700", sfn_dir]);
+    if dir_chmod_rc != 0 {
+        print("error: failed to set permissions on " + sfn_dir);
+        return 1;
+    }
+    let path = sfn_dir + "/config.toml";
+    let mut out: string = "";
+    if url.length > 0 {
+        out = out + "[registry]\n";
+        out = out + "url = \"" + url + "\"\n";
+    }
+    fs.writeFile(path, out);
+    let file_chmod_rc = process.run(["chmod", "600", path]);
+    if file_chmod_rc != 0 {
+        print("error: failed to set permissions on " + path);
+        return 1;
+    }
+    return 0;
+}
+
+fn handle_config_command(args: string[]) -> number ![io] {
+    if args.length < 2 {
+        print("usage: sfn config <get|set|unset|list> [key] [value]");
+        return 2;
+    }
+    let sub = args[1];
+    if strings_equal(sub, "list") {
+        if args.length != 2 {
+            print("usage: sfn config list");
+            return 2;
+        }
+        print("registry = " + _resolve_registry_url_cmd());
+        return 0;
+    }
+    if strings_equal(sub, "get") {
+        if args.length != 3 {
+            print("usage: sfn config get <key>");
+            return 2;
+        }
+        let key = args[2];
+        if strings_equal(key, "registry") {
+            print(_resolve_registry_url_cmd());
+            return 0;
+        }
+        print("unknown config key: " + key);
+        return 2;
+    }
+    if strings_equal(sub, "set") {
+        if args.length != 4 {
+            print("usage: sfn config set <key> <value>");
+            return 2;
+        }
+        let key = args[2];
+        let value = _toml_trim_cmd(args[3]);
+        if !strings_equal(key, "registry") {
+            print("unknown config key: " + key);
+            return 2;
+        }
+        if value.length == 0 {
+            print("error: empty value");
+            return 1;
+        }
+        let normalized = _strip_trailing_slash_cmd(value);
+        if !_is_valid_registry_url_cmd(normalized) {
+            print("error: registry must be an http(s) URL with no whitespace, quotes, or shell metacharacters");
+            return 1;
+        }
+        let rc = _write_config_registry_cmd(normalized);
+        if rc != 0 { return rc; }
+        print("registry = " + normalized);
+        return 0;
+    }
+    if strings_equal(sub, "unset") {
+        if args.length != 3 {
+            print("usage: sfn config unset <key>");
+            return 2;
+        }
+        let key = args[2];
+        if !strings_equal(key, "registry") {
+            print("unknown config key: " + key);
+            return 2;
+        }
+        let rc = _write_config_registry_cmd("");
+        if rc != 0 { return rc; }
+        print("unset " + key);
+        return 0;
+    }
+    print("unknown subcommand: " + sub);
+    print("usage: sfn config <get|set|unset|list> [key] [value]");
+    return 2;
+}
+
 fn handle_publish_command(args: string[]) -> number ![io] {
     if args.length > 2 {
         print("usage: sfn publish [path]");
@@ -926,7 +1121,8 @@ fn handle_publish_command(args: string[]) -> number ![io] {
     }
 
     let auth_header = "Bearer " + token;
-    let registry_url = "https://registry.sailfin.dev/api/publish";
+    let registry_base = _resolve_registry_url_cmd();
+    let registry_url = registry_base + "/api/publish";
     print("publishing to " + registry_url + "...");
     let response_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
     let header_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
@@ -1004,6 +1200,27 @@ fn handle_add_command(args: string[]) -> number ![io] {
     // `scope/name` format.
     let display_name = _display_capsule_name_cmd(registry_name);
 
+    // Validate scope/name up front — registry_name is interpolated into a
+    // shell pipeline below when fetching the index, and into the cache path
+    // and download URL after. Rejecting path-traversal and directory-separator
+    // characters early covers both the shell-injection and traversal risks.
+    let slash_pos = find_char(registry_name, "/", 0);
+    if slash_pos < 0 {
+        print("invalid capsule id — expected scope/name format: "
+            + registry_name);
+        return 1;
+    }
+    let scope = substring(registry_name, 0, slash_pos);
+    let name = substring(registry_name, slash_pos + 1, registry_name.length);
+    if !_is_safe_capsule_segment_cmd(scope) {
+        print("invalid capsule scope: " + scope);
+        return 1;
+    }
+    if !_is_safe_capsule_segment_cmd(name) {
+        print("invalid capsule name: " + name);
+        return 1;
+    }
+
     // If --update was not passed and a lockfile entry exists, use the locked version.
     let mut use_locked: boolean = false;
     let mut locked_version: string = "";
@@ -1026,7 +1243,9 @@ fn handle_add_command(args: string[]) -> number ![io] {
         print("using locked version: " + display_name + "@" + resolved_version);
     } else {
         print("fetching registry index...");
-        resolved_version = _shell_read_cmd("curl -sfS 'https://registry.sailfin.dev/api/index.json'"
+        let registry_base = _resolve_registry_url_cmd();
+        resolved_version = _shell_read_cmd("curl -sfS '" + registry_base
+            + "/api/index.json'"
             + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('"
             + registry_name
             + "',{}); print(c.get('latest',''))\" 2>/dev/null");
@@ -1036,24 +1255,6 @@ fn handle_add_command(args: string[]) -> number ![io] {
         }
     }
 
-    let slash_pos = find_char(registry_name, "/", 0);
-    if slash_pos < 0 {
-        print("invalid capsule id — expected scope/name format: "
-            + registry_name);
-        return 1;
-    }
-    let scope = substring(registry_name, 0, slash_pos);
-    let name = substring(registry_name, slash_pos + 1, registry_name.length);
-    // Validate path segments to prevent directory traversal (especially
-    // when resolved_version comes from capsule.lock).
-    if !_is_safe_capsule_segment_cmd(scope) {
-        print("invalid capsule scope: " + scope);
-        return 1;
-    }
-    if !_is_safe_capsule_segment_cmd(name) {
-        print("invalid capsule name: " + name);
-        return 1;
-    }
     if !_is_safe_capsule_version_cmd(resolved_version) {
         print("invalid version (possible path traversal): " + resolved_version);
         return 1;
@@ -1075,9 +1276,8 @@ fn handle_add_command(args: string[]) -> number ![io] {
     _ensure_dir_recursive_cmd(cache_base);
 
     let pkg_path = cache_base + "/" + resolved_version + ".sfnpkg";
-    let download_url = "https://registry.sailfin.dev/api/capsules/" + scope
-        + "/"
-        + name
+    let dl_registry_base = _resolve_registry_url_cmd();
+    let download_url = dl_registry_base + "/api/capsules/" + scope + "/" + name
         + "/"
         + resolved_version
         + ".sfnpkg";
@@ -1371,6 +1571,7 @@ export {
     handle_test_command,
     handle_publish_command,
     handle_add_command,
+    handle_config_command,
     handle_init_command,
     handle_login_command,
     handle_guillermo_command,

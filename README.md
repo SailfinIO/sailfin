@@ -20,7 +20,7 @@ The self-hosted native compiler (`build/native/sailfin`) supports:
 - Effect annotations (`![io, net, model, clock]`) — parsed and carried through to IR; effect enforcement is planned on the [roadmap](https://sailfin.dev/roadmap)
 - String interpolation (`{{ expression }}`), decorators, `async fn`
 - Standard library capsules: `fmt`, `json`, `crypto`, `math`, `path`, `toml`, `fs`, `os`, `log`, `time`, `cli`, `http` (partial)
-- Package registry at `registry.sailfin.dev` with dependency resolution (capability auditing planned)
+- Package registry at `pkg.sfn.dev` with dependency resolution (configurable via `sfn config set registry <url>` for private/enterprise registries; capability auditing planned)
 - `print(value)` / `print.err(value)` for stdout/stderr output
 - `sfn test` for running `*_test.sfn` files
 

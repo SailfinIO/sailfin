@@ -81,7 +81,7 @@ version     = "0.0.0"
 description = "Core language, runtime, and tooling"
 
 [registry]
-primary = "https://registry.sailfin.dev"
+primary = "https://pkg.sfn.dev"
 cache   = "~/.sfn/cache"
 
 [build]
@@ -225,11 +225,13 @@ sfn publish
 
 ## Registry & Provenance
 
-Sailfin capsules and model artefacts are hosted on the central registry at
-<https://registry.sailfin.dev>. Uploads include provenance metadata: commit
-hashes, generation cards, capability manifests, and evaluator baselines.
-Consumers can replay model calls using the bundled cards for deterministic
-evaluation.
+Sailfin capsules and model artefacts are hosted on the default central
+registry at <https://pkg.sfn.dev>. Users can point the toolchain at any
+alternate registry (e.g. a private enterprise mirror) via
+`sfn config set registry <url>` or the `SFN_REGISTRY` environment variable.
+Uploads include provenance metadata: commit hashes, generation cards,
+capability manifests, and evaluator baselines. Consumers can replay model
+calls using the bundled cards for deterministic evaluation.
 
 The registry is live today, but the current toolchain lacks native commands
 for interacting with it; the flows above remain design targets until the CLI
