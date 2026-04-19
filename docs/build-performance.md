@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-15 (revised, post-d2d0bf1/220c8b7)
 **Previous revision:** 2026-04-15 (morning), 2026-04-11
-**Context:** Self-hosting the compiler from the 0.5.2-alpha.1 seed via `build.sh` takes ~13-16 minutes for 121 modules single-threaded. Down from 60-90 minutes at the April 11 baseline thanks to partial IPC removal, string concat optimization, module splitting, and the Phase 1 accumulator sweep (`d2d0bf1`). Still far from the <5 minute target. Further IPC removal is blocked by a memory management crisis: file serialization was acting as accidental garbage collection. The two residual O(n²) copy sites (`concat_native_functions`, `append_local_binding`) were reverted in `220c8b7` because callers rely on input-array immutability — they are now aliasing-blocked until either the callers explicitly clone or the arena allocator lands.
+**Context:** Self-hosting the compiler from the 0.5.2-alpha.1 seed via `build.sh` takes ~13-16 minutes for 121 modules single-threaded. Down from 60-90 minutes at the April 11 baseline thanks to partial IPC removal, string concat optimization, module splitting, and the Phase 1 accumulator sweep (`d2d0bf1`). Still far from the <5 minute target. Further IPC removal is blocked by a memory management crisis: file serialization was acting as accidental garbage collection. The two residual O(n²) copy sites (`concat_native_functions`, `append_local_binding`) were reverted in `220c8b7` because callers rely on input-array immutability — they are now aliasing-blocked until either the callers explicitly clone or the arena allocator is enabled by default (the C arena is shipped behind `SAILFIN_USE_ARENA=1`; see [Completed Work: M0.5 Arena Allocator](#m05-arena-allocator-shipped-april-17)).
 
 ---
 
@@ -51,7 +51,7 @@ The C runtime (`runtime/native/src/sailfin_runtime.c`) has fundamental memory ma
 
 3. **Arrays are never freed.** No `array_drop` or array lifecycle management exists. Every `string[]` or `NativeFunction[]` allocated during compilation leaks.
 
-4. **No GC, no RC, no arena allocator.** The runtime tracks owned strings in a hash table for safe freeing, but this is opt-in and disabled. There is no generational GC, reference counting, or arena-based allocation.
+4. **No GC, no RC; arena allocator shipped but off by default.** The runtime tracks owned strings in a hash table for safe freeing, but this is opt-in and disabled. There is no generational GC or reference counting. The M0.5 bump-allocator arena landed in PR #174 (`runtime/native/src/sailfin_arena.c`) and is wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`, but it only activates when `SAILFIN_USE_ARENA=1`. The default selfhost build does not set the flag, and the M0.5 fast-fail criteria (per-module RAM < 512 MB, `make check` passes with arena on) have not yet been formally validated in CI.
 
 ### The consequence
 
@@ -126,9 +126,9 @@ Both of these still allocate a fresh array and copy the input before appending. 
 Options for resolving these:
 
 1. **Caller-side clone audit.** For each call site, determine whether the caller still needs the pristine input; if yes, clone explicitly at the caller; if no, switch that caller to in-place `push()`. Keeps the copies only where they're actually required.
-2. **Wait for the arena allocator (Phase 0).** Under an arena, the copy becomes cheap (bump alloc) and doesn't leak — the aliasing problem becomes a non-issue because both views remain live and freed in bulk at module exit.
+2. **Enable the arena allocator (Phase 0).** Under an arena, the copy becomes cheap (bump alloc) and doesn't leak — the aliasing problem becomes a non-issue because both views remain live and freed in bulk at module exit. The C arena is already in-tree (`sailfin_arena.c`, PR #174) but runs only when `SAILFIN_USE_ARENA=1`; flipping it on by default after the fast-fail criteria pass is the actual next step.
 
-Option 2 is simpler but requires Phase 0 to land first. Option 1 can proceed now but requires careful call-site analysis (lowering_core invariants around `local_functions` and nested-scope locals restoration are subtle).
+Option 2 is simpler but requires flipping the arena on by default (and validating the fast-fail criteria). Option 1 can proceed now but requires careful call-site analysis (lowering_core invariants around `local_functions` and nested-scope locals restoration are subtle).
 
 ### Other O(n²) patterns to audit
 
@@ -195,25 +195,26 @@ The original plan ordered IPC removal first. That is no longer viable because re
 
 ### Phase 0: Arena Allocator for Compilation (≡ M0.5 in [runtime_architecture.md §4.4](runtime_architecture.md#44-m05--arena-in-c-temporary-unblocker))
 
-**Priority:** Critical — **Prerequisite for all other phases**
+**Status:** C implementation shipped (PR #174). Runtime integration shipped. Default-on flip + fast-fail validation outstanding.
+**Priority:** Critical — **Prerequisite for removing the ~146 refs of per-instruction/per-binding IPC channels blocked by IPC-as-GC**
 **Expected:** Unblocks IPC removal; 30-50% memory reduction standalone
 
-Add a per-compilation arena allocator to the C runtime. During a single module compilation, all strings and arrays are allocated from a bump allocator that is freed in bulk at process exit (or after each module in a future long-lived compiler process).
+The C arena allocator (`runtime/native/src/sailfin_arena.c`, 254 lines) is in-tree and wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free` in `sailfin_runtime.c:618-654`. All string and array allocations route through the process-global arena when `SAILFIN_USE_ARENA=1`. The owned-string hash table and persistent-pointer set are bypassed entirely in arena mode. A correctness harness (`make test-arena`, `scripts/test_arena.sh`) diffs emitted LLVM IR with and without the flag.
+
+**What's missing (the actual Phase 0 gate):**
+1. **Default flip.** No `SAILFIN_USE_ARENA=1` in CI, `scripts/build.sh`, or the `Makefile`. The default self-host build runs in malloc mode.
+2. **Fast-fail validation** (per `runtime_architecture.md §4.4`):
+   - `make compile` succeeds with `SAILFIN_USE_ARENA=1`
+   - Per-module peak RAM drops below 512 MB (from 0.5-1.5 GB in malloc mode)
+   - `make check` passes with arena on
+3. **Stats integration.** `sfn_arena_print_stats` exists but isn't called from any test or build target, so we have no telemetry on arena pressure or page count.
 
 **Why arena, not RC or GC:**
 - The compiler is a batch process: allocate during compilation, discard everything at the end
 - No cycles to break (no need for tracing GC)
 - No per-object overhead (no RC increments on every string copy)
-- Simple to implement: replace `malloc` with `arena_alloc`, add `arena_reset` at end
 
-**Implementation sketch:**
-1. Add `sailfin_arena_t` to `sailfin_runtime.c` (simple bump allocator with page-sized backing blocks)
-2. Route string allocations through the arena when `SAILFIN_USE_ARENA=1`
-3. Route array allocations through the arena
-4. Remove the owned-string hash table overhead (not needed with arena)
-5. Call `arena_reset()` at process exit (future: per-module reset in long-lived mode)
-
-**Risk:** The `string_append` realloc optimization assumes `realloc` returns the same or a new pointer. Arena allocators typically don't support `realloc`. Either (a) fall back to concat for arena mode, or (b) implement arena-aware realloc (grow in place if at arena tip, else copy).
+**Grow-if-at-tip realloc.** `sfn_arena_realloc` in `sailfin_arena.c:147-184` already implements grow-if-at-tip — if the pointer being realloc'd is the last allocation on the current page and the page has room, the arena extends in place. This preserves the `string_append` realloc-based concat optimization (`b3b6dad`) when arena mode is enabled.
 
 ### Phase 1: Fix O(n²) Array Accumulation (Mostly Shipped)
 
@@ -250,7 +251,7 @@ The win is concentrated on the target module; aggregate is within bench variance
 ### Phase 2: Eliminate IPC Files (Resumed)
 
 **Priority:** Highest — **Expected:** 40-60% time reduction, enables parallel builds
-**Depends on:** Phase 0 (arena allocator) to prevent OOM for the per-binding/per-instruction channels
+**Depends on:** Enabling the arena allocator by default (Phase 0 is plumbed but off by default) to prevent OOM for the per-binding/per-instruction channels
 
 Most IPC channels were introduced as workarounds for v0.1.1-seed ABI corruption of array-of-struct parameters across module boundaries. The 0.5.x seed lineage no longer corrupts those parameters, so many channels are now dead-code fallbacks whose readers already have the data in-memory via an existing `bindings` or `locals` parameter. Those channels can be removed immediately — they do not depend on Phase 0.
 
@@ -394,6 +395,27 @@ On Linux x86_64 the 0.5.7 seed is already fully deterministic on these modules, 
 - ~28 net lines removed
 
 Because the writer is called inside `lower_return_instruction`, which fires for every `return <expr>` statement in every function, this removes roughly 3-6 `fs.writeFile` calls per emitted return across every module compile. The compiler itself has no `return self.*` patterns, so the channel's data-bearing path is never exercised during self-hosting; it was pure per-return overhead.
+
+### M0.5 Arena Allocator (Shipped April 17)
+
+**Status: C implementation shipped behind a feature flag; default-on flip outstanding.** PR #174 (`de5ee36`) landed the bump-allocator C arena under `runtime/native/src/sailfin_arena.c` (254 lines) and wired it into `sailfin_runtime.c:618-654` via `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`. Activates only when the `SAILFIN_USE_ARENA=1` env var is set — otherwise the runtime falls back to `malloc`/`realloc` with the existing owned-string hash table and persistent-pointer set.
+
+**What's in the arena code:**
+- Linked-list of `SfnArenaPage` blocks (default 1 MiB; 4 MiB for the compiler singleton).
+- Lazy global singleton via `pthread_once` — created on first `sfn_arena_global()` call.
+- `sfn_arena_alloc(size, align)` — 8-byte aligned bump, new page allocated if the current page can't fit.
+- `sfn_arena_realloc(ptr, old, new, align)` — grow-if-at-tip in place; otherwise fresh alloc + memcpy. Preserves the `string_append` realloc optimization.
+- `sfn_arena_reset()` / `sfn_arena_destroy()` — bulk reset / tear-down.
+- `sfn_arena_print_stats()` — page count, capacity, utilization telemetry (not yet wired to any test or build target).
+- Correctness harness in `scripts/test_arena.sh` + `make test-arena` — compiles a module with and without the flag and byte-diffs the emitted LLVM IR to catch arena-induced output corruption.
+
+**What's still outstanding for Phase 0 to fully land:**
+1. Flip `SAILFIN_USE_ARENA=1` as the default for the selfhost build (`scripts/build.sh` or `Makefile`).
+2. Validate the three fast-fail criteria from `runtime_architecture.md §4.4`: (a) `make compile` succeeds with arena on, (b) per-module peak RAM drops below 512 MB, (c) `make check` passes with arena on.
+3. Add an arena-enabled CI job so regressions can't re-break the flag.
+4. Once (1-3) pass, the ~146 refs of Phase 2 IPC channels blocked by IPC-as-GC (dispatch, let-result, expr-stmt, instr-*, block-result) become pickable.
+
+Until the default is flipped, "blocked by Phase 0" in this document means "blocked by enabling the arena by default and clearing the fast-fail criteria," not "blocked by implementing the arena."
 
 ### Module Globals IPC Channel Removal (April 19)
 
