@@ -39,6 +39,22 @@ LOCAL_DECL_RE = re.compile(
     r"([A-Za-z_][A-Za-z0-9_]*)",
     re.MULTILINE,
 )
+# Match top-level `let [mut] name` variable declarations.  Keep the
+# definition set aligned with the emitter's collect_local_definition_names
+# in compiler/src/emit_native.sfn so this lint does not produce false
+# positives that the compiler would accept.
+LOCAL_LET_RE = re.compile(
+    r"^\s*let\s+(?:mut\s+)?([A-Za-z_][A-Za-z0-9_]*)",
+    re.MULTILINE,
+)
+# Match top-level `test "name" { ... }` declarations.  Test names are
+# string literals, but the emitter treats the literal content as the
+# local name for re-export resolution.  Keep in sync with
+# Statement.TestDeclaration handling in emit_native.sfn.
+LOCAL_TEST_RE = re.compile(
+    r'^\s*test\s+"([^"\n]+)"',
+    re.MULTILINE,
+)
 
 
 def parse_specifier_list(text: str) -> list[tuple[str, str | None]]:
@@ -77,8 +93,13 @@ def lint_file(path: str) -> list[str]:
             local = alias if alias else name
             imports[local] = source
 
-    # Collect locally defined names.
+    # Collect locally defined names.  The set must mirror
+    # collect_local_definition_names in compiler/src/emit_native.sfn:
+    # fn / struct / enum / interface / type / model / pipeline / tool /
+    # let (variable) / test.
     locals_set: set[str] = {m.group(1) for m in LOCAL_DECL_RE.finditer(text)}
+    locals_set.update(m.group(1) for m in LOCAL_LET_RE.finditer(text))
+    locals_set.update(m.group(1) for m in LOCAL_TEST_RE.finditer(text))
 
     # Scan implicit `export { ... };` (no `from`) blocks.  EXPORT_RE
     # requires a trailing `;` immediately after `}`, so the inline form
@@ -96,11 +117,11 @@ def lint_file(path: str) -> list[str]:
             violations.append(
                 f'{path}: `export {{ {name} }};` re-exports a symbol '
                 f'imported from "{origin}" but there is no local '
-                f'`fn {name}` definition. Sailfin does not support '
+                f'definition of `{name}`. Sailfin does not support '
                 f'implicit re-exports of imported symbols. '
                 f'Fix: remove `{name}` from this module\'s export '
                 f'block and import it directly from "{origin}", or '
-                f'add a local `fn {name}(...)` forwarder.'
+                f'add a local definition of `{name}` in this module.'
             )
     return violations
 

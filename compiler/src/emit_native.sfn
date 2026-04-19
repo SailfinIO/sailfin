@@ -877,16 +877,15 @@ fn collect_reexport_violations(program: Program) -> string[] {
             if statement.source.length == 0 {
                 let mut spec_index: number = 0;
                 loop {
-                    if spec_index >= statement.export_specifiers.length { break; }
+                    if spec_index >= statement.export_specifiers.length {
+                        break;
+                    }
                     let spec = statement.export_specifiers[spec_index];
                     if !contains_string(local_defs, spec.name) {
                         let origin = find_local_import_source(program, spec.name);
                         if origin.length > 0 {
                             if is_local_module_path(origin) {
-                                violations = append_string(
-                                    violations,
-                                    format_reexport_violation(spec.name, origin)
-                                );
+                                violations = append_string(violations, format_reexport_violation(spec.name, origin));
                             }
                         }
                     }
@@ -989,18 +988,18 @@ fn is_local_module_path(path: string) -> boolean {
 fn format_reexport_violation(symbol: string, origin: string) -> string {
     return "`export { " + symbol + " };` re-exports a symbol imported from \""
         + origin
-        + "\" but there is no local `fn "
+        + "\" but there is no local definition of `"
         + symbol
-        + "` definition.  Sailfin does not support re-exporting imported symbols: "
+        + "` in this module.  Sailfin does not support implicit re-exports of imported symbols: "
         + "the emitter produces no `.fn` signature for them, so consumers silently "
         + "fall back to `i8*` and miscompile boolean `if` guards.  Fix: remove `"
         + symbol
         + "` from this module's export block and have consumers import it "
         + "directly from \""
         + origin
-        + "\", or add a local `fn "
+        + "\", or add a local definition or forwarder for `"
         + symbol
-        + "(...)` forwarder.  See docs/rca/2026-04-18-reexport-diagnostic-gep.md.";
+        + "` in this module.  See docs/rca/2026-04-18-reexport-diagnostic-gep.md.";
 }
 
 fn report_reexport_violations(violations: string[]) ![io] {

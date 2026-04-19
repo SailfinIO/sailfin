@@ -551,7 +551,7 @@ The validator only fires for imports whose source path starts with `./` or `../`
 
 ### Inline `export { X } from "./path"` is out of scope
 
-The inline form (used by vestigial barrel modules like `compiler/src/llvm/expressions.sfn`) is a separate statement shape and is **not** rejected by this fix.  Those barrels currently have no consumers and would suffer the same bug if any consumer arrived.  Tightening the validator to cover the inline form is tracked as a 1.0 follow-up; see `docs/proposals/module-system-1.0.md` (TBD).
+The inline form (used by vestigial barrel modules like `compiler/src/llvm/expressions.sfn`) is a separate statement shape and is **not** rejected by this fix.  Those barrels currently have no consumers and would suffer the same bug if any consumer arrived.  Tightening the validator to cover the inline form is tracked as an unscheduled 1.0 follow-up (the module-system proposal called out in the "Recommended audit and design work" section above has not yet been written).
 
 ## Links
 
