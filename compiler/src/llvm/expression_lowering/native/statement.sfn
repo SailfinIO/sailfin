@@ -212,7 +212,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             if index_check.success { is_lvalue = true; }
         }
         if is_lvalue {
-            return lower_lvalue_assignment_stmt(parsed_assignment.target, parsed_assignment.value, parsed_assignment.operator, current_bindings, current_locals, current_temp, current_lines, lines.length, current_next_region, scope_id, scope_depth, functions, context, current_label);
+            return lower_lvalue_assignment_stmt(parsed_assignment.target, parsed_assignment.value, parsed_assignment.operator, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, current_label);
         }
 
         // Simple local assignment
