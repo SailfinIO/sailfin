@@ -102,17 +102,10 @@ fn _assign_parse_int(text: string) -> number {
 }
 
 fn _write_assign_result_files(pre_lines_count: number, lines: string[], temp_index: number, mutations: LocalMutation[], next_region_id: number, string_constants: StringConstant[]) ![io] {
-    let new_count = lines.length - pre_lines_count;
     fs.writeFile("build/sailfin/.call_result_lines_count", number_to_string(lines.length));
     // Write all lines as bulk array
     fs.writeLines("build/sailfin/.call_result_lines", lines);
     fs.writeFile("build/sailfin/.call_result_temp", number_to_string(temp_index));
-    // Also write to .expr_stmt_temp_index — the caller in instructions.sfn reads
-    // this file for temp counter recovery.  Without this, lvalue assignments
-    // (struct field mutations like state.index += 1) leave a stale counter and
-    // the next statement reuses the same %tN temporaries.
-    fs.writeFile("build/sailfin/.expr_stmt_temp_index", number_to_string(temp_index));
-    fs.writeFile("build/sailfin/.expr_stmt_next_region_id", number_to_string(next_region_id));
 }
 
 // Handles deref (*ptr = value), member access (obj.field = value), and

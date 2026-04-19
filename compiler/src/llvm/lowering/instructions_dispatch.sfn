@@ -31,12 +31,11 @@ import {
 import {
     append_string,
     extend_string_array,
-    index_of,
     number_to_string,
     starts_with,
     trim_text
 } from "../utils";
-import { _parse_int_from_string, _read_ipc_int_min, extend_mutations } from "./instructions_helpers";
+import { extend_mutations } from "./instructions_helpers";
 import { extend_lifetime_regions } from "./instructions_helpers";
 import { lower_let_instruction } from "./instructions_let";
 import {
@@ -98,45 +97,6 @@ fn _write_locals_to_files(locals: LocalBinding[]) ![io] {
         fs.writeFile(lw_prefix + "_scope_depth", number_to_string(locals[lw_i].scope_depth));
         lw_i += 1;
     }
-}
-
-// Read string constants from the expr_stmt_string_constants file.
-// Returns the merged string constants.
-fn _read_expr_string_constants(existing: StringConstant[]) -> StringConstant[] ![io] {
-    let mut result = existing;
-    if fs.exists("build/sailfin/.expr_stmt_string_constants") {
-        let _raw = fs.readFile("build/sailfin/.expr_stmt_string_constants");
-        if _raw.length > 0 {
-            let mut _pos: number = 0;
-            loop {
-                if _pos >= _raw.length { break; }
-                let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
-                let mut _line: string = "";
-                if _nl < 0 {
-                    _line = substring(_raw, _pos, _raw.length);
-                    _pos = _raw.length;
-                } else {
-                    _line = substring(_raw, _pos, _pos + _nl);
-                    _pos = _pos + _nl + 1;
-                }
-                if _line.length == 0 { continue; }
-                let _t1 = index_of(_line, "\t");
-                if _t1 < 0 { continue; }
-                let _nm = substring(_line, 0, _t1);
-                let _r2 = substring(_line, _t1 + 1, _line.length);
-                let _t2 = index_of(_r2, "\t");
-                if _t2 < 0 { continue; }
-                let _ct = substring(_r2, 0, _t2);
-                let _bct = substring(_r2, _t2 + 1, _r2.length);
-                let _bc = _parse_int_from_string(_bct);
-                result = merge_string_constants(result, [StringConstant {
-                    name: _nm, content: _ct, byte_count: _bc
-                }]);
-            }
-        }
-        fs.writeFile("build/sailfin/.expr_stmt_string_constants", "");
-    }
-    return result;
 }
 
 // Read Let result from files and apply to caller's state.
@@ -235,31 +195,16 @@ fn dispatch_expression_instruction(function: NativeFunction, index: number, inst
         _write_bindings_to_files(bindings);
         _write_locals_to_files(result_locals);
         let lowered = lower_expression_statement(function.name, instruction, trimmed_expression, bindings, result_locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context, active_label);
-        // Read scalar results from files. Use floor-protected reader so that
-        // a missing/empty/stale temp-index file cannot cause the SSA counter
-        // to reset below `temp_index`, which would produce duplicate %tN
-        // definitions in the same function (see _read_ipc_int_min doc).
-        let _expr_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", temp_index);
-        let _expr_region = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_next_region_id"));
+        // Floor-protect the temp counter: a stale or zero value would
+        // produce duplicate %tN in the next emission (see _read_ipc_int_min doc).
+        let mut _expr_temp = lowered.temp_index;
+        if _expr_temp < temp_index { _expr_temp = temp_index; }
+        let _expr_region = lowered.next_region_id;
         fs.writeFile("build/sailfin/.dispatch_temp", number_to_string(_expr_temp));
         fs.writeFile("build/sailfin/.dispatch_next_region", number_to_string(_expr_region));
         fs.writeFile("build/sailfin/.dispatch_used_file_ipc", "1");
-        // Read mutations
-        let _mut_count = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_mut_count"));
-        let mut _mi: number = 0;
-        loop {
-            if _mi >= _mut_count { break; }
-            let _mp = "build/sailfin/.expr_stmt_mut_" + number_to_string(_mi);
-            let _mn = fs.readFile(_mp + "_name");
-            let _mt = fs.readFile(_mp + "_type");
-            let _mv = fs.readFile(_mp + "_value");
-            let _ml = fs.readFile(_mp + "_label");
-            current_mutations = extend_mutations(current_mutations, [LocalMutation {
-                name: _mn, llvm_type: _mt, value_name: _mv, span: null, originating_label: _ml
-            }]);
-            _mi += 1;
-        }
-        current_string_constants = _read_expr_string_constants(current_string_constants);
+        current_mutations = extend_mutations(current_mutations, lowered.mutations);
+        current_string_constants = merge_string_constants(current_string_constants, lowered.string_constants);
     }
     // Write mutation count for caller
     fs.writeFile("build/sailfin/.dispatch_mutation_count", number_to_string(current_mutations.length));
@@ -288,13 +233,14 @@ fn dispatch_return_instruction(function: NativeFunction, index: number, instruct
     _write_bindings_to_files(bindings);
     _write_locals_to_files(locals);
     let lowered = lower_return_instruction(function, instruction, llvm_return, bindings, locals, temp_index, lines, next_region_id, scope_id, scope_depth, functions, context);
-    // Read scalar results. Floor-protected: see _read_ipc_int_min.
-    let _ret_temp = _read_ipc_int_min("build/sailfin/.expr_stmt_temp_index", temp_index);
-    let _ret_region = _parse_int_from_string(fs.readFile("build/sailfin/.expr_stmt_next_region_id"));
+    // Floor-protect the temp counter: a stale or zero value would
+    // produce duplicate %tN in the next emission (see _read_ipc_int_min doc).
+    let mut _ret_temp: number = lowered.temp_index;
+    if _ret_temp < temp_index { _ret_temp = temp_index; }
+    let _ret_region = lowered.next_region_id;
     fs.writeFile("build/sailfin/.dispatch_temp", number_to_string(_ret_temp));
     fs.writeFile("build/sailfin/.dispatch_next_region", number_to_string(_ret_region));
-    // Read string constants
-    let result_sc = _read_expr_string_constants(string_constants);
+    let result_sc = merge_string_constants(string_constants, lowered.string_constants);
     // Write string constants count for caller
     let mut _joined_sc: string = "";
     let mut _si: number = 0;
