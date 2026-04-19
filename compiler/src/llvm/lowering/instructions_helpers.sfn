@@ -91,38 +91,6 @@ fn insert_lines_before_index(lines: string[], index: number, insert_lines: strin
     return result;
 }
 
-fn _write_block_result_files(lines: string[], allocas: string[], terminated: boolean, diagnostics: string[], string_constants: StringConstant[], temp_index: number, block_counter: number, next_local_id: number, next_lifetime_region_id: number, next_index: number) ![io] {
-    // Only write the two IPC files that still have live readers.
-    let mut term_val: string = "0";
-    if terminated { term_val = "1"; }
-    fs.writeFile("build/sailfin/.block_result_terminated", term_val);
-
-    let mut sc_lines: string[] = [];
-    let mut si: number = 0;
-    loop {
-        if si >= string_constants.length { break; }
-        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content
-            + "\t"
-            + number_to_string(string_constants[si].byte_count));
-        si = si + 1;
-    }
-    fs.writeLines("build/sailfin/.block_result_string_constants", sc_lines);
-}
-
-// Read the block_result_terminated IPC file and return true only if the file
-// contains the string "1".  The seedcheck's compiled `== "1"` comparison
-// gets mis-compiled into a pointer-to-bool bitcast (double-encoding bug),
-// which reads byte 0x30 from the string "0" as non-zero (true).  Using
-// grapheme_at to extract the first character avoids the cross-module ABI
-// corruption entirely.
-fn _read_ipc_terminated() -> boolean ![io] {
-    let content = fs.readFile("build/sailfin/.block_result_terminated");
-    if content.length == 0 { return false; }
-    let first_char = grapheme_at(content, 0);
-    if first_char == "1" { return true; }
-    return false;
-}
-
 fn _parse_int_from_string(text: string) -> number {
     let len = text.length;
     if len == 0 { return 0; }
@@ -207,44 +175,6 @@ fn write_locals_to_files(locals: LocalBinding[]) ![io] {
         fs.writeFile(lw_prefix + "_scope_depth", number_to_string(locals[lw_i].scope_depth));
         lw_i += 1;
     }
-}
-
-// Read string constants from the block_result_string_constants file,
-// merging into existing. Used by if/loop/match/for/try handlers.
-fn read_block_result_string_constants(existing: StringConstant[]) -> StringConstant[] ![io] {
-    let mut result = existing;
-    if fs.exists("build/sailfin/.block_result_string_constants") {
-        let _raw = fs.readFile("build/sailfin/.block_result_string_constants");
-        if _raw.length > 0 {
-            let mut _pos: number = 0;
-            loop {
-                if _pos >= _raw.length { break; }
-                let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
-                let mut _line: string = "";
-                if _nl < 0 {
-                    _line = substring(_raw, _pos, _raw.length);
-                    _pos = _raw.length;
-                } else {
-                    _line = substring(_raw, _pos, _pos + _nl);
-                    _pos = _pos + _nl + 1;
-                }
-                if _line.length == 0 { continue; }
-                let _t1 = index_of(_line, "\t");
-                if _t1 < 0 { continue; }
-                let _nm = substring(_line, 0, _t1);
-                let _r2 = substring(_line, _t1 + 1, _line.length);
-                let _t2 = index_of(_r2, "\t");
-                if _t2 < 0 { continue; }
-                let _ct = substring(_r2, 0, _t2);
-                let _bct = substring(_r2, _t2 + 1, _r2.length);
-                let _bc = _parse_int_from_string(_bct);
-                result = merge_string_constants(result, [StringConstant {
-                    name: _nm, content: _ct, byte_count: _bc
-                }]);
-            }
-        }
-    }
-    return result;
 }
 
 // Read string constants from the expr_stmt_string_constants file,

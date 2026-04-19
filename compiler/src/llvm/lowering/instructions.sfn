@@ -3,8 +3,8 @@
 // Instruction lowering: main dispatch loop.
 //
 // Helper functions (clone_local_bindings, extend_lifetime_regions,
-// extend_mutations, insert_lines_before_index, _write_block_result_files,
-// _parse_int_from_string) live in instructions_helpers.sfn so that
+// extend_mutations, insert_lines_before_index, _parse_int_from_string)
+// live in instructions_helpers.sfn so that
 // lower_instruction_range is at source position 1 — within the v0.1.1
 // seed's per-module streaming emission limit.
 import { NativeFunction, NativeInstruction } from "../../native_ir";

@@ -187,8 +187,6 @@ fn lower_throw_instruction(function_name: string, instruction: NativeInstruction
     };
 }
 
-// Read all BlockLoweringResult fields from the file IPC written by _write_block_result_files.
-// Same-module struct return avoids the v0.1.1 seed ABI corruption for cross-module returns.
 fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, block_counter: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], loop_stack: LoopContext[], end: number, context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> BlockLoweringResult {
     let mut diagnostics: string[] = [];
     let structure = collect_try_structure(function.instructions, start_index, end, function.name);

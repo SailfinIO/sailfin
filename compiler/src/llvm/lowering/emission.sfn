@@ -11,7 +11,7 @@
 // needs the main emit_llvm_function for the inner body, while the main
 // emitter delegates async wrapper generation to the async module.
 import { NativeFunction } from "../../native_ir";
-import { find_char, substring } from "../../string_utils";
+import { substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
 import { append_llvm_operand } from "../expression_lowering/native/core_scopes";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
@@ -52,23 +52,6 @@ import { emit_async_function } from "./emission_async";
 import { build_define_header_line } from "./emission_header";
 import { lower_instruction_range } from "./instructions";
 import { module_user_main_symbol } from "./module_globals";
-
-fn _split_by_newline(content: string) -> string[] {
-    let mut result: string[] = [];
-    if content.length == 0 { return result; }
-    let mut start: number = 0;
-    loop {
-        if start >= content.length { break; }
-        let next = find_char(content, "\n", start);
-        if next < 0 {
-            result.push(substring(content, start, content.length));
-            break;
-        }
-        result.push(substring(content, start, next));
-        start = next + 1;
-    }
-    return result;
-}
 
 fn is_safe_llvm_type_text(value: string) -> boolean {
     if value == null { return false; }
@@ -713,40 +696,4 @@ fn emit_body(function_unused: string, fn_name: string, fn_instr_count: number, l
         lifetime_regions: _empty_lifetime_regions,
         string_constants: lowered.string_constants
     };
-}
-
-// Parse serialized string constants from the file written by _write_block_result_files.
-// Format: one constant per line as "name\tcontent\tbyte_count".
-fn _parse_string_constants_from_file(raw: string) -> StringConstant[] {
-    let mut result: StringConstant[] = [];
-    let lines = _split_by_newline(raw);
-    let mut i: number = 0;
-    loop {
-        if i >= lines.length { break; }
-        let line = lines[i];
-        if line.length == 0 {
-            i += 1;
-            continue;
-        }
-        let tab1 = index_of(line, "\t");
-        if tab1 < 0 {
-            i += 1;
-            continue;
-        }
-        let name = substring(line, 0, tab1);
-        let rest = substring(line, tab1 + 1, line.length);
-        let tab2 = index_of(rest, "\t");
-        if tab2 < 0 {
-            i += 1;
-            continue;
-        }
-        let content = substring(rest, 0, tab2);
-        let byte_count_text = substring(rest, tab2 + 1, rest.length);
-        let byte_count = parse_simple_integer(byte_count_text);
-        result = append_string_constant(result, StringConstant {
-            name: name, content: content, byte_count: byte_count
-        });
-        i += 1;
-    }
-    return result;
 }
