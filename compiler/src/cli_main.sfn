@@ -44,7 +44,7 @@ fn _usage() -> string {
     out = out + "project:\n";
     out = out + "  sfn init\n";
     out = out + "  sfn check [--quiet] [path...]\n";
-    out = out + "  sfn fmt   [--check | --write] <path...>\n";
+    out = out + "  sfn fmt   [--check] [--write] <path...>\n";
     out = out + "  sfn test  [path]\n";
     out = out + "\n";
     out = out + "packages:\n";

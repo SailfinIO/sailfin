@@ -826,11 +826,52 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
 fn _default_registry_url_cmd() -> string { return "https://pkg.sfn.dev"; }
 
 fn _strip_trailing_slash_cmd(url: string) -> string {
-    if url.length == 0 { return url; }
-    if substring(url, url.length - 1, url.length) == "/" {
-        return substring(url, 0, url.length - 1);
+    let mut end = url.length;
+    loop {
+        if end == 0 { break; }
+        if substring(url, end - 1, end) != "/" { break; }
+        end -= 1;
     }
-    return url;
+    if end == url.length { return url; }
+    return substring(url, 0, end);
+}
+
+// Validate a registry URL before persisting or interpolating into shell/TOML.
+// Must be http:// or https://, contain no whitespace/control chars, no quotes,
+// no shell metacharacters that can escape a single-quoted context.
+fn _is_valid_registry_url_cmd(url: string) -> boolean {
+    if url.length == 0 { return false; }
+    let mut has_http = false;
+    if url.length >= 7 {
+        if strings_equal(substring(url, 0, 7), "http://") { has_http = true; }
+    }
+    if url.length >= 8 {
+        if strings_equal(substring(url, 0, 8), "https://") { has_http = true; }
+    }
+    if !has_http { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= url.length { break; }
+        let ch = url[i];
+        if ch == " " { return false; }
+        if ch == "\t" { return false; }
+        if ch == "\r" { return false; }
+        if ch == "\n" { return false; }
+        if ch == "\"" { return false; }
+        if ch == "'" { return false; }
+        if ch == "`" { return false; }
+        if ch == "$" { return false; }
+        if ch == "\\" { return false; }
+        if ch == ";" { return false; }
+        if ch == "|" { return false; }
+        if ch == "&" { return false; }
+        if ch == "<" { return false; }
+        if ch == ">" { return false; }
+        if ch == "(" { return false; }
+        if ch == ")" { return false; }
+        i += 1;
+    }
+    return true;
 }
 
 fn _config_file_path_cmd() -> string ![io] {
@@ -847,11 +888,21 @@ fn _config_registry_url_from_file_cmd() -> string ![io] {
     return _toml_trim_cmd(toml_get_string(text, "registry", "url"));
 }
 
+// Returns resolved registry base URL (no trailing slash). Silently falls back
+// to the next source if a source is set but invalid — the config-set path
+// already rejects bad URLs, so this only matters for SFN_REGISTRY from the
+// environment and hand-edited config files.
 fn _resolve_registry_url_cmd() -> string ![io] {
-    let env_url = _toml_trim_cmd(_get_env_cmd("SFN_REGISTRY"));
-    if env_url.length > 0 { return _strip_trailing_slash_cmd(env_url); }
-    let file_url = _config_registry_url_from_file_cmd();
-    if file_url.length > 0 { return _strip_trailing_slash_cmd(file_url); }
+    let env_url = _strip_trailing_slash_cmd(_toml_trim_cmd(_get_env_cmd("SFN_REGISTRY")));
+    if env_url.length > 0 {
+        if _is_valid_registry_url_cmd(env_url) { return env_url; }
+        print.err("warning: SFN_REGISTRY is not a valid http(s) URL; ignoring");
+    }
+    let file_url = _strip_trailing_slash_cmd(_config_registry_url_from_file_cmd());
+    if file_url.length > 0 {
+        if _is_valid_registry_url_cmd(file_url) { return file_url; }
+        print.err("warning: ~/.sfn/config.toml registry.url is invalid; ignoring");
+    }
     return _default_registry_url_cmd();
 }
 
@@ -863,7 +914,11 @@ fn _write_config_registry_cmd(url: string) -> number ![io] {
     }
     let sfn_dir = home + "/.sfn";
     _ensure_dir_recursive_cmd(sfn_dir);
-    process.run(["chmod", "700", sfn_dir]);
+    let dir_chmod_rc = process.run(["chmod", "700", sfn_dir]);
+    if dir_chmod_rc != 0 {
+        print("error: failed to set permissions on " + sfn_dir);
+        return 1;
+    }
     let path = sfn_dir + "/config.toml";
     let mut out: string = "";
     if url.length > 0 {
@@ -871,7 +926,11 @@ fn _write_config_registry_cmd(url: string) -> number ![io] {
         out = out + "url = \"" + url + "\"\n";
     }
     fs.writeFile(path, out);
-    process.run(["chmod", "600", path]);
+    let file_chmod_rc = process.run(["chmod", "600", path]);
+    if file_chmod_rc != 0 {
+        print("error: failed to set permissions on " + path);
+        return 1;
+    }
     return 0;
 }
 
@@ -918,6 +977,10 @@ fn handle_config_command(args: string[]) -> number ![io] {
             return 1;
         }
         let normalized = _strip_trailing_slash_cmd(value);
+        if !_is_valid_registry_url_cmd(normalized) {
+            print("error: registry must be an http(s) URL with no whitespace, quotes, or shell metacharacters");
+            return 1;
+        }
         let rc = _write_config_registry_cmd(normalized);
         if rc != 0 { return rc; }
         print("registry = " + normalized);
@@ -1135,6 +1198,27 @@ fn handle_add_command(args: string[]) -> number ![io] {
     // `scope/name` format.
     let display_name = _display_capsule_name_cmd(registry_name);
 
+    // Validate scope/name up front — registry_name is interpolated into a
+    // shell pipeline below when fetching the index, and into the cache path
+    // and download URL after. Rejecting path-traversal and directory-separator
+    // characters early covers both the shell-injection and traversal risks.
+    let slash_pos = find_char(registry_name, "/", 0);
+    if slash_pos < 0 {
+        print("invalid capsule id — expected scope/name format: "
+            + registry_name);
+        return 1;
+    }
+    let scope = substring(registry_name, 0, slash_pos);
+    let name = substring(registry_name, slash_pos + 1, registry_name.length);
+    if !_is_safe_capsule_segment_cmd(scope) {
+        print("invalid capsule scope: " + scope);
+        return 1;
+    }
+    if !_is_safe_capsule_segment_cmd(name) {
+        print("invalid capsule name: " + name);
+        return 1;
+    }
+
     // If --update was not passed and a lockfile entry exists, use the locked version.
     let mut use_locked: boolean = false;
     let mut locked_version: string = "";
@@ -1169,24 +1253,6 @@ fn handle_add_command(args: string[]) -> number ![io] {
         }
     }
 
-    let slash_pos = find_char(registry_name, "/", 0);
-    if slash_pos < 0 {
-        print("invalid capsule id — expected scope/name format: "
-            + registry_name);
-        return 1;
-    }
-    let scope = substring(registry_name, 0, slash_pos);
-    let name = substring(registry_name, slash_pos + 1, registry_name.length);
-    // Validate path segments to prevent directory traversal (especially
-    // when resolved_version comes from capsule.lock).
-    if !_is_safe_capsule_segment_cmd(scope) {
-        print("invalid capsule scope: " + scope);
-        return 1;
-    }
-    if !_is_safe_capsule_segment_cmd(name) {
-        print("invalid capsule name: " + name);
-        return 1;
-    }
     if !_is_safe_capsule_version_cmd(resolved_version) {
         print("invalid version (possible path traversal): " + resolved_version);
         return 1;

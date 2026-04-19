@@ -158,7 +158,16 @@ The `[dependencies]` table lists other capsules your capsule depends on. Depende
 
 ### Adding Dependencies
 
-**Note:** The `sfn add` command is planned for a future release. For now, add dependencies by editing `capsule.toml` directly and re-running your build command. The build system will fetch and cache the dependency from the configured registry (`pkg.sfn.dev` by default; override with `sfn config set registry <url>` or `SFN_REGISTRY`).
+Use `sfn add <capsule>` to record a dependency in `capsule.toml` and pre-fetch the package into `~/.sfn/cache/`. Pass `--dev` for dev-only dependencies and `--update` to pick up a newer version instead of honoring the lockfile:
+
+```bash
+sfn add http                  # add sfn/http (stdlib)
+sfn add --dev test            # dev dependency
+sfn add acme/router           # third-party scoped capsule
+sfn add --update acme/router  # ignore lockfile, fetch latest
+```
+
+The build system fetches capsules from the configured registry (`pkg.sfn.dev` by default; override with `sfn config set registry <url>` or `SFN_REGISTRY`).
 
 ### Dependency Resolution
 
@@ -456,7 +465,15 @@ export SFN_REGISTRY=https://registry.acme.internal
 
 Resolution order, highest priority first: `SFN_REGISTRY` env var → `~/.sfn/config.toml` → compiled-in default (`https://pkg.sfn.dev`).
 
-**Note:** The `sfn publish` command is planned and not yet implemented. When available, it will authenticate with the configured registry, validate the manifest, run tests, and upload the capsule. For now, treat the registry as a design preview.
+Publishing a capsule is a two-step flow:
+
+```bash
+sfn login                       # save your auth token to ~/.sfn/credentials (600)
+sfn publish                     # package the current capsule and upload it
+sfn publish path/to/capsule     # or package a capsule from a specific path
+```
+
+`sfn publish` bundles the capsule source (`capsule.toml` + `src/**/*.sfn`) into a SFNPKG payload, computes a SHA-256 digest, and POSTs it to `<registry>/api/publish` using the bearer token from `SFN_TOKEN` or `~/.sfn/credentials`. The registry URL is resolved through the same precedence as `sfn add` (`SFN_REGISTRY` → `~/.sfn/config.toml` → default). Capability auditing and signed provenance are in progress on the [roadmap](https://sailfin.dev/roadmap).
 
 The planned publication flow:
 

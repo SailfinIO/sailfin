@@ -14,9 +14,11 @@ BINARY="$(cd "$(dirname "${1:?usage: test_publish.sh <compiler-binary>}")" && pw
 PASS=0
 FAIL=0
 
-# Prevent the real SFN_TOKEN from leaking into tests — each test that needs
-# a token provides one explicitly via credentials file or env override.
+# Prevent the real SFN_TOKEN / SFN_REGISTRY from leaking into tests — each
+# test that needs them provides the value explicitly via credentials file,
+# config file, or per-command env override.
 unset SFN_TOKEN 2>/dev/null || true
+unset SFN_REGISTRY 2>/dev/null || true
 
 # Portable sha256 and base64 helpers (GNU vs macOS)
 _sha256() { sha256sum "$@" 2>/dev/null || shasum -a 256 "$@"; }

@@ -52,13 +52,13 @@ test_config_set_registry() {
         || { echo "missing url line"; return 1; }
 }
 
-# ---- Test 3: set strips trailing slash ----
+# ---- Test 3: set strips trailing slash(es) ----
 test_config_set_strips_trailing_slash() {
     local home="$tmpdir/t3"
     mkdir -p "$home"
-    HOME="$home" "$BINARY" config set registry "https://example.test/"
+    HOME="$home" "$BINARY" config set registry "https://example.test///"
     grep -q '^url = "https://example.test"$' "$home/.sfn/config.toml" \
-        || { echo "trailing slash not stripped:"; cat "$home/.sfn/config.toml"; return 1; }
+        || { echo "trailing slashes not stripped:"; cat "$home/.sfn/config.toml"; return 1; }
 }
 
 # ---- Test 4: get registry returns default when unset ----
@@ -149,6 +149,44 @@ test_config_set_empty_value() {
     return 0
 }
 
+# ---- Test 11b: set rejects non-http(s) scheme ----
+test_config_set_rejects_bad_scheme() {
+    local home="$tmpdir/t11b"
+    mkdir -p "$home"
+    if HOME="$home" "$BINARY" config set registry "ftp://nope.test" 2>&1; then
+        echo "expected non-zero exit for non-http scheme"
+        return 1
+    fi
+    [ ! -f "$home/.sfn/config.toml" ] \
+        || { echo "config.toml should not have been written"; return 1; }
+    return 0
+}
+
+# ---- Test 11c: set rejects shell metacharacters ----
+test_config_set_rejects_metachars() {
+    local home="$tmpdir/t11c"
+    mkdir -p "$home"
+    if HOME="$home" "$BINARY" config set registry 'https://bad.test"; echo pwn' 2>&1; then
+        echo "expected non-zero exit for URL with shell metacharacters"
+        return 1
+    fi
+    [ ! -f "$home/.sfn/config.toml" ] \
+        || { echo "config.toml should not have been written"; return 1; }
+    return 0
+}
+
+# ---- Test 11d: invalid env var falls back to default with warning ----
+test_config_invalid_env_falls_back() {
+    local home="$tmpdir/t11d"
+    mkdir -p "$home"
+    local output
+    output="$(HOME="$home" SFN_REGISTRY="not a url" "$BINARY" config get registry 2>&1)"
+    echo "$output" | grep -q "https://pkg.sfn.dev" \
+        || { echo "expected default URL in output, got: $output"; return 1; }
+    echo "$output" | grep -qi "warning" \
+        || { echo "expected warning about invalid SFN_REGISTRY, got: $output"; return 1; }
+}
+
 # ---- Test 12: unknown subcommand rejected ----
 test_config_unknown_subcommand() {
     local home="$tmpdir/t12"
@@ -185,6 +223,9 @@ run_test "config list shows resolved registry" test_config_list
 run_test "config set rejects unknown key" test_config_set_unknown_key
 run_test "config get rejects unknown key" test_config_get_unknown_key
 run_test "config set rejects empty value" test_config_set_empty_value
+run_test "config set rejects non-http scheme" test_config_set_rejects_bad_scheme
+run_test "config set rejects shell metacharacters" test_config_set_rejects_metachars
+run_test "invalid SFN_REGISTRY env falls back to default" test_config_invalid_env_falls_back
 run_test "config rejects unknown subcommand" test_config_unknown_subcommand
 run_test "config file permissions restricted" test_config_permissions
 
