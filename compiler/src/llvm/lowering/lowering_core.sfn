@@ -117,11 +117,7 @@ import {
     recover_native_imports_light,
     recover_native_structs_light
 } from "./lowering_recovery";
-import {
-    _parse_lowered_fn_string_constants,
-    _parse_module_globals_locals,
-    split_lines_local
-} from "./lowering_text_utils";
+import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowering_text_utils";
 import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Consolidated: parse all structure from native text using light recovery.
@@ -647,27 +643,14 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         }
     } else {
         let _mg = lower_module_bindings_to_globals(safe_bindings, type_context, native_module.module_name);
-        let _mg_needs_init_raw = fs.readFile("build/sailfin/.module_globals_needs_init");
-        module_globals_needs_init_call = _mg_needs_init_raw == "1";
-    }
-    if safe_bindings.length > 0 {
-        let _mg_preamble_raw = fs.readFile("build/sailfin/.module_globals_preamble");
-        if _mg_preamble_raw.length > 0 {
-            module_preamble_lines = split_lines_local(_mg_preamble_raw);
-        }
-        let _mg_init_raw = fs.readFile("build/sailfin/.module_globals_init");
-        if _mg_init_raw.length > 0 {
-            module_init_lines = split_lines_local(_mg_init_raw);
-        }
-        module_init_symbol = fs.readFile("build/sailfin/.module_globals_init_symbol");
-        let _mg_locals_raw = fs.readFile("build/sailfin/.module_globals_locals");
-        if _mg_locals_raw.length > 0 {
-            module_global_locals = _parse_module_globals_locals(_mg_locals_raw);
-        }
-        let _mg_diags_raw = fs.readFile("build/sailfin/.module_globals_diagnostics");
-        if _mg_diags_raw.length > 0 {
-            let _mg_diags = split_lines_local(_mg_diags_raw);
-            diagnostics = extend_string_lines_checked(diagnostics, _mg_diags, "module globals");
+        module_globals_needs_init_call = _mg.needs_init_call;
+        module_preamble_lines = _mg.preamble_lines;
+        module_init_lines = _mg.init_function_lines;
+        module_init_symbol = _mg.init_function_symbol;
+        module_global_locals = _mg.locals;
+        module_string_constants = _mg.string_constants;
+        if _mg.diagnostics.length > 0 {
+            diagnostics = extend_string_lines_checked(diagnostics, _mg.diagnostics, "module globals");
         }
     }
     if module_preamble_lines.length > 0 {

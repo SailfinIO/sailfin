@@ -1,29 +1,19 @@
 // compiler/src/llvm/lowering/module_globals.sfn
 //
 // Module-global lowering: turns `let` bindings into LLVM globals plus optional init function.
-//
-// IMPORTANT: The v0.1.1 seed compiler drops ALL code after a loop body
-// AND at the end of loop bodies (places it in the afterloop block).
-// Therefore, every function with a loop MUST NOT have significant code
-// after the loop or at the end of the loop body.
-import { NativeBinding, NativeFunction } from "../../native_ir";
-import { lower_expression } from "../expression_lowering/native/core";
-import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
-import { append_local_binding, find_local_binding } from "../expression_lowering/native/core_scopes";
+import { NativeBinding } from "../../native_ir";
 import { default_return_literal } from "../expressions_helpers";
 import { is_string_literal, normalise_number_literal } from "../expressions_literals";
 import { format_root_scope_id } from "../lifetime";
-import { empty_string_constant_set, merge_string_constants } from "../strings";
+import { empty_string_constant_set } from "../strings";
 import { map_local_type } from "../type_mapping";
 import {
+    BindingLoweringResult,
     LocalBinding,
     ModuleGlobalLoweringResult,
-    ParameterBinding,
-    StringConstant,
     TypeContext
 } from "../types";
 import {
-    append_string,
     is_boolean_literal,
     is_integer_literal,
     is_number_literal,
@@ -67,15 +57,18 @@ fn _strip_string_quotes(s: string) -> string {
     return s;
 }
 
-// Process a single module binding and write results to accumulation files.
-// This function is called from the loop body to keep the body minimal.
-// It appends preamble lines and local entries to accumulation files.
-// Returns "init" if the binding needs runtime initialization, "" otherwise.
-fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string) -> string ![io] {
-    if binding == null { return ""; }
+// Process a single module binding and return its lowered preamble lines,
+// a zero-or-one-element locals array, and whether it needs runtime init.
+fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: string) -> BindingLoweringResult {
+    let empty_result = BindingLoweringResult {
+        preamble_lines: [],
+        locals: [],
+        needs_init: false
+    };
+    if binding == null { return empty_result; }
     let mut name = binding.name;
-    if name == null { return ""; }
-    if name.length == 0 { return ""; }
+    if name == null { return empty_result; }
+    if name.length == 0 { return empty_result; }
     let mut raw_type_annotation = binding.type_annotation;
     if raw_type_annotation == null { raw_type_annotation = ""; }
     let mut type_annotation = trim_text(raw_type_annotation);
@@ -89,7 +82,7 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
             }
         }
     }
-    if type_annotation.length == 0 { return ""; }
+    if type_annotation.length == 0 { return empty_result; }
     let global_name = module_global_symbol(name);
     let mut llvm_type: string = "";
     // Fast-path common primitive types
@@ -104,8 +97,8 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
     }
     if llvm_type.length == 0 { llvm_type = "double"; }
 
-    // Build preamble line(s) and append to accumulation file
-    let mut needs_init_result: string = "";
+    let mut preamble_lines: string[] = [];
+    let mut needs_init: boolean = false;
 
     if llvm_type == "i8*" {
         let mut string_handled: boolean = false;
@@ -128,15 +121,14 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
                     + " x i8]* "
                     + str_const_name
                     + ", i32 0, i32 0)";
-                _append_to_file("build/sailfin/.module_globals_preamble", line1);
-                _append_to_file("build/sailfin/.module_globals_preamble", line2);
+                preamble_lines.push(line1);
+                preamble_lines.push(line2);
                 string_handled = true;
             }
         }
         if !string_handled {
-            _append_to_file("build/sailfin/.module_globals_preamble", global_name
-                + " = internal global i8* null");
-            if binding.value != null { needs_init_result = "init"; }
+            preamble_lines.push(global_name + " = internal global i8* null");
+            if binding.value != null { needs_init = true; }
         }
     } else {
         let mut initializer_text: string = default_return_literal(llvm_type);
@@ -170,44 +162,37 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
                     is_const = true;
                 }
             }
-            if !is_const { needs_init_result = "init"; }
+            if !is_const { needs_init = true; }
         }
-        _append_to_file("build/sailfin/.module_globals_preamble", global_name
-            + " = internal global "
-            + llvm_type
+        preamble_lines.push(global_name + " = internal global " + llvm_type
             + " "
             + initializer_text);
     }
 
-    // Append local binding entry (tab-separated)
-    let local_line = name + "\t" + global_name + "\t" + llvm_type + "\t"
-        + effective_type_annotation
-        + "\t"
-        + scope_id;
-    _append_to_file("build/sailfin/.module_globals_locals", local_line);
+    let local = LocalBinding {
+        name: name,
+        pointer: global_name,
+        llvm_type: llvm_type,
+        type_annotation: effective_type_annotation,
+        ownership: null,
+        consumed: false,
+        scope_id: scope_id,
+        scope_depth: 0
+    };
+    let mut locals: LocalBinding[] = [];
+    locals.push(local);
 
-    return needs_init_result;
+    return BindingLoweringResult {
+        preamble_lines: preamble_lines,
+        locals: locals,
+        needs_init: needs_init
+    };
 }
 
-// Append a line to a file (read existing content, append newline + new line).
-fn _append_to_file(path: string, line: string) ![io] {
-    let mut existing: string = "";
-    if fs.exists(path) { existing = fs.readFile(path); }
-    if existing.length == 0 { fs.writeFile(path, line); } else {
-        fs.writeFile(path, existing + "\n" + line);
-    }
-}
-
-fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeContext, module_name: string) -> ModuleGlobalLoweringResult ![io] {
+fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeContext, module_name: string) -> ModuleGlobalLoweringResult {
     let init_symbol = module_init_symbol(module_name);
 
     if bindings.length == 0 {
-        fs.writeFile("build/sailfin/.module_globals_needs_init", "0");
-        fs.writeFile("build/sailfin/.module_globals_preamble", "");
-        fs.writeFile("build/sailfin/.module_globals_init", "");
-        fs.writeFile("build/sailfin/.module_globals_init_symbol", init_symbol);
-        fs.writeFile("build/sailfin/.module_globals_locals", "");
-        fs.writeFile("build/sailfin/.module_globals_diagnostics", "");
         return ModuleGlobalLoweringResult {
             preamble_lines: [],
             init_function_lines: [],
@@ -220,43 +205,36 @@ fn lower_module_bindings_to_globals(bindings: NativeBinding[], context: TypeCont
     }
 
     let scope_id = format_root_scope_id("module");
+    let mut preamble_lines: string[] = [];
+    let mut locals: LocalBinding[] = [];
     let mut needs_init: boolean = false;
-
-    // Clear accumulation files before starting
-    fs.writeFile("build/sailfin/.module_globals_preamble", "");
-    fs.writeFile("build/sailfin/.module_globals_locals", "");
-    fs.writeFile("build/sailfin/.module_globals_init", "");
-    fs.writeFile("build/sailfin/.module_globals_init_symbol", init_symbol);
-    fs.writeFile("build/sailfin/.module_globals_diagnostics", "");
-
-    // Process each binding via helper function.
-    // The helper writes preamble and locals to files (append mode).
-    // Keep loop body minimal — the seed drops end-of-body code.
     let mut index: number = 0;
     loop {
-        if index >= bindings.length {
-            // Write needs_init at exit (inside loop, before break)
-            if needs_init {
-                fs.writeFile("build/sailfin/.module_globals_needs_init", "1");
-            } else {
-                fs.writeFile("build/sailfin/.module_globals_needs_init", "0");
-            }
-            break;
-        }
+        if index >= bindings.length { break; }
         let binding = bindings[index];
         index += 1;
         let result = _process_one_binding(binding, context, scope_id);
-        if result == "init" { needs_init = true; }
+        let mut li: number = 0;
+        loop {
+            if li >= result.preamble_lines.length { break; }
+            preamble_lines.push(result.preamble_lines[li]);
+            li += 1;
+        }
+        let mut lj: number = 0;
+        loop {
+            if lj >= result.locals.length { break; }
+            locals.push(result.locals[lj]);
+            lj += 1;
+        }
+        if result.needs_init { needs_init = true; }
     }
 
-    // NOTE: Code below is UNREACHABLE when compiled by the v0.1.1 seed.
-    // File IPC is written inside the loop exit and by _process_one_binding.
     return ModuleGlobalLoweringResult {
-        preamble_lines: [],
+        preamble_lines: preamble_lines,
         init_function_lines: [],
         init_function_symbol: init_symbol,
         needs_init_call: needs_init,
-        locals: [],
+        locals: locals,
         string_constants: empty_string_constant_set(),
         diagnostics: []
     };
