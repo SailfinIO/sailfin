@@ -161,6 +161,14 @@ The visible "`call to unknown function \`starts_with\`" diagnostic comes
 from the same site: the consumer's mangler can't decide which module owns
 `starts_with` because no `.sfn-asm` actually provides a signature for it.
 
+There is a second, even more visible manifestation: if the consumer's
+lowering happens to emit the call with the re-exporter's mangled name
+anyway (e.g. `@reexport_is_yes__middle`), the resulting object file has
+an undefined external reference and the link step fails with
+`undefined reference to 'reexport_is_yes__middle'`.  The
+`compiler/tests/e2e/test_reexport.sh` golden test hits this path — see
+its `EXPECTED_BUG_LINK` branch.
+
 A commit from earlier in the same week (`7f47f70`, "fix(emit_native_layout):
 import contains_string from string_utils") had already documented one half of
 this problem: it states that "without an export block, imported symbols
