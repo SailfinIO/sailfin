@@ -177,8 +177,9 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
         }
     }
 
-    // File-based fallback: parse_member_access is cross-module and returns
-    // corrupted data with the v0.1.1 seed.
+    // Inline member-access fallback: parse_member_access is cross-module
+    // and historically returned corrupted data with the v0.1.1 seed, so
+    // we re-derive the struct method target from `locals` directly.
     let _pre_dot = index_of(result_target, ".");
     if _pre_dot > 0 {
         if method_operand == null {
