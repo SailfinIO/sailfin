@@ -6,6 +6,12 @@ env:
   # re-export miscompilation — see
   # docs/rca/2026-04-18-reexport-diagnostic-gep.md.
   SEED_VERSION: 0.5.7
+  # Phase 0 / M0.5: pin arena allocator on for CI even after the
+  # scripts/build.sh default. Belt-and-suspenders guard so a future
+  # change to the build.sh default (or a caller that scrubs env) can't
+  # silently regress CI onto the malloc path.
+  # See docs/build-performance.md → "Arena Allocator Default-On".
+  SAILFIN_USE_ARENA: "1"
 
 permissions:
   contents: read
