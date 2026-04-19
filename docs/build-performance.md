@@ -280,7 +280,7 @@ If step 7 fails, the channel is not purely a workaround — some caller is relyi
 4. **Function metadata channel** (13 refs in `lowering_phase_functions.sfn`) — per-function overhead
 5. **Context functions serialization** (14 refs in `lowering_phase_types.sfn`) — per-module overhead
 6. **Module globals channel** (18 refs in `module_globals.sfn`)
-7. **Remaining channels** (emission, self-field, async, coerce)
+7. **Remaining channels** (emission, async, coerce)
 
 Named IPC functions to eliminate:
 - `_write_block_result_files()` — `instructions_helpers.sfn:122`
@@ -362,6 +362,40 @@ Concurrently, the `build.sh` retry loop went from 3 `invalid_ir` retries per ful
 - ~150 lines removed, ~15 added
 
 This is the first IPC removal under the procedure in Phase 2 above; future channel removals should follow the same 9-step pattern.
+
+### Self-Field IPC Channel Removal (April 19)
+
+**Status: Implemented.** Removed the `.self_field_*` file IPC channel — a v0.1.1-seed-era workaround used to ship the rewritten expression / next temp index / updated lines array from `preprocess_self_field_access` (in `statement_assignment.sfn`) back to its *immediate* caller `lower_return_instruction` (in `statement.sfn`).
+
+The writer was void-returning and wrote 4 sub-files (`.self_field_expr`, `.self_field_temp`, `.self_field_lines_count`, `.self_field_lines`) at 6 exit points (5 early returns + 1 final). The reader checked `fs.exists(".self_field_expr")` two lines after the call, read the 4 files back, reconstructed the three values, and deleted the scratch file. The call site is literally adjacent to the helper — the channel was pure function-return ceremony routed through the filesystem.
+
+**Shape of change:**
+- Added `SelfFieldResult { expression, temp_index, lines }` to `llvm/types.sfn` (wrapper struct is legitimate per procedure §267: three values travelling together).
+- `preprocess_self_field_access` now has return type `SelfFieldResult` and returns the struct at all 6 exits; all `fs.writeFile`/`fs.writeLines` on `.self_field_*` paths deleted. `![io]` retained because the function still reads `.struct_info` and `.instr_fn_name` (separate channels, out of scope).
+- Caller in `statement.sfn` captures the struct directly; `fs.exists` / `fs.readFile` / `fs.deleteFile` block replaced with three field reads. The `_sf_lc > current_lines.length` length gate is preserved as `result.lines.length > current_lines.length` so callers that didn't perform any self-field rewrites don't have their `current_lines` clobbered.
+- `cli_commands._clean_lowering_state` keeps the `.self_field_` prefix sweep with a comment explaining it's there to clean stale files from older build dirs / older seed binaries (following the PR #183 review precedent — never drop a prefix entirely).
+
+**Determinism delta (emit `llvm` × 20 runs on Linux x86_64, seed 0.5.7 baseline):**
+
+| Module | Baseline | Post-change |
+|--------|---------:|------------:|
+| `compiler/src/parser/expressions.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/parser/statements.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/llvm/lowering/instructions_helpers.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/llvm/expression_lowering/native/statement_assignment.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/cli_commands.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+
+On Linux x86_64 the 0.5.7 seed is already fully deterministic on these modules, so this channel's removal is not expected to move the hash count here — it eliminates the per-return file-I/O overhead instead. The equivalent macOS-arm64 measurements (where residual non-determinism still lives) will land in the PR body once the CI rebuild completes on that platform.
+
+**Scope of change:**
+- 1 writer function converted from void+file-IPC to `SelfFieldResult` return at 6 exit points
+- 1 reader (immediate caller, same stack frame) converted to direct struct-field reads
+- 1 struct added to `llvm/types.sfn` (3 fields)
+- 14 `fs.writeFile`/`fs.writeLines` calls removed from the writer; 5 `fs.readFile` + 1 `fs.exists` + 1 `fs.deleteFile` removed from the reader
+- `.self_field_` kept in the legacy cleanup sweep with a comment
+- ~28 net lines removed
+
+Because the writer is called inside `lower_return_instruction`, which fires for every `return <expr>` statement in every function, this removes roughly 3-6 `fs.writeFile` calls per emitted return across every module compile. The compiler itself has no `return self.*` patterns, so the channel's data-bearing path is never exercised during self-hosting; it was pure per-return overhead.
 
 ---
 
