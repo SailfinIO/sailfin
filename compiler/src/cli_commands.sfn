@@ -705,6 +705,8 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
         if _has_prefix_cmd(entry, ".let_result_") { is_scratch = true; }
         if _has_prefix_cmd(entry, ".module_globals_") { is_scratch = true; }
         if _has_prefix_cmd(entry, ".phase_") { is_scratch = true; }
+        // Legacy: .self_field_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
         if _has_prefix_cmd(entry, ".self_field_") { is_scratch = true; }
         if strings_equal(entry, ".condition_locals") { is_scratch = true; }
         if strings_equal(entry, ".enum_info") { is_scratch = true; }

@@ -26,6 +26,7 @@ import {
     OwnershipInfo,
     ParameterBinding,
     ParameterPreparation,
+    SelfFieldResult,
     StringConstant,
     TypeContext
 } from "../../types";
@@ -632,24 +633,12 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
         }
     }
     // Pre-process self.field patterns via helper (extracted to stay under 500 instr)
-    preprocess_self_field_access(instr_expression, current_temp, current_lines);
-    let mut _ret_expr: string = instr_expression;
-    if fs.exists("build/sailfin/.self_field_expr") {
-        _ret_expr = fs.readFile("build/sailfin/.self_field_expr");
-        let _sf_temp_str = fs.readFile("build/sailfin/.self_field_temp");
-        current_temp = _parse_int_local(_sf_temp_str);
-        current_temp = _recover_temp_from_lines(current_lines, current_temp);
-        let _sf_lc_str = fs.readFile("build/sailfin/.self_field_lines_count");
-        let _sf_lc = _parse_int_local(_sf_lc_str);
-        if _sf_lc > current_lines.length {
-            let _sf_lines_raw = fs.readFile("build/sailfin/.self_field_lines");
-            let mut _sf_new_lines: string[] = [];
-            if _sf_lines_raw.length > 0 {
-                _sf_new_lines = split_lines_local(_sf_lines_raw);
-            }
-            current_lines = _sf_new_lines;
-        }
-        fs.deleteFile("build/sailfin/.self_field_expr");
+    let _sf_result = preprocess_self_field_access(instr_expression, current_temp, current_lines);
+    let _ret_expr: string = _sf_result.expression;
+    current_temp = _sf_result.temp_index;
+    current_temp = _recover_temp_from_lines(current_lines, current_temp);
+    if _sf_result.lines.length > current_lines.length {
+        current_lines = _sf_result.lines;
     }
     let lowered = lower_expression(_ret_expr, current_bindings, current_locals, current_temp, current_lines, functions, context, safe_llvm_return);
     if debug_lowering {
