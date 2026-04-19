@@ -6,7 +6,7 @@
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import { NativeModule } from "../../emit_native";
-import { NativeFunction, NativeInstruction, NativeParameter } from "../../native_ir";
+import { NativeFunction } from "../../native_ir";
 import { append_function_effect_entry, find_function_effect_entry } from "../effects";
 import { collect_exported_symbol_names } from "../rendering_helpers";
 import {
@@ -45,42 +45,6 @@ import {
     get_function_return_type_at
 } from "./lowering_native_helpers";
 import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowering_text_utils";
-
-// Write function metadata to file-based IPC channels for emit_llvm_function.
-// The v0.1.1 seed compiles emission.sfn with NativeFunction as i8*,
-// making direct field access return garbage.
-fn write_function_ipc(local_functions: NativeFunction[], index: number, safe_function_name: string, safe_return_type: string, safe_parameters: NativeParameter[], safe_instructions: NativeInstruction[], safe_decorators: string[], fn_is_async: boolean, fn_is_extern: boolean) -> boolean ![io] {
-    let mut is_async_flag = "0";
-    if fn_is_async { is_async_flag = "1"; }
-    let mut is_extern_flag = "0";
-    if fn_is_extern { is_extern_flag = "1"; }
-    fs.writeFile("build/sailfin/.fn_name", safe_function_name);
-    fs.writeFile("build/sailfin/.fn_return_type", safe_return_type);
-    fs.writeFile("build/sailfin/.fn_is_async", is_async_flag);
-    fs.writeFile("build/sailfin/.fn_is_extern", is_extern_flag);
-    fs.writeFile("build/sailfin/.fn_param_count", number_to_string(safe_parameters.length));
-    fs.writeFile("build/sailfin/.fn_instr_count", number_to_string(safe_instructions.length));
-    let fn_index_str = number_to_string(index);
-    fs.writeFile("build/sailfin/.fn_index", fn_index_str);
-    fs.writeFile("build/sailfin/.fn_index_backup", fn_index_str);
-    fs.writeFile("build/sailfin/.fn_decorator_count", number_to_string(safe_decorators.length));
-    let mut param_write_i: number = 0;
-    loop {
-        if param_write_i >= safe_parameters.length { break; }
-        fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i)
-            + "_name", safe_parameters[param_write_i].name);
-        fs.writeFile("build/sailfin/.fn_param_" + number_to_string(param_write_i)
-            + "_type", safe_parameters[param_write_i].type_annotation);
-        param_write_i += 1;
-    }
-    let mut dec_write_i: number = 0;
-    loop {
-        if dec_write_i >= safe_decorators.length { break; }
-        fs.writeFile("build/sailfin/.fn_decorator_" + number_to_string(dec_write_i), safe_decorators[dec_write_i]);
-        dec_write_i += 1;
-    }
-    return true;
-}
 
 // Lower all local functions to LLVM IR.
 // Writes results to file-based IPC:
@@ -163,9 +127,7 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
                 + " idx="
                 + number_to_string(index));
         }
-        // Write function metadata to file-based IPC
-        write_function_ipc(local_functions, index, safe_function_name, safe_return_type, safe_parameters, safe_instructions, safe_decorators, fn_is_async, fn_is_extern);
-        let lowered = emit_llvm_function(safe_function_name, context_functions, effective_effects, type_context, module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call);
+        let lowered = emit_llvm_function(effective_function, context_functions, effective_effects, type_context, module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call);
         let _lfn_lines = lowered.lines;
         let _lfn_diags = lowered.diagnostics;
         let _lfn_string_constants = lowered.string_constants;

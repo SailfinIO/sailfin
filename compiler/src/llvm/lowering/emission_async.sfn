@@ -30,11 +30,14 @@ import {
     sanitize_symbol
 } from "../utils";
 import { emit_llvm_function } from "./emission";
-import { prepare_parameters_from_files } from "./emission";
+import { prepare_parameters_from_function } from "./emission";
 
 // Emit async wrapper + impl for an async function. Returns LoweredLLVMFunction.
-fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: number, function_name_hint: string, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {
+fn emit_async_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {
     let mut diagnostics: string[] = [];
+    let fn_name = function.name;
+    let fn_return_type = function.return_type;
+    let fn_param_count = function.parameters.length;
     let future_return = future_pointer_type_for_return_type(fn_return_type);
     let mut impl_return = map_return_type(context, fn_return_type);
     let mut _if205: boolean = false;
@@ -61,14 +64,21 @@ fn emit_async_function(fn_name: string, fn_return_type: string, fn_param_count: 
     }
 
     let impl_name = fn_name + "__async_impl";
-    fs.writeFile("build/sailfin/.fn_name", impl_name);
-    fs.writeFile("build/sailfin/.fn_return_type", impl_return_type_annotation);
-    fs.writeFile("build/sailfin/.fn_is_async", "0");
-    let impl_lowered = emit_llvm_function(function_name_hint, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call);
+    let impl_function = NativeFunction {
+        name: impl_name,
+        is_async: false,
+        parameters: function.parameters,
+        return_type: impl_return_type_annotation,
+        effects: function.effects,
+        decorators: function.decorators,
+        is_extern: false,
+        instructions: function.instructions
+    };
+    let impl_lowered = emit_llvm_function(impl_function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call);
 
     diagnostics = extend_string_array(diagnostics, impl_lowered.diagnostics);
 
-    let preparation = prepare_parameters_from_files(fn_name, fn_param_count, context);
+    let preparation = prepare_parameters_from_function(function, context);
     diagnostics = extend_string_array(diagnostics, preparation.diagnostics);
 
     let mut wrapper_lines: string[] = [];
