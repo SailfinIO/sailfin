@@ -597,7 +597,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
 // inline and replace each pattern with a temp variable. This is extracted from
 // lower_return_instruction to keep it under ~500 instructions.
 // Returns the rewritten expression, the next temp index, and the updated
-// lines array (with any prepended GEP/bitcast/load instructions).
+// lines array including any emitted GEP/bitcast/load instructions.
 fn preprocess_self_field_access(expression: string, current_temp: number, current_lines: string[]) -> SelfFieldResult ![io] {
     let mut result_expr: string = expression;
     let mut result_temp: number = current_temp;
