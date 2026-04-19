@@ -4,10 +4,12 @@
 import { Program } from "./ast";
 import {
     NativeModule,
+    collect_reexport_violations,
     emit_native,
     emit_native_text_to_file_with_module_name,
     emit_native_text_with_module_name,
-    emit_native_with_module_name
+    emit_native_with_module_name,
+    report_reexport_violations
 } from "./emit_native";
 import { emit_program } from "./emitter_sailfin";
 import {
@@ -39,6 +41,17 @@ fn _timing_line(module_name: string, phase: string, elapsed_ms: number) -> strin
         + number_to_string(elapsed_ms);
 }
 
+// Refuse compilation when any `export { X };` in this module re-exports
+// an imported symbol without a local definition.  Reports each violation
+// via print.err and returns true if the caller should bail.  See
+// docs/rca/2026-04-18-reexport-diagnostic-gep.md.
+fn _reject_reexport_violations(program: Program) -> boolean ![io] {
+    let violations = collect_reexport_violations(program);
+    if violations.length == 0 { return false; }
+    report_reexport_violations(violations);
+    return true;
+}
+
 fn compile_to_sailfin(source: string) -> string ![io] {
     let program: Program = parse_program(source);
     if typecheck_has_errors(program) {
@@ -46,6 +59,7 @@ fn compile_to_sailfin(source: string) -> string ![io] {
         report_typecheck_errors(diagnostics, source);
         return "";
     }
+    if _reject_reexport_violations(program) { return ""; }
     return emit_program(program);
 }
 
@@ -134,6 +148,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
         report_typecheck_errors(diagnostics, source);
         return "";
     }
+    if _reject_reexport_violations(program) { return ""; }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, "main");
     if trace_emit {
@@ -178,6 +193,7 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
     } else {
         print.err("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
+    if _reject_reexport_violations(program) { return ""; }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
@@ -228,6 +244,11 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     } else {
         t_typecheck = _ms_since(t1);
         print.err("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
+    }
+    if _reject_reexport_violations(program) {
+        print.err(_timing_line(module_name, "parse", t_parse));
+        print.err(_timing_line(module_name, "typecheck", t_typecheck));
+        return "";
     }
 
     let t2 = monotonic_millis();
@@ -299,6 +320,7 @@ fn compile_tests_to_llvm_file_with_module(source: string, module_name: string, o
         report_typecheck_errors(diagnostics, source);
         return false;
     }
+    if _reject_reexport_violations(program) { return false; }
     if trace {
         print.err("test compiler: emit_native_with_module_name start (module="
             + module_name
@@ -342,6 +364,7 @@ fn compile_to_native_text_with_module(source: string, module_name: string) -> st
         report_typecheck_errors(diagnostics, source);
         return "";
     }
+    if _reject_reexport_violations(program) { return ""; }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
@@ -362,6 +385,7 @@ fn write_native_text_file_with_module(source: string, module_name: string, out_p
         report_typecheck_errors(diagnostics, source);
         return false;
     }
+    if _reject_reexport_violations(program) { return false; }
     return emit_native_text_to_file_with_module_name(program, module_name, out_path);
 }
 
@@ -440,6 +464,7 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
     } else {
         print.err("emit-llvm-file: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
+    if _reject_reexport_violations(program) { return false; }
 
     let native_text_path = "build/sailfin/emit-native.tmp";
     if fs.exists(native_text_path) { fs.deleteFile(native_text_path); }

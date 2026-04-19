@@ -5,7 +5,7 @@
 - **Severity:** High — blocked triple-pass `make check`, blocked seed advancement past 0.5.3-alpha.1
 - **Affected releases:** 0.5.4, 0.5.5, 0.5.6 (the binary artifacts, not the source history)
 - **Resolved by:** [`v0.5.7`](https://github.com/SailfinIO/sailfin/releases/tag/v0.5.7) — first release built from a source tree where `native_ir_utils_text.sfn` defines `starts_with`/`strip_prefix` locally (`dc3c40e`), so the re-exporter's `.sfn-asm` emits real `.fn` entries consumers can resolve against.
-- **Status:** Immediate blocker cleared; `0.5.7` is now the canonical seed across CI, release-tag, and nightly. Underlying compiler bug (the emitter does not produce `.fn` signatures for re-exported imports) is still present in the binary and is tracked as a 1.0-blocker follow-up.
+- **Status:** Closed.  The 0.5.7 release worked around the bug at the source level (commit `dc3c40e` defines `starts_with`/`strip_prefix` locally in `native_ir_utils_text.sfn`) and is the canonical seed across CI, release-tag, and nightly.  The underlying compiler bug is now fixed at the emitter: implicit re-exports of imported symbols are refused with a clear diagnostic.  See [Compiler fix](#compiler-fix) below.
 
 ## TL;DR
 
@@ -527,6 +527,31 @@ This runs in under 30 seconds and does not require a full build. Any
 CI-equivalent health check that runs this single emit on every module
 after a build would have caught the bug immediately. Add this to CI as a
 cheap pre-check.
+
+## Compiler fix
+
+The compiler now implements **Option B** from the [Recommended audit and design work](#recommended-audit-and-design-work) section: the emitter refuses to compile any module containing `export { X };` (no `from` clause) where `X` is imported from a local module path (`./X` or `../X`) and has no local `fn`/`struct`/`enum`/`interface`/`type` definition.  Rejected compiles fail with a diagnostic that names the symbol, the import path, and a fix-it suggestion (import directly from the origin or add a local forwarder).
+
+### Why Option B
+
+1. **No ABI cost.**  The forwarder (Option A) would require the emitter to know the return type of the re-exported symbol at emit time, which the per-file emitter currently does not — origin signatures live in another file's `.sfn-asm`.  Threading that information through would be invasive.
+2. **The RCA already recommended it.**  The "Recommended audit and design work" section called Option B "the least surprising of the three, has no ABI cost, and the `7f47f70` commit already set the precedent by importing from the origin."
+3. **Zero in-tree fallout.**  An audit of every implicit `export { X };` block in `compiler/src/` and `runtime/` (see `scripts/lint_no_implicit_reexports.py`) found no remaining violations after the 0.5.7 source-level workaround landed.  The seven re-exports in `compiler/src/string_utils.sfn` (`clamp`, `substring`, `find_char`, `grapheme_count`, `grapheme_at`, `char_code`, `strings_equal`) are all re-exports of `runtime/prelude` symbols and are exempt: they resolve via the runtime helper descriptor table in `compiler/src/llvm/runtime_helpers.sfn`, not via the re-exporter's `.sfn-asm`, so they were never broken.
+
+### Carve-out: `runtime/prelude` and capsule paths
+
+The validator only fires for imports whose source path starts with `./` or `../` (i.e. relative module references).  Imports from `runtime/prelude`, capsule scopes (`sfn/cli`, `acme/foo`), and any other non-relative path are exempt because the consumer-side LLVM lowering resolves their signatures from the runtime helper descriptor table (`compiler/src/llvm/runtime_helpers.sfn`), not from the imported module's `.sfn-asm`.  This preserves the existing behaviour of `string_utils.sfn` and similar prelude-bridging modules while still catching the dangerous local-module-re-export pattern.
+
+### Where it lives
+
+- `compiler/src/emit_native.sfn:collect_reexport_violations` — the validator.
+- `compiler/src/main.sfn:_reject_reexport_violations` — the IO-effect reporter, called from every `compile_to_llvm*` and `compile_to_native_text*` path right after typecheck.
+- `scripts/lint_no_implicit_reexports.py` — the equivalent textual lint, wired into `.github/workflows/ci.yml` so PR authors see the failure in seconds rather than waiting for the ~13-minute self-host build.
+- `compiler/tests/e2e/test_reexport.sh` — the regression gate.  It tries to compile `fixtures/reexport/middle.sfn` (which has the bare bug shape) directly; the test passes when the emitter refuses with the expected diagnostic.
+
+### Inline `export { X } from "./path"` is out of scope
+
+The inline form (used by vestigial barrel modules like `compiler/src/llvm/expressions.sfn`) is a separate statement shape and is **not** rejected by this fix.  Those barrels currently have no consumers and would suffer the same bug if any consumer arrived.  Tightening the validator to cover the inline form is tracked as an unscheduled 1.0 follow-up (the module-system proposal called out in the "Recommended audit and design work" section above has not yet been written).
 
 ## Links
 

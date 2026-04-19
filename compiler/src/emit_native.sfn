@@ -53,6 +53,7 @@ import {
     LayoutContext,
     NativeState,
     StatementDispatchResult,
+    append_string,
     append_unique,
     builder_to_string,
     join_type_annotations,
@@ -65,7 +66,7 @@ import {
     state_pop_indent,
     state_push_indent
 } from "./emit_native_state";
-import { char_code } from "./string_utils";
+import { char_code, contains_string, substring } from "./string_utils";
 
 // ── Public data structures ───────────────────────────────────────────
 struct NativeModule {
@@ -851,4 +852,161 @@ fn count_exported_symbols(program: Program) -> number {
         index += 1;
     }
     return count;
+}
+
+// ── Re-export validation ─────────────────────────────────────────────
+// Refuse `export { X };` where X is only imported (no local definition)
+// and the import source is a local module path.  The emitter produces no
+// `.fn X` entry in the re-exporter's .sfn-asm for such symbols, so any
+// consumer that imports X through this module loses the real signature
+// and silently miscompiles (boolean returns drop `if` guards).
+//
+// Imports from non-local paths (e.g. "runtime/prelude") are resolved via
+// the runtime helper descriptor table in compiler/src/llvm/runtime_helpers.sfn
+// rather than the re-exporter's .sfn-asm, so they are exempt.
+//
+// See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
+fn collect_reexport_violations(program: Program) -> string[] {
+    let local_defs = collect_local_definition_names(program);
+    let mut violations: string[] = [];
+    let mut index: number = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let statement = program.statements[index];
+        if statement.variant == "ExportDeclaration" {
+            if statement.source.length == 0 {
+                let mut spec_index: number = 0;
+                loop {
+                    if spec_index >= statement.export_specifiers.length {
+                        break;
+                    }
+                    let spec = statement.export_specifiers[spec_index];
+                    if !contains_string(local_defs, spec.name) {
+                        let origin = find_local_import_source(program, spec.name);
+                        if origin.length > 0 {
+                            if is_local_module_path(origin) {
+                                violations = append_string(violations, format_reexport_violation(spec.name, origin));
+                            }
+                        }
+                    }
+                    spec_index += 1;
+                }
+            }
+        }
+        index += 1;
+    }
+    return violations;
+}
+
+fn collect_local_definition_names(program: Program) -> string[] {
+    let mut names: string[] = [];
+    let mut index: number = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "FunctionDeclaration" {
+            names = append_unique(names, stmt.signature.name);
+        }
+        if stmt.variant == "ExternFunctionDeclaration" {
+            names = append_unique(names, stmt.signature.name);
+        }
+        if stmt.variant == "PipelineDeclaration" {
+            names = append_unique(names, stmt.signature.name);
+        }
+        if stmt.variant == "ToolDeclaration" {
+            names = append_unique(names, stmt.signature.name);
+        }
+        if stmt.variant == "StructDeclaration" {
+            names = append_unique(names, stmt.name);
+        }
+        if stmt.variant == "EnumDeclaration" {
+            names = append_unique(names, stmt.name);
+        }
+        if stmt.variant == "InterfaceDeclaration" {
+            names = append_unique(names, stmt.name);
+        }
+        if stmt.variant == "TypeAliasDeclaration" {
+            names = append_unique(names, stmt.name);
+        }
+        if stmt.variant == "ModelDeclaration" {
+            names = append_unique(names, stmt.name);
+        }
+        if stmt.variant == "VariableDeclaration" {
+            names = append_unique(names, stmt.name);
+        }
+        if stmt.variant == "TestDeclaration" {
+            names = append_unique(names, stmt.name);
+        }
+        index += 1;
+    }
+    return names;
+}
+
+// Return the import source path for a symbol name, matching against the
+// locally-visible name (the alias when one is present and non-empty,
+// otherwise the original name).  Returns "" if no matching import is
+// found.
+fn find_local_import_source(program: Program, name: string) -> string {
+    let mut index: number = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        let stmt = program.statements[index];
+        if stmt.variant == "ImportDeclaration" {
+            let mut spec_index: number = 0;
+            loop {
+                if spec_index >= stmt.import_specifiers.length { break; }
+                let spec = stmt.import_specifiers[spec_index];
+                if specifier_local_name(spec.name, spec.alias) == name {
+                    return stmt.source;
+                }
+                spec_index += 1;
+            }
+        }
+        index += 1;
+    }
+    return "";
+}
+
+fn specifier_local_name(name: string, alias: string?) -> string {
+    let mut _no_alias: boolean = false;
+    if alias == null { _no_alias = true; }
+    if alias.length == 0 { _no_alias = true; }
+    if _no_alias { return name; }
+    return "" + alias;
+}
+
+fn is_local_module_path(path: string) -> boolean {
+    if path.length >= 2 {
+        if substring(path, 0, 2) == "./" { return true; }
+    }
+    if path.length >= 3 {
+        if substring(path, 0, 3) == "../" { return true; }
+    }
+    return false;
+}
+
+fn format_reexport_violation(symbol: string, origin: string) -> string {
+    return "`export { " + symbol + " };` re-exports a symbol imported from \""
+        + origin
+        + "\" but there is no local definition of `"
+        + symbol
+        + "` in this module.  Sailfin does not support implicit re-exports of imported symbols: "
+        + "the emitter produces no `.fn` signature for them, so consumers silently "
+        + "fall back to `i8*` and miscompile boolean `if` guards.  Fix: remove `"
+        + symbol
+        + "` from this module's export block and have consumers import it "
+        + "directly from \""
+        + origin
+        + "\", or add a local definition or forwarder for `"
+        + symbol
+        + "` in this module.  See docs/rca/2026-04-18-reexport-diagnostic-gep.md.";
+}
+
+fn report_reexport_violations(violations: string[]) ![io] {
+    let mut index: number = 0;
+    loop {
+        if index >= violations.length { break; }
+        print.err("[emit-native] " + violations[index]);
+        index += 1;
+    }
 }
