@@ -47,6 +47,7 @@ import {
     toml_generate,
     toml_get_dependencies,
     toml_get_name,
+    toml_get_string,
     toml_get_version
 } from "./toml_parser";
 import { format_source } from "./tools/fmt";
@@ -811,6 +812,137 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     return 0;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Registry configuration
+// ═══════════════════════════════════════════════════════════════════
+//
+// Registry URL resolution order (highest priority first):
+//   1. SFN_REGISTRY environment variable (one-shot override for CI)
+//   2. `[registry] url` in ~/.sfn/config.toml (persisted via `sfn config`)
+//   3. Compiled-in default: https://pkg.sfn.dev
+//
+// Per-project overrides (e.g. `[registry]` in capsule.toml) are intentionally
+// out of scope for now — can be added later without breaking this layering.
+fn _default_registry_url_cmd() -> string { return "https://pkg.sfn.dev"; }
+
+fn _strip_trailing_slash_cmd(url: string) -> string {
+    if url.length == 0 { return url; }
+    if substring(url, url.length - 1, url.length) == "/" {
+        return substring(url, 0, url.length - 1);
+    }
+    return url;
+}
+
+fn _config_file_path_cmd() -> string ![io] {
+    let home = _get_home_cmd();
+    if home.length == 0 { return ""; }
+    return home + "/.sfn/config.toml";
+}
+
+fn _config_registry_url_from_file_cmd() -> string ![io] {
+    let path = _config_file_path_cmd();
+    if path.length == 0 { return ""; }
+    if !fs.exists(path) { return ""; }
+    let text = fs.readFile(path);
+    return _toml_trim_cmd(toml_get_string(text, "registry", "url"));
+}
+
+fn _resolve_registry_url_cmd() -> string ![io] {
+    let env_url = _toml_trim_cmd(_get_env_cmd("SFN_REGISTRY"));
+    if env_url.length > 0 { return _strip_trailing_slash_cmd(env_url); }
+    let file_url = _config_registry_url_from_file_cmd();
+    if file_url.length > 0 { return _strip_trailing_slash_cmd(file_url); }
+    return _default_registry_url_cmd();
+}
+
+fn _write_config_registry_cmd(url: string) -> number ![io] {
+    let home = _get_home_cmd();
+    if home.length == 0 {
+        print("could not determine home directory");
+        return 1;
+    }
+    let sfn_dir = home + "/.sfn";
+    _ensure_dir_recursive_cmd(sfn_dir);
+    process.run(["chmod", "700", sfn_dir]);
+    let path = sfn_dir + "/config.toml";
+    let mut out: string = "";
+    if url.length > 0 {
+        out = out + "[registry]\n";
+        out = out + "url = \"" + url + "\"\n";
+    }
+    fs.writeFile(path, out);
+    process.run(["chmod", "600", path]);
+    return 0;
+}
+
+fn handle_config_command(args: string[]) -> number ![io] {
+    if args.length < 2 {
+        print("usage: sfn config <get|set|unset|list> [key] [value]");
+        return 2;
+    }
+    let sub = args[1];
+    if strings_equal(sub, "list") {
+        if args.length != 2 {
+            print("usage: sfn config list");
+            return 2;
+        }
+        print("registry = " + _resolve_registry_url_cmd());
+        return 0;
+    }
+    if strings_equal(sub, "get") {
+        if args.length != 3 {
+            print("usage: sfn config get <key>");
+            return 2;
+        }
+        let key = args[2];
+        if strings_equal(key, "registry") {
+            print(_resolve_registry_url_cmd());
+            return 0;
+        }
+        print("unknown config key: " + key);
+        return 2;
+    }
+    if strings_equal(sub, "set") {
+        if args.length != 4 {
+            print("usage: sfn config set <key> <value>");
+            return 2;
+        }
+        let key = args[2];
+        let value = _toml_trim_cmd(args[3]);
+        if !strings_equal(key, "registry") {
+            print("unknown config key: " + key);
+            return 2;
+        }
+        if value.length == 0 {
+            print("error: empty value");
+            return 1;
+        }
+        let normalized = _strip_trailing_slash_cmd(value);
+        let rc = _write_config_registry_cmd(normalized);
+        if rc != 0 { return rc; }
+        print("registry = " + normalized);
+        return 0;
+    }
+    if strings_equal(sub, "unset") {
+        if args.length != 3 {
+            print("usage: sfn config unset <key>");
+            return 2;
+        }
+        let key = args[2];
+        if !strings_equal(key, "registry") {
+            print("unknown config key: " + key);
+            return 2;
+        }
+        let rc = _write_config_registry_cmd("");
+        if rc != 0 { return rc; }
+        print("unset " + key);
+        return 0;
+    }
+    print("unknown subcommand: " + sub);
+    print("usage: sfn config <get|set|unset|list> [key] [value]");
+    return 2;
+}
+
 fn handle_publish_command(args: string[]) -> number ![io] {
     if args.length > 2 {
         print("usage: sfn publish [path]");
@@ -924,7 +1056,8 @@ fn handle_publish_command(args: string[]) -> number ![io] {
     }
 
     let auth_header = "Bearer " + token;
-    let registry_url = "https://registry.sailfin.dev/api/publish";
+    let registry_base = _resolve_registry_url_cmd();
+    let registry_url = registry_base + "/api/publish";
     print("publishing to " + registry_url + "...");
     let response_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
     let header_tmp = _shell_read_cmd("mktemp /tmp/.sfn_pub_XXXXXX");
@@ -1024,7 +1157,9 @@ fn handle_add_command(args: string[]) -> number ![io] {
         print("using locked version: " + display_name + "@" + resolved_version);
     } else {
         print("fetching registry index...");
-        resolved_version = _shell_read_cmd("curl -sfS 'https://registry.sailfin.dev/api/index.json'"
+        let registry_base = _resolve_registry_url_cmd();
+        resolved_version = _shell_read_cmd("curl -sfS '" + registry_base
+            + "/api/index.json'"
             + " | python3 -c \"import json,sys; d=json.load(sys.stdin); c=d.get('capsules',{}).get('"
             + registry_name
             + "',{}); print(c.get('latest',''))\" 2>/dev/null");
@@ -1073,9 +1208,8 @@ fn handle_add_command(args: string[]) -> number ![io] {
     _ensure_dir_recursive_cmd(cache_base);
 
     let pkg_path = cache_base + "/" + resolved_version + ".sfnpkg";
-    let download_url = "https://registry.sailfin.dev/api/capsules/" + scope
-        + "/"
-        + name
+    let dl_registry_base = _resolve_registry_url_cmd();
+    let download_url = dl_registry_base + "/api/capsules/" + scope + "/" + name
         + "/"
         + resolved_version
         + ".sfnpkg";
@@ -1369,6 +1503,7 @@ export {
     handle_test_command,
     handle_publish_command,
     handle_add_command,
+    handle_config_command,
     handle_init_command,
     handle_login_command,
     handle_guillermo_command,

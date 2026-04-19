@@ -241,6 +241,38 @@ fn toml_get_description(text: string) -> string {
     return t.description;
 }
 
+// Read a string value at `[section] key = "value"`. Returns "" if absent.
+// Lets callers read ad-hoc config (e.g. ~/.sfn/config.toml) without the
+// manifest-shaped SailToml struct.
+fn toml_get_string(text: string, section: string, key: string) -> string {
+    let lines = _toml_split_lines(text);
+    let mut current_section: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] == "[" {
+            let close = find_char(line, "]", 0);
+            if close > 0 {
+                current_section = _toml_trim(substring(line, 1, close));
+            }
+            continue;
+        }
+        if !strings_equal(current_section, section) { continue; }
+        let eq_pos = find_char(line, "=", 0);
+        if eq_pos < 0 { continue; }
+        let line_key = _toml_trim(substring(line, 0, eq_pos));
+        let stripped_key = _toml_strip_quotes(line_key);
+        if !strings_equal(stripped_key, key) { continue; }
+        let value = _toml_trim(substring(line, eq_pos + 1, line.length));
+        return _toml_strip_quotes(value);
+    }
+    return "";
+}
+
 // Return dependencies as a newline-separated string of "capsule=version" pairs.
 // Callers can split on "\n" and "=" to recover individual entries without
 // needing the SailToml struct across module boundaries.

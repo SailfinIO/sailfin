@@ -95,7 +95,7 @@ feature availability.
 | `sfn doc` (doc generator) | Planned | 1.0; see `docs/proposals/tooling.md` |
 | `sfn fix` (auto-rewriter) | Planned | 1.0; see `docs/proposals/tooling.md` |
 | Notebook support | Not started | Post-1.0 |
-| Package registry (`sfn init/add/publish`) | Shipped | CLI commands implemented; registry at `registry.sailfin.dev` |
+| Package registry (`sfn init/add/publish`) | Shipped | CLI commands implemented; default registry at `pkg.sfn.dev`; configurable via `sfn config set registry <url>` or `SFN_REGISTRY` env var |
 
 ## Print API (Current)
 

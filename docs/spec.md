@@ -1117,8 +1117,11 @@ access, enum payload extraction, and aggregate literals share the same ABI.
 
 See `docs/status.md` for the canonical feature table and implementation notes.
 
-`registry.sailfin.dev` is live, but the current toolchain does not yet expose
-publish/resolve commands; integration work tracks on the roadmap.
+The default registry lives at `pkg.sfn.dev`. `sfn init`, `sfn add`, and
+`sfn publish` target it out of the box. Point the toolchain at a different
+registry — for example, an enterprise mirror behind a firewall — with
+`sfn config set registry <url>` (persists to `~/.sfn/config.toml`) or the
+`SFN_REGISTRY` environment variable (one-shot override).
 
 ## Effect System (Current and Planned)
 

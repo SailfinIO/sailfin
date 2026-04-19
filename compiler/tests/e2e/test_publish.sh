@@ -304,6 +304,126 @@ SHIM
         || { echo "expected 'Digest mismatch' in server error, got: $output"; return 1; }
 }
 
+# ---- Test 10: publish uses default registry when none configured ----
+test_publish_uses_default_registry() {
+    local home="$tmpdir/t10"
+    local workdir="$tmpdir/t10_work"
+    mkdir -p "$home/.sfn"
+    echo "fake-token" > "$home/.sfn/credentials"
+    make_capsule "$workdir"
+
+    local shim_dir="$tmpdir/t10_shim"
+    local captured_url="$tmpdir/t10_url"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/curl" <<'SHIM'
+#!/usr/bin/env bash
+# Last positional arg is the URL
+last=""
+for arg in "$@"; do last="$arg"; done
+echo "$last" > "${CAPTURE_URL_TO}"
+exit 1
+SHIM
+    chmod +x "$shim_dir/curl"
+    CAPTURE_URL_TO="$captured_url" PATH="$shim_dir:$PATH" \
+        HOME="$home" "$BINARY" publish "$workdir" 2>&1 || true
+    [ -f "$captured_url" ] || { echo "curl shim did not capture url"; return 1; }
+    local url
+    url="$(cat "$captured_url")"
+    [ "$url" = "https://pkg.sfn.dev/api/publish" ] \
+        || { echo "expected default registry URL, got: $url"; return 1; }
+}
+
+# ---- Test 11: publish uses registry from config file ----
+test_publish_uses_config_file_registry() {
+    local home="$tmpdir/t11"
+    local workdir="$tmpdir/t11_work"
+    mkdir -p "$home/.sfn"
+    echo "fake-token" > "$home/.sfn/credentials"
+    cat > "$home/.sfn/config.toml" <<'CFG'
+[registry]
+url = "https://registry.acme.internal"
+CFG
+    make_capsule "$workdir"
+
+    local shim_dir="$tmpdir/t11_shim"
+    local captured_url="$tmpdir/t11_url"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/curl" <<'SHIM'
+#!/usr/bin/env bash
+last=""
+for arg in "$@"; do last="$arg"; done
+echo "$last" > "${CAPTURE_URL_TO}"
+exit 1
+SHIM
+    chmod +x "$shim_dir/curl"
+    CAPTURE_URL_TO="$captured_url" PATH="$shim_dir:$PATH" \
+        HOME="$home" "$BINARY" publish "$workdir" 2>&1 || true
+    local url
+    url="$(cat "$captured_url")"
+    [ "$url" = "https://registry.acme.internal/api/publish" ] \
+        || { echo "expected config-file registry, got: $url"; return 1; }
+}
+
+# ---- Test 12: SFN_REGISTRY env var overrides config file ----
+test_publish_env_overrides_config() {
+    local home="$tmpdir/t12"
+    local workdir="$tmpdir/t12_work"
+    mkdir -p "$home/.sfn"
+    echo "fake-token" > "$home/.sfn/credentials"
+    cat > "$home/.sfn/config.toml" <<'CFG'
+[registry]
+url = "https://in-file.test"
+CFG
+    make_capsule "$workdir"
+
+    local shim_dir="$tmpdir/t12_shim"
+    local captured_url="$tmpdir/t12_url"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/curl" <<'SHIM'
+#!/usr/bin/env bash
+last=""
+for arg in "$@"; do last="$arg"; done
+echo "$last" > "${CAPTURE_URL_TO}"
+exit 1
+SHIM
+    chmod +x "$shim_dir/curl"
+    CAPTURE_URL_TO="$captured_url" PATH="$shim_dir:$PATH" \
+        SFN_REGISTRY="https://from-env.test" \
+        HOME="$home" "$BINARY" publish "$workdir" 2>&1 || true
+    local url
+    url="$(cat "$captured_url")"
+    [ "$url" = "https://from-env.test/api/publish" ] \
+        || { echo "expected env registry, got: $url"; return 1; }
+}
+
+# ---- Test 13: SFN_REGISTRY strips trailing slash ----
+test_publish_env_strips_trailing_slash() {
+    local home="$tmpdir/t13"
+    local workdir="$tmpdir/t13_work"
+    mkdir -p "$home/.sfn"
+    echo "fake-token" > "$home/.sfn/credentials"
+    make_capsule "$workdir"
+
+    local shim_dir="$tmpdir/t13_shim"
+    local captured_url="$tmpdir/t13_url"
+    mkdir -p "$shim_dir"
+    cat > "$shim_dir/curl" <<'SHIM'
+#!/usr/bin/env bash
+last=""
+for arg in "$@"; do last="$arg"; done
+echo "$last" > "${CAPTURE_URL_TO}"
+exit 1
+SHIM
+    chmod +x "$shim_dir/curl"
+    CAPTURE_URL_TO="$captured_url" PATH="$shim_dir:$PATH" \
+        SFN_REGISTRY="https://slashy.test/" \
+        HOME="$home" "$BINARY" publish "$workdir" 2>&1 || true
+    local url
+    url="$(cat "$captured_url")"
+    [ "$url" = "https://slashy.test/api/publish" ] \
+        || { echo "expected stripped trailing slash, got: $url"; return 1; }
+}
+
 run_test "publish too many args shows usage" test_publish_too_many_args
 run_test "publish with no capsule.toml fails" test_publish_no_capsule_toml
 run_test "publish with path arg finds capsule" test_publish_path_finds_capsule
@@ -313,6 +433,10 @@ run_test "publish with no token fails" test_publish_no_token
 run_test "publish digest has sha256: prefix" test_publish_digest_format
 run_test "publish paths are relative with path arg" test_publish_relative_paths_in_payload
 run_test "publish surfaces HTTP error details" test_publish_surfaces_http_error
+run_test "publish uses default registry when unset" test_publish_uses_default_registry
+run_test "publish uses registry from config file" test_publish_uses_config_file_registry
+run_test "SFN_REGISTRY env overrides config file" test_publish_env_overrides_config
+run_test "SFN_REGISTRY strips trailing slash" test_publish_env_strips_trailing_slash
 
 echo ""
 echo "publish tests: $PASS passed, $FAIL failed"

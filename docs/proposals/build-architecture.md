@@ -148,8 +148,8 @@ Three import resolution rules are interleaved across
 
 The compiler binary carries a hard-coded allowlist of stdlib capsule names.
 Third-party capsules live in `~/.sfn/cache/capsules/<scope>/<name>/<version>/`
-after `sfn add` downloads a `.sfnpkg` from `registry.sailfin.dev` and writes
-an entry to `capsule.lock`.
+after `sfn add` downloads a `.sfnpkg` from the configured registry
+(`pkg.sfn.dev` by default) and writes an entry to `capsule.lock`.
 
 
 ---

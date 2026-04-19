@@ -353,7 +353,9 @@ Known limitations:
     [capabilities]
     required = ["io", "net"]
 
-Packages are called "capsules" and published to registry.sailfin.dev.
+Packages are called "capsules" and published to pkg.sfn.dev by default.
+Override the registry with `sfn config set registry <url>` (persists to
+~/.sfn/config.toml) or set SFN_REGISTRY for a one-shot override.
 
 ## Idiomatic Patterns
 
