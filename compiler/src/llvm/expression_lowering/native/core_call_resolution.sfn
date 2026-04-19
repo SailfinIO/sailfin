@@ -2,14 +2,8 @@
 //
 // Call target resolution extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
-import { NativeFunction, NativeParameter } from "../../../native_ir";
-import {
-    char_at,
-    char_code,
-    find_last_index_of_char,
-    index_of,
-    substring
-} from "../../../string_utils";
+import { NativeFunction } from "../../../native_ir";
+import { find_last_index_of_char, index_of, substring } from "../../../string_utils";
 import { is_simple_identifier } from "../../expressions_helpers";
 import { find_function_by_name } from "../../rendering_helpers";
 import { find_runtime_helper } from "../../runtime_helpers";
@@ -47,14 +41,10 @@ import { load_local_operand } from "./core_operands";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding, find_parameter_binding } from "./core_scopes";
 import { sanitize_symbol } from "./core_text";
-import {
-    future_pointer_type_for_return_type,
-    map_parameter_type,
-    map_return_type
-} from "./core_type_mapping";
+import { future_pointer_type_for_return_type, map_return_type } from "./core_type_mapping";
 
 // Resolve fused concat/push targets (e.g. `valuesconcat(xs)` → `concat`).
-// Also handles file-based method resolution and parse_member_access dispatch.
+// Also handles parse_member_access dispatch and struct-method fallback.
 // Returns a CallTargetResolution with the resolved target, method operand, etc.
 fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], current_temp: number, current_lines: string[], functions: NativeFunction[], context: TypeContext, diagnostics: string[], collected_string_constants: StringConstant[]) -> CallTargetResolution ![io] {
     let mut result_target = trimmed_target;
@@ -187,8 +177,9 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
         }
     }
 
-    // File-based fallback: parse_member_access is cross-module and returns
-    // corrupted data with the v0.1.1 seed.
+    // Inline member-access fallback: parse_member_access is cross-module
+    // and historically returned corrupted data with the v0.1.1 seed, so
+    // we re-derive the struct method target from `locals` directly.
     let _pre_dot = index_of(result_target, ".");
     if _pre_dot > 0 {
         if method_operand == null {
@@ -616,106 +607,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
     };
 }
 
-fn _parse_int_res(text: string) -> number {
-    let len = text.length;
-    if len == 0 { return 0; }
-    let mut result: number = 0;
-    let mut i: number = 0;
-    loop {
-        if i >= len { break; }
-        let ch = char_at(text, i);
-        let code = char_code(ch);
-        if code >= 48 {
-            if code <= 57 { result = result * 10 + (code - 48); }
-        }
-        i = i + 1;
-    }
-    return result;
-}
-
-fn _find_function_from_files_res(target: string) -> NativeFunction? ![io] {
-    if !fs.exists("build/sailfin/.ctx_func_count") { return null; }
-    let count_str = fs.readFile("build/sailfin/.ctx_func_count");
-    let count = _parse_int_res(count_str);
-    let mut suffix_match: NativeFunction? = null;
-    let mut suffix_match_count: number = 0;
-    let suffix_prefix = target + "__";
-    let mut idx: number = 0;
-    loop {
-        if idx >= count { break; }
-        let prefix = "build/sailfin/.ctx_func_" + number_to_string(idx);
-        if !fs.exists(prefix + "_name") { break; }
-        let fname = fs.readFile(prefix + "_name");
-        if fname == target {
-            let ret_type = fs.readFile(prefix + "_return_type");
-            let is_async_str = fs.readFile(prefix + "_is_async");
-            let is_async = is_async_str == "1";
-            let pc_str = fs.readFile(prefix + "_param_count");
-            let pc = _parse_int_res(pc_str);
-            let mut params: NativeParameter[] = [];
-            let mut j: number = 0;
-            loop {
-                if j >= pc { break; }
-                let pp = prefix + "_param_" + number_to_string(j);
-                let pname = fs.readFile(pp + "_name");
-                let ptype = fs.readFile(pp + "_type");
-                params.push(NativeParameter {
-                    name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null
-                });
-                j += 1;
-            }
-            return NativeFunction {
-                name: fname,
-                return_type: ret_type,
-                is_async: is_async,
-                parameters: params,
-                effects: [],
-                decorators: [],
-                is_extern: false,
-                instructions: []
-            };
-        }
-        if starts_with(fname, suffix_prefix) {
-            suffix_match_count += 1;
-            if suffix_match_count == 1 {
-                let ret_type = fs.readFile(prefix + "_return_type");
-                let is_async_str = fs.readFile(prefix + "_is_async");
-                let is_async = is_async_str == "1";
-                let pc_str = fs.readFile(prefix + "_param_count");
-                let pc = _parse_int_res(pc_str);
-                let mut params: NativeParameter[] = [];
-                let mut j: number = 0;
-                loop {
-                    if j >= pc { break; }
-                    let pp = prefix + "_param_" + number_to_string(j);
-                    let pname = fs.readFile(pp + "_name");
-                    let ptype = fs.readFile(pp + "_type");
-                    params.push(NativeParameter {
-                        name: pname, type_annotation: ptype, mutable: false, default_value: null, span: null
-                    });
-                    j += 1;
-                }
-                suffix_match = NativeFunction {
-                    name: fname,
-                    return_type: ret_type,
-                    is_async: is_async,
-                    parameters: params,
-                    effects: [],
-                    decorators: [],
-                    is_extern: false,
-                    instructions: []
-                };
-            }
-        }
-        idx += 1;
-    }
-    if suffix_match_count == 1 { return suffix_match; }
-    return null;
-}
-
-fn _find_function_by_name_or_import(functions: NativeFunction[], target: string) -> NativeFunction? ![io] {
-    let file_result = _find_function_from_files_res(target);
-    if file_result != null { return file_result; }
+fn _find_function_by_name_or_import(functions: NativeFunction[], target: string) -> NativeFunction? {
     let exact = find_function_by_name(functions, target);
     if exact != null { return exact; }
     let suffix_prefix = target + "__";
@@ -788,115 +680,12 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         result_helper = find_runtime_helper(result_target);
     }
 
-    // File-based function resolution with mapped parameter types
-    let mut _file_fn_name: string = "";
-    let mut _file_fn_return_type: string = "";
-    let mut _file_fn_is_async: boolean = false;
-    let mut _file_fn_param_types: string[] = [];
-    let mut _file_fn_found: boolean = false;
-    let _trace_ccl = fs.exists("build/sailfin/.trace_lowering");
-    if !is_trait_dispatch {
-        if result_helper == null {
-            if fs.exists("build/sailfin/.ctx_func_count") {
-                let _fl_count_str = fs.readFile("build/sailfin/.ctx_func_count");
-                let _fl_count = _parse_int_res(_fl_count_str);
-                let _fl_suffix_prefix = result_target + "__";
-                let mut _fl_suffix_idx: number = -1;
-                let mut _fl_suffix_count: number = 0;
-                let mut _fl_i: number = 0;
-                loop {
-                    if _fl_i >= _fl_count { break; }
-                    let _fl_prefix = "build/sailfin/.ctx_func_"
-                        + number_to_string(_fl_i);
-                    if !fs.exists(_fl_prefix + "_name") { break; }
-                    let _fl_name = fs.readFile(_fl_prefix + "_name");
-                    if _fl_name == result_target {
-                        _file_fn_name = _fl_name;
-                        _file_fn_return_type = fs.readFile(_fl_prefix
-                            + "_return_type");
-                        let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
-                        _file_fn_is_async = _fl_async_str == "1";
-                        let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
-                        let _fl_pc = _parse_int_res(_fl_pc_str);
-                        let mut _fl_j: number = 0;
-                        loop {
-                            if _fl_j >= _fl_pc { break; }
-                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_"
-                                + number_to_string(_fl_j)
-                                + "_type");
-                            let _fl_mapped = map_parameter_type(context, _fl_ptype);
-                            _file_fn_param_types.push(_fl_mapped);
-                            _fl_j += 1;
-                        }
-                        _file_fn_found = true;
-                        break;
-                    }
-                    if starts_with(_fl_name, _fl_suffix_prefix) {
-                        _fl_suffix_idx = _fl_i;
-                        _fl_suffix_count += 1;
-                    }
-                    _fl_i += 1;
-                }
-                if !_file_fn_found {
-                    if _fl_suffix_count == 1 {
-                        let _fl_prefix = "build/sailfin/.ctx_func_"
-                            + number_to_string(_fl_suffix_idx);
-                        _file_fn_name = fs.readFile(_fl_prefix + "_name");
-                        _file_fn_return_type = fs.readFile(_fl_prefix
-                            + "_return_type");
-                        let _fl_async_str = fs.readFile(_fl_prefix + "_is_async");
-                        _file_fn_is_async = _fl_async_str == "1";
-                        let _fl_pc_str = fs.readFile(_fl_prefix + "_param_count");
-                        let _fl_pc = _parse_int_res(_fl_pc_str);
-                        let mut _fl_j: number = 0;
-                        loop {
-                            if _fl_j >= _fl_pc { break; }
-                            let _fl_ptype = fs.readFile(_fl_prefix + "_param_"
-                                + number_to_string(_fl_j)
-                                + "_type");
-                            let _fl_mapped = map_parameter_type(context, _fl_ptype);
-                            _file_fn_param_types.push(_fl_mapped);
-                            _fl_j += 1;
-                        }
-                        _file_fn_found = true;
-                    }
-                }
-            }
-        }
-    }
-
     if !is_trait_dispatch {
         if result_helper != null {
             let descriptor = result_helper;
             llvm_return = descriptor.return_type;
             expected_params = descriptor.parameter_types;
             function_entry = null;
-        } else if _file_fn_found {
-            result_target = _file_fn_name;
-            function_entry = null;
-            if _file_fn_is_async {
-                let future_return = future_pointer_type_for_return_type(_file_fn_return_type);
-                if future_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: async function `"
-                        + result_target
-                        + "` has unsupported return type `"
-                        + _file_fn_return_type
-                        + "`");
-                    llvm_return = "i8*";
-                } else { llvm_return = future_return; }
-                // Store the underlying return type so await can unbox structs
-                fs.writeFile("build/sailfin/.async_inner_return_type", _file_fn_return_type);
-                expected_params = _file_fn_param_types;
-            } else {
-                llvm_return = map_return_type(context, _file_fn_return_type);
-                if llvm_return.length == 0 {
-                    result_diagnostics.push("llvm lowering: unsupported return type in call to `"
-                        + result_target
-                        + "`");
-                    llvm_return = "i8*";
-                }
-                expected_params = _file_fn_param_types;
-            }
         } else if function_entry != null {
             result_target = function_entry.name;
             if function_entry.is_async {

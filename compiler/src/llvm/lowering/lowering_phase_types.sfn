@@ -9,12 +9,7 @@
 // returned TypeContext has missing or empty enum names.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-import {
-    NativeEnum,
-    NativeFunction,
-    NativeInterface,
-    NativeStruct
-} from "../../native_ir";
+import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
 import { substring } from "../../string_utils";
 import { build_type_context, fixup_enum_layouts } from "../type_context";
 import { EnumTypeInfo, EnumVariantInfo, TypeContext } from "../types";
@@ -304,58 +299,4 @@ fn parse_enum_variants(variants_str: string) -> EnumVariantInfo[] {
         vpos = vend + 1;
     }
     return result;
-}
-
-// Serialize context_functions metadata to individual files so downstream
-// call resolution can read clean data instead of ABI-corrupted params.
-fn serialize_context_functions(context_functions: NativeFunction[], debug_lowering: boolean) -> number ![io] {
-    // Clean up stale files first.
-    let mut cfc_i: number = 0;
-    loop {
-        let cfc_prefix = "build/sailfin/.ctx_func_" + number_to_string(cfc_i);
-        if !fs.exists(cfc_prefix + "_name") { break; }
-        fs.deleteFile(cfc_prefix + "_name");
-        fs.deleteFile(cfc_prefix + "_return_type");
-        fs.deleteFile(cfc_prefix + "_is_async");
-        fs.deleteFile(cfc_prefix + "_param_count");
-        let mut cfc_j: number = 0;
-        loop {
-            let cfc_pp = cfc_prefix + "_param_" + number_to_string(cfc_j);
-            if !fs.exists(cfc_pp + "_name") { break; }
-            fs.deleteFile(cfc_pp + "_name");
-            fs.deleteFile(cfc_pp + "_type");
-            cfc_j += 1;
-        }
-        cfc_i += 1;
-    }
-    // Write fresh function metadata
-    fs.writeFile("build/sailfin/.ctx_func_count", number_to_string(context_functions.length));
-    let mut cfw_i: number = 0;
-    loop {
-        if cfw_i >= context_functions.length { break; }
-        let cfw_fn = context_functions[cfw_i];
-        let cfw_prefix = "build/sailfin/.ctx_func_" + number_to_string(cfw_i);
-        fs.writeFile(cfw_prefix + "_name", cfw_fn.name);
-        fs.writeFile(cfw_prefix + "_return_type", cfw_fn.return_type);
-        let mut cfw_async_flag: string = "0";
-        if cfw_fn.is_async { cfw_async_flag = "1"; }
-        fs.writeFile(cfw_prefix + "_is_async", cfw_async_flag);
-        let mut cfw_params = cfw_fn.parameters;
-        if cfw_params == null { cfw_params = []; }
-        fs.writeFile(cfw_prefix + "_param_count", number_to_string(cfw_params.length));
-        let mut cfw_j: number = 0;
-        loop {
-            if cfw_j >= cfw_params.length { break; }
-            let cfw_pp = cfw_prefix + "_param_" + number_to_string(cfw_j);
-            fs.writeFile(cfw_pp + "_name", cfw_params[cfw_j].name);
-            fs.writeFile(cfw_pp + "_type", cfw_params[cfw_j].type_annotation);
-            cfw_j += 1;
-        }
-        cfw_i += 1;
-    }
-    if debug_lowering {
-        print.err("emit-llvm: serialized context_functions count="
-            + number_to_string(context_functions.length));
-    }
-    return context_functions.length;
 }
