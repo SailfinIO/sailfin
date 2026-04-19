@@ -95,10 +95,19 @@ outcome() {
         return 2
     fi
 
-    # Build failed.  Classify based on stderr.
-    if grep -qE 'undefined reference to .*__middle' "$build_log"; then
+    # Build failed.  Classify based on stderr.  The "symbol not found
+    # at link time" shape appears in two dialects:
+    #   - GNU ld (Linux):    undefined reference to 'sym__middle'
+    #   - Apple ld (macOS):  Undefined symbols for architecture arm64:
+    #                          "_sym__...__middle"
+    # Require both:
+    #   (a) a linker "undefined" banner in either dialect, AND
+    #   (b) `__middle` appearing somewhere in the log — the
+    #       re-exporter's mangled suffix, unambiguous to this fixture.
+    if grep -qE '(undefined reference)|(Undefined symbols for architecture)' "$build_log" \
+            && grep -q '__middle' "$build_log"; then
         echo "[outcome] EXPECTED_BUG_LINK"
-        tail -10 "$build_log"
+        tail -15 "$build_log"
         rm -rf "$out_dir"
         return 1
     fi
