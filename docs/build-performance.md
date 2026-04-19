@@ -1,22 +1,22 @@
 # Build Performance: Root Cause Analysis & Fix Plan
 
-**Date:** 2026-04-15 (revised, post-d2d0bf1/220c8b7)
-**Previous revision:** 2026-04-15 (morning), 2026-04-11
+**Date:** 2026-04-19 (revised, post `.fn_*` channel removal)
+**Previous revision:** 2026-04-15 (revised, post-d2d0bf1/220c8b7), 2026-04-15 (morning), 2026-04-11
 **Context:** Self-hosting the compiler from the 0.5.2-alpha.1 seed via `build.sh` takes ~13-16 minutes for 121 modules single-threaded. Down from 60-90 minutes at the April 11 baseline thanks to partial IPC removal, string concat optimization, module splitting, and the Phase 1 accumulator sweep (`d2d0bf1`). Still far from the <5 minute target. The IPC-as-GC memory management blocker (formerly blocking ~146 Phase 2 channel refs) is now cleared: the arena allocator is default-on for selfhost as of the April 19 flip (see [Completed Work: Arena Allocator Default-On](#arena-allocator-default-on-april-19)). The two residual O(n²) copy sites (`concat_native_functions`, `append_local_binding`) that were reverted in `220c8b7` because callers rely on input-array immutability are now safe to convert to in-place push under arena — tracked as immediate follow-up work.
 
 ---
 
 ## Symptom Summary
 
-| Metric | April 11 | Current (April 15) | Target |
+| Metric | April 11 | Current (April 19) | Target |
 |--------|----------|---------------------|--------|
 | Full build (121 modules, 1 job) | 60-90 min | 13-16 min | < 5 min |
 | Per-module compile time (heavy) | 4-7 min | 1-3 min | < 30s |
 | Per-module compile time (light) | 30s-2 min | 10-30s | < 5s |
 | Per-module peak RAM | 1-2 GB | 0.5-1.5 GB | < 256 MB |
 | Parallel builds (`--jobs N`) | Broken | Functional but risky | Stable at 4 jobs |
-| `fs.*` calls (total) | 667 across 42 files | 592 across 39 files | < 50 per module |
-| `build/sailfin/` IPC refs | 487 | 336 (dotfiles) | 0 |
+| `fs.*` calls (total) | 667 across 42 files | 489 across 37 files | < 50 per module |
+| `build/sailfin/` IPC refs | 487 | 228 (dotfiles) | 0 |
 | Seed memory limit | 8 GB | 12 GB | < 4 GB |
 
 ---
@@ -63,10 +63,10 @@ Each IPC write-then-read cycle implicitly "freed" memory by letting the original
 
 ## Root Cause 1: Filesystem-as-IPC (Still Primary Bottleneck)
 
-The compiler still uses the filesystem as an inter-function communication channel. After partial removal, 16 distinct IPC channel families remain active.
+The compiler still uses the filesystem as an inter-function communication channel. Several channel families remain active after sustained removal work.
 
-- **592 total `fs.*` calls** across 39 files (down from 667/42)
-- **336 dotfile references** to `build/sailfin/.xxx` temp paths (down from 487)
+- **489 total `fs.*` calls** across 37 files (down from 667/42)
+- **228 dotfile references** to `build/sailfin/.xxx` temp paths (down from 487)
 - Per-instruction dispatch still involves 6-10 file writes + reads
 - Per-local-binding serialization: 4-6 files written, then read back, per binding
 
@@ -79,7 +79,6 @@ The compiler still uses the filesystem as an inter-function communication channe
 | Block result (terminated/string_constants) | instructions_helpers | instructions_try | 2 |
 | Expr statement result (temp/region/mutations) | statement | instructions_dispatch | 5+ |
 | Let result (temp/lines/allocas/diagnostics/locals) | instructions_let | instructions_dispatch, instructions_helpers | 11+ |
-| Function metadata (name/return/async/params/decorators) | lowering_phase_functions | emission | 10+ |
 | Context functions (count + per-entry fields) | lowering_phase_types | core_call_resolution | N×fields |
 | Type/struct/enum metadata | lowering_phase_types | core_member_*, statement_assignment, core_call_resolution | 2 |
 | Module globals (preamble/init/locals/diagnostics) | module_globals | lowering_core | 6 |
@@ -101,7 +100,7 @@ The compiler still uses the filesystem as an inter-function communication channe
 | `cli_main.sfn` | 30 | 1 |
 | `statement_assignment.sfn` | 28 | 29 |
 | `statement.sfn` | 25 | 22 |
-| `emission.sfn` | 21 | 21 |
+| `emission.sfn` | 3 | 3 |
 
 ---
 
@@ -274,11 +273,9 @@ If step 7 fails, the channel is not purely a workaround — some caller is relyi
 1. **Instruction dispatch channel** (45 refs in `instructions_dispatch.sfn`) — hottest path
 2. **Let result channel** (32 refs in `instructions_let.sfn`) — per-let-binding overhead
 3. **Statement/assignment channels** (29+22 refs) — per-expression-statement overhead
-4. **Function metadata channel** (13 refs in `lowering_phase_functions.sfn`) — per-function overhead
-5. **Remaining channels** (emission, async, coerce)
+4. **Remaining channels** (coerce, async inner-return-type, enum/struct info)
 
 Named IPC functions to eliminate:
-- `_write_block_result_files()` — `instructions_helpers.sfn:122`
 - `write_bindings_to_files()` / `write_locals_to_files()` — `instructions_helpers.sfn:216/240`
 - `_write_bindings_to_files()` / `_write_locals_to_files()` — `instructions_dispatch.sfn:95/119`
 - `serialize_context_functions()` — `lowering_phase_types.sfn:339`
@@ -483,27 +480,68 @@ On Linux x86_64 the 0.5.7 seed is already fully deterministic on these modules, 
 
 The writer is called once per module compile, but only performs work when a module has top-level `let` bindings (the compiler has very few — `version.sfn` is the main one). The per-binding overhead was `2×` `_append_to_file` calls per preamble line plus another for the locals row, each entailing an `fs.exists` + `fs.readFile` + `fs.writeFile` round-trip — so O(N × L) filesystem operations for N bindings and L preamble lines per binding. The win is concentrated on two things: the pure-function conversion (helper and writer no longer participate in the `![io]` effect graph), and the elimination of an O(N²) read-modify-write pattern where each `_append_to_file` had to re-read the accumulating file on every call.
 
+### Function Metadata IPC Channel Removal (April 19)
+
+**Status: Implemented.** Removed the `.fn_*` function metadata IPC channel — the most heavily-referenced channel remaining: `.fn_name`, `.fn_return_type`, `.fn_is_async`, `.fn_is_extern`, `.fn_param_count`, `.fn_instr_count`, `.fn_decorator_count`, `.fn_index`, `.fn_index_backup`, plus per-index `.fn_param_N_name`, `.fn_param_N_type`, and `.fn_decorator_N`. Writer: `write_function_ipc` in `lowering_phase_functions.sfn`, called once per local function from `lower_all_functions`. Readers: `emit_llvm_function` and `prepare_parameters_from_files` in `emission.sfn`, plus the dead `emit_body` helper and `.fn_name`/`.fn_return_type`/`.fn_is_async` overrides inside `emit_async_function` in `emission_async.sfn`.
+
+The channel existed as a workaround for the v0.1.1-seed compiling `emission.sfn` with `NativeFunction` demoted to `i8*` across module boundaries, making `function.name` etc. return garbage. The 0.5.7 seed under the default-on arena (PR #186) handles cross-module `NativeFunction` field access correctly — same pattern validated by PRs #183 (`.ctx_func_*`), #184 (`.self_field_*`), and #185 (`.module_globals_*`).
+
+**Shape of change:**
+- `emit_llvm_function` signature changed: now `fn emit_llvm_function(function: NativeFunction, functions: ..., ...)` — the caller passes the `NativeFunction` directly instead of a bare name and a `.fn_index` file.
+- All eight `fs.readFile` calls in `emission.sfn` for scalar `.fn_*` fields replaced with `function.{name,return_type,is_async,is_extern}` and `.length` reads on `function.parameters`/`function.instructions`/`function.decorators`.
+- The per-index `.fn_decorator_N` reader loop now iterates `function.decorators` in memory.
+- The `.fn_index` + `.fn_index_backup` lookup-with-fallback block (26 lines plus bounds-check return) collapsed to passing `function` straight into `lower_instruction_range`.
+- `prepare_parameters_from_files(fn_name, fn_param_count, context)` renamed to `prepare_parameters_from_function(function: NativeFunction, context: TypeContext)` and iterates `function.parameters` directly instead of reading per-param scratch files.
+- `emit_async_function` signature changed to take `NativeFunction`; the impl-function override (name/return-type/async-flag) is now a literal `NativeFunction { ... }` built in-memory and passed into the recursive `emit_llvm_function` call. No files are written.
+- `write_function_ipc` in `lowering_phase_functions.sfn` deleted entirely; caller passes `effective_function` directly into `emit_llvm_function`.
+- `cli_commands._clean_lowering_state` keeps the `.fn_` prefix sweep with a "Legacy" comment for stale scratch files from older build dirs / older seed binaries (precedent: PRs #183 / #184 / #185 / #188).
+
+**Dead code removed:**
+- `emit_body` in `emission.sfn` — 86 lines, unreferenced from any call site, still read `.fn_index`.
+- `parse_simple_integer` in `emission.sfn` — only used to parse the file-IPC integer fields.
+- `NativeParameter`/`NativeInstruction` imports in `lowering_phase_functions.sfn` — only used by the deleted `write_function_ipc` loops.
+
+**Scope:**
+- 226 lines deleted from `emission.sfn` (file reads + `emit_body` + `parse_simple_integer` + fn_index bounds check)
+- 42 lines deleted from `lowering_phase_functions.sfn` (writer + call site + unused imports)
+- 24 lines changed in `emission_async.sfn` (signature swap + impl NativeFunction literal)
+- 2 lines added to `cli_commands.sfn` (Legacy comment)
+- Net: −204 lines, 45 insertions across 4 files.
+
+**Per-function-compile overhead removed:**
+- 8 `fs.writeFile` calls for scalar fields (name, return_type, async/extern flags, counts, index ×2)
+- `2N` `fs.writeFile` calls for parameters (name + type per param)
+- `N` `fs.writeFile` calls for decorators
+- 8 `fs.readFile` calls for the scalars
+- 1 `fs.exists` + 1 `fs.readFile` (with fallback-to-backup) for `fn_index`
+- `N` `fs.readFile` calls for decorators
+- `2N` `fs.readFile` calls for parameters
+
+For a typical compiler module (50-200 functions, ~3 params + 0-1 decorators per fn), this eliminates roughly 500-2000 filesystem operations per module compile.
+
+**Determinism delta:** Full build + test suite passed on CI across platforms after removal. Linux x86_64 on seed 0.5.7 was already 20/20 identical on the hot modules per the arena-flip entry; this change removes per-function file-I/O overhead without introducing new non-determinism. macOS-arm64 determinism surface continues to be driven by the remaining Phase 2 channels (call-result, dispatch, let-result, expr-stmt) and is unchanged by this removal.
+
 ---
 
 ## Appendix: IPC Channel Census
 
-Total: **592 `fs.*` calls across 39 files.** 336 dotfile references to `build/sailfin/.xxx` temp paths across 31 files. 16 distinct IPC channel families.
+Total: **489 `fs.*` calls across 37 files.** 228 dotfile references to `build/sailfin/.xxx` temp paths across 27 files.
 
 ### Top IPC files by build/sailfin/ reference count
 
 | File | Dotfile refs |
 |------|-------------|
 | `instructions_dispatch.sfn` | 45 |
-| `instructions_helpers.sfn` | 35 |
 | `instructions_let.sfn` | 32 |
-| `statement_assignment.sfn` | 29 |
-| `statement.sfn` | 22 |
-| `emission.sfn` | 21 |
-| `module_globals.sfn` | 18 |
-| `lowering_core.sfn` | 15 |
-| `lowering_phase_types.sfn` | 10 |
-| `lowering_phase_functions.sfn` | 13 |
+| `instructions_helpers.sfn` | 30 |
+| `statement.sfn` | 16 |
 | `core_call_emission.sfn` | 13 |
-| `core_call_resolution.sfn` | 12 |
 | `core_literals_lowering.sfn` | 12 |
 | `main.sfn` | 12 |
+| `statement_assignment.sfn` | 9 |
+| `lowering_core.sfn` | 9 |
+| `lowering_phase_types.sfn` | 7 |
+| `cli_commands.sfn` | 4 |
+| `emission.sfn` | 3 |
+| `lowering_phase_functions.sfn` | 2 |
+| `core_call_resolution.sfn` | 1 |
