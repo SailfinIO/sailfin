@@ -109,7 +109,7 @@ import {
     sanitize_lowering_inputs,
     sanitize_structs
 } from "./lowering_phase_sanitize";
-import { build_type_context_with_recovery, serialize_context_functions } from "./lowering_phase_types";
+import { build_type_context_with_recovery } from "./lowering_phase_types";
 import {
     recover_functions_for_lowering,
     recover_native_enums_light,
@@ -506,8 +506,6 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     // site 2, no prior snapshot is aliased.
     context_functions = extend_native_functions_inplace(context_functions, imported_struct_methods);
     if debug_lowering { print.err("emit-llvm: phase=context_functions"); }
-
-    serialize_context_functions(context_functions, debug_lowering);
 
     // ── Effect analysis ─────────────────────────────────────────────
     let skip_effects = true;
