@@ -4,7 +4,7 @@
 //
 // NOTE: This module has a mutual import with emission_async.sfn:
 //   emission.sfn imports emit_async_function from emission_async.sfn
-//   emission_async.sfn imports emit_llvm_function + prepare_parameters_from_files from emission.sfn
+//   emission_async.sfn imports emit_llvm_function + prepare_parameters_from_function from emission.sfn
 // The Sailfin compiler's import resolver handles mutual imports correctly —
 // each module is compiled independently and cross-module calls are resolved
 // at link time via symbol mangling. This cycle is intentional: async emission
@@ -12,12 +12,9 @@
 // emitter delegates async wrapper generation to the async module.
 import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
-import { lower_expression } from "../expression_lowering/native/core";
-import { append_llvm_operand } from "../expression_lowering/native/core_scopes";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
-import { prepare_parameters } from "../expression_lowering/native/statement";
-import { default_return_literal, format_temp_name } from "../expressions_helpers";
-import { format_root_scope_id, validate_borrow_lifetimes } from "../lifetime";
+import { default_return_literal } from "../expressions_helpers";
+import { format_root_scope_id } from "../lifetime";
 import { should_internalize_function } from "../rendering_helpers";
 import {
     append_string_constant,
@@ -26,7 +23,6 @@ import {
 } from "../strings";
 import { map_return_type } from "../type_mapping";
 import {
-    BodyResult,
     LifetimeRegionMetadata,
     LocalBinding,
     LoweredLLVMFunction,
@@ -90,29 +86,6 @@ fn is_safe_llvm_type_text(value: string) -> boolean {
         index += 1;
     }
     return true;
-}
-
-fn parse_simple_integer(text: string) -> number {
-    let mut result: number = 0;
-    let mut i: number = 0;
-    loop {
-        if i >= text.length { break; }
-        let ch = substring(text, i, i + 1);
-        let mut digit: number = -1;
-        if ch == "0" { digit = 0; }
-        if ch == "1" { digit = 1; }
-        if ch == "2" { digit = 2; }
-        if ch == "3" { digit = 3; }
-        if ch == "4" { digit = 4; }
-        if ch == "5" { digit = 5; }
-        if ch == "6" { digit = 6; }
-        if ch == "7" { digit = 7; }
-        if ch == "8" { digit = 8; }
-        if ch == "9" { digit = 9; }
-        if digit >= 0 { result = result * 10 + digit; }
-        i += 1;
-    }
-    return result;
 }
 
 // Reorder lines within each basic block so that phi nodes come first.
@@ -196,7 +169,7 @@ fn _reorder_phis_to_block_start(lines: string[]) -> string[] {
     return out;
 }
 
-// Helper: build a ParameterBinding for the file-IPC loop in prepare_parameters_from_files.
+// Helper: build a ParameterBinding for the loop in prepare_parameters_from_function.
 // Kept as a separate function so the loop never has an inline struct literal at the top level
 // of the loop body — the v0.1.1 seed misidentifies `identifier {` as a loop-body closer.
 fn _emit_make_parameter_binding(name: string, llvm_name: string, llvm_type: string, type_annotation: string) -> ParameterBinding {
@@ -210,24 +183,18 @@ fn _emit_make_parameter_binding(name: string, llvm_name: string, llvm_type: stri
     };
 }
 
-// Build ParameterPreparation from files written by entrypoints.sfn.
-// This bypasses calling prepare_parameters in the statement module which
-// the v0.1.1 seed compiles with i8* for NativeFunction, preventing
-// struct field access.
-fn prepare_parameters_from_files(fn_name: string, fn_param_count: number, context: TypeContext) -> ParameterPreparation {
+// Build ParameterPreparation from the NativeFunction's parameter list.
+fn prepare_parameters_from_function(function: NativeFunction, context: TypeContext) -> ParameterPreparation {
     let mut signature: string[] = [];
     let mut bindings: ParameterBinding[] = [];
     let mut diagnostics: string[] = [];
     let mut seen_names: string[] = [];
+    let parameters = function.parameters;
     let mut index: number = 0;
     loop {
-        if index >= fn_param_count { break; }
-        let param_name = fs.readFile("build/sailfin/.fn_param_"
-            + number_to_string(index)
-            + "_name");
-        let raw_param_type = fs.readFile("build/sailfin/.fn_param_"
-            + number_to_string(index)
-            + "_type");
+        if index >= parameters.length { break; }
+        let param_name = parameters[index].name;
+        let raw_param_type = parameters[index].type_annotation;
         // Strip default value from type annotations like "number = 0".
         // The native IR emitter includes default values in .param annotations;
         // map_return_type cannot parse "number = 0" and falls back to i8*,
@@ -270,32 +237,23 @@ fn prepare_parameters_from_files(fn_name: string, fn_param_count: number, contex
     };
 }
 
-fn emit_llvm_function(function_name_hint: string, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {
+fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {
     let mut diagnostics: string[] = [];
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
 
-    // The v0.1.1 seed passes NativeFunction as i8* in emission.sfn's compiled
-    // LLVM, making direct field access (function.name etc.) return garbage.
-    // Work around by reading field values that entrypoints.sfn wrote to disk
-    // before calling this function.
-    let fn_name = fs.readFile("build/sailfin/.fn_name");
-    let fn_return_type = fs.readFile("build/sailfin/.fn_return_type");
-    let fn_is_async_text = fs.readFile("build/sailfin/.fn_is_async");
-    let fn_is_async = fn_is_async_text == "1";
-    let fn_is_extern_text = fs.readFile("build/sailfin/.fn_is_extern");
-    let fn_is_extern = fn_is_extern_text == "1";
-    let fn_param_count_text = fs.readFile("build/sailfin/.fn_param_count");
-    let fn_param_count = parse_simple_integer(fn_param_count_text);
-    let fn_instr_count_text = fs.readFile("build/sailfin/.fn_instr_count");
-    let fn_instr_count = parse_simple_integer(fn_instr_count_text);
-    let fn_decorator_count_text = fs.readFile("build/sailfin/.fn_decorator_count");
-    let fn_decorator_count = parse_simple_integer(fn_decorator_count_text);
+    let fn_name = function.name;
+    let fn_return_type = function.return_type;
+    let fn_is_async = function.is_async;
+    let fn_is_extern = function.is_extern;
+    let fn_param_count = function.parameters.length;
+    let fn_instr_count = function.instructions.length;
+    let fn_decorator_count = function.decorators.length;
 
     // Async lowering: delegate to emission_async module to keep this function small.
     if fn_is_async {
         if !fn_is_extern {
             if fn_name != "main" {
-                return emit_async_function(fn_name, fn_return_type, fn_param_count, function_name_hint, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call);
+                return emit_async_function(function, functions, effects, context, module_name, entry_points, exported_symbols, imported_functions, module_globals, module_init_symbol, needs_module_init_call);
             }
         }
     }
@@ -363,7 +321,7 @@ fn emit_llvm_function(function_name_hint: string, functions: NativeFunction[], e
         }
     }
 
-    let preparation = prepare_parameters_from_files(fn_name, fn_param_count, context);
+    let preparation = prepare_parameters_from_function(function, context);
     diagnostics = extend_string_array(diagnostics, preparation.diagnostics);
     if debug_lowering {
         print.err("emit-llvm: emit_fn phase=prepare_params name=" + fn_name
@@ -437,11 +395,11 @@ fn emit_llvm_function(function_name_hint: string, functions: NativeFunction[], e
             + " count="
             + number_to_string(fn_decorator_count));
     }
+    let decorators = function.decorators;
     let mut decorator_index: number = 0;
     loop {
         if decorator_index >= fn_decorator_count { break; }
-        let decorator_name = fs.readFile("build/sailfin/.fn_decorator_"
-            + number_to_string(decorator_index));
+        let decorator_name = decorators[decorator_index];
         let mut _if199: boolean = false;
         if matches_case_insensitive(decorator_name, "logExecution") {
             _if199 = true;
@@ -476,60 +434,11 @@ fn emit_llvm_function(function_name_hint: string, functions: NativeFunction[], e
     if debug_lowering {
         print.err("emit-llvm: emit_fn phase=pre_body name=" + fn_name
             + " instrs="
-            + number_to_string(fn_instr_count));
-    }
-
-    // Read .fn_index with fallback: the first-pass binary may fail to write it.
-    let mut _eb_fn_index: number = 0;
-    if fs.exists("build/sailfin/.fn_index") {
-        let _eb_fn_index_text = fs.readFile("build/sailfin/.fn_index");
-        _eb_fn_index = parse_simple_integer(_eb_fn_index_text);
-    } else if fs.exists("build/sailfin/.fn_index_backup") {
-        let _eb_fn_index_text = fs.readFile("build/sailfin/.fn_index_backup");
-        _eb_fn_index = parse_simple_integer(_eb_fn_index_text);
-    } else {
-        // Fallback: find by name
-        let mut _fi: number = 0;
-        loop {
-            if _fi >= functions.length { break; }
-            if functions[_fi].name == fn_name {
-                _eb_fn_index = _fi;
-                break;
-            }
-            _fi += 1;
-        }
-    }
-    if debug_lowering {
-        print.err("emit-llvm: emit_fn phase=body_lir fn_index="
-            + number_to_string(_eb_fn_index)
-            + " fn_name="
-            + fn_name
+            + number_to_string(fn_instr_count)
             + " fn_count="
             + number_to_string(functions.length));
     }
-    // Bounds check: protect against stale .fn_index values or run-away loop
-    if _eb_fn_index >= functions.length {
-        let bounds_diag = "llvm lowering: fn_index " + number_to_string(_eb_fn_index)
-            + " out of range (max "
-            + number_to_string(functions.length)
-            + ") for `"
-            + fn_name
-            + "`";
-        diagnostics = append_string(diagnostics, bounds_diag);
-        let ret_fallback = "  ret " + llvm_return + " " + default_return_literal(llvm_return);
-        lines = append_string(lines, ret_fallback);
-        lines = append_string(lines, "}");
-        let empty_constants = empty_string_constant_set();
-        let _empty_lifetime_regions: LifetimeRegionMetadata[] = [];
-        return LoweredLLVMFunction {
-            lines: lines,
-            diagnostics: diagnostics,
-            lifetime_regions: _empty_lifetime_regions,
-            string_constants: empty_constants
-        };
-    }
-    let _eb_function = functions[_eb_fn_index];
-    let _eb_result = lower_instruction_range(_eb_function, 0, fn_instr_count, llvm_return, preparation.bindings, module_globals, [], [], 0, 0, 0, 0, functions, [], context, format_root_scope_id(fn_name), 0, entry_label);
+    let _eb_result = lower_instruction_range(function, 0, fn_instr_count, llvm_return, preparation.bindings, module_globals, [], [], 0, 0, 0, 0, functions, [], context, format_root_scope_id(fn_name), 0, entry_label);
 
     let _eb_body_lines = _eb_result.lines;
     let _eb_allocas = _eb_result.allocas;
@@ -608,92 +517,5 @@ fn emit_llvm_function(function_name_hint: string, functions: NativeFunction[], e
         diagnostics: diagnostics,
         lifetime_regions: _empty_lifetime_regions,
         string_constants: merged_constants
-    };
-}
-
-fn emit_body(function_unused: string, fn_name: string, fn_instr_count: number, llvm_return: string, bindings: ParameterBinding[], module_globals: LocalBinding[], functions: NativeFunction[], context: TypeContext, entry_label: string) -> BodyResult ![io] {
-    let debug_body = fs.exists("build/sailfin/.trace_lowering");
-    if debug_body {
-        print.err("emit-llvm: emit_body start fn=" + fn_name + " llvm_return="
-            + llvm_return
-            + " bindings_len="
-            + number_to_string(bindings.length));
-    }
-    let mut _let202: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let202 = true; }
-    }
-    let trace = _let202;
-    if trace {
-        print.err("test llvm: emit_body start " + fn_name + " instrs="
-            + number_to_string(fn_instr_count));
-    }
-    // Load the NativeFunction from the functions array by index,
-    // avoiding the cross-module ABI issue where NativeFunction is
-    // passed as i8* (making the function parameter garbage).
-    let fn_index_text = fs.readFile("build/sailfin/.fn_index");
-    let fn_index = parse_simple_integer(fn_index_text);
-    let function = functions[fn_index];
-    let lowered = lower_instruction_range(function, 0, fn_instr_count, llvm_return, bindings, module_globals, [], [], 0, 0, 0, 0, functions, [], context, format_root_scope_id(fn_name), 0, entry_label);
-
-    let _blk_body_lines = lowered.lines;
-    let _blk_allocas = lowered.allocas;
-    let _blk_terminated = lowered.terminated;
-    if trace {
-        let mut term_label: string = "false";
-        if _blk_terminated { term_label = "true"; }
-        print.err("test llvm: emit_body lowered " + fn_name + " lines="
-            + number_to_string(_blk_body_lines.length)
-            + " allocas="
-            + number_to_string(_blk_allocas.length)
-            + " terminated="
-            + term_label);
-    }
-    let mut diagnostics: string[] = lowered.diagnostics;
-    let mut lines: string[] = [];
-    lines = extend_string_array(lines, _blk_allocas);
-    lines = extend_string_array(lines, _blk_body_lines);
-
-    let mut has_terminator: boolean = false;
-    let mut terminator_index: number = 0;
-    loop {
-        if terminator_index >= lines.length { break; }
-        let trimmed_line = trim_text(lines[terminator_index]);
-        let mut _if203: boolean = false;
-        if starts_with(trimmed_line, "ret ") { _if203 = true; }
-        if trimmed_line == "ret void" { _if203 = true; }
-        if starts_with(trimmed_line, "br ") { _if203 = true; }
-        if starts_with(trimmed_line, "switch ") { _if203 = true; }
-        if trimmed_line == "unreachable" { _if203 = true; }
-        if _if203 {
-            has_terminator = true;
-            break;
-        }
-        terminator_index += 1;
-    }
-
-    let mut _if204: boolean = false;
-    if !_blk_terminated { _if204 = true; }
-    if !has_terminator { _if204 = true; }
-    if _if204 {
-        if llvm_return == "void" {
-            lines = append_string(lines, "  ret void");
-        } else {
-            let missing_ret_diag2 = "llvm lowering: missing return in function `"
-                + fn_name
-                + "`";
-            diagnostics = append_string(diagnostics, missing_ret_diag2);
-            let ret_line2 = "  ret " + llvm_return + " "
-                + default_return_literal(llvm_return);
-            lines = append_string(lines, ret_line2);
-        }
-    }
-
-    let _empty_lifetime_regions: LifetimeRegionMetadata[] = [];
-    return BodyResult {
-        lines: lines,
-        diagnostics: diagnostics,
-        lifetime_regions: _empty_lifetime_regions,
-        string_constants: lowered.string_constants
     };
 }

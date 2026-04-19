@@ -701,6 +701,8 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
         if _has_prefix_cmd(entry, ".ctx_func_") { is_scratch = true; }
         if _has_prefix_cmd(entry, ".dispatch_") { is_scratch = true; }
         if _has_prefix_cmd(entry, ".expr_stmt_") { is_scratch = true; }
+        // Legacy: .fn_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
         if _has_prefix_cmd(entry, ".fn_") { is_scratch = true; }
         if _has_prefix_cmd(entry, ".instr_") { is_scratch = true; }
         if _has_prefix_cmd(entry, ".let_ipc_") { is_scratch = true; }
