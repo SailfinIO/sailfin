@@ -278,9 +278,7 @@ If step 7 fails, the channel is not purely a workaround — some caller is relyi
 2. **Let result channel** (32 refs in `instructions_let.sfn`) — per-let-binding overhead
 3. **Statement/assignment channels** (29+22 refs) — per-expression-statement overhead
 4. **Function metadata channel** (13 refs in `lowering_phase_functions.sfn`) — per-function overhead
-5. **Context functions serialization** (14 refs in `lowering_phase_types.sfn`) — per-module overhead
-6. **Module globals channel** (18 refs in `module_globals.sfn`)
-7. **Remaining channels** (emission, async, coerce)
+5. **Remaining channels** (emission, async, coerce)
 
 Named IPC functions to eliminate:
 - `_write_block_result_files()` — `instructions_helpers.sfn:122`
@@ -396,6 +394,42 @@ On Linux x86_64 the 0.5.7 seed is already fully deterministic on these modules, 
 - ~28 net lines removed
 
 Because the writer is called inside `lower_return_instruction`, which fires for every `return <expr>` statement in every function, this removes roughly 3-6 `fs.writeFile` calls per emitted return across every module compile. The compiler itself has no `return self.*` patterns, so the channel's data-bearing path is never exercised during self-hosting; it was pure per-return overhead.
+
+### Module Globals IPC Channel Removal (April 19)
+
+**Status: Implemented.** Removed the `.module_globals_*` file IPC channel — six scratch files (`preamble`, `locals`, `init`, `init_symbol`, `needs_init`, `diagnostics`) that `lower_module_bindings_to_globals` in `module_globals.sfn` used to ship its output back to its sole caller in `lowering_core.sfn`. The writer had always declared `ModuleGlobalLoweringResult` as its return type, but returned an empty stub; a "UNREACHABLE on v0.1.1 seed" comment documented the workaround. The 0.5.x seed lineage has no such restriction — `preprocess_self_field_access` (PR #184) validated the same return-struct pattern with 6 exits including a post-loop return.
+
+**Shape of change:**
+- Added `BindingLoweringResult { preamble_lines: string[]; locals: LocalBinding[]; needs_init: boolean }` to `llvm/types.sfn` (wrapper struct is legitimate per procedure §267: three values travelling together out of the per-binding helper).
+- `_process_one_binding` now returns a `BindingLoweringResult` at all 4 exits instead of writing `.module_globals_preamble` / `.module_globals_locals` scratch files. `![io]` removed — the helper is now pure.
+- `lower_module_bindings_to_globals` accumulates per-binding results in the outer loop (preamble via `.push`, locals via `.push`, needs_init via `|=`) and fully populates `ModuleGlobalLoweringResult` at its single return point. Early-return for empty bindings kept. `![io]` removed.
+- Caller in `lowering_core.sfn:640-672` replaces six `fs.readFile` + `split_lines_local` + `_parse_module_globals_locals` calls with six direct struct field reads.
+- `_parse_module_globals_locals` in `lowering_text_utils.sfn` is deleted as dead code (40 lines). `LocalBinding` import dropped from that file.
+- `cli_commands._clean_lowering_state` keeps the `.module_globals_` prefix sweep with a "Legacy" comment explaining it's there to clean stale files from older build dirs / older seed binaries (following the PR #183 / PR #184 precedent — never drop a prefix entirely).
+
+**Determinism delta (emit `llvm` × 20 runs on Linux x86_64, seed 0.5.7 baseline):**
+
+| Module | Baseline | Post-change |
+|--------|---------:|------------:|
+| `compiler/src/llvm/lowering/lowering_core.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/parser/expressions.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/version.sfn` (module with top-level `let`) | 1 hash (20/20 identical) | to be measured on new binary |
+
+On Linux x86_64 the 0.5.7 seed is already fully deterministic on these modules, so this channel's removal is not expected to move the hash count here — it eliminates per-binding `fs.writeFile` + clear-on-entry + read-back overhead instead. The equivalent macOS-arm64 measurements (where residual non-determinism still lives) will land in the PR body once the CI rebuild completes on that platform.
+
+**Scope of change:**
+- 1 writer function (`lower_module_bindings_to_globals`) converted from file-IPC stub to populated `ModuleGlobalLoweringResult` return
+- 1 helper (`_process_one_binding`) converted from void+file-IPC to `BindingLoweringResult` return at all 5 exits (4 early + 1 final)
+- 1 append-helper (`_append_to_file`) deleted entirely
+- 1 reader (`lowering_core.sfn:640-672`) converted from six `fs.readFile` + `split_lines_local` + `_parse_module_globals_locals` calls to direct struct field reads
+- 1 wrapper struct (`BindingLoweringResult`) added to `llvm/types.sfn` (3 fields)
+- 1 dead parser (`_parse_module_globals_locals`, 40 lines) deleted from `lowering_text_utils.sfn`
+- 13 `fs.writeFile` calls removed from the writer; 6 `fs.readFile` calls removed from the reader; `_append_to_file`'s internal `fs.exists` + `fs.readFile` + `fs.writeFile` per call removed
+- 3 `![io]` effect annotations narrowed — both `_process_one_binding` and `lower_module_bindings_to_globals` become pure; the `![io]` helper `_append_to_file` is deleted
+- `.module_globals_` prefix kept in the legacy cleanup sweep with an explanatory comment
+- ~75 net lines removed (−151, +77 per `git diff --stat`)
+
+The writer is called once per module compile, but only performs work when a module has top-level `let` bindings (the compiler has very few — `version.sfn` is the main one). The per-binding overhead was `2×` `_append_to_file` calls per preamble line plus another for the locals row, each entailing an `fs.exists` + `fs.readFile` + `fs.writeFile` round-trip — so O(N × L) filesystem operations for N bindings and L preamble lines per binding. The win is concentrated on two things: the pure-function conversion (helper and writer no longer participate in the `![io]` effect graph), and the elimination of an O(N²) read-modify-write pattern where each `_append_to_file` had to re-read the accumulating file on every call.
 
 ---
 

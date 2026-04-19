@@ -181,6 +181,12 @@ struct ModuleGlobalLoweringResult {
     diagnostics: string[];
 }
 
+struct BindingLoweringResult {
+    preamble_lines: string[];
+    locals: LocalBinding[];
+    needs_init: boolean;
+}
+
 // =============================================================================
 // LLVM Operands and Expression Results
 // =============================================================================

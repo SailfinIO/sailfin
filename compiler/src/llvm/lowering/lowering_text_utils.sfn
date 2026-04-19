@@ -4,7 +4,7 @@
 // LLVM lowering recovery code.  Extracted from lowering_core.sfn to
 // reduce per-file memory footprint during self-hosting compilation.
 import { char_code, substring } from "../../string_utils";
-import { LocalBinding, StringConstant } from "../types";
+import { StringConstant } from "../types";
 import { index_of } from "../utils";
 
 // ── Character / string utilities ─────────────────────────────────────
@@ -157,49 +157,6 @@ fn _parse_lowered_fn_string_constants(raw: string) -> StringConstant[] {
             name: name, content: content, byte_count: byte_count
         });
         i += 1;
-    }
-    return result;
-}
-
-// Parse the tab-separated locals file written by _write_module_globals_files.
-// Format: name\tpointer\tllvm_type\ttype_annotation\tscope_id
-fn _parse_module_globals_locals(raw: string) -> LocalBinding[] {
-    let mut result: LocalBinding[] = [];
-    if raw.length == 0 { return result; }
-    let file_lines = split_lines_local(raw);
-    let mut i: number = 0;
-    loop {
-        if i >= file_lines.length { break; }
-        let line = file_lines[i];
-        i += 1;
-        if line.length == 0 { continue; }
-        let tab1 = index_of_char_local(line, "\t");
-        if tab1 < 0 { continue; }
-        let name = substring(line, 0, tab1);
-        let rest1 = substring(line, tab1 + 1, line.length);
-        let tab2 = index_of_char_local(rest1, "\t");
-        if tab2 < 0 { continue; }
-        let pointer = substring(rest1, 0, tab2);
-        let rest2 = substring(rest1, tab2 + 1, rest1.length);
-        let tab3 = index_of_char_local(rest2, "\t");
-        if tab3 < 0 { continue; }
-        let llvm_type = substring(rest2, 0, tab3);
-        let rest3 = substring(rest2, tab3 + 1, rest2.length);
-        let tab4 = index_of_char_local(rest3, "\t");
-        if tab4 < 0 { continue; }
-        let type_annotation = substring(rest3, 0, tab4);
-        let scope_id = substring(rest3, tab4 + 1, rest3.length);
-        let binding = LocalBinding {
-            name: name,
-            pointer: pointer,
-            llvm_type: llvm_type,
-            type_annotation: type_annotation,
-            ownership: null,
-            consumed: false,
-            scope_id: scope_id,
-            scope_depth: 0
-        };
-        result = result.push(binding);
     }
     return result;
 }
