@@ -1,0 +1,41 @@
+// compiler/tests/e2e/fixtures/reexport/main.sfn
+//
+// Consumer for the re-export golden test.  Imports the helpers from
+// ./middle (which only re-exports them from ./origin) and uses each
+// in positions that exercise both failure modes of the
+// no-`.fn`-for-re-export bug:
+//
+// 1. Boolean in an `if` condition — the dangerous case (`i1` return).
+//    If the re-export lost the `i1` return type, neither branch
+//    fires and this prints "bool-*-FAIL".
+// 2. Boolean captured into a `let` — the same failure reveals itself
+//    through a downstream `if`.
+// 3. String returned up the stack — the accidentally-OK case, but
+//    we still assert the value end-to-end.
+//
+// Regression test for docs/rca/2026-04-18-reexport-diagnostic-gep.md.
+import { reexport_is_yes, reexport_strip_prefix_xyz } from "./middle";
+
+fn main() ![io] {
+    if reexport_is_yes("yes") { print("bool-yes-ok"); } else {
+        print("bool-yes-FAIL");
+    }
+    if reexport_is_yes("no") { print("bool-no-FAIL"); } else {
+        print("bool-no-ok");
+    }
+
+    let truthy = reexport_is_yes("yes");
+    let falsy = reexport_is_yes("no");
+    if truthy { print("let-truthy-ok"); } else { print("let-truthy-FAIL"); }
+    if falsy { print("let-falsy-FAIL"); } else { print("let-falsy-ok"); }
+
+    let stripped = reexport_strip_prefix_xyz("xyzabc");
+    if stripped == "abc" { print("string-strip-ok"); } else {
+        print("string-strip-FAIL");
+    }
+
+    let unchanged = reexport_strip_prefix_xyz("nope");
+    if unchanged == "nope" { print("string-unchanged-ok"); } else {
+        print("string-unchanged-FAIL");
+    }
+}
