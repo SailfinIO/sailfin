@@ -9,7 +9,7 @@ Orchestrate the full pipeline for adding a new language feature to Sailfin, from
 ## Phase 1: DESIGN
 
 Spawn the **compiler-architect** agent to produce a design plan for this feature. The architect will:
-- Read `site/src/pages/roadmap.astro` (the [roadmap](https://sailfin.dev/roadmap)), `docs/status.md`, and `docs/spec.md` for context
+- Read `site/src/pages/roadmap.astro` (the [roadmap](https://sailfin.dev/roadmap)), `docs/status.md`, and the language spec under `site/src/content/docs/docs/reference/spec/` (chapter files §1–§11) plus `.../reference/preview/` for context
 - Trace the current compiler pipeline to identify every file that needs changes
 - Produce a concrete plan covering: AST representation, type rules, IR representation, LLVM lowering, self-hosting migration strategy, and test cases
 - Identify dependencies and risks
@@ -79,7 +79,9 @@ If tests fail, diagnose and fix. Do not proceed to documentation with failing te
 
 Spawn the **docs-updater** agent to update documentation in this order:
 1. `docs/status.md` — update the feature matrix
-2. `docs/spec.md` — add to Part A if fully shipped, Part B if partial
+2. Language spec:
+   - If fully shipped: update or add content in the appropriate `site/src/content/docs/docs/reference/spec/NN-*.md` chapter
+   - If partial/planned: update or add a page under `site/src/content/docs/docs/reference/preview/`
 3. `site/src/pages/roadmap.astro` — update progress markers on the [roadmap](https://sailfin.dev/roadmap)
 
 ---

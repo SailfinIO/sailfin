@@ -1,0 +1,474 @@
+---
+import ThemeToggle from "./ThemeToggle.astro";
+
+interface Props {
+  mode?: "site" | "docs";
+}
+
+const { mode = "site" } = Astro.props;
+
+const navItems = [
+  { label: "Why Sailfin", href: "/why" },
+  { label: "Downloads", href: "/dl" },
+  {
+    label: "Docs",
+    href: "/docs/",
+    children: [
+      { label: "Getting Started", href: "/docs/getting-started/install" },
+      { label: "Learn", href: "/docs/learn/basics" },
+      { label: "Language Spec", href: "/docs/reference/spec/" },
+      { label: "Effect System", href: "/docs/reference/effects" },
+      { label: "Standard Library", href: "/docs/reference/standard-library" },
+      { label: "CLI Reference", href: "/docs/reference/cli" },
+    ],
+  },
+  { label: "Packages", href: "https://pkg.sfn.dev" },
+  { label: "Blog", href: "/blog" },
+  { label: "Community", href: "/community" },
+];
+
+const githubUrl = "https://github.com/sailfinio/sailfin";
+---
+
+<header class="site-header" data-mode={mode}>
+  <div class="header-inner">
+    <a href="/" class="logo" aria-label="Sailfin home">
+      <img src="/images/sfn_lang_logo_256.svg" alt="" width="32" height="32" />
+    </a>
+
+    <nav class="main-nav" aria-label="Main navigation">
+      {navItems.map((item) => (
+        <div class="nav-item">
+          <a href={item.href} class:list={["nav-link", { "has-children": !!item.children }]}>
+            {item.label}
+            {item.children && (
+              <svg class="chevron" width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true">
+                <path d="M3 5L6 8L9 5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+              </svg>
+            )}
+          </a>
+          {item.children && (
+            <div class="dropdown">
+              {item.children.map((child) => (
+                <a href={child.href} class="dropdown-link">{child.label}</a>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+    </nav>
+
+    <div class="header-actions">
+      {mode === "docs" && (
+        <div class="search-slot">
+          <slot name="search" />
+        </div>
+      )}
+
+      <a
+        href={githubUrl}
+        class="icon-btn"
+        aria-label="Sailfin on GitHub"
+        title="Sailfin on GitHub"
+        rel="noopener noreferrer"
+        target="_blank"
+      >
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+          <path d="M12 .5a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.4-1.8-1.4-1.8-1.1-.8.1-.8.1-.8 1.3.1 2 1.3 2 1.3 1.1 1.9 3 1.4 3.7 1 .1-.8.5-1.4.8-1.7-2.7-.3-5.5-1.3-5.5-6 0-1.3.5-2.4 1.3-3.2-.1-.3-.6-1.6.1-3.3 0 0 1-.3 3.3 1.2a11.5 11.5 0 0 1 6 0C17.6 5 18.6 5.3 18.6 5.3c.7 1.7.2 3 .1 3.3.8.8 1.3 1.9 1.3 3.2 0 4.7-2.8 5.7-5.5 6 .5.4.9 1.2.9 2.4v3.5c0 .3.2.7.8.6A12 12 0 0 0 12 .5z" />
+        </svg>
+      </a>
+
+      <ThemeToggle />
+
+      {mode === "site" && (
+        <a href="/docs/getting-started/install" class="btn-get-started">Get Started</a>
+      )}
+    </div>
+
+    {mode === "site" && (
+      <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle site menu" aria-expanded="false" aria-controls="mobile-nav">
+        <svg class="icon-hamburger" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+        <svg class="icon-close hidden" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <line x1="4" y1="4" x2="20" y2="20" />
+          <line x1="20" y1="4" x2="4" y2="20" />
+        </svg>
+      </button>
+    )}
+  </div>
+
+  {mode === "site" && (
+    <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation" aria-hidden="true">
+      {navItems.map((item) => (
+        <div class="mobile-nav-item">
+          <a href={item.href} class="mobile-nav-link">{item.label}</a>
+          {item.children && (
+            <div class="mobile-nav-children">
+              {item.children.map((child) => (
+                <a href={child.href} class="mobile-nav-child-link">{child.label}</a>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      <div class="mobile-actions">
+        <a href="/docs/getting-started/install" class="mobile-btn-get-started">Get Started</a>
+      </div>
+    </nav>
+  )}
+</header>
+
+<script>
+  const btn = document.getElementById("mobile-menu-btn") as HTMLButtonElement | null;
+  const nav = document.getElementById("mobile-nav") as HTMLElement | null;
+
+  if (btn && nav) {
+    const iconHamburger = btn.querySelector<SVGElement>(".icon-hamburger");
+    const iconClose = btn.querySelector<SVGElement>(".icon-close");
+    let isOpen = false;
+
+    function openMenu() {
+      if (!btn || !nav) return;
+      isOpen = true;
+      nav.classList.add("is-open");
+      nav.setAttribute("aria-hidden", "false");
+      btn.setAttribute("aria-expanded", "true");
+      iconHamburger?.classList.add("hidden");
+      iconClose?.classList.remove("hidden");
+    }
+
+    function closeMenu() {
+      if (!btn || !nav) return;
+      isOpen = false;
+      nav.classList.remove("is-open");
+      nav.setAttribute("aria-hidden", "true");
+      btn.setAttribute("aria-expanded", "false");
+      iconHamburger?.classList.remove("hidden");
+      iconClose?.classList.add("hidden");
+    }
+
+    btn.addEventListener("click", () => (isOpen ? closeMenu() : openMenu()));
+
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && isOpen) {
+        closeMenu();
+        btn.focus();
+      }
+    });
+
+    document.addEventListener("click", (e) => {
+      if (
+        isOpen &&
+        !nav.contains(e.target as Node) &&
+        !btn.contains(e.target as Node)
+      ) {
+        closeMenu();
+      }
+    });
+  }
+</script>
+
+<style>
+  .site-header {
+    height: var(--header-height);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--color-bg);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+  }
+
+  @media (max-width: 900px) {
+    .site-header {
+      height: auto;
+      min-height: var(--header-height);
+    }
+  }
+
+  .header-inner {
+    max-width: var(--max-width);
+    margin: 0 auto;
+    padding: 0 1.5rem;
+    height: var(--header-height);
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    text-decoration: none;
+    flex-shrink: 0;
+  }
+
+  .logo img {
+    display: block;
+  }
+
+  .main-nav {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .nav-item {
+    position: relative;
+  }
+
+  .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.5rem 0.75rem;
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    font-weight: 500;
+    text-decoration: none;
+    border-radius: 6px;
+    transition: color 0.15s, background 0.15s;
+    white-space: nowrap;
+  }
+
+  .nav-link:hover {
+    color: var(--color-text);
+    background: var(--color-bg-alt);
+    text-decoration: none;
+  }
+
+  .chevron {
+    transition: transform 0.15s;
+  }
+
+  .nav-item:hover .chevron,
+  .nav-item:focus-within .chevron {
+    transform: rotate(180deg);
+  }
+
+  .dropdown {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 220px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.5rem;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+    z-index: 10;
+  }
+
+  .nav-item:hover .dropdown,
+  .nav-item:focus-within .dropdown {
+    display: block;
+  }
+
+  .dropdown-link {
+    display: block;
+    padding: 0.5rem 0.75rem;
+    color: var(--color-text-secondary);
+    font-size: 0.875rem;
+    border-radius: 4px;
+    text-decoration: none;
+  }
+
+  .dropdown-link:hover {
+    color: var(--color-text);
+    background: var(--color-bg-alt);
+    text-decoration: none;
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .search-slot {
+    display: flex;
+    align-items: center;
+    /* Normalize Starlight's search button appearance */
+  }
+
+  .search-slot :global(site-search button),
+  .search-slot :global(.sl-flex) {
+    height: 34px;
+  }
+
+  .icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 34px;
+    height: 34px;
+    color: var(--color-text-secondary);
+    border: 1px solid var(--color-border);
+    border-radius: 6px;
+    background: transparent;
+    transition: color 0.15s, background 0.15s, border-color 0.15s;
+  }
+
+  .icon-btn:hover {
+    color: var(--color-text);
+    background: var(--color-bg-alt);
+    text-decoration: none;
+  }
+
+  .icon-btn:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  .btn-get-started {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.45rem 1.1rem;
+    margin-inline-start: 0.25rem;
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+
+  .btn-get-started:hover {
+    background: var(--color-primary-dark);
+    color: #fff;
+    text-decoration: none;
+  }
+
+  .mobile-menu-btn {
+    display: none;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    padding: 0.5rem;
+    color: var(--color-text);
+  }
+
+  .hidden {
+    display: none !important;
+  }
+
+  @media (max-width: 900px) {
+    .main-nav {
+      display: none;
+    }
+
+    /* Push header-actions (search / GitHub / theme toggle) to the right
+       edge so the logo-on-left / actions-on-right layout matches desktop. */
+    .header-actions {
+      margin-left: auto;
+    }
+
+    .btn-get-started {
+      display: none;
+    }
+
+    .mobile-menu-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+  }
+
+  /* Mobile nav drawer */
+  .mobile-nav {
+    display: none;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 1.5rem 1.5rem;
+    background: var(--color-bg);
+    border-bottom: 1px solid var(--color-border);
+  }
+
+  .mobile-nav.is-open {
+    display: flex;
+  }
+
+  @media (min-width: 901px) {
+    .mobile-nav {
+      display: none !important;
+    }
+  }
+
+  .mobile-nav-link {
+    padding: 0.65rem 0.5rem;
+    color: var(--color-text);
+    font-size: 1rem;
+    font-weight: 500;
+    text-decoration: none;
+    border-radius: 6px;
+  }
+
+  .mobile-nav-link:hover {
+    background: var(--color-bg-alt);
+    text-decoration: none;
+  }
+
+  .mobile-nav-children {
+    display: flex;
+    flex-direction: column;
+    padding-left: 1rem;
+    border-left: 2px solid var(--color-border);
+    margin: 0.25rem 0 0.5rem 0.5rem;
+  }
+
+  .mobile-nav-child-link {
+    padding: 0.5rem 0.5rem;
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    text-decoration: none;
+    border-radius: 4px;
+  }
+
+  .mobile-nav-child-link:hover {
+    background: var(--color-bg-alt);
+    color: var(--color-text);
+    text-decoration: none;
+  }
+
+  .mobile-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--color-border);
+  }
+
+  .mobile-action-link {
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
+    text-decoration: none;
+  }
+
+  .mobile-btn-get-started {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    padding: 0.55rem 1.25rem;
+    background: var(--color-primary);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 600;
+    border-radius: 6px;
+    text-decoration: none;
+  }
+
+  .mobile-btn-get-started:hover {
+    background: var(--color-primary-dark);
+    color: #fff;
+    text-decoration: none;
+  }
+</style>

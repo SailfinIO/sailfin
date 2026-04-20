@@ -18,7 +18,7 @@
   --gray-800: #343a40;
   --gray-900: #212529;
 
-  /* Semantic */
+  /* Semantic — light (default) */
   --color-primary: var(--sfn-blue);
   --color-primary-dark: var(--sfn-blue-dark);
   --color-accent: var(--sfn-teal);
@@ -29,6 +29,8 @@
   --color-text-secondary: var(--gray-600);
   --color-text-tertiary: var(--gray-500);
   --color-border: var(--gray-200);
+  --color-border-strong: var(--gray-300);
+  --color-muted-surface: var(--gray-200);
 
   /* Layout */
   --max-width: 1200px;
@@ -38,6 +40,25 @@
   /* Typography */
   --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+}
+
+/*
+ * Dark mode. Mirrors the `data-theme="dark"` attribute Starlight sets on
+ * `<html>`, so the marketing site and the docs share a single preference.
+ */
+html[data-theme="dark"] {
+  --color-primary: #4fa3e0;
+  --color-primary-dark: #0072ce;
+  --color-accent: #33c9bc;
+  --color-bg: #0f1115;
+  --color-bg-alt: #181b22;
+  --color-bg-code: #1d212a;
+  --color-text: #e9ecef;
+  --color-text-secondary: #adb5bd;
+  --color-text-tertiary: #868e96;
+  --color-border: #2a2f3a;
+  --color-border-strong: #3a3f4a;
+  --color-muted-surface: #252a34;
 }
 
 *,

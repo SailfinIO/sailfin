@@ -1,6 +1,6 @@
 # Basics Examples
 
-Foundational language constructs: variables, functions, conditionals, pattern matching, enums, interfaces, structs, tests, and basic error handling. These examples map closely to sections §3–§4 of `docs/spec.md` and the grammar in `docs/enbf.md`.
+Foundational language constructs: variables, functions, conditionals, pattern matching, enums, interfaces, structs, tests, and basic error handling. These examples map closely to [spec §3 Declarations](https://sailfin.dev/docs/reference/spec/03-declarations/) and [§4 Statements](https://sailfin.dev/docs/reference/spec/04-statements/), and the [grammar](https://sailfin.dev/docs/reference/grammar).
 
 ## Files
 

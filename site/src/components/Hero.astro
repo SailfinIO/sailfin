@@ -52,7 +52,11 @@ fn main() ![io, net] {
 
 <style>
   .hero {
-    background: linear-gradient(180deg, var(--sfn-blue-light) 0%, var(--color-bg) 100%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-primary) 10%, var(--color-bg)) 0%,
+      var(--color-bg) 100%
+    );
     padding: 5rem 0 4rem;
   }
 
@@ -123,7 +127,7 @@ fn main() ![io, net] {
 
   .btn-secondary:hover {
     background: var(--color-bg-alt);
-    border-color: var(--gray-300);
+    border-color: var(--color-border-strong);
     text-decoration: none;
   }
 

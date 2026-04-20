@@ -1,6 +1,6 @@
 # Concurrency Examples
 
-Illustrates Sailfin's structured concurrency surface: routines (lightweight tasks), channels for message passing, dynamic scheduling, and parallel evaluation. These map to §5 of `docs/spec.md`.
+Illustrates Sailfin's structured concurrency surface: routines (lightweight tasks), channels for message passing, dynamic scheduling, and parallel evaluation. See the [Concurrency design preview](https://sailfin.dev/docs/reference/preview/concurrency/) for the planned surface.
 
 ## Files
 

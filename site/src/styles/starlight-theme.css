@@ -1,0 +1,108 @@
+/*
+ * Sailfin theme overrides for Starlight.
+ *
+ * Two jobs:
+ *   1. Map Starlight's design tokens (`--sl-*`) to Sailfin brand colors.
+ *   2. Alias the site's semantic tokens (`--color-*`, `--header-height`, etc.)
+ *      to Starlight's tokens so the shared SiteHeader component renders
+ *      identically on docs pages (where global.css is NOT loaded).
+ */
+
+:root {
+  --sfn-blue: #0072ce;
+  --sfn-blue-dark: #005ba1;
+  --sfn-blue-light: #e8f4fd;
+  --sfn-teal: #00a99d;
+}
+
+:root,
+::backdrop {
+  /* Starlight accent → Sailfin blue (light mode) */
+  --sl-color-accent-low: #cfe6f8;
+  --sl-color-accent: #0072ce;
+  --sl-color-accent-high: #003f71;
+
+  /* Typography */
+  --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --sl-font-system-mono: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+
+  /* Slightly wider content column so prose isn't too cramped */
+  --sl-content-width: 52rem;
+
+  /*
+   * Site-level semantic aliases. These mirror the `--color-*` tokens in
+   * `src/styles/global.css` so that components rendered inside Starlight
+   * (SiteHeader via the Header override, Footer, etc.) resolve the same
+   * variables they would on the marketing pages.
+   *
+   * Starlight's gray scale inverts between themes — gray-1 is near-bg,
+   * gray-6 is near-text — so using named slots keeps the right contrast
+   * automatically in light and dark.
+   */
+  --color-primary: var(--sl-color-accent);
+  --color-primary-dark: var(--sl-color-accent-high);
+  --color-bg: var(--sl-color-bg);
+  --color-bg-alt: var(--sl-color-bg-nav);
+  --color-bg-code: var(--sl-color-bg-inline-code);
+  --color-text: var(--sl-color-text);
+  --color-text-secondary: var(--sl-color-gray-3);
+  --color-text-tertiary: var(--sl-color-gray-4);
+  --color-border: var(--sl-color-hairline);
+  --color-border-strong: var(--sl-color-hairline-shade);
+  --color-muted-surface: var(--sl-color-gray-6);
+  --header-height: var(--sl-nav-height, 64px);
+  --max-width: 90rem;
+}
+
+:root[data-theme="dark"] {
+  --sl-color-accent-low: #002a4f;
+  --sl-color-accent: #4fa3e0;
+  --sl-color-accent-high: #c7e1f6;
+}
+
+/* Inline code styling */
+:not(pre) > code {
+  border-radius: 4px;
+  padding: 0.15em 0.4em;
+}
+
+/*
+ * When SiteHeader is rendered inside Starlight's own fixed <header class="header">
+ * (via the Header override), we need to strip SiteHeader's own positioning,
+ * background, height, and border — otherwise the two headers nest and you
+ * see Starlight's chrome peeking out behind SiteHeader.
+ */
+header.header > .site-header {
+  position: static;
+  height: 100%;
+  min-height: 0;
+  background: transparent;
+  border-bottom: none;
+}
+
+header.header > .site-header .header-inner {
+  max-width: none;
+  padding: 0;
+  height: 100%;
+  gap: 1rem;
+}
+
+/*
+ * Starlight's built-in search button is sized for a wider slot. Pull it in
+ * line with our 34px icon buttons so the right-side actions all match.
+ */
+.site-header .search-slot site-search {
+  display: flex;
+  align-items: center;
+}
+
+.site-header .search-slot site-search button {
+  height: 34px;
+  padding: 0 0.75rem;
+}
+
+@media (max-width: 50rem) {
+  .site-header .search-slot site-search button {
+    padding: 0 0.5rem;
+  }
+}

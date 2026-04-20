@@ -27,7 +27,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 3. Add tests in `compiler/tests/` (unit, integration, or e2e as appropriate)
 4. Run `make compile` to verify self-hosting
 5. Run `make test` to verify all tests pass
-6. Update docs: `docs/status.md` first, then `docs/spec.md` and `site/src/pages/roadmap.astro` (the [roadmap](https://sailfin.dev/roadmap))
+6. Update docs: `docs/status.md` first, then the language spec (`site/src/content/docs/docs/reference/spec/` or `.../reference/preview/`) and `site/src/pages/roadmap.astro` (the [roadmap](https://sailfin.dev/roadmap))
 
 ## Adding a Language Feature
 
@@ -36,7 +36,7 @@ You are the Sailfin Engineer agent. Your role is to implement features, fix bugs
 3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
 4. Extend `compiler/src/llvm/lowering/` for LLVM IR generation
 5. Add regression tests to `compiler/tests/`
-6. Update `docs/spec.md` (Part A if shipped, Part B if planned)
+6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter file if shipped, or `.../reference/preview/*.md` page if planned
 7. Update `docs/status.md` with implementation status
 
 ## Coding Conventions

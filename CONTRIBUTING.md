@@ -45,8 +45,9 @@ git config --local merge.ours.driver true
 When behaviour, coverage, or roadmap status changes:
 
 1. Update `docs/status.md` first — keep the feature matrix authoritative.
-2. Sync `docs/spec.md` (bootstrap reference) and note new design work in the
-   Part B preview if needed.
+2. Sync the language spec at `site/src/content/docs/docs/reference/spec/`
+   (update the relevant §N chapter) and add/amend design notes under
+   `.../reference/preview/` if the feature is not yet shipped.
 3. Adjust the [roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`) for sequencing changes.
 4. Touch the relevant folder README (e.g., `compiler/README.md`,
    `runtime/README.md`, `examples/README.md`) so local guidance stays accurate.

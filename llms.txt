@@ -459,7 +459,7 @@ Sailfin source files use the `.sfn` extension.
 
 ## Further Reading
 
-- Language spec: docs/spec.md
+- Language spec: https://sailfin.dev/docs/reference/spec/ (source: site/src/content/docs/docs/reference/spec/)
 - Feature status: docs/status.md
 - Roadmap: https://sailfin.dev/roadmap
 - Examples: examples/ directory (40+ programs across 11 categories)

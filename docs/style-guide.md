@@ -116,7 +116,7 @@ import { parse_expression } from "./parser/mod";
 ## Documentation Alignment
 
 - Update `docs/status.md` first whenever behavior changes.
-- Follow up with `docs/spec.md` and the [roadmap](https://sailfin.dev/roadmap) (`site/src/pages/roadmap.astro`) as needed.
+- Follow up with the language spec (`site/src/content/docs/docs/reference/spec/` for shipped features, `.../reference/preview/` for planned) and the [roadmap](https://sailfin.dev/roadmap) (`site/src/pages/roadmap.astro`) as needed.
 - Add or adjust proposal docs under `docs/proposals/` for future work.
 
 ## Sailfin Language Style

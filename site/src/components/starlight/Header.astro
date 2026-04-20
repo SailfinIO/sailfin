@@ -1,0 +1,15 @@
+---
+/*
+ * Starlight header override. Renders the unified SiteHeader in "docs" mode
+ * and wires Starlight's built-in Search into the search slot. We intentionally
+ * do NOT render MobileMenuToggle here — Starlight's PageFrame already renders
+ * it inside the sidebar nav, and duplicating it stacks two fixed menu buttons
+ * in the top-right on mobile.
+ */
+import SiteHeader from "../SiteHeader.astro";
+import Search from "virtual:starlight/components/Search";
+---
+
+<SiteHeader mode="docs">
+  <Search slot="search" />
+</SiteHeader>

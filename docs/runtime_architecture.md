@@ -3,7 +3,7 @@
 **Date:** 2026-04-15
 **Author:** Compiler architect (design review)
 **Companion docs:** `docs/runtime_audit.md` (current C runtime state),
-`docs/runtime_abi.md` (target ABI), `docs/build-performance.md` (perf analysis)
+`site/src/content/docs/docs/reference/runtime-abi.md` (target ABI), `docs/build-performance.md` (perf analysis)
 
 This document is the architectural blueprint for the Sailfin-native runtime that
 will replace the C runtime (`runtime/native/`) before the 1.0 release. It
@@ -1420,7 +1420,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 - `compiler/src/llvm/expression_lowering/native/core_scopes.sfn` (allocation_kind)
 - `compiler/src/llvm/types.sfn` (add allocation_kind to LocalBinding)
 - `compiler/src/llvm/lowering/lowering_phase_types.sfn` (struct layout emission)
-- `docs/runtime_abi.md` (lock to v0)
+- `site/src/content/docs/docs/reference/runtime-abi.md` (lock to v0)
 
 ### M2 (Core Runtime in Sailfin)
 - `runtime/sfn/` (all new files per §1.5)
@@ -1500,7 +1500,7 @@ Sailfin toolchain source is `.sfn`.
 ## Cross-references
 
 - `docs/runtime_audit.md` — current C runtime state and compiler prerequisites.
-- `docs/runtime_abi.md` — target ABI contract (this architecture references and
+- `site/src/content/docs/docs/reference/runtime-abi.md` — target ABI contract (this architecture references and
   confirms its layouts).
 - `docs/build-performance.md` — perf analysis; M0.5 directly addresses its
   Phase 0.

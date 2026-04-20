@@ -1,6 +1,6 @@
 # Sailfin Examples
 
-This directory showcases the evolving Sailfin language surface implemented by the bootstrap compiler. Each subfolder groups small, focused programs illustrating syntax, type constructs, effects, and concurrency primitives described in `docs/spec.md`.
+This directory showcases the evolving Sailfin language surface implemented by the bootstrap compiler. Each subfolder groups small, focused programs illustrating syntax, type constructs, effects, and concurrency primitives described in the [language specification](https://sailfin.dev/docs/reference/spec/).
 
 > **Syntax reform notice:** These examples use pre-reform syntax (`->` for type
 > annotations, `{{ }}` for string interpolation). A pre-1.0 syntax reform is
@@ -127,8 +127,8 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 - **Bootstrap-friendly (legacy name: stage1)**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs covered by the bootstrap pipeline.
 - **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`). Declare the exact effects listed above before running them through the bootstrap compiler.
 - **Design-stage examples**: Some examples demonstrate planned features that parse but aren't fully enforced yet. These are marked with **Design-stage** in the notes column. Examples include:
-  - `unsafe-extern-interop.sfn` — FFI interop with raw pointers and `unsafe` blocks. Parser accepts the syntax but unsafe semantics are not yet enforced. See `docs/spec.md` §6.1.5.
+  - `unsafe-extern-interop.sfn` — FFI interop with raw pointers and `unsafe` blocks. Parser accepts the syntax but unsafe semantics are not yet enforced. See [spec §6 Type System](https://sailfin.dev/docs/reference/spec/06-types/).
   - `borrowing.sfn` — Ownership and borrowing syntax. Parser accepts but the bootstrap compiler does not enforce exclusivity. The native LLVM backend (legacy name: stage2) enforces borrow conflicts.
 - **Forward-looking commentary**: Any future syntax remains inside comments—runnable code in this directory sticks to the shipped bootstrap grammar. Update the index whenever you add new examples or adjust their effects.
 
-> Tip: Browse examples alongside the grammar (`docs/enbf.md`) and spec (`docs/spec.md`) to see how planned features map onto the implemented subset.
+> Tip: Browse examples alongside the [grammar](https://sailfin.dev/docs/reference/grammar) and [spec](https://sailfin.dev/docs/reference/spec/) to see how planned features map onto the implemented subset.

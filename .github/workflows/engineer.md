@@ -81,7 +81,7 @@ lexer (lexer.sfn) -> parser (parser.sfn) -> AST (ast.sfn) -> type check (typeche
    3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
    4. Extend `compiler/src/llvm/lowering/` for LLVM IR generation
    5. Add regression tests to `compiler/tests/`
-   6. Update `docs/spec.md` (Part A if shipped, Part B if planned)
+   6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter if shipped, `.../reference/preview/*.md` page if planned
    7. Update `docs/status.md` with implementation status
 
 5. **For bug fixes**:
