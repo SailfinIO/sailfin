@@ -270,14 +270,12 @@ If step 7 fails, the channel is not purely a workaround — some caller is relyi
 
 #### Remaining targets by priority:
 
-1. **Instruction dispatch channel** (45 refs in `instructions_dispatch.sfn`) — hottest path
-2. **Let result channel** (32 refs in `instructions_let.sfn`) — per-let-binding overhead
-3. **Statement/assignment channels** (29+22 refs) — per-expression-statement overhead
-4. **Remaining channels** (coerce, async inner-return-type, enum/struct info)
+1. **Statement/assignment channels** — per-expression-statement overhead
+2. **Async inner-return-type channel** (`.async_inner_return_type`) — writer in `core_call_resolution.sfn`, reader in `instructions_let.sfn`
+3. **Enum/struct info channels** (`.struct_info`, `.enum_info`) — cross-phase type metadata read by `core_member_lowering`, `core_member_helpers`, `core_literals_lowering`, `lowering_phase_render`, `statement_assignment`
+4. **Context-functions channel** — `serialize_context_functions()` in `lowering_phase_types.sfn:339`
 
 Named IPC functions to eliminate:
-- `write_bindings_to_files()` / `write_locals_to_files()` — `instructions_helpers.sfn:216/240`
-- `_write_bindings_to_files()` / `_write_locals_to_files()` — `instructions_dispatch.sfn:95/119`
 - `serialize_context_functions()` — `lowering_phase_types.sfn:339`
 
 ### Phase 3: Cache Import Artifacts
@@ -588,6 +586,43 @@ For a typical compiler module with hundreds of calls per function and dozens of 
 - No new tests added — the existing integration suite (`selfhost_pipeline_test.sfn`, `async_struct_return_stress_test.sfn`, `compiler_ir_patterns_test.sfn`) plus full self-hosting exercise every path.
 
 **Determinism:** Linux x86_64 on seed 0.5.7 is already 20/20 identical on the hot modules per the arena-flip entry; this change removes file-I/O overhead without introducing new non-determinism. macOS-arm64 measurement to be recorded after CI completes on that platform. With `.call_result_*` gone, the remaining Phase 2 channels driving residual macOS-arm64 non-determinism are `.dispatch_*`, `.let_result_*` / `.let_ipc_*`, and `.instr_*`.
+
+### Dispatch / Let Result / Let IPC Dead-Channel Sweep (April 20)
+
+**Status: Implemented.** Removed three file-IPC channel prefixes in a single sweep: `.dispatch_*`, `.let_result_*`, and `.let_ipc_*`. All three were **fully dead code** — the channels never delivered data end-to-end because the live lowering path (`instructions.sfn`) already consumes `LetLoweringResult` as a direct struct return from `lower_let_instruction` at `instructions_let.sfn:377-390`. Audit confirmed:
+
+- `.let_result_*` had **zero writers** anywhere in the repo.
+- `.let_ipc_*` had one writer (`read_let_result_from_files` in `instructions_helpers.sfn`) and zero readers.
+- `.dispatch_*` had writers only inside `instructions_dispatch.sfn` and was self-read via a single sentinel check inside the same file.
+- `instructions_dispatch.sfn` itself had **zero external importers** — its sole header-comment self-reference was the only incoming link.
+
+The channels were v0.1.1-seed-era fallback code paths that became unreferenced after the `LetLoweringResult` struct return shipped but were never pruned.
+
+**Shape of change:**
+- Deleted `compiler/src/llvm/lowering/instructions_dispatch.sfn` entirely (256 lines). No import fixups required anywhere.
+- Deleted four dead functions from `compiler/src/llvm/lowering/instructions_helpers.sfn`: `write_bindings_to_files`, `write_locals_to_files`, `read_let_result_string_constants`, `read_let_result_from_files` (~152 lines). All four had zero callers across `compiler/src` and `compiler/tests`.
+- Pruned imports in `instructions_helpers.sfn` that became unused after the deletion: `append_local_binding`, `merge_string_constants`, `substring`, `index_of`, `number_to_string`, `split_lines_local`, `ParameterBinding`, `StringConstant`.
+- Added "Legacy" sweep comments for `.dispatch_`, `.let_ipc_`, and `.let_result_` prefixes in `cli_commands._clean_lowering_state` (following the PR #183 / #184 / #185 / #188 / #189 / #191 / #192 precedent of keeping prefixes in the cleanup sweep to handle stale files from older build dirs and older seed binaries).
+- Updated `docs/build-performance.md` Remaining-targets list to reflect the new Phase 2 surface (statement/assignment channels, `.async_inner_return_type`, `.struct_info` / `.enum_info`, `serialize_context_functions`).
+
+**Scope:**
+- 1 file deleted (`instructions_dispatch.sfn`, −256 lines).
+- 1 file trimmed (`instructions_helpers.sfn`, −152 lines).
+- 2 files edited (`cli_commands.sfn` +6 lines for Legacy comments; `docs/build-performance.md` entry + Remaining-targets prune).
+- Net: approximately −400 lines across 4 modified/deleted files.
+- No new tests added — the existing integration suite plus full self-hosting exercise every live path.
+
+**Per-module overhead removed:**
+- `.dispatch_*` writes (lines, allocas, temp, next_local, next_region, used_file_ipc, mutation_count + per-index, string_constants) fired on every instruction dispatch — now zero.
+- `.let_ipc_*` writes (lines, allocas, temp, next_local, next_region, used) fired on every let-result read — now zero.
+- `.let_result_*` read-with-delete cycles fired on every let-instruction finalize — now zero.
+- The 256-line `instructions_dispatch.sfn` module itself is no longer compiled: on the April 15 baseline this module cost 26.17s and 3.1 GB peak RAM per `docs/perf/baseline-0.5.2-alpha.1.csv:66`. Eliminating the module removes that compilation cost from the aggregate build time.
+
+**Risk assessment:**
+- Because all three channels were dead code with no live data path, removal cannot change compiler output. The CI full build + test suite is the authoritative gate.
+- The `.instr_*` prefix is left intact (still swept without a Legacy comment) because although its writers lived inside the now-deleted `instructions_dispatch.sfn`, several readers remain in `statement.sfn`, `statement_assignment.sfn`, `core_member_lowering.sfn`, `core_member_helpers.sfn`, and `core_literals_lowering.sfn`. Those readers now always take their fallback path (the `fs.exists` check always returns false), which is semantically equivalent to the pre-existing fallback behavior. Full `.instr_*` removal is a separate PR.
+
+**Determinism:** With three more Phase 2 prefixes gone, the remaining channels driving residual macOS-arm64 non-determinism are `.instr_*` (reader-only now; fallback path active), `.async_inner_return_type`, `.struct_info`, and `.enum_info`. Post-change emit-sweep measurement to land in the PR body after CI completes.
 
 ---
 
