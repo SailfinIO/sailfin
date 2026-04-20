@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "sailfin": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["tools/mcp-server/dist/index.js"],
+      "env": {
+        "CLAUDE_PROJECT_DIR": "${workspaceFolder}"
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@sailfin/mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server exposing the Sailfin compiler (version, check, emit native/llvm, fmt) as tool calls for agentic clients.",
+  "type": "module",
+  "bin": {
+    "sailfin-mcp": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "tsc -p test/tsconfig.json && node --test dist-test/test/smoke.test.js",
+    "pretest": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

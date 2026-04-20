@@ -437,7 +437,10 @@ verification.
    Not yet implemented.
 
 4. **MCP server** — wraps the compiler so any agent can compile, type-check, and iterate
-   Sailfin code as a tool call. Depends on `--json` diagnostics. Not yet implemented.
+   Sailfin code as a tool call. Scaffold shipped in `tools/mcp-server/` (registered via
+   `.mcp.json` at the repo root): `sailfin_version`, `sailfin_check`, `sailfin_emit_native`,
+   `sailfin_emit_llvm`, `sailfin_fmt_check`. Build with `make mcp-server`. Richer tools
+   (`sailfin_diagnostics`, `sailfin_effect_trace`) land once `--json` diagnostics exist.
 
 5. **Training data presence** — Rosetta Code ports, algorithm examples, blog posts, and
    technical content in scraper-visible locations. The more `.sfn` code exists publicly,

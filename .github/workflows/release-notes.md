@@ -11,6 +11,7 @@ on:
 permissions:
   contents: read
   pull-requests: read
+  issues: read
 
 engine: copilot
 
@@ -39,15 +40,16 @@ Sailfin is a self-hosted compiled language targeting LLVM. The compiler lives in
 rand, clock]`), ownership types, and AI-native constructs.
 
 ### Key directories
-| Path | Area |
-|------|------|
-| `compiler/src/` | Compiler source (Sailfin) |
-| `compiler/tests/` | Test suites (unit, integration, e2e) |
-| `runtime/native/` | C runtime |
-| `runtime/prelude.sfn` | Prelude library |
-| `capsules/` | Standard library capsules |
-| `docs/` | Specification, status, roadmap |
-| `scripts/` | Build drivers |
+
+| Path                  | Area                                 |
+| --------------------- | ------------------------------------ |
+| `compiler/src/`       | Compiler source (Sailfin)            |
+| `compiler/tests/`     | Test suites (unit, integration, e2e) |
+| `runtime/native/`     | C runtime                            |
+| `runtime/prelude.sfn` | Prelude library                      |
+| `capsules/`           | Standard library capsules            |
+| `docs/`               | Specification, status, roadmap       |
+| `scripts/`            | Build drivers                        |
 
 ## Process
 
@@ -79,17 +81,21 @@ rand, clock]`), ownership types, and AI-native constructs.
    ## What's Changed
 
    ### Breaking Changes
+
    - **description** — brief explanation (#PR)
 
    ### Features
+
    - **description** — brief explanation (#PR)
 
    ### Bug Fixes
+
    - **description** — brief explanation (#PR)
 
    [... other non-empty sections ...]
 
    ### Contributors
+
    @contributor1, @contributor2, ...
 
    **Full Changelog**: https://github.com/SailfinIO/sailfin/compare/<prev_tag>...<this_tag>
