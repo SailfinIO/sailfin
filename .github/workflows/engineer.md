@@ -78,9 +78,18 @@ will be updated in the same PR.
 
 **3. Focus gate (soft).** For issues tagged `type:feature`, `type:perf`, or
 `type:refactor`, verify the issue body contains a `## Focus Workstream`
-section citing an open `focus:approved` issue. If missing, call `noop`:
-`{"noop": {"message": "focus gate: issue lacks Focus Workstream citation; escalating to architect"}}`
-(Bug fixes labeled `type:bug` are exempt — urgent fixes don't wait for the weekly focus.)
+section citing an open `focus:approved` issue. If missing:
+
+  1. Post a comment on the issue (via `add-comment`) with this text — verbatim so humans and downstream agents can pattern-match on it:
+
+     ```
+     @<issue_author> The engineer agent stood down without implementing this issue because it does not cite a current focus workstream. This is a feature/perf/refactor issue, so per `.github/AGENTS.md` it must include a `## Focus Workstream` section linking to an open `focus:approved` issue. Either (a) the architect should amend the issue to add the citation, or (b) a maintainer should re-label this as `type:bug` if it's a correctness fix that shouldn't wait for the weekly focus.
+     ```
+
+  2. Then call `noop`:
+     `{"noop": {"message": "focus gate: issue lacks Focus Workstream citation; commented on issue and standing down"}}`
+
+  (Bug fixes labeled `type:bug` are exempt — urgent fixes don't wait for the weekly focus.)
 
 All three must pass before any file is read for implementation.
 
