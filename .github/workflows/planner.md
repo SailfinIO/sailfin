@@ -11,8 +11,9 @@ description: |
 
 on:
   schedule:
-    # Mondays 08:00 UTC — frames the week before human work begins.
-    - cron: "0 8 * * 1"
+    # Mondays. Off-peak minute (xx:17) and an off-the-hour hour to avoid
+    # GitHub Actions cron contention at the top of the hour.
+    - cron: "17 13 * * 1"
   workflow_dispatch:
 
 permissions:

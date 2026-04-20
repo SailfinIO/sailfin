@@ -108,9 +108,9 @@ tier pyramid defined in **`.github/AGENTS.md`** — read that file before
 modifying any workflow. Summary:
 
 ```
-Planner (weekly, Mon 08:00 UTC)  →  Focus issue, labeled focus:proposed
+Planner (weekly, Monday)         →  Focus issue, labeled focus:proposed
    ↓ human applies focus:approved
-Grooming (daily, 07:00 UTC)      →  needs-design issue citing focus workstream
+Grooming (daily)                 →  needs-design issue citing focus workstream
    ↓ Architect flips to design-approved
 Engineer (on label, budget ≤ 2)  →  ONE PR labeled agent-authored
    ↓ QC / Security / Product / Docs review

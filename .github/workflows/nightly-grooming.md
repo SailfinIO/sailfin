@@ -10,8 +10,9 @@ description: |
 
 on:
   schedule:
-    # 07:00 UTC daily (nightly-selfhost runs earlier, Planner runs Monday 08:00).
-    - cron: "0 7 * * *"
+    # Daily, off-peak minute. Staggered well clear of nightly-selfhost and
+    # the Planner so cron contention doesn't bunch them up.
+    - cron: "43 11 * * *"
   workflow_dispatch:
 
 permissions:

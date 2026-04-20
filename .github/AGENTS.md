@@ -41,7 +41,7 @@ architect-approved issue, within a budget gate.
 ### Tier 0 — Strategy (Planner)
 
 - **Workflow:** `.github/workflows/planner.md`
-- **Cadence:** weekly (Mondays 08:00 UTC) + manual dispatch
+- **Cadence:** weekly on Mondays (off-peak minute; see workflow cron) + manual dispatch
 - **Reads:** roadmap, `docs/status.md`, `docs/build-performance.md`, open issues, recent merges, CI health
 - **Writes:** exactly ONE GitHub issue titled `Focus: Week of YYYY-MM-DD`, labeled `focus:proposed`, pinned via comment
 - **Must NOT:** open PRs, modify code, close issues, label other issues, run the compiler
@@ -51,7 +51,7 @@ architect-approved issue, within a budget gate.
 ### Tier 1 — Architecture (Architect + Grooming)
 
 - **Workflows:** `.github/workflows/architect-review.md` (reactive), `.github/workflows/nightly-grooming.md` (proactive)
-- **Cadence:** architect-review on `issues: labeled`; grooming daily at 07:00 UTC, noop if no `focus:approved` issue exists
+- **Cadence:** architect-review on `issues: labeled`; grooming runs daily (off-peak minute; see workflow cron), noop if no `focus:approved` issue exists
 - **Reads:** current approved focus, issue body, relevant source files
 - **Writes:** issues (grooming) or labels+comments on issues (architect-review). Every newly-groomed issue must include a `## Focus Workstream` section citing the current focus.
 - **Must NOT:** open PRs, modify source code, merge anything
