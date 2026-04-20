@@ -76,6 +76,13 @@ export function resolveInsideWorkspace(userPath: string): string {
     // File may not exist yet (e.g., new test fixture); fall back to the
     // logical candidate. The compiler will emit its own "no such file"
     // diagnostic.
+    //
+    // Known TOCTOU limitation: symlinks are not resolved on this branch,
+    // so a symlink created between this check and the compiler
+    // invocation could in principle point outside the workspace.
+    // Acceptable for a local stdio MCP server whose client already has
+    // full filesystem access; revisit if the server is ever exposed
+    // over a remote transport.
     resolved = candidate;
   }
   if (!resolved.startsWith(root + path.sep) && resolved !== root) {
@@ -100,8 +107,15 @@ export async function runSailfin(
   const cwd = opts.cwd ?? workspaceRoot();
   const bin = compilerPath();
 
-  // We use `/usr/bin/env bash -lc` so we can set `ulimit -v` before exec.
-  // Node's child_process doesn't support rlimits directly.
+  // We use `/usr/bin/env bash -lc` so we can set `ulimit -v` before
+  // exec. Node's child_process does not support rlimits directly.
+  //
+  // `-l` sources the user's login profile (~/.bash_profile etc.). This
+  // is deliberate — we need the user's PATH so `build/native/sailfin`
+  // can locate `clang` and the rest of the toolchain. It does mean a
+  // poisoned shell profile can influence the execution environment;
+  // acceptable for a local dev tool, revisit if this server ever runs
+  // with untrusted callers.
   const cmd = [
     `ulimit -v ${MEMORY_CAP_KB}`,
     `exec ${shellEscape(bin)} ${args.map(shellEscape).join(" ")}`,
