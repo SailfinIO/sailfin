@@ -731,6 +731,8 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
         // older build dirs / older seed binaries should still be swept.
         if _has_prefix_cmd(entry, ".self_field_") { is_scratch = true; }
         if strings_equal(entry, ".condition_locals") { is_scratch = true; }
+        // Legacy: .enum_info IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
         if strings_equal(entry, ".enum_info") { is_scratch = true; }
         if strings_equal(entry, ".struct_info") { is_scratch = true; }
         if !is_scratch { continue; }

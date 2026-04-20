@@ -272,7 +272,7 @@ If step 7 fails, the channel is not purely a workaround — some caller is relyi
 
 1. **Statement/assignment channels** — per-expression-statement overhead
 2. **Async inner-return-type channel** (`.async_inner_return_type`) — writer in `core_call_resolution.sfn`, reader in `instructions_let.sfn`
-3. **Enum/struct info channels** (`.struct_info`, `.enum_info`) — cross-phase type metadata read by `core_member_lowering`, `core_member_helpers`, `core_literals_lowering`, `lowering_phase_render`, `statement_assignment`
+3. **Struct info channel** (`.struct_info`) — cross-phase type metadata read by `core_member_lowering`, `core_member_helpers`, `core_literals_lowering`, `lowering_phase_render` (the `.enum_info` companion was removed April 20)
 4. **Context-functions channel** — `serialize_context_functions()` in `lowering_phase_types.sfn:339`
 
 Named IPC functions to eliminate:
@@ -650,6 +650,42 @@ The channels were v0.1.1-seed-era fallback code paths that became unreferenced a
 - The writer of `.instr_fn_name` was removed as part of `instructions_dispatch.sfn` deletion in the April 20 dispatch sweep (see entry above). After that removal, every `fs.exists("build/sailfin/.instr_fn_name")` call returned false (unless stale files existed in `build/sailfin/`, which the cleanup sweep already handles). CI for the dispatch sweep passed on all platforms, validating that the fallback path was genuinely dead. This cleanup only removes the unreachable code — no semantic change.
 
 **Determinism:** No behavior change expected on any platform — the deleted blocks were guarded by always-false conditions. Post-change emit-sweep measurement to land in the PR body after CI completes.
+
+### Enum Info IPC Channel Removal (April 20)
+
+**Status: Implemented.** Removed the `.enum_info` file-IPC channel — a v0.1.1-seed-era cross-module ABI workaround. Writer (`serialize_enum_info`) and reader (`recover_enums_from_file`) both lived in the same file (`lowering_phase_types.sfn`) and shared a single call frame inside `build_type_context_with_recovery` (the writer ran two lines before the reader's entry condition). Chosen as the first move ahead of `.struct_info` because the same-file, same-function writer/reader pair is the smallest possible blast radius to validate that arena-mode `build_type_context` reliably returns cross-module struct-array returns — the hypothesis that underwrites every Phase 2 removal since the April 19 arena default-on flip.
+
+**Shape of change:**
+- Added pure helper `build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[]` to `lowering_phase_types.sfn`. Iterates `fixed_enums_list` directly and produces byte-identical `EnumTypeInfo[]` to the file-based path: unit-enum defaults (`tag_type="i32"`, `tag_size=4`, `tag_align=4`, `size=4`, `align=4`, `max_payload_size=0`) and synthetic variant names `v0`, `v1`, ... (matching the `v<idx>=<idx>` format the writer serialized). The helper is genuinely pure — no `![io]`, no tracing — the `_trace_enums` branch moved to the caller, which already owns `![io]`.
+- Deleted `serialize_enum_info` (47 lines) and its single call at `build_type_context_with_recovery`.
+- Deleted the `fs.exists("build/sailfin/.enum_info")` gate on the recovery condition — under arena the file was no longer a meaningful signal, and `_needs_recovery` is now driven purely by `type_context.enums.length == 0 || _enum_names_empty`.
+- Replaced `recover_enums_from_file(_trace_enums)` call with `build_enum_infos_inline(fixed_enums_list)`; the post-recovery trace moved into the caller's `if recovered.length > 0` branch.
+- Deleted `recover_enums_from_file` (72 lines) and `parse_enum_variants` (~27 lines) — both were dead code after the reader was replaced.
+- Restructured pre-existing `type_context.enums[0].name` null-check at the recovery trigger to short-circuit before reading `.length` (defensive — if the ABI corruption ever surfaces with a `null` first-enum name, the old `_asgn253` pattern would have dereferenced through it).
+- Pruned unused imports: `substring` (from `string_utils`), `index_of` (from `utils`), `parse_number_local` + `split_lines_local` (from `lowering_text_utils`), plus pre-existing dead imports `fixup_enum_layouts` (from `type_context`) and `extend_string_lines_checked` (from `lowering_io`).
+- `cli_commands._clean_lowering_state` gets a "Legacy" comment for the `.enum_info` sweep (following the PR #183 / #184 / #185 / #188 / #189 / #191 / #192 precedent of keeping the prefix in the cleanup sweep to handle stale files from older build dirs / older seed binaries).
+
+**Per-module overhead removed:**
+- 1 `fs.writeLines(".enum_info", ...)` per module compile (fires on every module with a `build_type_context_with_recovery` call — i.e. every compiler module).
+- 1 `fs.exists(".enum_info")` per module compile (gating check).
+- 1 `fs.readFile(".enum_info")` + tab-delimited parse per module where recovery fires.
+- The 72-line `recover_enums_from_file` + 27-line `parse_enum_variants` helpers no longer compile into the module.
+
+**Risk assessment:**
+- **Recovery semantics**: the recovery path fires when `type_context.enums` is empty or has empty names (the v0.1.1-seed ABI corruption signal). Under the default-on arena (PR #186) the 0.5.7 seed returns correct struct-array returns across module boundaries — same pattern validated by PRs #184 (`.self_field_*`), #185 (`.module_globals_*`), #188 (`.fn_*`), #189 (same), #191 (`.expr_stmt_*`), #192 (`.call_result_*`), and the April 20 dispatch/let_result/let_ipc sweep. The in-memory fallback preserves byte-identical output (synthetic `v<idx>` variant names, unit-enum defaults) so any code relying on the file-based recovery shape continues to work.
+- **Cross-statement leak**: none — writer and reader share a call frame.
+- **Effect narrowing**: `build_enum_infos_inline` is genuinely pure — no `![io]`, no `print.err`, no `fs.*`. `serialize_enum_info`'s `![io]` obligation goes away with the function itself. `build_type_context_with_recovery` retains `![io]` because it still calls `serialize_struct_info`, writes `.phase_types_diagnostics`, and owns the `_trace_enums` post-recovery `print.err`.
+
+**Scope:**
+- 3 source files modified (`lowering_phase_types.sfn`, `cli_commands.sfn`, `docs/build-performance.md`).
+- `lowering_phase_types.sfn`: net approximately −95 lines (146 removed, 53 added — old serializer + file reader replaced by the inline builder).
+- `cli_commands.sfn`: +2 lines for the Legacy comment.
+- No signature changes, no new wrapper struct (procedure §267 not triggered — zero params travel; the data is already in scope).
+- No new tests added — the existing integration suite plus full self-hosting exercise the live paths; the recovery fallback is byte-identical to the file-based path it replaces.
+
+**Determinism:** Writer/reader shared a same-file call frame, so there was no cross-module hash divergence to measure on the `.enum_info` channel specifically. Post-change emit-sweep on `lowering_core.sfn`, `parser/expressions.sfn`, and modules with user enums (`ast.sfn`) will land in the PR body once CI completes. With `.enum_info` gone, the remaining Phase 2 channels driving residual macOS-arm64 non-determinism are `.struct_info`, `.async_inner_return_type`, and the reader-only `.instr_*` fallbacks.
+
+**Follow-up:** The immediate next PR should remove `.struct_info` using this PR's `build_enum_infos_inline` as the template for a `build_struct_infos_inline(combined_structs)` helper, applied to the four remaining readers in `core_member_helpers`, `core_member_lowering`, `core_literals_lowering`, and `lowering_phase_render`. That removal requires a one-hop `context: TypeContext` signature extension on `lower_inline_gep_field_access` — same blast radius as PR #183's `lower_inline_gep_field_access` hop.
 
 ---
 
