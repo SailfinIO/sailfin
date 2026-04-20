@@ -1,9 +1,13 @@
 // compiler/src/llvm/lowering/lowering_recovery.sfn
 //
 // Light recovery parsers for NativeFunction, NativeImport, and NativeStruct.
-// These parsers work directly on .sfn-asm text and bypass the structured
-// parser (parse_native_artifact_impl) which has deeply nested if/else chains
-// that the v0.1.1 seed cannot compile correctly.
+// The `recover_*_light` routines in this file work directly on .sfn-asm text
+// and bypass the structured parser (parse_native_artifact_impl) — they were
+// written for the v0.1.1 seed, which couldn't compile the structured parser's
+// deeply nested if/else chains. The structured path is now reliable under
+// seed 0.5.7+ (validated by every `.struct_info`/`.enum_info`/`.fn_*` removal
+// since PR #183); `parse_native_artifact_safe` now routes through it directly.
+// Tier 1C tracks removing the light-recovery primary path in lowering_core.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import {
@@ -22,14 +26,9 @@ import {
     ParseNativeResult
 } from "../../native_ir";
 import {
-    parse_native_bindings_from_text,
-    parse_native_diagnostics_from_text,
-    parse_native_enums_from_text,
+    parse_native_artifact,
     parse_native_function_count_from_text,
-    parse_native_functions_from_text,
-    parse_native_imports_from_text,
-    parse_native_interfaces_from_text,
-    parse_native_structs_from_text
+    parse_native_functions_from_text
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 import { index_of, number_to_string } from "../utils";
@@ -73,29 +72,15 @@ import {
 } from "./lowering_text_utils";
 
 // ── Parse wrappers ───────────────────────────────────────────────────
-// Construct a ParseNativeResult from individual field-extraction calls.
-// This avoids the seed v0.1.1 struct-return ABI bug: each extractor returns
-// an array (works through double→pointer shim), then we assemble locally.
-// Safe replacement for parse_native_artifact that avoids struct-return ABI bug.
-// Calls individual field extractors and assembles the result locally.
+// Historically built a ParseNativeResult from 7 per-field extractors to
+// sidestep the seed v0.1.1 struct-return ABI bug. Under seed 0.5.7+ the
+// struct-return path works (validated by every `.struct_info`/`.enum_info`/
+// `.fn_*` removal since PR #183), so this now delegates directly to
+// parse_native_artifact — a single artifact walk instead of 7. The wrapper
+// is kept during Tier 1A PR 1 so callsites don't churn; PR 2 swaps the 6
+// live callers to parse_native_artifact and PR 3 deletes this function.
 fn parse_native_artifact_safe(text: string) -> ParseNativeResult {
-    let functions = parse_native_functions_from_text(text);
-    let imports = parse_native_imports_from_text(text);
-    let structs = parse_native_structs_from_text(text);
-    let interfaces = parse_native_interfaces_from_text(text);
-    let enums = parse_native_enums_from_text(text);
-    let bindings = parse_native_bindings_from_text(text);
-    let diagnostics = parse_native_diagnostics_from_text(text);
-    let result = ParseNativeResult {
-        functions: functions,
-        imports: imports,
-        structs: structs,
-        interfaces: interfaces,
-        enums: enums,
-        bindings: bindings,
-        diagnostics: diagnostics
-    };
-    return result;
+    return parse_native_artifact(text);
 }
 
 // ── Light function recovery ──────────────────────────────────────────
