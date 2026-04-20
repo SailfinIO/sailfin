@@ -56,7 +56,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "./core_scopes";
-import { lower_lvalue_assignment_stmt, preprocess_self_field_access } from "./statement_assignment";
+import { lower_lvalue_assignment_stmt } from "./statement_assignment";
 // Submodules extracted from this file
 import { parse_assignment_expression, parse_inline_let_expression } from "./statement_parsing";
 import { detect_suspension_conflicts } from "./statement_suspension";
@@ -509,15 +509,8 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             bind_i += 1;
         }
     }
-    // Pre-process self.field patterns via helper (extracted to stay under 500 instr)
-    let _sf_result = preprocess_self_field_access(instr_expression, current_temp, current_lines);
-    let _ret_expr: string = _sf_result.expression;
-    current_temp = _sf_result.temp_index;
     current_temp = _recover_temp_from_lines(current_lines, current_temp);
-    if _sf_result.lines.length > current_lines.length {
-        current_lines = _sf_result.lines;
-    }
-    let lowered = lower_expression(_ret_expr, current_bindings, current_locals, current_temp, current_lines, functions, context, safe_llvm_return);
+    let lowered = lower_expression(instr_expression, current_bindings, current_locals, current_temp, current_lines, functions, context, safe_llvm_return);
     if debug_lowering {
         print.err("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
     }

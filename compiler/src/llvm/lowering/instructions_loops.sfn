@@ -346,8 +346,6 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
         mutations: _body_mutations,
         string_constants: _body_string_constants
     };
-    // Cross-module ABI: scalar fields corrupted; read from file IPC instead.
-    // Use _read_ipc_int_min to prevent the counter from going backwards.
     let _br_lp_temp = _body_temp;
     let _br_lp_blkctr = _body_blkctr;
     let _br_lp_nextloc = _body_nextloc;

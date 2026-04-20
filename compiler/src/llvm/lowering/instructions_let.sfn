@@ -78,6 +78,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     let mut lifetime_releases: LifetimeReleaseEvent[] = [];
     let mut current_next_region: number = next_region_id;
     let mut mutations: LocalMutation[] = [];
+    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if initializer_span == null { initializer_span = instruction.span; }
 
     let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span);
@@ -179,17 +180,17 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             + function.name
             + "`");
     } else {
-        if fs.exists("build/sailfin/.trace_lowering") {
+        if debug_lowering {
             print.err("let-lowering: pre-lower_expression name=" + instruction.name
                 + " value="
                 + instruction.value);
         }
         let _pre_expr_line_count = current_lines.length;
         let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
-        if fs.exists("build/sailfin/.trace_lowering") {
+        if debug_lowering {
             print.err("let-lowering: post-lower_expression name=" + instruction.name);
         }
-        if fs.exists("build/sailfin/.trace_lowering") {
+        if debug_lowering {
             print.err("let-lowering: accessing lowered.diagnostics");
         }
         let mut _ci19: number = 0;
@@ -198,20 +199,20 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             diagnostics.push(lowered.diagnostics[_ci19]);
             _ci19 += 1;
         }
-        if fs.exists("build/sailfin/.trace_lowering") {
+        if debug_lowering {
             print.err("let-lowering: accessing lowered.lines");
         }
         current_lines = lowered.lines;
-        if fs.exists("build/sailfin/.trace_lowering") {
+        if debug_lowering {
             print.err("let-lowering: got lines, accessing temp_index");
         }
         current_temp = lowered.temp_index;
-        if fs.exists("build/sailfin/.trace_lowering") {
+        if debug_lowering {
             print.err("let-lowering: got temp_index=" + number_to_string(current_temp)
                 + ", accessing operand");
         }
         operand = lowered.operand;
-        if fs.exists("build/sailfin/.trace_lowering") {
+        if debug_lowering {
             print.err("let-lowering: got operand, accessing string_constants");
         }
         // Use lowered.string_constants directly (covers enum variant
@@ -223,12 +224,12 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         string_constants = merge_string_constants(string_constants, inferred);
     }
 
-    if fs.exists("build/sailfin/.trace_lowering") {
+    if debug_lowering {
         print.err("let-lowering: checking llvm_type len=" + number_to_string(llvm_type.length));
     }
     if llvm_type.length == 0 {
         if operand != null {
-            if fs.exists("build/sailfin/.trace_lowering") {
+            if debug_lowering {
                 print.err("let-lowering: operand not null, trimming type");
             }
             let operand_type = trim_text(operand.llvm_type);
@@ -329,7 +330,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                 + llvm_type
                 + "* "
                 + pointer);
-            if fs.exists("build/sailfin/.trace_lowering") {
+            if debug_lowering {
                 print.err("let-lowering: identity coerce type=" + llvm_type
                     + " value="
                     + operand.value);
@@ -410,7 +411,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     };
     mutations.push(mutation);
 
-    if fs.exists("build/sailfin/.trace_lowering") {
+    if debug_lowering {
         print.err("let-lowering: returning LetLoweringResult for name="
             + instruction.name);
     }
