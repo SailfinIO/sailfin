@@ -281,13 +281,17 @@ With `.async_inner_return_type` gone, every cross-statement / cross-phase Phase 
 
 ### Phase 3: Cache Import Artifacts
 
-**Priority:** Medium — **Expected:** 10-15% time
+**Priority:** Medium — **Expected:** 5-15% time reduction
 **No dependency on Phases 0-2** — can proceed in parallel
 
-Add a file-level cache to `collect_imported_module_context_for_module`:
+The BFS in `collect_imported_module_context_for_module` (`llvm/imports.sfn:37`) already dedupes within a single process via `seen[]`. Under the per-module-process build model (`scripts/build.sh` spawns one `seed emit llvm` per module), the biggest remaining wins live across process boundaries — either pre-parsed sidecar artifacts or a persistent compiler process (Phase 5).
 
-- Cache parsed `LayoutManifest` and `.sfn-asm` text by slug within a single process
-- For cross-process caching: consider a pre-parsed binary format (e.g., write parsed manifests to a `.cache` directory during import-context staging, read them back instead of re-parsing text)
+**Subtasks:**
+
+- ~~**3a.** Fast-path scanner for `parse_native_imports_for_import`~~ — **Shipped** (see [Completed Work: Import Discovery Fast-Path Scanner](#import-discovery-fast-path-scanner-april-20)). Eliminates the recursive `.struct`/`.interface`/`.enum` block parses that were being done only to discard everything except the imports list.
+- **3b.** Pre-parsed `.imports` sidecar artifact emitted during `stage_import_context`. Would eliminate the per-discovery file read entirely and take advantage of the static cross-module dependency graph. Requires an emit-time format change and fallback logic for older build directories.
+- **3c.** Cross-process shared cache under `build/sailfin/.import-cache/` keyed by source hash. Only worth pursuing if 3b is rejected on artifact-layout grounds; adds invalidation complexity.
+- **3d.** In-process memoization of `parse_layout_manifest` and `.sfn-asm` reads. Evaluated during 3a planning and **rejected** because the BFS's `seen[]` already dedupes within a single process, and each `seed emit llvm` invocation calls the collector exactly once. Worth revisiting only after Phase 5 turns `seed emit` into a long-lived process that handles multiple modules per invocation.
 
 ### Phase 4: Eliminate Light Recovery Parser
 
@@ -810,6 +814,45 @@ The channel was a v0.1.1-seed-era workaround. Under the default-on arena (PR #18
 - No new wrapper structs, no signature changes to call sites, no new tests (existing integration suite + self-hosting exercise every live path).
 
 **Determinism:** The channel was per-async-call and cross-statement (writer in one lowering phase, reader in another), one of the structural sources of emit-time non-determinism on macOS-arm64. Removing it shrinks the residual non-determinism surface to the `.trace_lowering` debug gates (not IPC) and the reader-only `.instr_*` fallbacks (always-false, no data flow). With this change, every Phase 2 *structural* channel is gone — the fs-call census drops into mostly diagnostic and import-context territory.
+
+### Import Discovery Fast-Path Scanner (April 20)
+
+**Status: Implemented.** First Phase 3 landing. Replaced the full-artifact parse in `parse_native_imports_for_import` (in `compiler/src/native_ir_api.sfn`) with a line scanner that handles only top-level `.import`/`.export` directives and skips everything else with a cheap `starts_with` check. The previous implementation routed through `parse_native_artifact_impl`, which walks every `.struct`/`.interface`/`.enum` body via recursive `parse_struct_definition` / `parse_enum_definition` / `parse_interface_definition` helpers — work the caller (`collect_imported_module_context_for_module` in `llvm/imports.sfn:172`) immediately discarded. `.import`/`.export` lines are emitted only as top-level statements (see `emit_native.sfn:emit_statement_declarations`) and never appear inside block bodies, so a flat scan is semantically equivalent for the imports field.
+
+**Shape of change:**
+
+- `parse_native_imports_for_import` rewritten to loop over lines directly, checking for `.import `/`.export ` prefixes and calling `parse_import_entry` on matches. Diagnostics are intentionally dropped — the single live caller (`llvm/imports.sfn:172`) discards them regardless.
+- Added `parse_import_entry` to the imports from `./native_ir_utils_parse`.
+- `parse_native_artifact_impl` itself is unchanged — the other `*_for_import` wrappers (`parse_native_structs_for_import`, `parse_native_interfaces_for_import`, `parse_native_enums_for_import`, `parse_native_functions_for_import`) still route through it because they legitimately need the full parse.
+
+**Per-BFS overhead removed:**
+
+The BFS in `collect_imported_module_context_for_module` calls the fast path once per unique transitive module — typically 20-100 calls per `seed emit llvm` invocation for compiler sources. Each call previously did `O(lines)` iteration with recursive block parses; the fast scanner does `O(lines)` iteration with a flat starts_with check per line. Speedup scales with the size of the transitive module's `.sfn-asm` text: large compiler modules (1000-5000 lines) see the biggest wins because they contain many struct/enum/interface blocks whose bodies were being walked just to find the handful of `.import` lines at the top. Across a full 121-module build that's thousands of full-artifact parses reduced to flat line scans.
+
+**Why intra-process memoization was rejected:**
+
+The architect's original Phase 3 plan proposed a process-local memo of `(path → LayoutManifest)` and `(path → NativeImport[])`. Audit showed the BFS's `seen[]` array already dedupes within a single process, and each `seed emit llvm` invocation calls the collector exactly once — so a memo would have had a 0% hit rate. Attacking the per-call cost instead turned a no-op cache into a real per-line-of-artifact win, and left every candidate cross-process caching approach (sidecars, shared caches) available for future PRs when measurement supports them.
+
+**Risk assessment:**
+
+- **Output equivalence:** the fast scanner calls the same `parse_import_entry` helper with the same arguments for matching lines, so the `NativeImport[]` it produces is byte-identical to the `imports` field of `parse_native_artifact_impl` on the same input.
+- **No new state:** no module-level mutables, no cross-process cache, no sidecar artifacts. The change is a pure implementation swap inside one function.
+- **Scope of callers:** `parse_native_imports_for_import` has exactly one live caller (`imports.sfn:172`). `entrypoints.sfn:31` imports it but does not use it (pre-existing dead import, left alone).
+
+**Scope:**
+
+- 1 source file modified (`compiler/src/native_ir_api.sfn`).
+- ~30 lines added (fast-scanner loop + guiding comment), ~4 lines removed (previous body that dispatched to `parse_native_artifact_impl`).
+- 1 import added (`parse_import_entry` from `./native_ir_utils_parse`).
+- No signature changes, no new exports, no new wrapper structs, no new tests — existing integration suite plus full self-hosting exercise the live path on every module compile.
+
+**Determinism:** No new cross-phase or cross-process state. The function is invoked exactly once per unique transitive import slug per process (unchanged from before) and produces identical output for identical inputs. CI matrix determinism sweep on macOS-arm64 should show no regression.
+
+**Follow-ups (deferred to separate PRs):**
+
+- **3b:** Pre-parsed `.imports` sidecar artifact emitted during `stage_import_context`. Eliminates the per-discovery file read entirely; the sidecar is trivially cheap for the BFS to consume.
+- **3c:** Cross-process shared cache under `build/sailfin/.import-cache/`. Only worth pursuing if 3b is rejected on artifact-layout grounds.
+- **Phase 5:** Long-lived compiler process — subsumes 3a's intra-process work automatically and makes 3b/3c unnecessary.
 
 ---
 
