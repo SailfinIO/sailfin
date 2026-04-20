@@ -150,9 +150,9 @@ No memoization table, hash map, or shared artifact store exists.
 
 ## Root Cause 4: Light Recovery Parser Overhead
 
-`recover_native_functions_light` in `lowering_recovery.sfn:114+` still exists and is actively called from `lowering_core.sfn:286`. It re-scans every line of `.sfn-asm` text with 20+ `starts_with` checks per line. The structured `parse_native_artifact_safe` (same file, line 90) is a workaround that assembles results from per-field extraction calls rather than one structured call.
+`recover_native_functions_light` in `lowering_recovery.sfn:83+` still exists and is actively called from `lowering_core.sfn:127` as the **primary** path, not a fallback. It re-scans every line of `.sfn-asm` text with 20+ `starts_with` checks per line. `parse_native_artifact_safe` (same file, line 78) historically assembled results from 7 per-field extraction calls; as of Tier 1A PR 1 it delegates to `parse_native_artifact` directly (one artifact walk instead of seven). Full deletion of the wrapper is tracked as Tier 1A PR 2 / PR 3 below.
 
-Both exist because the v0.1.1 seed couldn't handle typed instruction variants. The 0.5.2-alpha.1 seed may support these, but the migration hasn't been attempted.
+Both exist because the v0.1.1 seed couldn't handle typed instruction variants. The 0.5.7 seed does (validated by the structured parser working through `parse_native_artifact` on every self-host), so the migration is now unblocked — Tier 1C pulls `recover_native_functions_light` off the primary path entirely.
 
 ---
 
@@ -854,6 +854,43 @@ The architect's original Phase 3 plan proposed a process-local memo of `(path �
 - **3b:** Pre-parsed `.imports` sidecar artifact emitted during `stage_import_context`. Eliminates the per-discovery file read entirely; the sidecar is trivially cheap for the BFS to consume.
 - **3c:** Cross-process shared cache under `build/sailfin/.import-cache/`. Only worth pursuing if 3b is rejected on artifact-layout grounds.
 - **Phase 5:** Long-lived compiler process — subsumes 3a's intra-process work automatically and makes 3b/3c unnecessary.
+
+### Tier 1A PR 1 — `parse_native_artifact_safe` Inlined (April 20)
+
+**Status: Implemented.** First Tier 1A landing. `parse_native_artifact_safe` in `compiler/src/llvm/lowering/lowering_recovery.sfn:78` no longer assembles a `ParseNativeResult` from seven per-field extraction calls; its body is now a single delegate to `parse_native_artifact(text)` in `compiler/src/native_ir_api.sfn:79`. Each of the 6 live callers drops from running `parse_native_artifact_impl` seven times per call (once per `_from_text` projection: `_functions_`, `_imports_`, `_structs_`, `_interfaces_`, `_enums_`, `_bindings_`, `_diagnostics_`) to exactly once.
+
+**Root cause:** `parse_native_artifact_safe` was written as a v0.1.1-seed struct-return ABI workaround. Each `_from_text` helper at `compiler/src/native_ir_api.sfn:89-129` is literally `let parsed = parse_native_artifact_impl(text, true, true); return parsed.X;` — pure projection of the same single-pass parser. `parse_native_artifact_impl` at `compiler/src/native_ir_parser.sfn:45-436` is the canonical single-pass line-driven state machine: one `split_lines`, one top-level loop, flat directive dispatch, sub-parsers that return `next_index`. The "single-pass parser" we wanted already existed — the wrapper was just calling it seven times.
+
+**Shape of change:**
+
+- `lowering_recovery.sfn:78` rewritten to `return parse_native_artifact(text);`. Comment rewritten to explain the historical ABI-workaround context and point at the PR 2/PR 3 follow-ups.
+- `native_ir_api` import block at `lowering_recovery.sfn:24-28` trimmed from 8 symbols to 3: `parse_native_artifact` added; `parse_native_bindings_from_text`, `parse_native_diagnostics_from_text`, `parse_native_enums_from_text`, `parse_native_imports_from_text`, `parse_native_interfaces_from_text`, `parse_native_structs_from_text` all dropped (unused in this file after the body rewrite). Retained: `parse_native_functions_from_text` (still called at `lowering_recovery.sfn:730, 836` inside `recover_functions_for_lowering`) and `parse_native_function_count_from_text` (still called at `lowering_recovery.sfn:826` inside the disk-recovery flow).
+
+**Per-caller overhead removed:**
+
+For each of the 6 live callers (`entrypoints.sfn:164,220,229,263,366` + `entrypoints_tests.sfn:117`), the underlying `parse_native_artifact_impl` invocation count drops from 7 to 1. Across 121 modules with typical 5–6 callsites hit per module in the normal lowering path that's thousands of redundant full-artifact walks eliminated per build. The measurement is algorithmic (7 → 1 by construction) — no benchmarking needed to confirm the invocation delta.
+
+**API surface change:** none. `parse_native_artifact_safe` keeps the same name, same signature, same return type. Callers compile identically. The wrapper's deletion is Tier 1A PR 3's job.
+
+**Risk assessment:**
+
+- **Output equivalence:** `parse_native_artifact(text)` is `parse_native_artifact_impl(text, true, true)` (one-line wrapper at `native_ir_api.sfn:79-81`). The old body called `parse_native_artifact_impl(text, true, true)` seven times and picked one field from each result. The new body calls it once and returns all seven fields. Same parser, same input flags, byte-identical `ParseNativeResult` by construction.
+- **ABI relic:** the v0.1.1-seed struct-return workaround that motivated `_safe` is obsolete. `parse_native_artifact` is already live in production (exported at `native_ir_api.sfn:196`, called directly by several callers), so the ABI path we're switching to is exercised end-to-end on every `make check`.
+- **Self-hosting:** only `lowering_recovery.sfn` changes; its exports are unchanged; every caller compiles identically. CI full build + test suite is the authoritative gate.
+
+**Scope:**
+
+- 1 source file modified (`compiler/src/llvm/lowering/lowering_recovery.sfn`).
+- Net: approximately −18 / +5 lines (body contraction + import-list trim + comment rewrite).
+- No signature changes, no new exports, no new wrapper structs, no new tests.
+
+**Determinism:** No new cross-phase or cross-process state. The parse result flowing into every downstream lowering phase is byte-identical to the pre-change path. CI determinism sweep on macOS-arm64 should show no regression.
+
+**Follow-ups (remaining Tier 1A work — track in subsequent PRs):**
+
+- **Tier 1A PR 2 — callsite swap.** Replace `parse_native_artifact_safe(x)` with `parse_native_artifact(x)` at all 6 live sites: `compiler/src/llvm/lowering/entrypoints.sfn:164`, `:220`, `:229`, `:263`, `:366`, and `compiler/src/llvm/lowering/entrypoints_tests.sfn:117`. Remove the two confirmed dead imports: `compiler/src/llvm/lowering/entrypoints_tests_writer.sfn:100` (imported but only referenced in a comment; real path uses `build_parse_result_from_text` at `:133`) and `compiler/src/llvm/lowering/lowering_phase_sanitize.sfn:25` (imported but not used in the file body). Requires `make clean-build` because it's a structural change to the import graph. No runtime behavior change.
+- **Tier 1A PR 3 — wrapper deletion.** Delete `fn parse_native_artifact_safe` from `compiler/src/llvm/lowering/lowering_recovery.sfn:78`. After the callsite swap in PR 2, the function has zero callers. Conditionally delete now-orphaned `_from_text` wrappers from `compiler/src/native_ir_api.sfn` if they have zero remaining callers repo-wide: `parse_native_structs_from_text`, `parse_native_imports_from_text`, `parse_native_interfaces_from_text`, `parse_native_enums_from_text`, `parse_native_diagnostics_from_text`. **Keep** `parse_native_functions_from_text` (live callers at `lowering_recovery.sfn:730,836`, `lowering_phase_sanitize.sfn:19,281`, `lowering_core.sfn:33`), `parse_native_function_count_from_text` (live caller at `lowering_recovery.sfn:826`), and `parse_native_bindings_from_text` (live callers at `lowering_phase_sanitize.sfn:19,409`, `lowering_core.sfn:31`) — verify via `grep -rn` at PR 3 time.
+- **Tier 1A PR 4 (optional) — equivalence regression test.** Add `compiler/tests/unit/parse_native_artifact_equivalence_test.sfn` constructing a synthetic `.sfn-asm` fixture that exercises every top-level directive (`.import`, `.export`, `.struct`+body, `.interface`+body, `.enum`+body, `.fn`+body, `.test`+body, top-level binding, `.decorator`, `.span`, `.init-span`) and asserts field-by-field equality between `parse_native_artifact(fixture).X` and each legacy `parse_native_X_from_text(fixture)` projection. Defense-in-depth only — the self-host itself is the real equivalence gate. Must follow the `parse_native_imports_fast_test.sfn` pattern (re-implement against minimal local types to stay under the 60s per-test budget; do not import the full parser chain).
 
 ---
 
