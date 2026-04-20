@@ -433,7 +433,7 @@ Criterion (2) is the only unmet gate, and its failure is **not arena-induced** �
    - `concat_native_functions` site 2 in `lowering_core.sfn:573` (the one the d2d0bf1 sweep left copying because `collect_runtime_helper_targets`/`render_llvm_preamble`/`lower_all_functions` needed a pristine `local_functions`).
    - All 6 `append_local_binding` sites in `expression_lowering/native/core_scopes.sfn:174-186`.
    Both were deferred because in-place mutation leaked across scope restoration. Under arena, the copy is a cheap bump alloc and both views are preserved — in-place conversions are safe.
-2. **Phase 2 IPC channels previously blocked by IPC-as-GC (~146 refs) become pickable:** `.call_result_*` (51), `.let_result_*` / `.let_ipc_*` (39), `.expr_stmt_*` (21), `.instr_*` (18), `.dispatch_*` (12), `.block_result_*` (5).
+2. **Phase 2 IPC channels previously blocked by IPC-as-GC (~146 refs) become pickable:** `.call_result_*` (51), `.let_result_*` / `.let_ipc_*` (39), ~~`.expr_stmt_*` (21)~~ removed in PR #191, `.instr_*` (18), `.dispatch_*` (12), ~~`.block_result_*` (5)~~ removed in PR #188.
 
 **macOS-arm64 determinism:** The 0.5.7 seed's residual non-determinism on macOS-arm64 (PRs #178 / #183 / #184 / #185 each measured 20-run hash sweeps against this) is driven by Phase 2 channels still active, not by memory allocation patterns. The arena flip itself should not change the non-determinism surface area — measurement will land in the PR body once CI completes on macOS-arm64.
 
@@ -519,7 +519,35 @@ The channel existed as a workaround for the v0.1.1-seed compiling `emission.sfn`
 
 For a typical compiler module (50-200 functions, ~3 params + 0-1 decorators per fn), this eliminates roughly 500-2000 filesystem operations per module compile.
 
-**Determinism delta:** Full build + test suite passed on CI across platforms after removal. Linux x86_64 on seed 0.5.7 was already 20/20 identical on the hot modules per the arena-flip entry; this change removes per-function file-I/O overhead without introducing new non-determinism. macOS-arm64 determinism surface continues to be driven by the remaining Phase 2 channels (call-result, dispatch, let-result, expr-stmt) and is unchanged by this removal.
+**Determinism delta:** Full build + test suite passed on CI across platforms after removal. Linux x86_64 on seed 0.5.7 was already 20/20 identical on the hot modules per the arena-flip entry; this change removes per-function file-I/O overhead without introducing new non-determinism. macOS-arm64 determinism surface continues to be driven by the remaining Phase 2 channels (call-result, dispatch, let-result) and is unchanged by this removal.
+
+### Expression Statement & Coerce Result IPC Channel Removal (April 19, PR #191)
+
+**Status: Implemented.** Removed two channels in one sweep:
+
+* **`.expr_stmt_*`** (21 dotfile refs, 2 writers, 2 readers): the v0.1.1-seed-era workaround used by `lower_expression_statement` / `lower_return_instruction` to ship per-statement temp counter, region id, mutations, and string constants back to `dispatch_expression_instruction` / `dispatch_return_instruction`. Both writers already returned a fully-populated `ExpressionStatementResult` struct; the file IPC was a parallel copy of the same data. Under the default-on arena (PR #186) the 0.5.7 seed handles cross-module struct returns correctly — same pattern validated by PRs #183 / #184 / #185 / #188 / #189. The dispatch readers now consume `lowered.{temp_index, next_region_id, mutations, string_constants}` directly, with the same temp-counter floor protection inlined.
+
+* **`.coerce_result_*`** (4 dotfile refs, 0 writers): pure dead code. The fallback reader in `instructions_let.sfn` checked for files no caller ever wrote — `coerce_operand_to_type` returns its result via `CoercionResult` struct and never touched the filesystem. Collapsed to the existing struct-field path.
+
+**Shape of change:**
+- `_write_expr_stmt_result_files{,_with_constants}` deleted from `statement.sfn` (2 helpers + 8 call sites at all return points of `lower_expression_statement` and `lower_return_instruction`).
+- `_read_expr_string_constants` deleted from `instructions_dispatch.sfn`; both dispatch readers now use struct fields directly.
+- `read_expr_string_constants` and `read_expr_mutations` deleted from `instructions_helpers.sfn` — both were unused/dead code.
+- `_write_assign_result_files` in `statement_assignment.sfn` had its two `.expr_stmt_*` writes dropped (the surrounding `.call_result_*` writes stay — separate channel, not in scope). Signature simplified from `(pre_lines_count, lines, temp_index, mutations, next_region_id, string_constants)` to `(lines, temp_index)` after the unused params became dead, with `lower_lvalue_assignment_stmt` losing its `pre_lines_count` parameter as well (per PR #191 review).
+- `instructions_let.sfn`'s `.coerce_result_type` file-existence branch (62 lines including the dead "fallback") collapsed to the `CoercionResult` struct path.
+- `cli_commands._clean_lowering_state` adds `.expr_stmt_` and `.coerce_result_` "Legacy" sweeps for stale files from older build dirs / older seed binaries (precedent: PRs #183 / #184 / #185 / #188 / #189).
+
+**Per-statement overhead removed:**
+- 5 + 4N `fs.writeFile` per emitted statement (temp/region/mut_count scalars + 4 per mutation: name/type/value/label)
+- 1 `fs.writeLines` per statement (string_constants array)
+- 5 `fs.readFile` + bulk parsing on the reader side
+- 4 `fs.readFile` per mutation on the reader side
+
+For typical compiler modules (hundreds of statements per function, dozens of functions per module) this eliminates thousands of filesystem operations per module compile.
+
+**Scope:**
+- 6 source files modified, ~−241 / +47 lines net.
+- No new tests added — the existing integration suite (`selfhost_pipeline_test.sfn`, `async_struct_return_stress_test.sfn`, `compiler_ir_patterns_test.sfn`) and the self-hosting build itself exercise every path that was changed.
 
 ---
 

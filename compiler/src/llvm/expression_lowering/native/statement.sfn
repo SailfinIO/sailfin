@@ -118,48 +118,6 @@ fn _recover_temp_from_lines(lines: string[], floor: number) -> number {
     return result;
 }
 
-// ---------------------------------------------------------------------------
-// IPC file helpers
-// ---------------------------------------------------------------------------
-// Helper: write expression statement result to files so cross-module
-// callers can read them even when struct return ABI is broken (v0.1.1 seed
-// compiles ExpressionStatementResult as i8* null for cross-module returns).
-fn _write_expr_stmt_result_files(input_lines_len: number, current_lines: string[], current_temp: number, mutations: LocalMutation[], current_next_region: number) ![io] {
-    fs.writeFile("build/sailfin/.expr_stmt_temp_index", number_to_string(current_temp));
-    fs.writeFile("build/sailfin/.expr_stmt_next_region_id", number_to_string(current_next_region));
-    let mut_count = mutations.length;
-    fs.writeFile("build/sailfin/.expr_stmt_mut_count", number_to_string(mut_count));
-    let mut mut_i = 0;
-    loop {
-        if mut_i >= mut_count { break; }
-        let m = mutations[mut_i];
-        let prefix = "build/sailfin/.expr_stmt_mut_" + number_to_string(mut_i);
-        fs.writeFile(prefix + "_name", m.name);
-        fs.writeFile(prefix + "_type", m.llvm_type);
-        fs.writeFile(prefix + "_value", m.value_name);
-        let mut label_val: string = "";
-        if m.originating_label != null { label_val = m.originating_label; }
-        fs.writeFile(prefix + "_label", label_val);
-        mut_i += 1;
-    }
-}
-
-// Variant that also serializes string constants to a file.
-fn _write_expr_stmt_result_files_with_constants(input_lines_len: number, current_lines: string[], current_temp: number, mutations: LocalMutation[], current_next_region: number, string_constants: StringConstant[]) ![io] {
-    _write_expr_stmt_result_files(input_lines_len, current_lines, current_temp, mutations, current_next_region);
-    // Write string constants as tab-separated lines: name\tcontent\tbyte_count
-    let mut sc_lines: string[] = [];
-    let mut si: number = 0;
-    loop {
-        if si >= string_constants.length { break; }
-        sc_lines.push(string_constants[si].name + "\t" + string_constants[si].content
-            + "\t"
-            + number_to_string(string_constants[si].byte_count));
-        si = si + 1;
-    }
-    fs.writeLines("build/sailfin/.expr_stmt_string_constants", sc_lines);
-}
-
 fn _parse_int_local(text: string) -> number {
     let len = text.length;
     if len == 0 { return 0; }
@@ -254,7 +212,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             if index_check.success { is_lvalue = true; }
         }
         if is_lvalue {
-            return lower_lvalue_assignment_stmt(parsed_assignment.target, parsed_assignment.value, parsed_assignment.operator, current_bindings, current_locals, current_temp, current_lines, lines.length, current_next_region, scope_id, scope_depth, functions, context, current_label);
+            return lower_lvalue_assignment_stmt(parsed_assignment.target, parsed_assignment.value, parsed_assignment.operator, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context, current_label);
         }
 
         // Simple local assignment
@@ -406,7 +364,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             };
             mutations.push(mutation);
         }
-        _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, mutations, current_next_region, string_constants);
         return ExpressionStatementResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -498,7 +455,6 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             + " delta="
             + number_to_string(current_lines.length - _pre_call_lines_len));
     }
-    _write_expr_stmt_result_files_with_constants(_pre_call_lines_len, current_lines, current_temp, mutations, current_next_region, string_constants);
     return ExpressionStatementResult {
         lines: current_lines,
         temp_index: current_temp,
@@ -565,7 +521,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
                 + number_to_string(current_lines.length));
         }
         let empty_constants = empty_string_constant_set();
-        _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, empty_constants);
         return ExpressionStatementResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -671,7 +626,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             print.err("test llvm: lower_return no_operand lines_after="
                 + number_to_string(current_lines.length));
         }
-        _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
         return ExpressionStatementResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -697,7 +651,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
         diagnostics.push("llvm lowering: void function `" + fn_name
             + "` returned a value");
         current_lines.push("  ret void");
-        _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
         return ExpressionStatementResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -742,7 +695,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             print.err("test llvm: lower_return no_coerce lines_after="
                 + number_to_string(current_lines.length));
         }
-        _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
         return ExpressionStatementResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -776,7 +728,6 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
     }
-    _write_expr_stmt_result_files_with_constants(lines.length, current_lines, current_temp, [], current_next_region, string_constants);
     return ExpressionStatementResult {
         lines: current_lines,
         temp_index: current_temp,

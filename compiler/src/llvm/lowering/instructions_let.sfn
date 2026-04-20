@@ -368,66 +368,36 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                     + operand.value);
             }
         } else {
-            // Types differ — need coercion. Since coerce_operand_to_type returns
-            // a struct across module boundaries (ABI corruption risk), we write
-            // the result to files from inside coerce_operand_to_type and read back.
+            // Types differ — coerce and use the returned struct.
             let coerced = coerce_operand_to_type(operand, llvm_type, current_temp, current_lines);
-            // Try file-based result first
-            if fs.exists("build/sailfin/.coerce_result_type") {
-                let _cr_type = fs.readFile("build/sailfin/.coerce_result_type");
-                let _cr_value = fs.readFile("build/sailfin/.coerce_result_value");
-                if _cr_type.length > 0 {
-                    stored_value = _cr_value;
-                    current_lines.push("  store " + llvm_type + " " + _cr_value
-                        + ", "
-                        + llvm_type
-                        + "* "
-                        + pointer);
-                } else {
-                    diagnostics.push("llvm lowering: unable to coerce initializer for `"
-                        + instruction.name
-                        + "` to `"
-                        + llvm_type
-                        + "`");
-                    current_lines.push("  store " + llvm_type + " "
-                        + default_return_literal(llvm_type)
-                        + ", "
-                        + llvm_type
-                        + "* "
-                        + pointer);
-                }
-                fs.deleteFile("build/sailfin/.coerce_result_type");
+            let mut _ci20: number = 0;
+            loop {
+                if _ci20 >= coerced.diagnostics.length { break; }
+                diagnostics.push(coerced.diagnostics[_ci20]);
+                _ci20 += 1;
+            }
+            current_lines = coerced.lines;
+            current_temp = coerced.temp_index;
+            if coerced.operand == null {
+                diagnostics.push("llvm lowering: unable to coerce initializer for `"
+                    + instruction.name
+                    + "` to `"
+                    + llvm_type
+                    + "`");
+                current_lines.push("  store " + llvm_type + " "
+                    + default_return_literal(llvm_type)
+                    + ", "
+                    + llvm_type
+                    + "* "
+                    + pointer);
             } else {
-                // Fallback: try struct fields (may crash if corrupted)
-                let mut _ci20: number = 0;
-                loop {
-                    if _ci20 >= coerced.diagnostics.length { break; }
-                    diagnostics.push(coerced.diagnostics[_ci20]);
-                    _ci20 += 1;
-                }
-                current_lines = coerced.lines;
-                current_temp = coerced.temp_index;
-                if coerced.operand == null {
-                    diagnostics.push("llvm lowering: unable to coerce initializer for `"
-                        + instruction.name
-                        + "` to `"
-                        + llvm_type
-                        + "`");
-                    current_lines.push("  store " + llvm_type + " "
-                        + default_return_literal(llvm_type)
-                        + ", "
-                        + llvm_type
-                        + "* "
-                        + pointer);
-                } else {
-                    let stored = coerced.operand;
-                    stored_value = stored.value;
-                    current_lines.push("  store " + llvm_type + " " + stored.value
-                        + ", "
-                        + llvm_type
-                        + "* "
-                        + pointer);
-                }
+                let stored = coerced.operand;
+                stored_value = stored.value;
+                current_lines.push("  store " + llvm_type + " " + stored.value
+                    + ", "
+                    + llvm_type
+                    + "* "
+                    + pointer);
             }
         }
     } else {
