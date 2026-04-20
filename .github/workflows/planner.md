@@ -10,10 +10,7 @@ description: |
   will act on the focus.
 
 on:
-  schedule:
-    # Mondays. Off-peak minute (xx:17) and an off-the-hour hour to avoid
-    # GitHub Actions cron contention at the top of the hour.
-    - cron: "17 13 * * 1"
+  schedule: weekly on monday
   workflow_dispatch:
 
 permissions:

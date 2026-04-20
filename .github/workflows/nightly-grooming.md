@@ -9,10 +9,7 @@ description: |
   Engineering never runs without an architect-approved, focus-referenced issue.
 
 on:
-  schedule:
-    # Daily, off-peak minute. Staggered well clear of nightly-selfhost and
-    # the Planner so cron contention doesn't bunch them up.
-    - cron: "43 11 * * *"
+  schedule: daily
   workflow_dispatch:
 
 permissions:
