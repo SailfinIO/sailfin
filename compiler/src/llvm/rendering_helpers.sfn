@@ -15,6 +15,7 @@ import {
     join_with_separator,
     number_to_string,
     sanitize_symbol,
+    starts_with,
     string_array_contains
 } from "./utils";
 
@@ -350,6 +351,30 @@ fn find_function_by_name(functions: NativeFunction[], name: string) -> NativeFun
         index += 1;
     }
     return null;
+}
+
+// Look up a function by exact name first, then fall back to a unique
+// `target + "__"` suffix match for imported / mangled functions (e.g. the
+// resolver will find `foo__pkg` when asked for `foo` as long as exactly one
+// candidate matches). Mirrors the call-resolution lookup used by
+// `resolve_call_signature` so other passes reach the same `NativeFunction`
+// entry without re-implementing the suffix logic.
+fn find_function_by_name_or_import(functions: NativeFunction[], target: string) -> NativeFunction? {
+    let exact = find_function_by_name(functions, target);
+    if exact != null { return exact; }
+    let suffix_prefix = target + "__";
+    let mut match_result: NativeFunction? = null;
+    let mut idx: number = 0;
+    loop {
+        if idx >= functions.length { break; }
+        let candidate = functions[idx];
+        if starts_with(candidate.name, suffix_prefix) {
+            if match_result != null { return null; }
+            match_result = candidate;
+        }
+        idx += 1;
+    }
+    return match_result;
 }
 
 // =============================================================================

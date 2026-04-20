@@ -5,7 +5,7 @@
 import { NativeFunction } from "../../../native_ir";
 import { find_last_index_of_char, index_of, substring } from "../../../string_utils";
 import { is_simple_identifier } from "../../expressions_helpers";
-import { find_function_by_name } from "../../rendering_helpers";
+import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
 import { find_runtime_helper } from "../../runtime_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import {
@@ -453,7 +453,7 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                     if _sfi >= context.structs.length { break; }
                     let _sf_candidate = context.structs[_sfi];
                     let _sf_fused = _sf_candidate.name + method_parse.field;
-                    let _sf_fn = _find_function_by_name_or_import(functions, _sf_fused);
+                    let _sf_fn = find_function_by_name_or_import(functions, _sf_fused);
                     if _sf_fn != null {
                         _struct_fallback_info = _sf_candidate;
                         break;
@@ -607,27 +607,9 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
     };
 }
 
-fn _find_function_by_name_or_import(functions: NativeFunction[], target: string) -> NativeFunction? {
-    let exact = find_function_by_name(functions, target);
-    if exact != null { return exact; }
-    let suffix_prefix = target + "__";
-    let mut match_result: NativeFunction? = null;
-    let mut idx: number = 0;
-    loop {
-        if idx >= functions.length { break; }
-        let candidate = functions[idx];
-        if starts_with(candidate.name, suffix_prefix) {
-            if match_result != null { return null; }
-            match_result = candidate;
-        }
-        idx += 1;
-    }
-    return match_result;
-}
-
 // Resolve the function signature for a call target: return type, expected parameter
 // types, whether it's a trait dispatch, and the resolved function entry.
-fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution ![io] {
+fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution {
     let mut result_target = trimmed_target;
     let mut function_entry: NativeFunction? = null;
     let mut llvm_return: string = "i8*";
@@ -675,7 +657,7 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
         }
     }
 
-    function_entry = _find_function_by_name_or_import(functions, result_target);
+    function_entry = find_function_by_name_or_import(functions, result_target);
     if result_helper == null {
         result_helper = find_runtime_helper(result_target);
     }
@@ -698,8 +680,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                         + "`");
                     llvm_return = "i8*";
                 } else { llvm_return = future_return; }
-                // Store the underlying return type so await can unbox structs
-                fs.writeFile("build/sailfin/.async_inner_return_type", function_entry.return_type);
+                // The underlying Sailfin return type is recovered on the let
+                // side via find_function_by_name(functions, target) so `await`
+                // can unbox structs — no file IPC needed.
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
             } else {
                 llvm_return = map_return_type(context, function_entry.return_type);
