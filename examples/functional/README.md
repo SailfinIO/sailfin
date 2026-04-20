@@ -10,4 +10,4 @@ Explores first-class functions, higher-order patterns, method-style collection h
 ## Notes
 
 - Function types like `(number) -> number` are parsed; deeper type inference & closure capture analysis will land in the self-hosted compiler.
-- Chaining and pipelining (`|>`) appear in other examples (see `ai/model-workflow.sfn` and pipelines once expanded).
+- The `|>` pipeline operator is a planned post-1.0 feature — not yet in the parser.

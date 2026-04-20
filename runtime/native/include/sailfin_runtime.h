@@ -159,7 +159,6 @@ extern "C"
     void *sailfin_runtime_create_capability_grant(void *effects);
     void *sailfin_runtime_create_filesystem_bridge(void *config);
     void *sailfin_runtime_create_http_bridge(void *config);
-    void *sailfin_runtime_create_model_bridge(void *config);
 
     // Filesystem adapter stubs.
     void *sailfin_adapter_fs_read_file(void *path);
@@ -170,10 +169,9 @@ extern "C"
     bool sailfin_adapter_fs_create_directory(void *path, bool recursive);
     bool sailfin_intrinsic_fs_exists(void *path);
 
-    // HTTP/model stubs.
+    // HTTP adapter stubs.
     void *sailfin_adapter_http_get(void *request);
     void *sailfin_adapter_http_post(void *request, void *body);
-    void *sailfin_adapter_model_invoke_with_prompt(void *model, void *prompt);
 
     // Package-manager HTTP helpers (curl subprocess).
     char *sailfin_runtime_http_get(const char *url);

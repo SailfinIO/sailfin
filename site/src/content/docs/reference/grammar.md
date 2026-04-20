@@ -46,9 +46,6 @@ Declaration        = StructDeclaration
                    | EnumDeclaration
                    | InterfaceDeclaration
                    | FunctionDeclaration
-                   | PipelineDeclaration
-                   | ToolDeclaration
-                   | ModelDeclaration
                    | TestDeclaration
                    | TypeAliasDeclaration
                    | VariableDeclaration ;
@@ -136,26 +133,16 @@ VariableDeclaration  = "let" [ "mut" ] Identifier [ TypeAnnotation ]
                        [ "=" Expression ] ";" ;
 ```
 
-### AI-Native Declarations
+### Tests
 
 ```ebnf
-ModelDeclaration    = "model" Identifier ":" Type [ EffectList ] ModelBlock ;
-ModelBlock          = "{" { ModelProperty } "}" ;
-ModelProperty       = Identifier "=" ModelValue ";" ;
-ModelValue          = Expression | Type ;
-
-PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
-                      [ ReturnType ] [ EffectList ] Block ;
-
-ToolDeclaration     = "tool" Identifier "(" [ Parameters ] ")"
-                      [ ReturnType ] [ EffectList ] Block ;
-
 TestDeclaration     = "test" ( Identifier | StringLiteral ) [ EffectList ] Block ;
 ```
 
-> **Status**: `model`, `pipeline`, and `tool` declarations are parsed and emit
-> `.sfn-asm` IR today. Model execution (`.call()`), the `|>` operator, and the
-> tool dispatcher are planned for post-1.0. See [Status](/docs/reference/spec#part-b--design-preview).
+> **Note**: `model`, `prompt`, `tool`, and `pipeline` block declarations were
+> removed from the grammar. AI functionality is delivered through the post-1.0
+> `sfn/ai` library capsule; the `![model]` effect remains as the capability
+> gate.
 
 ## Statements
 
@@ -174,7 +161,6 @@ Statement          = VariableDeclaration
                    | ReturnStatement
                    | ThrowStatement
                    | WithStatement
-                   | PromptStatement
                    | AssertStatement
                    | UnsafeBlock
                    | Block
@@ -213,15 +199,6 @@ ExpressionStatement = Expression ";" ;
 > **Note**: `RoutineDeclaration` (`routine { }`, `routine "name" { }`) appears in
 > example code today, but full runtime support (scheduling, joins) is planned for
 > 1.0. See the [roadmap](/roadmap).
-
-### Prompt Statements
-
-```ebnf
-PromptStatement    = "prompt" PromptChannel Block ;
-PromptChannel      = Identifier | StringLiteral ;
-```
-
-Canonical channel names are `system`, `user`, `assistant`, and `tool`. Any identifier is accepted; channel vocabulary enforcement is planned.
 
 ## Expressions
 

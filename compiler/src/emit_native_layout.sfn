@@ -583,9 +583,6 @@ fn canonical_type_layouts() -> CanonicalTypeLayout[] {
         name: "MatchCase", size: 80, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "ModelProperty", size: 64, align: 8
-    });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "FieldDeclaration", size: 32, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
@@ -598,16 +595,7 @@ fn canonical_type_layouts() -> CanonicalTypeLayout[] {
         name: "FunctionSignature", size: 56, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "PipelineDeclaration", size: 88, align: 8
-    });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "ToolDeclaration", size: 88, align: 8
-    });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "TestDeclaration", size: 48, align: 8
-    });
-    layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
-        name: "ModelDeclaration", size: 40, align: 8
     });
     layouts = append_canonical_type_layout(layouts, CanonicalTypeLayout {
         name: "Decorator", size: 16, align: 8

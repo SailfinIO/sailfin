@@ -224,18 +224,6 @@ fn emit_statement_declarations(state: NativeState, statement: Statement) -> Stat
             handled: true
         };
     }
-    if statement.variant == "PipelineDeclaration" {
-        return StatementDispatchResult {
-            state: emit_pipeline(state, statement),
-            handled: true
-        };
-    }
-    if statement.variant == "ToolDeclaration" {
-        return StatementDispatchResult {
-            state: emit_tool(state, statement),
-            handled: true
-        };
-    }
     if statement.variant == "TestDeclaration" {
         return StatementDispatchResult {
             state: emit_test(state, statement),
@@ -246,12 +234,6 @@ fn emit_statement_declarations(state: NativeState, statement: Statement) -> Stat
 }
 
 fn emit_statement_type_decls(state: NativeState, statement: Statement) -> StatementDispatchResult {
-    if statement.variant == "ModelDeclaration" {
-        return StatementDispatchResult {
-            state: emit_model(state, statement),
-            handled: true
-        };
-    }
     if statement.variant == "TypeAliasDeclaration" {
         return StatementDispatchResult {
             state: emit_type_alias(state, statement),
@@ -267,12 +249,6 @@ fn emit_statement_type_decls(state: NativeState, statement: Statement) -> Statem
     if statement.variant == "EnumDeclaration" {
         return StatementDispatchResult {
             state: emit_enum(state, statement),
-            handled: true
-        };
-    }
-    if statement.variant == "PromptStatement" {
-        return StatementDispatchResult {
-            state: emit_prompt(state, statement),
             handled: true
         };
     }
@@ -415,28 +391,6 @@ fn emit_function(state: NativeState, signature: FunctionSignature, body: Block, 
     return state_emit_line(current, ".endfn");
 }
 
-fn emit_pipeline(state: NativeState, statement: Statement) -> NativeState {
-    let mut current = emit_decorators(state, statement.decorators);
-    current = state_emit_line(current, ".pipeline " + format_function_signature(statement.signature));
-    current = emit_signature_metadata(current, statement.signature);
-    current = emit_parameter_metadata(current, statement.signature.parameters);
-    current = state_push_indent(current);
-    current = emit_block(current, statement.body);
-    current = state_pop_indent(current);
-    return state_emit_line(current, ".endpipeline");
-}
-
-fn emit_tool(state: NativeState, statement: Statement) -> NativeState {
-    let mut current = emit_decorators(state, statement.decorators);
-    current = state_emit_line(current, ".tool " + format_function_signature(statement.signature));
-    current = emit_signature_metadata(current, statement.signature);
-    current = emit_parameter_metadata(current, statement.signature.parameters);
-    current = state_push_indent(current);
-    current = emit_block(current, statement.body);
-    current = state_pop_indent(current);
-    return state_emit_line(current, ".endtool");
-}
-
 fn emit_test(state: NativeState, statement: Statement) -> NativeState {
     // NOTE: We intentionally lower `test "..." {}` to a normal function named
     // `test:<sanitized>` (instead of emitting a `.test` directive).
@@ -448,30 +402,6 @@ fn emit_test(state: NativeState, statement: Statement) -> NativeState {
     return emit_function(state, FunctionSignature {
         name: test_symbol, is_async: false, parameters: [], return_type: null, effects: statement.effects, type_parameters: [], name_span: statement.name_span
     }, statement.body, statement.decorators);
-}
-
-fn emit_model(state: NativeState, statement: Statement) -> NativeState {
-    let mut current = emit_decorators(state, statement.decorators);
-    let mut header: string = ".model " + statement.name + " : " + statement.model_type.text;
-    if statement.effects.length > 0 {
-        header = header + " ![" + join_with_separator(statement.effects, ", ")
-            + "]";
-    }
-    current = state_emit_line(current, header);
-    current = state_push_indent(current);
-    let mut index: number = 0;
-    loop {
-        if index >= statement.properties.length { break; }
-        let property = statement.properties[index];
-        let line = ".property " + property.name + " = " + format_expression(property.value);
-        current = state_emit_line(current, line);
-        index += 1;
-    }
-    if statement.properties.length == 0 {
-        current = state_emit_line(current, "noop");
-    }
-    current = state_pop_indent(current);
-    return state_emit_line(current, ".endmodel");
 }
 
 fn emit_type_alias(state: NativeState, statement: Statement) -> NativeState {
@@ -573,15 +503,6 @@ fn emit_method(state: NativeState, method: MethodDeclaration) -> NativeState {
     current = emit_block(current, method.body);
     current = state_pop_indent(current);
     return state_emit_line(current, ".endmethod");
-}
-
-fn emit_prompt(state: NativeState, statement: Statement) -> NativeState {
-    let mut current = emit_decorators(state, statement.decorators);
-    current = state_emit_line(current, ".prompt " + statement.channel);
-    current = state_push_indent(current);
-    current = emit_block(current, statement.body);
-    current = state_pop_indent(current);
-    return state_emit_line(current, ".endprompt");
 }
 
 fn emit_with(state: NativeState, statement: Statement) -> NativeState {
@@ -842,9 +763,6 @@ fn count_exported_symbols(program: Program) -> number {
         if stmt.variant == "FunctionDeclaration" { _if24 = true; }
         if stmt.variant == "StructDeclaration" { _if24 = true; }
         if stmt.variant == "EnumDeclaration" { _if24 = true; }
-        if stmt.variant == "PipelineDeclaration" { _if24 = true; }
-        if stmt.variant == "ToolDeclaration" { _if24 = true; }
-        if stmt.variant == "ModelDeclaration" { _if24 = true; }
         if stmt.variant == "TestDeclaration" { _if24 = true; }
         if stmt.variant == "TypeAliasDeclaration" { _if24 = true; }
         if stmt.variant == "InterfaceDeclaration" { _if24 = true; }
@@ -910,12 +828,6 @@ fn collect_local_definition_names(program: Program) -> string[] {
         if stmt.variant == "ExternFunctionDeclaration" {
             names = append_unique(names, stmt.signature.name);
         }
-        if stmt.variant == "PipelineDeclaration" {
-            names = append_unique(names, stmt.signature.name);
-        }
-        if stmt.variant == "ToolDeclaration" {
-            names = append_unique(names, stmt.signature.name);
-        }
         if stmt.variant == "StructDeclaration" {
             names = append_unique(names, stmt.name);
         }
@@ -926,9 +838,6 @@ fn collect_local_definition_names(program: Program) -> string[] {
             names = append_unique(names, stmt.name);
         }
         if stmt.variant == "TypeAliasDeclaration" {
-            names = append_unique(names, stmt.name);
-        }
-        if stmt.variant == "ModelDeclaration" {
             names = append_unique(names, stmt.name);
         }
         if stmt.variant == "VariableDeclaration" {

@@ -62,7 +62,7 @@ feature availability.
 | Effect annotations (`![...]`) | Shipped | Parsing and declaration |
 | Effect enforcement — `io` | Not enforced | Checker logic exists for `print.*`, `console.*`, `fs.*`, `@logExecution` but is not run during compilation |
 | Effect enforcement — `net` | Not enforced | Checker logic exists for `http.*`, `websocket.*`, `serve` but is not run during compilation |
-| Effect enforcement — `model` | Not enforced | Checker logic exists for `prompt` blocks but is not run during compilation |
+| Effect enforcement — `model` | Not enforced | Effect is declarable; transitive propagation from `sfn/ai` library functions will enforce it once that capsule ships |
 | Effect enforcement — `clock` | Not enforced | Checker logic exists for `sleep`/`runtime.sleep` but is not run during compilation |
 | Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; no checker logic |
 | Effect enforcement as compilation gate | **Not yet** | `validate_effects()` exists but is not invoked by the compiler; top priority |
@@ -71,18 +71,12 @@ feature availability.
 | `Affine<T>` / `Linear<T>` | Parsed only | Ownership wrappers accepted; move/consume rules not enforced |
 | `&T` / `&mut T` borrows | Parsed only | Accepted syntactically; exclusivity not checked |
 | `PII<T>` / `Secret<T>` | Parsed only | Parsed as nominal types; no taint enforcement |
-| `model` declarations | Parsed + IR | Emits `.model` directive in `.sfn-asm`; **no runtime execution** |
-| `prompt` blocks | Parsed + IR | Emits `.prompt` directive; **no runtime execution** |
-| `pipeline` declarations | Parsed + IR | Parsed as plain functions; `\|>` operator **not implemented** |
-| `tool` declarations | Parsed + IR | Recorded as metadata; no dispatcher |
+| `model` / `prompt` / `tool` / `pipeline` blocks | **Removed** | Moved to the `sfn/ai` library capsule (post-1.0). The `![model]` effect remains as the capability gate |
 | `routine { }` blocks | **Not implemented** | Not parsed |
 | `await` | **Not implemented** | Not parsed |
 | `channel()` concurrency | **Not implemented** | Not parsed as concurrency primitive |
 | `spawn` | **Not implemented** | Not parsed |
-| Model execution (`.call()`) | **Not implemented** | Parses as method call; no model runtime |
-| Generation cards / provenance | **Not implemented** | Planned alongside model execution |
-| Typed prompt channels | **Not implemented** | `prompt user<T> { }` is design-stage syntax |
-| `\|>` pipeline operator | **Not implemented** | |
+| `\|>` pipeline operator | **Not implemented** | Planned post-1.0 expression operator (unrelated to the removed `pipeline` block) |
 | Currency literals (`$0.05`) | **Not implemented** | Use numeric literal + comment |
 | Time literals (`1s`, `150ms`) | **Not implemented** | Use numeric literals |
 | `scope.with_timeout(...)` | **Not implemented** | |
@@ -255,26 +249,28 @@ from marketing materials and the homepage.
 focuses on making these world-class. AI integration, ownership enforcement,
 and taint tracking are post-1.0 library and compiler work.
 
-## AI / Model Constructs (Migration to Library)
+## AI / Model Constructs (Moved to Library)
 
 The `model`, `prompt`, `tool`, and `pipeline` keywords were originally designed
-as language-level syntax. Following a strategic review, these are being migrated
-to the `sfn/ai` library capsule for post-1.0 delivery. Rationale:
+as language-level syntax. They have been **removed from the language** and will
+be delivered as ordinary library APIs in the post-1.0 `sfn/ai` capsule.
+Rationale:
 
 - AI APIs change faster than language grammars can evolve
 - Library-level features can iterate independently of compiler releases
 - The `![model]` effect — the capability gate — remains a language-level feature
-- Keyword syntax reserved unnecessary grammar surface for features that have
-  no runtime behavior today
+- Keyword syntax reserved unnecessary grammar surface for features that had no
+  runtime behaviour
 
-**Current state**: `model`, `prompt`, `tool`, and `pipeline` blocks are still
-parsed and emit metadata to `.sfn-asm`, but perform no runtime execution. They
-will be migrated to the `sfn/ai` capsule as library types and functions.
+**Current state**: The parser, AST, typecheck, effect-checker, native emitter,
+LLVM runtime-helper descriptors, and C runtime stubs for these constructs have
+all been removed. The `![model]` effect is the only AI-specific construct that
+remains in the language.
 
 **What stays in the language**: The `![model]` effect annotation, which gates
-AI operations through the capability system. The effect checker detects
-violations, but enforcement does not yet block compilation (see Effect
-System Hardening on the [roadmap](https://sailfin.dev/roadmap)).
+AI operations through the capability system. Once the `sfn/ai` capsule ships,
+its functions will carry `![model]` in their signatures and effect checking
+will propagate transitively the same way it does for `io`, `net`, and `clock`.
 
-Design documents are preserved in `docs/spec.md` §3.6–§3.9 and
+Design-level discussion for the future library API is preserved in
 `docs/proposals/model-engines-and-training.md`.

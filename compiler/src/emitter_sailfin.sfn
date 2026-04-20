@@ -19,7 +19,6 @@ import {
     ImportSpecifier,
     MatchCase,
     MethodDeclaration,
-    ModelProperty,
     Parameter,
     Program,
     Statement,
@@ -135,17 +134,8 @@ fn emit_statement(builder: TextBuilder, statement: Statement) -> TextBuilder {
     if statement.variant == "StructDeclaration" {
         return emit_struct(builder, statement);
     }
-    if statement.variant == "PipelineDeclaration" {
-        return emit_callable(builder, "pipeline", statement.signature, statement.body, statement.decorators);
-    }
-    if statement.variant == "ToolDeclaration" {
-        return emit_callable(builder, "tool", statement.signature, statement.body, statement.decorators);
-    }
     if statement.variant == "TestDeclaration" {
         return emit_test(builder, statement);
-    }
-    if statement.variant == "ModelDeclaration" {
-        return emit_model(builder, statement);
     }
     if statement.variant == "TypeAliasDeclaration" {
         return emit_type_alias(builder, statement);
@@ -197,12 +187,6 @@ fn emit_function(builder: TextBuilder, signature: FunctionSignature, body: Block
     return emit_block_with_header(current, header, body);
 }
 
-fn emit_callable(builder: TextBuilder, keyword: string, signature: FunctionSignature, body: Block, decorators: Decorator[]) -> TextBuilder {
-    let mut current = emit_decorators(builder, decorators);
-    let header = format_callable_header(keyword, signature);
-    return emit_block_with_header(current, header, body);
-}
-
 fn emit_test(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut current = emit_decorators(builder, statement.decorators);
     let name = format_test_name(statement.name);
@@ -210,28 +194,6 @@ fn emit_test(builder: TextBuilder, statement: Statement) -> TextBuilder {
     let mut header: string = "test " + name;
     if effects.length > 0 { header = header + " " + effects; }
     return emit_block_with_header(current, header, statement.body);
-}
-
-fn emit_model(builder: TextBuilder, statement: Statement) -> TextBuilder {
-    let mut current = emit_decorators(builder, statement.decorators);
-    let mut header: string = "model " + statement.name + " : " + statement.model_type.text;
-    let effects = format_effects(statement.effects);
-    if effects.length > 0 { header = header + " " + effects; }
-    current = emit_block_header(current, header);
-    let mut index: number = 0;
-    loop {
-        if index >= statement.properties.length { break; }
-        let property = statement.properties[index];
-        let line = property.name + " = " + format_expression(property.value)
-            + ";";
-        current = builder_emit_line(current, line);
-        index += 1;
-    }
-    if statement.properties.length == 0 {
-        current = builder_emit_line(current, "// empty model body");
-    }
-    current = emit_block_end(current);
-    return current;
 }
 
 fn format_import_specifiers(specifiers: ImportSpecifier[]) -> string {
@@ -398,9 +360,6 @@ fn emit_block_statement(builder: TextBuilder, statement: Statement) -> TextBuild
     if statement.variant == "VariableDeclaration" {
         return emit_variable(builder, statement);
     }
-    if statement.variant == "PromptStatement" {
-        return emit_prompt(builder, statement);
-    }
     if statement.variant == "WithStatement" {
         return emit_with(builder, statement);
     }
@@ -428,13 +387,6 @@ fn emit_block_statement(builder: TextBuilder, statement: Statement) -> TextBuild
     }
     return builder_emit_line(builder, "// TODO: unsupported block statement: "
         + statement.variant);
-}
-
-fn emit_prompt(builder: TextBuilder, statement: Statement) -> TextBuilder {
-    let mut current = emit_decorators(builder, statement.decorators);
-    let header = "prompt " + statement.channel;
-    current = emit_block_with_header(current, header, statement.body);
-    return builder_emit_line(current, ";");
 }
 
 fn emit_with(builder: TextBuilder, statement: Statement) -> TextBuilder {
@@ -585,10 +537,6 @@ fn format_function_header(signature: FunctionSignature) -> string {
 
 fn format_method_header(signature: FunctionSignature) -> string {
     return format_signature_line("fn", signature);
-}
-
-fn format_callable_header(keyword: string, signature: FunctionSignature) -> string {
-    return format_signature_line(keyword, signature);
 }
 
 fn format_signature_line(keyword: string, signature: FunctionSignature) -> string {

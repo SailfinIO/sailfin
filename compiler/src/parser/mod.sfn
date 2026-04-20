@@ -20,11 +20,8 @@ import {
     parse_function,
     parse_import,
     parse_interface,
-    parse_model,
-    parse_pipeline,
     parse_struct,
     parse_test,
-    parse_tool,
     parse_type_alias,
     parse_unknown,
     parse_variable
@@ -97,18 +94,6 @@ fn parse_statement(initial_parser: Parser) -> StatementParseResult {
         if decorators.length > 0 { return parse_unknown(original); }
         return parse_variable(parser);
     }
-    if identifier_matches(token, "model") {
-        if decorators.length > 0 { return parse_unknown(original); }
-        return parse_model(parser, decorators);
-    }
-    if identifier_matches(token, "pipeline") {
-        if decorators.length > 0 { return parse_unknown(original); }
-        return parse_pipeline(parser, decorators);
-    }
-    if identifier_matches(token, "tool") {
-        if decorators.length > 0 { return parse_unknown(original); }
-        return parse_tool(parser, decorators);
-    }
     if identifier_matches(token, "test") {
         if decorators.length > 0 { return parse_unknown(original); }
         return parse_test(parser, decorators);
@@ -174,7 +159,6 @@ export {
     ParameterParseResult,
     ParameterListParseResult,
     StructFieldParseResult,
-    ModelPropertyParseResult,
     MethodParseResult,
     InterfaceMemberParseResult,
     EnumVariantParseResult,
@@ -359,7 +343,6 @@ export {
     split_match_case_tokens,
 
     // Special statements
-    parse_prompt_statement,
     parse_with_statement,
 
     // Return, throw, try/catch, assert
@@ -428,16 +411,6 @@ export {
 
     // Type alias declaration
     parse_type_alias,
-
-    // Model declaration
-    parse_model,
-    parse_model_property,
-
-    // Pipeline declaration
-    parse_pipeline,
-
-    // Tool declaration
-    parse_tool,
 
     // Test declaration
     parse_test,

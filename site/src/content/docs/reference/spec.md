@@ -185,71 +185,14 @@ type Row = number[];
 > `Result<T, E>` and function type aliases are on the [roadmap](/roadmap);
 > use union return types (`T | MyError`) and plain function signatures today.
 
-#### §3.7 Model Declarations
+#### §3.7 AI Constructs (Moved to Library)
 
-> **Status**: Parsed and emits `.model` IR. Model execution (`.call()`) and
-> generation cards are planned for the post-1.0 AI milestone.
+The `model`, `prompt`, `tool`, and `pipeline` block keywords have been removed
+from the language. AI functionality will be delivered via the `sfn/ai` library
+capsule, planned post-1.0. The `![model]` effect remains as the language-level
+capability gate — see §7.
 
-```sfn
-model Summarizer : Model<Text, Summary> {
-    engine     = "openai:gpt-4o@2025-06";
-    schema     = Summary;
-    max_tok    = 2000;
-    cost_cap   = 0.05;           // USD
-    evaluators = [ Faithfulness, LatencyBudget ];
-}
-```
-
-| Property | Type | Required | Description |
-|----------|------|----------|-------------|
-| `engine` | string | Yes | Provider + version tag |
-| `schema` | Type | Yes | Output validation type |
-| `max_tok` | number | No | Maximum output tokens |
-| `cost_cap` | number | No | Maximum spend per call |
-| `evaluators` | Array | No | Quality/guardrail evaluators |
-| `temperature` | number | No | Sampling temperature (0–2) |
-| `seed` | number | No | Deterministic seed |
-
-#### §3.8 Prompt Blocks
-
-> **Status**: Parsed and emits `.prompt` IR. The `model` effect is enforced.
-> No network calls are made — prompt execution is planned post-1.0.
-
-```sfn
-fn summarize(doc: string) -> Summary ![model] {
-    prompt system { "You are a precise technical summarizer." }
-    prompt user   { "Summarize:\n{{ doc }}" }
-    // Summarizer.call() — execution planned
-}
-```
-
-Prompt blocks execute in source order. Canonical channel names: `system`, `user`,
-`assistant`, `tool`. Any identifier is accepted; vocabulary enforcement is planned.
-
-#### §3.9 Pipeline Declarations
-
-> **Status**: Parsed as plain functions. The `|>` operator is not yet implemented (see [roadmap](/roadmap)).
-
-```sfn
-pipeline process_docs(docs: string[]) -> void ![io] {
-    // Use function calls until |> is implemented
-    let chunked = chunk(docs);
-    let embedded = embed(chunked);
-    upsert(embedded, "docs_idx");
-}
-```
-
-#### §3.10 Tool Declarations
-
-> **Status**: Parsed and recorded as metadata. No dispatcher yet.
-
-```sfn
-tool FetchUser(id: string) -> User ![net] {
-    return http.get("/users/{{ id }}");
-}
-```
-
-#### §3.11 Test Declarations
+#### §3.8 Test Declarations
 
 ```sfn
 test "basic arithmetic" {
@@ -401,7 +344,7 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 |--------|-------|--------|----------------|
 | IO | `io` | Filesystem, console, logging | Yes |
 | Network | `net` | HTTP, WebSocket, serve | Yes |
-| Model | `model` | Prompt blocks, model invocation | Yes (prompt blocks) |
+| Model | `model` | AI library invocation via `sfn/ai` (post-1.0) | Yes |
 | Clock | `clock` | `sleep`, wall-clock | Partial |
 | GPU | `gpu` | Tensor operations | Parsed only |
 | Random | `rand` | Random generation | Parsed only |
@@ -519,32 +462,21 @@ fn process_batch(items: Item[]) ![io] {
 **Planned for 1.0**: `await`, full `routine` runtime, channel runtime, `spawn`.
 See the [roadmap](/roadmap).
 
-### Model Execution
+### AI / Model Functionality (Post-1.0 Library)
 
-```sfn
-// model.call() parses today but performs no execution
-
-fn summarize(text: string) -> Summary ![io, model] {
-    prompt system { "You are a precise summarizer." }
-    prompt user   { "Summarize: {{ text }}" }
-    let gen = Summarizer.call();   // planned: executes against model provider
-    print(gen.card);               // planned: generation card (provenance metadata)
-    return gen.output;             // planned: typed Summary
-}
-```
-
-**Planned post-1.0**: model execution, generation cards, typed output schemas, evaluators.
+The `model`, `prompt`, `tool`, and `pipeline` block keywords have been removed
+from the language. Model invocation, generation cards, typed output schemas,
+evaluators, and provider adapters are planned for the post-1.0 `sfn/ai` library
+capsule. The `![model]` effect remains in the language as the capability gate.
 
 ### Pipeline Operator
 
 ```sfn
 // |> is not yet implemented; use function calls
-
-pipeline index_corpus(docs: string[]) -> void ![io, gpu] {
-    docs
-        |> chunk(by: "semantic", target_tokens: 512)   // planned
-        |> embed(with: "e5-large")
-        |> upsert(index: "docs_idx");
+fn index_corpus(docs: string[]) -> void ![io] {
+    let chunked = chunk(docs);
+    let embedded = embed(chunked);
+    upsert(embedded, "docs_idx");
 }
 ```
 

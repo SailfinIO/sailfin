@@ -213,52 +213,6 @@ unsafe fn write_raw(ptr: *mut u8, value: u8) -> void {
 
 ---
 
-### `model`
-
-**Status: Parsed + IR**
-
-Declare a model artifact with metadata (provider, model identifier, parameters). The compiler emits a `.model` directive in `.sfn-asm` IR. Model execution via `.call()` is not yet implemented. This construct is being migrated to the `sfn/ai` library capsule.
-
-```sfn
-model Summarizer : Model<Text, Summary> {
-    engine = "openai:gpt-4o@2025-06";
-    schema = Summary;
-    max_tok = 2000;
-}
-```
-
----
-
-### `pipeline`
-
-**Status: Parsed + IR**
-
-Declare a data-processing pipeline. Parsed as a function-like declaration and lowered to `.sfn-asm`. The `|>` pipeline operator is not yet implemented.
-
-```sfn
-pipeline process_orders(orders: Order[]) -> void ![io, model] {
-    for order in orders {
-        process(order);
-    }
-}
-```
-
----
-
-### `tool`
-
-**Status: Parsed + IR**
-
-Declare a callable tool that can be exposed to a model. Recorded as metadata in `.sfn-asm`; no dispatcher is implemented yet.
-
-```sfn
-tool GetWeather(location: string) -> string ![net] {
-    return http.get("https://api.weather.example/current?q={{ location }}").body;
-}
-```
-
----
-
 ### `test`
 
 **Status: Implemented**
@@ -554,57 +508,10 @@ spawn {
 
 ## AI and Domain Keywords
 
-### `prompt`
-
-**Status: Parsed + IR**
-
-Send a prompt to a model declared in the enclosing scope. Requires the `![model]` effect. Prompt blocks emit a `.prompt` directive in `.sfn-asm` IR. Runtime execution is not yet implemented.
-
-```sfn
-fn summarize(text: string) -> string ![model] {
-    prompt system {
-        "You are a precise summarizer.";
-    }
-    prompt user {
-        "Summarize the following in one sentence: {{ text }}";
-    }
-    return call_model("summarizer", text);
-}
-```
-
----
-
-### `system` / `user` / `assistant`
-
-**Status: Parsed + IR**
-
-Canonical channel identifiers used immediately after `prompt`. They correspond
-to the standard `system`, `user`, and `assistant` roles in language model APIs.
-Each `prompt CHANNEL { body }` block emits one `.prompt` directive.
-
-```sfn
-fn classify(input: string) -> string ![model] {
-    prompt system {
-        "You are a helpful classifier. Respond with a single category.";
-    }
-    prompt user {
-        input;
-    }
-    return call_model("classifier", input);
-}
-```
-
-The `assistant` channel seeds the model's reply context (few-shot examples) by
-appending another prompt block:
-
-```sfn
-prompt system { "Translate English to French."; }
-prompt user { "Good morning"; }
-prompt assistant { "Bonjour"; }
-prompt user { text_to_translate; }
-```
-
-> **Typed prompt channels** (`prompt user<MyType> { }`) are a design-stage feature and are not yet implemented.
+The `model`, `prompt`, `tool`, and `pipeline` block keywords have been removed
+from the language. AI functionality is being delivered as a post-1.0 library
+via the `sfn/ai` capsule. The `![model]` effect remains in the language as the
+capability gate for any code that calls into AI library functions.
 
 ---
 

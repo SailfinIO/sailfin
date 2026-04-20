@@ -5163,12 +5163,6 @@ void *sailfin_runtime_create_http_bridge(void *config)
     return NULL;
 }
 
-void *sailfin_runtime_create_model_bridge(void *config)
-{
-    (void)config;
-    return NULL;
-}
-
 void *sailfin_adapter_fs_read_file(void *path)
 {
     _runtime_enter();
@@ -5950,13 +5944,6 @@ char *sailfin_runtime_read_file_bytes(const char *path, int64_t *out_length)
     buf[read_n] = '\0';
     *out_length = (int64_t)read_n;
     return buf;
-}
-
-void *sailfin_adapter_model_invoke_with_prompt(void *model, void *prompt)
-{
-    (void)model;
-    (void)prompt;
-    return NULL;
 }
 
 void *sailfin_runtime_to_debug_string(void *value)

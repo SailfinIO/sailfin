@@ -7,7 +7,6 @@ import {
     FieldDeclaration,
     FunctionSignature,
     MethodDeclaration,
-    ModelProperty,
     SourceSpan,
     Statement,
     TypeAnnotation,
@@ -329,24 +328,6 @@ fn check_interface_members(members: FunctionSignature[]) -> Diagnostic[] {
             diagnostics.push(make_duplicate_symbol_diagnostic(name, "interface member", token_from_name(name, member.name_span)));
         } else { seen.push(name); }
         _mbi += 1;
-    }
-
-    return diagnostics;
-}
-
-fn check_model_properties(properties: ModelProperty[]) -> Diagnostic[] {
-    let mut seen: string[] = [];
-    let mut diagnostics: Diagnostic[] = [];
-
-    let mut _pi: number = 0;
-    loop {
-        if _pi >= properties.length { break; }
-        let property = properties[_pi];
-        let name = property.name;
-        if contains_string(seen, name) {
-            diagnostics.push(make_duplicate_symbol_diagnostic(name, "model property", token_from_name(name, property.span)));
-        } else { seen.push(name); }
-        _pi += 1;
     }
 
     return diagnostics;

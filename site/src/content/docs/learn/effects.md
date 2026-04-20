@@ -52,7 +52,7 @@ Java's checked exceptions are also transitive, but they are limited to exception
 |--------|-----------------|-------------------|:--------------:|
 | `io` | Filesystem, console, logging | `fs.read`, `fs.write`, `print()`, `print.err()`, `console.*`, `@logExecution` | Yes |
 | `net` | Network I/O | `http.get`, `http.post`, `websocket.*`, `serve` | Yes |
-| `model` | AI model invocation | `prompt` blocks, `model.call()` (execution planned) | Yes — required for any `prompt` block |
+| `model` | AI library invocation (`sfn/ai`, post-1.0) | Library functions carrying `![model]` (e.g., from `sfn/ai`) | Yes — required for any callee that declares `![model]` |
 | `clock` | Wall-clock and sleep | `sleep(ms)`, `runtime.sleep(ms)` | Partial — `sleep`/`runtime.sleep` checked; hierarchical names not yet enforced |
 | `gpu` | GPU and accelerator access | Tensor operations, `@gpu` blocks | Parsed only — not validated |
 | `rand` | Random number generation | `rand.int()`, `rand.float()`, `rand.shuffle()` | Parsed only — not validated |
@@ -230,35 +230,6 @@ The effect requirement on tests is intentional: it makes it visible at a glance 
 
 ---
 
-## Effects in Pipelines and Tools
-
-### Pipelines
-
-A `pipeline` declaration aggregates the effects of all its steps. Each step declares its own effects; the pipeline itself declares the union:
-
-```sfn
-pipeline analyze_feedback(path: string) ![io, model] {
-    let text = fs.read(path);
-    let result = prompt gpt4o {
-        system "Classify this feedback as: positive, negative, or neutral."
-        user "{{text}}"
-    };
-    fs.write(path + ".result", result);
-}
-```
-
-### Tools
-
-Tool declarations expose typed functions to model invocation. A `tool` block looks like a function declaration with the `tool` keyword:
-
-```sfn
-tool lookup_order(id: string) -> Order ![io] {
-    return db.find_order(id);
-}
-```
-
-A function that invokes a tool with a `prompt` block must declare `![model]`; any additional effects used inside the tool body (like `![io]` above) must also appear on the calling context.
-
 ---
 
 ## Effects in Lambdas and Closures
@@ -299,14 +270,6 @@ effects.missing: function `save_report` calls `fs.write` which requires ![io],
 effects.missing: function `run_query` calls `http.post` which requires ![net],
                  but `run_query` only declares ![io]
   = help: add `net` to the effect list: `fn run_query(...) ![io, net]`
-```
-
-### Missing effect for a prompt block
-
-```
-effects.missing: `prompt` block requires the `model` effect,
-                 but `summarize` declares no effects
-  = help: add `model` to the function signature: `fn summarize(text: string) -> string ![model]`
 ```
 
 ### How to read the diagnostic
@@ -480,11 +443,8 @@ fn fetch_fn(url: string) -> string ![net] { ... }
 // Test with effects
 test "my test" ![io] { ... }
 
-// Pipeline
-pipeline my_pipeline(input: string) ![io, model] { ... }
-
-// Tool
-tool my_tool(id: string) -> Data ![io] { ... }
+// Function using AI library (post-1.0 sfn/ai capsule)
+fn ai_fn(input: string) -> string ![model] { ... }
 ```
 
 ---

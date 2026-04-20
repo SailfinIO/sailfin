@@ -89,12 +89,6 @@ struct MatchCase {
     body: Block;
 }
 
-struct ModelProperty {
-    name: string;
-    value: Expression;
-    span: SourceSpan?;
-}
-
 struct FieldDeclaration {
     name: string;
     type_annotation: TypeAnnotation;
@@ -124,29 +118,9 @@ struct FunctionSignature {
     name_span: SourceSpan?;
 }
 
-struct PipelineDeclaration {
-    signature: FunctionSignature;
-    body: Block;
-    decorators: Decorator[];
-}
-
-struct ToolDeclaration {
-    signature: FunctionSignature;
-    body: Block;
-    decorators: Decorator[];
-}
-
 struct TestDeclaration {
     name: string;
     body: Block;
-    effects: string[];
-    decorators: Decorator[];
-}
-
-struct ModelDeclaration {
-    name: string;
-    model_type: TypeAnnotation;
-    properties: ModelProperty[];
     effects: string[];
     decorators: Decorator[];
 }
@@ -199,24 +173,6 @@ enum Statement {
         span: SourceSpan?;
         initializer_span: SourceSpan?;
     },
-    ModelDeclaration {
-        name: string;
-        name_span: SourceSpan?;
-        model_type: TypeAnnotation;
-        properties: ModelProperty[];
-        effects: string[];
-        decorators: Decorator[];
-    },
-    PipelineDeclaration {
-        signature: FunctionSignature;
-        body: Block;
-        decorators: Decorator[];
-    },
-    ToolDeclaration {
-        signature: FunctionSignature;
-        body: Block;
-        decorators: Decorator[];
-    },
     TestDeclaration {
         name: string;
         name_span: SourceSpan?;
@@ -262,13 +218,6 @@ enum Statement {
         name_span: SourceSpan?;
         type_parameters: TypeParameter[];
         variants: EnumVariant[];
-        decorators: Decorator[];
-    },
-    PromptStatement {
-        channel: string;
-        keyword_token: Token;
-        channel_token: Token;
-        body: Block;
         decorators: Decorator[];
     },
     WithStatement {

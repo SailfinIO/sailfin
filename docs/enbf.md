@@ -23,9 +23,6 @@ Declaration        = StructDeclaration
                    | EnumDeclaration
                    | InterfaceDeclaration
                    | FunctionDeclaration
-                   | PipelineDeclaration
-                   | ToolDeclaration
-                   | ModelDeclaration
                    | TestDeclaration
                    | TypeAliasDeclaration
                    | VariableDeclaration ;
@@ -80,16 +77,10 @@ FunctionModifier    = "async" | "unsafe" | "extern" ;
 //   unsafe extern fn free(ptr: *u8) -> void;
 //   unsafe extern fn strlen(s: *u8) -> usize;
 
-PipelineDeclaration = "pipeline" Identifier "(" [ Parameters ] ")"
-                      [ TypeSep Type ] [ EffectList ] Block ;
-
-ToolDeclaration     = "tool" Identifier "(" [ Parameters ] ")"
-                      [ TypeSep Type ] [ EffectList ] Block ;
-
-ModelDeclaration    = "model" Identifier ":" Type [ EffectList ] ModelBlock ;
-ModelBlock          = "{" { ModelProperty } "}" ;
-ModelProperty       = Identifier "=" ModelValue ";" ;
-ModelValue          = Expression | Type ;
+// Note: `model`, `prompt`, `tool`, and `pipeline` block declarations were
+// removed from the grammar. AI functionality is delivered through the post-1.0
+// `sfn/ai` library capsule; the `![model]` effect remains as the capability
+// gate.
 
 TestDeclaration     = "test" ( Identifier | StringLiteral ) [ EffectList ] Block ;
 
@@ -115,7 +106,6 @@ Statement          = VariableDeclaration
                    | ReturnStatement
                    | ThrowStatement
                    | WithStatement
-                   | PromptStatement
                    | AssertStatement
                    | UnsafeBlock
                    | Block
@@ -152,11 +142,6 @@ ForStatement       = "for" Expression "in" Expression Block [ ";" ] ;
 LoopStatement      = "loop" Block [ ";" ] ;
 BreakStatement     = "break" [ ";" ] ;
 ContinueStatement  = "continue" [ ";" ] ;
-
-PromptStatement    = "prompt" PromptChannel Block ;
-// Channels are parsed as identifiers; canonical channel names are
-// system | user | assistant | tool (not enforced yet).
-PromptChannel      = Identifier ;
 
 AssignmentStatement = Assignment ";" ;
 Assignment         = Expression ( "=" | "+=" | "-=" | "*=" | "/=" ) Expression ;
