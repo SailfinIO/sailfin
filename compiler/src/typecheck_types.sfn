@@ -459,6 +459,28 @@ fn make_duplicate_symbol_diagnostic(name: string, kind: string, token: Token?) -
     };
 }
 
+// Match a removed AI block keyword at the start of a `Statement.Unknown` text.
+// Returns the keyword if found, or "" otherwise. A keyword only matches if it
+// is followed by a space (i.e. it is acting as a statement-introducer, not part
+// of an identifier like `model_registry`).
+fn detect_removed_ai_keyword(text: string) -> string {
+    if starts_with(text, "model ") { return "model"; }
+    if starts_with(text, "prompt ") { return "prompt"; }
+    if starts_with(text, "tool ") { return "tool"; }
+    if starts_with(text, "pipeline ") { return "pipeline"; }
+    return "";
+}
+
+fn make_removed_keyword_diagnostic(keyword: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0410",
+        message: "`" + keyword + "` block syntax was removed from the language;"
+            + " AI functionality is planned for the post-1.0 `sfn/ai` library"
+            + " capsule and the `![model]` effect remains as the capability gate",
+        primary: null
+    };
+}
+
 fn make_missing_interface_member_diagnostic(struct_name: string, interface_name: string, member_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0301",

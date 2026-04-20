@@ -29,6 +29,8 @@ import {
     check_struct_methods,
     check_type_parameters,
     clone_bindings,
+    detect_removed_ai_keyword,
+    make_removed_keyword_diagnostic,
     register_local_symbol,
     register_symbol
 } from "./typecheck_types";
@@ -337,6 +339,16 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             bindings: registration.bindings,
             diagnostics: diagnostics
         };
+    }
+    if statement.variant == "Unknown" {
+        let keyword = detect_removed_ai_keyword(statement.text);
+        if keyword.length > 0 {
+            return ScopeResult {
+                bindings: bindings,
+                diagnostics: [make_removed_keyword_diagnostic(keyword)]
+            };
+        }
+        return ScopeResult { bindings: bindings, diagnostics: [] };
     }
     return ScopeResult { bindings: bindings, diagnostics: [] };
 }

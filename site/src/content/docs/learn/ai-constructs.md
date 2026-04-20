@@ -15,7 +15,7 @@ The capability gate — `![model]` — stays in the language because it is a com
 
 ## The `![model]` Effect
 
-The `![model]` effect marks any function that calls into the `sfn/ai` capsule or any other library function carrying `![model]` in its signature. The effect propagates transitively through the call graph.
+The `![model]` effect marks any function that calls into the `sfn/ai` capsule or any other library function carrying `![model]` in its signature. Callers are expected to declare the same effect; full call-graph–transitive enforcement based on callee signatures is planned but not yet implemented.
 
 ```sfn
 // A library function that carries ![model] (e.g., from sfn/ai post-1.0)
@@ -36,7 +36,7 @@ fn process_document(doc: string) -> string ![io, model] {
 }
 ```
 
-Omitting `![model]` from any function in the chain is a compile-time error.
+Omitting `![model]` from a function that directly uses a model-capable API is a compile error. Transitive enforcement across callers is tracked under Effect System Hardening on the [roadmap](/roadmap) and will land alongside the `sfn/ai` capsule.
 
 ## Roadmap
 

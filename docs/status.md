@@ -62,7 +62,7 @@ feature availability.
 | Effect annotations (`![...]`) | Shipped | Parsing and declaration |
 | Effect enforcement — `io` | Not enforced | Checker logic exists for `print.*`, `console.*`, `fs.*`, `@logExecution` but is not run during compilation |
 | Effect enforcement — `net` | Not enforced | Checker logic exists for `http.*`, `websocket.*`, `serve` but is not run during compilation |
-| Effect enforcement — `model` | Not enforced | Effect is declarable; transitive propagation from `sfn/ai` library functions will enforce it once that capsule ships |
+| Effect enforcement — `model` | Not enforced | Effect is declarable; future enforcement for `sfn/ai` calls requires wiring `validate_effects()` into compilation and adding signature-based transitive analysis once that capsule ships |
 | Effect enforcement — `clock` | Not enforced | Checker logic exists for `sleep`/`runtime.sleep` but is not run during compilation |
 | Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; no checker logic |
 | Effect enforcement as compilation gate | **Not yet** | `validate_effects()` exists but is not invoked by the compiler; top priority |

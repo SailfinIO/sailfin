@@ -53,12 +53,15 @@ syntax appended to the signature:
 fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 ```
 
-Current status: the parser records effect lists and the compiler validator
-(`compiler/src/effect_checker.sfn`) enforces coverage for console I/O,
+Current status: the parser records effect lists. The compiler validator
+(`compiler/src/effect_checker.sfn`) detects coverage gaps for console I/O,
 filesystem/HTTP/WebSocket helpers, `spawn`/`serve`, `sleep`, and decorators that
-imply `io`. The `model` effect is reserved as the capability gate for the
-`sfn/ai` library capsule (post-1.0) — any function that invokes an AI backend
-must declare `![model]`. See the Effect System section below for details.
+imply `io`, but `validate_effects()` is not yet wired into the main compilation
+pipeline — today these diagnostics surface through `sfn check` rather than
+blocking normal builds (see `docs/status.md`). The `model` effect is reserved
+as the capability gate for the `sfn/ai` library capsule (post-1.0) — any
+function that invokes an AI backend must declare `![model]`. See the Effect
+System section below for details.
 
 ## 2. Modules, Imports, and Capabilities
 
@@ -239,10 +242,11 @@ iterate without language churn.
 
 What stays in the language:
 
-- `![model]` — the capability effect gating any function that invokes an AI
-  backend. `sfn/ai` functions will declare `![model]` in their signatures, and
-  the effect checker enforces transitive propagation the same way it does for
-  `io`, `net`, and `clock`.
+- `![model]` — the capability effect for functions that invoke an AI backend.
+  Planned `sfn/ai` APIs will declare `![model]` in their signatures. As future
+  effect-checking work, that requirement is intended to propagate transitively
+  through callers, similar to other effect annotations; this is not enforced
+  by normal compilation today.
 
 What is no longer accepted syntax:
 

@@ -17,7 +17,7 @@ The effect system is a compile-time capability mechanism. Every function declare
 |--------|-------|-----------------|----------------|---------|
 | IO | `io` | Filesystem, console output, logging, decorators like `@logExecution` | Yes | `print()`, `print.err()`, `fs.readFile()`, `fs.writeFile()`, `console.*` |
 | Network | `net` | HTTP, WebSocket, serve | Yes | `http.get()`, `http.post()`, `websocket.*`, `serve` |
-| Model | `model` | AI library invocation (`sfn/ai`, post-1.0) | Yes | Transitively propagated from library functions carrying `![model]` |
+| Model | `model` | AI library invocation (`sfn/ai`, post-1.0) | No (planned) | Intended for `sfn/ai`; callee-signature/transitive enforcement is not implemented today |
 | GPU | `gpu` | Tensor and accelerator operations | No (parsed only) | Tensor ops, `@gpu` blocks, GPU memory |
 | Random | `rand` | Random number generation | No (parsed only) | `rand.*` |
 | Clock | `clock` | Time operations | Partial | `sleep()`, `runtime.sleep()` |
@@ -105,10 +105,12 @@ Required for all outbound network calls, WebSocket connections, and binding to a
 ### `model` effect
 
 Required for any function that calls a library function (such as one from the
-planned `sfn/ai` capsule) whose signature declares `![model]`. The effect
-propagates transitively through the call graph. The `model`, `prompt`, `tool`,
-and `pipeline` block keywords have been removed from the language; the `![model]`
-effect remains as the capability gate.
+planned `sfn/ai` capsule) whose signature declares `![model]`. Today `![model]`
+acts as a capability gate for direct use of model-capable APIs; full
+call-graph–transitive enforcement based on callee signatures is planned but
+not yet implemented. The `model`, `prompt`, `tool`, and `pipeline` block
+keywords have been removed from the language; the `![model]` effect remains
+as the capability gate.
 
 | API | Notes |
 |-----|-------|

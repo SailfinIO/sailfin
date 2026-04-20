@@ -1,0 +1,106 @@
+// Regression tests covering the typecheck diagnostic for removed AI block
+// keywords (`model`, `prompt`, `tool`, `pipeline`). These keywords were moved
+// to the planned post-1.0 `sfn/ai` library capsule; when legacy source still
+// uses the block forms, the parser falls through to `Statement.Unknown` and
+// the typechecker must emit a specific "keyword removed" diagnostic so the
+// code is rejected loudly.
+//
+// Kept self-contained (no imports, no struct literals) to match the pattern
+// used by `fmt_test.sfn` and `check_tool_test.sfn` — the standalone test
+// runner cannot link the string_utils → runtime chain.
+//
+// The helpers below mirror the logic in
+// compiler/src/typecheck_types.sfn::detect_removed_ai_keyword and
+// compiler/src/typecheck_types.sfn::make_removed_keyword_diagnostic — keep
+// them in sync when that file changes.
+// -------------------------------------------------------------------
+// Local helpers
+// -------------------------------------------------------------------
+fn _starts_with(value: string, prefix: string) -> boolean {
+    if prefix.length > value.length { return false; }
+    let mut index: number = 0;
+    loop {
+        if index >= prefix.length { break; }
+        if value[index] != prefix[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn _detect_removed_ai_keyword(text: string) -> string {
+    if _starts_with(text, "model ") { return "model"; }
+    if _starts_with(text, "prompt ") { return "prompt"; }
+    if _starts_with(text, "tool ") { return "tool"; }
+    if _starts_with(text, "pipeline ") { return "pipeline"; }
+    return "";
+}
+
+fn _diagnostic_message(keyword: string) -> string {
+    return "`" + keyword + "` block syntax was removed from the language;"
+        + " AI functionality is planned for the post-1.0 `sfn/ai` library"
+        + " capsule and the `![model]` effect remains as the capability gate";
+}
+
+// -------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------
+test "removed keywords: detects `model` block" {
+    assert _detect_removed_ai_keyword("model Summarizer : Model<Text, Summary> {") == "model";
+}
+
+test "removed keywords: detects `prompt` block" {
+    assert _detect_removed_ai_keyword("prompt system { \"hello\" }") == "prompt";
+}
+
+test "removed keywords: detects `tool` declaration" {
+    assert _detect_removed_ai_keyword("tool FetchProfile(id: Id) -> Profile") == "tool";
+}
+
+test "removed keywords: detects `pipeline` declaration" {
+    assert _detect_removed_ai_keyword("pipeline index_corpus(docs: Seq<Text>)") == "pipeline";
+}
+
+test "removed keywords: ignores identifiers that share a prefix" {
+    // `model_registry`, `prompt_text`, `toolbox`, `pipeline_name` must not fire —
+    // the match is anchored on a trailing space, i.e. the keyword-as-statement
+    // introducer form.
+    assert _detect_removed_ai_keyword("model_registry = init();") == "";
+    assert _detect_removed_ai_keyword("prompt_text = \"hi\";") == "";
+    assert _detect_removed_ai_keyword("toolbox.add(x);") == "";
+    assert _detect_removed_ai_keyword("pipeline_name = \"main\";") == "";
+}
+
+test "removed keywords: returns empty for unrelated unknown text" {
+    assert _detect_removed_ai_keyword("???") == "";
+    assert _detect_removed_ai_keyword("let x = 1;") == "";
+    assert _detect_removed_ai_keyword("") == "";
+}
+
+test "removed keywords: diagnostic message mentions the keyword and sfn/ai" {
+    let msg = _diagnostic_message("model");
+    assert _starts_with(msg, "`model` block syntax was removed");
+    // The diagnostic must point users at the planned library capsule.
+    let mut found: boolean = false;
+    let mut i: number = 0;
+    let needle = "sfn/ai";
+    let limit = msg.length - needle.length;
+    loop {
+        if i > limit { break; }
+        if msg[i] == "s" {
+            if msg[i + 1] == "f" {
+                if msg[i + 2] == "n" {
+                    if msg[i + 3] == "/" {
+                        if msg[i + 4] == "a" {
+                            if msg[i + 5] == "i" {
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    assert found == true;
+}
