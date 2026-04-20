@@ -1,6 +1,11 @@
 /*
  * Sailfin theme overrides for Starlight.
- * Maps Starlight's design tokens to Sailfin brand colors.
+ *
+ * Two jobs:
+ *   1. Map Starlight's design tokens (`--sl-*`) to Sailfin brand colors.
+ *   2. Alias the site's semantic tokens (`--color-*`, `--header-height`, etc.)
+ *      to Starlight's tokens so the shared SiteHeader component renders
+ *      identically on docs pages (where global.css is NOT loaded).
  */
 
 :root {
@@ -12,7 +17,7 @@
 
 :root,
 ::backdrop {
-  /* Light mode accent */
+  /* Starlight accent → Sailfin blue (light mode) */
   --sl-color-accent-low: #cfe6f8;
   --sl-color-accent: #0072ce;
   --sl-color-accent-high: #003f71;
@@ -23,6 +28,23 @@
 
   /* Slightly wider content column so prose isn't too cramped */
   --sl-content-width: 52rem;
+
+  /*
+   * Site-level semantic aliases. These mirror the `--color-*` tokens in
+   * `src/styles/global.css` so that components rendered inside Starlight
+   * (SiteHeader via the Header override, Footer, etc.) resolve the same
+   * variables they would on the marketing pages.
+   */
+  --color-primary: var(--sl-color-accent);
+  --color-primary-dark: var(--sl-color-accent-high);
+  --color-bg: var(--sl-color-bg);
+  --color-bg-alt: var(--sl-color-bg-nav);
+  --color-bg-code: var(--sl-color-bg-inline-code);
+  --color-text: var(--sl-color-text);
+  --color-text-secondary: var(--sl-color-text-accent);
+  --color-border: var(--sl-color-hairline);
+  --header-height: var(--sl-nav-height, 64px);
+  --max-width: 90rem;
 }
 
 :root[data-theme="dark"] {
@@ -31,13 +53,43 @@
   --sl-color-accent-high: #c7e1f6;
 }
 
-/* Match the landing-page header height for visual continuity */
-header.header {
-  height: 64px;
-}
-
 /* Inline code styling */
 :not(pre) > code {
   border-radius: 4px;
   padding: 0.15em 0.4em;
+}
+
+/*
+ * Tighten up the SiteHeader inside Starlight's navbar so it matches the
+ * marketing header and uses Starlight's full nav width rather than being
+ * centered at our narrow max-width.
+ */
+.site-header {
+  border-bottom: none; /* Starlight already renders a hairline */
+}
+
+.site-header .header-inner {
+  max-width: none;
+  padding: 0 1rem;
+}
+
+/*
+ * Starlight's built-in search button is styled for a wider slot. In the
+ * header-actions row we want it to look like the other icon buttons: a
+ * compact pill with an icon only at narrow widths.
+ */
+.site-header .search-slot site-search {
+  display: flex;
+  align-items: center;
+}
+
+.site-header .search-slot site-search button {
+  height: 34px;
+  padding: 0 0.75rem;
+}
+
+@media (max-width: 50rem) {
+  .site-header .search-slot site-search button {
+    padding: 0 0.5rem;
+  }
 }

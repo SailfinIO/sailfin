@@ -19,7 +19,7 @@ export default defineConfig({
       ],
       customCss: ["./src/styles/starlight-theme.css"],
       components: {
-        SiteTitle: "./src/components/starlight/SiteTitle.astro",
+        Header: "./src/components/starlight/Header.astro",
       },
       sidebar: [
         {

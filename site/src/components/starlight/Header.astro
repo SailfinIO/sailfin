@@ -1,0 +1,15 @@
+---
+/*
+ * Starlight header override. Renders the unified SiteHeader in "docs" mode
+ * and wires Starlight's built-in Search + MobileMenuToggle so the docs chrome
+ * (search popup, mobile sidebar toggle) keeps working.
+ */
+import SiteHeader from "../SiteHeader.astro";
+import Search from "virtual:starlight/components/Search";
+import MobileMenuToggle from "virtual:starlight/components/MobileMenuToggle";
+---
+
+<SiteHeader mode="docs">
+  <Search slot="search" />
+</SiteHeader>
+<MobileMenuToggle />
