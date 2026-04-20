@@ -120,7 +120,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = trimmed_target + " " + assign_operator + " "
-                + assign_value;
+            + assign_value;
         }
         let lowered_value = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
         let mut _ci0: number = 0;
@@ -263,7 +263,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = assign_target + " " + assign_operator + " "
-                + assign_value;
+            + assign_value;
         }
         let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
         let mut _ci3: number = 0;
@@ -403,7 +403,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = assign_target + " " + assign_operator + " "
-                + assign_value;
+            + assign_value;
         }
         let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
         let mut _ci6: number = 0;
@@ -568,24 +568,16 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
     };
 }
 
-// Pre-process self.field patterns in return expressions: emit GEP instructions
-// inline and replace each pattern with a temp variable. This is extracted from
+// Pre-process self.field patterns in return expressions. This is extracted from
 // lower_return_instruction to keep it under ~500 instructions.
 // Returns the rewritten expression, the next temp index, and the updated
 // lines array including any emitted GEP/bitcast/load instructions.
-fn preprocess_self_field_access(expression: string, current_temp: number, current_lines: string[]) -> SelfFieldResult ![io] {
+fn preprocess_self_field_access(expression: string, current_temp: number, current_lines: string[]) -> SelfFieldResult {
     let mut result_expr: string = expression;
     let mut result_temp: number = current_temp;
     let mut result_lines: string[] = current_lines;
 
     if index_of(result_expr, "self.") < 0 {
-        return SelfFieldResult {
-            expression: result_expr,
-            temp_index: result_temp,
-            lines: result_lines
-        };
-    }
-    if !fs.exists("build/sailfin/.struct_info") {
         return SelfFieldResult {
             expression: result_expr,
             temp_index: result_temp,

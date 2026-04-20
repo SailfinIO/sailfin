@@ -2,9 +2,12 @@
 //
 // Inline GEP field access helper extracted from core_member_lowering.sfn
 // to keep each function under ~500 .sfn-asm instructions (avoids seed OOM).
-import { index_of, substring } from "../../../string_utils";
 import { find_local_binding } from "../../expressions_bindings";
 import { format_temp_name } from "../../expressions_helpers";
+import {
+    find_struct_field_info,
+    find_struct_info_by_name
+} from "../../type_context_queries";
 import {
     ExpressionResult,
     LLVMOperand,
@@ -15,12 +18,10 @@ import {
 } from "../../types";
 import { number_to_string, trim_text } from "../../utils";
 
-// Try to resolve a struct field access via file-based struct info when the
+// Try to resolve a struct field access via in-memory TypeContext when the
 // base type is i8* (opaque pointer). Returns an ExpressionResult with the
 // loaded field value, or null if resolution fails.
-fn lower_inline_gep_field_access(base_name: string, field_name: string, base_operand: LLVMOperand, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult? ![io] {
-    if !fs.exists("build/sailfin/.struct_info") { return null; }
-
+fn lower_inline_gep_field_access(base_name: string, field_name: string, base_operand: LLVMOperand, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[], context: TypeContext) -> ExpressionResult? {
     let _igep_base = trim_text(base_name);
     let mut _igep_struct: string = "";
 
@@ -47,62 +48,16 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
 
     if _igep_struct.length == 0 { return null; }
 
-    // Look up struct in .struct_info and find field
-    let _igep_raw = fs.readFile("build/sailfin/.struct_info");
-    let mut _igep_rp: number = 0;
-    let mut _igep_llvm: string = "";
-    let mut _igep_fidx: number = -1;
-    let mut _igep_ftype: string = "";
-    loop {
-        if _igep_rp >= _igep_raw.length { break; }
-        let _igep_rnl = index_of(substring(_igep_raw, _igep_rp, _igep_raw.length), "\n");
-        let mut _igep_rln: string = "";
-        if _igep_rnl < 0 {
-            _igep_rln = substring(_igep_raw, _igep_rp, _igep_raw.length);
-            _igep_rp = _igep_raw.length;
-        } else {
-            _igep_rln = substring(_igep_raw, _igep_rp, _igep_rp + _igep_rnl);
-            _igep_rp = _igep_rp + _igep_rnl + 1;
-        }
-        if _igep_rln.length == 0 { continue; }
-        let _igep_rt = index_of(_igep_rln, "\t");
-        if _igep_rt < 0 { continue; }
-        if substring(_igep_rln, 0, _igep_rt) != _igep_struct { continue; }
-        let _igep_rr = substring(_igep_rln, _igep_rt + 1, _igep_rln.length);
-        let _igep_rt2 = index_of(_igep_rr, "\t");
-        if _igep_rt2 < 0 { continue; }
-        _igep_llvm = substring(_igep_rr, 0, _igep_rt2);
-        let _igep_fs = substring(_igep_rr, _igep_rt2 + 1, _igep_rr.length);
-        let mut _igep_fi: number = 0;
-        let mut _igep_fp: number = 0;
-        loop {
-            if _igep_fp >= _igep_fs.length { break; }
-            let _igep_fc = index_of(substring(_igep_fs, _igep_fp, _igep_fs.length), ",");
-            let mut _igep_fe: string = "";
-            if _igep_fc < 0 {
-                _igep_fe = substring(_igep_fs, _igep_fp, _igep_fs.length);
-                _igep_fp = _igep_fs.length;
-            } else {
-                _igep_fe = substring(_igep_fs, _igep_fp, _igep_fp + _igep_fc);
-                _igep_fp = _igep_fp + _igep_fc + 1;
-            }
-            let _igep_fk = index_of(_igep_fe, ":");
-            if _igep_fk < 0 {
-                _igep_fi += 1;
-                continue;
-            }
-            if substring(_igep_fe, 0, _igep_fk) == field_name {
-                _igep_fidx = _igep_fi;
-                _igep_ftype = substring(_igep_fe, _igep_fk + 1, _igep_fe.length);
-                break;
-            }
-            _igep_fi += 1;
-        }
-        break;
-    }
+    // Look up struct in TypeContext
+    let info = find_struct_info_by_name(context, _igep_struct);
+    if info == null { return null; }
+    let field_info = find_struct_field_info(info, field_name);
+    if field_info == null { return null; }
+    let _igep_llvm = info.llvm_name;
+    let _igep_fidx = field_info.index;
+    let _igep_ftype = field_info.llvm_type;
 
     if _igep_llvm.length == 0 { return null; }
-    if _igep_fidx < 0 { return null; }
     if _igep_ftype.length == 0 { return null; }
 
     // Emit bitcast + GEP + load

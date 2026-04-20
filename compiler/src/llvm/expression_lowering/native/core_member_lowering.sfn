@@ -203,7 +203,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     if parse.field == "variant" {
         let sanitized_enum = sanitize_symbol(enum_info.name);
         let default_constant_name = "@.enum." + sanitized_enum
-            + ".variant.default";
+        + ".variant.default";
         let existing_default = find_string_constant_by_name(enum_string_constants, default_constant_name);
         let mut default_constant: StringConstant = StringConstant {
             name: default_constant_name,
@@ -230,8 +230,8 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             let variant_info = enum_info.variants[variant_index];
             let sanitized_variant = sanitize_symbol(variant_info.name);
             let constant_name = "@.enum." + sanitized_enum + "."
-                + sanitized_variant
-                + ".variant";
+            + sanitized_variant
+            + ".variant";
             let existing_variant = find_string_constant_by_name(enum_string_constants, constant_name);
             let mut variant_constant: StringConstant = StringConstant {
                 name: constant_name,
@@ -564,7 +564,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     return make_expression_result(current_lines, current_temp, operand, messages, enum_string_constants);
 }
 
-fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
+fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
     let mut diagnostics: string[] = base_result.diagnostics;
     let mut collected_string_constants: StringConstant[] = base_result.string_constants;
@@ -666,7 +666,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, true, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
             if base_type_trimmed == "i8*" {
-                let _igep_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diagnostics, collected_string_constants);
+                let _igep_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diagnostics, collected_string_constants, context);
                 if _igep_result != null { return _igep_result; }
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
@@ -695,7 +695,7 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
                 return lower_enum_member_access(parse, enum_info_candidate, base_operand, false, current_temp, current_lines, diagnostics, collected_string_constants, expected_type);
             }
             if base_type_trimmed == "i8*" {
-                let _igep2_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diagnostics, collected_string_constants);
+                let _igep2_result = lower_inline_gep_field_access(parse.base, parse.field, base_operand, bindings, locals, current_temp, current_lines, diagnostics, collected_string_constants, context);
                 if _igep2_result != null { return _igep2_result; }
                 return lower_dynamic_member_access(parse.field, base_operand, current_temp, current_lines, diagnostics, collected_string_constants);
             }
@@ -880,138 +880,6 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
         operand: operand,
         diagnostics: diagnostics,
         string_constants: collected_string_constants
-    };
-}
-
-// File-based struct field access: when the TypeContext is corrupted (v0.1.1 seed ABI),
-// look up struct info from the .struct_info file and emit a proper GEP instruction
-// instead of sailfin_runtime_get_field.
-fn try_file_based_struct_field_access(base_name: string, field_name: string, base_operand: LLVMOperand, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult ![io] {
-    let empty_constants = empty_string_constant_set();
-    let null_result = ExpressionResult {
-        lines: lines,
-        temp_index: temp_index,
-        operand: null,
-        diagnostics: diagnostics,
-        string_constants: string_constants
-    };
-    if !fs.exists("build/sailfin/.struct_info") { return null_result; }
-    // Find the struct type annotation for this base from bindings or locals.
-    let mut struct_type_ann: string = "";
-    let trimmed_base = trim_text(base_name);
-    let mut _bi: number = 0;
-    loop {
-        if _bi >= bindings.length { break; }
-        if bindings[_bi].name == trimmed_base {
-            struct_type_ann = bindings[_bi].type_annotation;
-            break;
-        }
-        _bi += 1;
-    }
-    if struct_type_ann.length == 0 {
-        let local = find_local_binding(locals, trimmed_base);
-        if local != null {
-            if local.type_annotation != null {
-                struct_type_ann = local.type_annotation;
-            }
-        }
-    }
-    if struct_type_ann.length == 0 { return null_result; }
-    // Look up struct in .struct_info
-    let _si_raw = fs.readFile("build/sailfin/.struct_info");
-    if _si_raw.length == 0 { return null_result; }
-    let mut _si_llvm: string = "";
-    let mut _si_field_idx: number = -1;
-    let mut _si_field_type: string = "";
-    let mut _si_pos: number = 0;
-    loop {
-        if _si_pos >= _si_raw.length { break; }
-        let _si_nl = index_of(substring(_si_raw, _si_pos, _si_raw.length), "\n");
-        let mut _si_line: string = "";
-        if _si_nl < 0 {
-            _si_line = substring(_si_raw, _si_pos, _si_raw.length);
-            _si_pos = _si_raw.length;
-        } else {
-            _si_line = substring(_si_raw, _si_pos, _si_pos + _si_nl);
-            _si_pos = _si_pos + _si_nl + 1;
-        }
-        if _si_line.length == 0 { continue; }
-        let _si_t1 = index_of(_si_line, "\t");
-        if _si_t1 < 0 { continue; }
-        let _si_name = substring(_si_line, 0, _si_t1);
-        if _si_name != struct_type_ann { continue; }
-        let _si_rest = substring(_si_line, _si_t1 + 1, _si_line.length);
-        let _si_t2 = index_of(_si_rest, "\t");
-        if _si_t2 < 0 { continue; }
-        _si_llvm = substring(_si_rest, 0, _si_t2);
-        let _si_fields = substring(_si_rest, _si_t2 + 1, _si_rest.length);
-        // Find the field index and type
-        let mut _fi: number = 0;
-        let mut _fpos: number = 0;
-        loop {
-            if _fpos >= _si_fields.length { break; }
-            let _fcomma = index_of(substring(_si_fields, _fpos, _si_fields.length), ",");
-            let mut _fentry: string = "";
-            if _fcomma < 0 {
-                _fentry = substring(_si_fields, _fpos, _si_fields.length);
-                _fpos = _si_fields.length;
-            } else {
-                _fentry = substring(_si_fields, _fpos, _fpos + _fcomma);
-                _fpos = _fpos + _fcomma + 1;
-            }
-            let _fcolon = index_of(_fentry, ":");
-            if _fcolon < 0 {
-                _fi += 1;
-                continue;
-            }
-            let _fname = substring(_fentry, 0, _fcolon);
-            let _ftype = substring(_fentry, _fcolon + 1, _fentry.length);
-            if _fname == field_name {
-                _si_field_idx = _fi;
-                _si_field_type = _ftype;
-                break;
-            }
-            _fi += 1;
-        }
-        break;
-    }
-    let mut _if72: boolean = false;
-    if _si_llvm.length == 0 { _if72 = true; }
-    if _si_field_idx < 0 { _if72 = true; }
-    if _si_field_type.length == 0 { _if72 = true; }
-    if _if72 { return null_result; }
-    // Emit: bitcast i8* to %Struct*, then GEP, then load
-    let mut _out_lines = lines;
-    let mut _out_temp = temp_index;
-    let cast_temp = format_temp_name(_out_temp);
-    _out_lines.push("  " + cast_temp + " = bitcast i8* " + base_operand.value
-        + " to "
-        + _si_llvm
-        + "*");
-    _out_temp += 1;
-    let gep_temp = format_temp_name(_out_temp);
-    _out_lines.push("  " + gep_temp + " = getelementptr inbounds " + _si_llvm
-        + ", "
-        + _si_llvm
-        + "* "
-        + cast_temp
-        + ", i32 0, i32 "
-        + number_to_string(_si_field_idx));
-    _out_temp += 1;
-    let load_temp = format_temp_name(_out_temp);
-    let field_ptr_type = _si_field_type + "*";
-    _out_lines.push("  " + load_temp + " = load " + _si_field_type + ", "
-        + field_ptr_type
-        + " "
-        + gep_temp);
-    _out_temp += 1;
-    let operand = LLVMOperand { llvm_type: _si_field_type, value: load_temp };
-    return ExpressionResult {
-        lines: _out_lines,
-        temp_index: _out_temp,
-        operand: operand,
-        diagnostics: diagnostics,
-        string_constants: string_constants
     };
 }
 

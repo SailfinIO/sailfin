@@ -8,16 +8,16 @@
 
 ## Symptom Summary
 
-| Metric | April 11 | Current (April 19) | Target |
-|--------|----------|---------------------|--------|
-| Full build (121 modules, 1 job) | 60-90 min | 13-16 min | < 5 min |
-| Per-module compile time (heavy) | 4-7 min | 1-3 min | < 30s |
-| Per-module compile time (light) | 30s-2 min | 10-30s | < 5s |
-| Per-module peak RAM | 1-2 GB | 0.5-1.5 GB | < 256 MB |
-| Parallel builds (`--jobs N`) | Broken | Functional but risky | Stable at 4 jobs |
-| `fs.*` calls (total) | 667 across 42 files | 489 across 37 files | < 50 per module |
-| `build/sailfin/` IPC refs | 487 | 228 (dotfiles) | 0 |
-| Seed memory limit | 8 GB | 12 GB | < 4 GB |
+| Metric                          | April 11            | Current (April 19)   | Target           |
+| ------------------------------- | ------------------- | -------------------- | ---------------- |
+| Full build (121 modules, 1 job) | 60-90 min           | 13-16 min            | < 5 min          |
+| Per-module compile time (heavy) | 4-7 min             | 1-3 min              | < 30s            |
+| Per-module compile time (light) | 30s-2 min           | 10-30s               | < 5s             |
+| Per-module peak RAM             | 1-2 GB              | 0.5-1.5 GB           | < 256 MB         |
+| Parallel builds (`--jobs N`)    | Broken              | Functional but risky | Stable at 4 jobs |
+| `fs.*` calls (total)            | 667 across 42 files | 489 across 37 files  | < 50 per module  |
+| `build/sailfin/` IPC refs       | 487                 | 228 (dotfiles)       | 0                |
+| Seed memory limit               | 8 GB                | 12 GB                | < 4 GB           |
 
 ---
 
@@ -72,35 +72,35 @@ The compiler still uses the filesystem as an inter-function communication channe
 
 ### Active IPC Channels
 
-| Channel | Written By | Read By | Files per call |
-|---------|-----------|---------|----------------|
-| Call result (type/value) | core_literals, core_call_emission, core_strings | instructions_let | 2 |
-| Dispatch result (lines/allocas/temp/region/mutations) | instructions_dispatch, instructions_helpers | instructions, instructions_helpers | 8+ |
-| Block result (terminated/string_constants) | instructions_helpers | instructions_try | 2 |
-| Expr statement result (temp/region/mutations) | statement | instructions_dispatch | 5+ |
-| Let result (temp/lines/allocas/diagnostics/locals) | instructions_let | instructions_dispatch, instructions_helpers | 11+ |
-| Context functions (count + per-entry fields) | lowering_phase_types | core_call_resolution | N×fields |
-| Type/struct/enum metadata | lowering_phase_types | core_member_*, statement_assignment, core_call_resolution | 2 |
-| Module globals (preamble/init/locals/diagnostics) | module_globals | lowering_core | 6 |
-| Self-field expression result | statement_assignment | statement | 4 |
-| Per-instruction bindings/locals | instructions_dispatch, instructions_helpers | statement, core_call_resolution | 4×N |
-| Instruction metadata (fn_name/expression/return/span) | instructions_dispatch | statement, statement_assignment, core_member_* | 4 |
+| Channel                                               | Written By                                      | Read By                                                    | Files per call |
+| ----------------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------- | -------------- |
+| Call result (type/value)                              | core_literals, core_call_emission, core_strings | instructions_let                                           | 2              |
+| Dispatch result (lines/allocas/temp/region/mutations) | instructions_dispatch, instructions_helpers     | instructions, instructions_helpers                         | 8+             |
+| Block result (terminated/string_constants)            | instructions_helpers                            | instructions_try                                           | 2              |
+| Expr statement result (temp/region/mutations)         | statement                                       | instructions_dispatch                                      | 5+             |
+| Let result (temp/lines/allocas/diagnostics/locals)    | instructions_let                                | instructions_dispatch, instructions_helpers                | 11+            |
+| Context functions (count + per-entry fields)          | lowering_phase_types                            | core_call_resolution                                       | N×fields       |
+| Type/struct/enum metadata                             | lowering_phase_types                            | core*member*\*, statement_assignment, core_call_resolution | 2              |
+| Module globals (preamble/init/locals/diagnostics)     | module_globals                                  | lowering_core                                              | 6              |
+| Self-field expression result                          | statement_assignment                            | statement                                                  | 4              |
+| Per-instruction bindings/locals                       | instructions_dispatch, instructions_helpers     | statement, core_call_resolution                            | 4×N            |
+| Instruction metadata (fn_name/expression/return/span) | instructions_dispatch                           | statement, statement*assignment, core_member*\*            | 4              |
 
 ### Hotspots (Current)
 
-| File | `fs.*` Calls | `build/sailfin/` Refs |
-|------|--------------|-----------------------|
-| `instructions_dispatch.sfn` | 67 | 45 |
-| `instructions_helpers.sfn` | 58 | 35 |
-| `cli_commands.sfn` | 44 | 4 |
-| `main.sfn` | 37 | 12 |
-| `instructions_let.sfn` | 32 | 32 |
-| `core_call_resolution.sfn` | 32 | 12 |
-| `lowering_core.sfn` | 32 | 15 |
-| `cli_main.sfn` | 30 | 1 |
-| `statement_assignment.sfn` | 28 | 29 |
-| `statement.sfn` | 25 | 22 |
-| `emission.sfn` | 3 | 3 |
+| File                        | `fs.*` Calls | `build/sailfin/` Refs |
+| --------------------------- | ------------ | --------------------- |
+| `instructions_dispatch.sfn` | 67           | 45                    |
+| `instructions_helpers.sfn`  | 58           | 35                    |
+| `cli_commands.sfn`          | 44           | 4                     |
+| `main.sfn`                  | 37           | 12                    |
+| `instructions_let.sfn`      | 32           | 32                    |
+| `core_call_resolution.sfn`  | 32           | 12                    |
+| `lowering_core.sfn`         | 32           | 15                    |
+| `cli_main.sfn`              | 30           | 1                     |
+| `statement_assignment.sfn`  | 28           | 29                    |
+| `statement.sfn`             | 25           | 22                    |
+| `emission.sfn`              | 3            | 3                     |
 
 ---
 
@@ -117,10 +117,10 @@ The broad copy-then-append sweep landed in `d2d0bf1`. Current state:
 
 Both of these still allocate a fresh array and copy the input before appending. They are the two places where a trivial in-place conversion was **tried and reverted** because callers depend on the input staying pristine.
 
-| Function | Location | Call sites | Aliasing constraint |
-|----------|----------|-----------:|---------------------|
-| `concat_native_functions` | `lowering/lowering_helpers_mangling.sfn:389` | 3 | `lowering_core.sfn` passes `local_functions` into `concat_native_functions` *and* into `lower_all_functions`/`collect_runtime_helper_targets` afterwards. In-place mutation corrupts the second pass. |
-| `append_local_binding` | `expression_lowering/native/core_scopes.sfn:174-186` | 6 | Nested scopes (for bodies, try/catch) build a temporary locals array via append, then restore the original for the outer scope. In-place mutation leaks bindings across scopes. |
+| Function                  | Location                                             | Call sites | Aliasing constraint                                                                                                                                                                                   |
+| ------------------------- | ---------------------------------------------------- | ---------: | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `concat_native_functions` | `lowering/lowering_helpers_mangling.sfn:389`         |          3 | `lowering_core.sfn` passes `local_functions` into `concat_native_functions` _and_ into `lower_all_functions`/`collect_runtime_helper_targets` afterwards. In-place mutation corrupts the second pass. |
+| `append_local_binding`    | `expression_lowering/native/core_scopes.sfn:174-186` |          6 | Nested scopes (for bodies, try/catch) build a temporary locals array via append, then restore the original for the outer scope. In-place mutation leaks bindings across scopes.                       |
 
 Options for resolving these:
 
@@ -160,13 +160,13 @@ Both exist because the v0.1.1 seed couldn't handle typed instruction variants. T
 
 The runtime has no mechanism to reclaim memory during compilation:
 
-| Resource | Allocation | Deallocation | Status |
-|----------|-----------|--------------|--------|
-| Strings (<64 KB) | `malloc` | `string_drop` → `free` | **Disabled by default** (`SAILFIN_ENABLE_STRING_FREE=0`) |
-| Strings (≥64 KB) | `malloc` | `mark_persistent` (never freed) | **Permanently leaked** |
-| String arrays | `malloc` | None | **Always leaked** |
-| NativeFunction arrays | `malloc` | None | **Always leaked** |
-| LocalBinding arrays | `malloc` | None | **Always leaked** |
+| Resource              | Allocation | Deallocation                    | Status                                                   |
+| --------------------- | ---------- | ------------------------------- | -------------------------------------------------------- |
+| Strings (<64 KB)      | `malloc`   | `string_drop` → `free`          | **Disabled by default** (`SAILFIN_ENABLE_STRING_FREE=0`) |
+| Strings (≥64 KB)      | `malloc`   | `mark_persistent` (never freed) | **Permanently leaked**                                   |
+| String arrays         | `malloc`   | None                            | **Always leaked**                                        |
+| NativeFunction arrays | `malloc`   | None                            | **Always leaked**                                        |
+| LocalBinding arrays   | `malloc`   | None                            | **Always leaked**                                        |
 
 The owned-string hash table and persistent-pointer set add per-allocation bookkeeping overhead even when freeing is disabled. The concat-reuse optimization (`_concat_reuse_ptr`) helps for chained `+` expressions but does not address the general leak.
 
@@ -201,10 +201,12 @@ The original plan ordered IPC removal first. That is no longer viable because re
 The C arena allocator (`runtime/native/src/sailfin_arena.c`, 254 lines) is in-tree and wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free` in `sailfin_runtime.c:618-654`. All string and array allocations route through the process-global arena when `SAILFIN_USE_ARENA=1` (now the default). The owned-string hash table and persistent-pointer set are bypassed entirely in arena mode. A correctness harness (`make test-arena`, `scripts/test_arena.sh`) diffs emitted LLVM IR with and without the flag.
 
 **Residual follow-ups (not blocking Phase 2):**
+
 1. **Per-module peak RAM < 512 MB.** The M0.5 target is not met by arena alone — arena caps a single module at 4.7 GB, down from 7.5 GB under malloc but still far above target. Reaching 512 MB requires Phase 2 IPC removal on top of arena, not more arena work.
 2. **Stats integration.** `sfn_arena_print_stats` exists but isn't called from any test or build target, so we have no telemetry on arena pressure or page count.
 
 **Why arena, not RC or GC:**
+
 - The compiler is a batch process: allocate during compilation, discard everything at the end
 - No cycles to break (no need for tracing GC)
 - No per-object overhead (no RC increments on every string copy)
@@ -218,28 +220,28 @@ The C arena allocator (`runtime/native/src/sailfin_arena.c`, 254 lines) is in-tr
 
 **What shipped (`d2d0bf1`):**
 
-| Target | Call sites | Status |
-|--------|-----------:|--------|
-| `extend_string_lines` | ~36 | ✅ In-place `push()` |
-| `.concat([x])` in loops | ~50 | ✅ Replaced with `.push(x)` (1 residual in `parser/declarations.sfn`) |
+| Target                  | Call sites | Status                                                                |
+| ----------------------- | ---------: | --------------------------------------------------------------------- |
+| `extend_string_lines`   |        ~36 | ✅ In-place `push()`                                                  |
+| `.concat([x])` in loops |        ~50 | ✅ Replaced with `.push(x)` (1 residual in `parser/declarations.sfn`) |
 
 **What shipped next (Phase 1b partial, post-baseline):**
 
 Per-site aliasing audit (see [runtime_architecture.md §4.4](runtime_architecture.md#44-m05--arena-in-c-temporary-unblocker) M0.5 fast-fail criteria and the matching audit performed here) identified that only 2 of the 3 `concat_native_functions` sites in `lowering_core.sfn` are aliasing-safe without an arena. Those 2 sites (lines 568 and 576) now use a new in-place helper `extend_native_functions_inplace`. The third site at line 573 stays copying because downstream passes (`collect_runtime_helper_targets`, `render_llvm_preamble`, `lower_all_functions`) read the pristine `local_functions`.
 
-| Target | Call sites | Status |
-|--------|-----------:|--------|
-| `concat_native_functions` sites 1, 3 (lowering_core.sfn) | 2 | ✅ In-place `extend_native_functions_inplace` |
-| `concat_native_functions` site 2 (lowering_core.sfn) | 1 | Copying — caller needs pristine `local_functions` |
-| `append_local_binding` all 6 sites | 6 | Still copying — aliasing audit revealed deeper caller-side structural dependencies than initial audit indicated; safe to convert to in-place push now that the M0.5 arena is default-on (April 19 flip) |
+| Target                                                   | Call sites | Status                                                                                                                                                                                                  |
+| -------------------------------------------------------- | ---------: | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `concat_native_functions` sites 1, 3 (lowering_core.sfn) |          2 | ✅ In-place `extend_native_functions_inplace`                                                                                                                                                           |
+| `concat_native_functions` site 2 (lowering_core.sfn)     |          1 | Copying — caller needs pristine `local_functions`                                                                                                                                                       |
+| `append_local_binding` all 6 sites                       |          6 | Still copying — aliasing audit revealed deeper caller-side structural dependencies than initial audit indicated; safe to convert to in-place push now that the M0.5 arena is default-on (April 19 flip) |
 
 **Measured impact (lowering_core only — the hottest module):**
 
-| Metric | Baseline (post-d2d0bf1) | Phase 1b partial | Delta |
-|--------|------------------------:|-----------------:|------:|
-| Compile time | 61.69s | 58.02s | −6.0% |
-| Peak memory | 7.23 GB | 7.23 GB | ±0 |
-| Aggregate build | 641.33s | 639.51s | −0.3% (noise) |
+| Metric          | Baseline (post-d2d0bf1) | Phase 1b partial |         Delta |
+| --------------- | ----------------------: | ---------------: | ------------: |
+| Compile time    |                  61.69s |           58.02s |         −6.0% |
+| Peak memory     |                 7.23 GB |          7.23 GB |            ±0 |
+| Aggregate build |                 641.33s |          639.51s | −0.3% (noise) |
 
 The win is concentrated on the target module; aggregate is within bench variance. `append_local_binding` conversions become cheap automatically under the M0.5 arena, so Phase 1b is complete as a pre-arena intervention.
 
@@ -272,10 +274,11 @@ If step 7 fails, the channel is not purely a workaround — some caller is relyi
 
 1. **Statement/assignment channels** — per-expression-statement overhead
 2. **Async inner-return-type channel** (`.async_inner_return_type`) — writer in `core_call_resolution.sfn`, reader in `instructions_let.sfn`
-3. **Struct info channel** (`.struct_info`) — cross-phase type metadata read by `core_member_lowering`, `core_member_helpers`, `core_literals_lowering`, `lowering_phase_render` (the `.enum_info` companion was removed April 20)
+3. ~~**Struct info channel** (`.struct_info`) — cross-phase type metadata read by `core_member_lowering`, `core_member_helpers`, `core_literals_lowering`, `lowering_phase_render`~~ — **Removed April 20** (see [Completed Work: Struct Info IPC Channel Removal](#struct-info-ipc-channel-removal-april-20))
 4. **Context-functions channel** — `serialize_context_functions()` in `lowering_phase_types.sfn:339`
 
 Named IPC functions to eliminate:
+
 - `serialize_context_functions()` — `lowering_phase_types.sfn:339`
 
 ### Phase 3: Cache Import Artifacts
@@ -284,6 +287,7 @@ Named IPC functions to eliminate:
 **No dependency on Phases 0-2** — can proceed in parallel
 
 Add a file-level cache to `collect_imported_module_context_for_module`:
+
 - Cache parsed `LayoutManifest` and `.sfn-asm` text by slug within a single process
 - For cross-process caching: consider a pre-parsed binary format (e.g., write parsed manifests to a `.cache` directory during import-context staging, read them back instead of re-parsing text)
 
@@ -299,6 +303,7 @@ Replace `recover_native_functions_light` (line-by-line scanning with 20+ `starts
 **Priority:** Future (post-1.0 or late pre-1.0) — **Expected:** 50-70% time reduction
 
 Replace the 121 separate compiler processes with a single long-lived process that compiles all modules in sequence (or in parallel with shared state):
+
 - Eliminates per-module startup overhead
 - Enables in-process import artifact caching (Phase 3 becomes trivial)
 - Eliminates per-module import-context directory copies
@@ -334,18 +339,19 @@ This channel was the first concrete source proven responsible for silent LLVM IR
 
 **Determinism delta (emit `llvm` x 20 runs on macOS arm64, same seed):**
 
-| Module | Baseline (seed 0.5.5 pre-change) | New compiler (post-change) |
-|--------|----------------------------------|-----------------------------|
-| `compiler/src/parser/expressions.sfn` | 4/30 divergent (5 distinct hashes) | 0/20 divergent (1 hash) |
-| `compiler/src/llvm/lowering/lowering_core.sfn` | intermittently dropped all user fns | 0/20 divergent (1 hash) |
-| `compiler/src/llvm/expression_lowering/native/core.sfn` | (not measured baseline) | 0/20 divergent |
-| `compiler/src/parser/statements.sfn` | (not measured baseline) | 1/20 divergent (other channels) |
+| Module                                                  | Baseline (seed 0.5.5 pre-change)    | New compiler (post-change)      |
+| ------------------------------------------------------- | ----------------------------------- | ------------------------------- |
+| `compiler/src/parser/expressions.sfn`                   | 4/30 divergent (5 distinct hashes)  | 0/20 divergent (1 hash)         |
+| `compiler/src/llvm/lowering/lowering_core.sfn`          | intermittently dropped all user fns | 0/20 divergent (1 hash)         |
+| `compiler/src/llvm/expression_lowering/native/core.sfn` | (not measured baseline)             | 0/20 divergent                  |
+| `compiler/src/parser/statements.sfn`                    | (not measured baseline)             | 1/20 divergent (other channels) |
 
 The three large modules that previously flaked are now fully deterministic. The residual 1/20 flake on `parser/statements.sfn` is driven by other scratch channels still active (call-result, struct-info, instr-fn-name) and will be eliminated as subsequent Phase 2 channels are removed.
 
 Concurrently, the `build.sh` retry loop went from 3 `invalid_ir` retries per full build (`core_operands`, `core_parsing`, `instructions_helpers`) down to 1 (`cli_commands`), another signal that real non-determinism volume dropped materially.
 
 **Scope of change:**
+
 - 1 writer deletion (`instructions_condition.sfn`)
 - 4 reader conversions to `find_local_binding(locals, name)` against the existing in-memory parameter
 - 1 signature extension (`lower_inline_gep_field_access` in `core_member_helpers.sfn` — added `locals: LocalBinding[]`, updated two call sites in `core_member_lowering.sfn`)
@@ -355,29 +361,31 @@ This is the first IPC removal under the procedure in Phase 2 above; future chann
 
 ### Self-Field IPC Channel Removal (April 19)
 
-**Status: Implemented.** Removed the `.self_field_*` file IPC channel — a v0.1.1-seed-era workaround used to ship the rewritten expression / next temp index / updated lines array from `preprocess_self_field_access` (in `statement_assignment.sfn`) back to its *immediate* caller `lower_return_instruction` (in `statement.sfn`).
+**Status: Implemented.** Removed the `.self_field_*` file IPC channel — a v0.1.1-seed-era workaround used to ship the rewritten expression / next temp index / updated lines array from `preprocess_self_field_access` (in `statement_assignment.sfn`) back to its _immediate_ caller `lower_return_instruction` (in `statement.sfn`).
 
 The writer was void-returning and wrote 4 sub-files (`.self_field_expr`, `.self_field_temp`, `.self_field_lines_count`, `.self_field_lines`) at 6 exit points (5 early returns + 1 final). The reader checked `fs.exists(".self_field_expr")` two lines after the call, read the 4 files back, reconstructed the three values, and deleted the scratch file. The call site is literally adjacent to the helper — the channel was pure function-return ceremony routed through the filesystem.
 
 **Shape of change:**
+
 - Added `SelfFieldResult { expression, temp_index, lines }` to `llvm/types.sfn` (wrapper struct is legitimate per procedure §267: three values travelling together).
-- `preprocess_self_field_access` now has return type `SelfFieldResult` and returns the struct at all 6 exits; all `fs.writeFile`/`fs.writeLines` on `.self_field_*` paths deleted. `![io]` retained because the function still reads `.struct_info` and `.instr_fn_name` (separate channels, out of scope).
+- `preprocess_self_field_access` now has return type `SelfFieldResult` and returns the struct at all 6 exits; all `fs.writeFile`/`fs.writeLines` on `.self_field_*` paths deleted. `![io]` subsequently dropped after the `.struct_info` channel removal (April 20) eliminated the last `fs.*` call.
 - Caller in `statement.sfn` captures the struct directly; `fs.exists` / `fs.readFile` / `fs.deleteFile` block replaced with three field reads. The `_sf_lc > current_lines.length` length gate is preserved as `result.lines.length > current_lines.length` so callers that didn't perform any self-field rewrites don't have their `current_lines` clobbered.
 - `cli_commands._clean_lowering_state` keeps the `.self_field_` prefix sweep with a comment explaining it's there to clean stale files from older build dirs / older seed binaries (following the PR #183 review precedent — never drop a prefix entirely).
 
 **Determinism delta (emit `llvm` × 20 runs on Linux x86_64, seed 0.5.7 baseline):**
 
-| Module | Baseline | Post-change |
-|--------|---------:|------------:|
-| `compiler/src/parser/expressions.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
-| `compiler/src/parser/statements.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
-| `compiler/src/llvm/lowering/instructions_helpers.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| Module                                                                  |                 Baseline |                  Post-change |
+| ----------------------------------------------------------------------- | -----------------------: | ---------------------------: |
+| `compiler/src/parser/expressions.sfn`                                   | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/parser/statements.sfn`                                    | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/llvm/lowering/instructions_helpers.sfn`                   | 1 hash (20/20 identical) | to be measured on new binary |
 | `compiler/src/llvm/expression_lowering/native/statement_assignment.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
-| `compiler/src/cli_commands.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/cli_commands.sfn`                                         | 1 hash (20/20 identical) | to be measured on new binary |
 
 On Linux x86_64 the 0.5.7 seed is already fully deterministic on these modules, so this channel's removal is not expected to move the hash count here — it eliminates the per-return file-I/O overhead instead. The equivalent macOS-arm64 measurements (where residual non-determinism still lives) will land in the PR body once the CI rebuild completes on that platform.
 
 **Scope of change:**
+
 - 1 writer function converted from void+file-IPC to `SelfFieldResult` return at 6 exit points
 - 1 reader (immediate caller, same stack frame) converted to direct struct-field reads
 - 1 struct added to `llvm/types.sfn` (3 fields)
@@ -392,6 +400,7 @@ Because the writer is called inside `lower_return_instruction`, which fires for 
 **Status: C implementation shipped behind a feature flag.** PR #174 (`de5ee36`) landed the bump-allocator C arena under `runtime/native/src/sailfin_arena.c` (254 lines) and wired it into `sailfin_runtime.c:618-654` via `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`. Activates when `SAILFIN_USE_ARENA=1`; otherwise the runtime falls back to `malloc`/`realloc` with the existing owned-string hash table and persistent-pointer set.
 
 **What's in the arena code:**
+
 - Linked-list of `SfnArenaPage` blocks (default 1 MiB; 4 MiB for the compiler singleton).
 - Lazy global singleton via `pthread_once` — created on first `sfn_arena_global()` call.
 - `sfn_arena_alloc(size, align)` — 8-byte aligned bump, new page allocated if the current page can't fit.
@@ -408,34 +417,36 @@ The default-on flip is tracked as its own entry below.
 
 **Measured on `compiler/src/llvm/lowering/lowering_core.sfn` (the heaviest module in the compiler), seed 0.5.7, Linux x86_64, isolated emit-only run (no parallelism, no timeout):**
 
-| Metric | Malloc | Arena | Delta |
-|--------|-------:|------:|------:|
-| Wall time | 11:43 | 10:31 | −10% |
-| Peak RSS | 7.49 GB | 4.72 GB | **−37%** |
+| Metric        |  Malloc |   Arena |              Delta |
+| ------------- | ------: | ------: | -----------------: |
+| Wall time     |   11:43 |   10:31 |               −10% |
+| Peak RSS      | 7.49 GB | 4.72 GB |           **−37%** |
 | LLVM IR bytes | 430,213 | 430,213 | **byte-identical** |
 
 The IR is byte-identical to the malloc output — `test-arena` reports `PASS ... (430,213 bytes identical)` — confirming the arena is transparent to compiler semantics on this module.
 
 **Fast-fail criteria from `runtime_architecture.md §4.4`:**
 
-| Criterion | Status | Notes |
-|---|---|---|
-| (1) `make compile` succeeds with arena on | ✅ In CI | Local selfhost on resource-constrained machines may still exceed `SEED_TIMEOUT=600` per module (lowering_core emit is close to the timeout even on the malloc path); CI's faster hardware clears both paths in ~14 min total on Linux. |
-| (2) Per-module peak RAM < 512 MB | ⚠️ Not met | Both paths remain well above 512 MB on the heaviest modules (arena 4.7 GB, malloc 7.5 GB on `lowering_core`). The 512 MB target requires IPC removal on top of the arena — arena alone eliminates the IPC-as-GC dependency but does not bring peak RAM to the target. Filed as a follow-up after Phase 2 IPC removal. |
-| (3) `make check` passes with arena on | ✅ In CI | Validated end-to-end in CI by this PR. |
+| Criterion                                 | Status     | Notes                                                                                                                                                                                                                                                                                                                 |
+| ----------------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| (1) `make compile` succeeds with arena on | ✅ In CI   | Local selfhost on resource-constrained machines may still exceed `SEED_TIMEOUT=600` per module (lowering_core emit is close to the timeout even on the malloc path); CI's faster hardware clears both paths in ~14 min total on Linux.                                                                                |
+| (2) Per-module peak RAM < 512 MB          | ⚠️ Not met | Both paths remain well above 512 MB on the heaviest modules (arena 4.7 GB, malloc 7.5 GB on `lowering_core`). The 512 MB target requires IPC removal on top of the arena — arena alone eliminates the IPC-as-GC dependency but does not bring peak RAM to the target. Filed as a follow-up after Phase 2 IPC removal. |
+| (3) `make check` passes with arena on     | ✅ In CI   | Validated end-to-end in CI by this PR.                                                                                                                                                                                                                                                                                |
 
 Criterion (2) is the only unmet gate, and its failure is **not arena-induced** — malloc is 59% higher peak. Arena is the better path on every axis measured; the 512 MB target is re-scoped as a Phase 2 follow-up.
 
 **Unblocked work (actionable immediately):**
+
 1. **Phase 1b aliasing-blocked residuals become safe under arena:**
    - `concat_native_functions` site 2 in `lowering_core.sfn:573` (the one the d2d0bf1 sweep left copying because `collect_runtime_helper_targets`/`render_llvm_preamble`/`lower_all_functions` needed a pristine `local_functions`).
    - All 6 `append_local_binding` sites in `expression_lowering/native/core_scopes.sfn:174-186`.
-   Both were deferred because in-place mutation leaked across scope restoration. Under arena, the copy is a cheap bump alloc and both views are preserved — in-place conversions are safe.
+     Both were deferred because in-place mutation leaked across scope restoration. Under arena, the copy is a cheap bump alloc and both views are preserved — in-place conversions are safe.
 2. **Phase 2 IPC channels previously blocked by IPC-as-GC (~146 refs) become pickable:** `.call_result_*` (51), `.let_result_*` / `.let_ipc_*` (39), ~~`.expr_stmt_*` (21)~~ removed in PR #191, `.instr_*` (18), `.dispatch_*` (12), ~~`.block_result_*` (5)~~ removed in PR #188.
 
 **macOS-arm64 determinism:** The 0.5.7 seed's residual non-determinism on macOS-arm64 (PRs #178 / #183 / #184 / #185 each measured 20-run hash sweeps against this) is driven by Phase 2 channels still active, not by memory allocation patterns. The arena flip itself should not change the non-determinism surface area — measurement will land in the PR body once CI completes on macOS-arm64.
 
 **Scope of change:**
+
 - `scripts/build.sh`: 1 export added (`SAILFIN_USE_ARENA="${SAILFIN_USE_ARENA:-1}"`) with a comment block explaining the contract.
 - `.github/workflows/ci.yml`: 1 env var pinned at workflow level (`SAILFIN_USE_ARENA: "1"`).
 - No compiler or runtime source changes.
@@ -447,6 +458,7 @@ Known pre-existing bug: on macOS-arm64, top-level user `fn` bodies with `return 
 **Status: Implemented.** Removed the `.module_globals_*` file IPC channel — six scratch files (`preamble`, `locals`, `init`, `init_symbol`, `needs_init`, `diagnostics`) that `lower_module_bindings_to_globals` in `module_globals.sfn` used to ship its output back to its sole caller in `lowering_core.sfn`. The writer had always declared `ModuleGlobalLoweringResult` as its return type, but returned an empty stub; a "UNREACHABLE on v0.1.1 seed" comment documented the workaround. The 0.5.x seed lineage has no such restriction — `preprocess_self_field_access` (PR #184) validated the same return-struct pattern with 6 exits including a post-loop return.
 
 **Shape of change:**
+
 - Added `BindingLoweringResult { preamble_lines: string[]; locals: LocalBinding[]; needs_init: boolean }` to `llvm/types.sfn` (wrapper struct is legitimate per procedure §267: three values travelling together out of the per-binding helper).
 - `_process_one_binding` now returns a `BindingLoweringResult` at all 4 exits instead of writing `.module_globals_preamble` / `.module_globals_locals` scratch files. `![io]` removed — the helper is now pure.
 - `lower_module_bindings_to_globals` accumulates per-binding results in the outer loop (preamble via `.push`, locals via `.push`, needs_init via `|=`) and fully populates `ModuleGlobalLoweringResult` at its single return point. Early-return for empty bindings kept. `![io]` removed.
@@ -456,15 +468,16 @@ Known pre-existing bug: on macOS-arm64, top-level user `fn` bodies with `return 
 
 **Determinism delta (emit `llvm` × 20 runs on Linux x86_64, seed 0.5.7 baseline):**
 
-| Module | Baseline | Post-change |
-|--------|---------:|------------:|
-| `compiler/src/llvm/lowering/lowering_core.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
-| `compiler/src/parser/expressions.sfn` | 1 hash (20/20 identical) | to be measured on new binary |
+| Module                                                   |                 Baseline |                  Post-change |
+| -------------------------------------------------------- | -----------------------: | ---------------------------: |
+| `compiler/src/llvm/lowering/lowering_core.sfn`           | 1 hash (20/20 identical) | to be measured on new binary |
+| `compiler/src/parser/expressions.sfn`                    | 1 hash (20/20 identical) | to be measured on new binary |
 | `compiler/src/version.sfn` (module with top-level `let`) | 1 hash (20/20 identical) | to be measured on new binary |
 
 On Linux x86_64 the 0.5.7 seed is already fully deterministic on these modules, so this channel's removal is not expected to move the hash count here — it eliminates per-binding `fs.writeFile` + clear-on-entry + read-back overhead instead. The equivalent macOS-arm64 measurements (where residual non-determinism still lives) will land in the PR body once the CI rebuild completes on that platform.
 
 **Scope of change:**
+
 - 1 writer function (`lower_module_bindings_to_globals`) converted from file-IPC stub to populated `ModuleGlobalLoweringResult` return
 - 1 helper (`_process_one_binding`) converted from void+file-IPC to `BindingLoweringResult` return at all 5 exits (4 early + 1 final)
 - 1 append-helper (`_append_to_file`) deleted entirely
@@ -485,6 +498,7 @@ The writer is called once per module compile, but only performs work when a modu
 The channel existed as a workaround for the v0.1.1-seed compiling `emission.sfn` with `NativeFunction` demoted to `i8*` across module boundaries, making `function.name` etc. return garbage. The 0.5.7 seed under the default-on arena (PR #186) handles cross-module `NativeFunction` field access correctly — same pattern validated by PRs #183 (`.ctx_func_*`), #184 (`.self_field_*`), and #185 (`.module_globals_*`).
 
 **Shape of change:**
+
 - `emit_llvm_function` signature changed: now `fn emit_llvm_function(function: NativeFunction, functions: ..., ...)` — the caller passes the `NativeFunction` directly instead of a bare name and a `.fn_index` file.
 - All eight `fs.readFile` calls in `emission.sfn` for scalar `.fn_*` fields replaced with `function.{name,return_type,is_async,is_extern}` and `.length` reads on `function.parameters`/`function.instructions`/`function.decorators`.
 - The per-index `.fn_decorator_N` reader loop now iterates `function.decorators` in memory.
@@ -495,11 +509,13 @@ The channel existed as a workaround for the v0.1.1-seed compiling `emission.sfn`
 - `cli_commands._clean_lowering_state` keeps the `.fn_` prefix sweep with a "Legacy" comment for stale scratch files from older build dirs / older seed binaries (precedent: PRs #183 / #184 / #185 / #188).
 
 **Dead code removed:**
+
 - `emit_body` in `emission.sfn` — 86 lines, unreferenced from any call site, still read `.fn_index`.
 - `parse_simple_integer` in `emission.sfn` — only used to parse the file-IPC integer fields.
 - `NativeParameter`/`NativeInstruction` imports in `lowering_phase_functions.sfn` — only used by the deleted `write_function_ipc` loops.
 
 **Scope:**
+
 - 226 lines deleted from `emission.sfn` (file reads + `emit_body` + `parse_simple_integer` + fn_index bounds check)
 - 42 lines deleted from `lowering_phase_functions.sfn` (writer + call site + unused imports)
 - 24 lines changed in `emission_async.sfn` (signature swap + impl NativeFunction literal)
@@ -507,6 +523,7 @@ The channel existed as a workaround for the v0.1.1-seed compiling `emission.sfn`
 - Net: −204 lines, 45 insertions across 4 files.
 
 **Per-function-compile overhead removed:**
+
 - 8 `fs.writeFile` calls for scalar fields (name, return_type, async/extern flags, counts, index ×2)
 - `2N` `fs.writeFile` calls for parameters (name + type per param)
 - `N` `fs.writeFile` calls for decorators
@@ -523,11 +540,12 @@ For a typical compiler module (50-200 functions, ~3 params + 0-1 decorators per 
 
 **Status: Implemented.** Removed two channels in one sweep:
 
-* **`.expr_stmt_*`** (21 dotfile refs, 2 writers, 2 readers): the v0.1.1-seed-era workaround used by `lower_expression_statement` / `lower_return_instruction` to ship per-statement temp counter, region id, mutations, and string constants back to `dispatch_expression_instruction` / `dispatch_return_instruction`. Both writers already returned a fully-populated `ExpressionStatementResult` struct; the file IPC was a parallel copy of the same data. Under the default-on arena (PR #186) the 0.5.7 seed handles cross-module struct returns correctly — same pattern validated by PRs #183 / #184 / #185 / #188 / #189. The dispatch readers now consume `lowered.{temp_index, next_region_id, mutations, string_constants}` directly, with the same temp-counter floor protection inlined.
+- **`.expr_stmt_*`** (21 dotfile refs, 2 writers, 2 readers): the v0.1.1-seed-era workaround used by `lower_expression_statement` / `lower_return_instruction` to ship per-statement temp counter, region id, mutations, and string constants back to `dispatch_expression_instruction` / `dispatch_return_instruction`. Both writers already returned a fully-populated `ExpressionStatementResult` struct; the file IPC was a parallel copy of the same data. Under the default-on arena (PR #186) the 0.5.7 seed handles cross-module struct returns correctly — same pattern validated by PRs #183 / #184 / #185 / #188 / #189. The dispatch readers now consume `lowered.{temp_index, next_region_id, mutations, string_constants}` directly, with the same temp-counter floor protection inlined.
 
-* **`.coerce_result_*`** (4 dotfile refs, 0 writers): pure dead code. The fallback reader in `instructions_let.sfn` checked for files no caller ever wrote — `coerce_operand_to_type` returns its result via `CoercionResult` struct and never touched the filesystem. Collapsed to the existing struct-field path.
+- **`.coerce_result_*`** (4 dotfile refs, 0 writers): pure dead code. The fallback reader in `instructions_let.sfn` checked for files no caller ever wrote — `coerce_operand_to_type` returns its result via `CoercionResult` struct and never touched the filesystem. Collapsed to the existing struct-field path.
 
 **Shape of change:**
+
 - `_write_expr_stmt_result_files{,_with_constants}` deleted from `statement.sfn` (2 helpers + 8 call sites at all return points of `lower_expression_statement` and `lower_return_instruction`).
 - `_read_expr_string_constants` deleted from `instructions_dispatch.sfn`; both dispatch readers now use struct fields directly.
 - `read_expr_string_constants` and `read_expr_mutations` deleted from `instructions_helpers.sfn` — both were unused/dead code.
@@ -536,6 +554,7 @@ For a typical compiler module (50-200 functions, ~3 params + 0-1 decorators per 
 - `cli_commands._clean_lowering_state` adds `.expr_stmt_` and `.coerce_result_` "Legacy" sweeps for stale files from older build dirs / older seed binaries (precedent: PRs #183 / #184 / #185 / #188 / #189).
 
 **Per-statement overhead removed:**
+
 - 5 + 4N `fs.writeFile` per emitted statement (temp/region/mut_count scalars + 4 per mutation: name/type/value/label)
 - 1 `fs.writeLines` per statement (string_constants array)
 - 5 `fs.readFile` + bulk parsing on the reader side
@@ -544,6 +563,7 @@ For a typical compiler module (50-200 functions, ~3 params + 0-1 decorators per 
 For typical compiler modules (hundreds of statements per function, dozens of functions per module) this eliminates thousands of filesystem operations per module compile.
 
 **Scope:**
+
 - 6 source files modified, ~−241 / +47 lines net.
 - No new tests added — the existing integration suite (`selfhost_pipeline_test.sfn`, `async_struct_return_stress_test.sfn`, `compiler_ir_patterns_test.sfn`) and the self-hosting build itself exercise every path that was changed.
 
@@ -551,11 +571,12 @@ For typical compiler modules (hundreds of statements per function, dozens of fun
 
 **Status: Implemented.** Removed the `.call_result_*` file-IPC channel — the heaviest-referenced remaining Phase 2 channel. Two sub-groups shared the prefix:
 
-* **Type/value pair** (`.call_result_type`, `.call_result_value`): a v0.1.1-seed-era workaround that writers in `core_call_emission.sfn`, `core_literals_lowering.sfn`, `core_strings.sfn`, and the await paths of `core.sfn` used to ship `LLVMOperand.{llvm_type, value}` back to `instructions_let.sfn`. Every writer already populated `ExpressionResult.operand` with the identical data — the file IPC was a parallel copy. The reader in `instructions_let.sfn` used the files as a `_use_ipc_override` fallback when `operand.llvm_type` appeared corrupted crossing module boundaries. Under the default-on arena (PR #186) the 0.5.7 seed handles cross-module struct returns correctly — same pattern validated by PRs #183 / #184 / #185 / #188 / #189 / #191.
+- **Type/value pair** (`.call_result_type`, `.call_result_value`): a v0.1.1-seed-era workaround that writers in `core_call_emission.sfn`, `core_literals_lowering.sfn`, `core_strings.sfn`, and the await paths of `core.sfn` used to ship `LLVMOperand.{llvm_type, value}` back to `instructions_let.sfn`. Every writer already populated `ExpressionResult.operand` with the identical data — the file IPC was a parallel copy. The reader in `instructions_let.sfn` used the files as a `_use_ipc_override` fallback when `operand.llvm_type` appeared corrupted crossing module boundaries. Under the default-on arena (PR #186) the 0.5.7 seed handles cross-module struct returns correctly — same pattern validated by PRs #183 / #184 / #185 / #188 / #189 / #191.
 
-* **Lines/count/temp triple** (`.call_result_lines_count`, `.call_result_lines`, `.call_result_temp`): a cross-statement leak used by `_write_assign_result_files` in `statement_assignment.sfn` to ship post-lvalue-assignment IR lines + temp counter to a sentinel-gated reader in `statement.sfn`'s `lower_expression_statement`. The sentinel-gated reader fired only when a *prior* statement's lvalue path had written the files; under arena, in-place array mutation of `current_lines` plus `_recover_temp_from_lines(current_lines, current_temp)` already delivers the same data in-band. The reader block's comment ("ExpressionResult struct fields may be ABI-corrupted crossing module boundaries") describes a pre-arena failure mode.
+- **Lines/count/temp triple** (`.call_result_lines_count`, `.call_result_lines`, `.call_result_temp`): a cross-statement leak used by `_write_assign_result_files` in `statement_assignment.sfn` to ship post-lvalue-assignment IR lines + temp counter to a sentinel-gated reader in `statement.sfn`'s `lower_expression_statement`. The sentinel-gated reader fired only when a _prior_ statement's lvalue path had written the files; under arena, in-place array mutation of `current_lines` plus `_recover_temp_from_lines(current_lines, current_temp)` already delivers the same data in-band. The reader block's comment ("ExpressionResult struct fields may be ABI-corrupted crossing module boundaries") describes a pre-arena failure mode.
 
 **Shape of change:**
+
 - `_write_emission_result_lines` deleted from `core_call_emission.sfn` (helper + all 6 call sites at trait/concat/push/array paths).
 - 14 `fs.writeFile(".call_result_{type,value}", ...)` pairs deleted across `core_call_emission.sfn` (6), `core_literals_lowering.sfn` (5), `core.sfn` (3 await paths), `core_strings.sfn` (1).
 - `_write_assign_result_files` deleted from `statement_assignment.sfn` (helper + all 11 call sites at every return point of `lower_lvalue_assignment_stmt`).
@@ -566,6 +587,7 @@ For typical compiler modules (hundreds of statements per function, dozens of fun
 - `cli_commands._clean_lowering_state` keeps the `.call_result_` prefix sweep with a "Legacy" comment for stale files from older build dirs / older seed binaries (precedent: PRs #183 / #184 / #185 / #188 / #189 / #191).
 
 **Per-call / per-statement overhead removed:**
+
 - Up to 2 `fs.writeFile` per call emission (type + value scalars) — fires on every `call` IR emission across trait dispatch, concat/push inline, void/value standard calls, array-struct literals, zero-field structs, string concat, and await unboxing.
 - 3 `fs.writeFile` per lvalue assignment statement (lines count + bulk lines + temp index) — fires on every deref, member-access, and array-index assignment.
 - 2 `fs.deleteFile` per let initializer (pre-clear sentinel).
@@ -576,16 +598,18 @@ For typical compiler modules (hundreds of statements per function, dozens of fun
 For a typical compiler module with hundreds of calls per function and dozens of functions, this eliminates thousands of filesystem operations per module compile. Together with the `.expr_stmt_*` removal in PR #191, the per-statement IR accumulation path is now fully in-memory end-to-end.
 
 **Risks evaluated:**
+
 - **v0.1.1-seed ABI corruption**: the channel's original purpose. 0.5.x seeds under arena validated by PRs #183-#191 — `ExpressionResult` and `ExpressionStatementResult` are reliable across module boundaries today.
 - **Cross-statement `_write_assign_result_files` → `statement.sfn` reader**: the else-branch fallback at `statement.sfn:441` (`_recover_temp_from_lines`) was already the standalone code path when the sentinel file was absent, and its comment explicitly documented that `current_lines` is mutated in-place. Removing both writer and reader together makes the scanner-based recovery the single path.
 - **`_use_ipc_override` removal**: the reader exists to repair operands whose `llvm_type` is empty or mismatched versus the expected `llvm_type`. Under arena, the operand struct returned by `lower_expression` carries the correct type — the file-based reconstruction was a parallel safety net that is no longer needed. The identity-vs-coerce split at the store site (lines 357-402) is unchanged.
 
 **Scope:**
+
 - 8 source files modified (7 compiler + 1 CLI), 1 docs file updated.
 - Net: ~−200 lines deleted / ~+20 lines added.
 - No new tests added — the existing integration suite (`selfhost_pipeline_test.sfn`, `async_struct_return_stress_test.sfn`, `compiler_ir_patterns_test.sfn`) plus full self-hosting exercise every path.
 
-**Determinism:** Linux x86_64 on seed 0.5.7 is already 20/20 identical on the hot modules per the arena-flip entry; this change removes file-I/O overhead without introducing new non-determinism. macOS-arm64 measurement to be recorded after CI completes on that platform. With `.call_result_*` gone, the remaining Phase 2 channels driving residual macOS-arm64 non-determinism are `.dispatch_*`, `.let_result_*` / `.let_ipc_*`, and `.instr_*`.
+**Determinism:** Linux x86*64 on seed 0.5.7 is already 20/20 identical on the hot modules per the arena-flip entry; this change removes file-I/O overhead without introducing new non-determinism. macOS-arm64 measurement to be recorded after CI completes on that platform. With `.call_result*_`gone, the remaining Phase 2 channels driving residual macOS-arm64 non-determinism are`.dispatch\__`, `.let*result*_`/`.let*ipc*_`, and `.instr\_\*`.
 
 ### Dispatch / Let Result / Let IPC Dead-Channel Sweep (April 20)
 
@@ -599,6 +623,7 @@ For a typical compiler module with hundreds of calls per function and dozens of 
 The channels were v0.1.1-seed-era fallback code paths that became unreferenced after the `LetLoweringResult` struct return shipped but were never pruned.
 
 **Shape of change:**
+
 - Deleted `compiler/src/llvm/lowering/instructions_dispatch.sfn` entirely (256 lines). No import fixups required anywhere.
 - Deleted four dead functions from `compiler/src/llvm/lowering/instructions_helpers.sfn`: `write_bindings_to_files`, `write_locals_to_files`, `read_let_result_string_constants`, `read_let_result_from_files` (~152 lines). All four had zero callers across `compiler/src` and `compiler/tests`.
 - Pruned imports in `instructions_helpers.sfn` that became unused after the deletion: `append_local_binding`, `merge_string_constants`, `substring`, `index_of`, `number_to_string`, `split_lines_local`, `ParameterBinding`, `StringConstant`.
@@ -606,6 +631,7 @@ The channels were v0.1.1-seed-era fallback code paths that became unreferenced a
 - Updated `docs/build-performance.md` Remaining-targets list to reflect the new Phase 2 surface (statement/assignment channels, `.async_inner_return_type`, `.struct_info` / `.enum_info`, `serialize_context_functions`).
 
 **Scope:**
+
 - 1 file deleted (`instructions_dispatch.sfn`, −256 lines).
 - 1 file trimmed (`instructions_helpers.sfn`, −152 lines).
 - 2 files edited (`cli_commands.sfn` +6 lines for Legacy comments; `docs/build-performance.md` entry + Remaining-targets prune).
@@ -613,12 +639,14 @@ The channels were v0.1.1-seed-era fallback code paths that became unreferenced a
 - No new tests added — the existing integration suite plus full self-hosting exercise every live path.
 
 **Per-module overhead removed:**
+
 - `.dispatch_*` writes (lines, allocas, temp, next_local, next_region, used_file_ipc, mutation_count + per-index, string_constants) fired on every instruction dispatch — now zero.
 - `.let_ipc_*` writes (lines, allocas, temp, next_local, next_region, used) fired on every let-result read — now zero.
 - `.let_result_*` read-with-delete cycles fired on every let-instruction finalize — now zero.
 - The 256-line `instructions_dispatch.sfn` module itself is no longer compiled: on the April 15 baseline this module cost 26.17s and 3.1 GB peak RAM per `docs/perf/baseline-0.5.2-alpha.1.csv:66`. Eliminating the module removes that compilation cost from the aggregate build time.
 
 **Risk assessment:**
+
 - Because all three channels were dead code with no live data path, removal cannot change compiler output. The CI full build + test suite is the authoritative gate.
 - The `.instr_*` prefix is left intact (still swept without a Legacy comment) because although its writers lived inside the now-deleted `instructions_dispatch.sfn`, several readers remain in `statement.sfn`, `statement_assignment.sfn`, `core_member_lowering.sfn`, `core_member_helpers.sfn`, and `core_literals_lowering.sfn`. Those readers now always take their fallback path (the `fs.exists` check always returns false), which is semantically equivalent to the pre-existing fallback behavior. Full `.instr_*` removal is a separate PR.
 
@@ -635,18 +663,21 @@ The channels were v0.1.1-seed-era fallback code paths that became unreferenced a
 - `compiler/src/llvm/expression_lowering/native/statement_assignment.sfn:595-755` — the `if !fs.exists(".instr_fn_name") { return ... }` guard plus the entire `.struct_info`/`.instr_fn_name` parsing + `self.field` rewrite loop that followed inside `preprocess_self_field_access` (~160 lines). The function now early-returns for any `self.*` return expression — which is the behavior that has been live since the April 20 dispatch sweep removed the writer.
 
 **Shape of change:**
+
 - Three dead `if fs.exists(".instr_fn_name")` reader blocks deleted.
-- `preprocess_self_field_access` collapses to a trivial pass-through (early-return on `self.` absent, early-return on `.struct_info` absent, final return of unmodified inputs). `![io]` retained because `fs.exists(".struct_info")` is still called.
+- `preprocess_self_field_access` collapses to a trivial pass-through (early-return on `self.` absent, return unmodified inputs). `![io]` dropped — no `fs.*` calls remain after the `.struct_info` channel removal.
 - `cli_commands._clean_lowering_state` line for `.instr_` now carries a "Legacy" comment (following the PR #183 / #184 / #185 / #188 / #189 / #191 / #192 precedent of keeping prefixes in the cleanup sweep to handle stale files from older build dirs / older seed binaries).
 - No import cleanup required: `index_of`, `substring`, `format_temp_name`, `number_to_string` all remain heavily used elsewhere in the modified files.
 
 **Scope:**
+
 - 3 source files modified, ~−239 / +4 lines net.
 - 1 CLI file edited (+2 lines for Legacy comment).
 - 1 docs file updated.
 - No new tests added — the existing integration suite plus full self-hosting exercise the live paths; the deletions remove only code guarded by an always-false `fs.exists` check.
 
 **Risk assessment:**
+
 - The writer of `.instr_fn_name` was removed as part of `instructions_dispatch.sfn` deletion in the April 20 dispatch sweep (see entry above). After that removal, every `fs.exists("build/sailfin/.instr_fn_name")` call returned false (unless stale files existed in `build/sailfin/`, which the cleanup sweep already handles). CI for the dispatch sweep passed on all platforms, validating that the fallback path was genuinely dead. This cleanup only removes the unreachable code — no semantic change.
 
 **Determinism:** No behavior change expected on any platform — the deleted blocks were guarded by always-false conditions. Post-change emit-sweep measurement to land in the PR body after CI completes.
@@ -656,6 +687,7 @@ The channels were v0.1.1-seed-era fallback code paths that became unreferenced a
 **Status: Implemented.** Removed the `.enum_info` file-IPC channel — a v0.1.1-seed-era cross-module ABI workaround. Writer (`serialize_enum_info`) and reader (`recover_enums_from_file`) both lived in the same file (`lowering_phase_types.sfn`) and shared a single call frame inside `build_type_context_with_recovery` (the writer ran two lines before the reader's entry condition). Chosen as the first move ahead of `.struct_info` because the same-file, same-function writer/reader pair is the smallest possible blast radius to validate that arena-mode `build_type_context` reliably returns cross-module struct-array returns — the hypothesis that underwrites every Phase 2 removal since the April 19 arena default-on flip.
 
 **Shape of change:**
+
 - Added pure helper `build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[]` to `lowering_phase_types.sfn`. Iterates `fixed_enums_list` directly and produces byte-identical `EnumTypeInfo[]` to the file-based path: unit-enum defaults (`tag_type="i32"`, `tag_size=4`, `tag_align=4`, `size=4`, `align=4`, `max_payload_size=0`) and synthetic variant names `v0`, `v1`, ... (matching the `v<idx>=<idx>` format the writer serialized). The helper is genuinely pure — no `![io]`, no tracing — the `_trace_enums` branch moved to the caller, which already owns `![io]`.
 - Deleted `serialize_enum_info` (47 lines) and its single call at `build_type_context_with_recovery`.
 - Deleted the `fs.exists("build/sailfin/.enum_info")` gate on the recovery condition — under arena the file was no longer a meaningful signal, and `_needs_recovery` is now driven purely by `type_context.enums.length == 0 || _enum_names_empty`.
@@ -666,17 +698,20 @@ The channels were v0.1.1-seed-era fallback code paths that became unreferenced a
 - `cli_commands._clean_lowering_state` gets a "Legacy" comment for the `.enum_info` sweep (following the PR #183 / #184 / #185 / #188 / #189 / #191 / #192 precedent of keeping the prefix in the cleanup sweep to handle stale files from older build dirs / older seed binaries).
 
 **Per-module overhead removed:**
+
 - 1 `fs.writeLines(".enum_info", ...)` per module compile (fires on every module with a `build_type_context_with_recovery` call — i.e. every compiler module).
 - 1 `fs.exists(".enum_info")` per module compile (gating check).
 - 1 `fs.readFile(".enum_info")` + tab-delimited parse per module where recovery fires.
 - The 72-line `recover_enums_from_file` + 27-line `parse_enum_variants` helpers no longer compile into the module.
 
 **Risk assessment:**
+
 - **Recovery semantics**: the recovery path fires when `type_context.enums` is empty or has empty names (the v0.1.1-seed ABI corruption signal). Under the default-on arena (PR #186) the 0.5.7 seed returns correct struct-array returns across module boundaries — same pattern validated by PRs #184 (`.self_field_*`), #185 (`.module_globals_*`), #188 (`.fn_*`), #189 (same), #191 (`.expr_stmt_*`), #192 (`.call_result_*`), and the April 20 dispatch/let_result/let_ipc sweep. The in-memory fallback preserves byte-identical output (synthetic `v<idx>` variant names, unit-enum defaults) so any code relying on the file-based recovery shape continues to work.
 - **Cross-statement leak**: none — writer and reader share a call frame.
 - **Effect narrowing**: `build_enum_infos_inline` is genuinely pure — no `![io]`, no `print.err`, no `fs.*`. `serialize_enum_info`'s `![io]` obligation goes away with the function itself. `build_type_context_with_recovery` retains `![io]` because it still calls `serialize_struct_info`, writes `.phase_types_diagnostics`, and owns the `_trace_enums` post-recovery `print.err`.
 
 **Scope:**
+
 - 3 source files modified (`lowering_phase_types.sfn`, `cli_commands.sfn`, `docs/build-performance.md`).
 - `lowering_phase_types.sfn`: net approximately −95 lines (146 removed, 53 added — old serializer + file reader replaced by the inline builder).
 - `cli_commands.sfn`: +2 lines for the Legacy comment.
@@ -685,7 +720,60 @@ The channels were v0.1.1-seed-era fallback code paths that became unreferenced a
 
 **Determinism:** Writer/reader shared a same-file call frame, so there was no cross-module hash divergence to measure on the `.enum_info` channel specifically. Post-change emit-sweep on `lowering_core.sfn`, `parser/expressions.sfn`, and modules with user enums (`ast.sfn`) will land in the PR body once CI completes. With `.enum_info` gone, the remaining Phase 2 channels driving residual macOS-arm64 non-determinism are `.struct_info`, `.async_inner_return_type`, and the reader-only `.instr_*` fallbacks.
 
-**Follow-up:** The immediate next PR should remove `.struct_info` using this PR's `build_enum_infos_inline` as the template for a `build_struct_infos_inline(combined_structs)` helper, applied to the four remaining readers in `core_member_helpers`, `core_member_lowering`, `core_literals_lowering`, and `lowering_phase_render`. That removal requires a one-hop `context: TypeContext` signature extension on `lower_inline_gep_field_access` — same blast radius as PR #183's `lower_inline_gep_field_access` hop.
+**Follow-up:** ~~The immediate next PR should remove `.struct_info`~~ — Done. See below.
+
+### Struct Info IPC Channel Removal (April 20)
+
+**Status: Implemented.** Removed the `.struct_info` file-IPC channel — a v0.1.1-seed-era cross-module ABI workaround. Writer (`serialize_struct_info`) in `lowering_phase_types.sfn` serialized `NativeStruct[]` as tab-delimited lines to `build/sailfin/.struct_info`; five readers across four files parsed it back to resolve struct field metadata. Under the 0.5.7 seed with arena (default-on since April 19), `TypeContext` crosses module boundaries reliably, making the file path dead.
+
+**Shape of change:**
+
+_Phase A — Dead code removal:_
+
+- Deleted `try_file_based_struct_field_access` (~130 lines) from `core_member_lowering.sfn` — zero callers, not exported. Pure dead code from a v0.1.1-seed era that was never wired up.
+- Collapsed `preprocess_self_field_access` in `statement_assignment.sfn` — removed the `fs.exists(".struct_info")` check, dropped `![io]`. Function is now a trivial pass-through (early-return on `self.` absent, return unmodified inputs).
+
+_Phase B — Reader conversions:_
+
+- `core_member_helpers.sfn`: Rewrote `lower_inline_gep_field_access` to use `find_struct_info_by_name(context, name)` + `find_struct_field_info(info, field_name)` from the in-memory `TypeContext`. Added `context: TypeContext` parameter. Dropped `![io]`. Removed `index_of`/`substring` imports (no longer needed). Updated two call sites in `core_member_lowering.sfn` to pass `context`.
+- `core_member_lowering.sfn`: Dropped `![io]` from `lower_member_access` (no more `fs.*` calls in the file).
+- `core_literals_lowering.sfn`: Deleted the ~80-line file-based fallback block from `lower_struct_literal` that parsed `.struct_info` when `resolve_struct_info_for_literal` returned null. Dropped `![io]`. Removed unused imports: `index_of`, `StructFieldInfo`, `StructTypeInfo`.
+- `lowering_phase_render.sfn`: Converted `recover_struct_types_from_file()` to `recover_struct_types_from_context(type_context: TypeContext)` — iterates `type_context.structs` in-memory to produce the same LLVM type-definition lines. Dropped `![io]` from the recovery function. Removed unused imports: `NativeStruct`, `substring`, `index_of`, `split_lines_local`.
+
+_Phase C — Writer deletion:_
+
+- Deleted `serialize_struct_info` (~43 lines) from `lowering_phase_types.sfn` and its call in `build_type_context_with_recovery`. Removed unused imports: `get_struct_field_name_at`, `get_struct_field_type_at`, `get_struct_fields_at`, `get_struct_name_at`. Updated module header comment.
+- `cli_commands.sfn`: Added "Legacy" comment to the `.struct_info` cleanup sweep (following PR #183+ precedent).
+
+**Per-module overhead removed:**
+
+- 1 `fs.writeLines(".struct_info", ...)` per module compile (fires on every module with `build_type_context_with_recovery`).
+- Up to 5 `fs.exists(".struct_info")` + `fs.readFile(".struct_info")` + tab-delimited parse calls per module across the four reader sites.
+- ~350 lines of file-I/O parsing code removed, replaced with ~20 lines of in-memory lookups.
+
+**Effect narrowing:**
+
+- `lower_inline_gep_field_access`: `![io]` → pure
+- `lower_member_access`: `![io]` → pure
+- `lower_struct_literal`: `![io]` → pure
+- `recover_struct_types_from_context`: new function, pure (replacing `![io]` file-based version)
+- `preprocess_self_field_access`: `![io]` → pure (no `fs.*` calls remain)
+- `serialize_struct_info`: deleted entirely
+- `build_type_context_with_recovery` retains `![io]` (still writes `.phase_types_diagnostics` and owns debug `print.err`).
+
+**Risk assessment:**
+
+- All five reader sites were verified to have `TypeContext` in scope (either directly or one hop up). The in-memory helpers `find_struct_info_by_name` and `find_struct_field_info` already existed in `type_context_queries.sfn` and are exercised by the primary code paths.
+- The file-based paths were fallbacks for when `TypeContext` arrived corrupt across module boundaries (v0.1.1-seed ABI issue). Under the 0.5.7 seed with arena, the primary in-memory paths work reliably — validated by PRs #183-#192 and the `.enum_info` removal.
+
+**Scope:**
+
+- 7 source files modified.
+- Net approximately −350 lines removed, ~20 added.
+- 1 signature extension (`lower_inline_gep_field_access` gains `context: TypeContext`, 2 call sites updated).
+- No new wrapper structs, no new tests (existing integration suite + self-hosting exercise all live paths).
+
+**Determinism:** The `.struct_info` channel was a significant source of non-determinism because its five readers spanned four different files across two lowering phases (expression lowering and render). Cross-phase file reads are the primary mechanism for hash divergence on macOS-arm64. Post-change emit-sweep measurements to land in the PR body once CI completes. With `.struct_info` gone, the remaining Phase 2 channels are `.async_inner_return_type` and the reader-only `.instr_*` fallbacks.
 
 ---
 
@@ -695,19 +783,19 @@ Total: **489 `fs.*` calls across 37 files.** 228 dotfile references to `build/sa
 
 ### Top IPC files by build/sailfin/ reference count
 
-| File | Dotfile refs |
-|------|-------------|
-| `instructions_dispatch.sfn` | 45 |
-| `instructions_let.sfn` | 32 |
-| `instructions_helpers.sfn` | 30 |
-| `statement.sfn` | 16 |
-| `core_call_emission.sfn` | 13 |
-| `core_literals_lowering.sfn` | 12 |
-| `main.sfn` | 12 |
-| `statement_assignment.sfn` | 9 |
-| `lowering_core.sfn` | 9 |
-| `lowering_phase_types.sfn` | 7 |
-| `cli_commands.sfn` | 4 |
-| `emission.sfn` | 3 |
-| `lowering_phase_functions.sfn` | 2 |
-| `core_call_resolution.sfn` | 1 |
+| File                           | Dotfile refs |
+| ------------------------------ | ------------ |
+| `instructions_dispatch.sfn`    | 45           |
+| `instructions_let.sfn`         | 32           |
+| `instructions_helpers.sfn`     | 30           |
+| `statement.sfn`                | 16           |
+| `core_call_emission.sfn`       | 13           |
+| `core_literals_lowering.sfn`   | 12           |
+| `main.sfn`                     | 12           |
+| `statement_assignment.sfn`     | 9            |
+| `lowering_core.sfn`            | 9            |
+| `lowering_phase_types.sfn`     | 7            |
+| `cli_commands.sfn`             | 4            |
+| `emission.sfn`                 | 3            |
+| `lowering_phase_functions.sfn` | 2            |
+| `core_call_resolution.sfn`     | 1            |
