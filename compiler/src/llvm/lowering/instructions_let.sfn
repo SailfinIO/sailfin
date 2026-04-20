@@ -15,7 +15,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "../lifetime";
-import { find_function_by_name } from "../rendering_helpers";
+import { find_function_by_name_or_import } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     find_interface_info_by_name,
@@ -378,13 +378,16 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     // For locals that hold async futures, store the underlying return type
     // as type_annotation so the await handler can unbox structs. The callee is
     // the leading identifier of the initializer (the writer only ever fired
-    // for direct async function calls); looking it up in `functions` gives us
-    // the same `return_type` the file-IPC channel used to carry.
+    // for direct async function calls); looking it up via
+    // `find_function_by_name_or_import` matches the exact name and — for
+    // imported / mangled callees — the unique `target + "__"` suffix, so we
+    // reach the same `NativeFunction.return_type` the file-IPC channel used
+    // to carry for both local and imported async functions.
     let mut local_type_annotation: string = instruction.type_annotation;
     if llvm_type == "%SailfinFuturePtr*" {
         let call_target = _extract_leading_call_target(instruction.value);
         if call_target.length > 0 {
-            let callee = find_function_by_name(functions, call_target);
+            let callee = find_function_by_name_or_import(functions, call_target);
             if callee != null {
                 if callee.is_async {
                     if callee.return_type.length > 0 {
