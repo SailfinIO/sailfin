@@ -9,6 +9,9 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+imports:
+  - shared/build-mcp-server.md
+
 permissions:
   contents: read
   issues: read

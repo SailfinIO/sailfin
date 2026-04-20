@@ -12,6 +12,9 @@ on:
   schedule: daily
   workflow_dispatch:
 
+imports:
+  - shared/build-mcp-server.md
+
 permissions:
   contents: read
   issues: read

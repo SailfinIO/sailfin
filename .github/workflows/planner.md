@@ -13,6 +13,9 @@ on:
   schedule: weekly on monday
   workflow_dispatch:
 
+imports:
+  - shared/build-mcp-server.md
+
 permissions:
   contents: read
   issues: read

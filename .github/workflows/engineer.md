@@ -12,6 +12,9 @@ on:
   # workflow level — saves the first-turn cost of writing a noop.
   skip-if-no-match: 'label:design-approved OR label:bug'
 
+imports:
+  - shared/build-mcp-server.md
+
 permissions:
   contents: read
   issues: read

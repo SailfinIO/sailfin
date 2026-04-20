@@ -9,6 +9,9 @@ on:
   issues:
     types: [opened, reopened]
 
+imports:
+  - shared/build-mcp-server.md
+
 permissions:
   contents: read
   issues: read

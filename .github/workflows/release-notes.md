@@ -8,6 +8,9 @@ on:
   release:
     types: [published]
 
+imports:
+  - shared/build-mcp-server.md
+
 permissions:
   contents: read
   pull-requests: read
