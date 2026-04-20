@@ -208,10 +208,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         }
         current_lines = finished.lines;
         current_temp = finished.temp_index;
-        if finished.operand != null {
-            fs.writeFile("build/sailfin/.call_result_type", finished.operand.llvm_type);
-            fs.writeFile("build/sailfin/.call_result_value", finished.operand.value);
-        }
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -496,8 +492,6 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         llvm_type: struct_type + "*",
         value: struct_pointer
     };
-    fs.writeFile("build/sailfin/.call_result_type", struct_type + "*");
-    fs.writeFile("build/sailfin/.call_result_value", struct_pointer);
     return ExpressionResult {
         lines: current_lines,
         temp_index: current_temp,
@@ -615,8 +609,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             llvm_type: info.llvm_name,
             value: "zeroinitializer"
         };
-        fs.writeFile("build/sailfin/.call_result_type", info.llvm_name);
-        fs.writeFile("build/sailfin/.call_result_value", "zeroinitializer");
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -725,8 +717,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             llvm_type: info.llvm_name,
             value: "zeroinitializer"
         };
-        fs.writeFile("build/sailfin/.call_result_type", info.llvm_name);
-        fs.writeFile("build/sailfin/.call_result_value", "zeroinitializer");
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -740,8 +730,6 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
         llvm_type: info.llvm_name,
         value: previous_value
     };
-    fs.writeFile("build/sailfin/.call_result_type", info.llvm_name);
-    fs.writeFile("build/sailfin/.call_result_value", previous_value);
     return ExpressionResult {
         lines: current_lines,
         temp_index: current_temp,

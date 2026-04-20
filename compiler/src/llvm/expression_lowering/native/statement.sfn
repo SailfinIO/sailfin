@@ -13,7 +13,6 @@ import {
     substring
 } from "../../../string_utils";
 import { default_return_literal } from "../../expressions_helpers";
-import { split_lines_local } from "../../lowering/lowering_text_utils";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
 // Import types from modular structure
@@ -114,23 +113,6 @@ fn _recover_temp_from_lines(lines: string[], floor: number) -> number {
             }
         }
         ri += 1;
-    }
-    return result;
-}
-
-fn _parse_int_local(text: string) -> number {
-    let len = text.length;
-    if len == 0 { return 0; }
-    let mut result: number = 0;
-    let mut i: number = 0;
-    loop {
-        if i >= len { break; }
-        let ch = char_at(text, i);
-        let code = char_code(ch);
-        if code >= 48 {
-            if code <= 57 { result = result * 10 + (code - 48); }
-        }
-        i = i + 1;
     }
     return result;
 }
@@ -387,73 +369,14 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     }
     let consumption = ownership_analysis.consumption;
 
-    let _pre_call_lines_len = current_lines.length;
-    // Clear the call_result sentinel BEFORE the nested lower_expression call
-    // so that its presence afterwards is a guaranteed signal from THIS call,
-    // not a stale leftover from a prior lvalue assignment in another function.
-    // Without this, the post-call IPC-read branch would overwrite current_temp
-    // and current_lines with stale data, producing duplicate %tN in the IR.
-    if fs.exists("build/sailfin/.call_result_lines_count") {
-        fs.deleteFile("build/sailfin/.call_result_lines_count");
-    }
-    let lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    // ExpressionResult struct fields may be ABI-corrupted crossing module boundaries.
-    // Read lines/temp from files written by lower_call_expression instead.
-    if debug_lowering {
-        let _cr_exists_check = fs.exists("build/sailfin/.call_result_lines_count");
-        if _cr_exists_check {
-            print.err("stmt-lowering: call_result_lines_count EXISTS");
-        } else {
-            print.err("stmt-lowering: call_result_lines_count NOT FOUND");
-        }
-    }
-    if fs.exists("build/sailfin/.call_result_lines_count") {
-        let _cr_lines_raw = fs.readFile("build/sailfin/.call_result_lines");
-        let mut _new_lines: string[] = [];
-        if _cr_lines_raw.length > 0 {
-            _new_lines = split_lines_local(_cr_lines_raw);
-        }
-        current_lines = _new_lines;
-        if debug_lowering {
-            print.err("stmt-lowering: read " + number_to_string(_new_lines.length)
-                + " lines from call_result files, current_lines.length="
-                + number_to_string(current_lines.length));
-        }
-        let _cr_temp_str = fs.readFile("build/sailfin/.call_result_temp");
-        let _cr_parsed = _parse_int_local(_cr_temp_str);
-        // Floor-protect: if the file is stale from a prior statement (e.g. a
-        // chained `arr.push(...); pi += 1;`), _cr_parsed can be much lower
-        // than the counter we already have, which would produce duplicate
-        // %tN in the next emission. Never let the counter go below its
-        // current value; _recover_temp_from_lines below also bumps past any
-        // %tN already present in `current_lines`.
-        if _cr_parsed > current_temp { current_temp = _cr_parsed; }
-        current_temp = _recover_temp_from_lines(current_lines, current_temp);
-        // Clean up sentinel
-        fs.deleteFile("build/sailfin/.call_result_lines_count");
-    } else {
-        // Fallback: struct return fields are ABI-corrupted in the v0.1.1 seed.
-        // Do NOT replace current_lines with lowered.lines — lower_expression
-        // mutated the lines array in-place, so current_lines already has the
-        // new IR.  Using the corrupted struct field would cause
-        // _recover_temp_from_lines to scan wrong data and return a stale temp
-        // counter, leading to duplicate SSA names in the next statement.
-        current_temp = _recover_temp_from_lines(current_lines, current_temp);
-    }
+    let _lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+    current_temp = _recover_temp_from_lines(current_lines, current_temp);
     if consumption != null {
         if consumption.kind == "local" {
             current_locals = mark_local_consumed(current_locals, consumption.name);
         } else if consumption.kind == "parameter" {
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
         }
-    }
-    if debug_lowering {
-        print.err("stmt-lowering: pre-write _pre_call_lines_len="
-            + number_to_string(_pre_call_lines_len)
-            + " current_lines.length="
-            + number_to_string(current_lines.length)
-            + " delta="
-            + number_to_string(current_lines.length - _pre_call_lines_len));
     }
     return ExpressionStatementResult {
         lines: current_lines,

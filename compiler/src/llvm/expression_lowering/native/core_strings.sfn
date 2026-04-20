@@ -96,11 +96,6 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: number,
         + ")";
     let mut out_lines = append_string(right_aligned.lines, line);
     let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
-    // Write result to IPC files so let-lowering picks up the latest value
-    // instead of a stale call_result_value from an intermediate function call
-    // (e.g., number_to_string used within a string concat chain).
-    fs.writeFile("build/sailfin/.call_result_type", "i8*");
-    fs.writeFile("build/sailfin/.call_result_value", temp_name);
     return ExpressionResult {
         lines: out_lines,
         temp_index: right_aligned.temp_index + 1,
