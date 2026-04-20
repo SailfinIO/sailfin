@@ -1,74 +1,17 @@
 // compiler/src/llvm/lowering/lowering_phase_types.sfn
 //
-// Phase 3 of LLVM lowering: struct/enum info serialization, type
-// context building, and enum recovery.
+// Phase 3 of LLVM lowering: type context building and enum recovery.
 //
-// The v0.1.1 seed corrupted struct data when crossing module boundaries
-// via build_type_context.  This module writes struct info to a file
-// BEFORE the cross-module call as a readable-elsewhere channel, and
-// recovers enum info from the in-memory input when build_type_context
-// returned empty or corrupt enums.
+// Builds the TypeContext via build_type_context and recovers enum info
+// from in-memory NativeEnum[] when cross-module ABI corruption causes
+// enums to arrive empty or with empty names.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
 import { build_type_context } from "../type_context";
 import { EnumTypeInfo, EnumVariantInfo, TypeContext } from "../types";
 import { number_to_string, sanitize_symbol } from "../utils";
-import {
-    get_enum_name_at,
-    get_struct_field_name_at,
-    get_struct_field_type_at,
-    get_struct_fields_at,
-    get_struct_name_at
-} from "./lowering_native_helpers";
-
-// Serialize struct info to build/sailfin/.struct_info for use by
-// build_type_context recovery.  Format per line:
-//   name\t%LlvmName\tfield1:type1,field2:type2,...
-fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
-    let mut lines: string[] = [];
-    let mut idx: number = 0;
-    loop {
-        if idx >= combined_structs.length { break; }
-        let name = get_struct_name_at(combined_structs, idx);
-        let mut _if251: boolean = false;
-        if name == null { _if251 = true; }
-        if name.length == 0 { _if251 = true; }
-        if _if251 {
-            idx += 1;
-            continue;
-        }
-        let llvm = "%" + sanitize_symbol(name);
-        let mut line = name + "\t" + llvm + "\t";
-        let mut fi: number = 0;
-        let fields = get_struct_fields_at(combined_structs, idx);
-        if fields != null {
-            loop {
-                if fi >= fields.length { break; }
-                if fi > 0 { line = line + ","; }
-                let mut fn_name = get_struct_field_name_at(fields, fi);
-                if fn_name == null { fn_name = ""; }
-                let mut ft = "i8*";
-                let ann = get_struct_field_type_at(fields, fi);
-                if ann == "number" { ft = "double"; } else if ann == "boolean" {
-                    ft = "i1";
-                } else if ann == "bool" { ft = "i1"; } else if ann == "i64" {
-                    ft = "i64";
-                } else if ann == "int" { ft = "i64"; } else if ann == "usize" {
-                    ft = "i64";
-                } else if ann == "i32" { ft = "i32"; } else if ann == "u8" {
-                    ft = "i8";
-                }
-                line = line + fn_name + ":" + ft;
-                fi += 1;
-            }
-        }
-        lines.push(line);
-        idx += 1;
-    }
-    fs.writeLines("build/sailfin/.struct_info", lines);
-    return "";
-}
+import { get_enum_name_at } from "./lowering_native_helpers";
 
 // Build skeletal EnumTypeInfo[] directly from in-memory NativeEnum[].
 // Used as a fallback when build_type_context returned empty or corrupt
@@ -138,11 +81,6 @@ fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_e
         print.err("emit-llvm: about to fixup_enum_layouts enums="
             + number_to_string(combined_enums.length));
     }
-
-    // Serialize struct info BEFORE the cross-module build_type_context call
-    // (still consumed by fallback readers in core_member_lowering /
-    // core_member_helpers / core_literals_lowering / lowering_phase_render).
-    serialize_struct_info(combined_structs);
 
     if _trace_enums {
         print.err("enum_trace: combined_enums=" + number_to_string(combined_enums.length)

@@ -6,8 +6,7 @@
 // and libc declarations.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
-import { NativeFunction, NativeStruct } from "../../native_ir";
-import { substring } from "../../string_utils";
+import { NativeFunction } from "../../native_ir";
 import {
     render_enum_type_definitions,
     render_imported_function_declarations,
@@ -22,9 +21,8 @@ import {
     render_vtable_type_definitions
 } from "../rendering_helpers";
 import { TraitMetadata, TypeContext } from "../types";
-import { index_of, number_to_string, starts_with } from "../utils";
+import { number_to_string, starts_with } from "../utils";
 import { extend_string_lines, module_source_filename } from "./lowering_io";
-import { split_lines_local } from "./lowering_text_utils";
 
 // Render the LLVM IR preamble: source filename, trait metadata,
 // struct/enum/interface type definitions, async runtime types,
@@ -73,10 +71,10 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
         lines = extend_string_lines(lines, struct_type_lines);
         lines.push("");
     }
-    // Supplement struct type definitions from .struct_info file when the
+    // Supplement struct type definitions from TypeContext when the
     // cross-module render_struct_type_definitions produced nothing or corrupted output.
     if !stl_valid {
-        let recovered_lines = recover_struct_types_from_file();
+        let recovered_lines = recover_struct_types_from_context(type_context);
         if recovered_lines.length > 0 {
             lines = extend_string_lines(lines, recovered_lines);
             lines.push("");
@@ -159,59 +157,28 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     return lines;
 }
 
-// Recover struct type definitions from the .struct_info file.
+// Recover struct type definitions from in-memory TypeContext.
 // Used when render_struct_type_definitions produced corrupted output.
-fn recover_struct_types_from_file() -> string[] ![io] {
+fn recover_struct_types_from_context(type_context: TypeContext) -> string[] {
     let mut result: string[] = [];
-    if !fs.exists("build/sailfin/.struct_info") { return result; }
-    let raw = fs.readFile("build/sailfin/.struct_info");
-    if raw.length == 0 { return result; }
-    let mut pos: number = 0;
+    let mut si: number = 0;
     loop {
-        if pos >= raw.length { break; }
-        let nl = index_of(substring(raw, pos, raw.length), "\n");
-        let mut line: string = "";
-        if nl < 0 {
-            line = substring(raw, pos, raw.length);
-            pos = raw.length;
-        } else {
-            line = substring(raw, pos, pos + nl);
-            pos = pos + nl + 1;
+        if si >= type_context.structs.length { break; }
+        let info = type_context.structs[si];
+        if info.llvm_name.length == 0 {
+            si += 1;
+            continue;
         }
-        if line.length == 0 { continue; }
-        let t1 = index_of(line, "\t");
-        if t1 < 0 { continue; }
-        let rest = substring(line, t1 + 1, line.length);
-        let t2 = index_of(rest, "\t");
-        if t2 < 0 { continue; }
-        let llvm = substring(rest, 0, t2);
-        let fields_str = substring(rest, t2 + 1, rest.length);
-        if llvm.length == 0 { continue; }
-        // Build field type list
         let mut ftypes: string = "";
-        if fields_str.length > 0 {
-            let mut fpos: number = 0;
-            let mut first: boolean = true;
-            loop {
-                if fpos >= fields_str.length { break; }
-                let comma = index_of(substring(fields_str, fpos, fields_str.length), ",");
-                let mut fentry: string = "";
-                if comma < 0 {
-                    fentry = substring(fields_str, fpos, fields_str.length);
-                    fpos = fields_str.length;
-                } else {
-                    fentry = substring(fields_str, fpos, fpos + comma);
-                    fpos = fpos + comma + 1;
-                }
-                let colon = index_of(fentry, ":");
-                if colon < 0 { continue; }
-                let ftype = substring(fentry, colon + 1, fentry.length);
-                if !first { ftypes = ftypes + ", "; }
-                ftypes = ftypes + ftype;
-                first = false;
-            }
+        let mut fi: number = 0;
+        loop {
+            if fi >= info.fields.length { break; }
+            if fi > 0 { ftypes = ftypes + ", "; }
+            ftypes = ftypes + info.fields[fi].llvm_type;
+            fi += 1;
         }
-        result.push(llvm + " = type { " + ftypes + " }");
+        result.push(info.llvm_name + " = type { " + ftypes + " }");
+        si += 1;
     }
     return result;
 }

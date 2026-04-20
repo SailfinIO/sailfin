@@ -13,6 +13,12 @@ COMPILER="$1"
 TEST_FILE="$2"
 BASENAME="$(basename "$TEST_FILE")"
 
+# Clean build/sailfin/ scratch directory to prevent cross-test contamination.
+# The compiler writes intermediate files (test.ll, emit-native.tmp, IPC dot-files)
+# into this directory; leftovers from a prior test can alter subsequent runs.
+rm -rf build/sailfin 2>/dev/null || true
+mkdir -p build/sailfin
+
 # 60s timeout — if the binary hangs, something is fundamentally broken
 TIMEOUT=60
 
