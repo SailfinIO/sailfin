@@ -68,8 +68,25 @@ function parseAsset(asset: GHAsset): ParsedAsset | null {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Derive fallback version from compiler/capsule.toml (the version source of
+// truth) so the page stays current even when the GitHub API call fails.
+// ---------------------------------------------------------------------------
+import fs from "node:fs";
+import path from "node:path";
+
+function readCapsuleVersion(): string {
+  try {
+    const tomlPath = path.resolve(import.meta.dirname, "../../../compiler/capsule.toml");
+    const toml = fs.readFileSync(tomlPath, "utf-8");
+    const match = toml.match(/^\s*version\s*=\s*"([^"]+)"/m);
+    if (match) return match[1];
+  } catch {}
+  return "0.5.7"; // last-resort hardcoded fallback
+}
+
 // Fetch releases — tolerate API failures gracefully
-let stableVersion = "0.5.1";
+let stableVersion = readCapsuleVersion();
 let stableTag = `v${stableVersion}`;
 let allAssets: ParsedAsset[] = [];
 
@@ -99,7 +116,8 @@ try {
     allAssets = installerAssets.map(parseAsset).filter((a): a is ParsedAsset => a !== null);
   }
 } catch (e) {
-  console.warn(`[dl] Failed to fetch releases from GitHub, using fallback: ${e}`);
+  console.warn(`[dl] Failed to fetch releases from GitHub API, using fallback v${stableVersion}: ${e}`);
+  console.warn(`[dl] Set GITHUB_TOKEN in your Cloudflare Pages environment to avoid rate limits.`);
 }
 
 // Fallback if API returned nothing
