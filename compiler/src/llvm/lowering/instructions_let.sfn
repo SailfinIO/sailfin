@@ -151,14 +151,6 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             + function.name
             + "`");
     } else {
-        // Clear stale call-result files before expression lowering so that only
-        // a call from THIS let's initializer can populate them.
-        if fs.exists("build/sailfin/.call_result_type") {
-            fs.deleteFile("build/sailfin/.call_result_type");
-        }
-        if fs.exists("build/sailfin/.call_result_value") {
-            fs.deleteFile("build/sailfin/.call_result_value");
-        }
         if fs.exists("build/sailfin/.trace_lowering") {
             print.err("let-lowering: pre-lower_expression name=" + instruction.name
                 + " value="
@@ -168,12 +160,6 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         let lowered = lower_expression(instruction.value, current_bindings, current_locals, current_temp, current_lines, functions, context, llvm_type);
         if fs.exists("build/sailfin/.trace_lowering") {
             print.err("let-lowering: post-lower_expression name=" + instruction.name);
-        }
-        // Read lines/temp from files to bypass ExpressionResult struct corruption
-        if fs.exists("build/sailfin/.call_result_type") {
-            if fs.exists("build/sailfin/.trace_lowering") {
-                print.err("let-lowering: call_result_type file exists");
-            }
         }
         if fs.exists("build/sailfin/.trace_lowering") {
             print.err("let-lowering: accessing lowered.diagnostics");
@@ -213,25 +199,12 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         print.err("let-lowering: checking llvm_type len=" + number_to_string(llvm_type.length));
     }
     if llvm_type.length == 0 {
-        // Try file-based fallback FIRST, since operand.llvm_type may be
-        // a corrupted pointer that crashes on access.
-        if fs.exists("build/sailfin/.call_result_type") {
-            let _crt = fs.readFile("build/sailfin/.call_result_type");
-            if _crt.length > 0 {
-                llvm_type = _crt;
-                if fs.exists("build/sailfin/.trace_lowering") {
-                    print.err("let-lowering: llvm_type from file=" + llvm_type);
-                }
+        if operand != null {
+            if fs.exists("build/sailfin/.trace_lowering") {
+                print.err("let-lowering: operand not null, trimming type");
             }
-        }
-        if llvm_type.length == 0 {
-            if operand != null {
-                if fs.exists("build/sailfin/.trace_lowering") {
-                    print.err("let-lowering: operand not null, trimming type");
-                }
-                let operand_type = trim_text(operand.llvm_type);
-                if operand_type.length > 0 { llvm_type = operand_type; }
-            }
+            let operand_type = trim_text(operand.llvm_type);
+            if operand_type.length > 0 { llvm_type = operand_type; }
         }
     }
 
@@ -319,41 +292,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     current_allocas.push("  " + pointer + " = alloca " + llvm_type);
 
     let mut stored_value: string = default_return_literal(llvm_type);
-    // Fix operand if its llvm_type was corrupted crossing module boundaries.
-    // Only use file-based reconstruction when the operand's type is clearly
-    // wrong (empty or mismatch). When the operand type matches the expected
-    // llvm_type, the operand is correct and the IPC file may contain stale
-    // intermediate values (e.g., from number_to_string inside a string concat chain).
     if operand != null {
-        let mut _use_ipc_override: boolean = false;
-        let _op_type = trim_text(operand.llvm_type);
-        if _op_type.length == 0 { _use_ipc_override = true; }
-        if _op_type != llvm_type {
-            if llvm_type.length > 0 { _use_ipc_override = true; }
-        }
-        if _use_ipc_override {
-            if fs.exists("build/sailfin/.call_result_type") {
-                let _fixup_type = fs.readFile("build/sailfin/.call_result_type");
-                if _fixup_type.length > 0 {
-                    let mut _fixup_value: string = "";
-                    if fs.exists("build/sailfin/.call_result_value") {
-                        _fixup_value = fs.readFile("build/sailfin/.call_result_value");
-                    }
-                    operand = LLVMOperand {
-                        llvm_type: _fixup_type,
-                        value: _fixup_value
-                    };
-                    if fs.exists("build/sailfin/.trace_lowering") {
-                        print.err("let-lowering: operand reconstructed type="
-                            + _fixup_type
-                            + " value="
-                            + _fixup_value);
-                    }
-                }
-            }
-        }
-        // Avoid calling coerce_operand_to_type across module boundaries when
-        // types already match — the returned CoercionResult struct gets ABI-corrupted.
         if operand.llvm_type == llvm_type {
             // Identity coercion — use operand directly
             stored_value = operand.value;

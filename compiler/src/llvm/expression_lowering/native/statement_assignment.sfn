@@ -101,13 +101,6 @@ fn _assign_parse_int(text: string) -> number {
     return result;
 }
 
-fn _write_assign_result_files(lines: string[], temp_index: number) ![io] {
-    fs.writeFile("build/sailfin/.call_result_lines_count", number_to_string(lines.length));
-    // Write all lines as bulk array
-    fs.writeLines("build/sailfin/.call_result_lines", lines);
-    fs.writeFile("build/sailfin/.call_result_temp", number_to_string(temp_index));
-}
-
 // Handles deref (*ptr = value), member access (obj.field = value), and
 // array index (arr[i] = value) assignments. Returns ExpressionStatementResult.
 fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, assign_operator: string, current_bindings: ParameterBinding[], current_locals: LocalBinding[], temp_index: number, lines: string[], next_region_id: number, scope_id: string, scope_depth: number, functions: NativeFunction[], context: TypeContext, current_label: string) -> ExpressionStatementResult ![io] {
@@ -144,7 +137,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push("llvm lowering: failed to lower assignment value for deref target `"
                 + assign_target
                 + "`");
-            _write_assign_result_files(current_lines, current_temp);
             return ExpressionStatementResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -161,7 +153,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         let pointer_text = trim_text(substring(trimmed_target, 1, trimmed_target.length));
         if pointer_text.length == 0 {
             diagnostics.push("llvm lowering: deref assignment missing pointer operand");
-            _write_assign_result_files(current_lines, current_temp);
             return ExpressionStatementResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -189,7 +180,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push("llvm lowering: deref assignment pointer `"
                 + pointer_text
                 + "` produced no value");
-            _write_assign_result_files(current_lines, current_temp);
             return ExpressionStatementResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -207,7 +197,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push("llvm lowering: deref assignment target is not a pointer (got `"
                 + lowered_ptr.operand.llvm_type
                 + "`)");
-            _write_assign_result_files(current_lines, current_temp);
             return ExpressionStatementResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -236,7 +225,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             diagnostics.push("llvm lowering: unable to coerce deref assignment value to `"
                 + element_type
                 + "`");
-            _write_assign_result_files(current_lines, current_temp);
             return ExpressionStatementResult {
                 lines: current_lines,
                 temp_index: current_temp,
@@ -255,7 +243,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             + element_type
             + "* "
             + lowered_ptr.operand.value);
-        _write_assign_result_files(current_lines, current_temp);
         return ExpressionStatementResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -334,7 +321,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                     diagnostics.push("llvm lowering: member access assignment base `"
                         + member_parse.base
                         + "` is not addressable");
-                    _write_assign_result_files(current_lines, current_temp);
                     return ExpressionStatementResult {
                         lines: current_lines,
                         temp_index: current_temp,
@@ -397,7 +383,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 }
             }
         }
-        _write_assign_result_files(current_lines, current_temp);
         return ExpressionStatementResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -499,7 +484,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 diagnostics.push("llvm lowering: unable to coerce array index to i64 for `"
                                     + assign_target
                                     + "`");
-                                _write_assign_result_files(current_lines, current_temp);
                                 return ExpressionStatementResult {
                                     lines: current_lines,
                                     temp_index: current_temp,
@@ -555,7 +539,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 }
             }
         }
-        _write_assign_result_files(current_lines, current_temp);
         return ExpressionStatementResult {
             lines: current_lines,
             temp_index: current_temp,
@@ -571,7 +554,6 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
     }
 
     // Not a complex lvalue — should not reach here; caller dispatches simple local separately.
-    _write_assign_result_files(current_lines, current_temp);
     return ExpressionStatementResult {
         lines: current_lines,
         temp_index: current_temp,

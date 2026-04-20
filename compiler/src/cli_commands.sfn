@@ -696,6 +696,8 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
         // Legacy: .block_result_* IPC channel was removed but stale files from
         // older build dirs / older seed binaries should still be swept.
         if _has_prefix_cmd(entry, ".block_result_") { is_scratch = true; }
+        // Legacy: .call_result_* IPC channel was removed but stale files from
+        // older build dirs / older seed binaries should still be swept.
         if _has_prefix_cmd(entry, ".call_result_") { is_scratch = true; }
         // Legacy: .coerce_result_* file IPC fallback was removed (no writer
         // was ever shipped); sweep stale files from older build dirs.

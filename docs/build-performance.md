@@ -549,6 +549,46 @@ For typical compiler modules (hundreds of statements per function, dozens of fun
 - 6 source files modified, ~−241 / +47 lines net.
 - No new tests added — the existing integration suite (`selfhost_pipeline_test.sfn`, `async_struct_return_stress_test.sfn`, `compiler_ir_patterns_test.sfn`) and the self-hosting build itself exercise every path that was changed.
 
+### Call Result IPC Channel Removal (April 20)
+
+**Status: Implemented.** Removed the `.call_result_*` file-IPC channel — the heaviest-referenced remaining Phase 2 channel. Two sub-groups shared the prefix:
+
+* **Type/value pair** (`.call_result_type`, `.call_result_value`): a v0.1.1-seed-era workaround that writers in `core_call_emission.sfn`, `core_literals_lowering.sfn`, `core_strings.sfn`, and the await paths of `core.sfn` used to ship `LLVMOperand.{llvm_type, value}` back to `instructions_let.sfn`. Every writer already populated `ExpressionResult.operand` with the identical data — the file IPC was a parallel copy. The reader in `instructions_let.sfn` used the files as a `_use_ipc_override` fallback when `operand.llvm_type` appeared corrupted crossing module boundaries. Under the default-on arena (PR #186) the 0.5.7 seed handles cross-module struct returns correctly — same pattern validated by PRs #183 / #184 / #185 / #188 / #189 / #191.
+
+* **Lines/count/temp triple** (`.call_result_lines_count`, `.call_result_lines`, `.call_result_temp`): a cross-statement leak used by `_write_assign_result_files` in `statement_assignment.sfn` to ship post-lvalue-assignment IR lines + temp counter to a sentinel-gated reader in `statement.sfn`'s `lower_expression_statement`. The sentinel-gated reader fired only when a *prior* statement's lvalue path had written the files; under arena, in-place array mutation of `current_lines` plus `_recover_temp_from_lines(current_lines, current_temp)` already delivers the same data in-band. The reader block's comment ("ExpressionResult struct fields may be ABI-corrupted crossing module boundaries") describes a pre-arena failure mode.
+
+**Shape of change:**
+- `_write_emission_result_lines` deleted from `core_call_emission.sfn` (helper + all 6 call sites at trait/concat/push/array paths).
+- 14 `fs.writeFile(".call_result_{type,value}", ...)` pairs deleted across `core_call_emission.sfn` (6), `core_literals_lowering.sfn` (5), `core.sfn` (3 await paths), `core_strings.sfn` (1).
+- `_write_assign_result_files` deleted from `statement_assignment.sfn` (helper + all 11 call sites at every return point of `lower_lvalue_assignment_stmt`).
+- `statement.sfn`'s `lower_expression_statement` pre-clear block (lines 391-398), trace-gated existence check (403-409), sentinel-gated reader (410-433), and `_pre_call_lines_len` debug print (450-457) all deleted. The surrounding `_recover_temp_from_lines(current_lines, current_temp)` call (previously the `else`-branch fallback) becomes the single temp-recovery path. Return value of the `lower_expression` call renamed to `_lowered` to signal intentional discard (struct fields are unused — the call's effect is the in-place mutation of `current_lines`).
+- `_parse_int_local` in `statement.sfn` (16 lines) deleted — only used by the dead `.call_result_temp` reader.
+- `split_lines_local` import dropped from `statement.sfn` — only use was in the dead reader block. Export kept in `lowering_text_utils.sfn` (many other files import it).
+- `instructions_let.sfn` pre-clear block (lines 154-161), `.call_result_type` trace guard (173-177), `llvm_type` fallback reader (218-225), and `_use_ipc_override` branch (328-354) all deleted. Operand path simplifies to: if `operand.llvm_type == llvm_type` → direct store (identity coerce, unchanged); else → `coerce_operand_to_type` (unchanged).
+- `cli_commands._clean_lowering_state` keeps the `.call_result_` prefix sweep with a "Legacy" comment for stale files from older build dirs / older seed binaries (precedent: PRs #183 / #184 / #185 / #188 / #189 / #191).
+
+**Per-call / per-statement overhead removed:**
+- Up to 2 `fs.writeFile` per call emission (type + value scalars) — fires on every `call` IR emission across trait dispatch, concat/push inline, void/value standard calls, array-struct literals, zero-field structs, string concat, and await unboxing.
+- 3 `fs.writeFile` per lvalue assignment statement (lines count + bulk lines + temp index) — fires on every deref, member-access, and array-index assignment.
+- 2 `fs.deleteFile` per let initializer (pre-clear sentinel).
+- Up to 3 `fs.readFile` + 1 `fs.deleteFile` per expression statement (sentinel gate + bulk lines + temp + cleanup).
+- Up to 2 `fs.readFile` per let-binding fixup (`_use_ipc_override` branch).
+- Multiple `fs.exists` trace gates.
+
+For a typical compiler module with hundreds of calls per function and dozens of functions, this eliminates thousands of filesystem operations per module compile. Together with the `.expr_stmt_*` removal in PR #191, the per-statement IR accumulation path is now fully in-memory end-to-end.
+
+**Risks evaluated:**
+- **v0.1.1-seed ABI corruption**: the channel's original purpose. 0.5.x seeds under arena validated by PRs #183-#191 — `ExpressionResult` and `ExpressionStatementResult` are reliable across module boundaries today.
+- **Cross-statement `_write_assign_result_files` → `statement.sfn` reader**: the else-branch fallback at `statement.sfn:441` (`_recover_temp_from_lines`) was already the standalone code path when the sentinel file was absent, and its comment explicitly documented that `current_lines` is mutated in-place. Removing both writer and reader together makes the scanner-based recovery the single path.
+- **`_use_ipc_override` removal**: the reader exists to repair operands whose `llvm_type` is empty or mismatched versus the expected `llvm_type`. Under arena, the operand struct returned by `lower_expression` carries the correct type — the file-based reconstruction was a parallel safety net that is no longer needed. The identity-vs-coerce split at the store site (lines 357-402) is unchanged.
+
+**Scope:**
+- 8 source files modified (7 compiler + 1 CLI), 1 docs file updated.
+- Net: ~−200 lines deleted / ~+20 lines added.
+- No new tests added — the existing integration suite (`selfhost_pipeline_test.sfn`, `async_struct_return_stress_test.sfn`, `compiler_ir_patterns_test.sfn`) plus full self-hosting exercise every path.
+
+**Determinism:** Linux x86_64 on seed 0.5.7 is already 20/20 identical on the hot modules per the arena-flip entry; this change removes file-I/O overhead without introducing new non-determinism. macOS-arm64 measurement to be recorded after CI completes on that platform. With `.call_result_*` gone, the remaining Phase 2 channels driving residual macOS-arm64 non-determinism are `.dispatch_*`, `.let_result_*` / `.let_ipc_*`, and `.instr_*`.
+
 ---
 
 ## Appendix: IPC Channel Census

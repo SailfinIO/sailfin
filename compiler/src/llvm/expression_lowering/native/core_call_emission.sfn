@@ -35,10 +35,6 @@ import { parse_member_access } from "./core_parse";
 import { find_local_binding } from "./core_scopes";
 import { sanitize_symbol } from "./core_text";
 
-fn _write_emission_result_lines(result_lines: string[], result_temp: number) -> void ![io] {
-    // Dead IPC files removed — .call_result_line_count and .call_result_temp_index have no reader.
-}
-
 // Coerce operands to expected types and emit the final call instruction.
 // Handles array concat/push, trait dispatch, and normal function calls.
 fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expected_params: string[], llvm_return: string, is_trait_dispatch: boolean, is_array_concat: boolean, array_concat_element_type: string, is_array_push: boolean, array_push_element_type: string, method_operand: LLVMOperand?, helper_descriptor: RuntimeHelperDescriptor?, function_entry: NativeFunction?, current_temp: number, current_lines: string[], diagnostics: string[], collected_string_constants: StringConstant[], bindings: ParameterBinding[], locals: LocalBinding[], context: TypeContext) -> ExpressionResult ![io] {
@@ -119,9 +115,6 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                     result_lines = concat_result.lines;
                     result_temp = concat_result.temp_index;
                     if concat_result.operand == null {
-                        _write_emission_result_lines(result_lines, result_temp);
-                        fs.writeFile("build/sailfin/.call_result_type", "");
-                        fs.writeFile("build/sailfin/.call_result_value", "");
                         return ExpressionResult {
                             lines: result_lines,
                             temp_index: result_temp,
@@ -130,9 +123,6 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                             string_constants: collected_string_constants
                         };
                     }
-                    _write_emission_result_lines(result_lines, result_temp);
-                    fs.writeFile("build/sailfin/.call_result_type", concat_result.operand.llvm_type);
-                    fs.writeFile("build/sailfin/.call_result_value", concat_result.operand.value);
                     return ExpressionResult {
                         lines: result_lines,
                         temp_index: result_temp,
@@ -168,9 +158,6 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 result_lines = push_result.lines;
                 result_temp = push_result.temp_index;
                 if push_result.operand == null {
-                    _write_emission_result_lines(result_lines, result_temp);
-                    fs.writeFile("build/sailfin/.call_result_type", "");
-                    fs.writeFile("build/sailfin/.call_result_value", "");
                     return ExpressionResult {
                         lines: result_lines,
                         temp_index: result_temp,
@@ -195,9 +182,6 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                         }
                     }
                 }
-                _write_emission_result_lines(result_lines, result_temp);
-                fs.writeFile("build/sailfin/.call_result_type", push_result.operand.llvm_type);
-                fs.writeFile("build/sailfin/.call_result_value", push_result.operand.value);
                 return ExpressionResult {
                     lines: result_lines,
                     temp_index: result_temp,
@@ -438,9 +422,6 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         if _trace_ccl {
             print.err("call_lowering: checkpoint-H void return");
         }
-        _write_emission_result_lines(result_lines, result_temp);
-        fs.writeFile("build/sailfin/.call_result_type", "");
-        fs.writeFile("build/sailfin/.call_result_value", "");
         return ExpressionResult {
             lines: result_lines,
             temp_index: result_temp,
@@ -461,12 +442,6 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         + ")";
     result_lines.push(call_line);
     let operand = LLVMOperand { llvm_type: llvm_return, value: temp_name };
-    if _trace_ccl {
-        print.err("call_lowering: checkpoint-J writing result files");
-    }
-    _write_emission_result_lines(result_lines, result_temp + 1);
-    fs.writeFile("build/sailfin/.call_result_type", llvm_return);
-    fs.writeFile("build/sailfin/.call_result_value", temp_name);
     if _trace_ccl { print.err("call_lowering: checkpoint-K returning"); }
     return ExpressionResult {
         lines: result_lines,
