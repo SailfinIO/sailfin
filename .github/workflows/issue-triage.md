@@ -9,11 +9,24 @@ on:
   issues:
     types: [opened, reopened]
 
+imports:
+  - shared/build-mcp-server.md
+
 permissions:
   contents: read
   issues: read
 
-engine: copilot
+# Pattern-match an issue against label categories — cheap model is plenty.
+# Requires ANTHROPIC_API_KEY.
+engine:
+  id: claude
+  model: claude-haiku-4-5
+
+# Serialize per-issue so a rapid open+edit doesn't double-triage. Cancel an
+# in-progress run if the same issue retriggers (latest content wins).
+concurrency:
+  group: "gh-aw-triage-${{ github.event.issue.number }}"
+  cancel-in-progress: true
 
 network: defaults
 

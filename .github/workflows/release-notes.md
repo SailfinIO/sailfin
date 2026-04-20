@@ -8,12 +8,24 @@ on:
   release:
     types: [published]
 
+imports:
+  - shared/build-mcp-server.md
+
 permissions:
   contents: read
   pull-requests: read
   issues: read
 
-engine: copilot
+# Summarization task — categorize commits into changelog sections. Cheap
+# model is plenty. Requires ANTHROPIC_API_KEY.
+engine:
+  id: claude
+  model: claude-haiku-4-5
+
+# Serialize per-tag. Two release events on the same tag shouldn't double-comment.
+concurrency:
+  group: "gh-aw-release-notes-${{ github.event.release.tag_name }}"
+  cancel-in-progress: false
 
 network: defaults
 
