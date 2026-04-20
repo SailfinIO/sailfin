@@ -11,10 +11,9 @@
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
-import { build_type_context, fixup_enum_layouts } from "../type_context";
+import { build_type_context } from "../type_context";
 import { EnumTypeInfo, EnumVariantInfo, TypeContext } from "../types";
 import { number_to_string, sanitize_symbol } from "../utils";
-import { extend_string_lines_checked } from "./lowering_io";
 import {
     get_enum_name_at,
     get_struct_field_name_at,
@@ -78,16 +77,19 @@ fn serialize_struct_info(combined_structs: NativeStruct[]) -> string ![io] {
 // unit-enum defaults (i32 tag, size 4, align 4) and synthetic variant
 // names `v0`, `v1`, ...  Keeping byte-identical output means the fallback
 // semantics are unchanged from the file-based path.
-fn build_enum_infos_inline(enums: NativeEnum[], _trace_enums: boolean) -> EnumTypeInfo[] {
+//
+// Pure — any tracing is the caller's responsibility.
+fn build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[] {
     let mut recovered: EnumTypeInfo[] = [];
     let mut idx: number = 0;
     loop {
         if idx >= enums.length { break; }
         let name = get_enum_name_at(enums, idx);
-        let mut _skip: boolean = false;
-        if name == null { _skip = true; }
-        if name.length == 0 { _skip = true; }
-        if _skip {
+        if name == null {
+            idx += 1;
+            continue;
+        }
+        if name.length == 0 {
             idx += 1;
             continue;
         }
@@ -119,12 +121,6 @@ fn build_enum_infos_inline(enums: NativeEnum[], _trace_enums: boolean) -> EnumTy
             name: name, llvm_name: llvm, tag_type: tag_type, tag_size: tag_size, tag_align: tag_align, max_payload_size: max_ps, size: size, align: align, variants: variants_out
         });
         idx += 1;
-    }
-    if recovered.length > 0 {
-        if _trace_enums {
-            print.err("enum_trace: recovered " + number_to_string(recovered.length)
-                + " enum(s) from in-memory fixed_enums_list");
-        }
     }
     return recovered;
 }
@@ -174,17 +170,21 @@ fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_e
     // ABI corruption caused enums to arrive empty or with empty names.
     let mut _enum_names_empty: boolean = false;
     if type_context.enums.length > 0 {
-        let mut _asgn253: boolean = false;
-        if type_context.enums[0].name == null { _asgn253 = true; }
-        if type_context.enums[0].name.length == 0 { _asgn253 = true; }
-        _enum_names_empty = _asgn253;
+        let _first_name = type_context.enums[0].name;
+        if _first_name == null { _enum_names_empty = true; } else if _first_name.length == 0 {
+            _enum_names_empty = true;
+        }
     }
     let mut _needs_recovery: boolean = false;
     if type_context.enums.length == 0 { _needs_recovery = true; }
     if _enum_names_empty { _needs_recovery = true; }
     if _needs_recovery {
-        let recovered = build_enum_infos_inline(fixed_enums_list, _trace_enums);
+        let recovered = build_enum_infos_inline(fixed_enums_list);
         if recovered.length > 0 {
+            if _trace_enums {
+                print.err("enum_trace: recovered " + number_to_string(recovered.length)
+                    + " enum(s) from in-memory fixed_enums_list");
+            }
             type_context = TypeContext {
                 structs: type_context.structs,
                 enums: recovered,
