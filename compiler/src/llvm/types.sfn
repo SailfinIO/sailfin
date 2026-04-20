@@ -449,12 +449,6 @@ struct TernaryParseResult {
 // =============================================================================
 // Statement/Instruction Lowering Results
 // =============================================================================
-struct SelfFieldResult {
-    expression: string;
-    temp_index: number;
-    lines: string[];
-}
-
 struct ExpressionStatementResult {
     lines: string[];
     temp_index: number;
