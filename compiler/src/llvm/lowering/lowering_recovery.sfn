@@ -1,9 +1,13 @@
 // compiler/src/llvm/lowering/lowering_recovery.sfn
 //
 // Light recovery parsers for NativeFunction, NativeImport, and NativeStruct.
-// These parsers work directly on .sfn-asm text and bypass the structured
-// parser (parse_native_artifact_impl) which has deeply nested if/else chains
-// that the v0.1.1 seed cannot compile correctly.
+// The `recover_*_light` routines in this file work directly on .sfn-asm text
+// and bypass the structured parser (parse_native_artifact_impl) — they were
+// written for the v0.1.1 seed, which couldn't compile the structured parser's
+// deeply nested if/else chains. The structured path is now reliable under
+// seed 0.5.7+ (validated by every `.struct_info`/`.enum_info`/`.fn_*` removal
+// since PR #183); `parse_native_artifact_safe` now routes through it directly.
+// Tier 1C tracks removing the light-recovery primary path in lowering_core.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import {
@@ -70,8 +74,8 @@ import {
 // ── Parse wrappers ───────────────────────────────────────────────────
 // Historically built a ParseNativeResult from 7 per-field extractors to
 // sidestep the seed v0.1.1 struct-return ABI bug. Under seed 0.5.7+ the
-// struct-return path works (validated by every `.struct_info`/`.enum_info`
-// / `.fn_*` removal since PR #183), so this now delegates directly to
+// struct-return path works (validated by every `.struct_info`/`.enum_info`/
+// `.fn_*` removal since PR #183), so this now delegates directly to
 // parse_native_artifact — a single artifact walk instead of 7. The wrapper
 // is kept during Tier 1A PR 1 so callsites don't churn; PR 2 swaps the 6
 // live callers to parse_native_artifact and PR 3 deletes this function.
