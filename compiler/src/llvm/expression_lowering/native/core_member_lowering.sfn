@@ -916,48 +916,6 @@ fn try_file_based_struct_field_access(base_name: string, field_name: string, bas
             }
         }
     }
-    if struct_type_ann.length == 0 {
-        if trimmed_base == "self" {
-            // For "self" parameter in methods, extract the struct name from the
-            // current function name (e.g., "Persongreet" → struct "Person").
-            // The function name is available from .instr_fn_name file.
-            if fs.exists("build/sailfin/.instr_fn_name") {
-                let _fn_name = fs.readFile("build/sailfin/.instr_fn_name");
-                if _fn_name.length > 0 {
-                    // Check each struct in .struct_info; if the function name
-                    // starts with the struct name, that's our struct.
-                    let _sf_raw = fs.readFile("build/sailfin/.struct_info");
-                    let mut _sf_pos: number = 0;
-                    loop {
-                        if _sf_pos >= _sf_raw.length { break; }
-                        let _sf_nl = index_of(substring(_sf_raw, _sf_pos, _sf_raw.length), "\n");
-                        let mut _sf_line: string = "";
-                        if _sf_nl < 0 {
-                            _sf_line = substring(_sf_raw, _sf_pos, _sf_raw.length);
-                            _sf_pos = _sf_raw.length;
-                        } else {
-                            _sf_line = substring(_sf_raw, _sf_pos, _sf_pos
-                                + _sf_nl);
-                            _sf_pos = _sf_pos + _sf_nl + 1;
-                        }
-                        if _sf_line.length == 0 { continue; }
-                        let _sf_t1 = index_of(_sf_line, "\t");
-                        if _sf_t1 < 0 { continue; }
-                        let _sf_sname = substring(_sf_line, 0, _sf_t1);
-                        if _sf_sname.length > 0 {
-                            if _sf_sname.length < _fn_name.length {
-                                let _fn_prefix = substring(_fn_name, 0, _sf_sname.length);
-                                if _fn_prefix == _sf_sname {
-                                    struct_type_ann = _sf_sname;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
     if struct_type_ann.length == 0 { return null_result; }
     // Look up struct in .struct_info
     let _si_raw = fs.readFile("build/sailfin/.struct_info");
