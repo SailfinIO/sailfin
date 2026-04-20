@@ -4,9 +4,7 @@
 // lower_instruction_range occupies position 1 in its module -- within
 // the v0.1.1 seed's per-module streaming emission limit.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { char_code, grapheme_at, substring } from "../../string_utils";
-import { append_local_binding } from "../expression_lowering/native/core_scopes";
-import { merge_string_constants } from "../strings";
+import { char_code, grapheme_at } from "../../string_utils";
 import {
     BlockLoweringResult,
     LLVMOperand,
@@ -18,20 +16,15 @@ import {
     LoopContext,
     OwnershipConsumption,
     OwnershipInfo,
-    ParameterBinding,
     ScopeMetadata,
-    StringConstant,
     TypeContext
 } from "../types";
 import {
     append_string,
     extend_string_array,
-    index_of,
-    number_to_string,
     starts_with,
     trim_text
 } from "../utils";
-import { split_lines_local } from "./lowering_text_utils";
 
 fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
@@ -122,150 +115,6 @@ fn _read_ipc_int_min(path: string, floor_value: number) -> number ![io] {
     let parsed = _parse_int_from_string(text);
     if parsed > floor_value { return parsed; }
     return floor_value;
-}
-
-// Write parameter bindings to files for statement.sfn to read.
-// Avoids ABI corruption of struct params across module boundaries.
-fn write_bindings_to_files(bindings: ParameterBinding[]) ![io] {
-    let mut bc_i: number = 0;
-    loop {
-        let bc_prefix = "build/sailfin/.instr_binding_" + number_to_string(bc_i);
-        if !fs.exists(bc_prefix + "_name") { break; }
-        fs.deleteFile(bc_prefix + "_name");
-        fs.deleteFile(bc_prefix + "_llvm_name");
-        fs.deleteFile(bc_prefix + "_llvm_type");
-        fs.deleteFile(bc_prefix + "_type_annotation");
-        bc_i += 1;
-    }
-    let mut bw_i: number = 0;
-    loop {
-        if bw_i >= bindings.length { break; }
-        let bw_prefix = "build/sailfin/.instr_binding_" + number_to_string(bw_i);
-        fs.writeFile(bw_prefix + "_name", bindings[bw_i].name);
-        fs.writeFile(bw_prefix + "_llvm_name", bindings[bw_i].llvm_name);
-        fs.writeFile(bw_prefix + "_llvm_type", bindings[bw_i].llvm_type);
-        fs.writeFile(bw_prefix + "_type_annotation", bindings[bw_i].type_annotation);
-        bw_i += 1;
-    }
-}
-
-// Write local bindings to files for statement.sfn to read.
-fn write_locals_to_files(locals: LocalBinding[]) ![io] {
-    let mut lc_i: number = 0;
-    loop {
-        let lc_prefix = "build/sailfin/.instr_local_" + number_to_string(lc_i);
-        if !fs.exists(lc_prefix + "_name") { break; }
-        fs.deleteFile(lc_prefix + "_name");
-        fs.deleteFile(lc_prefix + "_pointer");
-        fs.deleteFile(lc_prefix + "_llvm_type");
-        fs.deleteFile(lc_prefix + "_type_annotation");
-        fs.deleteFile(lc_prefix + "_scope_id");
-        fs.deleteFile(lc_prefix + "_scope_depth");
-        lc_i += 1;
-    }
-    let mut lw_i: number = 0;
-    loop {
-        if lw_i >= locals.length { break; }
-        let lw_prefix = "build/sailfin/.instr_local_" + number_to_string(lw_i);
-        fs.writeFile(lw_prefix + "_name", locals[lw_i].name);
-        fs.writeFile(lw_prefix + "_pointer", locals[lw_i].pointer);
-        fs.writeFile(lw_prefix + "_llvm_type", locals[lw_i].llvm_type);
-        fs.writeFile(lw_prefix + "_type_annotation", locals[lw_i].type_annotation);
-        fs.writeFile(lw_prefix + "_scope_id", locals[lw_i].scope_id);
-        fs.writeFile(lw_prefix + "_scope_depth", number_to_string(locals[lw_i].scope_depth));
-        lw_i += 1;
-    }
-}
-
-// Read string constants from the let_result_string_constants file,
-// merging into existing. Used by let instruction handler.
-fn read_let_result_string_constants(existing: StringConstant[]) -> StringConstant[] ![io] {
-    let mut result = existing;
-    if fs.exists("build/sailfin/.let_result_string_constants") {
-        let _raw = fs.readFile("build/sailfin/.let_result_string_constants");
-        if _raw.length > 0 {
-            let mut _pos: number = 0;
-            loop {
-                if _pos >= _raw.length { break; }
-                let _nl = index_of(substring(_raw, _pos, _raw.length), "\n");
-                let mut _line: string = "";
-                if _nl < 0 {
-                    _line = substring(_raw, _pos, _raw.length);
-                    _pos = _raw.length;
-                } else {
-                    _line = substring(_raw, _pos, _pos + _nl);
-                    _pos = _pos + _nl + 1;
-                }
-                if _line.length == 0 { continue; }
-                let _t1 = index_of(_line, "\t");
-                if _t1 < 0 { continue; }
-                let _nm = substring(_line, 0, _t1);
-                let _r2 = substring(_line, _t1 + 1, _line.length);
-                let _t2 = index_of(_r2, "\t");
-                if _t2 < 0 { continue; }
-                let _ct = substring(_r2, 0, _t2);
-                let _bct = substring(_r2, _t2 + 1, _r2.length);
-                let _bc = _parse_int_from_string(_bct);
-                result = merge_string_constants(result, [StringConstant {
-                    name: _nm, content: _ct, byte_count: _bc
-                }]);
-            }
-        }
-    }
-    return result;
-}
-
-// Read let-lowering result from file IPC and update state.
-// Returns updated locals array.
-// Writes lines/allocas/scalar results to .let_ipc_* files for caller.
-fn read_let_result_from_files(diagnostics: string[], current_locals: LocalBinding[], current_lines: string[], current_allocas: string[], scope_id: string, scope_depth: number) -> LocalBinding[] ![io] {
-    let mut result_locals = current_locals;
-    if fs.exists("build/sailfin/.let_result_temp_index") {
-        // Read diagnostics from bulk file
-        let _diag_raw = fs.readFile("build/sailfin/.let_result_diagnostics");
-        if _diag_raw.length > 0 {
-            let _diag_lines = split_lines_local(_diag_raw);
-            let mut _di: number = 0;
-            loop {
-                if _di >= _diag_lines.length { break; }
-                diagnostics.push(_diag_lines[_di]);
-                _di += 1;
-            }
-        }
-        // Read lines from bulk file
-        let _lines_raw = fs.readFile("build/sailfin/.let_result_lines");
-        let mut _new_lines: string[] = [];
-        if _lines_raw.length > 0 {
-            _new_lines = split_lines_local(_lines_raw);
-        }
-        // Write lines for caller to read
-        fs.writeLines("build/sailfin/.let_ipc_lines", _new_lines);
-        // Read allocas from bulk file
-        let _allocas_raw = fs.readFile("build/sailfin/.let_result_allocas");
-        let mut _new_allocas: string[] = [];
-        if _allocas_raw.length > 0 {
-            _new_allocas = split_lines_local(_allocas_raw);
-        }
-        fs.writeLines("build/sailfin/.let_ipc_allocas", _new_allocas);
-        fs.writeFile("build/sailfin/.let_ipc_temp", fs.readFile("build/sailfin/.let_result_temp_index"));
-        fs.writeFile("build/sailfin/.let_ipc_next_local", fs.readFile("build/sailfin/.let_result_next_local_id"));
-        fs.writeFile("build/sailfin/.let_ipc_next_region", fs.readFile("build/sailfin/.let_result_next_region_id"));
-        fs.writeFile("build/sailfin/.let_ipc_used", "1");
-        if fs.exists("build/sailfin/.let_result_local_name") {
-            let _name = fs.readFile("build/sailfin/.let_result_local_name");
-            let _pointer = fs.readFile("build/sailfin/.let_result_local_pointer");
-            let _type = fs.readFile("build/sailfin/.let_result_local_llvm_type");
-            let _ann = fs.readFile("build/sailfin/.let_result_local_type_ann");
-            result_locals = append_local_binding(result_locals, LocalBinding {
-                name: _name, pointer: _pointer, llvm_type: _type, type_annotation: _ann, ownership: null, consumed: false, scope_id: scope_id, scope_depth: scope_depth
-            });
-        }
-        fs.deleteFile("build/sailfin/.let_result_temp_index");
-        if fs.exists("build/sailfin/.let_result_local_name") {
-            fs.deleteFile("build/sailfin/.let_result_local_name");
-        }
-    } else { fs.writeFile("build/sailfin/.let_ipc_used", "0"); }
-    return result_locals;
 }
 
 // Scan accumulated IR lines for the highest %tN temp index and return
