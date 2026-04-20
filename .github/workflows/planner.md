@@ -37,8 +37,8 @@ tools:
     min-integrity: none
   # Persistent state across weeks. The Planner reads last week's state,
   # writes a fresh one, and the focus issue is the human-facing summary.
+  # Mount path is exposed via env at runtime; see prompt for discovery.
   repo-memory:
-    id: planner-state
     branch-name: memory/planner
     file-glob: ["*.md", "*.json"]
 
@@ -79,11 +79,11 @@ over creating a new one.
 6. **Recent merges** — PRs merged in the last 7 days. Use the titles + PR bodies to infer what's progressed.
 7. **Previous focus** — the most recent `focus:approved` or `focus:proposed` issue. Continuity matters; don't redirect the ship every week.
 
-8. **Your own memory.** Read `/tmp/gh-aw/repo-memory-planner-state/state.md` if it exists. This is what *you* wrote at the end of last week's run: observations about each workstream, signals you noticed, things you wanted to revisit. Always consult this before composing the new focus — it's the difference between reconstructing context and remembering it.
+8. **Your own memory.** Locate the repo-memory mount: it's the directory under `/tmp/gh-aw/` whose contents include `state.md` (run `ls /tmp/gh-aw/` and look for the `repo-memory-*` directory). If `state.md` exists there, read it before doing anything else. This is what *you* wrote at the end of last week's run: observations about each workstream, signals you noticed, things you wanted to revisit. It's the difference between reconstructing context and remembering it.
 
-   If the file doesn't exist (first run), proceed without it.
+   If `state.md` doesn't exist (first run), proceed without it.
 
-   At the **end** of every run, regardless of whether you created or updated the focus issue, write a fresh `/tmp/gh-aw/repo-memory-planner-state/state.md` with:
+   At the **end** of every run, regardless of whether you created or updated the focus issue, write a fresh `state.md` to the same repo-memory directory containing:
 
    ```markdown
    # Planner state — written <date>
@@ -99,7 +99,7 @@ over creating a new one.
    - <forward-looking notes for future-you>
    ```
 
-   This file is auto-committed to the `memory/planner` branch by gh-aw — you don't need to push it.
+   The file is auto-committed to the `memory/planner` branch by gh-aw after the run — you don't need to push it.
 
 ## Decision procedure
 

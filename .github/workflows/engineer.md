@@ -7,11 +7,10 @@ description: |
 on:
   issues:
     types: [labeled]
-
-# Short-circuit before booting the agent: the only labels that should ever
-# trigger work here are design-approved or bug. Anything else, exit at the
-# workflow level — saves the first-turn cost of writing a noop.
-skip-if-no-match: 'label:design-approved OR label:bug'
+  # Short-circuit before booting the agent: the only labels that should ever
+  # trigger work here are design-approved or bug. Anything else, exit at the
+  # workflow level — saves the first-turn cost of writing a noop.
+  skip-if-no-match: 'label:design-approved OR label:bug'
 
 permissions:
   contents: read

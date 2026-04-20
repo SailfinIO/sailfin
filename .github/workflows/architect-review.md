@@ -8,9 +8,8 @@ description: |
 on:
   issues:
     types: [labeled]
-
-# Only fire on the label that matters; skip the boot for any other label event.
-skip-if-no-match: 'label:needs-design'
+  # Only fire on the label that matters; skip the boot for any other label event.
+  skip-if-no-match: 'label:needs-design'
 
 permissions:
   contents: read
