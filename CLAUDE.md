@@ -101,6 +101,32 @@ The runtime currently ships as C under `runtime/native/`.
 
 Slash commands orchestrate multi-phase workflows using specialized subagents. Use them instead of manually driving each step. The user types a single command and Claude drives the full workflow, stopping only at explicit approval gates.
 
+### Autonomous agent pipeline (GitHub workflows)
+
+Scheduled and event-driven agents in `.github/workflows/*.md` follow a strict
+tier pyramid defined in **`.github/AGENTS.md`** — read that file before
+modifying any workflow. Summary:
+
+```
+Planner (weekly, Mon 08:00 UTC)  →  Focus issue, labeled focus:proposed
+   ↓ human applies focus:approved
+Grooming (daily, 07:00 UTC)      →  needs-design issue citing focus workstream
+   ↓ Architect flips to design-approved
+Engineer (on label, budget ≤ 2)  →  ONE PR labeled agent-authored
+   ↓ QC / Security / Product / Docs review
+Human merge
+```
+
+Key rules (enforced in `.github/AGENTS.md`):
+- Code flows one way. No agent self-generates work.
+- Engineer has a hard budget of **2 concurrent `agent-authored` PRs**.
+- Every feature/perf/refactor issue must cite a workstream from the current
+  `focus:approved` issue. Bugs are exempt.
+- Grooming noops if no `focus:approved` issue exists.
+- Interactive Claude Code agents (`.claude/agents/*.md`) follow relaxed rules
+  because a human is driving; they and the GitHub workflows share names but
+  not permissions.
+
 ### Available Workflows
 
 | Command | Phases | When to use |
