@@ -14,7 +14,17 @@ permissions:
   issues: read
   pull-requests: read
 
-engine: copilot
+# Four-perspective review — non-trivial but not strategy work. Sonnet hits
+# the quality/cost sweet spot. Requires ANTHROPIC_API_KEY.
+engine:
+  id: claude
+  model: claude-sonnet-4-6
+
+# Serialize per-PR. A force-push that arrives mid-review should cancel the
+# in-progress one — the new commit is what we want reviewed.
+concurrency:
+  group: "gh-aw-pr-review-${{ github.event.pull_request.number }}"
+  cancel-in-progress: true
 
 network: defaults
 

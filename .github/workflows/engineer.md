@@ -8,12 +8,30 @@ on:
   issues:
     types: [labeled]
 
+# Short-circuit before booting the agent: the only labels that should ever
+# trigger work here are design-approved or bug. Anything else, exit at the
+# workflow level — saves the first-turn cost of writing a noop.
+skip-if-no-match: 'label:design-approved OR label:bug'
+
 permissions:
   contents: read
   issues: read
   pull-requests: read
 
-engine: copilot
+# Code quality matters here; use the strongest reasoning model. Requires
+# ANTHROPIC_API_KEY repo secret.
+engine:
+  id: claude
+  model: claude-opus-4-7
+
+# CRITICAL: serialize all engineer runs. Without this, two near-simultaneous
+# label events can both pass the budget gate (both see 0 open agent-authored
+# PRs because neither has applied its label yet) and end up exceeding the
+# limit. cancel-in-progress: false preserves the queued issue rather than
+# dropping it.
+concurrency:
+  group: "gh-aw-engineer"
+  cancel-in-progress: false
 
 network: defaults
 

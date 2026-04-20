@@ -17,7 +17,16 @@ permissions:
   issues: read
   pull-requests: read
 
-engine: copilot
+# Grooming is pattern-matching: read focus, find underserved workstream,
+# write a templated issue. Cheap model is fine. Requires ANTHROPIC_API_KEY.
+engine:
+  id: claude
+  model: claude-haiku-4-5
+
+# Serialize against itself so a manual dispatch can't race the daily run.
+concurrency:
+  group: "gh-aw-grooming"
+  cancel-in-progress: false
 
 network: defaults
 

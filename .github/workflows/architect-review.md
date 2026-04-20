@@ -9,11 +9,23 @@ on:
   issues:
     types: [labeled]
 
+# Only fire on the label that matters; skip the boot for any other label event.
+skip-if-no-match: 'label:needs-design'
+
 permissions:
   contents: read
   issues: read
 
-engine: copilot
+# Architectural review needs strong reasoning. Requires ANTHROPIC_API_KEY.
+engine:
+  id: claude
+  model: claude-opus-4-7
+
+# Serialize: prevents two label events on the same issue from racing into
+# conflicting verdicts.
+concurrency:
+  group: "gh-aw-architect-${{ github.event.issue.number }}"
+  cancel-in-progress: false
 
 network: defaults
 

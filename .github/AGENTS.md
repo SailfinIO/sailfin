@@ -84,6 +84,72 @@ The engineer's preflight check must:
 To change the budget, edit this file and the inline comment in
 `engineer.md`. Do not change it via agent prompts.
 
+The engineer workflow also enforces this with a `concurrency` group
+(`gh-aw-engineer`, `cancel-in-progress: false`) so two near-simultaneous
+label events serialize. Without the concurrency block, both runs could
+pass the PR-count check before either applied its `agent-authored` label.
+
+## Engine and model per tier
+
+All workflows use `engine: id: claude` and require an `ANTHROPIC_API_KEY`
+repo secret. Selecting the right model per tier is a real cost lever and
+the only knob that matters for spend; everything else is rounding.
+
+| Workflow | Model | Why |
+|---|---|---|
+| `planner.md` | `claude-opus-4-7` | Strategic synthesis; runs once a week |
+| `architect-review.md` | `claude-opus-4-7` | Non-trivial reasoning; gates downstream code |
+| `engineer.md` | `claude-opus-4-7` | Code quality is the product |
+| `pr-review.md` | `claude-sonnet-4-6` | Four-perspective review; quality/cost sweet spot |
+| `nightly-grooming.md` | `claude-haiku-4-5` | Pattern-match focus → templated issue |
+| `issue-triage.md` | `claude-haiku-4-5` | Label routing |
+| `release-notes.md` | `claude-haiku-4-5` | Commit summarization |
+
+Rule of thumb: **Opus when wrong output corrupts a downstream tier;
+Haiku when wrong output is easily caught by a human in seconds.**
+
+To change a tier's model, edit the workflow file directly and update this
+table in the same PR.
+
+## Concurrency contract
+
+Every workflow declares a `concurrency.group`. The pattern:
+
+| Workflow | Group | cancel-in-progress | Why |
+|---|---|---|---|
+| `planner.md` | `gh-aw-planner` | `false` | Manual dispatch must not race scheduled run |
+| `nightly-grooming.md` | `gh-aw-grooming` | `false` | Same reason |
+| `engineer.md` | `gh-aw-engineer` | `false` | **Critical** — closes the budget-gate race |
+| `architect-review.md` | `gh-aw-architect-${{ issue.number }}` | `false` | Per-issue serialization |
+| `issue-triage.md` | `gh-aw-triage-${{ issue.number }}` | `true` | Edit retriggers — latest content wins |
+| `pr-review.md` | `gh-aw-pr-review-${{ pr.number }}` | `true` | Force-push retriggers — latest commit wins |
+| `release-notes.md` | `gh-aw-release-notes-${{ tag }}` | `false` | One comment per release tag |
+
+`cancel-in-progress: false` preserves queued work (use when each event matters);
+`true` discards superseded work (use when only the latest input is interesting).
+
+## Skip-if-no-match short-circuits
+
+Some workflows trigger on event types that fire often but only do work for
+specific labels. Those use `skip-if-no-match` to exit at the workflow level
+before booting the agent — saves the first-turn cost of writing a noop:
+
+- `engineer.md`: `skip-if-no-match: 'label:design-approved OR label:bug'`
+- `architect-review.md`: `skip-if-no-match: 'label:needs-design'`
+
+The agent's preconditions still re-validate; this is purely an early exit.
+
+## Repo memory
+
+The Planner uses `tools.repo-memory` (branch `memory/planner`) for
+cross-week continuity. It reads `state.md` from prior runs (last week's
+workstream assessments and forward-looking notes) before composing the
+new focus, then writes a fresh state at the end of each run. This is the
+difference between "re-derive context every Monday" and "remember it."
+
+If we find Grooming or other recurring agents need similar continuity,
+add `tools.repo-memory` with a unique `id` per agent.
+
 ## Labels (canonical)
 
 | Label | Applied by | Meaning |

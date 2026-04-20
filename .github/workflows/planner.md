@@ -18,7 +18,16 @@ permissions:
   issues: read
   pull-requests: read
 
-engine: copilot
+# Strategic synthesis — wants the strongest reasoning model. Requires
+# ANTHROPIC_API_KEY repo secret.
+engine:
+  id: claude
+  model: claude-opus-4-7
+
+# Serialize against itself: a manual dispatch must not race the scheduled run.
+concurrency:
+  group: "gh-aw-planner"
+  cancel-in-progress: false
 
 network: defaults
 
@@ -26,6 +35,12 @@ tools:
   github:
     toolsets: [issues, pull_requests, repos]
     min-integrity: none
+  # Persistent state across weeks. The Planner reads last week's state,
+  # writes a fresh one, and the focus issue is the human-facing summary.
+  repo-memory:
+    id: planner-state
+    branch-name: memory/planner
+    file-glob: ["*.md", "*.json"]
 
 safe-outputs:
   create-issue:
@@ -63,6 +78,28 @@ over creating a new one.
 5. **Issue queue** — open issues grouped by label (`priority:critical`, `priority:high`, `needs-design`, `design-approved`, `blocked`, `bug`).
 6. **Recent merges** — PRs merged in the last 7 days. Use the titles + PR bodies to infer what's progressed.
 7. **Previous focus** — the most recent `focus:approved` or `focus:proposed` issue. Continuity matters; don't redirect the ship every week.
+
+8. **Your own memory.** Read `/tmp/gh-aw/repo-memory-planner-state/state.md` if it exists. This is what *you* wrote at the end of last week's run: observations about each workstream, signals you noticed, things you wanted to revisit. Always consult this before composing the new focus — it's the difference between reconstructing context and remembering it.
+
+   If the file doesn't exist (first run), proceed without it.
+
+   At the **end** of every run, regardless of whether you created or updated the focus issue, write a fresh `/tmp/gh-aw/repo-memory-planner-state/state.md` with:
+
+   ```markdown
+   # Planner state — written <date>
+
+   ## Last week's workstreams (assessment)
+   - <name>: <shipped | in flight | stalled> — <one-line evidence>
+
+   ## Signals I noticed this run
+   - <e.g., "build perf hasn't been touched in 3 weeks despite high-priority status">
+   - <e.g., "extern fn issues are landing but missing tests; raise QC bar next week">
+
+   ## Things to revisit next run
+   - <forward-looking notes for future-you>
+   ```
+
+   This file is auto-committed to the `memory/planner` branch by gh-aw — you don't need to push it.
 
 ## Decision procedure
 
