@@ -6,6 +6,17 @@ every agent role in `.github/agents/*.agent.md` must honour the rules below.
 
 If an agent's behaviour conflicts with this document, this document wins.
 
+## How these workflows actually run
+
+The `.github/workflows/*.md` files are **gh-aw source**, not what GitHub
+Actions executes. Each `.md` compiles via `gh aw compile` into a sibling
+`.github/workflows/*.lock.yml`, and Actions runs the lock file. **Source
+edits do not take effect until the lock file is regenerated and committed.**
+Whenever you change a `.md` workflow, run `gh aw compile` (or
+`gh aw compile --approve-updates` when introducing a new restricted
+secret) and commit the resulting `.lock.yml` in the same PR. The
+`activation` check enforces this.
+
 ## Prime directive
 
 Code only flows **downward** through the tier pyramid. No agent self-generates
@@ -77,9 +88,13 @@ architect-approved issue, within a budget gate.
 The engineer's preflight check must:
 
 1. Call `list_pull_requests` with `state=open`, `labels=agent-authored`
-2. If the returned count ≥ 2, emit `noop` with message:
-   `"budget gate: already <N> open agent-authored PRs (limit 2)"`
+2. If the returned count ≥ 2, emit `noop` with message exactly:
+   `"budget gate: <N>/2 open agent-authored PRs; standing down"`
 3. Otherwise proceed; apply `agent-authored` label to the resulting PR
+
+The string is reproduced verbatim in `engineer.md`. If you change the
+wording in one file, change it in the other in the same commit — the
+contract and the implementation must agree.
 
 To change the budget, edit this file and the inline comment in
 `engineer.md`. Do not change it via agent prompts.

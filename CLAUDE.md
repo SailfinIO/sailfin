@@ -105,7 +105,9 @@ Slash commands orchestrate multi-phase workflows using specialized subagents. Us
 
 Scheduled and event-driven agents in `.github/workflows/*.md` follow a strict
 tier pyramid defined in **`.github/AGENTS.md`** — read that file before
-modifying any workflow. Summary:
+modifying any workflow. The `.md` files are gh-aw sources; Actions runs
+the sibling `*.lock.yml` produced by `gh aw compile`, so source edits
+require recompiling and committing the lock file in the same PR. Summary:
 
 ```
 Planner (weekly, Monday)         →  Focus issue, labeled focus:proposed
