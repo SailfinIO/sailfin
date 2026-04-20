@@ -273,13 +273,11 @@ If step 7 fails, the channel is not purely a workaround — some caller is relyi
 #### Remaining targets by priority:
 
 1. **Statement/assignment channels** — per-expression-statement overhead
-2. **Async inner-return-type channel** (`.async_inner_return_type`) — writer in `core_call_resolution.sfn`, reader in `instructions_let.sfn`
+2. ~~**Async inner-return-type channel** (`.async_inner_return_type`) — writer in `core_call_resolution.sfn`, reader in `instructions_let.sfn`~~ — **Removed April 20** (see [Completed Work: Async Inner Return Type IPC Channel Removal](#async-inner-return-type-ipc-channel-removal-april-20))
 3. ~~**Struct info channel** (`.struct_info`) — cross-phase type metadata read by `core_member_lowering`, `core_member_helpers`, `core_literals_lowering`, `lowering_phase_render`~~ — **Removed April 20** (see [Completed Work: Struct Info IPC Channel Removal](#struct-info-ipc-channel-removal-april-20))
-4. **Context-functions channel** — `serialize_context_functions()` in `lowering_phase_types.sfn:339`
+4. ~~**Context-functions channel** — `serialize_context_functions()` in `lowering_phase_types.sfn`~~ — **Already removed** (writer no longer exists in the source; the `.ctx_func_*` cleanup sweep remains as legacy).
 
-Named IPC functions to eliminate:
-
-- `serialize_context_functions()` — `lowering_phase_types.sfn:339`
+With `.async_inner_return_type` gone, every cross-statement / cross-phase Phase 2 channel has been eliminated. The residual `fs.*` surface in the compiler is now (a) `.trace_lowering` debug gates, (b) `.phase_*` diagnostics sinks, and (c) import-context reads in `llvm/imports.sfn` (targeted by Phase 3).
 
 ### Phase 3: Cache Import Artifacts
 
@@ -437,10 +435,7 @@ Criterion (2) is the only unmet gate, and its failure is **not arena-induced** �
 
 **Unblocked work (actionable immediately):**
 
-1. **Phase 1b aliasing-blocked residuals become safe under arena:**
-   - `concat_native_functions` site 2 in `lowering_core.sfn:573` (the one the d2d0bf1 sweep left copying because `collect_runtime_helper_targets`/`render_llvm_preamble`/`lower_all_functions` needed a pristine `local_functions`).
-   - All 6 `append_local_binding` sites in `expression_lowering/native/core_scopes.sfn:174-186`.
-     Both were deferred because in-place mutation leaked across scope restoration. Under arena, the copy is a cheap bump alloc and both views are preserved — in-place conversions are safe.
+1. ~~**Phase 1b aliasing-blocked residuals become safe under arena:**~~ — **Revised April 20**: on re-inspection, the remaining Phase 1b sites (`concat_native_functions` site 2 in `lowering_core.sfn:500` and all `append_local_binding` call sites) are **not aliasing-blocked in the memory sense** — the reason the sweep left them copying is semantic: `context_functions` and `local_functions` must remain distinct arrays so that appending `imported_functions` to one doesn't contaminate the other, and `append_local_binding` produces per-scope snapshots that nested scopes extend without polluting the outer scope's locals. Arena makes the allocation cheap but does not change array identity, so in-place conversion would break correctness regardless of allocator. The current O(n) copies are the right behavior; under arena they are already cheap bump allocations.
 2. **Phase 2 IPC channels previously blocked by IPC-as-GC (~146 refs) become pickable:** `.call_result_*` (51), `.let_result_*` / `.let_ipc_*` (39), ~~`.expr_stmt_*` (21)~~ removed in PR #191, `.instr_*` (18), `.dispatch_*` (12), ~~`.block_result_*` (5)~~ removed in PR #188.
 
 **macOS-arm64 determinism:** The 0.5.7 seed's residual non-determinism on macOS-arm64 (PRs #178 / #183 / #184 / #185 each measured 20-run hash sweeps against this) is driven by Phase 2 channels still active, not by memory allocation patterns. The arena flip itself should not change the non-determinism surface area — measurement will land in the PR body once CI completes on macOS-arm64.
@@ -774,6 +769,46 @@ _Phase C — Writer deletion:_
 - No new wrapper structs, no new tests (existing integration suite + self-hosting exercise all live paths).
 
 **Determinism:** The `.struct_info` channel was a significant source of non-determinism because its five readers spanned four different files across two lowering phases (expression lowering and render). Cross-phase file reads are the primary mechanism for hash divergence on macOS-arm64. Post-change emit-sweep measurements to land in the PR body once CI completes. With `.struct_info` gone, the remaining Phase 2 channels are `.async_inner_return_type` and the reader-only `.instr_*` fallbacks.
+
+### Async Inner Return Type IPC Channel Removal (April 20)
+
+**Status: Implemented.** Removed the `.async_inner_return_type` file-IPC channel — the last remaining cross-statement Phase 2 scalar channel. Writer in `core_call_resolution.sfn:702` (inside `resolve_call_signature`) serialized `function_entry.return_type` whenever the resolved call target was an async function; reader in `instructions_let.sfn:354-358` consumed it in the narrow case where the let's LLVM type was `%SailfinFuturePtr*`, using the value as the local's `type_annotation` so the `await` handler could unbox structs.
+
+The channel was a v0.1.1-seed-era workaround. Under the default-on arena (PR #186), the let-side reader can derive the exact same value in-memory: `instructions_let.sfn` already receives `functions: NativeFunction[]` as a parameter, and the writer only ever fired for direct async function calls — so extracting the leading identifier of `instruction.value` and looking it up via `find_function_by_name(functions, target)` reaches the same `NativeFunction.return_type` the writer was shipping.
+
+**Shape of change:**
+
+- Added a small local helper `_extract_leading_call_target(expression) -> string` to `instructions_let.sfn` that returns the identifier prefix of the expression when it is shaped `<identifier>(...)`, else the empty string. Uses the existing `is_identifier_start_char` / `is_identifier_part_char` / `trim_text` utilities (extended the existing `../utils` import).
+- Added `import { find_function_by_name } from "../rendering_helpers"` — the helper already existed but hadn't been imported into `instructions_let.sfn`.
+- Replaced the 5-line `fs.exists` / `fs.readFile` / `fs.deleteFile` block at line 353-358 with a pure `find_function_by_name(functions, call_target)` lookup; when the callee is async and has a non-empty `return_type`, the local binding's `type_annotation` is set to it (matching previous behavior).
+- Deleted the sole `fs.writeFile("build/sailfin/.async_inner_return_type", ...)` call at `core_call_resolution.sfn:702`.
+- Narrowed `resolve_call_signature` from `![io]` to pure — it was the only `fs.*` call in the function.
+- Added a "Legacy" comment to the existing `.async_inner_` cleanup sweep in `cli_commands.sfn` (following PR #183 / #184 / #185 / #188 / #189 / #191 / #192 / `.enum_info` / `.struct_info` precedent).
+
+**Per-call overhead removed:**
+
+- 1 `fs.writeFile(".async_inner_return_type", ...)` per async call emission (fires in `resolve_call_signature` for every async callee).
+- 1 `fs.exists` + up to 1 `fs.readFile` + 1 `fs.deleteFile` per let whose LLVM type is `%SailfinFuturePtr*`.
+
+**Effect narrowing:**
+
+- `resolve_call_signature`: `![io]` → pure.
+- `instructions_let.sfn::lower_let_instruction` retains `![io]` (still uses `.trace_lowering` debug gates elsewhere).
+
+**Risk assessment:**
+
+- **Narrow fallback surface**: the writer only fired when `function_entry.is_async` and `function_entry` was non-null — i.e., the call target was a plain async function name found in the `functions` array. The reader-side replacement does the same lookup against the same array; when the original would have fired, the replacement fires with byte-identical data.
+- **Non-call initializers**: `let f = some_future_var` (no call in the initializer) leaves `_extract_leading_call_target` returning empty and the `type_annotation` falls through to `instruction.type_annotation` — semantically identical to the old file-IPC path, which also wouldn't have produced output for this case (the writer wasn't fired).
+- **Method calls on async targets**: `let f = obj.async_method()` would have the extracted target `obj.async_method`, which doesn't match a bare function name via `find_function_by_name` — so the lookup misses and the annotation falls through. This matches the old file-IPC behavior (the writer fired only via `_find_function_by_name_or_import` matching a top-level function). Async methods flow through a different resolution path and are unaffected.
+- **Cross-statement leak**: none — writer and reader are now fully in-memory; no inter-process or inter-module file exchange remains.
+
+**Scope:**
+
+- 4 source files modified (`instructions_let.sfn`, `core_call_resolution.sfn`, `cli_commands.sfn`, `docs/build-performance.md`).
+- Net approximately −6 `fs.*` calls removed, +20 lines of local helper (the in-memory path is a tight lookup against an array the reader already had).
+- No new wrapper structs, no signature changes to call sites, no new tests (existing integration suite + self-hosting exercise every live path).
+
+**Determinism:** The channel was per-async-call and cross-statement (writer in one lowering phase, reader in another), one of the structural sources of emit-time non-determinism on macOS-arm64. Removing it shrinks the residual non-determinism surface to the `.trace_lowering` debug gates (not IPC) and the reader-only `.instr_*` fallbacks (always-false, no data flow). With this change, every Phase 2 *structural* channel is gone — the fs-call census drops into mostly diagnostic and import-context territory.
 
 ---
 

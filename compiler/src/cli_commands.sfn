@@ -692,6 +692,8 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
         if entry[0] != "." { continue; }
         // Only delete known lowering scratch prefixes.
         let mut is_scratch: boolean = false;
+        // Legacy: .async_inner_return_type IPC channel was removed but stale files
+        // from older build dirs / older seed binaries should still be swept.
         if _has_prefix_cmd(entry, ".async_inner_") { is_scratch = true; }
         // Legacy: .block_result_* IPC channel was removed but stale files from
         // older build dirs / older seed binaries should still be swept.

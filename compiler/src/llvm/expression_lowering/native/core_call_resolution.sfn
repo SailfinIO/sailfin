@@ -627,7 +627,7 @@ fn _find_function_by_name_or_import(functions: NativeFunction[], target: string)
 
 // Resolve the function signature for a call target: return type, expected parameter
 // types, whether it's a trait dispatch, and the resolved function entry.
-fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution ![io] {
+fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution {
     let mut result_target = trimmed_target;
     let mut function_entry: NativeFunction? = null;
     let mut llvm_return: string = "i8*";
@@ -698,8 +698,9 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                         + "`");
                     llvm_return = "i8*";
                 } else { llvm_return = future_return; }
-                // Store the underlying return type so await can unbox structs
-                fs.writeFile("build/sailfin/.async_inner_return_type", function_entry.return_type);
+                // The underlying Sailfin return type is recovered on the let
+                // side via find_function_by_name(functions, target) so `await`
+                // can unbox structs — no file IPC needed.
                 expected_params = collect_parameter_types(context, function_entry.parameters, result_target);
             } else {
                 llvm_return = map_return_type(context, function_entry.return_type);

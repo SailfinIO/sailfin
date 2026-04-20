@@ -15,6 +15,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "../lifetime";
+import { find_function_by_name } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     find_interface_info_by_name,
@@ -34,7 +35,34 @@ import {
     StringConstant,
     TypeContext
 } from "../types";
-import { number_to_string, trim_text } from "../utils";
+import {
+    is_identifier_part_char,
+    is_identifier_start_char,
+    number_to_string,
+    trim_text
+} from "../utils";
+
+// Extract the leading function-call target identifier from a let initializer
+// expression. Returns the identifier when the expression is shaped like
+// `<identifier>(...)`, otherwise the empty string. Used to look up the callee
+// of a direct async call so we can annotate the let's local with the callee's
+// Sailfin return type (needed by `await` to unbox structs).
+fn _extract_leading_call_target(expression: string) -> string {
+    let trimmed = trim_text(expression);
+    if trimmed.length == 0 { return ""; }
+    let first = substring(trimmed, 0, 1);
+    if !is_identifier_start_char(first) { return ""; }
+    let mut index: number = 1;
+    loop {
+        if index >= trimmed.length { break; }
+        let ch = substring(trimmed, index, index + 1);
+        if !is_identifier_part_char(ch) { break; }
+        index += 1;
+    }
+    if index >= trimmed.length { return ""; }
+    if substring(trimmed, index, index + 1) != "(" { return ""; }
+    return substring(trimmed, 0, index);
+}
 
 fn lower_let_instruction(function: NativeFunction, instruction: NativeInstruction, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> LetLoweringResult ![io] {
     let mut diagnostics: string[] = [];
@@ -348,13 +376,22 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     }
 
     // For locals that hold async futures, store the underlying return type
-    // as type_annotation so the await handler can unbox structs.
+    // as type_annotation so the await handler can unbox structs. The callee is
+    // the leading identifier of the initializer (the writer only ever fired
+    // for direct async function calls); looking it up in `functions` gives us
+    // the same `return_type` the file-IPC channel used to carry.
     let mut local_type_annotation: string = instruction.type_annotation;
     if llvm_type == "%SailfinFuturePtr*" {
-        if fs.exists("build/sailfin/.async_inner_return_type") {
-            let async_inner = fs.readFile("build/sailfin/.async_inner_return_type");
-            if async_inner.length > 0 { local_type_annotation = async_inner; }
-            fs.deleteFile("build/sailfin/.async_inner_return_type");
+        let call_target = _extract_leading_call_target(instruction.value);
+        if call_target.length > 0 {
+            let callee = find_function_by_name(functions, call_target);
+            if callee != null {
+                if callee.is_async {
+                    if callee.return_type.length > 0 {
+                        local_type_annotation = callee.return_type;
+                    }
+                }
+            }
         }
     }
     current_locals = append_local_binding(current_locals, LocalBinding {
