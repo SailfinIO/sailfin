@@ -10,6 +10,7 @@ import path from "node:path";
 
 const MEMORY_CAP_KB = 8 * 1024 * 1024; // 8 GB virtual memory
 const DEFAULT_TIMEOUT_MS = 60_000;
+const MAX_OUTPUT_BYTES = 8 * 1024 * 1024; // 8 MiB per stream
 
 export interface SailfinResult {
   exit: number;
@@ -39,7 +40,8 @@ export function workspaceRoot(): string {
 }
 
 export function compilerPath(): string {
-  return path.join(workspaceRoot(), "build", "native", "sailfin");
+  const suffix = process.platform === "win32" ? ".exe" : "";
+  return path.join(workspaceRoot(), "build", "native", `sailfin${suffix}`);
 }
 
 export function assertCompilerExists(): void {
@@ -57,7 +59,15 @@ export function assertCompilerExists(): void {
  * from asking the server to compile /etc/passwd.
  */
 export function resolveInsideWorkspace(userPath: string): string {
-  const root = realpathSync(workspaceRoot());
+  const rawRoot = workspaceRoot();
+  let root: string;
+  try {
+    root = realpathSync(rawRoot);
+  } catch (err) {
+    throw new SailfinError(
+      `Workspace root does not exist or is unreadable: ${rawRoot} (${(err as NodeJS.ErrnoException).code ?? "ERR"}). Set CLAUDE_PROJECT_DIR to a valid Sailfin checkout.`,
+    );
+  }
   const candidate = path.resolve(root, userPath);
   let resolved: string;
   try {
@@ -104,16 +114,15 @@ export async function runSailfin(
       stdio: ["ignore", "pipe", "pipe"],
     });
 
-    let stdout = "";
-    let stderr = "";
+    // Bound each stream so a runaway `emit llvm` on a huge module can't
+    // exhaust the MCP server's own heap. The compiler process itself is
+    // already memory-capped, but its output size is not.
+    const stdoutBuf = new BoundedBuffer(MAX_OUTPUT_BYTES, "stdout");
+    const stderrBuf = new BoundedBuffer(MAX_OUTPUT_BYTES, "stderr");
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
-    });
+    child.stdout.on("data", (chunk: string) => stdoutBuf.append(chunk));
+    child.stderr.on("data", (chunk: string) => stderrBuf.append(chunk));
 
     let timedOut = false;
     const timer = setTimeout(() => {
@@ -126,8 +135,8 @@ export async function runSailfin(
       const durationMs = Date.now() - started;
       resolve({
         exit: code ?? (signal === "SIGKILL" ? 137 : 1),
-        stdout,
-        stderr,
+        stdout: stdoutBuf.toString(),
+        stderr: stderrBuf.toString(),
         durationMs,
         timedOut,
       });
@@ -135,10 +144,11 @@ export async function runSailfin(
 
     child.on("error", (err) => {
       clearTimeout(timer);
+      stderrBuf.append(`\n[sailfin-mcp] spawn error: ${String(err)}`);
       resolve({
         exit: 1,
-        stdout,
-        stderr: stderr + `\n[sailfin-mcp] spawn error: ${String(err)}`,
+        stdout: stdoutBuf.toString(),
+        stderr: stderrBuf.toString(),
         durationMs: Date.now() - started,
         timedOut: false,
       });
@@ -149,4 +159,44 @@ export async function runSailfin(
 function shellEscape(s: string): string {
   // Single-quote wrap and escape any embedded single quotes.
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/**
+ * Append-only string buffer with a hard byte cap. Once the cap is reached,
+ * further writes are discarded and a single truncation marker is appended
+ * so the caller can see that output was cut.
+ */
+class BoundedBuffer {
+  private chunks: string[] = [];
+  private size = 0;
+  private truncated = false;
+
+  constructor(
+    private readonly maxBytes: number,
+    private readonly label: string,
+  ) {}
+
+  append(chunk: string): void {
+    if (this.truncated) return;
+    const chunkBytes = Buffer.byteLength(chunk, "utf8");
+    if (this.size + chunkBytes <= this.maxBytes) {
+      this.chunks.push(chunk);
+      this.size += chunkBytes;
+      return;
+    }
+    // Keep the prefix that still fits, then mark truncated.
+    const remaining = this.maxBytes - this.size;
+    if (remaining > 0) {
+      this.chunks.push(chunk.slice(0, remaining));
+      this.size = this.maxBytes;
+    }
+    this.truncated = true;
+    this.chunks.push(
+      `\n[sailfin-mcp] ${this.label} truncated at ${this.maxBytes} bytes\n`,
+    );
+  }
+
+  toString(): string {
+    return this.chunks.join("");
+  }
 }

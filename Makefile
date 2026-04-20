@@ -289,7 +289,7 @@ clean:
 # Inspector) can reach the compiler as tool calls. `.mcp.json` at the repo root
 # points at tools/mcp-server/dist/index.js, which this target produces.
 mcp-server:
-	cd tools/mcp-server && npm install --no-audit --no-fund && npm run build
+	cd tools/mcp-server && npm ci --no-audit --no-fund && npm run build
 
 # Remove local build artifacts (keeps downloaded seed by default).
 # Use KEEP_SEED=0 to also delete build/seed.
