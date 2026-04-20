@@ -20,6 +20,7 @@ export default defineConfig({
       customCss: ["./src/styles/starlight-theme.css"],
       components: {
         Header: "./src/components/starlight/Header.astro",
+        MobileMenuFooter: "./src/components/starlight/MobileMenuFooter.astro",
       },
       sidebar: [
         {

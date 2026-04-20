@@ -85,39 +85,41 @@ const githubUrl = "https://github.com/sailfinio/sailfin";
       )}
     </div>
 
-    <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle site menu" aria-expanded="false" aria-controls="mobile-nav">
-      <svg class="icon-hamburger" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-        <line x1="3" y1="6" x2="21" y2="6" />
-        <line x1="3" y1="12" x2="21" y2="12" />
-        <line x1="3" y1="18" x2="21" y2="18" />
-      </svg>
-      <svg class="icon-close hidden" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-        <line x1="4" y1="4" x2="20" y2="20" />
-        <line x1="20" y1="4" x2="4" y2="20" />
-      </svg>
-    </button>
+    {mode === "site" && (
+      <button class="mobile-menu-btn" id="mobile-menu-btn" aria-label="Toggle site menu" aria-expanded="false" aria-controls="mobile-nav">
+        <svg class="icon-hamburger" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+        <svg class="icon-close hidden" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+          <line x1="4" y1="4" x2="20" y2="20" />
+          <line x1="20" y1="4" x2="4" y2="20" />
+        </svg>
+      </button>
+    )}
   </div>
 
-  <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation" aria-hidden="true">
-    {navItems.map((item) => (
-      <div class="mobile-nav-item">
-        <a href={item.href} class="mobile-nav-link">{item.label}</a>
-        {item.children && (
-          <div class="mobile-nav-children">
-            {item.children.map((child) => (
-              <a href={child.href} class="mobile-nav-child-link">{child.label}</a>
-            ))}
-          </div>
-        )}
-      </div>
-    ))}
-    <div class="mobile-actions">
-      <a href={githubUrl} class="mobile-action-link" rel="noopener noreferrer" target="_blank">GitHub</a>
-      {mode === "site" && (
+  {mode === "site" && (
+    <nav class="mobile-nav" id="mobile-nav" aria-label="Mobile navigation" aria-hidden="true">
+      {navItems.map((item) => (
+        <div class="mobile-nav-item">
+          <a href={item.href} class="mobile-nav-link">{item.label}</a>
+          {item.children && (
+            <div class="mobile-nav-children">
+              {item.children.map((child) => (
+                <a href={child.href} class="mobile-nav-child-link">{child.label}</a>
+              ))}
+            </div>
+          )}
+        </div>
+      ))}
+      <div class="mobile-actions">
+        <a href={githubUrl} class="mobile-action-link" rel="noopener noreferrer" target="_blank">GitHub</a>
         <a href="/docs/getting-started/install" class="mobile-btn-get-started">Get Started</a>
-      )}
-    </div>
-  </nav>
+      </div>
+    </nav>
+  )}
 </header>
 
 <script>

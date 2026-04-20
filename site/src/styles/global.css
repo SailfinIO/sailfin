@@ -29,6 +29,8 @@
   --color-text-secondary: var(--gray-600);
   --color-text-tertiary: var(--gray-500);
   --color-border: var(--gray-200);
+  --color-border-strong: var(--gray-300);
+  --color-muted-surface: var(--gray-200);
 
   /* Layout */
   --max-width: 1200px;
@@ -55,6 +57,8 @@ html[data-theme="dark"] {
   --color-text-secondary: #adb5bd;
   --color-text-tertiary: #868e96;
   --color-border: #2a2f3a;
+  --color-border-strong: #3a3f4a;
+  --color-muted-surface: #252a34;
 }
 
 *,

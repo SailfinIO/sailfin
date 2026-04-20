@@ -34,6 +34,10 @@
    * `src/styles/global.css` so that components rendered inside Starlight
    * (SiteHeader via the Header override, Footer, etc.) resolve the same
    * variables they would on the marketing pages.
+   *
+   * Starlight's gray scale inverts between themes — gray-1 is near-bg,
+   * gray-6 is near-text — so using named slots keeps the right contrast
+   * automatically in light and dark.
    */
   --color-primary: var(--sl-color-accent);
   --color-primary-dark: var(--sl-color-accent-high);
@@ -41,8 +45,11 @@
   --color-bg-alt: var(--sl-color-bg-nav);
   --color-bg-code: var(--sl-color-bg-inline-code);
   --color-text: var(--sl-color-text);
-  --color-text-secondary: var(--sl-color-text-accent);
+  --color-text-secondary: var(--sl-color-gray-3);
+  --color-text-tertiary: var(--sl-color-gray-4);
   --color-border: var(--sl-color-hairline);
+  --color-border-strong: var(--sl-color-hairline-shade);
+  --color-muted-surface: var(--sl-color-gray-6);
   --header-height: var(--sl-nav-height, 64px);
   --max-width: 90rem;
 }
@@ -60,23 +67,29 @@
 }
 
 /*
- * Tighten up the SiteHeader inside Starlight's navbar so it matches the
- * marketing header and uses Starlight's full nav width rather than being
- * centered at our narrow max-width.
+ * When SiteHeader is rendered inside Starlight's own fixed <header class="header">
+ * (via the Header override), we need to strip SiteHeader's own positioning,
+ * background, height, and border — otherwise the two headers nest and you
+ * see Starlight's chrome peeking out behind SiteHeader.
  */
-.site-header {
-  border-bottom: none; /* Starlight already renders a hairline */
+header.header > .site-header {
+  position: static;
+  height: 100%;
+  min-height: 0;
+  background: transparent;
+  border-bottom: none;
 }
 
-.site-header .header-inner {
+header.header > .site-header .header-inner {
   max-width: none;
-  padding: 0 1rem;
+  padding: 0;
+  height: 100%;
+  gap: 1rem;
 }
 
 /*
- * Starlight's built-in search button is styled for a wider slot. In the
- * header-actions row we want it to look like the other icon buttons: a
- * compact pill with an icon only at narrow widths.
+ * Starlight's built-in search button is sized for a wider slot. Pull it in
+ * line with our 34px icon buttons so the right-side actions all match.
  */
 .site-header .search-slot site-search {
   display: flex;

@@ -237,7 +237,11 @@ const featured = allAssets;
 
 <style>
   .dl-hero {
-    background: linear-gradient(180deg, var(--sfn-blue-light) 0%, var(--color-bg) 100%);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-primary) 10%, var(--color-bg)) 0%,
+      var(--color-bg) 100%
+    );
     padding: 4rem 0 3rem;
     text-align: center;
   }

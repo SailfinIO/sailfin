@@ -1,0 +1,71 @@
+---
+/*
+ * Mobile menu footer override. Starlight's docs sidebar is the only
+ * hamburger on docs pages (mobile). We add the marketing-site nav links to
+ * its footer so mobile docs readers can reach Why / Downloads / Blog /
+ * Community / Packages without leaving the docs sidebar UI.
+ *
+ * We intentionally drop Starlight's built-in ThemeSelect / LanguageSelect /
+ * SocialIcons — the theme toggle and GitHub link are already visible in our
+ * top header at all viewport widths.
+ */
+
+const siteLinks = [
+  { label: "Home", href: "/" },
+  { label: "Why Sailfin", href: "/why" },
+  { label: "Downloads", href: "/dl" },
+  { label: "Packages", href: "https://pkg.sfn.dev" },
+  { label: "Blog", href: "/blog" },
+  { label: "Community", href: "/community" },
+];
+---
+
+<div class="site-links">
+  <p class="site-links-label">Sailfin</p>
+  <ul>
+    {siteLinks.map((link) => (
+      <li>
+        <a href={link.href}>{link.label}</a>
+      </li>
+    ))}
+  </ul>
+</div>
+
+<style>
+  .site-links {
+    border-top: 1px solid var(--sl-color-hairline);
+    padding: 1rem 0 0.5rem;
+    margin-top: 1rem;
+  }
+
+  .site-links-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--sl-color-gray-3);
+    margin: 0 0 0.5rem;
+  }
+
+  .site-links ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .site-links a {
+    display: block;
+    padding: 0.5rem 0;
+    color: var(--sl-color-text);
+    text-decoration: none;
+    font-size: 0.95rem;
+  }
+
+  .site-links a:hover {
+    color: var(--sl-color-text-accent);
+    text-decoration: none;
+  }
+</style>
