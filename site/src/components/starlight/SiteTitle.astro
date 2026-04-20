@@ -1,0 +1,48 @@
+---
+import type { Props } from "@astrojs/starlight/props";
+---
+
+<a href="/" class="site-title" aria-label={Astro.props.siteTitle}>
+  <img
+    src="/images/sfn_lang_logo_256.svg"
+    alt=""
+    width="28"
+    height="28"
+    class="site-logo"
+  />
+  <span class="site-name">Sailfin</span>
+  <span class="site-section">Docs</span>
+</a>
+
+<style>
+  .site-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    text-decoration: none;
+    color: var(--sl-color-white);
+    font-weight: 600;
+  }
+
+  .site-title:hover {
+    text-decoration: none;
+  }
+
+  .site-logo {
+    display: block;
+  }
+
+  .site-name {
+    font-size: 1.1rem;
+    letter-spacing: -0.01em;
+  }
+
+  .site-section {
+    font-size: 0.85rem;
+    color: var(--sl-color-text-accent);
+    font-weight: 500;
+    padding: 0.1rem 0.5rem;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--sl-color-accent) 18%, transparent);
+  }
+</style>
