@@ -31,6 +31,7 @@ import {
     parse_struct_layout_field,
     parse_struct_layout_header
 } from "./native_ir_utils_layout";
+import { parse_import_entry } from "./native_ir_utils_parse";
 import {
     is_trim_char,
     split_lines,
@@ -134,9 +135,37 @@ fn parse_native_structs_for_import(text: string) -> NativeStruct[] {
 }
 
 fn parse_native_imports_for_import(text: string) -> NativeImport[] {
-    let parsed = parse_native_artifact_impl(text, false, false);
-    if parsed.imports == null { return []; }
-    return parsed.imports;
+    // Import discovery fast-path: scan only top-level `.import`/`.export`
+    // directives instead of routing through parse_native_artifact_impl, which
+    // walks every `.struct`/`.interface`/`.enum` body via recursive helpers.
+    // The BFS in collect_imported_module_context_for_module calls this once per
+    // unique transitive module; skipping multi-line block parsing removes the
+    // dominant per-module discovery cost. `.import`/`.export` are emitted only
+    // as top-level statements (see emit_native.sfn:emit_statement_declarations),
+    // so a flat line scan matches parse_native_artifact_impl's output for the
+    // imports field. Diagnostics are intentionally dropped — the caller
+    // (llvm/imports.sfn) discards them.
+    let lines = split_lines(text);
+    let mut imports: NativeImport[] = [];
+    let mut index: number = 0;
+    loop {
+        if index >= lines.length { break; }
+        let line = trim_text(lines[index]);
+        index += 1;
+        if line.length == 0 { continue; }
+        if starts_with(line, ";") { continue; }
+        if starts_with(line, ".import ") {
+            let parsed_import = parse_import_entry("import", strip_prefix(line, ".import "));
+            if parsed_import != null { imports.push(parsed_import); }
+            continue;
+        }
+        if starts_with(line, ".export ") {
+            let parsed_export = parse_import_entry("export", strip_prefix(line, ".export "));
+            if parsed_export != null { imports.push(parsed_export); }
+            continue;
+        }
+    }
+    return imports;
 }
 
 fn parse_native_interfaces_for_import(text: string) -> NativeInterface[] {
