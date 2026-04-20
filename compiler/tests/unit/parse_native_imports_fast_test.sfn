@@ -1,0 +1,211 @@
+// Regression test for the Phase 3 import-discovery fast path.
+//
+// `parse_native_imports_for_import` in compiler/src/native_ir_api.sfn is a
+// line scanner that extracts only top-level `.import`/`.export` directives
+// from `.sfn-asm` text, bypassing the full multi-line parse performed by
+// `parse_native_artifact_impl`. It ships in service of the BFS in
+// `collect_imported_module_context_for_module` (llvm/imports.sfn), which
+// calls it once per unique transitive module during LLVM lowering.
+//
+// These tests pin down the two properties the fast path must preserve:
+//
+//   1. Output equivalence — for any well-formed `.sfn-asm`, the NativeImport[]
+//      produced by the fast scanner is the same (kind/module/specifiers) as
+//      the imports field of `parse_native_artifact_for_import_context` on
+//      the same input.
+//   2. Robustness to non-import noise — comments, empty lines, `.module`,
+//      `.struct`/`.interface`/`.enum`/`.fn` blocks with nested bodies must
+//      not cause spurious imports and must not swallow real ones.
+//
+// See docs/build-performance.md "Import Discovery Fast-Path Scanner" for
+// the rationale.
+import { NativeImport } from "../../src/native_ir";
+import {
+    parse_native_artifact_for_import_context,
+    parse_native_imports_for_import
+} from "../../src/native_ir_api";
+
+// ── Helpers ────────────────────────────────────────────────────────────
+fn _specifier_signature(imp: NativeImport) -> string {
+    let mut result: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= imp.specifiers.length { break; }
+        let spec = imp.specifiers[i];
+        result = result + spec.name;
+        if spec.alias != null { result = result + "=" + spec.alias; }
+        result = result + ",";
+        i += 1;
+    }
+    return result;
+}
+
+fn _import_signature(imp: NativeImport) -> string {
+    return imp.kind + "|" + imp.module + "|" + _specifier_signature(imp);
+}
+
+// Compares the fast path against the full parser for a given text and
+// returns true iff both produce the same kind/module/specifier signatures
+// in the same order.
+fn _matches_full_parser(text: string) -> boolean {
+    let fast = parse_native_imports_for_import(text);
+    let full_result = parse_native_artifact_for_import_context(text);
+    let full = full_result.imports;
+    if fast.length != full.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= fast.length { break; }
+        if _import_signature(fast[i]) != _import_signature(full[i]) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────
+test "parse_native_imports_for_import: empty text returns empty" {
+    let result = parse_native_imports_for_import("");
+    assert result.length == 0;
+}
+
+test "parse_native_imports_for_import: no-import text returns empty" {
+    let text = "; just a comment\n.module foo\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 0;
+}
+
+test "parse_native_imports_for_import: simple import without specifiers" {
+    let text = ".import \"./helpers\"\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 1;
+    assert result[0].kind == "import";
+    assert result[0].module == "./helpers";
+    assert result[0].specifiers.length == 0;
+}
+
+test "parse_native_imports_for_import: import with named specifiers" {
+    let text = ".import \"./foo\" { bar, baz }\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 1;
+    assert result[0].kind == "import";
+    assert result[0].module == "./foo";
+    assert result[0].specifiers.length == 2;
+    assert result[0].specifiers[0].name == "bar";
+    assert result[0].specifiers[1].name == "baz";
+}
+
+test "parse_native_imports_for_import: import with aliased specifier" {
+    let text = ".import \"./foo\" { bar as qux }\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 1;
+    assert result[0].specifiers.length == 1;
+    assert result[0].specifiers[0].name == "bar";
+    assert result[0].specifiers[0].alias != null;
+    assert result[0].specifiers[0].alias == "qux";
+}
+
+test "parse_native_imports_for_import: export line is captured" {
+    let text = ".export \"./mine\" { public_fn }\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 1;
+    assert result[0].kind == "export";
+    assert result[0].module == "./mine";
+    assert result[0].specifiers.length == 1;
+    assert result[0].specifiers[0].name == "public_fn";
+}
+
+test "parse_native_imports_for_import: multiple imports preserve order" {
+    let text = ".import \"./a\"\n.import \"./b\"\n.import \"./c\"\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 3;
+    assert result[0].module == "./a";
+    assert result[1].module == "./b";
+    assert result[2].module == "./c";
+}
+
+test "parse_native_imports_for_import: comments and blank lines are skipped" {
+    let text = "; header comment\n\n.module foo\n\n; another\n.import \"./real\"\n\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 1;
+    assert result[0].module == "./real";
+}
+
+test "parse_native_imports_for_import: leading whitespace tolerated via trim" {
+    let text = "    .import \"./indented\"\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 1;
+    assert result[0].module == "./indented";
+}
+
+test "parse_native_imports_for_import: struct/enum/fn bodies do not produce spurious imports" {
+    // The fast scanner must skip block bodies without getting confused by
+    // `.layout` / `.field` / `.method` / `.meta` / `.span` / `.param` /
+    // `.endstruct` / `.endfn` / instructions.
+    let text = "; test\n" + ".module test_mod\n" + ".import \"./helpers\"\n"
+        + ".interface Meter\n"
+        + "    .sig total(self: Meter) -> number\n"
+        + ".endinterface\n"
+        + ".struct Person implements Meter\n"
+        + "    .layout struct name=Person size=8 align=8\n"
+        + "    .layout field years type=number offset=0 size=8 align=8\n"
+        + "    .field years: number\n"
+        + "    .method total(self: Person) -> number\n"
+        + "    .meta return number\n"
+        + "    .meta effects none\n"
+        + "        .span 8 14 8 28\n"
+        + "        .param self: Person\n"
+        + "        ret self.years\n"
+        + "    .endmethod\n"
+        + ".endstruct\n"
+        + ".fn identity(value: number) -> number\n"
+        + ".meta return number\n"
+        + "    ret value\n"
+        + ".endfn\n"
+        + ".export \"./api\" { identity }\n";
+    let result = parse_native_imports_for_import(text);
+    assert result.length == 2;
+    assert result[0].kind == "import";
+    assert result[0].module == "./helpers";
+    assert result[1].kind == "export";
+    assert result[1].module == "./api";
+    assert result[1].specifiers.length == 1;
+    assert result[1].specifiers[0].name == "identity";
+}
+
+// ── Output-equivalence tests vs parse_native_artifact_impl ─────────────
+test "parse_native_imports_for_import: matches full parser on empty input" {
+    assert _matches_full_parser("");
+}
+
+test "parse_native_imports_for_import: matches full parser on comment-only input" {
+    assert _matches_full_parser("; only a comment\n");
+}
+
+test "parse_native_imports_for_import: matches full parser on imports-only input" {
+    let text = ".import \"./a\"\n" + ".import \"./b\" { x, y as z }\n"
+        + ".export \"./c\" { pub }\n";
+    assert _matches_full_parser(text);
+}
+
+test "parse_native_imports_for_import: matches full parser on mixed input" {
+    // Representative `.sfn-asm` with imports, exports, interface, struct,
+    // and function — what transitive-discovery sees in practice.
+    let text = "; Sailfin Native Prototype\n" + ".module sample\n"
+        + ".import \"./foo\" { bar }\n"
+        + ".import \"./baz\"\n"
+        + ".interface Meter\n"
+        + "    .sig total(self: Meter) -> number\n"
+        + ".endinterface\n"
+        + ".struct Point\n"
+        + "    .layout struct name=Point size=16 align=8\n"
+        + "    .field x: number\n"
+        + "    .field y: number\n"
+        + ".endstruct\n"
+        + ".fn add(a: number, b: number) -> number\n"
+        + ".meta return number\n"
+        + "    ret a + b\n"
+        + ".endfn\n"
+        + ".export \"./api\" { add, Point }\n";
+    assert _matches_full_parser(text);
+}
