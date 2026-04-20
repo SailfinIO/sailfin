@@ -86,7 +86,7 @@ api() {
     auth_args=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   fi
   curl --fail -sSL \
-    "${auth_args[@]}" \
+    ${auth_args[@]+"${auth_args[@]}"} \
     -H "Accept: application/vnd.github+json" \
     "$1"
 }
@@ -153,7 +153,7 @@ if [ -n "${GITHUB_TOKEN:-}" ]; then
   DL_AUTH_ARGS=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 fi
 curl --fail -sSL \
-  "${DL_AUTH_ARGS[@]}" \
+  ${DL_AUTH_ARGS[@]+"${DL_AUTH_ARGS[@]}"} \
   -H "Accept: application/octet-stream" \
   "https://api.github.com/repos/${REPO}/releases/assets/${asset_id}" \
   -o "$ARCHIVE_PATH"
