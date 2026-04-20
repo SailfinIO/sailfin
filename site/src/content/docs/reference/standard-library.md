@@ -814,23 +814,16 @@ section above for the full API and examples.
 
 ---
 
-### AI / Model adapters — Planned (`![model]` effect)
+### `sfn/ai` capsule — Planned (`![model]` effect)
 
-> **Coming in 1.0:** First-class model invocation via the `sfn/ai` capsule. `model` and `prompt` blocks are parsed and emit metadata today; actual `.call()` execution is planned. See the [roadmap](/roadmap).
+> **Post-1.0:** The `sfn/ai` capsule will provide model invocation, typed output schemas, tool dispatch, and provider adapters as library functions. All `sfn/ai` functions carry `![model]` in their signatures, so any caller must declare `![model]`. The `model`, `prompt`, `tool`, and `pipeline` block keywords have been removed from the language. See the [roadmap](/roadmap).
 
 ```sfn
-// Planned — not yet implemented
-model MyModel {
-    provider = "anthropic";
-    model_id = "claude-sonnet-4-20250514";
-    max_tokens = 1024;
-}
+// Planned sfn/ai API — not yet implemented
+import { call_model } from "sfn/ai";
 
 fn classify(text: string) -> string ![model] {
-    prompt user {
-        "Classify the following: {{text}}";
-    }
-    return "";
+    return call_model("classifier", text);
 }
 ```
 

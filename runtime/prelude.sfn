@@ -11,7 +11,6 @@ let websocket = runtime.websocket;
 let runtime_create_capability_grant = runtime.create_capability_grant;
 let runtime_create_filesystem_bridge = runtime.create_filesystem_bridge;
 let runtime_create_http_bridge = runtime.create_http_bridge;
-let runtime_create_model_bridge = runtime.create_model_bridge;
 let runtime_sleep_fn = runtime.sleep;
 let runtime_monotonic_millis_fn = runtime.monotonic_millis;
 let runtime_channel_fn = runtime.channel;
@@ -46,10 +45,6 @@ fn fs_bridge(grant: any) -> any {
 
 fn http_bridge(grant: any) -> any {
     return runtime_create_http_bridge(grant);
-}
-
-fn model_bridge(grant: any) -> any {
-    return runtime_create_model_bridge(grant);
 }
 
 struct EnumField {
@@ -631,7 +626,6 @@ export {
     capability_grant,
     fs_bridge,
     http_bridge,
-    model_bridge,
     clamp,
     substring,
     find_char,

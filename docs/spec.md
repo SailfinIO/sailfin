@@ -30,9 +30,8 @@ the current on-disk structure.
 - **Identifiers** begin with a letter and may contain ASCII letters, digits, or
   `_`. Identifiers are case-sensitive.
 - **Keywords** are listed in `docs/keywords.md`. They include traditional
-  control-flow terms (`fn`, `async`, `await`, `match`, …) and AI-first syntax
-  such as `model`, `prompt`, `pipeline`, `test`, and the implemented `assert`
-  statement (see §8).
+  control-flow terms (`fn`, `async`, `await`, `match`, …), the `test` and
+  `assert` statements (see §8), and the capability effects described in §1.1.
 - **Literals**:
   - Numeric literals support integers (`42`) and decimals (`3.14`). Currency
     literals (e.g. `$0.05`) are **not yet parsed** by the compiler;
@@ -47,17 +46,22 @@ the current on-disk structure.
 
 ### 1.1 Effect Annotation
 
-Functions, pipelines, tests, and tools may declare required capabilities with
-`![effect, ...]` syntax appended to the signature:
+Functions and tests may declare required capabilities with `![effect, ...]`
+syntax appended to the signature:
 
 ```sfn
 fn fetch_order(id: OrderId) -> Order ![io, net] { ... }
 ```
 
-Current status: the parser records effect lists and the compiler validator
-(`compiler/src/effect_checker.sfn`) enforces coverage for prompts, console I/O,
+Current status: the parser records effect lists. The compiler validator
+(`compiler/src/effect_checker.sfn`) detects coverage gaps for console I/O,
 filesystem/HTTP/WebSocket helpers, `spawn`/`serve`, `sleep`, and decorators that
-imply `io`. See the Effect System section below for details.
+imply `io`, but `validate_effects()` is not yet wired into the main compilation
+pipeline — today these diagnostics surface through `sfn check` rather than
+blocking normal builds (see `docs/status.md`). The `model` effect is reserved
+as the capability gate for the `sfn/ai` library capsule (post-1.0) — any
+function that invokes an AI backend must declare `![model]`. See the Effect
+System section below for details.
 
 ## 2. Modules, Imports, and Capabilities
 
@@ -228,166 +232,33 @@ clauses and the aliased type text for parity with current compiler.
 type Result<T> = Response | T;
 ```
 
-### 3.6 Model Declarations
+### 3.6 AI Constructs (moved to library)
 
-> **Current status**: `model` blocks are parsed and emit a `.model` directive in
-> `.sfn-asm` IR. However, **model execution is not yet implemented** — `.call()`
-> parses as a method call but no model runtime exists. Generation cards and
-> evaluators are design-stage. This entire section describes the planned
-> semantics; see `docs/status.md` for implementation state.
->
-> **Design question (open):** Should `model`, `prompt`, `pipeline`, and `tool`
-> be language-level keywords or standard library constructs? Language keywords
-> bake API-level details (token limits, temperature, engine names) into the
-> grammar — details that change monthly as AI providers update their APIs. The
-> `![model]` effect annotation is valuable and should remain a language feature,
-> but the declaration syntax could potentially be expressed as library types
-> (e.g., `sfn/model` capsule) without losing safety or expressiveness. This
-> question should be resolved before these features ship. See the
-> [roadmap](https://sailfin.dev/roadmap) Post-1.0 AI section for discussion.
+Earlier drafts of Sailfin included `model`, `prompt`, `tool`, and `pipeline`
+declaration keywords. These have been **removed from the language** and will
+ship as ordinary library APIs in the post-1.0 `sfn/ai` capsule. API surface for
+AI providers changes too frequently to bake into a grammar; libraries can
+iterate without language churn.
 
-Models are first-class program artefacts. A `model` block declares metadata,
-versions, schemas, and evaluator suites, producing a `Model<Input, Output>`
-value.
+What stays in the language:
 
-```sfn
-model Summarizer : Model<Text, Summary> {
-  engine      = "gpt-foo@2.3.1";
-  schema      = Summary;
-  max_tok     = 2000;
-  cost_cap    = 0.05; // USD (currency literal support forthcoming)
-  evaluators  = [ Faithfulness, LatencyBudget(150ms) ];
-}
-```
+- `![model]` — the capability effect for functions that invoke an AI backend.
+  Planned `sfn/ai` APIs will declare `![model]` in their signatures. As future
+  effect-checking work, that requirement is intended to propagate transitively
+  through callers, similar to other effect annotations; this is not enforced
+  by normal compilation today.
 
-Calling a model requires the `model` effect, returns a typed output, and yields
-a signed **generation card** containing provenance (engine, params, seeds,
-input hashes, latency, cost). Both the call mechanism and generation cards are
-planned for the post-1.0 AI milestone.
+What is no longer accepted syntax:
 
-### 3.6.1 Model Block Schema
+- `model Foo : Model<In, Out> { ... }` — use a library factory (planned).
+- `prompt system { ... }` / `prompt user { ... }` — use library APIs for
+  prompt composition.
+- `tool Foo(...) -> T ![net] { ... }` — declare an ordinary `fn` instead.
+- `pipeline Foo(...) { ... }` — declare an ordinary `fn`; the `|>` operator
+  remains a planned post-1.0 expression-level feature, unrelated to this block.
 
-| Property      | Type                                            | Required | Description                                             |
-| ------------- | ----------------------------------------------- | -------- | ------------------------------------------------------- | --------------------------------------------------- |
-| `engine`      | string                                          | Yes      | Provider + version tag (e.g. `gpt-foo@2.3.1`)           |
-| `schema`      | Type                                            | Yes      | Output validation / shaping type                        |
-| `max_tok`     | number                                          | No       | Maximum output tokens (advisory; enforced per provider) |
-| `cost_cap`    | number (monetary; currency literal forthcoming) | No       | Maximum spend for a single call (enforced at runtime)   |
-| `evaluators`  | Array<Identifier                                | Call>    | No                                                      | Quality/guardrail evaluators applied to generations |
-| `temperature` | number (0–2)                                    | No       | Stochastic sampling parameter                           |
-| `top_p`       | number (0–1)                                    | No       | Nucleus sampling parameter                              |
-| `seed`        | number                                          | No       | Deterministic seed for reproducible generations         |
-| `notes`       | string                                          | No       | Free-form provenance / intent rationale                 |
-
-Note: The parser accepts any identifier keys within a `model` block and stores
-them verbatim in a plain object. Keys listed above are the canonical set;
-unknown keys are preserved but not validated yet.
-
-Additional provider-specific keys MAY appear but MUST NOT change semantics of
-declared standard keys. Unknown keys are preserved in generation cards for
-observability.
-
-### 3.7 Prompt Blocks
-
-`prompt` blocks compose multi-part instructions. Channels are parsed as
-identifiers and commonly use `system`, `user`, `assistant`, and `tool`. The
-compiler does not yet enforce the channel vocabulary.
-
-Evaluation order: prompt blocks execute in source order. A typical sequence is
-`system` → `user` → `assistant` → `tool`. The current backend preserves the
-declared order when generating code and effect-checks against the presence of
-any prompt block.
-
-Current status: prompt blocks emit dedicated `PromptStatement` nodes inside
-block bodies, enabling effect analysis to reason about prompts without falling
-back to token scanning.
-
-```sfn
-fn summarize_doc(doc: Text) -> Summary ![model] {
-  prompt system { "You are a concise technical summarizer." }
-  prompt user   { "Summarise:\n{{ doc }}" }
-  Summarizer.call()
-}
-Typed prompts (planned):
-
-The design includes typed prompt channels to validate shape, e.g. `prompt
-user<SummaryRequest> { ... }`. This syntax is not accepted by the compiler and
-appears here as a forward-looking example.
-
-```
-
-### 3.8 Pipelines and Dataflow
-
-Note: `pipeline` declarations parse and emit as plain functions. The `|>`
-operator shown below is a planned feature and not implemented in the current
-parser.
-
-`pipeline` declarations express ETL-style dataflows with zero-copy semantics and
-compile-time shape checks.
-
-```sfn
-pipeline index_corpus(docs: Seq<Text>) ![io, gpu] {
-    docs
-      |> chunk(by: "semantic", target_tokens: 512)
-      |> embed(with: "e5-large")
-      |> upsert(index: "docs_idx");
-}
-```
-
-Each stage declares effect usage implicitly via the called functions. Pipelines
-can be invoked like ordinary functions and integrate with structured
-concurrency.
-
-#### 3.8.1 Pipeline Semantics (planned)
-
-- `|>` is left-associative and has lower precedence than all expression
-  operators; the right-hand side of each stage parses as a LogicalOr root.
-- Stages SHOULD be effect-pure except for declared function calls; side effects
-  aggregate into the pipeline's effect list.
-- The compiler performs (planned) shape analysis: if a stage's output union is
-  not accepted by the next stage's parameter type, a type error is issued.
-
-#### 3.8.2 Failure behaviour and side effects
-
-- Current: Pipelines are ordinary functions. Failures follow standard exception
-  semantics; side effects occur as the function executes. There is no
-  transactional rollback or stage isolation in the current compiler.
-- Planned: Pipelines run with structured scopes. Side effects propagate in
-  order; failures within a stage can trigger compensations or retries based on
-  policy, and determinism settings are applied per stage.
-
-#### 3.8.3 Async and lazy pipelines (planned)
-
-Pipelines may run lazily or asynchronously, where upstream stages backpressure
-downstream consumers. The current compiler does not implement async/lazy
-pipelines; use explicit `async fn`, `routine`, and `channel(capacity)` in the
-current compiler.
-
-#### 3.8.2 Named Arguments in Stages
-
-Named arguments follow the same grammar as function calls (`identifier: expr`).
-They do not participate in overloading; their role is clarity and future
-compile-time configuration.
-
-### 3.9 Tools and Capability Contracts
-
-Tools are typed capabilities that models may invoke. They declare their own
-effect sets and are subject to the same capability enforcement as user code.
-
-```sfn
-tool FetchProfile(id: Id) -> Profile ![net] { ... }
-```
-
-Foreign adapters for external runtimes run in sandboxed processes with
-copy-on-write buffers; taint wrappers (`PII`, `Secret`) propagate through
-adapter boundaries.
-
-#### 3.9.1 Tool Semantics
-
-- Tool declarations mirror functions but are externally invocable by models.
-- A tool's effect list is a superset of all effects required by its body.
-- Tool calls from model generations are mediated by a dispatcher enforcing
-  capability and taint policies before execution.
+See the [roadmap](https://sailfin.dev/roadmap) Post-1.0 AI section for the
+`sfn/ai` plan.
 
 ## 4. Statements and Control Flow
 
@@ -873,18 +744,15 @@ declare void @sailfin_intrinsic_io_print(i8*)
 
 ; intrinsic sailfin_intrinsic_http_get requires capabilities: ![net]
 declare i8* @sailfin_intrinsic_http_get(i8*)
-
-; intrinsic sailfin_intrinsic_model_invoke requires capabilities: ![model]
-declare i8* @sailfin_intrinsic_model_invoke(i8*, i8*)
 ```
 
 #### 7.2.2 Intrinsic Call Routing
 
 Calls to runtime helpers in Sailfin source (e.g., `console.info(message)`,
-`fs.read(path)`, `http.get(url)`, `prompt(system, user)`) are automatically routed
-to their corresponding intrinsics during LLVM lowering. The effect requirements
-declared in the intrinsic descriptor propagate into the calling function's effect
-set and ultimately into the capability manifest for entry points.
+`fs.read(path)`, `http.get(url)`) are automatically routed to their corresponding
+intrinsics during LLVM lowering. The effect requirements declared in the
+intrinsic descriptor propagate into the calling function's effect set and
+ultimately into the capability manifest for entry points.
 
 #### 7.2.3 Current Intrinsics
 
@@ -900,8 +768,6 @@ set and ultimately into the capability manifest for entry points.
 | `fs.exists`     | `sailfin_intrinsic_fs_exists`    | `(i8*) -> i1`        | `![io]`    |
 | `http.get`      | `sailfin_intrinsic_http_get`     | `(i8*) -> i8*`       | `![net]`   |
 | `http.post`     | `sailfin_intrinsic_http_post`    | `(i8*, i8*) -> i8*`  | `![net]`   |
-| `prompt`        | `sailfin_intrinsic_model_invoke` | `(i8*, i8*) -> i8*`  | `![model]` |
-| `model_invoke`  | `sailfin_intrinsic_model_invoke` | `(i8*, i8*) -> i8*`  | `![model]` |
 
 **Status**: Coverage for intrinsic declaration emission, capability metadata propagation,
 and manifest integration is provided by

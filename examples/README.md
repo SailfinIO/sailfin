@@ -1,6 +1,6 @@
 # Sailfin Examples
 
-This directory showcases the evolving Sailfin language surface implemented by the bootstrap compiler. Each subfolder groups small, focused programs illustrating syntax, type constructs, effects, concurrency primitives, and forthcoming AI-native features described in `docs/spec.md`.
+This directory showcases the evolving Sailfin language surface implemented by the bootstrap compiler. Each subfolder groups small, focused programs illustrating syntax, type constructs, effects, and concurrency primitives described in `docs/spec.md`.
 
 > **Syntax reform notice:** These examples use pre-reform syntax (`->` for type
 > annotations, `{{ }}` for string interpolation). A pre-1.0 syntax reform is
@@ -10,7 +10,7 @@ This directory showcases the evolving Sailfin language surface implemented by th
 
 Always check `docs/status.md` before relying on an example in production code. Examples stay limited to the bootstrap feature set unless noted; future-facing snippets include inline comments.
 
-Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, remember these are partially stubbed in the current Python runtime: semantics (capability enforcement, provenance, determinism) will harden in the self-hosted toolchain.
+Where you see effect lists (e.g. `![io, model]`), remember the runtime backing is partially stubbed: capability enforcement will harden through the self-hosted toolchain. Richer AI functionality (model declarations, prompt composition, tool dispatch) is being delivered as a post-1.0 `sfn/ai` library capsule rather than language syntax; the `![model]` effect is the only AI-specific construct that stays in the language.
 
 ## Categories
 
@@ -18,7 +18,7 @@ Where you see effect lists (e.g. `![io,model]`) or model/pipeline declarations, 
 - [Concurrency](./concurrency/) – Routines, channels, dynamic scheduling, and parallel execution primitives.
 - [Web](./web/) – HTTP & WebSocket server patterns plus async I/O examples.
 - [Advanced](./advanced/) – Generics, polymorphism, closures, decorators, type guards, effectful interfaces, concurrency + web integration, matrix math, and more.
-- [AI](./ai/) – Model declarations, prompt blocks, tools, pipelines, effect annotations, and deterministic scope helpers.
+- [AI](./ai/) – The `![model]` effect gating functions that perform model work.
 - [Algorithms](./algorithms/) – Classic algorithms expressed in Sailfin (currently `quicksort`).
 - [Functional](./functional/) – Higher‑order functions, map/reduce, immutable style data transforms.
 - [I/O](./io/) – File system read/write helpers (stubbed in bootstrap runtime).
@@ -100,10 +100,9 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 
 ### `ai/`
 
-| Example                    | Effects              | Notes                                                             |
-| -------------------------- | -------------------- | ----------------------------------------------------------------- |
-| `effectful-model-call.sfn` | `io`, `model`        | Prompt-style helpers with mocked model calls and console logging. |
-| `model-workflow.sfn`       | `io`, `model`, `net` | Pipeline wiring a model invocation with auxiliary `net` tool use. |
+| Example                    | Effects       | Notes                                                                                |
+| -------------------------- | ------------- | ------------------------------------------------------------------------------------ |
+| `effectful-model-call.sfn` | `io`, `model` | Demonstrates the `![model]` effect gating helper functions that perform model calls. |
 
 ### `io/`
 
@@ -126,7 +125,7 @@ Effect annotations (`![...]`) flag the runtime capabilities you need to declare 
 ## Runtime Notes
 
 - **Bootstrap-friendly (legacy name: stage1)**: `basics`, `functional`, `types`, and `algorithms` only rely on console I/O and pure language constructs covered by the bootstrap pipeline.
-- **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`, `model` prompts). Declare the exact effects listed above before running them through the bootstrap compiler.
+- **Effect-sensitive**: `advanced`, `concurrency`, `ai`, `io`, and `web` rely on mocked helpers (`print.*`, `fs.*`, `http.*`, `serve`, `sleep`, `channel`). Declare the exact effects listed above before running them through the bootstrap compiler.
 - **Design-stage examples**: Some examples demonstrate planned features that parse but aren't fully enforced yet. These are marked with **Design-stage** in the notes column. Examples include:
   - `unsafe-extern-interop.sfn` — FFI interop with raw pointers and `unsafe` blocks. Parser accepts the syntax but unsafe semantics are not yet enforced. See `docs/spec.md` §6.1.5.
   - `borrowing.sfn` — Ownership and borrowing syntax. Parser accepts but the bootstrap compiler does not enforce exclusivity. The native LLVM backend (legacy name: stage2) enforces borrow conflicts.

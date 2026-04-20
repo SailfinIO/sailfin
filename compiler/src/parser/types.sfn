@@ -16,7 +16,6 @@ import {
     ImportSpecifier,
     MatchCase,
     MethodDeclaration,
-    ModelProperty,
     ObjectField,
     Parameter,
     SourceSpan,
@@ -70,12 +69,6 @@ struct ParameterListParseResult {
 struct StructFieldParseResult {
     parser: Parser;
     field: FieldDeclaration?;
-    success: boolean;
-}
-
-struct ModelPropertyParseResult {
-    parser: Parser;
-    property: ModelProperty?;
     success: boolean;
 }
 

@@ -47,9 +47,6 @@ The following keywords cannot be reused as identifiers in the compiler.
 - `export`
 - `from`
 - `as` — Type casting operator (e.g., `ptr as *i32`)
-- `model`
-- `tool`
-- `pipeline`
 - `test`
 
 ### Unsafe & FFI
@@ -71,12 +68,6 @@ The following keywords cannot be reused as identifiers in the compiler.
 - `false`
 - `null`
 
-### Prompt Composition
-
-- `prompt`
-- Channels (`system`, `user`, `assistant`, `tool`) are ordinary identifiers
-  unless the prompt syntax is used; the canonical set is not enforced yet.
-
 ### Reserved Identifiers (Runtime)
 
 - `print` and `info` tokenise specially to support `print.info(...)`. Avoid
@@ -84,14 +75,15 @@ The following keywords cannot be reused as identifiers in the compiler.
 
 > Behaviour notes:
 > - `is` lowers to `runtime.check_type`.
-> - `model`, `pipeline`, `tool`, and `test` parse today but may generate stubs;
->   the pipeline operator `|>` remains design-stage syntax.
+> - The `|>` pipeline operator remains design-stage syntax.
+> - `model` / `prompt` / `tool` / `pipeline` were removed from the language;
+>   AI functionality ships in the post-1.0 `sfn/ai` library capsule. The
+>   `![model]` effect remains as the capability gate.
 
 ## Parser Notes
 
 - The Sailfin-native parser mirrors the keyword set above and emits structured
-  nodes for `interface`, `enum`, `type`, `prompt`, and decorator-bearing
-  blocks.
+  nodes for `interface`, `enum`, `type`, and decorator-bearing blocks.
 - Decorator metadata is analysed so `@trace` implies an `io` effect when missing.
 - Future keywords discussed in proposals (e.g., `training`) remain unimplemented
   until they appear in `docs/status.md`.
