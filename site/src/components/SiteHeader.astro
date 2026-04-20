@@ -115,7 +115,6 @@ const githubUrl = "https://github.com/sailfinio/sailfin";
         </div>
       ))}
       <div class="mobile-actions">
-        <a href={githubUrl} class="mobile-action-link" rel="noopener noreferrer" target="_blank">GitHub</a>
         <a href="/docs/getting-started/install" class="mobile-btn-get-started">Get Started</a>
       </div>
     </nav>
@@ -365,10 +364,10 @@ const githubUrl = "https://github.com/sailfinio/sailfin";
       display: none;
     }
 
-    .btn-get-started,
-    .header-actions .icon-btn,
-    .header-actions .search-slot {
-      /* Keep theme toggle + search visible; hide the rest on narrow screens */
+    /* Push header-actions (search / GitHub / theme toggle) to the right
+       edge so the logo-on-left / actions-on-right layout matches desktop. */
+    .header-actions {
+      margin-left: auto;
     }
 
     .btn-get-started {
@@ -379,7 +378,6 @@ const githubUrl = "https://github.com/sailfinio/sailfin";
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      margin-left: auto;
     }
   }
 
