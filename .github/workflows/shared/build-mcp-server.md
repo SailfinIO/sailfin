@@ -15,6 +15,10 @@ description: |
 
 steps:
   - uses: actions/checkout@v4
+    with:
+      # strict mode: prevent the GitHub token from being persisted in
+      # .git/config where the agent could read it.
+      persist-credentials: false
   - uses: actions/setup-node@v4
     with:
       node-version: "20"
