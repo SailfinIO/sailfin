@@ -1227,7 +1227,7 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         current_operand = concat1.operand;
 
         let part_literal = encode_string_literal_for_sailfin(parsed.parts[index
-                + 1]);
+            + 1]);
         let part_value = lower_string_literal(part_literal, current_temp, current_lines);
         current_lines = part_value.lines;
         current_temp = part_value.temp_index;

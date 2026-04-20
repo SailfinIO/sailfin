@@ -11,9 +11,7 @@ import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
 import { build_type_context } from "../type_context";
 import { EnumTypeInfo, EnumVariantInfo, TypeContext } from "../types";
 import { number_to_string, sanitize_symbol } from "../utils";
-import {
-    get_enum_name_at
-} from "./lowering_native_helpers";
+import { get_enum_name_at } from "./lowering_native_helpers";
 
 // Build skeletal EnumTypeInfo[] directly from in-memory NativeEnum[].
 // Used as a fallback when build_type_context returned empty or corrupt
@@ -56,14 +54,14 @@ fn build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[] {
             loop {
                 if vi >= src.length { break; }
                 variants_out.push(EnumVariantInfo {
-                        name: "v" + number_to_string(vi), tag: vi, offset: 0, size: 0, align: 1, fields: []
+                    name: "v" + number_to_string(vi), tag: vi, offset: 0, size: 0, align: 1, fields: []
                 });
                 vi += 1;
             }
         }
 
         recovered.push(EnumTypeInfo {
-                name: name, llvm_name: llvm, tag_type: tag_type, tag_size: tag_size, tag_align: tag_align, max_payload_size: max_ps, size: size, align: align, variants: variants_out
+            name: name, llvm_name: llvm, tag_type: tag_type, tag_size: tag_size, tag_align: tag_align, max_payload_size: max_ps, size: size, align: align, variants: variants_out
         });
         idx += 1;
     }

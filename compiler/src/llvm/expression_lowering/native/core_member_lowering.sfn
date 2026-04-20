@@ -203,7 +203,7 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     if parse.field == "variant" {
         let sanitized_enum = sanitize_symbol(enum_info.name);
         let default_constant_name = "@.enum." + sanitized_enum
-        + ".variant.default";
+            + ".variant.default";
         let existing_default = find_string_constant_by_name(enum_string_constants, default_constant_name);
         let mut default_constant: StringConstant = StringConstant {
             name: default_constant_name,
@@ -230,8 +230,8 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
             let variant_info = enum_info.variants[variant_index];
             let sanitized_variant = sanitize_symbol(variant_info.name);
             let constant_name = "@.enum." + sanitized_enum + "."
-            + sanitized_variant
-            + ".variant";
+                + sanitized_variant
+                + ".variant";
             let existing_variant = find_string_constant_by_name(enum_string_constants, constant_name);
             let mut variant_constant: StringConstant = StringConstant {
                 name: constant_name,

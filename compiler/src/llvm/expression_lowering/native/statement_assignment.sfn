@@ -120,7 +120,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = trimmed_target + " " + assign_operator + " "
-            + assign_value;
+                + assign_value;
         }
         let lowered_value = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
         let mut _ci0: number = 0;
@@ -263,7 +263,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = assign_target + " " + assign_operator + " "
-            + assign_value;
+                + assign_value;
         }
         let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
         let mut _ci3: number = 0;
@@ -403,7 +403,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         let mut effective_value: string = assign_value;
         if assign_operator.length > 0 {
             effective_value = assign_target + " " + assign_operator + " "
-            + assign_value;
+                + assign_value;
         }
         let lowered = lower_expression(effective_value, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
         let mut _ci6: number = 0;
