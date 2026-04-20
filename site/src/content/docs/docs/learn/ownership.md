@@ -549,4 +549,4 @@ Full ownership enforcement — move tracking, exclusivity checking, must-consume
 
 - [Error Handling](/docs/learn/error-handling) — How Sailfin handles failures with `try/catch` and result types
 - [The Effect System](/docs/learn/effects) — Capability annotations and transitive enforcement
-- [Language Spec: Ownership](/docs/reference/spec) — Formal ownership semantics
+- [Design Preview: Ownership Enforcement](/docs/reference/preview/ownership-enforcement/) — Planned formal ownership semantics

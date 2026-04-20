@@ -35,7 +35,6 @@ import {
     skip_trivia,
     source_span_from_tokens,
     split_token_slices_by_comma,
-    string_literal_value,
     symbol_matches,
     token_slice,
     tokens_to_text,
@@ -249,9 +248,6 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
     }
     if identifier_matches(token, "match") {
         return parse_match_statement(after_decorators, decorators);
-    }
-    if identifier_matches(token, "prompt") {
-        return parse_prompt_statement(after_decorators, decorators);
     }
     if identifier_matches(token, "with") {
         return parse_with_statement(after_decorators, decorators);
@@ -911,68 +907,8 @@ fn split_match_case_tokens(tokens: Token[]) -> MatchCaseTokenSplit {
 }
 
 // ============================================================================
-// Special Statements (prompt, with)
+// Special Statements (with)
 // ============================================================================
-fn parse_prompt_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
-    let original = parser;
-    let mut current = skip_trivia(parser);
-    let prompt_token = parser_peek_raw(current);
-    if !identifier_matches(prompt_token, "prompt") {
-        return BlockStatementParseResult {
-            parser: original,
-            statement: null,
-            success: false
-        };
-    }
-    current = consume_keyword(current, "prompt");
-
-    current = skip_trivia(current);
-    let channel_token = parser_peek_raw(current);
-    let mut channel: string = "";
-    if channel_token.kind.variant == "Identifier" {
-        channel = identifier_text(channel_token);
-        current = parser_advance_raw(current);
-    } else if channel_token.kind.variant == "StringLiteral" {
-        channel = string_literal_value(channel_token);
-        current = parser_advance_raw(current);
-    } else {
-        return BlockStatementParseResult {
-            parser: original,
-            statement: null,
-            success: false
-        };
-    }
-
-    let block_result = parse_block(current);
-    if block_result.block.tokens.length == 0 {
-        return BlockStatementParseResult {
-            parser: original,
-            statement: null,
-            success: false
-        };
-    }
-    current = block_result.parser;
-    let body = block_result.block;
-
-    current = skip_trivia(current);
-    if symbol_matches(parser_peek_raw(current), ";") {
-        current = parser_advance_raw(current);
-    }
-
-    let statement = Statement.PromptStatement {
-        channel: channel,
-        keyword_token: prompt_token,
-        channel_token: channel_token,
-        body: body,
-        decorators: decorators
-    };
-    return BlockStatementParseResult {
-        parser: current,
-        statement: statement,
-        success: true
-    };
-}
-
 fn parse_with_statement(parser: Parser, decorators: Decorator[]) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);

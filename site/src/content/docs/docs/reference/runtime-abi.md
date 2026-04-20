@@ -6,8 +6,6 @@ sidebar:
   order: 7
 ---
 
-> Canonical source: [`docs/runtime_abi.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/runtime_abi.md)
-
 ## Goals
 
 - Performance-first data layouts

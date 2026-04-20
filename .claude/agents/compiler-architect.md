@@ -62,7 +62,8 @@ Always consult these before designing:
 |---|---|
 | `site/src/pages/roadmap.astro` | 1.0 priorities and feature completeness requirements ([sailfin.dev/roadmap](https://sailfin.dev/roadmap)) |
 | `docs/status.md` | Current feature matrix — what ships, what's partial, what's missing |
-| `docs/spec.md` | Language reference (Part A: shipped, Part B: planned) |
+| `site/src/content/docs/docs/reference/spec/` | Language reference, chapter files (§1–§11) for current language |
+| `site/src/content/docs/docs/reference/preview/` | Design preview — planned but not yet shipped |
 | `docs/build-performance.md` | Build bottleneck root causes and optimization plan |
 | `compiler/capsule.toml` | Current version and manifest |
 

@@ -35,44 +35,6 @@ fn lower_inline_gep_field_access(base_name: string, field_name: string, base_ope
         _igep_bi += 1;
     }
 
-    // For self param, extract struct from function name
-    if _igep_struct.length == 0 {
-        if _igep_base == "self" {
-            if fs.exists("build/sailfin/.instr_fn_name") {
-                let _igep_fn = fs.readFile("build/sailfin/.instr_fn_name");
-                if _igep_fn.length > 0 {
-                    let _igep_si = fs.readFile("build/sailfin/.struct_info");
-                    let mut _igep_sp: number = 0;
-                    loop {
-                        if _igep_sp >= _igep_si.length { break; }
-                        let _igep_nl = index_of(substring(_igep_si, _igep_sp, _igep_si.length), "\n");
-                        let mut _igep_ln: string = "";
-                        if _igep_nl < 0 {
-                            _igep_ln = substring(_igep_si, _igep_sp, _igep_si.length);
-                            _igep_sp = _igep_si.length;
-                        } else {
-                            _igep_ln = substring(_igep_si, _igep_sp, _igep_sp
-                                + _igep_nl);
-                            _igep_sp = _igep_sp + _igep_nl + 1;
-                        }
-                        if _igep_ln.length == 0 { continue; }
-                        let _igep_t = index_of(_igep_ln, "\t");
-                        if _igep_t < 0 { continue; }
-                        let _igep_sn = substring(_igep_ln, 0, _igep_t);
-                        if _igep_sn.length > 0 {
-                            if _igep_sn.length < _igep_fn.length {
-                                if substring(_igep_fn, 0, _igep_sn.length) == _igep_sn {
-                                    _igep_struct = _igep_sn;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // Check locals for type annotation on the base.
     if _igep_struct.length == 0 {
         let _igep_local = find_local_binding(locals, _igep_base);

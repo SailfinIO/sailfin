@@ -1,6 +1,6 @@
 # Advanced Examples
 
-Higher-level language features: generics, parametric polymorphism, closures, decorators, effectful interfaces, concurrency + networking integration, type guards, matrix math, and union/intersection typing. These illustrate directions described in `docs/spec.md` beyond the basic surface.
+Higher-level language features: generics, parametric polymorphism, closures, decorators, effectful interfaces, concurrency + networking integration, type guards, matrix math, and union/intersection typing. These illustrate directions described in the [language specification](https://sailfin.dev/docs/reference/spec/) beyond the basic surface.
 
 ## Files
 

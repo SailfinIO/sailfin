@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-15
 **Previous revision:** pre-April 2026 (dated, superseded)
-**Companion docs:** `docs/runtime_abi.md` (target ABI), `docs/build-performance.md`
+**Companion docs:** `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI), `docs/build-performance.md`
 (self-hosting perf analysis that surfaced the memory-management crisis)
 
 ## Purpose
@@ -374,7 +374,7 @@ compiler features that do not exist in the current toolchain.
 
 ## Memory Model (Target)
 
-`docs/runtime_abi.md` calls the selection "Hybrid: arenas + RC." The audit's
+`site/src/content/docs/docs/reference/runtime-abi.md` calls the selection "Hybrid: arenas + RC." The audit's
 position based on 2026-04-15 evidence:
 
 - **Batch path (compiler) wants arenas, not RC.** The compiler is a short-
@@ -444,7 +444,7 @@ Reordered from the previous audit to reflect the April 2026 reality.
   in the C runtime and is deleted at M3. Scope: bump allocator, reset per
   process. No reuse across modules.
 - **M1 — Native ABI lock and codegen switch.** Finalize
-  `docs/runtime_abi.md` v0, emit ABI version metadata in IR, switch string and
+  `site/src/content/docs/docs/reference/runtime-abi.md` v0, emit ABI version metadata in IR, switch string and
   array lowering to `{ptr, len, [cap]}` layouts. All subsequent work assumes
   this ABI.
 - **M2 — Core runtime in Sailfin.** Strings, arrays, exceptions, logging,
@@ -464,7 +464,7 @@ top of it.
 
 ## Cross-references
 
-- `docs/runtime_abi.md` — target ABI contract (draft v0), updated alongside
+- `site/src/content/docs/docs/reference/runtime-abi.md` — target ABI contract (draft v0), updated alongside
   this audit.
 - `docs/build-performance.md` — self-hosting perf analysis; source of the
   memory-management crisis findings.

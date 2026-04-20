@@ -17,7 +17,7 @@ The argument can be:
 Read the relevant context:
 - `site/src/pages/roadmap.astro` — find the epic and its surrounding priorities (published at [sailfin.dev/roadmap](https://sailfin.dev/roadmap))
 - `docs/status.md` — current state of the affected feature(s)
-- `docs/spec.md` — what the language commits to
+- `site/src/content/docs/docs/reference/spec/` (chapter files §1–§11) — what the language commits to today; `.../reference/preview/` for planned features
 - Any document referenced in the argument
 
 Identify:

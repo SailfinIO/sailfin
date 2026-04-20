@@ -52,5 +52,5 @@ tools/             # Developer tooling
 
 When changing language behavior, update in order:
 1. `docs/status.md` — What ships today
-2. `docs/spec.md` — Language reference
+2. Language spec under `site/src/content/docs/docs/reference/spec/` (shipped) or `.../reference/preview/` (planned)
 3. The [roadmap](/roadmap) — If it affects planned work

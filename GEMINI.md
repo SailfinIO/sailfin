@@ -48,7 +48,7 @@ Key documents include:
 
 - [sailfin.dev/roadmap](https://sailfin.dev/roadmap): The project's roadmap, which tracks tasks and future development (source: `site/src/pages/roadmap.astro`).
 - [docs/status.md](docs/status.md): The source of truth for what ships today (native compiler primary; legacy name stage2) versus what is still in progress.
-- [docs/spec.md](docs/spec.md): The bootstrap language reference with design-preview callouts.
+- [sailfin.dev/docs/reference/spec/](https://sailfin.dev/docs/reference/spec/): The language reference split by chapter. Source under `site/src/content/docs/docs/reference/spec/` (current language, §1–§11) and `.../reference/preview/` (design previews).
 
 ## Testing
 

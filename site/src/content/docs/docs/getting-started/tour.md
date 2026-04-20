@@ -606,4 +606,4 @@ You have seen every major feature of the language. Here is where to go deeper:
 - **[AI Integration](/docs/learn/ai-constructs)** — The `![model]` effect and the `sfn/ai` capsule (post-1.0)
 - **[Testing](/docs/learn/testing)** — Built-in testing, test organization, and patterns
 - **[Effective Sailfin](/docs/learn/effective-sailfin)** — Idioms and best practices
-- **[Language Spec](/docs/reference/spec)** — Complete formal reference
+- **[Language Spec](/docs/reference/spec/)** — Complete formal reference, by chapter

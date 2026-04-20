@@ -9,7 +9,6 @@ import {
     FieldDeclaration,
     FunctionSignature,
     MethodDeclaration,
-    ModelProperty,
     Program,
     SourceSpan,
     Statement,
@@ -25,12 +24,13 @@ import {
     check_enum_variants,
     check_function_signature,
     check_interface_members,
-    check_model_properties,
     check_struct_fields,
     check_struct_implements_interfaces,
     check_struct_methods,
     check_type_parameters,
     clone_bindings,
+    detect_removed_ai_keyword,
+    make_removed_keyword_diagnostic,
     register_local_symbol,
     register_symbol
 } from "./typecheck_types";
@@ -100,15 +100,6 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
     }
     if statement.variant == "InterfaceDeclaration" {
         return register_symbol(statement.name, "interface", statement.name_span, existing);
-    }
-    if statement.variant == "ModelDeclaration" {
-        return register_symbol(statement.name, "model", statement.name_span, existing);
-    }
-    if statement.variant == "PipelineDeclaration" {
-        return register_symbol(statement.signature.name, "pipeline", statement.signature.name_span, existing);
-    }
-    if statement.variant == "ToolDeclaration" {
-        return register_symbol(statement.signature.name, "tool", statement.signature.name_span, existing);
     }
     if statement.variant == "TestDeclaration" {
         return register_symbol(statement.name, "test", statement.name_span, existing);
@@ -259,65 +250,6 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             diagnostics: diagnostics
         };
     }
-    if statement.variant == "ModelDeclaration" {
-        let registration = register_local_symbol(bindings, statement.name, "model", statement.name_span);
-        let mut diagnostics = registration.diagnostics;
-        let _mp_diags = check_model_properties(statement.properties);
-        let mut _ci: number = 0;
-        loop {
-            if _ci >= _mp_diags.length { break; }
-            diagnostics.push(_mp_diags[_ci]);
-            _ci += 1;
-        }
-        return ScopeResult {
-            bindings: registration.bindings,
-            diagnostics: diagnostics
-        };
-    }
-    if statement.variant == "PipelineDeclaration" {
-        let registration = register_local_symbol(bindings, statement.signature.name, "pipeline", statement.signature.name_span);
-        let mut diagnostics = registration.diagnostics;
-        let _sig_diags = check_function_signature(statement.signature);
-        let mut _ci: number = 0;
-        loop {
-            if _ci >= _sig_diags.length { break; }
-            diagnostics.push(_sig_diags[_ci]);
-            _ci += 1;
-        }
-        let _fb_diags = check_function_body(statement.signature, statement.body, interfaces);
-        let mut _ci2: number = 0;
-        loop {
-            if _ci2 >= _fb_diags.length { break; }
-            diagnostics.push(_fb_diags[_ci2]);
-            _ci2 += 1;
-        }
-        return ScopeResult {
-            bindings: registration.bindings,
-            diagnostics: diagnostics
-        };
-    }
-    if statement.variant == "ToolDeclaration" {
-        let registration = register_local_symbol(bindings, statement.signature.name, "tool", statement.signature.name_span);
-        let mut diagnostics = registration.diagnostics;
-        let _sig_diags = check_function_signature(statement.signature);
-        let mut _ci: number = 0;
-        loop {
-            if _ci >= _sig_diags.length { break; }
-            diagnostics.push(_sig_diags[_ci]);
-            _ci += 1;
-        }
-        let _fb_diags = check_function_body(statement.signature, statement.body, interfaces);
-        let mut _ci2: number = 0;
-        loop {
-            if _ci2 >= _fb_diags.length { break; }
-            diagnostics.push(_fb_diags[_ci2]);
-            _ci2 += 1;
-        }
-        return ScopeResult {
-            bindings: registration.bindings,
-            diagnostics: diagnostics
-        };
-    }
     if statement.variant == "TestDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "test", statement.name_span);
         let mut diagnostics = registration.diagnostics;
@@ -393,12 +325,6 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             diagnostics: check_block(statement.body, bindings, interfaces)
         };
     }
-    if statement.variant == "PromptStatement" {
-        return ScopeResult {
-            bindings: bindings,
-            diagnostics: check_block(statement.body, bindings, interfaces)
-        };
-    }
     if statement.variant == "TypeAliasDeclaration" {
         let registration = register_local_symbol(bindings, statement.name, "type", statement.name_span);
         let mut diagnostics = registration.diagnostics;
@@ -413,6 +339,16 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             bindings: registration.bindings,
             diagnostics: diagnostics
         };
+    }
+    if statement.variant == "Unknown" {
+        let keyword = detect_removed_ai_keyword(statement.text);
+        if keyword.length > 0 {
+            return ScopeResult {
+                bindings: bindings,
+                diagnostics: [make_removed_keyword_diagnostic(keyword)]
+            };
+        }
+        return ScopeResult { bindings: bindings, diagnostics: [] };
     }
     return ScopeResult { bindings: bindings, diagnostics: [] };
 }

@@ -59,14 +59,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "fs.exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"]
     });
 
-    // Model intrinsics
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "model_invoke", symbol: "sailfin_intrinsic_model_invoke", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["model"]
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "prompt", symbol: "sailfin_intrinsic_model_invoke", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["model"]
-    });
-
     // Network intrinsics
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "net_request", symbol: "sailfin_intrinsic_net_request", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net"]
@@ -111,9 +103,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_create_http_bridge", symbol: "sailfin_runtime_create_http_bridge", return_type: "i8*", parameter_types: ["i8*"], effects: ["net"]
-    });
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_create_model_bridge", symbol: "sailfin_runtime_create_model_bridge", return_type: "i8*", parameter_types: ["i8*"], effects: ["model"]
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_log_execution_fn", symbol: "sailfin_runtime_log_execution", return_type: "i8*", parameter_types: ["i8*"], effects: ["io"]
@@ -216,11 +205,6 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "http_post", symbol: "sailfin_adapter_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"]
-    });
-
-    // Model adapter
-    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "model_invoke_with_prompt", symbol: "sailfin_adapter_model_invoke_with_prompt", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["model"]
     });
 
     // Serve adapters

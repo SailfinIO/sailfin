@@ -28,7 +28,7 @@ Canonical effects: io, net, model, clock, gpu, rand
 
 - io    -- file system, printing, process execution
 - net   -- HTTP, WebSocket, TCP, serve
-- model -- AI model invocation (prompt blocks)
+- model -- capability gate for AI backend calls; required on any fn that invokes the `sfn/ai` library capsule (post-1.0)
 - clock -- sleep, timers, monotonic time
 - gpu   -- tensor dispatch, GPU compute (planned)
 - rand  -- random number generation (planned)
@@ -281,8 +281,6 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 - Closures with capture -- lambdas parse but don't capture enclosing scope
 - Generic constraints (<T: Bound>) -- parsed as text, not enforced
 - Affine<T> / Linear<T> ownership -- parsed, transparent (no enforcement)
-- PII<T> / Secret<T> taint types -- parsed, no runtime enforcement
-- model / prompt / tool / pipeline -- parse and emit metadata only, no execution
 - Union types -- parse but match destructuring is unstable
 - async/await -- async fn compiles, await lowering is partial
 
@@ -295,6 +293,15 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 - routine { } structured concurrency blocks
 - channel() and spawn concurrency primitives
 - |> pipeline operator
+
+## AI Constructs (Moved to Library)
+
+Earlier drafts had `model`, `prompt`, `tool`, and `pipeline` block keywords.
+These were removed from the language; richer AI functionality ships as the
+post-1.0 `sfn/ai` library capsule. The `![model]` effect stays in the language
+as the capability gate — any function that reaches an AI backend must declare
+it. Don't emit `model { ... }` / `prompt system { ... }` / `tool ... { ... }` /
+`pipeline ... { ... }` forms — they are not valid Sailfin.
 
 ## Compiler Architecture
 
@@ -452,7 +459,7 @@ Sailfin source files use the `.sfn` extension.
 
 ## Further Reading
 
-- Language spec: docs/spec.md
+- Language spec: https://sailfin.dev/docs/reference/spec/ (source: site/src/content/docs/docs/reference/spec/)
 - Feature status: docs/status.md
 - Roadmap: https://sailfin.dev/roadmap
 - Examples: examples/ directory (40+ programs across 11 categories)

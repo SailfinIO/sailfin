@@ -874,4 +874,4 @@ print.err("Failed: {{e.message}}");
 - [Testing](/docs/learn/testing) — Testing guide with patterns and examples
 - [The Effect System](/docs/learn/effects) — Deep dive into capability declarations
 - [Ownership & Borrowing](/docs/learn/ownership) — Memory safety model
-- [Language Spec](/docs/reference/spec) — Complete formal reference
+- [Language Spec](/docs/reference/spec/) — Complete formal reference, by chapter

@@ -43,16 +43,6 @@ fn analyze_statement(statement: Statement) -> EffectViolation[] {
     if statement.variant == "FunctionDeclaration" {
         return analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name);
     }
-    if statement.variant == "PipelineDeclaration" {
-        let signature = statement.signature;
-        let qualified = "pipeline " + signature.name;
-        return analyze_routine(signature, statement.body, statement.decorators, qualified);
-    }
-    if statement.variant == "ToolDeclaration" {
-        let signature = statement.signature;
-        let qualified = "tool " + signature.name;
-        return analyze_routine(signature, statement.body, statement.decorators, qualified);
-    }
     if statement.variant == "TestDeclaration" {
         let signature = FunctionSignature {
             name: statement.name,
@@ -166,13 +156,6 @@ fn collect_effects_from_optional_statement(statement: Statement?) -> EffectRequi
 }
 
 fn collect_effects_from_statement(statement: Statement) -> EffectRequirement[] {
-    if statement.variant == "PromptStatement" {
-        let mut required = collect_effects_from_block(statement.body);
-        required = append_requirement(required, EffectRequirement {
-            effect: "model", description: "prompt \"" + statement.channel + "\""
-        });
-        return required;
-    }
     if statement.variant == "WithStatement" {
         let mut required = collect_effects_from_block(statement.body);
         let mut clause_index: number = 0;
@@ -223,12 +206,6 @@ fn collect_effects_from_statement(statement: Statement) -> EffectRequirement[] {
     if statement.variant == "FunctionDeclaration" {
         return collect_effects_from_block(statement.body);
     }
-    if statement.variant == "PipelineDeclaration" {
-        return collect_effects_from_block(statement.body);
-    }
-    if statement.variant == "ToolDeclaration" {
-        return collect_effects_from_block(statement.body);
-    }
     if statement.variant == "TestDeclaration" {
         return collect_effects_from_block(statement.body);
     }
@@ -239,16 +216,6 @@ fn collect_effects_from_statement(statement: Statement) -> EffectRequirement[] {
             if method_index >= statement.methods.length { break; }
             required = merge_requirements(required, collect_effects_from_block(statement.methods[method_index].body));
             method_index += 1;
-        }
-        return required;
-    }
-    if statement.variant == "ModelDeclaration" {
-        let mut required: EffectRequirement[] = [];
-        let mut property_index: number = 0;
-        loop {
-            if property_index >= statement.properties.length { break; }
-            required = merge_requirements(required, collect_effects_from_expression(statement.properties[property_index].value));
-            property_index += 1;
         }
         return required;
     }

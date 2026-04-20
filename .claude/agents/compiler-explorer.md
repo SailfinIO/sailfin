@@ -30,7 +30,7 @@ The Sailfin compiler follows this flow. When tracing a feature, check each stage
 | `compiler/src/cli_main.sfn` | CLI commands and argument parsing |
 | `runtime/prelude.sfn` | Standard library (collections, strings, type checks) |
 | `runtime/native/` | C runtime implementation |
-| `docs/spec.md` | Language specification |
+| `site/src/content/docs/docs/reference/spec/` | Language specification, split by chapter |
 | `docs/status.md` | Feature implementation status |
 
 ## Exploration Strategy

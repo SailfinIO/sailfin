@@ -26,6 +26,6 @@ The specification is split across chapters for readability:
 
 For planned-but-not-yet-shipped features, see the [Design Preview](/docs/reference/preview/).
 
-The canonical source lives in
-[`docs/spec.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/spec.md);
-this site is the rendered form.
+The canonical source is this site; the markdown chapter files live under
+[`site/src/content/docs/docs/reference/spec/`](https://github.com/SailfinIO/sailfin/tree/main/site/src/content/docs/docs/reference/spec)
+in the repository.

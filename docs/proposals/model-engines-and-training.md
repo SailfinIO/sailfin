@@ -365,8 +365,8 @@ These can be replayed deterministically or published to the registry.
 
 - Review this proposal collaboratively (core, compiler, runtime).
 - Once accepted:
-  - Add section “Engines & Training” to `docs/spec.md`.
-  - Extend EBNF for `EngineIdent`, `TrainingDeclaration`, and Tensor types in `docs/enbf.md`.
+  - Add section “Engines & Training” to the language spec at `site/src/content/docs/docs/reference/spec/` (or `.../reference/preview/` until shipped).
+  - Extend EBNF for `EngineIdent`, `TrainingDeclaration`, and Tensor types in `site/src/content/docs/docs/reference/grammar.md`.
   - Implement Adapter Registry in `runtime/adapters/`.
   - Add CLI commands (`sfn train`, `sfn adapters list`).
   - Add tests under `runtime/tests/engine_and_training/`.

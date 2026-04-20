@@ -73,9 +73,9 @@ See `docs/status.md` for a detailed feature matrix and the [roadmap](https://sai
 Sailfin is under active development targeting a 1.0 release. The self-hosted compiler compiles itself via LLVM and passes a growing test suite.
 
 - `docs/status.md` — source of truth for what the compiler enforces versus what is still planned
-- `docs/spec.md` — language reference with design-preview callouts
+- [sailfin.dev/docs/reference/spec/](https://sailfin.dev/docs/reference/spec/) — language reference, split by chapter (source under `site/src/content/docs/docs/reference/`)
 - [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — milestones and sequencing toward 1.0
-- `docs/enbf.md` — grammar sketch aligned to the current parser
+- [sailfin.dev/docs/reference/grammar](https://sailfin.dev/docs/reference/grammar) — grammar aligned to the current parser
 - `llms.txt` — single-file language reference designed for LLM context windows (also at [sailfin.dev/llms.txt](https://sailfin.dev/llms.txt))
 
 ## Installing the Compiler

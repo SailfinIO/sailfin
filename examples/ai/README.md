@@ -1,8 +1,7 @@
 # AI Examples
 
-Illustrates Sailfin's AI‑native primitives: model declarations, prompt composition, effect annotations, tools, pipelines, and deterministic scopes. These map to §§3.6–3.8 & 8 in `docs/spec.md`.
+Illustrates how Sailfin gates AI-flavoured code paths through the `![model]` effect. Richer AI functionality — model declarations, prompt composition, tool dispatch, provenance tracking — is being delivered as a post-1.0 library capsule (`sfn/ai`) rather than language syntax.
 
-- **`effectful-model-call.sfn`** – Minimal effectful model invocation with a redaction helper and a `test` validating string composition.
-- **`model-workflow.sfn`** – End‑to‑end workflow: model declaration, prompt blocks (`prompt system` / `prompt user`), a `tool`, a `pipeline`, and scoped determinism helpers (`with seed(...), temperature(...)`).
+- **`effectful-model-call.sfn`** — Minimal effectful model invocation behind a helper function. Demonstrates how a caller must declare `![model]` to invoke anything that performs model work.
 
-> The bootstrap runtime currently mocks model behaviour. Generation cards, provenance, capability enforcement, and evaluator suites will activate in the self‑hosted runtime—treat these examples as forward‑looking scaffolds.
+The `![model]` effect is the only AI-specific construct that stays in the language. It acts as a compile-time capability gate for any code path that reaches an AI backend.

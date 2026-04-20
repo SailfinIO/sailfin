@@ -59,7 +59,7 @@ lexer -> parser -> AST -> type check -> effect check -> emit (.sfn-asm) -> LLVM 
 Read these files to inform your review:
 - [sailfin.dev/roadmap](https://sailfin.dev/roadmap) — Active workstreams and priorities (source: `site/src/pages/roadmap.astro`)
 - `docs/status.md` — Current feature implementation status
-- `docs/spec.md` — Language specification (Part A: shipped, Part B: planned)
+- `site/src/content/docs/docs/reference/spec/` — Language specification, chapter files §1–§11 (current); `.../reference/preview/` for planned features
 - `CLAUDE.md` — Full development context and constraints
 
 ## Review Process

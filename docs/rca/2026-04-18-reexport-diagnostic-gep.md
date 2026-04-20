@@ -405,7 +405,7 @@ subsystem needs a focused audit and a production-ready design before 1.0.
    that introduced it.
 
 3. **Decide on a canonical re-export semantics** and document it in
-   `docs/spec.md` and the compiler:
+   `site/src/content/docs/docs/reference/spec/` and the compiler:
    - **Option A**: re-exports of imported symbols are permitted and emit a
      local forwarding shim. Simpler for users; costs one extra indirection
      per re-exported call.

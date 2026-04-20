@@ -39,7 +39,7 @@ make check            # Full compile + test validation
 
 ### 3. Documentation
 - [ ] `docs/status.md` updated if feature status changed
-- [ ] `docs/spec.md` updated if syntax or semantics changed (Part A: shipped, Part B: planned)
+- [ ] Language spec updated if syntax or semantics changed — `site/src/content/docs/docs/reference/spec/NN-*.md` for shipped features, `.../reference/preview/` for planned
 - [ ] [Roadmap](https://sailfin.dev/roadmap) (`site/src/pages/roadmap.astro`) updated if priorities shifted
 
 ### 4. Code Quality

@@ -36,7 +36,6 @@ The reference section is the authoritative source for how Sailfin works.
 
 ## Canonical Source
 
-The specification's canonical source file is
-[`docs/spec.md`](https://github.com/SailfinIO/sailfin/blob/main/docs/spec.md)
-in the repository. This site renders it in chapter form; single-file viewers
-should consult the repository.
+The specification's canonical source lives in the site content under
+[`site/src/content/docs/docs/reference/`](https://github.com/SailfinIO/sailfin/tree/main/site/src/content/docs/docs/reference)
+in the repository. This site is the rendered form.

@@ -996,4 +996,4 @@ error[E0100]: type annotation required
 - [The Effect System](/docs/learn/effects) — Capability annotations and compile-time enforcement
 - [Ownership & Borrowing](/docs/learn/ownership) — Move semantics and borrow rules
 - [Error Handling](/docs/learn/error-handling) — try/catch and Result-style patterns
-- [Language Spec](/docs/reference/spec) — Formal type system reference
+- [Language Spec §6 Type System](/docs/reference/spec/06-types/) — Formal type system reference

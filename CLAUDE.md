@@ -242,7 +242,7 @@ Use `/add-feature <name>` for the full orchestrated workflow. The pipeline stage
 3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
 4. Extend `compiler/src/llvm/lowering/` (e.g. `entrypoints.sfn`) for LLVM
 5. Add regression tests to `compiler/tests/`
-6. Update `docs/spec.md` (Part A if shipped, Part B if planned)
+6. Update the language spec at `site/src/content/docs/docs/reference/spec/` (add/update the chapter §N file if shipped) or `site/src/content/docs/docs/reference/preview/` (add/update the design-preview page if planned)
 7. Update `docs/status.md` with implementation status
 
 ### Fixing Effect Checker Issues
@@ -286,7 +286,7 @@ Check `examples/README.md` for capability requirements (`![io]`, `![model]`, etc
 When uncertain about feature status or semantics:
 
 1. **`docs/status.md`** — What ships today (Stage0/1/2 breakdown)
-2. **`docs/spec.md`** — Language reference (Part A: bootstrap, Part B: planned)
+2. **Language Specification** — Rendered at [sailfin.dev/docs/reference/spec/](https://sailfin.dev/docs/reference/spec/); source under `site/src/content/docs/docs/reference/spec/` (chapter files §1–§11) and `.../reference/preview/` (design previews)
 3. **[sailfin.dev/roadmap](https://sailfin.dev/roadmap)** — Active workstreams and sequencing (source: `site/src/pages/roadmap.astro`)
 4. **`docs/runtime_audit.md`** — Python→Sailfin migration tracker
 
@@ -471,7 +471,7 @@ Before declaring a feature "shipped in Stage1":
 4. Lowers to LLVM IR (`compiler/src/llvm/lowering/entrypoints.sfn`)
 5. Has regression coverage (`compiler/tests/`)
 6. Self-hosts (compiler compiles itself)
-7. Documented in `docs/status.md` and `docs/spec.md` Part A
+7. Documented in `docs/status.md` and under `site/src/content/docs/docs/reference/spec/` (the appropriate §N chapter)
 
 ### Do Not Use Python Bootstrap (Stage0)
 

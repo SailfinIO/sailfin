@@ -90,7 +90,7 @@ Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effe
 
 - **Python:** PEP 8, four-space indentation, `snake_case` functions, narrow passes; share helpers instead of duplicating parsing logic.
 - **Sailfin (`.sfn`):** Spell effects explicitly, keep effect lists ordered by impact, `CamelCase` for models/capsules, `snake_case` for locals, annotate future syntax as comments until the compiler supports it.
-- Align terminology with `docs/spec.md` (capsule, fleet, provenance card).
+- Align terminology with the language spec at `site/src/content/docs/docs/reference/spec/` (capsule, fleet, provenance card).
 
 ## Adding a Language Feature
 
@@ -99,7 +99,7 @@ Effect checking walks nested blocks, lambdas, and `routine` scopes. Missing effe
 3. Update `compiler/src/emit_native.sfn` to emit `.sfn-asm`
 4. Extend `compiler/src/llvm/lowering/entrypoints.sfn` for LLVM
 5. Add regression tests to `compiler/tests/`
-6. Update `docs/spec.md` (Part A if shipped, Part B if planned)
+6. Update the language spec: `site/src/content/docs/docs/reference/spec/NN-*.md` chapter if shipped, `.../reference/preview/*.md` page if planned
 7. Update `docs/status.md` with implementation status
 
 ## Testing
@@ -128,7 +128,7 @@ Run `make test` before submitting and capture reproduction steps for regressions
 Update documents in this order when behaviour changes:
 
 1. `docs/status.md` — keep the feature matrix authoritative
-2. `docs/spec.md` — sync bootstrap reference (Part A shipped, Part B planned)
+2. Language spec — `site/src/content/docs/docs/reference/spec/NN-*.md` for shipped features, `.../reference/preview/*.md` for planned
 3. `site/src/pages/roadmap.astro` — adjust the [roadmap](https://sailfin.dev/roadmap) for sequencing changes
 4. Relevant folder `README` (`compiler/README.md`, `runtime/README.md`, etc.)
 
@@ -144,7 +144,7 @@ Update documents in this order when behaviour changes:
 | Document | Purpose |
 |---|---|
 | `docs/status.md` | What ships today (Stage0/1/2 breakdown) |
-| `docs/spec.md` | Language reference (Part A: bootstrap, Part B: planned) |
+| `site/src/content/docs/docs/reference/spec/` | Language reference, chapter files §1–§11 (current language); `.../reference/preview/` holds planned features |
 | [sailfin.dev/roadmap](https://sailfin.dev/roadmap) | Active workstreams and sequencing (source: `site/src/pages/roadmap.astro`) |
 | `docs/runtime_audit.md` | Python→Sailfin migration tracker |
 

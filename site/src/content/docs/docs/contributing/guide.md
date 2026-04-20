@@ -44,7 +44,7 @@ git checkout -b feature/my-feature main
 3. Update the emitter (`compiler/src/emit_native.sfn`)
 4. Extend LLVM lowering (`compiler/src/llvm/lowering/`)
 5. Add regression tests (`compiler/tests/`)
-6. Update `docs/spec.md` and `docs/status.md`
+6. Update the language spec (`site/src/content/docs/docs/reference/spec/NN-*.md` or `.../reference/preview/*.md`) and `docs/status.md`
 
 ### Self-Hosting Invariant
 

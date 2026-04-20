@@ -1,19 +1,33 @@
 # Sailfin Documentation Guide
 
-Choose the path that fits your task:
+This directory holds engineering documentation: status matrices, runtime
+audits, performance notes, proposals, and RCAs. **User-facing language
+documentation lives on the docs site.**
 
-- **Understand what runs today** → `docs/status.md`
-- **Learn the language** → `docs/spec.md`
-  Pair with `docs/enbf.md` for grammar details and `docs/keywords.md` for reserved identifiers.
-- **Plan future work** → [sailfin.dev/roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`)
-- **Retire AOT prepare** → `docs/aot-prepare-retirement.md`
-- **Track proposals** → `docs/proposals/` (e.g., `package-management.md`, `model-engines-and-training.md`)
-- **Align structure & naming** → `docs/style-guide.md`
-- **See working samples** → `examples/` (category index in `examples/README.md`)
+## Where to find things
 
-When updating docs:
+- **What runs today (feature matrix)** → `docs/status.md`
+- **Language specification** → [sailfin.dev/docs/reference/spec/](https://sailfin.dev/docs/reference/spec/)
+  (source under `site/src/content/docs/docs/reference/spec/`, split by chapter)
+- **Grammar (EBNF)** → [sailfin.dev/docs/reference/grammar](https://sailfin.dev/docs/reference/grammar)
+- **Keywords** → [sailfin.dev/docs/reference/keywords](https://sailfin.dev/docs/reference/keywords)
+- **Runtime ABI** → [sailfin.dev/docs/reference/runtime-abi](https://sailfin.dev/docs/reference/runtime-abi)
+- **Roadmap** → [sailfin.dev/roadmap](https://sailfin.dev/roadmap) (source: `site/src/pages/roadmap.astro`)
+- **Runtime migration tracker** → `docs/runtime_audit.md`
+- **Runtime architecture notes** → `docs/runtime_architecture.md`
+- **Build performance plan** → `docs/build-performance.md`
+- **Repository style guide** → `docs/style-guide.md`
+- **Proposals** → `docs/proposals/` (future-facing designs)
+- **Root-cause analyses** → `docs/rca/`
+- **Perf notes** → `docs/perf/`
+- **Examples** → `examples/` (category index in `examples/README.md`)
 
-1. Refresh `docs/status.md` once behaviour or coverage changes.  
-2. Update the spec after the status doc so “planned” notes stay accurate.  
-3. Cross-link roadmap items and proposals to the relevant source files or
-   tests.
+## Updating docs
+
+When behaviour, coverage, or roadmap status changes:
+
+1. Refresh `docs/status.md` once behaviour or coverage changes.
+2. Update the language spec on the site under
+   `site/src/content/docs/docs/reference/spec/` (the appropriate §N chapter)
+   or `.../reference/preview/` for planned features.
+3. Cross-link roadmap items and proposals to the relevant source files or tests.

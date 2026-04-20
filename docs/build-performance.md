@@ -624,6 +624,33 @@ The channels were v0.1.1-seed-era fallback code paths that became unreferenced a
 
 **Determinism:** With three more Phase 2 prefixes gone, the remaining channels driving residual macOS-arm64 non-determinism are `.instr_*` (reader-only now; fallback path active), `.async_inner_return_type`, `.struct_info`, and `.enum_info`. Post-change emit-sweep measurement to land in the PR body after CI completes.
 
+### Instr_fn_name Dead-Reader Cleanup (April 20)
+
+**Status: Implemented.** Removed the three remaining `.instr_fn_name` reader blocks — all dead code after the dispatch sweep (April 20 Dispatch / Let Result / Let IPC Dead-Channel Sweep) eliminated the only writers. The `fs.exists("build/sailfin/.instr_fn_name")` check now always returns false in every location that previously read it, so the guarded code never ran.
+
+**Readers removed:**
+
+- `compiler/src/llvm/expression_lowering/native/core_member_helpers.sfn:38-74` — the "For self param, extract struct from function name" fallback block inside `lower_inline_gep_field_access`. Removed the nested `if _igep_struct.length == 0 { if _igep_base == "self" { if fs.exists(...) { ... } } }` block (~37 lines). The remaining locals-based type-annotation lookup one level below covered the same case via `find_local_binding` whenever `self` was properly bound.
+- `compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn:919-960` — the identical fallback block inside `try_file_based_struct_field_access` (~42 lines). Function now returns `null_result` when `struct_type_ann` remains empty, consistent with the primary path.
+- `compiler/src/llvm/expression_lowering/native/statement_assignment.sfn:595-755` — the `if !fs.exists(".instr_fn_name") { return ... }` guard plus the entire `.struct_info`/`.instr_fn_name` parsing + `self.field` rewrite loop that followed inside `preprocess_self_field_access` (~160 lines). The function now early-returns for any `self.*` return expression — which is the behavior that has been live since the April 20 dispatch sweep removed the writer.
+
+**Shape of change:**
+- Three dead `if fs.exists(".instr_fn_name")` reader blocks deleted.
+- `preprocess_self_field_access` collapses to a trivial pass-through (early-return on `self.` absent, early-return on `.struct_info` absent, final return of unmodified inputs). `![io]` retained because `fs.exists(".struct_info")` is still called.
+- `cli_commands._clean_lowering_state` line for `.instr_` now carries a "Legacy" comment (following the PR #183 / #184 / #185 / #188 / #189 / #191 / #192 precedent of keeping prefixes in the cleanup sweep to handle stale files from older build dirs / older seed binaries).
+- No import cleanup required: `index_of`, `substring`, `format_temp_name`, `number_to_string` all remain heavily used elsewhere in the modified files.
+
+**Scope:**
+- 3 source files modified, ~−239 / +4 lines net.
+- 1 CLI file edited (+2 lines for Legacy comment).
+- 1 docs file updated.
+- No new tests added — the existing integration suite plus full self-hosting exercise the live paths; the deletions remove only code guarded by an always-false `fs.exists` check.
+
+**Risk assessment:**
+- The writer of `.instr_fn_name` was removed as part of `instructions_dispatch.sfn` deletion in the April 20 dispatch sweep (see entry above). After that removal, every `fs.exists("build/sailfin/.instr_fn_name")` call returned false (unless stale files existed in `build/sailfin/`, which the cleanup sweep already handles). CI for the dispatch sweep passed on all platforms, validating that the fallback path was genuinely dead. This cleanup only removes the unreachable code — no semantic change.
+
+**Determinism:** No behavior change expected on any platform — the deleted blocks were guarded by always-false conditions. Post-change emit-sweep measurement to land in the PR body after CI completes.
+
 ---
 
 ## Appendix: IPC Channel Census

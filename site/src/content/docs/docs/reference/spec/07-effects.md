@@ -21,14 +21,14 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 |--------|-------|--------|----------------|
 | IO | `io` | Filesystem, console, logging | Yes |
 | Network | `net` | HTTP, WebSocket, serve | Yes |
-| Model | `model` | Prompt blocks, model invocation | Yes (prompt blocks) |
+| Model | `model` | AI library invocation via `sfn/ai` (post-1.0) | No (planned) |
 | Clock | `clock` | `sleep`, wall-clock | Partial |
 | GPU | `gpu` | Tensor operations | Parsed only |
 | Random | `rand` | Random generation | Parsed only |
 
 **Enforcement rules**:
-1. Any function calling an effectful operation must declare that effect
-2. Effects are transitive: if A calls B, A must declare B's effects
+1. Any function calling an effectful operation directly must declare that effect
+2. Call-graph–transitive enforcement (A must declare B's effects when A calls B) is planned but not yet implemented
 3. Tests follow the same rules as functions
 4. Missing effects are compile errors with fix-it hints
 

@@ -205,8 +205,8 @@ manually before running on the full codebase.
 
 ### Phase 4: Documentation
 
-1. Update code samples in `spec.md`, `status.md`, `roadmap.md`, `style-guide.md`
-2. Update EBNF in `docs/enbf.md`
+1. Update code samples in the language spec (`site/src/content/docs/docs/reference/spec/`), `docs/status.md`, `roadmap.astro`, `style-guide.md`
+2. Update EBNF in `site/src/content/docs/docs/reference/grammar.md`
 3. Remove "syntax reform" callout boxes that describe this as pending
 4. Mark checkbox in `roadmap.md`
 
