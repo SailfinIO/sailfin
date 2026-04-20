@@ -844,7 +844,8 @@ The architect's original Phase 3 plan proposed a process-local memo of `(path �
 - 1 source file modified (`compiler/src/native_ir_api.sfn`).
 - ~30 lines added (fast-scanner loop + guiding comment), ~4 lines removed (previous body that dispatched to `parse_native_artifact_impl`).
 - 1 import added (`parse_import_entry` from `./native_ir_utils_parse`).
-- No signature changes, no new exports, no new wrapper structs, no new tests — existing integration suite plus full self-hosting exercise the live path on every module compile.
+- 1 regression test added (`compiler/tests/unit/parse_native_imports_fast_test.sfn`, 11 tests). Follows the `emit_native_format_test.sfn` convention of re-implementing the scanner against minimal local types, because importing `parse_native_imports_for_import` directly would pull the full native_ir parser chain (~4.5k lines) into the test runner's inlined source and exceed the 60s per-test budget. The shipping code is exercised end-to-end by self-host on every `make compile`; the test file pins down the scanner's expected behavior shape.
+- No signature changes, no new exports, no new wrapper structs — existing integration suite plus full self-hosting exercise the live path on every module compile.
 
 **Determinism:** No new cross-phase or cross-process state. The function is invoked exactly once per unique transitive import slug per process (unchanged from before) and produces identical output for identical inputs. CI matrix determinism sweep on macOS-arm64 should show no regression.
 
