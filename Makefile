@@ -64,7 +64,7 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-installer
 
-.PHONY: rebuild
+.PHONY: rebuild mcp-server
 
 help:
 	@echo "Common Sailfin tasks"
@@ -80,6 +80,7 @@ help:
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
 	@echo "  make bench          # Benchmark per-module compile time and memory"
+	@echo "  make mcp-server     # Build the Sailfin MCP server (tools/mcp-server)"
 	@echo "  make clean          # Remove packaged artifacts (dist/)"
 	@echo ""
 
@@ -283,6 +284,12 @@ test-arena:
 
 clean:
 	rm -rf dist
+
+# Build the Sailfin MCP server so agentic clients (Claude Code, Claude Desktop,
+# Inspector) can reach the compiler as tool calls. `.mcp.json` at the repo root
+# points at tools/mcp-server/dist/index.js, which this target produces.
+mcp-server:
+	cd tools/mcp-server && npm install --no-audit --no-fund && npm run build
 
 # Remove local build artifacts (keeps downloaded seed by default).
 # Use KEEP_SEED=0 to also delete build/seed.
