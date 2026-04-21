@@ -5,6 +5,7 @@
 // recovery from native text when the ABI corrupts struct fields.
 //
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
+import { NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
     NativeBinding,
@@ -33,7 +34,7 @@ import {
 // so this function is a near-passthrough. Per-field null/length
 // guards still happen downstream in the dedicated `sanitize_*`
 // helpers below.
-fn sanitize_lowering_inputs(parse_in: ParseNativeResult, debug_lowering: boolean) -> ParseNativeResult ![io] {
+fn sanitize_lowering_inputs(parse_in: ParseNativeResult, native_text_override_path: string, native_module: NativeModule, imported_manifests_in: LayoutManifest[], imported_native_texts_in: string[], diagnostics_in: string[], debug_lowering: boolean) -> ParseNativeResult ![io] {
     if debug_lowering { print.err("emit-llvm: dbg-A parse_in assigned"); }
     return parse_in;
 }

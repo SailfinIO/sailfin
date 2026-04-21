@@ -269,7 +269,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     }
 
     // ── Phase 1: Sanitize & recover inputs ──────────────────────────
-    let parse = sanitize_lowering_inputs(parse_in, debug_lowering);
+    let parse = sanitize_lowering_inputs(parse_in, native_text_override_path, native_module, imported_manifests, imported_native_texts, diagnostics_in, debug_lowering);
 
     let safe_imported_manifests = sanitize_imported_manifests(imported_manifests, debug_lowering);
     let safe_imported_native_texts = sanitize_imported_native_texts(imported_native_texts, debug_lowering);
