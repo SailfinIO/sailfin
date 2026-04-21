@@ -22,7 +22,6 @@ import { is_test_module_slug, sanitize_collection_length } from "./lowering_help
 import { extend_string_lines_checked } from "./lowering_io";
 import { get_struct_fields_at, get_struct_name_at } from "./lowering_native_helpers";
 import {
-    parse_native_artifact_safe,
     recover_functions_for_lowering,
     recover_native_enums_light,
     recover_native_functions_light,

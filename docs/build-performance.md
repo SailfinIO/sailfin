@@ -888,9 +888,53 @@ For each of the 6 live callers (`entrypoints.sfn:164,220,229,263,366` + `entrypo
 
 **Follow-ups (remaining Tier 1A work — track in subsequent PRs):**
 
-- **Tier 1A PR 2 — callsite swap.** Replace `parse_native_artifact_safe(x)` with `parse_native_artifact(x)` at all 6 live sites: `compiler/src/llvm/lowering/entrypoints.sfn:164`, `:220`, `:229`, `:263`, `:366`, and `compiler/src/llvm/lowering/entrypoints_tests.sfn:117`. Remove the two confirmed dead imports: `compiler/src/llvm/lowering/entrypoints_tests_writer.sfn:100` (imported but only referenced in a comment; real path uses `build_parse_result_from_text` at `:133`) and `compiler/src/llvm/lowering/lowering_phase_sanitize.sfn:25` (imported but not used in the file body). Requires `make clean-build` because it's a structural change to the import graph. No runtime behavior change.
-- **Tier 1A PR 3 — wrapper deletion.** Delete `fn parse_native_artifact_safe` from `compiler/src/llvm/lowering/lowering_recovery.sfn:78`. After the callsite swap in PR 2, the function has zero callers. Conditionally delete now-orphaned `_from_text` wrappers from `compiler/src/native_ir_api.sfn` if they have zero remaining callers repo-wide: `parse_native_structs_from_text`, `parse_native_imports_from_text`, `parse_native_interfaces_from_text`, `parse_native_enums_from_text`, `parse_native_diagnostics_from_text`. **Keep** `parse_native_functions_from_text` (live callers at `lowering_recovery.sfn:730,836`, `lowering_phase_sanitize.sfn:19,281`, `lowering_core.sfn:33`), `parse_native_function_count_from_text` (live caller at `lowering_recovery.sfn:826`), and `parse_native_bindings_from_text` (live callers at `lowering_phase_sanitize.sfn:19,409`, `lowering_core.sfn:31`) — verify via `grep -rn` at PR 3 time.
+- ~~**Tier 1A PR 2 — callsite swap.**~~ — **Shipped** (see [Completed Work: Tier 1A PR 2+3](#tier-1a-pr-23--callsite-swap--wrapper-deletion-april-21)).
+- ~~**Tier 1A PR 3 — wrapper deletion.**~~ — **Shipped** (combined with PR 2 in the same PR).
 - **Tier 1A PR 4 (optional) — equivalence regression test.** Add `compiler/tests/unit/parse_native_artifact_equivalence_test.sfn` constructing a synthetic `.sfn-asm` fixture that exercises every top-level directive (`.import`, `.export`, `.struct`+body, `.interface`+body, `.enum`+body, `.fn`+body, `.test`+body, top-level binding, `.decorator`, `.span`, `.init-span`) and asserts field-by-field equality between `parse_native_artifact(fixture).X` and each legacy `parse_native_X_from_text(fixture)` projection. Defense-in-depth only — the self-host itself is the real equivalence gate. Must follow the `parse_native_imports_fast_test.sfn` pattern (re-implement against minimal local types to stay under the 60s per-test budget; do not import the full parser chain).
+
+### Tier 1A PR 2+3 — Callsite Swap + Wrapper Deletion (April 21)
+
+**Status: Implemented.** Combines the two planned Tier 1A follow-ups into a single PR: swap every `parse_native_artifact_safe` callsite to `parse_native_artifact`, delete the wrapper, and prune the five orphaned `_from_text` projections that fell out once the wrapper's internal machinery was gone.
+
+**Shape of change:**
+
+- `compiler/src/llvm/lowering/entrypoints.sfn`: dropped `parse_native_artifact_safe` from the `./lowering_recovery` import block (`parse_native_artifact` was already imported from `../../native_ir_api`). Dropped the five orphan `_from_text` imports (`parse_native_structs_from_text`, `parse_native_imports_from_text`, `parse_native_interfaces_from_text`, `parse_native_enums_from_text`, `parse_native_diagnostics_from_text`) — they were imported but never referenced in this file. Swapped all 5 callsites (lines 158, 214, 223, 257, 360 after prior edits) to `parse_native_artifact`.
+- `compiler/src/llvm/lowering/entrypoints_tests.sfn`: added `parse_native_artifact` to the `../../native_ir_api` import block, dropped the `parse_native_artifact_safe` import from `./lowering_recovery`, swapped the single callsite.
+- `compiler/src/llvm/lowering/entrypoints_tests_writer.sfn`: dropped the dead `parse_native_artifact_safe` import (referenced only in a comment; real path uses `build_parse_result_from_text`). Updated the comment to reference `parse_native_artifact` instead.
+- `compiler/src/llvm/lowering/lowering_phase_sanitize.sfn`: dropped `parse_native_artifact_safe` from the `./lowering_recovery` import block — the identifier never appeared in the file body.
+- `compiler/src/llvm/lowering/lowering_recovery.sfn`: deleted `fn parse_native_artifact_safe` (one-line delegator) and its header comment block. Pruned now-unused imports `parse_native_artifact` (from `../../native_ir_api`) and `ParseNativeResult` (from `../../native_ir`). Rewrote the module header comment to drop the stale `parse_native_artifact_safe` reference.
+- `compiler/src/native_ir_api.sfn`: deleted the five orphaned `_from_text` wrappers (`parse_native_structs_from_text`, `parse_native_imports_from_text`, `parse_native_interfaces_from_text`, `parse_native_enums_from_text`, `parse_native_diagnostics_from_text`) and their entries in the `export` block. **Kept:** `parse_native_artifact`, `parse_native_function_count_from_text`, `parse_native_functions_from_text`, `parse_native_bindings_from_text`, all `_for_import` variants, `parse_native_artifact_for_import_context`, `parse_layout_manifest` — all still have live callers (verified via repo-wide `grep -rn` prior to deletion).
+
+**Caller audit at PR-open time:**
+
+| Symbol                                 | Live callers (non-import) | Decision |
+| -------------------------------------- | -------------------------: | -------- |
+| `parse_native_artifact_safe`           |                          6 | delete after swap |
+| `parse_native_structs_from_text`       |                          0 | delete |
+| `parse_native_imports_from_text`       |                          0 | delete |
+| `parse_native_interfaces_from_text`    |                          0 | delete |
+| `parse_native_enums_from_text`         |                          0 | delete |
+| `parse_native_diagnostics_from_text`   |                          0 | delete |
+| `parse_native_functions_from_text`     |                          4 | keep (`lowering_recovery`, `lowering_phase_sanitize`) |
+| `parse_native_function_count_from_text`|                          1 | keep (`lowering_recovery`) |
+| `parse_native_bindings_from_text`      |                          1 | keep (`lowering_phase_sanitize`) |
+
+Pre-existing dead imports of the retained symbols in `lowering_core.sfn` and `lowering_helpers.sfn` are left alone — they're not in scope for Tier 1A and their removal is a separate cleanup.
+
+**API surface change:** all five deleted `_from_text` symbols were in the `export` block of `native_ir_api.sfn`; they are now removed from the public surface. No capsule outside the compiler imports them (caller audit is repo-wide).
+
+**Risk assessment:**
+
+- **Output equivalence:** `parse_native_artifact(text) ≡ parse_native_artifact_impl(text, true, true)` — the exact call the wrapper delegated to. The five deleted projection wrappers were pure `parsed.X` field reads off the same underlying parser; no caller depended on any projection-only semantics.
+- **Structural / import-graph change:** touches 6 source files with one symbol deletion and 5 projection deletions. Requires `make clean-build` on a fresh build directory because several modules' import lists changed. CI's matrix build on PR open exercises this on every supported platform.
+- **Self-hosting:** only `parse_native_artifact_safe`'s five live callers were real work — each reduces from a trivial delegate call to the underlying parser call. Compiler output is byte-identical by construction.
+
+**Scope:**
+
+- 6 source files modified (`entrypoints.sfn`, `entrypoints_tests.sfn`, `entrypoints_tests_writer.sfn`, `lowering_phase_sanitize.sfn`, `lowering_recovery.sfn`, `native_ir_api.sfn`) + this entry in `docs/build-performance.md` + `docs/proposals/phase-4-eliminate-light-recovery.md` (architect's Phase 4 migration plan, dropped in the same PR so the next session can pick it up).
+- Net: approximately −70 lines across the 6 source files (wrapper deletion + 5 projection deletions + dead-import pruning). No signature changes, no new wrapper structs, no new tests (the self-host itself exercises every live path on every `make check`).
+
+**Determinism:** No new cross-phase or cross-process state. The parse result flowing into every downstream lowering phase is produced by the same single-pass `parse_native_artifact_impl` invocation as before; the only change is whether it routes through a trivial wrapper or not. CI determinism sweep on macOS-arm64 should show no regression.
 
 ---
 

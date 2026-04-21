@@ -97,7 +97,6 @@ import {
     extend_string_lines_checked,
     module_source_filename
 } from "./lowering_io";
-import { parse_native_artifact_safe } from "./lowering_recovery";
 import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Stub: kept for import-graph compatibility (main.sfn imports this symbol).
@@ -123,7 +122,7 @@ fn write_llvm_ir_for_tests_from_text(native_text: string, module_name: string, o
     // rather than stale data from a previous `run` invocation.
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     // Use the recovery parser (build_parse_result_from_text) instead of the
-    // structured parser (parse_native_artifact_safe).  The recovery parser
+    // structured parser (parse_native_artifact).  The recovery parser
     // creates ALL instructions as Expression(tag→21) with parseable text,
     // which the tag-21 fallback handler in the instruction lowerer can
     // dispatch correctly.  The structured parser creates typed variants

@@ -23,17 +23,12 @@ import {
     parse_native_artifact,
     parse_native_artifact_for_import_context,
     parse_native_bindings_from_text,
-    parse_native_diagnostics_from_text,
-    parse_native_enums_from_text,
     parse_native_function_count_from_text,
     parse_native_functions_for_import,
     parse_native_functions_from_text,
     parse_native_imports_for_import,
-    parse_native_imports_from_text,
     parse_native_interfaces_for_import,
-    parse_native_interfaces_from_text,
     parse_native_structs_for_import,
-    parse_native_structs_from_text,
     select_layout_manifest_artifact,
     select_text_artifact
 } from "../../native_ir_api";
@@ -145,7 +140,6 @@ import {
     write_llvm_lines_chunked
 } from "./lowering_io";
 import {
-    parse_native_artifact_safe,
     recover_functions_for_lowering,
     recover_native_functions_light,
     recover_native_imports_light,
@@ -161,7 +155,7 @@ fn lower_to_llvm(native_module: NativeModule) -> LoweredLLVMResult ![io] {
     if _if206 {
         return lower_to_llvm_with_context(native_module, [], [], []);
     }
-    let parse = parse_native_artifact_safe(artifact.contents);
+    let parse = parse_native_artifact(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
     return lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics);
 }
@@ -217,7 +211,7 @@ fn lower_to_llvm_ir(native_module: NativeModule) -> string ![io] {
         return lowered.ir;
     }
     // Parse once and reuse throughout lowering; parsing the native artifact is expensive.
-    let parse = parse_native_artifact_safe(artifact.contents);
+    let parse = parse_native_artifact(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
     let lowered = lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics);
     return lowered.ir;
@@ -226,7 +220,7 @@ fn lower_to_llvm_ir(native_module: NativeModule) -> string ![io] {
 // Build LLVM IR from raw native text (non-test path), avoiding NativeModule ABI issues.
 fn lower_to_llvm_ir_from_text(native_text: string, module_name: string) -> string ![io] {
     if native_text.length == 0 { return ""; }
-    let parse = parse_native_artifact_safe(native_text);
+    let parse = parse_native_artifact(native_text);
     let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = NativeModule {
         module_name: module_name,
@@ -260,7 +254,7 @@ fn lower_to_llvm_ir_from_text(native_text: string, module_name: string) -> strin
 fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io] {
     let artifact = select_text_artifact(native_module.artifacts);
     if artifact == null { return false; }
-    let parse = parse_native_artifact_safe(artifact.contents);
+    let parse = parse_native_artifact(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, artifact.contents);
     let lines = lowered_lines.lines;
@@ -363,6 +357,6 @@ fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manife
         };
     }
 
-    let parse = parse_native_artifact_safe(artifact.contents);
+    let parse = parse_native_artifact(artifact.contents);
     return lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, diagnostics, true, artifact.contents);
 }
