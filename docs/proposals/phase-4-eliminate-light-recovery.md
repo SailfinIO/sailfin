@@ -38,7 +38,7 @@
 
 **Two fabricated contracts the pipeline relies on:**
 
-1. **Flat struct-method flattening.** `recover_native_functions_light` flattens methods at parse time; the structured parser keeps them nested. `lowering_core.sfn:488` calls `flatten_struct_methods(module_structs)`, so this is already paper-overed on the non-test primary path via `lower_to_llvm` (`entrypoints.sfn:158`). The issue only bites `compile_native_text_to_llvm_file` and the test-writer (which skip that flatten call).
+1. **Flat struct-method flattening.** `recover_native_functions_light` flattens methods at parse time; the structured parser keeps them nested. `lowering_core.sfn:488` calls `flatten_struct_methods(module_structs)`, so this is already papered over on the non-test primary path via `lower_to_llvm` (`entrypoints.sfn:158`). The issue only bites `compile_native_text_to_llvm_file` and the test-writer (which skip that flatten call).
 
 2. **Tag-21 instruction dispatch.** Per the `entrypoints_tests_writer.sfn:124-131` comment, the seedcheck's `get_instruction_tag` historically returned 21 for every typed variant. **Confirm before proceeding** — inspect `compiler/src/native_ir.sfn`'s `get_instruction_tag` and `compiler/src/llvm/lowering/instructions_*.sfn` dispatch against typed tags under seed 0.5.7. If it now dispatches typed tags correctly, Phase 4 can cover the test path (PR 2). If not, the test path stays on `build_parse_result_from_text` and Phase 4 only covers the non-test primary (PR 1 alone).
 

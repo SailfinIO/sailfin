@@ -931,7 +931,7 @@ Pre-existing dead imports of the retained symbols in `lowering_core.sfn` and `lo
 
 **Scope:**
 
-- 6 source files modified (`entrypoints.sfn`, `entrypoints_tests.sfn`, `entrypoints_tests_writer.sfn`, `lowering_phase_sanitize.sfn`, `lowering_recovery.sfn`, `native_ir_api.sfn`) + 1 docs file.
+- 6 source files modified (`entrypoints.sfn`, `entrypoints_tests.sfn`, `entrypoints_tests_writer.sfn`, `lowering_phase_sanitize.sfn`, `lowering_recovery.sfn`, `native_ir_api.sfn`) + this entry in `docs/build-performance.md` + `docs/proposals/phase-4-eliminate-light-recovery.md` (architect's Phase 4 migration plan, dropped in the same PR so the next session can pick it up).
 - Net: approximately −70 lines across the 6 source files (wrapper deletion + 5 projection deletions + dead-import pruning). No signature changes, no new wrapper structs, no new tests (the self-host itself exercises every live path on every `make check`).
 
 **Determinism:** No new cross-phase or cross-process state. The parse result flowing into every downstream lowering phase is produced by the same single-pass `parse_native_artifact_impl` invocation as before; the only change is whether it routes through a trivial wrapper or not. CI determinism sweep on macOS-arm64 should show no regression.
