@@ -139,7 +139,12 @@ import {
     module_source_filename,
     write_llvm_lines_chunked
 } from "./lowering_io";
-import { recover_functions_for_lowering } from "./lowering_recovery";
+import {
+    recover_functions_for_lowering,
+    recover_native_functions_light,
+    recover_native_imports_light,
+    recover_native_structs_light
+} from "./lowering_recovery";
 import { lower_module_bindings_to_globals } from "./module_globals";
 
 fn lower_to_llvm(native_module: NativeModule) -> LoweredLLVMResult ![io] {
