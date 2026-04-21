@@ -23,9 +23,7 @@ import { extend_string_lines_checked } from "./lowering_io";
 import { get_struct_fields_at, get_struct_name_at } from "./lowering_native_helpers";
 import {
     recover_functions_for_lowering,
-    recover_native_enums_light,
     recover_native_functions_light,
-    recover_native_imports_light,
     recover_native_structs_light
 } from "./lowering_recovery";
 
@@ -47,44 +45,21 @@ import {
 // returned through a ParseNativeResult struct. Callers should read
 // the returned struct fields cautiously and use their own recovery
 // path if later phases detect corrupted data.
+//
+// After the Phase 4 PR 1 override-reparse removal, most of this function's
+// parameters are unused — retained for signature stability so downstream
+// callers don't need rewiring. Drop them in Phase 4b alongside the
+// `recover_*_light` fallback removal.
+// unused — retained for signature stability:
+//   native_module, imported_manifests_in, imported_native_texts_in,
+//   diagnostics_in, native_text_override_path (debug-only).
 fn sanitize_lowering_inputs(parse_in: ParseNativeResult, native_text_override_path: string, native_module: NativeModule, imported_manifests_in: LayoutManifest[], imported_native_texts_in: string[], diagnostics_in: string[], debug_lowering: boolean) -> ParseNativeResult ![io] {
-    let mut parse = parse_in;
     if debug_lowering { print.err("emit-llvm: dbg-A parse_in assigned"); }
     if debug_lowering {
-        print.err("emit-llvm: dbg-B before override check path_len="
+        print.err("emit-llvm: dbg-B structured parse is authoritative (no override reparse) path_len="
             + number_to_string(native_text_override_path.length));
     }
-    // --- Reparse from override text ---
-    if native_text_override_path.length > 0 {
-        let _rfns = recover_native_functions_light(native_text_override_path);
-        let _rsts = recover_native_structs_light(native_text_override_path);
-        let _rens = recover_native_enums_light(native_text_override_path);
-        let reparsed = ParseNativeResult {
-            functions: _rfns,
-            imports: parse_in.imports,
-            structs: _rsts,
-            interfaces: [],
-            enums: _rens,
-            bindings: [],
-            diagnostics: []
-        };
-        if reparsed.functions.length >= parse.functions.length {
-            parse = reparsed;
-        }
-        if debug_lowering {
-            print.err("emit-llvm: reparsed from override text functions="
-                + number_to_string(parse.functions.length));
-            print.err("emit-llvm: reparsed from override diagnostics="
-                + number_to_string(parse.diagnostics.length));
-            if parse.diagnostics.length > 0 {
-                print.err("emit-llvm: reparsed diagnostic " + parse.diagnostics[0]);
-            }
-        }
-    }
-    if debug_lowering {
-        print.err("emit-llvm: dbg-C after reparse block");
-    }
-    return parse;
+    return parse_in;
 }
 
 // Sanitize imported manifests array: null-check + length guard.
