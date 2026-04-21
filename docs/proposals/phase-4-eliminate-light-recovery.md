@@ -1,8 +1,8 @@
 # Phase 4: Eliminate `recover_native_functions_light` Primary Path
 
-**Status:** Planned (April 21, 2026). Not yet implemented.
+**Status:** PR 1 partially implemented (April 21, 2026) — see `docs/build-performance.md` "Phase 4 PR 1" entry. The `parse_native_artifact` swap at `compile_native_text_to_llvm_file:261` had to be reverted because the 0.5.7 seed compiles cross-module `ParseNativeResult` struct returns with a latent ABI bug that segfaults inside the sanitize chain. The remaining PR 1 wins (override-reparse block removal, per-import enum swap, dead-import cleanup) landed. The `parse_native_artifact` swap moves to PR 2 along with the test-writer migration, once the cross-module struct-return ABI is stable.
 **Parent track:** `docs/build-performance.md` — Root Cause 4 / Phase 4.
-**Predecessor PRs:** Tier 1A PR 1 (#204), Tier 1A PR 2+3 (this branch).
+**Predecessor PRs:** Tier 1A PR 1 (#204), Tier 1A PR 2+3 (#207).
 **Owner:** next session.
 
 ---

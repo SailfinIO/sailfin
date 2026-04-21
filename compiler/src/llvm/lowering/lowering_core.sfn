@@ -258,7 +258,7 @@ fn compile_native_text_to_llvm_file(native_text_path: string, module_name: strin
         print.err("emit-llvm: native text file empty at " + native_text_path);
         return false;
     }
-    let parse = parse_native_artifact(native_text);
+    let parse = build_parse_result_from_text(native_text);
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = make_native_module_for_emit(module_name, native_text);

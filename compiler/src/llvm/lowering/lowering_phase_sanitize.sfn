@@ -45,6 +45,14 @@ import {
 // returned through a ParseNativeResult struct. Callers should read
 // the returned struct fields cautiously and use their own recovery
 // path if later phases detect corrupted data.
+//
+// After the Phase 4 PR 1 override-reparse removal, most of this function's
+// parameters are unused — retained for signature stability so downstream
+// callers don't need rewiring. Drop them in Phase 4b alongside the
+// `recover_*_light` fallback removal.
+// unused — retained for signature stability:
+//   native_module, imported_manifests_in, imported_native_texts_in,
+//   diagnostics_in, native_text_override_path (debug-only).
 fn sanitize_lowering_inputs(parse_in: ParseNativeResult, native_text_override_path: string, native_module: NativeModule, imported_manifests_in: LayoutManifest[], imported_native_texts_in: string[], diagnostics_in: string[], debug_lowering: boolean) -> ParseNativeResult ![io] {
     if debug_lowering { print.err("emit-llvm: dbg-A parse_in assigned"); }
     if debug_lowering {
