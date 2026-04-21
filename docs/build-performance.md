@@ -296,9 +296,9 @@ The BFS in `collect_imported_module_context_for_module` (`llvm/imports.sfn:37`) 
 ### Phase 4: Eliminate Light Recovery Parser
 
 **Priority:** Low — **Expected:** 5-10% time
-**Depends on:** Verifying the 0.5.2-alpha.1 seed handles typed instruction variants
+**Status:** PR 1 (non-test primary path) landed April 21 — see [Completed Work: Phase 4 PR 1](#phase-4-pr-1--non-test-primary-path-april-21). PR 2 (test-writer swap) and PR 3 (Phase 4b wrapper deletion) remain.
 
-Replace `recover_native_functions_light` (line-by-line scanning with 20+ `starts_with` checks) and `parse_native_artifact_safe` (per-field extraction workaround) with direct structured `parse_native_artifact` calls.
+Replace `recover_native_functions_light` (line-by-line scanning with 20+ `starts_with` checks) and `parse_native_artifact_safe` (per-field extraction workaround) with direct structured `parse_native_artifact` calls. The non-test primary path (`compile_native_text_to_llvm_file` + `sanitize_lowering_inputs` override-reparse) is done. The test-writer path (`write_llvm_ir_for_tests_from_text` in `entrypoints_tests_writer.sfn`) still routes through `build_parse_result_from_text` pending confirmation that seed 0.5.7's seedcheck correctly dispatches typed instruction variants and reads typed-variant payload fields.
 
 ### Phase 5: Long-Lived Compiler Process (Future)
 
@@ -935,6 +935,58 @@ Pre-existing dead imports of the retained symbols in `lowering_core.sfn` and `lo
 - Net: approximately −70 lines across the 6 source files (wrapper deletion + 5 projection deletions + dead-import pruning). No signature changes, no new wrapper structs, no new tests (the self-host itself exercises every live path on every `make check`).
 
 **Determinism:** No new cross-phase or cross-process state. The parse result flowing into every downstream lowering phase is produced by the same single-pass `parse_native_artifact_impl` invocation as before; the only change is whether it routes through a trivial wrapper or not. CI determinism sweep on macOS-arm64 should show no regression.
+
+### Phase 4 PR 1 — Non-Test Primary Path (April 21)
+
+**Status: Implemented.** First Phase 4 landing. The non-test primary LLVM-emit path no longer invokes the `recover_*_light` family. `compile_native_text_to_llvm_file` (in `compiler/src/llvm/lowering/lowering_core.sfn`, called from `main.sfn` for every non-test `emit llvm` invocation) now drives the structured parser directly, and `sanitize_lowering_inputs` no longer runs a second light reparse over the same input. Under the default-on arena (PR #186) with every Phase 2 structural IPC channel removed, the structured parser has been the reliable source of truth for ~80 PRs; the light-recovery override-reparse was pure dead weight on the happy path.
+
+**Shape of change:**
+
+- `lowering_core.sfn::compile_native_text_to_llvm_file`: swapped `build_parse_result_from_text(native_text)` → `parse_native_artifact(native_text)`; dropped the redundant `recover_native_imports_light(native_text)` call in favor of reusing `parse.imports`. One fewer artifact walk per non-test module compile.
+- `lowering_core.sfn` per-import loop at `:425`: swapped `recover_native_enums_light(native_text)` → `parse_native_enums_for_import(native_text)`. Fires once per transitive imported module — typical compiler module imports 5-20, so this eliminates a full line-scanner walk per import per module compile.
+- `lowering_core.sfn` imports: added `parse_native_artifact` and `parse_native_enums_for_import` to the `native_ir_api` block.
+- `lowering_core.sfn::build_parse_result_from_text` (lines 125-144): **retained** with an updated doc-comment pointing at the Phase 4 PR 2 gating question. Still has one live caller (`entrypoints_tests_writer.sfn:132`) — the test-writer path continues to use the light recovery parser because the seedcheck-emitted-for-tests `get_instruction_tag` + payload-field accessor dispatch against typed variants has not been re-confirmed under seed 0.5.7. That confirmation is the PR 2 gate.
+- `lowering_phase_sanitize.sfn::sanitize_lowering_inputs`: deleted the `_rfns`/`_rsts`/`_rens` override-reparse block (formerly lines 58-83). The structured `parse_in` is now authoritative end-to-end. Function body collapses from ~40 lines to 8.
+- `lowering_phase_sanitize.sfn` imports: dropped `recover_native_enums_light` and `recover_native_imports_light` (both were only used by the deleted override-reparse block). `recover_native_functions_light` and `recover_native_structs_light` remain in the import list — they still feed the defensive `sanitize_functions` and `recover_structs_if_corrupt` fallbacks, which only fire on empty/corrupt primary parse.
+- `entrypoints.sfn` imports: dropped `recover_native_functions_light`, `recover_native_imports_light`, `recover_native_structs_light` (all three were imported but never referenced in the file — dead imports left over from earlier pipeline passes). `recover_functions_for_lowering` retained as a single-symbol import block.
+- `docs/proposals/phase-4-eliminate-light-recovery.md`: Section 3 (Scope) and Section 4 (PR 1 Step 2) rewritten to match the actual PR 1 endpoint — `build_parse_result_from_text` deletion and its light-recovery import drops are explicitly moved to PR 2.
+
+**Per-module overhead removed (non-test primary path):**
+
+- 1 full line-scanner walk (`recover_native_functions_light`) per module compile.
+- 1 full line-scanner walk (`recover_native_structs_light`) per module compile.
+- 2 full line-scanner walks (`recover_native_imports_light`) per module compile — one in `build_parse_result_from_text`, one right after at the call site.
+- 1 full line-scanner walk (`recover_native_enums_light`) per module compile.
+- Plus: the entire override-reparse swap-in-place block in `sanitize_lowering_inputs` — another 3 walks (`_rfns` / `_rsts` / `_rens`) per module compile when `native_text_override_path` is non-empty (the normal case from `compile_native_text_to_llvm_file`).
+- Per imported module: 1 full line-scanner walk (`recover_native_enums_light`) replaced with `parse_native_enums_for_import`, which routes through the same single-pass `parse_native_artifact_impl` the other import helpers already share. This is ~5-20 walks eliminated per module compile depending on import fan-in.
+
+For the 121-module compiler self-host, this is thousands of line-scanner walks per build on the primary path, plus the redundant override-reparse block firing on every `compile_native_text_to_llvm_file` invocation.
+
+**Defensive fallbacks retained (Phase 4b scope):**
+
+- `sanitize_functions` at `lowering_phase_sanitize.sfn:~267` — still calls `recover_native_functions_light` if the structured parse returns zero functions or only extern declarations.
+- `recover_structs_if_corrupt` at `lowering_phase_sanitize.sfn:~350` — still calls `recover_native_structs_light` if every safe struct has an empty name.
+- `recover_functions_for_lowering` light arms at `lowering_recovery.sfn:773, 838, 852` — still fire when the structured parser returns empty / inconsistent results.
+- These stay in place as belt-and-suspenders. Phase 4b (PR 3) will add `print.err` counters, bake for a release cycle, and delete the arms and their `recover_*_light` bodies once counters confirm zero hits on the happy path.
+
+**Risk assessment:**
+
+- **Struct-method shape mismatch in `compile_native_text_to_llvm_file`**: light parser flattens struct methods at parse time (methods appear top-level in `parse.functions`); structured parser keeps them nested inside `NativeStruct.methods`. `lower_to_llvm_lines_with_parsed_context` already calls `flatten_struct_methods(module_structs)` at `:488`, so flattening happens regardless. Net effect: methods are now flattened once (via the unconditional `flatten_struct_methods` call) instead of twice (light parser + flatten). If pre-change IR had duplicate method-mangled symbols, this change is a net fix.
+- **Tag-21 vs typed instruction dispatch**: the light parser emits every instruction as `Expression(tag=21)` with parseable text; the structured parser emits typed variants (`Let`, `Return`, `If`, etc.). The non-test lowering pipeline has been consuming typed variants from the other `parse_native_artifact` call sites since Tier 1A PR 1 (PR #204) without issue, so this does not introduce a new dispatch surface for the primary path. The test-writer path is a separate story — see PR 2.
+- **macOS-arm64 determinism**: the deleted override-reparse block was introduced during v0.1.1-seed-era ABI flake. Seed 0.5.7 with arena has been stable across PRs #183-#203 determinism sweeps. Pre-merge gate is CI's macOS-arm64 matrix build + a 20× `emit llvm` determinism sweep on `lowering_core.sfn` (see verification section in the proposal).
+- **Defensive-fallback hits on the happy path**: if the structured parser has a latent bug that the override-reparse was silently masking, `sanitize_functions:267` or `recover_structs_if_corrupt:350` would start firing. Phase 4b's counter PR is the correct gate for *deleting* these arms; PR 1 leaves them in place specifically so any such latent bug gets caught and corrected instead of propagating a regression into IR.
+
+**Scope:**
+
+- 3 compiler source files modified (`lowering_core.sfn`, `lowering_phase_sanitize.sfn`, `entrypoints.sfn`) + 2 docs files (this entry + `docs/proposals/phase-4-eliminate-light-recovery.md` scope rewrite).
+- Net approximately −40 lines in `lowering_phase_sanitize.sfn` (override-reparse block gone), −10 lines across `lowering_core.sfn` (call-site simplification + import additions), −8 lines in `entrypoints.sfn` (dead-import cleanup). No signature changes, no new wrapper structs, no new tests (the self-host itself exercises every live path on every `make check`; the defensive fallbacks at `sanitize_functions:267` / `recover_structs_if_corrupt:350` / `recover_functions_for_lowering:773` catch regressions).
+
+**Determinism:** The deleted override-reparse block was a cross-module reparse that fed back into the primary pipeline's `parse`. Removing it shrinks the set of per-module operations that can non-determinize output on macOS-arm64. Post-change emit-sweep measurements to land in the PR body once CI completes on all platforms.
+
+**Follow-ups:**
+
+- **Phase 4 PR 2** — conditional on seed 0.5.7 seedcheck confirming both typed-tag dispatch *and* typed-variant payload access. Once confirmed, swap `entrypoints_tests_writer.sfn:132` to `parse_native_artifact`, delete `build_parse_result_from_text` and its four light-recovery imports in `lowering_core.sfn`, and add a test-harness determinism check.
+- **Phase 4b (PR 3)** — instrument the three remaining defensive-fallback arms with `print.err` counters; after a release cycle with zero hits, delete the arms plus the `recover_*_light` function bodies from `lowering_recovery.sfn` (~600 LOC).
 
 ---
 

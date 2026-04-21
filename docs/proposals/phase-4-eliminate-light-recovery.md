@@ -45,18 +45,18 @@
 ## 3. Scope
 
 **In (PR 1):**
-- Delete `build_parse_result_from_text` (`lowering_core.sfn:126-140`).
 - Rework `compile_native_text_to_llvm_file` to call `parse_native_artifact` directly.
 - Delete the `_rfns`/`_rsts`/`_rens` override-reparse block in `sanitize_lowering_inputs` (`lowering_phase_sanitize.sfn:58-83`).
 - Replace per-import `recover_native_enums_light` at `lowering_core.sfn:425` with `parse_native_enums_for_import`.
 - Collapse the duplicate `recover_native_imports_light` at `lowering_core.sfn:258` into reusing `parse.imports`.
-- Clean up now-orphaned imports in `entrypoints.sfn`, `lowering_core.sfn`, `lowering_phase_sanitize.sfn`.
+- Clean up now-orphaned imports in `entrypoints.sfn` and `lowering_phase_sanitize.sfn`.
 
 **Out (keep as defensive fallbacks):**
 - `recover_functions_for_lowering` internal light calls — fire only when structured parse returned empty/inconsistent. Keep as belt-and-suspenders; delete in Phase 4b.
 - `sanitize_functions:300` and `recover_structs_if_corrupt:383` — same argument.
 - The `recover_*_light` function bodies themselves in `lowering_recovery.sfn` — still exported for the fallbacks. Delete in Phase 4b once counters confirm zero hits for a release cycle.
-- `write_llvm_ir_for_tests_from_text` — conditional on Section 2 item 2; most likely stays on `build_parse_result_from_text` for this PR.
+- `write_llvm_ir_for_tests_from_text` — still the gating question (Section 2 item 2). Stays on `build_parse_result_from_text` for PR 1.
+- `build_parse_result_from_text` (`lowering_core.sfn:126-140`) and its four light-recovery imports — retained because the test writer still calls it. Deletion moves to PR 2 once the test-writer swap lands.
 
 ## 4. Sequencing
 
@@ -70,8 +70,8 @@
 
 **Step 2** — `lowering_core.sfn`:
 - Lines `:247-282`: replace `build_parse_result_from_text(native_text)` with `parse_native_artifact(native_text)`; replace `recover_native_imports_light(native_text)` at `:258` with `parse.imports`.
-- Lines `:126-140`: delete `build_parse_result_from_text`.
-- Lines `:115-119`: drop light-recovery imports (keep `recover_functions_for_lowering`).
+- Lines `:126-140`: **Keep** `build_parse_result_from_text` — the test-writer (`entrypoints_tests_writer.sfn:132`) still depends on it. Add a comment pointing at PR 2's gating. Deletion moves to PR 2.
+- Lines `:115-119`: **Keep** all four light-recovery imports — `build_parse_result_from_text` still calls them. Dropping moves to PR 2.
 - Line `:425`: replace `recover_native_enums_light(native_text)` with `parse_native_enums_for_import(native_text)`. Add `parse_native_enums_for_import` to the `native_ir_api` import block.
 
 **Step 3** — Fallback verification:
@@ -87,8 +87,10 @@
 
 ### PR 2 — Test-writer path (conditional)
 
-Only proceed if inspection of `native_ir.sfn:get_instruction_tag` confirms typed-tag dispatch works under seed 0.5.7. Then:
+Only proceed if inspection of `native_ir.sfn:get_instruction_tag` confirms typed-tag dispatch works under seed 0.5.7, **and** the payload accessors (`get_instruction_text`, `get_instruction_condition`, etc. in `lowering_native_helpers.sfn:291-299`) correctly read typed-variant payload fields under the seedcheck (the second failure mode flagged by the test-writer comment block). Then:
 - `entrypoints_tests_writer.sfn:132`: switch from `build_parse_result_from_text` to `parse_native_artifact`. Remove the `:76` import. Update the `:120-131` comment block.
+- `lowering_core.sfn:126-140`: delete `build_parse_result_from_text` (now has zero callers).
+- `lowering_core.sfn:115-119`: drop the four light-recovery imports (now orphaned).
 - Add a test-harness determinism check covering a module with `if`/`loop`/`match`.
 
 Otherwise, park PR 2 with a tracking comment and revisit after the next seed cut.

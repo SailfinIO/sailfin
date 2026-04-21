@@ -28,7 +28,9 @@ import {
     ParseNativeResult
 } from "../../native_ir";
 import {
+    parse_native_artifact,
     parse_native_bindings_from_text,
+    parse_native_enums_for_import,
     parse_native_function_count_from_text,
     parse_native_functions_from_text,
     parse_native_structs_for_import
@@ -121,8 +123,10 @@ import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowerin
 import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Consolidated: parse all structure from native text using light recovery.
-// Kept in lowering_core to preserve cross-module symbol mangling compatibility
-// with the v0.1.1 seed's shim expectations.
+// Retained for `write_llvm_ir_for_tests_from_text`; see PR 2 gating in
+// `docs/proposals/phase-4-eliminate-light-recovery.md` §2.2. The primary
+// non-test build path (`compile_native_text_to_llvm_file`) now calls
+// `parse_native_artifact` directly.
 fn build_parse_result_from_text(native_text: string) -> ParseNativeResult {
     let recovered_functions = recover_native_functions_light(native_text);
     let recovered_structs = recover_native_structs_light(native_text);
@@ -254,10 +258,9 @@ fn compile_native_text_to_llvm_file(native_text_path: string, module_name: strin
         print.err("emit-llvm: native text file empty at " + native_text_path);
         return false;
     }
-    let parse = build_parse_result_from_text(native_text);
-    let raw_imports = recover_native_imports_light(native_text);
+    let parse = parse_native_artifact(native_text);
     fs.writeFile("build/sailfin/emit-native.tmp", native_text);
-    let import_context = collect_imported_module_context_for_module(raw_imports, module_name);
+    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = make_native_module_for_emit(module_name, native_text);
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
     if lowered_lines.lines == null {
@@ -422,7 +425,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         }
         // Single-pass: parse structs+enums once, apply manifest once
         let imported_structs_safe = parse_native_structs_for_import(native_text);
-        let imported_enums_safe = recover_native_enums_light(native_text);
+        let imported_enums_safe = parse_native_enums_for_import(native_text);
         let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
         let mut applied_structs = applied_import.structs;
         if applied_structs == null { applied_structs = []; }
