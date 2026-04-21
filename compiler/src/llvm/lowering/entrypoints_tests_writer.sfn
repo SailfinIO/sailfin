@@ -72,10 +72,7 @@ import {
     string_array_contains
 } from "../utils";
 import { emit_llvm_function } from "./emission";
-import {
-    build_parse_result_from_text,
-    lower_to_llvm_lines_with_parsed_context_for_tests
-} from "./lowering_core";
+import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core";
 import { render_test_harness_main_for_module } from "./lowering_helpers";
 import {
     empty_trait_metadata,
@@ -97,7 +94,42 @@ import {
     extend_string_lines_checked,
     module_source_filename
 } from "./lowering_io";
+import {
+    recover_native_enums_light,
+    recover_native_functions_light,
+    recover_native_imports_light,
+    recover_native_structs_light
+} from "./lowering_recovery";
 import { lower_module_bindings_to_globals } from "./module_globals";
+
+// Test-only: assemble a ParseNativeResult using the light recovery parsers.
+// The structured parser (parse_native_artifact) emits typed instruction
+// variants (Let, Return, If, ...) that the test-writer's instruction
+// dispatch path historically could not handle when running against an
+// older seedcheck (collapsed every typed tag to 21 = Expression). The
+// light recovery parsers emit every body instruction as Expression with
+// reparseable text, which the tag-21 fallback handler always lowers.
+//
+// Lives here (not in lowering_core.sfn) because the test-writer is the
+// only remaining consumer; the non-test primary path now goes through
+// parse_native_artifact directly. This function — and the underlying
+// recover_*_light helpers — will be deleted when the test-writer
+// migrates to parse_native_artifact (Phase 4 PR 2).
+fn build_parse_result_from_text(native_text: string) -> ParseNativeResult {
+    let recovered_functions = recover_native_functions_light(native_text);
+    let recovered_structs = recover_native_structs_light(native_text);
+    let recovered_imports = recover_native_imports_light(native_text);
+    let recovered_enums = recover_native_enums_light(native_text);
+    return ParseNativeResult {
+        functions: recovered_functions,
+        imports: recovered_imports,
+        structs: recovered_structs,
+        interfaces: [],
+        enums: recovered_enums,
+        bindings: [],
+        diagnostics: []
+    };
+}
 
 // Stub: kept for import-graph compatibility (main.sfn imports this symbol).
 // The full implementation (~600 lines duplicating the entire lowering pipeline)

@@ -855,8 +855,8 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
     return [];
 }
 
-// build_parse_result_from_text lives in lowering_core.sfn to preserve
-// cross-module symbol mangling compatibility with the v0.1.1 seed shims.
+// build_parse_result_from_text now lives in entrypoints_tests_writer.sfn
+// (its only consumer after Phase 4 PR 1). It will be deleted in PR 2.
 // ── Enum recovery ───────────────────────────────────────────────────
 // Light line-scanner for .enum/.endenum blocks, analogous to
 // recover_native_structs_light.  Avoids the cross-module ABI corruption
