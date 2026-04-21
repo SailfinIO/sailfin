@@ -15,6 +15,7 @@ import {
     ParseNativeResult
 } from "../../native_ir";
 import {
+    parse_native_artifact,
     parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_interfaces_for_import,
@@ -97,7 +98,6 @@ import {
     extend_string_lines_checked,
     module_source_filename
 } from "./lowering_io";
-import { parse_native_artifact_safe } from "./lowering_recovery";
 import { lower_module_bindings_to_globals } from "./module_globals";
 
 // Stub: kept for import-graph compatibility (main.sfn imports this symbol).
@@ -114,7 +114,7 @@ fn lower_to_llvm_for_tests(native_module: NativeModule) -> LoweredLLVMResult ![i
             string_constants: empty_string_constant_set()
         };
     }
-    let parse = parse_native_artifact_safe(artifact.contents);
+    let parse = parse_native_artifact(artifact.contents);
     let import_context = collect_imported_module_context_for_module(parse.imports, native_module.module_name);
     let base = lower_to_llvm_with_parsed_context(native_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics);
     return base;
