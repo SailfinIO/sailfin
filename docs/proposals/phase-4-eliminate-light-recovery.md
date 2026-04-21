@@ -99,7 +99,7 @@ Once fallback counters confirm zero hits for a full release cycle: delete `recov
 
 ## 5. Risks
 
-- **macOS-arm64 determinism**: the override-reparse block in `sanitize_phase_sanitize.sfn:58-83` was added when cross-module struct returns were unreliable. Seed 0.5.7 proved stable in PR #183/#186 sweeps, but arm64 has lagged on prior ABI flakes. **Mitigation**: gate PR 1 merge on a macOS-arm64 determinism run (20× `emit llvm` per-module, hash compare). If arm64 flakes, narrow PR 1 to Step 2 only (leave the override-reparse in `sanitize_lowering_inputs` intact), reclaiming ~half the win.
+- **macOS-arm64 determinism**: the override-reparse block in `lowering_phase_sanitize.sfn:58-83` was added when cross-module struct returns were unreliable. Seed 0.5.7 proved stable in PR #183/#186 sweeps, but arm64 has lagged on prior ABI flakes. **Mitigation**: gate PR 1 merge on a macOS-arm64 determinism run (20× `emit llvm` per-module, hash compare). If arm64 flakes, narrow PR 1 to Step 2 only (leave the override-reparse in `sanitize_lowering_inputs` intact), reclaiming ~half the win.
 
 - **Struct-method shape mismatch in `compile_native_text_to_llvm_file`**: light parser flattens methods at parse; structured parser keeps them nested. `lower_to_llvm_lines_with_parsed_context` already calls `flatten_struct_methods` at `:488`, so flattening happens regardless. Step 2 changes `parse.functions` to no longer contain flattened methods. Net effect: methods appear once (via flatten) instead of twice. **Verify** by diffing a small module's pre/post IR; if method-mangled symbols double, there's already latent dedup and this change is a net fix.
 
