@@ -694,37 +694,40 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
     let mut current_lines: string[] = lines;
     let mut current_temp: number = temp_index;
 
-    let allocation = lookup_allocation_info(context, operand.llvm_type);
-    if allocation == null {
-        diagnostics.push("llvm lowering: unable to allocate heap storage for `"
-            + operand.llvm_type
-            + "` when assigning to `"
-            + expected_pointer_type
-            + "`");
-        return HeapBoxResult {
-            lines: current_lines,
-            temp_index: current_temp,
-            operand: null,
-            diagnostics: diagnostics
-        };
-    }
-    if allocation.size <= 0 {
-        diagnostics.push("llvm lowering: computed heap allocation size for `"
-            + operand.llvm_type
-            + "` is zero");
-        return HeapBoxResult {
-            lines: current_lines,
-            temp_index: current_temp,
-            operand: null,
-            diagnostics: diagnostics
-        };
-    }
+    // 0.5.8+ boxed-struct ABI: compute the true LLVM layout size via the
+    // `getelementptr` sizeof trick instead of the `lookup_allocation_info`
+    // cached value. Under option-a inline layout, the cached StructTypeInfo
+    // size was computed treating user-struct fields as pointer-sized (8
+    // bytes), which undercounts structs that nest other structs inline.
+    // Example: `%AABB = type { %Vec3, %Vec3 }` with inline layout is 48
+    // bytes (2 × 24), but the cached `info.size` said 32, so calloc allocated
+    // only 32 bytes and the subsequent `store %AABB` overflowed the heap.
+    //
+    // The GEP-sizeof trick lets LLVM compute the actual runtime size from
+    // the same type declaration that governs the store — they agree by
+    // construction, regardless of what the upstream layout pass thinks.
+    let size_ptr_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + size_ptr_temp
+        + " = getelementptr "
+        + operand.llvm_type
+        + ", "
+        + operand.llvm_type
+        + "* null, i32 1");
+    let size_temp = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + size_temp
+        + " = ptrtoint "
+        + operand.llvm_type
+        + "* "
+        + size_ptr_temp
+        + " to i64");
 
     let malloc_temp = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + malloc_temp
         + " = call noalias i8* @calloc(i64 1, i64 "
-        + number_to_string(allocation.size)
+        + size_temp
         + ")");
 
     let typed_ptr_temp = format_temp_name(current_temp);
