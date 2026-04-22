@@ -379,6 +379,45 @@ fn _map_type_core(context: TypeContext, normalized: string) -> string {
     if array_type.length > 0 { return array_type; }
     let primitive_type = map_primitive_type(context, normalized);
     if primitive_type.length > 0 { return primitive_type; }
+
+    // 0.5.8+ boxed-struct ABI — mirror of type_mapping.sfn:map_return_type.
+    // User structs/enums are returned as %T*, interfaces stay by-value
+    // (already-compact fat pointers). This mapper is used by let bindings
+    // and other statement-level type resolution; both this file and
+    // type_mapping.sfn must agree, otherwise call-site return types and
+    // local alloca types disagree and LLVM rejects the IR with
+    // `invalid operand type for instruction`.
+    if normalized.length > 0 {
+        let mut first_ch = substring(normalized, 0, 1);
+        let mut looks_user: boolean = false;
+        if first_ch >= "A" {
+            if first_ch <= "Z" { looks_user = true; }
+        }
+        if looks_user {
+            let mut i: number = 0;
+            loop {
+                if i >= context.structs.length { break; }
+                let info = context.structs[i];
+                if info.name == normalized { return info.llvm_name + "*"; }
+                i += 1;
+            }
+            i = 0;
+            loop {
+                if i >= context.enums.length { break; }
+                let info = context.enums[i];
+                if info.name == normalized { return info.llvm_name + "*"; }
+                i += 1;
+            }
+            i = 0;
+            loop {
+                if i >= context.interfaces.length { break; }
+                let info = context.interfaces[i];
+                // Interfaces stay by-value (16-byte fat pointer).
+                if info.name == normalized { return info.llvm_name; }
+                i += 1;
+            }
+        }
+    }
     return "";
 }
 

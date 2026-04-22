@@ -9,7 +9,12 @@
 // Extracted from lowering_core.sfn to reduce per-file memory footprint.
 import { NativeEnum, NativeInterface, NativeStruct } from "../../native_ir";
 import { build_type_context } from "../type_context";
-import { EnumTypeInfo, EnumVariantInfo, TypeContext } from "../types";
+import {
+    EnumTypeInfo,
+    EnumVariantInfo,
+    TypeContext,
+    TypeContextBuildResult
+} from "../types";
 import { number_to_string, sanitize_symbol } from "../utils";
 import { get_enum_name_at } from "./lowering_native_helpers";
 
@@ -70,8 +75,12 @@ fn build_enum_infos_inline(enums: NativeEnum[]) -> EnumTypeInfo[] {
 
 // Build the type context and recover enum info from the in-memory input
 // if cross-module ABI corruption caused enums to arrive empty.
-// Returns the TypeContext (enums may be recovered from fixed_enums_list).
-fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_enums: NativeEnum[], combined_interfaces: NativeInterface[], diagnostics: string[], _trace_enums: boolean, debug_lowering: boolean) -> TypeContext ![io] {
+// Returns a `TypeContextBuildResult` — the TypeContext (enums may be
+// recovered from fixed_enums_list) plus accumulated diagnostics. The
+// orchestrator merges diagnostics in-memory. Previously wrote to
+// `build/sailfin/.phase_types_diagnostics` which was a source of
+// non-determinism when stale files persisted across test invocations.
+fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_enums: NativeEnum[], combined_interfaces: NativeInterface[], diagnostics: string[], _trace_enums: boolean, debug_lowering: boolean) -> TypeContextBuildResult ![io] {
     // Skip cross-module fixup_enum_layouts: the seed's struct-returning
     // cross-module ABI segfaults.  Pass enums through directly.
     let fixed_enums_list = combined_enums;
@@ -89,8 +98,9 @@ fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_e
     }
 
     let type_build = build_type_context(combined_structs, fixed_enums_list, combined_interfaces);
-    // Write type-context diagnostics to file so the orchestrator can merge them.
-    // The `diagnostics` parameter is local — reassigning it here would be dropped.
+    // Collect type-context diagnostics into a local array; returned
+    // to the orchestrator via `TypeContextBuildResult` instead of
+    // the legacy `.phase_types_diagnostics` file channel.
     let mut _tc_di: number = 0;
     let _tc_diags = type_build.diagnostics;
     let mut _tc_diags_lines: string[] = [];
@@ -101,7 +111,6 @@ fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_e
             _tc_di += 1;
         }
     }
-    fs.writeLines("build/sailfin/.phase_types_diagnostics", _tc_diags_lines);
     let mut type_context = type_build.context;
 
     // Recover enum info from the in-memory fixed_enums_list if cross-module
@@ -135,5 +144,8 @@ fn build_type_context_with_recovery(combined_structs: NativeStruct[], combined_e
         print.err("enum_trace: type_context.enums=" + number_to_string(type_context.enums.length));
     }
     if debug_lowering { print.err("emit-llvm: phase=type_context"); }
-    return type_context;
+    return TypeContextBuildResult {
+        context: type_context,
+        diagnostics: _tc_diags_lines
+    };
 }

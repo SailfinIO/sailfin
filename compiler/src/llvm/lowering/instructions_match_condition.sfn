@@ -80,14 +80,27 @@ fn lower_match_case_condition(function_name: string, subject_operand: LLVMOperan
                     if enum_info.tag_type == "i32" { tag_llvm_type = "i32"; }
                     if enum_info.tag_type == "i64" { tag_llvm_type = "i64"; }
 
-                    // Extract the tag from the subject enum value using extractvalue
-                    let tag_temp = format_temp_name(current_temp);
+                    // 0.5.8+ boxed-struct ABI: subject_operand is %EnumT* (a
+                    // pointer, not a first-class aggregate). Use GEP to the
+                    // tag field (index 0) + load, not extractvalue.
+                    let tag_ptr_temp = format_temp_name(current_temp);
                     current_temp += 1;
-                    current_lines.push("  " + tag_temp + " = extractvalue "
+                    current_lines.push("  " + tag_ptr_temp
+                        + " = getelementptr inbounds "
+                        + enum_info.llvm_name
+                        + ", "
                         + subject_operand.llvm_type
                         + " "
                         + subject_operand.value
-                        + ", 0");
+                        + ", i32 0, i32 0");
+                    let tag_temp = format_temp_name(current_temp);
+                    current_temp += 1;
+                    current_lines.push("  " + tag_temp + " = load "
+                        + tag_llvm_type
+                        + ", "
+                        + tag_llvm_type
+                        + "* "
+                        + tag_ptr_temp);
 
                     // Compare the extracted tag with the variant's tag
                     let tag_operand = LLVMOperand {

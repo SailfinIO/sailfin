@@ -714,3 +714,24 @@ struct CallSignatureResolution {
     is_trait_dispatch: boolean;
     diagnostics: string[];
 }
+
+// Wraps the output of `lower_all_functions` so the orchestrator can
+// merge diagnostics in-memory instead of reading them back via the
+// `.phase_functions_diagnostics` file IPC channel. The previous file
+// channel was a source of non-determinism: if the file persisted across
+// test invocations (the `cli_commands._clean_lowering_state` sweep
+// happens early in a compile, not between test invocations), a later
+// invocation could read stale bytes into diagnostic strings and
+// contaminate downstream state.
+struct FunctionLoweringResult {
+    lines: string[];
+    diagnostics: string[];
+}
+
+// Wraps the output of `build_type_context_with_recovery` for the same
+// reason as `FunctionLoweringResult` — eliminates the
+// `.phase_types_diagnostics` file IPC channel.
+struct TypeContextBuildResult {
+    context: TypeContext;
+    diagnostics: string[];
+}

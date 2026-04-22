@@ -22,6 +22,7 @@ import {
     find_struct_info_by_llvm_type,
     find_vtable_for_struct_interface
 } from "../type_context_queries";
+import { ends_with_pointer_suffix } from "../type_mapping";
 import {
     LLVMOperand,
     LetLoweringResult,
@@ -264,22 +265,38 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
                     let with_vtable_temp = "%t" + number_to_string(current_temp);
                     current_temp += 1;
 
-                    // Allocate space for the struct on the stack
-                    current_lines.push("  " + struct_ptr_temp + " = alloca "
-                        + struct_info.llvm_name);
-                    // Store the struct value
-                    current_lines.push("  store " + operand.llvm_type + " "
-                        + operand.value
-                        + ", "
-                        + operand.llvm_type
-                        + "* "
-                        + struct_ptr_temp);
-                    // Cast struct pointer to i8*
-                    current_lines.push("  " + data_ptr_temp + " = bitcast "
-                        + struct_info.llvm_name
-                        + "* "
-                        + struct_ptr_temp
-                        + " to i8*");
+                    // 0.5.8+ boxed-struct ABI: under the new ABI, struct operands
+                    // arrive as `%T*` pointers. The alloca+store "take address"
+                    // dance below is only needed when the operand is a by-value
+                    // aggregate — which no longer happens for user structs.
+                    // Skip the dance when the operand is already a pointer, and
+                    // bitcast directly from the struct pointer to i8*.
+                    if ends_with_pointer_suffix(operand.llvm_type) {
+                        current_lines.push("  " + data_ptr_temp + " = bitcast "
+                            + operand.llvm_type
+                            + " "
+                            + operand.value
+                            + " to i8*");
+                    } else {
+                        // Legacy by-value aggregate path — kept for any non-user
+                        // aggregate that somehow still arrives as %T.
+                        // Allocate space for the struct on the stack
+                        current_lines.push("  " + struct_ptr_temp + " = alloca "
+                            + struct_info.llvm_name);
+                        // Store the struct value
+                        current_lines.push("  store " + operand.llvm_type + " "
+                            + operand.value
+                            + ", "
+                            + operand.llvm_type
+                            + "* "
+                            + struct_ptr_temp);
+                        // Cast struct pointer to i8*
+                        current_lines.push("  " + data_ptr_temp + " = bitcast "
+                            + struct_info.llvm_name
+                            + "* "
+                            + struct_ptr_temp
+                            + " to i8*");
+                    }
                     // Get vtable pointer (bitcast global vtable constant to i8*)
                     current_lines.push("  " + vtable_ptr_temp + " = bitcast "
                         + vtable.llvm_type_name

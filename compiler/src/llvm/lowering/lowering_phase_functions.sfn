@@ -10,6 +10,7 @@ import { append_function_effect_entry, find_function_effect_entry } from "../eff
 import { merge_string_constants, render_string_constants } from "../strings";
 import {
     FunctionEffectEntry,
+    FunctionLoweringResult,
     LocalBinding,
     StringConstant,
     TypeContext
@@ -35,10 +36,13 @@ import {
 
 // Lower all local functions to LLVM IR. Returns the full LLVM IR line
 // array (user functions + synthesized `@add` helper + string constants +
-// intrinsic declarations). Writes the accumulated diagnostics to
-// `build/sailfin/.phase_functions_diagnostics` for lowering_core.sfn to
-// read back.
-fn lower_all_functions(local_functions: NativeFunction[], context_functions: NativeFunction[], aggregated_effects: FunctionEffectEntry[], type_context: TypeContext, module_name: string, safe_entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_global_locals: LocalBinding[], module_init_symbol: string, module_globals_needs_init_call: boolean, module_string_constants: StringConstant[], trace: boolean, debug_lowering: boolean) -> string[] ![io] {
+// intrinsic declarations) along with accumulated diagnostics, bundled in
+// a `FunctionLoweringResult` so the orchestrator can merge diagnostics
+// in-memory. Previously wrote to `build/sailfin/.phase_functions_diagnostics`
+// which was a source of non-determinism when stale files persisted
+// across test invocations (the cleanup sweep fires on compile start,
+// not between test runs within a single `make test` invocation).
+fn lower_all_functions(local_functions: NativeFunction[], context_functions: NativeFunction[], aggregated_effects: FunctionEffectEntry[], type_context: TypeContext, module_name: string, safe_entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_global_locals: LocalBinding[], module_init_symbol: string, module_globals_needs_init_call: boolean, module_string_constants: StringConstant[], trace: boolean, debug_lowering: boolean) -> FunctionLoweringResult ![io] {
     let mut lines: string[] = [];
     let mut index: number = 0;
     let mut has_add_function: boolean = false;
@@ -212,8 +216,5 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
     if trace { print.err("test llvm: intrinsics ensured"); }
     if debug_lowering { print.err("emit-llvm: phase=intrinsics"); }
 
-    // Write diagnostics to file for lowering_core.sfn to read
-    fs.writeLines("build/sailfin/.phase_functions_diagnostics", diagnostics);
-
-    return lines;
+    return FunctionLoweringResult { lines: lines, diagnostics: diagnostics };
 }

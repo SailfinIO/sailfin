@@ -3188,6 +3188,20 @@ static void _array_check_canary(const char *label, SailfinPtrArray *arr)
     }
 }
 
+// Boxed-struct allocation (0.5.8+ ABI). Returns a pointer to zero-initialized
+// memory of the requested size. Routes through the arena when enabled (default-on
+// in selfhost builds), otherwise falls back to calloc. Callers use GEP+store to
+// populate fields, and return the pointer directly as %Struct*. This replaces
+// the pre-0.5.8 LLVM first-class aggregate return (%Struct with chained
+// insertvalue), which triggered non-deterministic AArch64 aggregate-return
+// legalization mismatches at cross-module boundaries on Apple Silicon.
+void *sailfin_runtime_alloc_struct(int64_t size_bytes)
+{
+    if (size_bytes <= 0)
+        return NULL;
+    return _rt_calloc(1, (size_t)size_bytes);
+}
+
 SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 {
     _invalidate_concat_reuse();

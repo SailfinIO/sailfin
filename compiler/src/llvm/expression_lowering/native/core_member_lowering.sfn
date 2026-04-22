@@ -743,6 +743,37 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             + ", i32 0, i32 "
             + number_to_string(field_info.index));
         current_temp += 1;
+
+        // 0.5.8+ boxed-struct ABI: if the field is itself a user struct or
+        // enum (option-a inline layout), do NOT load the aggregate value.
+        // Return the GEP pointer as %FieldT* — it points into the parent's
+        // heap storage (since the parent was heap-boxed in lower_struct_literal)
+        // so the pointer is stable for the parent's lifetime. Loading would
+        // materialize a by-value aggregate and reintroduce the exact AArch64
+        // ABI ambiguity we're avoiding.
+        let mut _field_is_user_aggregate: boolean = false;
+        if starts_with(field_info.llvm_type, "%") {
+            if find_struct_info_by_llvm_type(context, field_info.llvm_type) != null {
+                _field_is_user_aggregate = true;
+            }
+            if find_enum_info_by_llvm_type(context, field_info.llvm_type) != null {
+                _field_is_user_aggregate = true;
+            }
+        }
+        if _field_is_user_aggregate {
+            let typed_operand = LLVMOperand {
+                llvm_type: field_info.llvm_type + "*",
+                value: gep_name
+            };
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: typed_operand,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
+
         let load_name = format_temp_name(current_temp);
         current_lines.push("  " + load_name + " = load " + field_info.llvm_type
             + ", "

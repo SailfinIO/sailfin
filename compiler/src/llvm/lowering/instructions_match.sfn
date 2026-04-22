@@ -421,19 +421,28 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
                         let enum_info_val = lowered_condition.enum_info;
                         let variant_info_val = lowered_condition.variant_info;
 
-                        // Allocate subject on stack for field extraction
-                        let subject_alloca_temp = format_temp_name(current_temp);
-                        current_temp += 1;
-                        current_lines.push("  " + subject_alloca_temp
-                            + " = alloca "
-                            + subject_operand.llvm_type);
-                        current_lines.push("  store " + subject_operand.llvm_type
-                            + " "
-                            + subject_operand.value
-                            + ", "
-                            + subject_operand.llvm_type
-                            + "* "
-                            + subject_alloca_temp);
+                        // 0.5.8+ boxed-struct ABI: if the subject is already a
+                        // %EnumT* pointer, we can use it directly as the base
+                        // for payload GEP. The old alloca+store "take address"
+                        // dance was only needed when the subject arrived as a
+                        // by-value %EnumT first-class aggregate.
+                        let mut subject_alloca_temp: string = "";
+                        if ends_with_pointer_suffix(subject_operand.llvm_type) {
+                            subject_alloca_temp = subject_operand.value;
+                        } else {
+                            subject_alloca_temp = format_temp_name(current_temp);
+                            current_temp += 1;
+                            current_lines.push("  " + subject_alloca_temp
+                                + " = alloca "
+                                + subject_operand.llvm_type);
+                            current_lines.push("  store " + subject_operand.llvm_type
+                                + " "
+                                + subject_operand.value
+                                + ", "
+                                + subject_operand.llvm_type
+                                + "* "
+                                + subject_alloca_temp);
+                        }
 
                         // Note: NOT added to base_allocas since this allocation happens in the match body, not at function entry
                         let mut binding_idx: number = 0;

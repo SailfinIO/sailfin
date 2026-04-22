@@ -57,6 +57,14 @@ extern "C"
     // Currently used for `.variant` on boxed enums.
     char *sailfin_runtime_get_field(char *base, char *field);
 
+    // ---- Struct helpers ----
+    // Allocate zero-initialized memory for a boxed struct literal. Part of the
+    // boxed-struct ABI migration (0.5.8+): user structs are returned by pointer
+    // (%Struct*) instead of as first-class LLVM aggregates, to sidestep the
+    // AArch64 aggregate-return legalization ambiguity that caused cross-module
+    // non-deterministic truncation under seed 0.5.7 on Apple Silicon.
+    void *sailfin_runtime_alloc_struct(int64_t size_bytes);
+
     // ---- Array helpers ----
 
     // For `{ i8**, i64 }*` concatenation, native IR uses `@sailfin_runtime_concat({i8**,i64}*,{i8**,i64}*)`.
