@@ -360,7 +360,33 @@ fn map_return_type(context: TypeContext, return_type: string) -> string {
     let array_type = map_array_pointer_type(context, normalized);
     if array_type.length > 0 { return array_type; }
     let primitive_type = map_primitive_type(context, normalized);
-    if primitive_type.length > 0 { return primitive_type; }
+    if primitive_type.length > 0 {
+        // 0.5.8+ boxed-struct ABI: `map_primitive_type` returns bare `%T`
+        // for user structs/enums (needed for struct-field layouts and other
+        // non-return-type uses). For RETURN types specifically, user struct
+        // and enum returns must be `%T*` (pointer) to match the boxed ABI
+        // in `type_mapping.sfn::map_return_type`. Interfaces stay by-value.
+        // Without this addendum, call-site signatures disagree with the
+        // function definitions and LLVM rejects the IR with invalid operand
+        // type errors.
+        if starts_with(primitive_type, "%") {
+            if !ends_with_pointer_suffix(primitive_type) {
+                // Check if this is a struct or enum (not interface).
+                let struct_info = find_struct_info_by_name(context, normalized);
+                if struct_info != null { return primitive_type + "*"; }
+                let mut _enum_idx: number = 0;
+                loop {
+                    if _enum_idx >= context.enums.length { break; }
+                    if context.enums[_enum_idx].name == normalized {
+                        return primitive_type + "*";
+                    }
+                    _enum_idx += 1;
+                }
+                // Interface — return bare name (by-value fat pointer).
+            }
+        }
+        return primitive_type;
+    }
     // Fallback to opaque pointer for unrecognised return types (`any`, user structs, etc.)
     return "i8*";
 }
@@ -432,7 +458,26 @@ fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
     let array_type = map_array_pointer_type(context, normalized);
     if array_type.length > 0 { return array_type; }
     let primitive_type = map_primitive_type(context, normalized);
-    if primitive_type.length > 0 { return primitive_type; }
+    if primitive_type.length > 0 {
+        // 0.5.8+ boxed-struct ABI: same logic as map_return_type above.
+        // User struct/enum PARAMETERS must cross boundaries as %T*.
+        // Interfaces stay by-value fat pointers.
+        if starts_with(primitive_type, "%") {
+            if !ends_with_pointer_suffix(primitive_type) {
+                let struct_info = find_struct_info_by_name(context, normalized);
+                if struct_info != null { return primitive_type + "*"; }
+                let mut _enum_idx: number = 0;
+                loop {
+                    if _enum_idx >= context.enums.length { break; }
+                    if context.enums[_enum_idx].name == normalized {
+                        return primitive_type + "*";
+                    }
+                    _enum_idx += 1;
+                }
+            }
+        }
+        return primitive_type;
+    }
     // Fallback to generic pointer for unresolved types (e.g., imported structs/enums not in type context)
     return "i8*";
 }
