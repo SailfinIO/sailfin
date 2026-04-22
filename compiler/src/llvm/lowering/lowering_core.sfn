@@ -472,13 +472,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     if trace { print.err("test llvm: enum layout fixup start"); }
 
     if trace { print.err("test llvm: type context build start"); }
-    let type_context = build_type_context_with_recovery(combined_structs, combined_enums, combined_interfaces, diagnostics, _trace_enums, debug_lowering);
-    // Merge type-context diagnostics written by build_type_context_with_recovery
-    let _tc_diags_raw = fs.readFile("build/sailfin/.phase_types_diagnostics");
-    if _tc_diags_raw.length > 0 {
-        let _tc_diags = split_lines_local(_tc_diags_raw);
-        diagnostics = extend_string_lines_checked(diagnostics, _tc_diags, "type context");
-    }
+    let _tc_build = build_type_context_with_recovery(combined_structs, combined_enums, combined_interfaces, diagnostics, _trace_enums, debug_lowering);
+    let type_context = _tc_build.context;
+    diagnostics = extend_string_lines_checked(diagnostics, _tc_build.diagnostics, "type context");
     if trace { print.err("test llvm: type context built"); }
     if timing {
         print.err("test llvm: phase=type_context ms=" + number_to_string(monotonic_millis() - start_ms));
@@ -669,15 +665,9 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     }
 
     // ── Phase 5: Lower all functions ────────────────────────────────
-    let function_lines = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering);
-    lines = extend_string_lines(lines, function_lines);
-
-    // Read function phase diagnostics
-    let _fn_diags_raw = fs.readFile("build/sailfin/.phase_functions_diagnostics");
-    if _fn_diags_raw.length > 0 {
-        let _fn_diags = split_lines_local(_fn_diags_raw);
-        diagnostics = extend_string_lines_checked(diagnostics, _fn_diags, "function lowering");
-    }
+    let function_result = lower_all_functions(local_functions, context_functions, aggregated_effects, type_context, native_module.module_name, safe_entry_points, exported_symbols, imported_functions, module_global_locals, module_init_symbol, module_globals_needs_init_call, module_string_constants, trace, debug_lowering);
+    lines = extend_string_lines(lines, function_result.lines);
+    diagnostics = extend_string_lines_checked(diagnostics, function_result.diagnostics, "function lowering");
 
     if timing {
         print.err("test llvm: phase=functions ms=" + number_to_string(monotonic_millis() - start_ms));

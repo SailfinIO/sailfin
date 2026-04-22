@@ -820,23 +820,47 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                             tag_llvm_type = "i64";
                         }
 
-                        let left_tag_temp = format_temp_name(alignment_temp);
+                        // 0.5.8+ boxed-struct ABI: enum operands are %EnumT*,
+                        // not by-value %EnumT. Read the tag via GEP+load.
+                        let left_tag_ptr_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
-                        alignment_lines.push("  " + left_tag_temp
-                            + " = extractvalue "
+                        alignment_lines.push("  " + left_tag_ptr_temp
+                            + " = getelementptr inbounds "
+                            + enum_info.llvm_name
+                            + ", "
                             + left_operand.llvm_type
                             + " "
                             + left_operand.value
-                            + ", 0");
-
-                        let right_tag_temp = format_temp_name(alignment_temp);
+                            + ", i32 0, i32 0");
+                        let left_tag_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
-                        alignment_lines.push("  " + right_tag_temp
-                            + " = extractvalue "
+                        alignment_lines.push("  " + left_tag_temp
+                            + " = load "
+                            + tag_llvm_type
+                            + ", "
+                            + tag_llvm_type
+                            + "* "
+                            + left_tag_ptr_temp);
+
+                        let right_tag_ptr_temp = format_temp_name(alignment_temp);
+                        alignment_temp += 1;
+                        alignment_lines.push("  " + right_tag_ptr_temp
+                            + " = getelementptr inbounds "
+                            + enum_info.llvm_name
+                            + ", "
                             + right_operand.llvm_type
                             + " "
                             + right_operand.value
-                            + ", 0");
+                            + ", i32 0, i32 0");
+                        let right_tag_temp = format_temp_name(alignment_temp);
+                        alignment_temp += 1;
+                        alignment_lines.push("  " + right_tag_temp
+                            + " = load "
+                            + tag_llvm_type
+                            + ", "
+                            + tag_llvm_type
+                            + "* "
+                            + right_tag_ptr_temp);
 
                         let compare_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;

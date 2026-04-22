@@ -524,14 +524,22 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
     }
 
     if info.fields.length == 0 {
-        let operand = LLVMOperand {
+        let aggregate = LLVMOperand {
             llvm_type: info.llvm_name,
             value: "zeroinitializer"
         };
+        // 0.5.8+ boxed-struct ABI: heap-allocate the aggregate and return %T*.
+        let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
+        let mut _bdi: number = 0;
+        loop {
+            if _bdi >= boxed.diagnostics.length { break; }
+            diagnostics.push(boxed.diagnostics[_bdi]);
+            _bdi += 1;
+        }
         return ExpressionResult {
-            lines: current_lines,
-            temp_index: current_temp,
-            operand: operand,
+            lines: boxed.lines,
+            temp_index: boxed.temp_index,
+            operand: boxed.operand,
             diagnostics: diagnostics,
             string_constants: collected_string_constants
         };
@@ -632,27 +640,50 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
     }
 
     if previous_value.length == 0 {
-        let operand = LLVMOperand {
+        let aggregate = LLVMOperand {
             llvm_type: info.llvm_name,
             value: "zeroinitializer"
         };
+        // 0.5.8+ boxed-struct ABI: heap-allocate the aggregate and return %T*.
+        let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
+        let mut _bdi: number = 0;
+        loop {
+            if _bdi >= boxed.diagnostics.length { break; }
+            diagnostics.push(boxed.diagnostics[_bdi]);
+            _bdi += 1;
+        }
         return ExpressionResult {
-            lines: current_lines,
-            temp_index: current_temp,
-            operand: operand,
+            lines: boxed.lines,
+            temp_index: boxed.temp_index,
+            operand: boxed.operand,
             diagnostics: diagnostics,
             string_constants: collected_string_constants
         };
     }
 
-    let operand = LLVMOperand {
+    // 0.5.8+ boxed-struct ABI: the `insertvalue` chain above built a first-class
+    // aggregate value (%T) in `previous_value`. Pipe through box_aggregate_operand
+    // to heap-allocate the struct and return its pointer (%T*). The by-value
+    // aggregate still materializes as an intermediate, but clang's mem2reg+sroa
+    // passes eliminate it. The bootstrap-safety benefit: the aggregate never
+    // crosses a function boundary — it's alloca'd immediately, store'd, and only
+    // the pointer returns. That's what sidesteps the AArch64 aggregate-return
+    // ABI ambiguity.
+    let aggregate = LLVMOperand {
         llvm_type: info.llvm_name,
         value: previous_value
     };
+    let boxed = box_aggregate_operand(aggregate, info.llvm_name + "*", current_temp, current_lines, context);
+    let mut _bdi: number = 0;
+    loop {
+        if _bdi >= boxed.diagnostics.length { break; }
+        diagnostics.push(boxed.diagnostics[_bdi]);
+        _bdi += 1;
+    }
     return ExpressionResult {
-        lines: current_lines,
-        temp_index: current_temp,
-        operand: operand,
+        lines: boxed.lines,
+        temp_index: boxed.temp_index,
+        operand: boxed.operand,
         diagnostics: diagnostics,
         string_constants: collected_string_constants
     };
@@ -977,14 +1008,28 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
         }
     }
 
-    let operand = LLVMOperand {
+    // 0.5.8+ boxed-struct ABI: the code above materialized the enum as a
+    // first-class aggregate value in `enum_value` (either via insertvalue for
+    // unit variants, or via alloca+GEP-store+load for payload variants).
+    // Box the aggregate into heap storage so it crosses function boundaries
+    // as %EnumT* (unambiguous AArch64 ABI) instead of %EnumT (ambiguous
+    // first-class aggregate return that the seed's AArch64 legalizer
+    // non-deterministically truncates).
+    let aggregate = LLVMOperand {
         llvm_type: enum_info.llvm_name,
         value: enum_value
     };
+    let boxed = box_aggregate_operand(aggregate, enum_info.llvm_name + "*", current_temp, current_lines, context);
+    let mut _edi: number = 0;
+    loop {
+        if _edi >= boxed.diagnostics.length { break; }
+        diagnostics.push(boxed.diagnostics[_edi]);
+        _edi += 1;
+    }
     return ExpressionResult {
-        lines: current_lines,
-        temp_index: current_temp,
-        operand: operand,
+        lines: boxed.lines,
+        temp_index: boxed.temp_index,
+        operand: boxed.operand,
         diagnostics: diagnostics,
         string_constants: collected_string_constants
     };
