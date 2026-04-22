@@ -708,17 +708,13 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
     // construction, regardless of what the upstream layout pass thinks.
     let size_ptr_temp = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + size_ptr_temp
-        + " = getelementptr "
-        + operand.llvm_type
+    current_lines.push("  " + size_ptr_temp + " = getelementptr " + operand.llvm_type
         + ", "
         + operand.llvm_type
         + "* null, i32 1");
     let size_temp = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + size_temp
-        + " = ptrtoint "
-        + operand.llvm_type
+    current_lines.push("  " + size_temp + " = ptrtoint " + operand.llvm_type
         + "* "
         + size_ptr_temp
         + " to i64");
