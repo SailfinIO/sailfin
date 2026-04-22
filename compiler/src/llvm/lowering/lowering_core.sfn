@@ -144,7 +144,18 @@ fn build_parse_result_from_text(native_text: string) -> ParseNativeResult {
 }
 
 fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
-    let base = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, false, "");
+    let mut native_text_for_recovery: string = "";
+    if native_module.artifacts != null {
+        if native_module.artifacts.length > 0 {
+            let _first_artifact = native_module.artifacts[0];
+            if _first_artifact != null {
+                if _first_artifact.contents != null {
+                    native_text_for_recovery = _first_artifact.contents;
+                }
+            }
+        }
+    }
+    let base = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, false, native_text_for_recovery);
     if base.lines.length == 0 { return base; }
 
     let mut test_count: number = 0;
@@ -259,7 +270,6 @@ fn compile_native_text_to_llvm_file(native_text_path: string, module_name: strin
         return false;
     }
     let parse = build_parse_result_from_text(native_text);
-    fs.writeFile("build/sailfin/emit-native.tmp", native_text);
     let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = make_native_module_for_emit(module_name, native_text);
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
@@ -358,7 +368,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
 
     safe_structs = recover_structs_if_corrupt(safe_structs, native_text_override_path, debug_lowering);
 
-    let safe_bindings = sanitize_bindings(parse.bindings, diagnostics);
+    let safe_bindings = sanitize_bindings(parse.bindings, diagnostics, native_text_override_path);
 
     let mut safe_parse_diagnostics = parse.diagnostics;
     if safe_parse_diagnostics == null { safe_parse_diagnostics = []; }
