@@ -1,30 +1,50 @@
 /*
  * Sailfin theme overrides for Starlight.
  *
- * Two jobs:
- *   1. Map Starlight's design tokens (`--sl-*`) to Sailfin brand colors.
+ * Three jobs:
+ *   1. Map Starlight's design tokens (`--sl-*`) to Sailfin brand colors
+ *      (violet → magenta, rooted in the Guillermo mark).
  *   2. Alias the site's semantic tokens (`--color-*`, `--header-height`, etc.)
  *      to Starlight's tokens so the shared SiteHeader component renders
  *      identically on docs pages (where global.css is NOT loaded).
+ *   3. Harmonize with Starlight's own cascade. Starlight ships default
+ *      theme tokens via `:root,::backdrop` (dark default) and
+ *      `:root[data-theme='light']` (light). We match those exact selectors
+ *      so source order doesn't matter — specificity ties on a per-selector
+ *      basis and our customCss can't be overridden by Starlight defaults.
  */
 
+/* Brand tokens (--sfn-*, --effect-*, --s-*, etc.) live in tokens.css. */
+@import "./tokens.css";
+
 :root {
-  --sfn-blue: #0072ce;
-  --sfn-blue-dark: #005ba1;
-  --sfn-blue-light: #e8f4fd;
-  --sfn-teal: #00a99d;
+  /* Legacy aliases — resolve to the brand scale for any lingering references
+     to the old blue/teal names. Safe to remove once nothing reads them. */
+  --sfn-blue:       var(--sfn-violet-core);
+  --sfn-blue-dark:  var(--sfn-violet);
+  --sfn-blue-light: #f3e6ff;
+  --sfn-teal:       var(--sfn-magenta-hot);
 }
 
+/*
+ * Dark-default tokens. Starlight itself declares dark-mode values inside
+ * `:root,::backdrop` (treating dark as the base) and adds a separate
+ * `:root[data-theme='light']` block for light mode. We override both
+ * scopes so specificity matches Starlight's on every selector.
+ */
 :root,
 ::backdrop {
-  /* Starlight accent → Sailfin blue (light mode) */
-  --sl-color-accent-low: #cfe6f8;
-  --sl-color-accent: #0072ce;
-  --sl-color-accent-high: #003f71;
+  /* Starlight accent → Sailfin brand (dark surface: magenta-hot for legibility).
+     `!important` is required because Starlight ships its own `:root,::backdrop`
+     rule later in the bundled cascade; specificity ties go to the last rule. */
+  --sl-color-accent-low:  var(--sfn-plum)         !important;
+  --sl-color-accent:      var(--sfn-magenta-hot)  !important;
+  --sl-color-accent-high: var(--sfn-magenta-tint) !important;
 
-  /* Typography */
-  --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --sl-font-system-mono: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+  /* Typography — consume the brand font tokens so marketing and docs
+     share a single font stack definition. */
+  --sl-font:             var(--font-sans);
+  --sl-font-system-mono: var(--font-mono);
 
   /* Slightly wider content column so prose isn't too cramped */
   --sl-content-width: 52rem;
@@ -34,30 +54,30 @@
    * `src/styles/global.css` so that components rendered inside Starlight
    * (SiteHeader via the Header override, Footer, etc.) resolve the same
    * variables they would on the marketing pages.
-   *
-   * Starlight's gray scale inverts between themes — gray-1 is near-bg,
-   * gray-6 is near-text — so using named slots keeps the right contrast
-   * automatically in light and dark.
    */
-  --color-primary: var(--sl-color-accent);
-  --color-primary-dark: var(--sl-color-accent-high);
-  --color-bg: var(--sl-color-bg);
-  --color-bg-alt: var(--sl-color-bg-nav);
-  --color-bg-code: var(--sl-color-bg-inline-code);
-  --color-text: var(--sl-color-text);
+  --color-primary:        var(--sl-color-accent);
+  --color-primary-dark:   var(--sl-color-accent-high);
+  --color-accent:         var(--sfn-magenta-hot);
+  --color-bg:             var(--sl-color-bg);
+  --color-bg-alt:         var(--sl-color-bg-nav);
+  --color-bg-code:        var(--sl-color-bg-inline-code);
+  --color-text:           var(--sl-color-text);
   --color-text-secondary: var(--sl-color-gray-3);
-  --color-text-tertiary: var(--sl-color-gray-4);
-  --color-border: var(--sl-color-hairline);
-  --color-border-strong: var(--sl-color-hairline-shade);
-  --color-muted-surface: var(--sl-color-gray-6);
-  --header-height: var(--sl-nav-height, 64px);
+  --color-text-tertiary:  var(--sl-color-gray-4);
+  --color-border:         var(--sl-color-hairline);
+  --color-border-strong:  var(--sl-color-hairline-shade);
+  --color-muted-surface:  var(--sl-color-gray-6);
+  --header-height:        var(--sl-nav-height, 64px);
   --max-width: 90rem;
 }
 
-:root[data-theme="dark"] {
-  --sl-color-accent-low: #002a4f;
-  --sl-color-accent: #4fa3e0;
-  --sl-color-accent-high: #c7e1f6;
+/* Light-mode overrides — specificity matches Starlight's own light-mode
+   selector (`:root[data-theme='light'], [data-theme='light'] ::backdrop`). */
+:root[data-theme='light'],
+[data-theme='light'] ::backdrop {
+  --sl-color-accent-low:  var(--sfn-violet-tint)  !important;
+  --sl-color-accent:      var(--sfn-violet)       !important;
+  --sl-color-accent-high: var(--sfn-violet-shade) !important;
 }
 
 /* Inline code styling */
