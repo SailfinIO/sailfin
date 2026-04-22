@@ -490,14 +490,19 @@ fn should_internalize_function(function: NativeFunction, entry_points: string[],
     if sanitized == "string_char_at" { _if297 = true; }
     if _if297 { return false; }
 
-    // Treat leading-underscore helpers as module-local.
-    if sanitized.length > 0 {
-        if substring(sanitized, 0, 1) == "_" { return true; }
-    }
-
     // Collision-prone local helper names observed across compiler modules.
     // Keep these module-local to avoid duplicate symbol definitions at final link.
     if sanitized == "contains_effect" { return true; }
+
+    // NOTE: A previous revision also internalised any function whose sanitized
+    // name starts with `_`. That heuristic was too aggressive — several
+    // underscore-prefix helpers (e.g. `_parse_int_from_string` from
+    // instructions_helpers, `_parse_lowered_fn_string_constants` from
+    // lowering_text_utils) are imported across modules and must retain
+    // external linkage so the final IR link succeeds. The 0.5.7 seed
+    // happened to produce external linkage for them because its own
+    // baked-in rule was narrower, which hid the regression in self-host
+    // builds until the seedcheck link step exposed it.
 
     // Default: preserve existing cross-module linkage behavior.
     return false;
