@@ -28,6 +28,7 @@ import {
     compile_to_sailfin,
     module_name_from_path,
     number_to_string,
+    print_llvm_with_module,
     write_native_text_file_with_module
 } from "./main";
 import { resolve_compiler_version } from "./version";
@@ -457,7 +458,9 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
                 if timing {
                     print(compile_to_llvm_with_module_timed(source, module_name));
                 } else {
-                    print(compile_to_llvm_with_module(source, module_name));
+                    if !print_llvm_with_module(source, module_name) {
+                        return 1;
+                    }
                 }
             }
             return 0;

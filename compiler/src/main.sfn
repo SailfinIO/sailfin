@@ -15,6 +15,7 @@ import { emit_program } from "./emitter_sailfin";
 import {
     lower_to_llvm_ir,
     lower_to_llvm_ir_from_text,
+    print_llvm_ir_from_text,
     write_llvm_ir,
     write_llvm_ir_from_native_text_file
 } from "./llvm/lowering/entrypoints";
@@ -179,6 +180,27 @@ fn compile_to_llvm(source: string) -> string ![io] {
         }
     }
     return ir;
+}
+
+// Compile source to LLVM IR and print it line-by-line to stdout.
+// Returns true on success. Used by `sfn emit llvm <file>` (no -o flag) to
+// avoid the large-string cross-module return in `compile_to_llvm_with_module`,
+// which segfaulted on large modules like `compiler/src/native_ir_api.sfn`
+// when the big joined IR string was returned and then printed.
+fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] {
+    let program: Program = parse_program(source);
+    let skip_typecheck = fs.exists("build/sailfin/.skip_typecheck");
+    if !skip_typecheck {
+        if typecheck_has_errors(program) {
+            let diagnostics = typecheck_diagnostics(program);
+            report_typecheck_errors(diagnostics, source);
+            return false;
+        }
+    }
+    if _reject_reexport_violations(program) { return false; }
+    let native_text = emit_native_text_with_module_name(program, module_name);
+    if native_text.length == 0 { return false; }
+    return print_llvm_ir_from_text(native_text, module_name);
 }
 
 fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![io] {

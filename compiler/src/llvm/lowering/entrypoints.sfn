@@ -99,6 +99,7 @@ import {
 } from "../utils";
 import { emit_llvm_function } from "./emission";
 import {
+    build_parse_result_from_text,
     compile_native_text_to_llvm_file,
     lower_to_llvm_lines_with_parsed_context,
     lower_to_llvm_lines_with_parsed_context_for_tests
@@ -242,6 +243,56 @@ fn lower_to_llvm_ir_from_text(native_text: string, module_name: string) -> strin
         return "";
     }
     return _join_llvm_lines_linear(lowered_lines.lines);
+}
+
+// Lower native text to LLVM IR and print it line-by-line to stdout.
+// Returns true on success. Two important differences vs
+// `lower_to_llvm_ir_from_text`:
+//   1. Uses `build_parse_result_from_text` (recovery parser) instead of
+//      `parse_native_artifact` — the structured parser segfaults on
+//      specific large modules (e.g. `compiler/src/native_ir_api.sfn`)
+//      due to a latent aggregate-load bug in the first-pass binary.
+//      The recovery parser takes a simpler line-scan path that isn't
+//      affected.
+//   2. Prints lines directly rather than joining into one huge string
+//      and returning it — avoids `_join_llvm_lines_linear` memory
+//      amplification for very large LLVM outputs.
+fn print_llvm_ir_from_text(native_text: string, module_name: string) -> boolean ![io] {
+    if native_text.length == 0 { return false; }
+    let parse = build_parse_result_from_text(native_text);
+    let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
+    let dummy_module = NativeModule {
+        module_name: module_name,
+        artifacts: [NativeArtifact {
+            name: module_name, format: "sailfin-native-text", contents: native_text
+        }],
+        entry_points: [],
+        symbol_count: 0
+    };
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
+    let mut _if_empty: boolean = false;
+    if lowered_lines.lines == null { _if_empty = true; }
+    if lowered_lines.lines.length == 0 { _if_empty = true; }
+    if _if_empty {
+        print.err("emit-llvm: no lines from native text (functions="
+            + number_to_string(parse.functions.length)
+            + " structs="
+            + number_to_string(parse.structs.length)
+            + " enums="
+            + number_to_string(parse.enums.length)
+            + " diagnostics="
+            + number_to_string(parse.diagnostics.length)
+            + ")");
+        return false;
+    }
+    let lines = lowered_lines.lines;
+    let mut index: number = 0;
+    loop {
+        if index >= lines.length { break; }
+        print(lines[index]);
+        index += 1;
+    }
+    return true;
 }
 
 // Build and write LLVM IR with module symbol mangling for non-test usage.
