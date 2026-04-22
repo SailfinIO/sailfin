@@ -710,11 +710,6 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
                 expected_source_text = native_text_override_path;
             }
         }
-        if expected_source_text.length == 0 {
-            if fs.exists("build/sailfin/emit-native.tmp") {
-                expected_source_text = fs.readFile("build/sailfin/emit-native.tmp");
-            }
-        }
 
         if expected_source_text.length > 0 {
             let expected_functions = parse_native_functions_from_text(expected_source_text);
@@ -807,20 +802,10 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
     if recovery_text.length == 0 {
         if artifact_text.length > 0 { recovery_text = artifact_text; }
     }
-    if recovery_text.length == 0 {
-        if fs.exists("build/sailfin/emit-native.tmp") {
-            recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
-        }
-    }
 
     let direct_count = parse_native_function_count_from_text(recovery_text);
     if debug_lowering {
         print.err("emit-llvm: recovery source direct count=" + number_to_string(direct_count));
-    }
-    if direct_count == 0 {
-        if fs.exists("build/sailfin/emit-native.tmp") {
-            recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
-        }
     }
 
     let parsed_recovery = parse_native_functions_from_text(recovery_text);
@@ -847,11 +832,6 @@ fn recover_functions_for_lowering(current_functions: NativeFunction[], native_te
         }
     }
 
-    if fs.exists("build/sailfin/emit-native.tmp") {
-        let disk_recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
-        let disk_recovery = recover_native_functions_light(disk_recovery_text);
-        if disk_recovery.length > 0 { return disk_recovery; }
-    }
     return [];
 }
 

@@ -232,18 +232,6 @@ fn sanitize_functions(functions: NativeFunction[], native_text_override_path: st
             print.err("emit-llvm: dbg-R2 recovery_text.length="
                 + number_to_string(recovery_text.length));
         }
-        if recovery_text.length == 0 {
-            if fs.exists("build/sailfin/emit-native.tmp") {
-                if debug_lowering {
-                    print.err("emit-llvm: dbg-R3 reading emit-native.tmp");
-                }
-                recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
-                if debug_lowering {
-                    print.err("emit-llvm: dbg-R4 read emit-native.tmp bytes="
-                        + number_to_string(recovery_text.length));
-                }
-            }
-        }
         if debug_lowering {
             print.err("emit-llvm: dbg-R5 before parse recovery_text.length="
                 + number_to_string(recovery_text.length));
@@ -351,8 +339,6 @@ fn recover_structs_if_corrupt(safe_structs: NativeStruct[], native_text_override
         let mut struct_recovery_text = "";
         if native_text_override_path.length > 0 {
             struct_recovery_text = native_text_override_path;
-        } else if fs.exists("build/sailfin/emit-native.tmp") {
-            struct_recovery_text = fs.readFile("build/sailfin/emit-native.tmp");
         }
         if struct_recovery_text.length > 0 {
             let recovered_structs = recover_native_structs_light(struct_recovery_text);
@@ -363,7 +349,9 @@ fn recover_structs_if_corrupt(safe_structs: NativeStruct[], native_text_override
 }
 
 // Sanitize and recover bindings array.
-fn sanitize_bindings(bindings: NativeBinding[], diagnostics: string[]) -> NativeBinding[] ![io] {
+// The `native_text_override_path` param name is a misnomer retained for diff
+// stability — it carries the native IR text content, not a filesystem path.
+fn sanitize_bindings(bindings: NativeBinding[], diagnostics: string[], native_text_override_path: string) -> NativeBinding[] ![io] {
     let mut safe = bindings;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 200000) {
@@ -375,17 +363,12 @@ fn sanitize_bindings(bindings: NativeBinding[], diagnostics: string[]) -> Native
             + "); dropping");
         safe = [];
     }
-    // Recovery: if bindings empty, re-parse from emit-native.tmp
+    // Recovery: if bindings empty, re-parse from in-memory native text.
     if safe.length == 0 {
-        if fs.exists("build/sailfin/emit-native.tmp") {
-            let _reparse_native = fs.readFile("build/sailfin/emit-native.tmp");
-            if _reparse_native.length > 0 {
-                let _reparsed_bindings = parse_native_bindings_from_text(_reparse_native);
-                if _reparsed_bindings != null {
-                    if _reparsed_bindings.length > 0 {
-                        safe = _reparsed_bindings;
-                    }
-                }
+        if native_text_override_path.length > 0 {
+            let _reparsed_bindings = parse_native_bindings_from_text(native_text_override_path);
+            if _reparsed_bindings != null {
+                if _reparsed_bindings.length > 0 { safe = _reparsed_bindings; }
             }
         }
     }
