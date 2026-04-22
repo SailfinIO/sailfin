@@ -35,11 +35,21 @@ import {
 } from "./token_utils";
 // Import types from submodules
 import { Parser, StatementParseResult } from "./types";
+import { number_to_string } from "../emit_native_state";
 
 // ============================================================================
 // Main Entry Points
 // ============================================================================
+// 0.5.7 seed miscompilation workaround: when compiled by the 0.5.7 seed, some
+// heap-layout pattern in parse_program corrupts memory for source inputs with
+// specific token counts (observed on linux-x86_64 with 44-char module paths
+// like `compiler/tests/unit/struct_large_return_test`). A short heap-allocated
+// pad string at function entry shifts subsequent allocations past the corrupted
+// bucket. Remove this once the 0.5.8 seed is released and adopted.
 fn parse_program(source: string) -> Program {
+    // Force a runtime heap allocation so 0.5.7 can't fold the pad away.
+    let _pad_len: number = source.length;
+    let _pad: string = "pp-" + number_to_string(_pad_len);
     let tokens = lex(source);
     return parse_tokens(tokens);
 }
