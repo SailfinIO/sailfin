@@ -4,7 +4,9 @@
  *
  * 1200 × 630, near-black surface with the Sailfin violet→magenta radial
  * spotlight, Guillermo (the sailfin lizard mark) on the right, wordmark
- * + tagline on the left. Uses the brand tokens from tmp-design/colors_and_type.css.
+ * + tagline on the left. Colors and layout are inlined in the composed
+ * SVG below — if brand tokens shift in site/src/styles/tokens.css, mirror
+ * the new values here by hand and re-run the script.
  *
  * Re-run with `node site/scripts/build-og.mjs` whenever the brand or
  * tagline changes.

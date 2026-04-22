@@ -28,10 +28,33 @@
   --sfn-ink-raised:  #15101d;
   --sfn-ink-sunken:  #080611;
 
-  /* Signature gradients */
-  --sfn-gradient: linear-gradient(135deg, #5a0090 0%, #a000ff 45%, #fb48b8 100%);
-  --sfn-gradient-radial: radial-gradient(80% 120% at 20% 10%, #fb48b8 0%, #a000ff 35%, #5a0090 75%, #0e0b14 100%);
-  --sfn-gradient-soft: linear-gradient(135deg, rgba(161, 0, 255, 0.14), rgba(251, 72, 184, 0.14));
+  /* Signature gradients — composed from the brand scale above so there's
+     only one place to change the violet/magenta values. */
+  --sfn-gradient: linear-gradient(
+    135deg,
+    var(--sfn-violet-deep) 0%,
+    var(--sfn-violet-core) 45%,
+    var(--sfn-magenta-hot) 100%
+  );
+  --sfn-gradient-radial: radial-gradient(
+    80% 120% at 20% 10%,
+    var(--sfn-magenta-hot) 0%,
+    var(--sfn-violet-core) 35%,
+    var(--sfn-violet-deep) 75%,
+    var(--sfn-ink) 100%
+  );
+  --sfn-gradient-soft: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--sfn-violet-core) 14%, transparent),
+    color-mix(in srgb, var(--sfn-magenta-hot) 14%, transparent)
+  );
+
+  /* Tints/shades used by the docs accent scale (Starlight's low/high slots).
+     These pair with --sfn-violet / --sfn-magenta-hot as the accent core. */
+  --sfn-violet-tint:   #f3e6ff;  /* light-mode accent-low   */
+  --sfn-violet-shade:  #3b005e;  /* light-mode accent-high  */
+  --sfn-plum:          #2b003f;  /* dark-mode  accent-low   */
+  --sfn-magenta-tint:  #ffd8f0;  /* dark-mode  accent-high  */
 
   /* ---------------------------------------------------------------- */
   /* Effect-type colors                                               */
@@ -88,7 +111,9 @@
   --fw-black:    800;
 
   /* ---------------------------------------------------------------- */
-  /* Spacing — 4px base, doubling (matches `sfn fmt` 4-space indent). */
+  /* Spacing — 4px base stepped scale (matches `sfn fmt` 4-space       */
+  /* indent). Doubles every other step, with a 1.5× in between so you  */
+  /* get fine-grained gutters without jumping straight to the next 2×. */
   /* ---------------------------------------------------------------- */
   --s-0:  0;
   --s-1:  4px;
@@ -140,8 +165,9 @@
 }
 
 /*
- * Respect user preference. All motion tokens collapse toward zero so any
- * `transition: … var(--dur-…)` in the system becomes effectively instant.
+ * Respect user preference. Any `transition: … var(--dur-…)` in the system
+ * becomes effectively instant, and page-level `scroll-behavior: smooth` is
+ * forced back to `auto` so hash-link jumps don't animate either.
  */
 @media (prefers-reduced-motion: reduce) {
   :root {
@@ -149,5 +175,17 @@
     --dur-2: 0ms;
     --dur-3: 0ms;
     --dur-4: 0ms;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

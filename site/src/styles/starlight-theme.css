@@ -37,13 +37,14 @@
   /* Starlight accent → Sailfin brand (dark surface: magenta-hot for legibility).
      `!important` is required because Starlight ships its own `:root,::backdrop`
      rule later in the bundled cascade; specificity ties go to the last rule. */
-  --sl-color-accent-low:  #2b003f !important;
-  --sl-color-accent:      #fb48b8 !important;
-  --sl-color-accent-high: #ffd8f0 !important;
+  --sl-color-accent-low:  var(--sfn-plum)         !important;
+  --sl-color-accent:      var(--sfn-magenta-hot)  !important;
+  --sl-color-accent-high: var(--sfn-magenta-tint) !important;
 
-  /* Typography */
-  --sl-font: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --sl-font-system-mono: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
+  /* Typography — consume the brand font tokens so marketing and docs
+     share a single font stack definition. */
+  --sl-font:             var(--font-sans);
+  --sl-font-system-mono: var(--font-mono);
 
   /* Slightly wider content column so prose isn't too cramped */
   --sl-content-width: 52rem;
@@ -74,9 +75,9 @@
    selector (`:root[data-theme='light'], [data-theme='light'] ::backdrop`). */
 :root[data-theme='light'],
 [data-theme='light'] ::backdrop {
-  --sl-color-accent-low:  #f3e6ff !important;
-  --sl-color-accent:      #7903be !important;
-  --sl-color-accent-high: #3b005e !important;
+  --sl-color-accent-low:  var(--sfn-violet-tint)  !important;
+  --sl-color-accent:      var(--sfn-violet)       !important;
+  --sl-color-accent-high: var(--sfn-violet-shade) !important;
 }
 
 /* Inline code styling */

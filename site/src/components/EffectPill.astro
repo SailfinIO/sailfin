@@ -78,12 +78,17 @@ const solo = list.length === 1 ? list[0]?.toLowerCase() : undefined;
   .effect-pill.effect-gpu   { --pill-accent: var(--effect-gpu); }
   .effect-pill.effect-rand  { --pill-accent: var(--effect-rand); }
 
-  /* Light surfaces need a darker accent for text legibility on white. */
-  :global(html[data-theme="light"]) .effect-pill           { --pill-accent: var(--sfn-violet); }
-  :global(html[data-theme="light"]) .effect-pill.effect-io    { --pill-accent: var(--effect-io-dim); }
-  :global(html[data-theme="light"]) .effect-pill.effect-net   { --pill-accent: var(--effect-net-dim); }
-  :global(html[data-theme="light"]) .effect-pill.effect-model { --pill-accent: var(--effect-model-dim); }
-  :global(html[data-theme="light"]) .effect-pill.effect-clock { --pill-accent: var(--effect-clock-dim); }
-  :global(html[data-theme="light"]) .effect-pill.effect-gpu   { --pill-accent: var(--effect-gpu-dim); }
-  :global(html[data-theme="light"]) .effect-pill.effect-rand  { --pill-accent: var(--effect-rand-dim); }
+  /*
+   * Light surfaces need a darker accent for text legibility on white.
+   * Matches anything that isn't explicitly dark so the dim tokens also
+   * kick in when JS is disabled or the early theme script throws and
+   * `data-theme` is never set — light is the marketing default.
+   */
+  :global(html:not([data-theme="dark"])) .effect-pill              { --pill-accent: var(--sfn-violet); }
+  :global(html:not([data-theme="dark"])) .effect-pill.effect-io    { --pill-accent: var(--effect-io-dim); }
+  :global(html:not([data-theme="dark"])) .effect-pill.effect-net   { --pill-accent: var(--effect-net-dim); }
+  :global(html:not([data-theme="dark"])) .effect-pill.effect-model { --pill-accent: var(--effect-model-dim); }
+  :global(html:not([data-theme="dark"])) .effect-pill.effect-clock { --pill-accent: var(--effect-clock-dim); }
+  :global(html:not([data-theme="dark"])) .effect-pill.effect-gpu   { --pill-accent: var(--effect-gpu-dim); }
+  :global(html:not([data-theme="dark"])) .effect-pill.effect-rand  { --pill-accent: var(--effect-rand-dim); }
 </style>
