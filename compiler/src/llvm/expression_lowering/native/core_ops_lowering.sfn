@@ -834,8 +834,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                             + ", i32 0, i32 0");
                         let left_tag_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
-                        alignment_lines.push("  " + left_tag_temp
-                            + " = load "
+                        alignment_lines.push("  " + left_tag_temp + " = load "
                             + tag_llvm_type
                             + ", "
                             + tag_llvm_type
@@ -854,8 +853,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                             + ", i32 0, i32 0");
                         let right_tag_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
-                        alignment_lines.push("  " + right_tag_temp
-                            + " = load "
+                        alignment_lines.push("  " + right_tag_temp + " = load "
                             + tag_llvm_type
                             + ", "
                             + tag_llvm_type

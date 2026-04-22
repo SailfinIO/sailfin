@@ -216,8 +216,5 @@ fn lower_all_functions(local_functions: NativeFunction[], context_functions: Nat
     if trace { print.err("test llvm: intrinsics ensured"); }
     if debug_lowering { print.err("emit-llvm: phase=intrinsics"); }
 
-    return FunctionLoweringResult {
-        lines: lines,
-        diagnostics: diagnostics
-    };
+    return FunctionLoweringResult { lines: lines, diagnostics: diagnostics };
 }

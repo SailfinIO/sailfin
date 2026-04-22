@@ -22,6 +22,7 @@ import {
     find_struct_info_by_llvm_type,
     find_vtable_for_struct_interface
 } from "../type_context_queries";
+import { ends_with_pointer_suffix } from "../type_mapping";
 import {
     LLVMOperand,
     LetLoweringResult,
@@ -35,9 +36,6 @@ import {
     StringConstant,
     TypeContext
 } from "../types";
-import {
-    ends_with_pointer_suffix
-} from "../type_mapping";
 import {
     is_identifier_part_char,
     is_identifier_start_char,

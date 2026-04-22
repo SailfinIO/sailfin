@@ -41,7 +41,11 @@ import { load_local_operand } from "./core_operands";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding, find_parameter_binding } from "./core_scopes";
 import { sanitize_symbol } from "./core_text";
-import { future_pointer_type_for_return_type, map_array_pointer_type, map_return_type } from "./core_type_mapping";
+import {
+    future_pointer_type_for_return_type,
+    map_array_pointer_type,
+    map_return_type
+} from "./core_type_mapping";
 
 // Resolve fused concat/push targets (e.g. `valuesconcat(xs)` → `concat`).
 // Also handles parse_member_access dispatch and struct-method fallback.
@@ -199,7 +203,9 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                         // defuse-fused block at lines 126-178.
                         let mut _pre_is_array_method: boolean = false;
                         if _pre_field == "push" { _pre_is_array_method = true; }
-                        if _pre_field == "concat" { _pre_is_array_method = true; }
+                        if _pre_field == "concat" {
+                            _pre_is_array_method = true;
+                        }
                         if _pre_is_array_method {
                             if is_simple_identifier(_pre_base) {
                                 let _pre_am_local = find_local_binding(locals, _pre_base);
@@ -211,7 +217,9 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     let _pre_am_load = load_local_operand(_pre_am_local, result_temp, result_lines);
                                     let mut _pci_am: number = 0;
                                     loop {
-                                        if _pci_am >= _pre_am_load.diagnostics.length { break; }
+                                        if _pci_am >= _pre_am_load.diagnostics.length {
+                                            break;
+                                        }
                                         result_diagnostics.push(_pre_am_load.diagnostics[_pci_am]);
                                         _pci_am += 1;
                                     }
