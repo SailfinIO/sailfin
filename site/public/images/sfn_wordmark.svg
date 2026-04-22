@@ -1,0 +1,15 @@
+<svg width="320" height="128" viewBox="0 0 320 128" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="sfn">
+  <defs>
+    <linearGradient id="sfnGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5A0090"></stop>
+      <stop offset="0.5" stop-color="#A000FF"></stop>
+      <stop offset="1" stop-color="#FB48B8"></stop>
+    </linearGradient>
+  </defs>
+  <g font-family="Inter, -apple-system, &#39;Segoe UI&#39;, sans-serif" font-weight="800" font-size="96" letter-spacing="-4">
+    <text x="18" y="92" fill="url(#sfnGrad)">sfn</text>
+    
+    <text x="214" y="92" fill="#FB48B8" font-size="72" font-weight="700">!</text>
+    <text x="244" y="92" fill="#F4EEFB" font-size="72" font-weight="400">[ ]</text>
+  </g>
+</svg>

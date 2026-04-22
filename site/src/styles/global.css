@@ -1,13 +1,22 @@
+/*
+ * Brand tokens (--sfn-*, --fs-*, --s-*, --r-*, --shadow-*, etc.) live in
+ * ./tokens.css. This file maps them to the site's semantic layer
+ * (--color-primary, --color-bg, …) and defines element-level defaults.
+ */
+@import "./tokens.css";
+
 :root {
-  /* Sailfin brand colors */
-  --sfn-blue: #0072ce;
-  --sfn-blue-dark: #005ba1;
-  --sfn-blue-light: #e8f4fd;
-  --sfn-teal: #00a99d;
-  --sfn-teal-dark: #008c82;
+  /* Legacy aliases — resolve to the brand scale for any lingering
+     references to the old blue/teal names. Safe to remove once nothing
+     outside `--color-*` reads these. */
+  --sfn-blue:       var(--sfn-violet-core);
+  --sfn-blue-dark:  var(--sfn-violet);
+  --sfn-blue-light: #f3e6ff;
+  --sfn-teal:       var(--sfn-magenta-hot);
+  --sfn-teal-dark:  var(--sfn-magenta);
 
   /* Neutrals */
-  --gray-50: #f8f9fa;
+  --gray-50:  #f8f9fa;
   --gray-100: #f1f3f5;
   --gray-200: #e9ecef;
   --gray-300: #dee2e6;
@@ -19,16 +28,16 @@
   --gray-900: #212529;
 
   /* Semantic — light (default) */
-  --color-primary: var(--sfn-blue);
-  --color-primary-dark: var(--sfn-blue-dark);
-  --color-accent: var(--sfn-teal);
-  --color-bg: #ffffff;
-  --color-bg-alt: var(--gray-50);
-  --color-bg-code: var(--gray-100);
-  --color-text: var(--gray-900);
-  --color-text-secondary: var(--gray-600);
+  --color-primary:       var(--sfn-violet-core);
+  --color-primary-dark:  var(--sfn-violet);
+  --color-accent:        var(--sfn-magenta-hot);
+  --color-bg:            #ffffff;
+  --color-bg-alt:        var(--gray-50);
+  --color-bg-code:       #f5f2fa;       /* faint violet tint so inline code reads */
+  --color-text:          var(--gray-900);
+  --color-text-secondary:var(--gray-600);
   --color-text-tertiary: var(--gray-500);
-  --color-border: var(--gray-200);
+  --color-border:        var(--gray-200);
   --color-border-strong: var(--gray-300);
   --color-muted-surface: var(--gray-200);
 
@@ -36,29 +45,28 @@
   --max-width: 1200px;
   --header-height: 64px;
   --sidebar-width: 280px;
-
-  /* Typography */
-  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", "SF Mono", Menlo, monospace;
 }
 
 /*
  * Dark mode. Mirrors the `data-theme="dark"` attribute Starlight sets on
  * `<html>`, so the marketing site and the docs share a single preference.
+ *
+ * The marketing palette leans into the near-black ink surface from the
+ * design system (#0e0b14) which lets the violet gradient breathe.
  */
 html[data-theme="dark"] {
-  --color-primary: #4fa3e0;
-  --color-primary-dark: #0072ce;
-  --color-accent: #33c9bc;
-  --color-bg: #0f1115;
-  --color-bg-alt: #181b22;
-  --color-bg-code: #1d212a;
-  --color-text: #e9ecef;
-  --color-text-secondary: #adb5bd;
-  --color-text-tertiary: #868e96;
-  --color-border: #2a2f3a;
-  --color-border-strong: #3a3f4a;
-  --color-muted-surface: #252a34;
+  --color-primary:       var(--sfn-magenta-hot);  /* brighter on dark for legibility */
+  --color-primary-dark:  var(--sfn-violet-core);
+  --color-accent:        var(--sfn-magenta);
+  --color-bg:            var(--sfn-ink);
+  --color-bg-alt:        var(--sfn-ink-raised);
+  --color-bg-code:       #1b1326;
+  --color-text:          #f4eefb;
+  --color-text-secondary:#cfc4e0;
+  --color-text-tertiary: #8f85a3;
+  --color-border:        rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.16);
+  --color-muted-surface: #1b1326;
 }
 
 *,
@@ -120,11 +128,24 @@ pre code {
 h1, h2, h3, h4, h5, h6 {
   line-height: 1.3;
   font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+/* Heavier display weight for h1; Inter reads flat at 600 above ~32px. */
+h1 {
+  font-weight: 700;
+  letter-spacing: -0.025em;
 }
 
 img {
   max-width: 100%;
   height: auto;
+}
+
+/* Selection picks up the brand */
+::selection {
+  background: rgba(251, 72, 184, 0.35);
+  color: #fff;
 }
 
 /* Utility */
@@ -143,4 +164,13 @@ img {
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
+}
+
+/* Gradient text utility — reserved for standalone hero moments,
+   NOT to be used adjacent to the Guillermo mark. */
+.sfn-gradient-text {
+  background: var(--sfn-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }

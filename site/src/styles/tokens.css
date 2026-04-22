@@ -1,0 +1,153 @@
+/*
+ * Sailfin design tokens.
+ *
+ * Lifted from the Claude Design brand system. This file is the single
+ * source of truth for brand scale, effect colors, typography scale,
+ * spacing, radii, shadows, and motion.
+ *
+ * Consumed by:
+ *   - src/styles/global.css        (marketing surfaces)
+ *   - src/styles/starlight-theme.css (docs surface)
+ *
+ * The site-specific semantic layer (--color-primary, --color-bg, etc.)
+ * lives in global.css / starlight-theme.css and maps these tokens to
+ * surface-aware aliases.
+ */
+
+:root {
+  /* ---------------------------------------------------------------- */
+  /* Brand scale — from the Guillermo logo SVG                        */
+  /* ---------------------------------------------------------------- */
+  --sfn-violet-deep: #5a0090;    /* darkest body of the mark */
+  --sfn-violet:      #7903be;
+  --sfn-violet-core: #a000ff;    /* electric violet, center of the gradient */
+  --sfn-magenta:     #e121b7;
+  --sfn-magenta-hot: #fb48b8;    /* lightest highlight on the mark */
+
+  --sfn-ink:         #0e0b14;    /* near-black marketing surface */
+  --sfn-ink-raised:  #15101d;
+  --sfn-ink-sunken:  #080611;
+
+  /* Signature gradients */
+  --sfn-gradient: linear-gradient(135deg, #5a0090 0%, #a000ff 45%, #fb48b8 100%);
+  --sfn-gradient-radial: radial-gradient(80% 120% at 20% 10%, #fb48b8 0%, #a000ff 35%, #5a0090 75%, #0e0b14 100%);
+  --sfn-gradient-soft: linear-gradient(135deg, rgba(161, 0, 255, 0.14), rgba(251, 72, 184, 0.14));
+
+  /* ---------------------------------------------------------------- */
+  /* Effect-type colors                                               */
+  /* Each canonical effect gets its own hue; used in EffectPill,      */
+  /* syntax highlighting, and docs badges.                            */
+  /* ---------------------------------------------------------------- */
+  --effect-io:    #fb48b8;   /* magenta — IO is the "loud" default */
+  --effect-net:   #a000ff;   /* violet core */
+  --effect-model: #5a0090;   /* deep violet, reserved for AI */
+  --effect-clock: #00a99d;   /* teal */
+  --effect-gpu:   #ff7b33;   /* accent orange (heat/compute) */
+  --effect-rand:  #f4c542;   /* amber (entropy) */
+
+  /* Darker variants for light-mode legibility on white prose */
+  --effect-io-dim:    #c01a7e;
+  --effect-net-dim:   #7903be;
+  --effect-model-dim: #5a0090;
+  --effect-clock-dim: #00796c;
+  --effect-gpu-dim:   #c85716;
+  --effect-rand-dim:  #8a6a00;
+
+  /* ---------------------------------------------------------------- */
+  /* Typography scale                                                 */
+  /* ---------------------------------------------------------------- */
+  --font-sans:    "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono:    "JetBrains Mono", "Fira Code", "SF Mono", Menlo, ui-monospace, monospace;
+  --font-display: var(--font-sans);
+
+  --fs-xs:   12px;
+  --fs-sm:   14px;
+  --fs-base: 16px;
+  --fs-md:   18px;
+  --fs-lg:   20px;
+  --fs-xl:   24px;
+  --fs-2xl:  32px;
+  --fs-3xl:  44px;
+  --fs-4xl:  60px;
+  --fs-5xl:  88px;
+
+  --lh-tight:   1.1;
+  --lh-snug:    1.25;
+  --lh-normal:  1.55;
+  --lh-relaxed: 1.7;
+
+  --tracking-tight:  -0.02em;
+  --tracking-normal:  0;
+  --tracking-wide:    0.04em;
+  --tracking-caps:    0.12em;
+
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+  --fw-bold:     700;
+  --fw-black:    800;
+
+  /* ---------------------------------------------------------------- */
+  /* Spacing — 4px base, doubling (matches `sfn fmt` 4-space indent). */
+  /* ---------------------------------------------------------------- */
+  --s-0:  0;
+  --s-1:  4px;
+  --s-2:  8px;
+  --s-3:  12px;
+  --s-4:  16px;
+  --s-5:  24px;
+  --s-6:  32px;
+  --s-7:  48px;
+  --s-8:  64px;
+  --s-9:  96px;
+  --s-10: 128px;
+
+  /* ---------------------------------------------------------------- */
+  /* Radii                                                            */
+  /* ---------------------------------------------------------------- */
+  --r-1: 4px;      /* chips, inline code, kbd */
+  --r-2: 8px;      /* buttons, inputs */
+  --r-3: 12px;     /* standard cards */
+  --r-4: 16px;     /* panels */
+  --r-5: 24px;     /* feature cards, hero chrome */
+  --r-full: 999px; /* capsule pills, effect tags */
+
+  /* ---------------------------------------------------------------- */
+  /* Shadows — dark-first elevation ladder                            */
+  /* ---------------------------------------------------------------- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 4px 14px rgba(0, 0, 0, 0.45);
+  --shadow-3:
+    0 18px 48px -20px rgba(90, 0, 144, 0.55),
+    0 8px 24px rgba(0, 0, 0, 0.45);
+  --shadow-glow:
+    0 0 0 1px rgba(161, 0, 255, 0.35),
+    0 8px 40px -8px rgba(161, 0, 255, 0.45),
+    0 0 60px -20px rgba(251, 72, 184, 0.35);
+
+  /* Focus ring — magenta-hot halo */
+  --focus-ring: 0 0 0 3px rgba(251, 72, 184, 0.45);
+
+  /* ---------------------------------------------------------------- */
+  /* Motion                                                           */
+  /* ---------------------------------------------------------------- */
+  --ease-standard:   cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-emphasized: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --dur-3: 320ms;
+  --dur-4: 560ms;
+}
+
+/*
+ * Respect user preference. All motion tokens collapse toward zero so any
+ * `transition: … var(--dur-…)` in the system becomes effectively instant.
+ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-1: 0ms;
+    --dur-2: 0ms;
+    --dur-3: 0ms;
+    --dur-4: 0ms;
+  }
+}

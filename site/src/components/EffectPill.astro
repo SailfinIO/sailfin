@@ -1,0 +1,89 @@
+---
+/*
+ * EffectPill — styled capsule for Sailfin effect annotations.
+ *
+ * Renders as `![io, net]` in JetBrains Mono, wrapped in a pill-shaped
+ * capsule that matches the design system's "effect tag" pattern.
+ *
+ * Each canonical effect has its own accent token (`--effect-io`,
+ * `--effect-net`, …). The background and border tints are derived
+ * from that accent at render time via `color-mix()`, so the set of
+ * per-effect hard-coded colors is zero. Mixed-effect pills fall back
+ * to the generic violet accent.
+ *
+ * Usage:
+ *   <EffectPill effects={["io", "net"]} />
+ *   <EffectPill effects="io" />
+ *   <EffectPill effects={["clock"]} size="sm" />
+ */
+
+interface Props {
+  effects: string | string[];
+  size?: "sm" | "md";
+}
+
+const { effects, size = "md" } = Astro.props;
+const list = Array.isArray(effects) ? effects : [effects];
+const solo = list.length === 1 ? list[0]?.toLowerCase() : undefined;
+---
+
+<span class:list={["effect-pill", `size-${size}`, solo && `effect-${solo}`]}>
+  <span class="bang" aria-hidden="true">!</span>[<span class="effects">{list.join(", ")}</span>]
+</span>
+
+<style>
+  /*
+   * --pill-accent resolves per-effect via the .effect-<name> classes
+   * below. The tints for background and border are derived at render
+   * time with color-mix(), so per-effect styles only need to set one
+   * variable.
+   */
+  .effect-pill {
+    --pill-accent: var(--sfn-magenta-hot);
+    display: inline-flex;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-weight: var(--fw-medium);
+    font-size: 0.8rem;
+    line-height: 1;
+    padding: 0.3em 0.7em;
+    border-radius: var(--r-full);
+    color: var(--pill-accent);
+    background: color-mix(in srgb, var(--pill-accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--pill-accent) 45%, transparent);
+    white-space: nowrap;
+    vertical-align: baseline;
+  }
+
+  .effect-pill.size-sm {
+    font-size: 0.72rem;
+    padding: 0.25em 0.6em;
+  }
+
+  .effect-pill .bang {
+    color: inherit;
+    font-weight: var(--fw-bold);
+    margin-right: 0.05em;
+  }
+
+  .effect-pill .effects {
+    color: inherit;
+  }
+
+  /* Per-effect accent assignment — the tint math above does the rest. */
+  .effect-pill.effect-io    { --pill-accent: var(--effect-io); }
+  .effect-pill.effect-net   { --pill-accent: var(--effect-net); }
+  .effect-pill.effect-model { --pill-accent: var(--effect-model); }
+  .effect-pill.effect-clock { --pill-accent: var(--effect-clock); }
+  .effect-pill.effect-gpu   { --pill-accent: var(--effect-gpu); }
+  .effect-pill.effect-rand  { --pill-accent: var(--effect-rand); }
+
+  /* Light surfaces need a darker accent for text legibility on white. */
+  :global(html[data-theme="light"]) .effect-pill           { --pill-accent: var(--sfn-violet); }
+  :global(html[data-theme="light"]) .effect-pill.effect-io    { --pill-accent: var(--effect-io-dim); }
+  :global(html[data-theme="light"]) .effect-pill.effect-net   { --pill-accent: var(--effect-net-dim); }
+  :global(html[data-theme="light"]) .effect-pill.effect-model { --pill-accent: var(--effect-model-dim); }
+  :global(html[data-theme="light"]) .effect-pill.effect-clock { --pill-accent: var(--effect-clock-dim); }
+  :global(html[data-theme="light"]) .effect-pill.effect-gpu   { --pill-accent: var(--effect-gpu-dim); }
+  :global(html[data-theme="light"]) .effect-pill.effect-rand  { --pill-accent: var(--effect-rand-dim); }
+</style>

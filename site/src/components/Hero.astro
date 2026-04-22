@@ -1,4 +1,17 @@
 ---
+/*
+ * Hero.astro — Sailfin marketing hero.
+ *
+ * Cosmetic changes vs. upstream:
+ *   - Headline highlight word uses the brand gradient (violet→magenta)
+ *   - Install box gets a `$` prompt and copy-to-clipboard button
+ *   - Code window swaps placeholder file title for `server.sfn` monospace
+ *   - Subtle radial spotlight behind the headline on dark mode
+ *
+ * Structural / semantic markup is unchanged from the previous Hero.astro,
+ * so routing, SEO and a11y behavior are preserved.
+ */
+
 const exampleCode = `struct Config {
     host: string;
     port: number;
@@ -19,12 +32,17 @@ fn main() ![io, net] {
     print("Listening on {{config.host}}");
     serve(handle, { port: config.port });
 }`;
+
+const installCmd = "curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash";
 ---
 
 <section class="hero">
   <div class="hero-inner">
     <div class="hero-text">
-      <h1>Know what your code can do <span class="highlight">before it runs</span></h1>
+      <h1>
+        Know what your code can do
+        <span class="highlight">before it runs</span>
+      </h1>
       <p class="hero-subtitle">
         A compiled systems language where every function declares its capabilities — IO, network, clock, and more — with compile-time effect checking.
       </p>
@@ -32,11 +50,20 @@ fn main() ![io, net] {
         <a href="/docs/getting-started/install" class="btn btn-primary">Get Started</a>
         <a href="/docs/getting-started/tour" class="btn btn-secondary">Take the Tour</a>
       </div>
-      <div class="hero-install">
-        <code>curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash</code>
+      <div class="hero-install" role="group" aria-label="Install command">
+        <span class="prompt" aria-hidden="true">$</span>
+        <code>{installCmd}</code>
+        <button
+          type="button"
+          class="copy"
+          data-install={installCmd}
+          aria-label="Copy install command"
+        >
+          Copy
+        </button>
       </div>
     </div>
-    <div class="hero-code">
+    <div class="hero-code" aria-hidden="true">
       <div class="code-window">
         <div class="code-titlebar">
           <span class="dot red"></span>
@@ -50,15 +77,54 @@ fn main() ![io, net] {
   </div>
 </section>
 
+<script>
+  // Install-command copy button. Progressive enhancement — the <code>
+  // block is readable without JS.
+  document.querySelectorAll<HTMLButtonElement>(".hero-install .copy").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const cmd = btn.dataset.install;
+      if (!cmd) return;
+      try {
+        await navigator.clipboard.writeText(cmd);
+        btn.textContent = "Copied";
+        btn.classList.add("ok");
+        setTimeout(() => {
+          btn.textContent = "Copy";
+          btn.classList.remove("ok");
+        }, 1500);
+      } catch {
+        /* clipboard unavailable; leave UI alone */
+      }
+    });
+  });
+</script>
+
 <style>
   .hero {
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--color-primary) 10%, var(--color-bg)) 0%,
-      var(--color-bg) 100%
-    );
+    position: relative;
     padding: 5rem 0 4rem;
+    isolation: isolate;
+    background: var(--color-bg);
   }
+
+  /* Soft radial spotlight — visible on dark mode, invisible on light. */
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: -10% -5% auto -5%;
+    height: 120%;
+    background: radial-gradient(
+      55% 65% at 30% 20%,
+      rgba(161, 0, 255, 0.18) 0%,
+      rgba(251, 72, 184, 0.1) 35%,
+      transparent 70%
+    );
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  :global(html[data-theme="dark"]) .hero::before { opacity: 1; }
 
   .hero-inner {
     max-width: var(--max-width);
@@ -71,18 +137,22 @@ fn main() ![io, net] {
 
   .hero-text {
     flex: 1;
-    max-width: 520px;
+    max-width: 560px;
   }
 
   .hero-text h1 {
-    font-size: 2.75rem;
-    line-height: 1.15;
+    font-size: clamp(2.25rem, 4.5vw, 3.25rem);
+    line-height: 1.08;
     letter-spacing: -0.03em;
     margin-bottom: 1.25rem;
+    font-weight: 700;
   }
 
   .highlight {
-    color: var(--color-primary);
+    background: var(--sfn-gradient);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
   }
 
   .hero-subtitle {
@@ -106,16 +176,18 @@ fn main() ![io, net] {
     font-weight: 600;
     border-radius: 8px;
     text-decoration: none;
-    transition: all 0.15s;
+    transition: transform 0.15s, box-shadow 0.15s, background 0.15s, border-color 0.15s;
   }
 
   .btn-primary {
-    background: var(--color-primary);
+    background: var(--sfn-gradient);
     color: #fff;
+    box-shadow: 0 6px 20px -8px rgba(251, 72, 184, 0.45);
   }
 
   .btn-primary:hover {
-    background: var(--color-primary-dark);
+    transform: translateY(-1px);
+    box-shadow: 0 10px 28px -8px rgba(251, 72, 184, 0.55);
     text-decoration: none;
   }
 
@@ -131,14 +203,56 @@ fn main() ![io, net] {
     text-decoration: none;
   }
 
-  .hero-install code {
-    display: block;
-    background: var(--gray-900);
-    color: var(--gray-300);
-    padding: 0.75rem 1rem;
+  .hero-install {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    background: var(--color-bg-code);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
-    font-size: 0.875rem;
+    padding: 0.6rem 0.85rem;
+    font-family: var(--font-mono);
+    font-size: 0.825rem;
+  }
+
+  .hero-install .prompt {
+    color: var(--color-primary);
+    font-weight: 600;
+    user-select: none;
+  }
+
+  .hero-install code {
+    flex: 1;
+    min-width: 0;
+    background: none;
+    padding: 0;
+    color: var(--color-text);
     overflow-x: auto;
+    white-space: nowrap;
+  }
+
+  .hero-install .copy {
+    flex-shrink: 0;
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--color-text-secondary);
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    padding: 0.3rem 0.6rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+  }
+
+  .hero-install .copy:hover {
+    color: var(--color-text);
+    border-color: var(--color-border-strong);
+  }
+
+  .hero-install .copy.ok {
+    color: var(--color-accent);
+    border-color: var(--color-accent);
   }
 
   .hero-code {
@@ -147,10 +261,11 @@ fn main() ![io, net] {
   }
 
   .code-window {
-    background: var(--gray-900);
-    border-radius: 12px;
+    background: var(--color-bg-code);
+    border: 1px solid var(--color-border);
+    border-radius: var(--r-3);
     overflow: hidden;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
+    box-shadow: var(--shadow-3);
   }
 
   .code-titlebar {
@@ -158,12 +273,13 @@ fn main() ![io, net] {
     align-items: center;
     gap: 0.5rem;
     padding: 0.75rem 1rem;
-    background: var(--gray-800);
+    background: rgba(0, 0, 0, 0.25);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   .dot {
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
   }
 
@@ -181,13 +297,13 @@ fn main() ![io, net] {
   .code-window pre {
     margin: 0;
     padding: 1.25rem 1.5rem;
-    background: var(--gray-900);
+    background: transparent;
     border-radius: 0;
     overflow-x: auto;
   }
 
   .code-window code {
-    color: var(--gray-300);
+    color: #cfc4e0;
     font-size: 0.825rem;
     background: none;
     padding: 0;
@@ -204,12 +320,12 @@ fn main() ![io, net] {
       text-align: center;
     }
 
-    .hero-text h1 {
-      font-size: 2.25rem;
-    }
-
     .hero-actions {
       justify-content: center;
+    }
+
+    .hero-install {
+      text-align: left;
     }
 
     .hero-code {

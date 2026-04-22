@@ -44,6 +44,7 @@ const columns = [
     <div class="footer-brand">
       <a href="/" class="footer-logo">
         <img src="/images/sfn_lang_logo_256.svg" alt="Sailfin" width="28" height="28" />
+        <span class="footer-wordmark" aria-hidden="true">sfn</span>
       </a>
       <p class="footer-tagline">
         A compiled systems language with compile-time capability enforcement.
@@ -78,7 +79,7 @@ const columns = [
 
 <style>
   .site-footer {
-    background: var(--gray-900);
+    background: #0e0b14;
     color: var(--gray-400);
     margin-top: auto;
   }
@@ -100,11 +101,21 @@ const columns = [
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    color: #fff;
+    color: #f4eefb;
     font-weight: 700;
     font-size: 1.1rem;
     text-decoration: none;
     margin-bottom: 0.75rem;
+  }
+
+  /* Brand rule: solid wordmark beside the mark, JetBrains Mono 700. */
+  .footer-wordmark {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 1.25rem;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: #f4eefb;
   }
 
   .footer-tagline {

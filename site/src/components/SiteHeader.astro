@@ -34,6 +34,7 @@ const githubUrl = "https://github.com/sailfinio/sailfin";
   <div class="header-inner">
     <a href="/" class="logo" aria-label="Sailfin home">
       <img src="/images/sfn_lang_logo_256.svg" alt="" width="32" height="32" />
+      <span class="wordmark" aria-hidden="true">sfn</span>
     </a>
 
     <nav class="main-nav" aria-label="Main navigation">
@@ -201,12 +202,29 @@ const githubUrl = "https://github.com/sailfinio/sailfin";
   .logo {
     display: flex;
     align-items: center;
+    gap: 0.5rem;
     text-decoration: none;
     flex-shrink: 0;
+    color: var(--color-text);
   }
 
   .logo img {
     display: block;
+  }
+
+  /*
+   * Brand rule (tmp-design/README.md): the gradient belongs to Guillermo.
+   * When the `sfn` wordmark sits beside the mark, it is set SOLID — off-white
+   * on dark surfaces, deep-violet on light — in JetBrains Mono 700 at a cap
+   * height that matches the mark's 32px icon.
+   */
+  .logo .wordmark {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: 1.375rem;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    color: var(--color-text);
   }
 
   .main-nav {
