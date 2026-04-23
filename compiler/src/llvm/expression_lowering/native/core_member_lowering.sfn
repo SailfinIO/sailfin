@@ -325,13 +325,43 @@ fn lower_enum_member_access(parse: MemberAccessParse, enum_info: EnumTypeInfo, b
     let mut selected_fields: StructFieldInfo[] = matched_fields;
 
     if expected_type.length > 0 {
+        // Compute the base type (strip trailing `*` levels) of the expected
+        // type so we can match variants whose field is either the same type
+        // or differs by one pointer level. The downstream select-chain logic
+        // (`pointer_coercion`) already handles the mismatch by loading /
+        // taking-address as needed, so filtering by EXACT type equality
+        // would silently drop compatible variants. Concretely:
+        //
+        //   statement.expression where
+        //     ReturnStatement.expression : Expression?   -> %Expression*
+        //     ThrowStatement.expression  : Expression    -> %Expression
+        //     ExpressionStatement.expression : Expression -> %Expression
+        //
+        // A caller passing this to `format_expression(expression: Expression)`
+        // under the 0.5.8+ boxed-struct ABI has `expected_type = %Expression*`.
+        // An exact-equality filter would keep only ReturnStatement and the
+        // chain would return `null` for ExpressionStatement / ThrowStatement,
+        // crashing `format_expression(null)` at runtime.
+        let mut expected_base: string = expected_type;
+        loop {
+            if !ends_with_pointer_suffix(expected_base) { break; }
+            expected_base = strip_pointer_suffix(expected_base);
+        }
         let mut filtered_variants: EnumVariantInfo[] = [];
         let mut filtered_fields: StructFieldInfo[] = [];
         let mut selection_index: number = 0;
         loop {
             if selection_index >= matched_fields.length { break; }
             let candidate_field = matched_fields[selection_index];
-            if candidate_field.llvm_type == expected_type {
+            let mut candidate_base: string = candidate_field.llvm_type;
+            loop {
+                if !ends_with_pointer_suffix(candidate_base) { break; }
+                candidate_base = strip_pointer_suffix(candidate_base);
+            }
+            let mut accept: boolean = false;
+            if candidate_field.llvm_type == expected_type { accept = true; }
+            if candidate_base == expected_base { accept = true; }
+            if accept {
                 filtered_variants.push(matched_variants[selection_index]);
                 filtered_fields.push(candidate_field);
             }
