@@ -503,7 +503,6 @@ fn should_internalize_function(function: NativeFunction, entry_points: string[],
     // happened to produce external linkage for them because its own
     // baked-in rule was narrower, which hid the regression in self-host
     // builds until the seedcheck link step exposed it.
-
     // Default: preserve existing cross-module linkage behavior.
     return false;
 }

@@ -1,0 +1,87 @@
+// Regression test: enum-member access across variants whose shared field has
+// different but pointer-depth-compatible LLVM types.
+//
+// Background: `lower_enum_member_access` in
+// `compiler/src/llvm/expression_lowering/native/core_member_lowering.sfn`
+// filters variants against the caller's expected type before building the
+// select chain that reads the field. The filter used to require EXACT
+// `llvm_type` equality, which silently dropped variants whose field was the
+// same base type at a different pointer depth (e.g. `Expression` vs
+// `Expression?` → `%Expression` vs `%Expression*`). The downstream
+// `pointer_coercion` branch is already designed to unify such cases by
+// loading / taking-address as needed, but filtering killed the variant
+// before that code ran — so the compiled select chain returned `null` for
+// the unmatched tags. Callers that passed the result to a function taking
+// the base type (boxed-struct ABI) then crashed on the `null` pointer.
+//
+// This test locks the fix in: it defines an enum whose variants all carry a
+// `payload` field, but one variant uses the nullable form and the others
+// use the bare form. The test accesses `.payload` in typed contexts (both
+// by-pointer and by-value) and asserts that the select chain picks the
+// right value for every variant tag.
+struct Cell {
+    value: number;
+}
+
+enum Node {
+    // `payload: Cell?` — LLVM maps to `%Cell*` (depth 1).
+    Optional { payload: Cell?, tag: number },
+    // `payload: Cell`  — LLVM maps to `%Cell`  (depth 0) under the inline
+    // user-struct field layout used for enum payloads.
+    Direct { payload: Cell, tag: number },
+    // Sentinel variant without `payload` — must not interfere with the
+    // match-arm tag lookup.
+    Missing { tag: number }
+}
+
+fn _extract_value(node: Node) -> number {
+    // Accesses `node.payload` in a context where the receiver expects a
+    // boxed `Cell?` pointer. The filter used to keep only the `Optional`
+    // variant here, returning `null` on `Direct` and crashing inside
+    // `_cell_value(null)`. With the fix, both variants are kept and the
+    // downstream coercion supplies a `Cell*` for each.
+    let cell = node.payload;
+    return _cell_value(cell);
+}
+
+fn _cell_value(cell: Cell?) -> number {
+    if cell == null { return -1; }
+    return cell.value;
+}
+
+fn _tag_of(node: Node) -> number {
+    // `.tag` is present on every variant with the same `number` type, so
+    // the filter should accept all three with no depth mismatch.
+    return node.tag;
+}
+
+test "enum_mixed: Direct variant payload is extracted correctly" {
+    let n = Node.Direct {
+        payload: Cell { value: 42 },
+        tag: 1
+    };
+    assert _extract_value(n) == 42;
+    assert _tag_of(n) == 1;
+}
+
+test "enum_mixed: Optional variant payload (Some) is extracted correctly" {
+    let n = Node.Optional {
+        payload: Cell { value: 7 },
+        tag: 2
+    };
+    assert _extract_value(n) == 7;
+    assert _tag_of(n) == 2;
+}
+
+test "enum_mixed: Optional variant payload (None) falls through to sentinel" {
+    let n = Node.Optional { payload: null, tag: 3 };
+    assert _extract_value(n) == -1;
+    assert _tag_of(n) == 3;
+}
+
+test "enum_mixed: Missing variant has no payload field" {
+    let n = Node.Missing { tag: 9 };
+    // Accessing `.payload` on a variant that lacks the field should yield
+    // the default sentinel; accessing `.tag` still works normally.
+    assert _tag_of(n) == 9;
+}

@@ -11,6 +11,7 @@
 //   - declarations.sfn: Top-level declarations (fn, struct, enum, import, etc.)
 import { Program, Statement } from "../ast";
 import { lex } from "../lexer";
+import { substring } from "../string_utils";
 import { Token, TokenKind } from "../token";
 import {
     parse_decorators,
@@ -35,7 +36,6 @@ import {
 } from "./token_utils";
 // Import types from submodules
 import { Parser, StatementParseResult } from "./types";
-import { number_to_string } from "../emit_native_state";
 
 // ============================================================================
 // Main Entry Points
@@ -47,9 +47,17 @@ import { number_to_string } from "../emit_native_state";
 // pad string at function entry shifts subsequent allocations past the corrupted
 // bucket. Remove this once the 0.5.8 seed is released and adopted.
 fn parse_program(source: string) -> Program {
-    // Force a runtime heap allocation so 0.5.7 can't fold the pad away.
-    let _pad_len: number = source.length;
-    let _pad: string = "pp-" + number_to_string(_pad_len);
+    // Force a runtime heap allocation pattern that 0.5.7 can't fold away.
+    // `substring(source, 0, 1)` is a runtime intrinsic over `source` (a
+    // function parameter, not a compile-time value), so the seed cannot
+    // constant-fold it. Concatenating with a literal then triggers a second
+    // runtime string_concat — two heap allocations of 1 and 4 bytes
+    // respectively. Empirically this pattern shifts subsequent allocations
+    // past the bad bucket; a single 1-byte substring was not sufficient.
+    // Cost is O(1) regardless of source length — no dependency on
+    // emit_native_state.
+    let _pad_src: string = substring(source, 0, 1);
+    let _pad: string = "pp-" + _pad_src;
     let tokens = lex(source);
     return parse_tokens(tokens);
 }
