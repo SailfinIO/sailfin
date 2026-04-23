@@ -1,0 +1,95 @@
+// Regression test: match-case colon syntax (`1: { body }` and
+// `Variant: return value`) must parse as MatchStatement, not Unknown.
+//
+// Background: `collect_pattern_until_arrow` in
+// `compiler/src/parser/token_utils.sfn` is called by `parse_match_case` to
+// consume the pattern tokens up to the pattern-to-body separator. The
+// original implementation only recognized `=>` and `->` as terminators,
+// but the spec / tests use `:` (a modern, boring syntax consistent with
+// TypeScript/Python record literals). Without the colon as a terminator,
+// the scanner ran to end-of-file, `parse_match_case` returned
+// `success: false`, `parse_match_statement` fell through, and
+// `parse_block_statement` classified the whole `match { ... }` as a
+// `Statement.Unknown` — which `emit_native` drops with an
+// `unsupported statement` diagnostic.
+//
+// In the first-pass binary this bug was silent because the match-bearing
+// function's test bodies also collapsed to empty (assertions elided along
+// with the unparseable match). In the seedcheck binary — compiled by the
+// first-pass with the correct array-literal lowering — the test bodies
+// retained their assertions, so the same parse failure surfaced as
+// `assertion failed` the moment any test called a match-using helper.
+//
+// The fix makes `collect_pattern_until_arrow` depth-aware (paren/brace/
+// bracket balanced) and adds `:` as a top-level terminator alongside `=>`
+// and `->`. Nested `:` inside a struct or map literal pattern is still
+// treated as part of the pattern, not as a case separator.
+fn _compute(op: number, a: number, b: number) -> number {
+    let mut result: number = 0;
+    match op {
+        1: {
+            result = a + b;
+        },
+        2: {
+            result = a * b;
+        },
+        _: {
+            result = -1;
+        }
+    }
+    return result;
+}
+
+enum Signal {
+    Stop,
+    Go,
+    Wait
+}
+
+fn _describe(s: Signal) -> string {
+    match s {
+        Signal.Stop: return "halt",
+        Signal.Go: return "proceed",
+        Signal.Wait: return "hold"
+    }
+}
+
+test "match_colon: numeric patterns with block bodies" {
+    assert _compute(1, 10, 5) == 15;
+    assert _compute(2, 10, 5) == 50;
+    assert _compute(99, 10, 5) == -1;
+}
+
+test "match_colon: enum patterns with inline return" {
+    assert strings_equal(_describe(Signal.Stop), "halt");
+    assert strings_equal(_describe(Signal.Go), "proceed");
+    assert strings_equal(_describe(Signal.Wait), "hold");
+}
+
+test "match_colon: match inside a loop updates counters" {
+    let mut i: number = 0;
+    let mut sum: number = 0;
+    loop {
+        if i >= 5 { break; }
+        match i {
+            0: {
+                sum += 10;
+            },
+            1: {
+                sum += 20;
+            },
+            2: {
+                sum += 30;
+            },
+            _: {
+                sum += 1;
+            }
+        }
+        i += 1;
+    }
+    // 10 + 20 + 30 + 1 + 1 = 62. Before the fix the loop never advanced
+    // past `match i` because the statement parsed as Unknown and emitted
+    // no instructions — the loop body contained only `i >= 5` check and
+    // the `sum += ...` assignments were dropped.
+    assert sum == 62;
+}
