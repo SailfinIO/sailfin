@@ -6,10 +6,12 @@ name: CI (branch push)
 # releases — use the manual "Release" workflow (release.yml) for that.
 #
 # The pinned seed version lives in `.seed-version` at the repo root.
-# A setup step below reads that file into $GITHUB_ENV so this workflow,
-# ci.yml, release-tag.yml, nightly-selfhost.yml, and the Makefile all
-# resolve to the same pin automatically. Bumping the seed is a one-line
-# edit to `.seed-version`.
+# A setup step below reads that file and exports the resolved value as
+# a step output (`steps.seed.outputs.seed_version`) so the downstream
+# composite action sees the correct pin. Kept in sync with ci.yml,
+# release-tag.yml, nightly-selfhost.yml, and the Makefile — all four
+# read the same `.seed-version` file. Bumping the seed is a one-line
+# edit.
 
 on:
     push:
@@ -55,16 +57,21 @@ jobs:
               uses: actions/checkout@v6.0.2
 
             - name: Resolve seed version from .seed-version
+              id: seed
               shell: bash
               run: |
                   set -euo pipefail
+                  if [ ! -f .seed-version ]; then
+                      echo "[seed-pin] .seed-version is missing from checkout" >&2
+                      exit 1
+                  fi
                   pin="$(tr -d '[:space:]' < .seed-version)"
                   if [ -z "$pin" ]; then
-                      echo "[seed-pin] .seed-version is empty or missing" >&2
+                      echo "[seed-pin] .seed-version is empty" >&2
                       exit 1
                   fi
                   echo "[seed-pin] using seed $pin"
-                  echo "SEED_VERSION=$pin" >> "$GITHUB_ENV"
+                  echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
 
             - name: Install clang (Linux)
               if: runner.os == 'Linux'
@@ -87,7 +94,7 @@ jobs:
               with:
                   target: ${{ matrix.package_label }}
                   clang: ${{ matrix.clang }}
-                  seed_version: ${{ env.SEED_VERSION }}
+                  seed_version: ${{ steps.seed.outputs.seed_version }}
 
             - name: Report compiler metadata
               shell: bash {0}

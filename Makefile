@@ -129,7 +129,17 @@ SEED ?= build/seed/bin/sailfin
 FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
 
 fetch-seed:
-	@echo "[fetch-seed] installing seed into $(SEED_INSTALL_BASE)"
+	@if [ -z "$(SEED_VERSION)" ]; then \
+		echo "[fetch-seed][error] SEED_VERSION is empty." >&2; \
+		echo "[fetch-seed][error] The pin lives in .seed-version at the repo root." >&2; \
+		if [ ! -f .seed-version ]; then \
+			echo "[fetch-seed][error] .seed-version is missing — restore it or pass SEED_VERSION=... explicitly." >&2; \
+		else \
+			echo "[fetch-seed][error] .seed-version is present but empty — write a version (e.g. 0.5.7) to it." >&2; \
+		fi; \
+		exit 1; \
+	fi
+	@echo "[fetch-seed] installing seed $(SEED_VERSION) into $(SEED_INSTALL_BASE)"
 	@mkdir -p build/seed
 	@REPO="$(SEED_REPO)" VERSION="$(SEED_VERSION)" EXCLUDE_TAG="$(SEED_EXCLUDE_TAG)" \
 		GLOBAL_BIN_DIR="$(SEED_GLOBAL_BIN_DIR)" INSTALL_BASE="$(SEED_INSTALL_BASE)" \
