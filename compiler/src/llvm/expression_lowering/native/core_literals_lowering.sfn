@@ -6,6 +6,8 @@ import { substring } from "../../../string_utils";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import {
+    find_enum_info_by_llvm_type,
+    find_struct_info_by_llvm_type,
     lookup_allocation_info,
     resolve_enum_info_for_literal,
     resolve_enum_variant_info,
@@ -278,6 +280,14 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         // `coerce_operand_to_type` below inserts a `load %T, %T* %op`
         // before the store. Non-aggregate pointer types (`i8*`, `ptr`) keep
         // their original dominant_type semantics.
+        //
+        // The symmetric case (first element with no prior inference, no
+        // annotation, operand is `%T*`) must also prefer the unboxed form.
+        // Otherwise `[FieldInput { ... }]` seeds inferred_element_type with
+        // `%FieldInput*`, producing `{ %FieldInput**, i64 }` storage that
+        // readers (which GEP with element type `%FieldInput`) interpret as
+        // an array of by-value structs. The visible symptom is fields past
+        // the first 8 bytes reading uninitialized memory.
         let _ielt_base = inferred_element_type;
         let _op_type = lowered.operand.llvm_type;
         let mut _keep_element_type: boolean = false;
@@ -290,6 +300,36 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                             if _op_base == _ielt_base {
                                 _keep_element_type = true;
                             }
+                        }
+                    }
+                }
+            }
+        }
+        if !_keep_element_type {
+            // When inferred is empty (first aggregate operand with no prior
+            // annotation) and the operand is `%T*` where `%T` is a known
+            // user aggregate, seed the inference with the unboxed `%T`
+            // form. This mirrors the option-a inline layout used for struct
+            // and enum fields — aggregates live by-value inside containers
+            // and cross function boundaries by pointer. `dominant_type`
+            // would otherwise preserve the pointer-shaped operand type,
+            // forcing a later bitcast that misaligns all field reads.
+            if _ielt_base.length == 0 {
+                if starts_with(_op_type, "%") {
+                    if ends_with_pointer_suffix(_op_type) {
+                        let _first_base = trim_text(strip_pointer_suffix(_op_type));
+                        let mut _seed_unboxed: boolean = false;
+                        if _first_base.length > 0 {
+                            if find_struct_info_by_llvm_type(context, _first_base) != null {
+                                _seed_unboxed = true;
+                            }
+                            if find_enum_info_by_llvm_type(context, _first_base) != null {
+                                _seed_unboxed = true;
+                            }
+                        }
+                        if _seed_unboxed {
+                            inferred_element_type = _first_base;
+                            _keep_element_type = true;
                         }
                     }
                 }
