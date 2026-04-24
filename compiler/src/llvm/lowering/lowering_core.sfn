@@ -259,14 +259,9 @@ fn make_native_module_for_emit(module_name: string, native_text: string) -> Nati
     };
 }
 
-fn compile_native_text_to_llvm_file(native_text_path: string, module_name: string, out_path: string) -> boolean ![io] {
-    if !fs.exists(native_text_path) {
-        print.err("emit-llvm: native text file missing at " + native_text_path);
-        return false;
-    }
-    let native_text = fs.readFile(native_text_path);
+fn compile_native_text_to_llvm_file(native_text: string, module_name: string, out_path: string) -> boolean ![io] {
     if native_text.length == 0 {
-        print.err("emit-llvm: native text file empty at " + native_text_path);
+        print.err("emit-llvm: empty native text for module " + module_name);
         return false;
     }
     let parse = build_parse_result_from_text(native_text);
