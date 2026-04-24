@@ -17,10 +17,6 @@ NATIVE_OPT ?= -O2
 #   CLANG_LL_FLAGS=-mllvm -opaque-pointers
 CLANG_LL_FLAGS ?=
 
-# Parallelism for the compiler build orchestrator's per-module emit + clang compile.
-# Keep conservative by default: this can increase peak memory.
-BUILD_JOBS ?= 1
-
 # Extra args passed through to the build orchestrator script.
 BUILD_ARGS ?=
 
@@ -40,6 +36,22 @@ else ifeq ($(IS_WINDOWS),1)
 TIMEOUT_CMD ?=
 else
 TIMEOUT_CMD ?= timeout
+endif
+
+# Parallelism for the compiler build orchestrator's per-module emit + clang
+# compile (passed through to scripts/build.sh as JOBS).
+#
+# Default: auto-detected from CPU count and total RAM via
+# scripts/detect_build_jobs.sh, with a per-job budget of 5 GB (heaviest module
+# ~4.7 GB peak RSS under the arena allocator, plus headroom). macOS additionally
+# caps at 2 because the M1 GitHub runner has only 7 GB total RAM. Windows / hosts
+# we cannot probe fall back to 1.
+#
+# Override explicitly with `BUILD_JOBS=N` (or the legacy `make rebuild
+# BUILD_JOBS=4`); empty / unset uses auto-detect. See docs/build-performance.md
+# → Phase 6 for the rollout plan and the per-job budget rationale.
+ifeq ($(strip $(BUILD_JOBS)),)
+BUILD_JOBS := $(shell bash scripts/detect_build_jobs.sh 2>/dev/null || echo 1)
 endif
 
 # Portable SHA-256 hasher. `shasum -a 256` ships with Perl on both macOS and
