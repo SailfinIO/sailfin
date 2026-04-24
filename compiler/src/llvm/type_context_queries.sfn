@@ -171,6 +171,21 @@ fn resolve_struct_info_from_llvm_type(context: TypeContext, llvm_type: string) -
     return find_struct_info_by_llvm_type(context, candidate);
 }
 
+// Resolve enum info from an operand's LLVM type that may be either the
+// value form (`%Enum`) or the boxed pointer form (`%Enum*`). Mirrors
+// resolve_struct_info_from_llvm_type — callers that need pointer-depth-
+// tolerant lookup should use this; callers that require an exact llvm_name
+// match (e.g. the aggregate-field classifier in core_member_lowering) must
+// continue to use find_enum_info_by_llvm_type directly.
+fn resolve_enum_info_from_llvm_type(context: TypeContext, llvm_type: string) -> EnumTypeInfo? {
+    let mut candidate = trim_text(llvm_type);
+    if candidate.length == 0 { return null; }
+    if ends_with_pointer_suffix(candidate) {
+        candidate = strip_pointer_suffix(candidate);
+    }
+    return find_enum_info_by_llvm_type(context, candidate);
+}
+
 fn lookup_allocation_info(context: TypeContext, llvm_type: string) -> TypeAllocationInfo? {
     let trimmed = trim_text(llvm_type);
     if trimmed.length == 0 { return null; }

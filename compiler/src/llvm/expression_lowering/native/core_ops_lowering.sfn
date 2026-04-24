@@ -5,7 +5,7 @@ import { NativeFunction } from "../../../native_ir";
 import { substring } from "../../../string_utils";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
-import { find_enum_info_by_llvm_type } from "../../type_context_queries";
+import { resolve_enum_info_from_llvm_type } from "../../type_context_queries";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
     ExpressionResult,
@@ -804,24 +804,56 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
     if is_equality {
         if left_operand != null {
             if right_operand != null {
-                // Enum equality compares tags.
-                if left_operand.llvm_type == right_operand.llvm_type {
-                    let enum_info = find_enum_info_by_llvm_type(context, left_operand.llvm_type);
-                    if enum_info != null {
-                        let mut tag_llvm_type: string = "i32";
-                        if enum_info.tag_type == "i8" { tag_llvm_type = "i8"; }
-                        if enum_info.tag_type == "i16" {
-                            tag_llvm_type = "i16";
+                // Enum equality compares tags — never pointer identity.
+                //
+                // Under the 0.5.8+ boxed-struct ABI both operand forms are
+                // legitimate at the same enum type:
+                //   - value form  (%EnumT):  extracted from an inline field
+                //                            (tasks[i].status), loaded from
+                //                            an array of inline enums, or
+                //                            produced by a by-value return.
+                //   - pointer form (%EnumT*): boxed parameters, heap-boxed
+                //                            enum literals, and members of
+                //                            boxed parent structs whose
+                //                            field GEP returns a %Field*.
+                //
+                // Resolve each operand's enum identity independently (the
+                // resolver strips one pointer level) so mixed comparisons
+                // like `tasks[i].status == status_param` work alongside
+                // same-shape pairs. We fall through to the non-enum path
+                // only if both sides fail to resolve OR they resolve to
+                // different enums (which is a type error the caller will
+                // report downstream).
+                let left_enum_info = resolve_enum_info_from_llvm_type(context, left_operand.llvm_type);
+                let right_enum_info = resolve_enum_info_from_llvm_type(context, right_operand.llvm_type);
+                let mut enums_match: boolean = false;
+                if left_enum_info != null {
+                    if right_enum_info != null {
+                        if left_enum_info.llvm_name == right_enum_info.llvm_name {
+                            enums_match = true;
                         }
-                        if enum_info.tag_type == "i32" {
-                            tag_llvm_type = "i32";
-                        }
-                        if enum_info.tag_type == "i64" {
-                            tag_llvm_type = "i64";
-                        }
+                    }
+                }
+                if enums_match {
+                    let enum_info = left_enum_info;
+                    let mut tag_llvm_type: string = "i32";
+                    if enum_info.tag_type == "i8" { tag_llvm_type = "i8"; }
+                    if enum_info.tag_type == "i16" {
+                        tag_llvm_type = "i16";
+                    }
+                    if enum_info.tag_type == "i32" {
+                        tag_llvm_type = "i32";
+                    }
+                    if enum_info.tag_type == "i64" {
+                        tag_llvm_type = "i64";
+                    }
 
-                        // 0.5.8+ boxed-struct ABI: enum operands are %EnumT*,
-                        // not by-value %EnumT. Read the tag via GEP+load.
+                    // Read each operand's tag. Pointer form walks GEP+load;
+                    // value form uses extractvalue on the aggregate. Mixed
+                    // forms are both fine — one side may be a boxed param
+                    // while the other is a loaded inline field.
+                    let mut left_tag_value: string = "";
+                    if ends_with_pointer_suffix(left_operand.llvm_type) {
                         let left_tag_ptr_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
                         alignment_lines.push("  " + left_tag_ptr_temp
@@ -840,7 +872,21 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                             + tag_llvm_type
                             + "* "
                             + left_tag_ptr_temp);
+                        left_tag_value = left_tag_temp;
+                    } else {
+                        let left_tag_temp = format_temp_name(alignment_temp);
+                        alignment_temp += 1;
+                        alignment_lines.push("  " + left_tag_temp
+                            + " = extractvalue "
+                            + enum_info.llvm_name
+                            + " "
+                            + left_operand.value
+                            + ", 0");
+                        left_tag_value = left_tag_temp;
+                    }
 
+                    let mut right_tag_value: string = "";
+                    if ends_with_pointer_suffix(right_operand.llvm_type) {
                         let right_tag_ptr_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
                         alignment_lines.push("  " + right_tag_ptr_temp
@@ -859,31 +905,42 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                             + tag_llvm_type
                             + "* "
                             + right_tag_ptr_temp);
-
-                        let compare_temp = format_temp_name(alignment_temp);
+                        right_tag_value = right_tag_temp;
+                    } else {
+                        let right_tag_temp = format_temp_name(alignment_temp);
                         alignment_temp += 1;
-                        let mut predicate: string = "icmp eq";
-                        if match.symbol == "!=" { predicate = "icmp ne"; }
-                        alignment_lines.push("  " + compare_temp + " = "
-                            + predicate
+                        alignment_lines.push("  " + right_tag_temp
+                            + " = extractvalue "
+                            + enum_info.llvm_name
                             + " "
-                            + tag_llvm_type
-                            + " "
-                            + left_tag_temp
-                            + ", "
-                            + right_tag_temp);
-                        let operand = LLVMOperand {
-                            llvm_type: "i1",
-                            value: compare_temp
-                        };
-                        return ExpressionResult {
-                            lines: alignment_lines,
-                            temp_index: alignment_temp,
-                            operand: operand,
-                            diagnostics: diagnostics,
-                            string_constants: string_constants
-                        };
+                            + right_operand.value
+                            + ", 0");
+                        right_tag_value = right_tag_temp;
                     }
+
+                    let compare_temp = format_temp_name(alignment_temp);
+                    alignment_temp += 1;
+                    let mut predicate: string = "icmp eq";
+                    if match.symbol == "!=" { predicate = "icmp ne"; }
+                    alignment_lines.push("  " + compare_temp + " = "
+                        + predicate
+                        + " "
+                        + tag_llvm_type
+                        + " "
+                        + left_tag_value
+                        + ", "
+                        + right_tag_value);
+                    let operand = LLVMOperand {
+                        llvm_type: "i1",
+                        value: compare_temp
+                    };
+                    return ExpressionResult {
+                        lines: alignment_lines,
+                        temp_index: alignment_temp,
+                        operand: operand,
+                        diagnostics: diagnostics,
+                        string_constants: string_constants
+                    };
                 }
 
                 let left_is_char = left_operand.llvm_type == "i8";
