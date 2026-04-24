@@ -1,0 +1,91 @@
+// Regression test: array literals whose elements are boxed user structs
+// must store by value in the array slot, not by pointer.
+//
+// Background: `lower_array_literal` in
+// `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
+// infers the element_type by dominant-merging the expected type with every
+// operand's llvm_type. Under the 0.5.8+ boxed-struct ABI, an expression
+// returning a user struct value is a `%T*` pointer (heap-boxed). Before the
+// fix, dominant_type would promote the inferred element type from `%T`
+// (value form, the expected array element) to `%T*` (pointer form). That
+// caused the array header to be emitted as `{ %T**, i64 }` (array of
+// pointers) and then bitcast to `{ %T*, i64 }*`. Readers — including
+// `prepare_parameters_from_function` in the compiler itself — then read
+// the buffer with `getelementptr %T, %T* data, i64 i; load %T, %T* slot`,
+// treating the pointer-to-pointer layout as an array of struct values.
+// The load read the STORED POINTER BYTES as the struct's first field
+// plus 40 bytes of uninitialized heap past the 8-byte buffer — so each
+// field past the first was random.
+//
+// The user-visible manifestation was methods on user structs lowering
+// with `i8* %<garbage>` for their `self` parameter (garbage because
+// `parameters[i].name` was the random bytes), and stubbed `ret double 0.0`
+// bodies because `map_return_type` couldn't resolve the empty type
+// annotation and fell through to i8*. The bug only fires in the seedcheck
+// binary (compiled by the 0.5.8 first-pass), because the 0.5.7 seed
+// predates the boxed-struct ABI.
+//
+// Minimal reproducer: a struct with at least one method whose parameter
+// list is constructed via the `parameters: [self_param]` array literal
+// inside the recovery parser's `make_native_function_method`. Any struct
+// with a method triggers this path in the seedcheck. We use two structs
+// with multiple methods to exercise the boxed-pointer-to-value coercion
+// path for every insertion position.
+struct Pixel {
+    x: number;
+    y: number;
+
+    fn manhattan(self) -> number { return self.x + self.y; }
+
+    fn scaled(self, factor: number) -> Pixel {
+        return Pixel { x: self.x * factor, y: self.y * factor };
+    }
+}
+
+struct Region {
+    origin: Pixel;
+    extent: Pixel;
+
+    fn corners(self) -> Pixel {
+        return Pixel {
+            x: self.origin.x + self.extent.x,
+            y: self.origin.y + self.extent.y
+        };
+    }
+
+    fn origin_sum(self) -> number { return self.origin.manhattan(); }
+}
+
+test "array_literal_boxed_struct: method on user struct reads self correctly" {
+    let p = Pixel { x: 3, y: 4 };
+    // Before the fix, `self.x` would read a random heap word instead of 3.
+    assert p.manhattan() == 7;
+}
+
+test "array_literal_boxed_struct: method returning boxed struct" {
+    let p = Pixel { x: 2, y: 5 };
+    let scaled = p.scaled(3);
+    assert scaled.x == 6;
+    assert scaled.y == 15;
+}
+
+test "array_literal_boxed_struct: nested struct method chain" {
+    let r = Region {
+        origin: Pixel { x: 1, y: 2 },
+        extent: Pixel { x: 10, y: 20 }
+    };
+    let c = r.corners();
+    assert c.x == 11;
+    assert c.y == 22;
+}
+
+test "array_literal_boxed_struct: nested method invocation on field" {
+    let r = Region {
+        origin: Pixel { x: 7, y: 8 },
+        extent: Pixel { x: 0, y: 0 }
+    };
+    // `r.origin.manhattan()` exercises the method-call path on a nested
+    // struct value — the broken seedcheck would emit this method with a
+    // stub body regardless of arguments.
+    assert r.origin_sum() == 15;
+}

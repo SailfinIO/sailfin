@@ -260,7 +260,44 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             };
         }
         operands.push(lowered.operand);
-        inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type);
+        // 0.5.8+ boxed-struct ABI:
+        // Under the boxed ABI, expressions that produce a user struct/enum value
+        // return a `%T*` pointer (heap-boxed), not the struct value.  But the
+        // array storage convention is `[N x %T]` — elements are stored inline
+        // by value. If we let `dominant_type` promote the element type from
+        // `%T` to `%T*`, the array header type `{ %T**, i64 }` gets bitcast
+        // to `{ %T*, i64 }`, and readers (which GEP with element type %T)
+        // then read an array of pointers as if it were an array of struct
+        // values — producing uninitialized reads for every field past the
+        // first 8 bytes. The visible symptom is methods on user structs
+        // lowering with corrupt self-parameter names like `%U`/`%TU`/`%_1U`
+        // (fragments of a pointer interpreted as a string).
+        //
+        // Fix: when the element type is already the unboxed `%T` form and
+        // the operand is `%T*`, keep the unboxed element type so
+        // `coerce_operand_to_type` below inserts a `load %T, %T* %op`
+        // before the store. Non-aggregate pointer types (`i8*`, `ptr`) keep
+        // their original dominant_type semantics.
+        let _ielt_base = inferred_element_type;
+        let _op_type = lowered.operand.llvm_type;
+        let mut _keep_element_type: boolean = false;
+        if _ielt_base.length > 0 {
+            if starts_with(_ielt_base, "%") {
+                if !ends_with_pointer_suffix(_ielt_base) {
+                    if ends_with_pointer_suffix(_op_type) {
+                        if starts_with(_op_type, "%") {
+                            let _op_base = strip_pointer_suffix(_op_type);
+                            if _op_base == _ielt_base {
+                                _keep_element_type = true;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if !_keep_element_type {
+            inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type);
+        }
         index += 1;
     }
 

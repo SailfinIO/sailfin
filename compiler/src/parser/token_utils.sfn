@@ -455,6 +455,12 @@ fn collect_parenthesized(parser: Parser) -> ParenthesizedParseResult {
 fn collect_pattern_until_arrow(parser: Parser) -> PatternCaptureResult {
     let mut current = skip_trivia(parser);
     let mut tokens: Token[] = [];
+    // Track balancing of (), {}, [] so nested separators inside a pattern
+    // (e.g. `SomeStruct { a: b }` or `func(x: 1)`) are not mistaken for the
+    // pattern-to-body separator.
+    let mut paren_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut bracket_depth: number = 0;
 
     loop {
         let token = parser_peek_raw(current);
@@ -467,12 +473,41 @@ fn collect_pattern_until_arrow(parser: Parser) -> PatternCaptureResult {
         }
         if token.kind.variant == "Symbol" {
             let sym = token.lexeme;
-            let mut _if421: boolean = false;
-            if strings_equal(sym, "=>") { _if421 = true; }
-            if strings_equal(sym, "->") { _if421 = true; }
-            if _if421 {
-                current = parser_advance_raw(current);
-                break;
+            let mut _is_arrow: boolean = false;
+            if strings_equal(sym, "=>") { _is_arrow = true; }
+            if strings_equal(sym, "->") { _is_arrow = true; }
+            let mut _at_top: boolean = false;
+            if paren_depth == 0 {
+                if brace_depth == 0 {
+                    if bracket_depth == 0 { _at_top = true; }
+                }
+            }
+            if _is_arrow {
+                if _at_top {
+                    current = parser_advance_raw(current);
+                    break;
+                }
+            }
+            // Modern match syntax uses `:` to separate the pattern from the
+            // case body (e.g. `1: { ... }` or `HttpStatus.Ok: return 200`).
+            // Stop at a top-level `:` so parse_match_case sees the body
+            // starter (`{` or `return`) on its next peek. Do NOT consume the
+            // `:`; parse_match_case's downstream skip_trivia + body-symbol
+            // checks handle it (and the separator is already implicit).
+            if strings_equal(sym, ":") {
+                if _at_top {
+                    // Consume the `:` so parse_match_case resumes at the
+                    // body (next token after `:`).
+                    current = parser_advance_raw(current);
+                    break;
+                }
+            }
+            if strings_equal(sym, "(") { paren_depth += 1; } else if strings_equal(sym, ")") {
+                if paren_depth > 0 { paren_depth -= 1; }
+            } else if strings_equal(sym, "{") { brace_depth += 1; } else if strings_equal(sym, "}") {
+                if brace_depth > 0 { brace_depth -= 1; }
+            } else if strings_equal(sym, "[") { bracket_depth += 1; } else if strings_equal(sym, "]") {
+                if bracket_depth > 0 { bracket_depth -= 1; }
             }
         }
         tokens = append_token(tokens, token);
