@@ -143,7 +143,7 @@ fetch-seed:
 		if [ ! -f .seed-version ]; then \
 			echo "[fetch-seed][error] .seed-version is missing — restore it or pass SEED_VERSION=... explicitly." >&2; \
 		else \
-			echo "[fetch-seed][error] .seed-version is present but empty — write a version (e.g. 0.5.7) to it." >&2; \
+			echo "[fetch-seed][error] .seed-version is present but empty — write a version (e.g. 0.5.9) to it." >&2; \
 		fi; \
 		exit 1; \
 	fi
