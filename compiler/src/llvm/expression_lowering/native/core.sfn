@@ -613,7 +613,19 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
 
             // If we're awaiting an opaque pointer future in a typed context, try to unbox.
             // This avoids leaking boxed aggregates (struct/enum values) returned as `i8*`.
+            //
+            // Two shapes are legitimate for an `%SailfinFuturePtr*` await:
+            //   - bitcast-then-load: the old by-value ABI stored the full
+            //     aggregate on the heap and the awaiter loaded the value.
+            //     Kept for primitives-embedded-as-value (currently none use
+            //     this path, but the structure stays for forward compat).
+            //   - bitcast-only: the 0.5.8+ boxed-struct ABI returns struct
+            //     and enum aggregates as `%T*` pointers already. Loading
+            //     here would materialise a by-value aggregate and lose the
+            //     pointer-shaped handle every subsequent member access and
+            //     function call is written to consume.
             let mut trimmed_expected = trim_text(expected_type);
+            let mut inferred_boxed_type: string = "";
             // When expected_type is empty (no annotation on the let), try to infer
             // the concrete return type from the future's local binding.  The let
             // lowerer stores the async function's Sailfin return type in
@@ -630,6 +642,12 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                                 if mapped != "i8*" {
                                     if !ends_with_pointer_suffix(mapped) {
                                         trimmed_expected = mapped;
+                                    } else {
+                                        // Boxed user aggregate return: keep
+                                        // the pointer form; record it so the
+                                        // cast-only path below emits a
+                                        // bitcast to the typed handle.
+                                        inferred_boxed_type = mapped;
                                     }
                                 }
                             }
@@ -673,6 +691,31 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                             };
                         }
                     }
+                }
+                // 0.5.8+ boxed-struct ABI: if we inferred a user aggregate
+                // return as `%T*`, emit a bitcast so the awaiter sees the
+                // typed pointer. The heap allocation is owned by the awaited
+                // value — do NOT free it here (it would dangle on the first
+                // field access).
+                if inferred_boxed_type.length > 0 {
+                    let typed_ptr_temp = format_temp_name(lowered.temp_index
+                        + 1);
+                    awaited_lines2.push("  " + typed_ptr_temp
+                        + " = bitcast i8* "
+                        + result_temp
+                        + " to "
+                        + inferred_boxed_type);
+                    let out_operand_boxed = LLVMOperand {
+                        llvm_type: inferred_boxed_type,
+                        value: typed_ptr_temp
+                    };
+                    return ExpressionResult {
+                        lines: awaited_lines2,
+                        temp_index: lowered.temp_index + 2,
+                        operand: out_operand_boxed,
+                        diagnostics: diagnostics,
+                        string_constants: lowered.string_constants
+                    };
                 }
             }
 
