@@ -838,15 +838,9 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                     let enum_info = left_enum_info;
                     let mut tag_llvm_type: string = "i32";
                     if enum_info.tag_type == "i8" { tag_llvm_type = "i8"; }
-                    if enum_info.tag_type == "i16" {
-                        tag_llvm_type = "i16";
-                    }
-                    if enum_info.tag_type == "i32" {
-                        tag_llvm_type = "i32";
-                    }
-                    if enum_info.tag_type == "i64" {
-                        tag_llvm_type = "i64";
-                    }
+                    if enum_info.tag_type == "i16" { tag_llvm_type = "i16"; }
+                    if enum_info.tag_type == "i32" { tag_llvm_type = "i32"; }
+                    if enum_info.tag_type == "i64" { tag_llvm_type = "i64"; }
 
                     // Read each operand's tag. Pointer form walks GEP+load;
                     // value form uses extractvalue on the aggregate. Mixed
@@ -922,8 +916,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                     alignment_temp += 1;
                     let mut predicate: string = "icmp eq";
                     if match.symbol == "!=" { predicate = "icmp ne"; }
-                    alignment_lines.push("  " + compare_temp + " = "
-                        + predicate
+                    alignment_lines.push("  " + compare_temp + " = " + predicate
                         + " "
                         + tag_llvm_type
                         + " "

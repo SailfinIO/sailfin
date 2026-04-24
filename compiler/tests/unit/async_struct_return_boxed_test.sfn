@@ -21,7 +21,6 @@
 // a bitcast-only path (no load, no free — the heap allocation is the
 // value). Subsequent field accesses then flow through the normal boxed
 // member-access lowering.
-
 struct Point {
     x: number;
     y: number;

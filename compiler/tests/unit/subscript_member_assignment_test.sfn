@@ -21,7 +21,6 @@
 // (compiler/src/lock.sfn:lock_add_entry and compiler/src/toml_parser.sfn)
 // — a local array built up with `push`, then mutated by
 // `arr[i].field = value`, then observed via `arr[i].field` reads.
-
 struct Entry {
     key: string;
     value: number;
@@ -31,7 +30,7 @@ struct Entry {
 fn _make_entries() -> Entry[] {
     let mut entries: Entry[] = [];
     entries.push(Entry { key: "alpha", value: 1, tag: 0 });
-    entries.push(Entry { key: "beta",  value: 2, tag: 0 });
+    entries.push(Entry { key: "beta", value: 2, tag: 0 });
     entries.push(Entry { key: "gamma", value: 3, tag: 0 });
     return entries;
 }

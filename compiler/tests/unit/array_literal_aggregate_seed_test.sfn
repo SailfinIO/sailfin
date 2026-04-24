@@ -26,7 +26,6 @@
 // user struct or enum in the type context. Primitives (`i8*`, `ptr`,
 // `double*`) keep the existing pointer semantics; arrays and optionals
 // retain their pointer-form inference.
-
 struct Field {
     name: string;
     offset: number;
@@ -64,10 +63,7 @@ fn _layout_for(inputs: FieldInput[]) -> Record {
             align = 1;
         }
         fields.push(Field {
-            name: input.name,
-            offset: offset,
-            size: size,
-            align: align,
+            name: input.name, offset: offset, size: size, align: align
         });
         offset += size;
         if align > max_align { max_align = align; }
@@ -77,7 +73,6 @@ fn _layout_for(inputs: FieldInput[]) -> Record {
 }
 
 // -- the exact shape that broke emit_native_layout_test --
-
 test "array_literal_aggregate_seed: single struct element via literal" {
     let inputs = [FieldInput { name: "x", type_name: "number" }];
     let result = _layout_for(inputs);
@@ -94,10 +89,9 @@ test "array_literal_aggregate_seed: single struct element via literal" {
 }
 
 test "array_literal_aggregate_seed: two struct elements via literal" {
-    let inputs = [
-        FieldInput { name: "a", type_name: "i32" },
-        FieldInput { name: "b", type_name: "i32" },
-    ];
+    let inputs = [FieldInput { name: "a", type_name: "i32" }, FieldInput {
+        name: "b", type_name: "i32"
+    },];
     let result = _layout_for(inputs);
     assert result.fields.length == 2;
     assert result.fields[0].name == "a";
@@ -111,7 +105,6 @@ test "array_literal_aggregate_seed: two struct elements via literal" {
 }
 
 // -- direct reads, without the function boundary --
-
 test "array_literal_aggregate_seed: direct read from inline literal" {
     let inputs = [FieldInput { name: "y", type_name: "boolean" }];
     assert inputs.length == 1;
@@ -120,7 +113,6 @@ test "array_literal_aggregate_seed: direct read from inline literal" {
 }
 
 // -- primitive arrays still work (fix must not regress them) --
-
 test "array_literal_aggregate_seed: number array literal unchanged" {
     let xs = [1.0, 2.5, 4.0];
     assert xs.length == 3;
@@ -137,13 +129,10 @@ test "array_literal_aggregate_seed: string array literal unchanged" {
 }
 
 // -- mixed: struct element followed by more struct elements --
-
 test "array_literal_aggregate_seed: three struct elements end-to-end" {
-    let inputs = [
-        FieldInput { name: "one",   type_name: "number" },
-        FieldInput { name: "two",   type_name: "number" },
-        FieldInput { name: "three", type_name: "number" },
-    ];
+    let inputs = [FieldInput { name: "one", type_name: "number" }, FieldInput {
+        name: "two", type_name: "number"
+    }, FieldInput { name: "three", type_name: "number" },];
     let result = _layout_for(inputs);
     assert result.fields.length == 3;
     assert result.fields[0].name == "one";

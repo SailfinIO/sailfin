@@ -26,19 +26,18 @@
 // the same enum (by `llvm_name`), and reads each operand's tag in the
 // form appropriate to its shape: `extractvalue` for value form,
 // `getelementptr`+`load` for pointer form.
-
 enum Priority {
     Low,
     Medium,
     High,
-    Critical,
+    Critical
 }
 
 enum TaskStatus {
     Todo,
     InProgress,
     Done,
-    Blocked,
+    Blocked
 }
 
 struct Task {
@@ -50,9 +49,7 @@ struct Task {
 
 // Pointer-vs-pointer: both sides arrive boxed (a local variable and a
 // fresh enum literal). Before the fix this compared heap identities.
-fn _pointer_vs_pointer(p: Priority) -> boolean {
-    return p == Priority.High;
-}
+fn _pointer_vs_pointer(p: Priority) -> boolean { return p == Priority.High; }
 
 // Value-vs-value: reading two enum fields from the same struct, both
 // extracted by value from an inline field position.
@@ -86,7 +83,6 @@ fn _contains_critical(priorities: Priority[]) -> boolean {
 }
 
 // -- pointer-vs-pointer --
-
 test "enum_equality_boxed_abi: pointer vs pointer — equal tags" {
     assert _pointer_vs_pointer(Priority.High) == true;
 }
@@ -100,31 +96,49 @@ test "enum_equality_boxed_abi: pointer vs pointer — different tags" {
 test "enum_equality_boxed_abi: pointer vs pointer — != inverts" {
     let p: Priority = Priority.Low;
     assert p != Priority.High;
-    assert !(p != Priority.Low);
+    assert ! (p != Priority.Low);
 }
 
 // -- value-vs-value (two inline fields) --
-
 test "enum_equality_boxed_abi: value vs value — equal tags" {
-    let a = Task { name: "a", priority: Priority.Low, status: TaskStatus.Todo, effort: 0 };
-    let b = Task { name: "b", priority: Priority.High, status: TaskStatus.Todo, effort: 0 };
+    let a = Task {
+        name: "a",
+        priority: Priority.Low,
+        status: TaskStatus.Todo,
+        effort: 0
+    };
+    let b = Task {
+        name: "b",
+        priority: Priority.High,
+        status: TaskStatus.Todo,
+        effort: 0
+    };
     assert _value_vs_value(a, b) == true;
 }
 
 test "enum_equality_boxed_abi: value vs value — different tags" {
-    let a = Task { name: "a", priority: Priority.Low, status: TaskStatus.Todo, effort: 0 };
-    let b = Task { name: "b", priority: Priority.High, status: TaskStatus.Done, effort: 0 };
+    let a = Task {
+        name: "a",
+        priority: Priority.Low,
+        status: TaskStatus.Todo,
+        effort: 0
+    };
+    let b = Task {
+        name: "b",
+        priority: Priority.High,
+        status: TaskStatus.Done,
+        effort: 0
+    };
     assert _value_vs_value(a, b) == false;
 }
 
 // -- mixed forms --
-
 test "enum_equality_boxed_abi: value vs pointer — matches" {
     let t = Task {
         name: "deploy",
         priority: Priority.High,
         status: TaskStatus.InProgress,
-        effort: 3,
+        effort: 3
     };
     assert _value_vs_pointer(t, TaskStatus.InProgress) == true;
     assert _value_vs_pointer(t, TaskStatus.Done) == false;
@@ -135,14 +149,13 @@ test "enum_equality_boxed_abi: pointer vs value — matches" {
         name: "deploy",
         priority: Priority.High,
         status: TaskStatus.InProgress,
-        effort: 3,
+        effort: 3
     };
     assert _pointer_vs_value(TaskStatus.InProgress, t) == true;
     assert _pointer_vs_value(TaskStatus.Blocked, t) == false;
 }
 
 // -- array of enums (value vs pointer inside a loop) --
-
 test "enum_equality_boxed_abi: array contains — found" {
     let mut ps: Priority[] = [];
     ps.push(Priority.Low);

@@ -698,8 +698,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 // value — do NOT free it here (it would dangle on the first
                 // field access).
                 if inferred_boxed_type.length > 0 {
-                    let typed_ptr_temp = format_temp_name(lowered.temp_index
-                        + 1);
+                    let typed_ptr_temp = format_temp_name(lowered.temp_index + 1);
                     awaited_lines2.push("  " + typed_ptr_temp
                         + " = bitcast i8* "
                         + result_temp
