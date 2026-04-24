@@ -1,0 +1,173 @@
+// Regression test: enum `==` / `!=` must compare tags, not pointer identity,
+// across every combination of boxed-struct-ABI operand forms.
+//
+// Background: under the 0.5.8+ boxed-struct ABI an enum value can reach a
+// comparison site in either:
+//   - value form   (`%Enum`)  — extracted from an inline parent field or
+//                                loaded from an array of inline enums, or
+//   - pointer form (`%Enum*`) — a boxed parameter, a heap-boxed literal,
+//                                or the GEP pointer returned from a member
+//                                access on a boxed parent struct.
+//
+// Before the fix, `lower_comparison_operation` in
+// `compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn`
+// only resolved enum info on an exact llvm_name match (via
+// `find_enum_info_by_llvm_type`), which missed the `%Enum*` form entirely,
+// and further required `left.llvm_type == right.llvm_type` before emitting
+// a tag compare. That meant:
+//   1. pointer-vs-pointer comparisons silently fell through to `icmp eq
+//      %Enum* a, %Enum* b` — always false, because every literal
+//      heap-allocates a fresh tag cell;
+//   2. value-vs-pointer comparisons (`tasks[i].status == status_param`)
+//      skipped the tag-compare path because the types didn't match.
+//
+// The fix resolves each operand's enum identity via a pointer-tolerant
+// `resolve_enum_info_from_llvm_type`, requires both sides to resolve to
+// the same enum (by `llvm_name`), and reads each operand's tag in the
+// form appropriate to its shape: `extractvalue` for value form,
+// `getelementptr`+`load` for pointer form.
+enum Priority {
+    Low,
+    Medium,
+    High,
+    Critical
+}
+
+enum TaskStatus {
+    Todo,
+    InProgress,
+    Done,
+    Blocked
+}
+
+struct Task {
+    name: string;
+    priority: Priority;
+    status: TaskStatus;
+    effort: number;
+}
+
+// Pointer-vs-pointer: both sides arrive boxed (a local variable and a
+// fresh enum literal). Before the fix this compared heap identities.
+fn _pointer_vs_pointer(p: Priority) -> boolean { return p == Priority.High; }
+
+// Value-vs-value: reading two enum fields from the same struct, both
+// extracted by value from an inline field position.
+fn _value_vs_value(a: Task, b: Task) -> boolean {
+    return a.status == b.status;
+}
+
+// Mixed value-vs-pointer: the left side reads an enum field by value
+// from a struct, the right side is a boxed parameter. This is the
+// very common `tasks[i].status == status` shape.
+fn _value_vs_pointer(t: Task, s: TaskStatus) -> boolean {
+    return t.status == s;
+}
+
+// Mixed pointer-vs-value: the symmetric case, where the boxed side is
+// on the left. The comparison must still canonicalise to a tag compare.
+fn _pointer_vs_value(s: TaskStatus, t: Task) -> boolean {
+    return s == t.status;
+}
+
+// Array of enums: elements are inline (value form when loaded), so
+// `priorities[i] == Priority.High` is value vs pointer.
+fn _contains_critical(priorities: Priority[]) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= priorities.length { break; }
+        if priorities[i] == Priority.Critical { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -- pointer-vs-pointer --
+test "enum_equality_boxed_abi: pointer vs pointer — equal tags" {
+    assert _pointer_vs_pointer(Priority.High) == true;
+}
+
+test "enum_equality_boxed_abi: pointer vs pointer — different tags" {
+    assert _pointer_vs_pointer(Priority.Low) == false;
+    assert _pointer_vs_pointer(Priority.Medium) == false;
+    assert _pointer_vs_pointer(Priority.Critical) == false;
+}
+
+test "enum_equality_boxed_abi: pointer vs pointer — != inverts" {
+    let p: Priority = Priority.Low;
+    assert p != Priority.High;
+    assert ! (p != Priority.Low);
+}
+
+// -- value-vs-value (two inline fields) --
+test "enum_equality_boxed_abi: value vs value — equal tags" {
+    let a = Task {
+        name: "a",
+        priority: Priority.Low,
+        status: TaskStatus.Todo,
+        effort: 0
+    };
+    let b = Task {
+        name: "b",
+        priority: Priority.High,
+        status: TaskStatus.Todo,
+        effort: 0
+    };
+    assert _value_vs_value(a, b) == true;
+}
+
+test "enum_equality_boxed_abi: value vs value — different tags" {
+    let a = Task {
+        name: "a",
+        priority: Priority.Low,
+        status: TaskStatus.Todo,
+        effort: 0
+    };
+    let b = Task {
+        name: "b",
+        priority: Priority.High,
+        status: TaskStatus.Done,
+        effort: 0
+    };
+    assert _value_vs_value(a, b) == false;
+}
+
+// -- mixed forms --
+test "enum_equality_boxed_abi: value vs pointer — matches" {
+    let t = Task {
+        name: "deploy",
+        priority: Priority.High,
+        status: TaskStatus.InProgress,
+        effort: 3
+    };
+    assert _value_vs_pointer(t, TaskStatus.InProgress) == true;
+    assert _value_vs_pointer(t, TaskStatus.Done) == false;
+}
+
+test "enum_equality_boxed_abi: pointer vs value — matches" {
+    let t = Task {
+        name: "deploy",
+        priority: Priority.High,
+        status: TaskStatus.InProgress,
+        effort: 3
+    };
+    assert _pointer_vs_value(TaskStatus.InProgress, t) == true;
+    assert _pointer_vs_value(TaskStatus.Blocked, t) == false;
+}
+
+// -- array of enums (value vs pointer inside a loop) --
+test "enum_equality_boxed_abi: array contains — found" {
+    let mut ps: Priority[] = [];
+    ps.push(Priority.Low);
+    ps.push(Priority.Medium);
+    ps.push(Priority.Critical);
+    assert _contains_critical(ps) == true;
+}
+
+test "enum_equality_boxed_abi: array contains — not found" {
+    let mut ps: Priority[] = [];
+    ps.push(Priority.Low);
+    ps.push(Priority.Medium);
+    ps.push(Priority.High);
+    assert _contains_critical(ps) == false;
+}

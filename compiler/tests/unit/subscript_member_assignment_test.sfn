@@ -1,0 +1,119 @@
+// Regression test: `arr[i].field = value` must actually mutate the slot.
+//
+// Background: `lower_lvalue_assignment_stmt` in
+// `compiler/src/llvm/expression_lowering/native/statement_assignment.sfn`
+// parses `entries[i].version` into base=`entries[i]`, field=`version`,
+// then lowers the base via `lower_expression`. Under the 0.5.8+
+// boxed-struct ABI, `lower_index_expression` LOADS the element by value,
+// so the returned operand carries `%_LockEntry` — not a pointer into
+// the array slot. The subsequent addressability check (`is_simple_identifier`
+// + `find_local_binding`) then fails because `entries[i]` isn't a bare
+// identifier, the branch emits a `not addressable` diagnostic, and the
+// store is dropped. Callers observe the slot unchanged.
+//
+// The fix teaches the member-access branch to detect a subscripted base
+// and compute the slot pointer directly (the same GEP pattern as the
+// existing `arr[i] = value` branch) so the struct-field GEP+store writes
+// through to the correct slot, bounds-checked. Both plain and compound
+// assignment paths are covered.
+//
+// Tests mirror the shape that actually appears in production code
+// (compiler/src/lock.sfn:lock_add_entry and compiler/src/toml_parser.sfn)
+// — a local array built up with `push`, then mutated by
+// `arr[i].field = value`, then observed via `arr[i].field` reads.
+struct Entry {
+    key: string;
+    value: number;
+    tag: number;
+}
+
+fn _make_entries() -> Entry[] {
+    let mut entries: Entry[] = [];
+    entries.push(Entry { key: "alpha", value: 1, tag: 0 });
+    entries.push(Entry { key: "beta", value: 2, tag: 0 });
+    entries.push(Entry { key: "gamma", value: 3, tag: 0 });
+    return entries;
+}
+
+// Plain assignment to a numeric field.
+test "subscript_member_assign: plain assign updates slot 0 value" {
+    let mut entries = _make_entries();
+    entries[0].value = 999;
+    assert entries[0].value == 999;
+    assert entries[1].value == 2;
+    assert entries[2].value == 3;
+    // Unchanged fields stay unchanged.
+    assert entries[0].key == "alpha";
+    assert entries[0].tag == 0;
+}
+
+// Plain assignment to a non-boundary slot.
+test "subscript_member_assign: plain assign updates middle slot" {
+    let mut entries = _make_entries();
+    entries[1].value = 42;
+    assert entries[0].value == 1;
+    assert entries[1].value == 42;
+    assert entries[2].value == 3;
+}
+
+// Plain assignment to a non-numeric (string) field.
+test "subscript_member_assign: assigning a string field writes through" {
+    let mut entries = _make_entries();
+    entries[2].key = "zeta";
+    assert entries[2].key == "zeta";
+    // Siblings untouched.
+    assert entries[0].key == "alpha";
+    assert entries[1].key == "beta";
+    // Value field in the mutated slot untouched.
+    assert entries[2].value == 3;
+}
+
+// Compound assignment: `+=`.
+test "subscript_member_assign: += compound updates in place" {
+    let mut entries = _make_entries();
+    entries[1].value += 10;
+    assert entries[0].value == 1;
+    assert entries[1].value == 12;
+    assert entries[2].value == 3;
+}
+
+test "subscript_member_assign: repeated += accumulates" {
+    let mut entries = _make_entries();
+    entries[0].value += 5;
+    entries[0].value += 5;
+    assert entries[0].value == 11;
+}
+
+// Multiple sequential writes hitting two different slots in the same block.
+test "subscript_member_assign: multiple fields in same and neighbour slots" {
+    let mut entries = _make_entries();
+    entries[0].value = 100;
+    entries[0].tag = 1;
+    entries[2].value = 200;
+    entries[2].tag = 2;
+    assert entries[0].value == 100;
+    assert entries[0].tag == 1;
+    assert entries[1].value == 2;
+    assert entries[1].tag == 0;
+    assert entries[2].value == 200;
+    assert entries[2].tag == 2;
+}
+
+// Loop mutation through the subscript — mirrors the `lock_add_entry`
+// shape that drove the bug: iterate, test, mutate the matching slot.
+test "subscript_member_assign: loop mutation through subscript" {
+    let mut entries = _make_entries();
+    let mut i: number = 0;
+    loop {
+        if i >= entries.length { break; }
+        entries[i].tag = entries[i].tag + i + 1;
+        i += 1;
+    }
+    assert entries[0].tag == 1;
+    assert entries[1].tag == 2;
+    assert entries[2].tag == 3;
+    // Other fields untouched.
+    assert entries[0].value == 1;
+    assert entries[1].value == 2;
+    assert entries[2].value == 3;
+}

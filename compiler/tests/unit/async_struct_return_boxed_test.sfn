@@ -1,0 +1,59 @@
+// Regression test: `await f` on a `Future<AsyncStructT>` must surface a
+// typed `%AsyncStructT*` pointer, not leave the result as opaque `i8*`.
+//
+// Background: under the 0.5.8+ boxed-struct ABI an async function whose
+// return type is a user struct or enum returns the aggregate by pointer
+// (`%T*`). The future's opaque `i8*` payload IS that pointer — it just
+// needs a bitcast before the caller can project fields.
+//
+// Before the fix, `lower_expression`'s await path in
+// `compiler/src/llvm/expression_lowering/native/core.sfn` inferred the
+// callee's Sailfin return type, mapped it to LLVM, and then dropped the
+// mapping on the floor whenever `map_return_type` returned a pointer
+// (`ends_with_pointer_suffix(mapped)` skipped the assignment to
+// `trimmed_expected`). The subsequent "unbox" branch only triggers on
+// non-pointer typed returns, so the await result leaked as `i8*` — the
+// caller's `result.field` projection collapsed to dynamic
+// `sailfin_runtime_get_field` lookups that compare stringified field
+// values instead of reading the struct directly.
+//
+// The fix captures the pointer form into `inferred_boxed_type` and emits
+// a bitcast-only path (no load, no free — the heap allocation is the
+// value). Subsequent field accesses then flow through the normal boxed
+// member-access lowering.
+struct Point {
+    x: number;
+    y: number;
+}
+
+async fn make_origin() -> Point {
+    return Point { x: 0, y: 0 };
+}
+
+async fn make_point(x: number, y: number) -> Point {
+    return Point { x: x, y: y };
+}
+
+test "async_boxed_return: awaiting a struct return projects fields" {
+    let f = make_point(3, 4);
+    let p = await f;
+    assert p.x == 3;
+    assert p.y == 4;
+}
+
+test "async_boxed_return: awaiting origin returns zeroed struct" {
+    let f = make_origin();
+    let p = await f;
+    assert p.x == 0;
+    assert p.y == 0;
+}
+
+test "async_boxed_return: awaiting a struct-returning call with args" {
+    let f = make_point(7, 11);
+    let p = await f;
+    assert p.x == 7;
+    assert p.y == 11;
+    // The pointer stays live past the first projection — readers are not
+    // allowed to free the awaited allocation, the owning future is.
+    assert p.x + p.y == 18;
+}

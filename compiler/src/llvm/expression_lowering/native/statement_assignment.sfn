@@ -316,6 +316,125 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         }
                     }
                 }
+                // Subscripted lvalue: `arr[i].field = value`.
+                //
+                // The default `lower_expression(member_parse.base, ...)` call
+                // above yields a loaded aggregate (e.g. `%_LockEntry`) for a
+                // subscript base because `lower_index_expression` reads the
+                // element by value. Storing into a loaded copy discards the
+                // mutation, which is why `entries[i].version = v` silently
+                // dropped writes before this path existed.
+                //
+                // When the base parses as a subscript, recompute the slot
+                // pointer (`getelementptr` into the array's data buffer)
+                // and use that as the struct-field GEP base. The emission
+                // mirrors the `arr[i] = value` branch below so bounds
+                // checking and element-type determination stay consistent.
+                if !ends_with_pointer_suffix(base_pointer_type) {
+                    let subscript_parse = parse_index_expression(base_name);
+                    if subscript_parse.success {
+                        let array_result = lower_expression(subscript_parse.base, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+                        let mut _sci0: number = 0;
+                        loop {
+                            if _sci0 >= array_result.diagnostics.length {
+                                break;
+                            }
+                            diagnostics.push(array_result.diagnostics[_sci0]);
+                            _sci0 += 1;
+                        }
+                        current_lines = array_result.lines;
+                        current_temp = array_result.temp_index;
+                        current_temp = _recover_assign_temp(current_lines, current_temp);
+                        if array_result.operand != null {
+                            let array_operand = array_result.operand;
+                            let element_type = array_pointer_element_type(array_operand.llvm_type);
+                            if element_type.length > 0 {
+                                let index_result = lower_expression(subscript_parse.index, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
+                                let mut _sci1: number = 0;
+                                loop {
+                                    if _sci1 >= index_result.diagnostics.length {
+                                        break;
+                                    }
+                                    diagnostics.push(index_result.diagnostics[_sci1]);
+                                    _sci1 += 1;
+                                }
+                                current_lines = index_result.lines;
+                                current_temp = index_result.temp_index;
+                                current_temp = _recover_assign_temp(current_lines, current_temp);
+                                if index_result.operand != null {
+                                    let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines);
+                                    let mut _sci2: number = 0;
+                                    loop {
+                                        if _sci2 >= coerced_index.diagnostics.length {
+                                            break;
+                                        }
+                                        diagnostics.push(coerced_index.diagnostics[_sci2]);
+                                        _sci2 += 1;
+                                    }
+                                    current_lines = coerced_index.lines;
+                                    current_temp = coerced_index.temp_index;
+                                    current_temp = _recover_assign_temp(current_lines, current_temp);
+                                    if coerced_index.operand != null {
+                                        let data_field_ptr = format_temp_name(current_temp);
+                                        current_temp += 1;
+                                        current_lines.push("  " + data_field_ptr
+                                            + " = getelementptr "
+                                            + array_struct_type_for_element(element_type)
+                                            + ", "
+                                            + array_operand.llvm_type
+                                            + " "
+                                            + array_operand.value
+                                            + ", i32 0, i32 0");
+                                        let data_ptr_loaded = format_temp_name(current_temp);
+                                        current_temp += 1;
+                                        current_lines.push("  "
+                                            + data_ptr_loaded
+                                            + " = load "
+                                            + element_type
+                                            + "*, "
+                                            + element_type
+                                            + "** "
+                                            + data_field_ptr);
+                                        let length_field_ptr = format_temp_name(current_temp);
+                                        current_temp += 1;
+                                        current_lines.push("  "
+                                            + length_field_ptr
+                                            + " = getelementptr "
+                                            + array_struct_type_for_element(element_type)
+                                            + ", "
+                                            + array_operand.llvm_type
+                                            + " "
+                                            + array_operand.value
+                                            + ", i32 0, i32 1");
+                                        let length_loaded = format_temp_name(current_temp);
+                                        current_temp += 1;
+                                        current_lines.push("  " + length_loaded
+                                            + " = load i64, i64* "
+                                            + length_field_ptr);
+                                        current_lines.push("  call void @sailfin_runtime_bounds_check(i64 "
+                                            + coerced_index.operand.value
+                                            + ", i64 "
+                                            + length_loaded
+                                            + ")");
+                                        let slot_ptr = format_temp_name(current_temp);
+                                        current_temp += 1;
+                                        current_lines.push("  " + slot_ptr
+                                            + " = getelementptr "
+                                            + element_type
+                                            + ", "
+                                            + element_type
+                                            + "* "
+                                            + data_ptr_loaded
+                                            + ", i64 "
+                                            + coerced_index.operand.value);
+                                        base_pointer_type = element_type + "*";
+                                        base_pointer_value = slot_ptr;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 if !ends_with_pointer_suffix(base_pointer_type) {
                     diagnostics.push("llvm lowering: member access assignment base `"
                         + member_parse.base

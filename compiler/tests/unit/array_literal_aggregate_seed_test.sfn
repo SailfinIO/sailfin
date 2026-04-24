@@ -1,0 +1,145 @@
+// Regression test: array literals whose element type is inferred from a
+// single boxed struct operand must seed the inferred element type with the
+// unboxed `%T` form, not the boxed `%T*` form.
+//
+// Background: `lower_array_literal` in
+// `compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`
+// threads an `inferred_element_type` across operand lowering, falling back
+// to `dominant_type(inferred, operand_type)` when the previous element
+// already picked a type. PR #221 fixed the mid-sequence case (keep `%T`
+// when the prior inference was `%T` and the operand is `%T*`), but left
+// the FIRST-element case unpatched. That case still took the default
+// `dominant_type("", "%T*")` branch, which yields `"%T*"`.
+//
+// With `inferred_element_type = "%T*"`, the array buffer allocated below
+// is `[N x %T*]` (array of pointers) and the header is cast to the
+// `{ %T*, i64 }` shape the rest of the compiler expects. Readers GEP with
+// element type `%T` into a buffer of `%T*` values — every struct field
+// past the first 8 bytes reads the junk that used to be part of the stored
+// pointer, or memory past the pointer bytes. The user-visible symptom is
+// that `result.fields[0].offset`, `result.fields[0].size`, etc. come back
+// as uninitialized values whenever the array literal had a single
+// heap-boxed struct element at construction time.
+//
+// The fix seeds `inferred_element_type` with the stripped `%T` when the
+// first operand is an aggregate pointer whose base resolves to a known
+// user struct or enum in the type context. Primitives (`i8*`, `ptr`,
+// `double*`) keep the existing pointer semantics; arrays and optionals
+// retain their pointer-form inference.
+struct Field {
+    name: string;
+    offset: number;
+    size: number;
+    align: number;
+}
+
+struct Record {
+    size: number;
+    align: number;
+    fields: Field[];
+}
+
+struct FieldInput {
+    name: string;
+    type_name: string;
+}
+
+fn _layout_for(inputs: FieldInput[]) -> Record {
+    let mut fields: Field[] = [];
+    let mut offset: number = 0;
+    let mut max_align: number = 1;
+    let mut i: number = 0;
+    loop {
+        if i >= inputs.length { break; }
+        let input = inputs[i];
+        let mut size: number = 8;
+        let mut align: number = 8;
+        if input.type_name == "i32" {
+            size = 4;
+            align = 4;
+        }
+        if input.type_name == "boolean" {
+            size = 1;
+            align = 1;
+        }
+        fields.push(Field {
+            name: input.name, offset: offset, size: size, align: align
+        });
+        offset += size;
+        if align > max_align { max_align = align; }
+        i += 1;
+    }
+    return Record { size: offset, align: max_align, fields: fields };
+}
+
+// -- the exact shape that broke emit_native_layout_test --
+test "array_literal_aggregate_seed: single struct element via literal" {
+    let inputs = [FieldInput { name: "x", type_name: "number" }];
+    let result = _layout_for(inputs);
+    // Before the fix, `result.fields[0].name` read the first 8 bytes of
+    // the stored `%FieldInput*` pointer — an invalid string — so both
+    // the name and every field past it came back garbled.
+    assert result.fields.length == 1;
+    assert result.fields[0].name == "x";
+    assert result.fields[0].offset == 0;
+    assert result.fields[0].size == 8;
+    assert result.fields[0].align == 8;
+    assert result.size == 8;
+    assert result.align == 8;
+}
+
+test "array_literal_aggregate_seed: two struct elements via literal" {
+    let inputs = [FieldInput { name: "a", type_name: "i32" }, FieldInput {
+        name: "b", type_name: "i32"
+    },];
+    let result = _layout_for(inputs);
+    assert result.fields.length == 2;
+    assert result.fields[0].name == "a";
+    assert result.fields[0].offset == 0;
+    assert result.fields[0].size == 4;
+    assert result.fields[1].name == "b";
+    assert result.fields[1].offset == 4;
+    assert result.fields[1].size == 4;
+    assert result.size == 8;
+    assert result.align == 4;
+}
+
+// -- direct reads, without the function boundary --
+test "array_literal_aggregate_seed: direct read from inline literal" {
+    let inputs = [FieldInput { name: "y", type_name: "boolean" }];
+    assert inputs.length == 1;
+    assert inputs[0].name == "y";
+    assert inputs[0].type_name == "boolean";
+}
+
+// -- primitive arrays still work (fix must not regress them) --
+test "array_literal_aggregate_seed: number array literal unchanged" {
+    let xs = [1.0, 2.5, 4.0];
+    assert xs.length == 3;
+    assert xs[0] == 1.0;
+    assert xs[1] == 2.5;
+    assert xs[2] == 4.0;
+}
+
+test "array_literal_aggregate_seed: string array literal unchanged" {
+    let names = ["alpha", "beta", "gamma"];
+    assert names.length == 3;
+    assert names[0] == "alpha";
+    assert names[2] == "gamma";
+}
+
+// -- mixed: struct element followed by more struct elements --
+test "array_literal_aggregate_seed: three struct elements end-to-end" {
+    let inputs = [FieldInput { name: "one", type_name: "number" }, FieldInput {
+        name: "two", type_name: "number"
+    }, FieldInput { name: "three", type_name: "number" },];
+    let result = _layout_for(inputs);
+    assert result.fields.length == 3;
+    assert result.fields[0].name == "one";
+    assert result.fields[1].name == "two";
+    assert result.fields[2].name == "three";
+    assert result.fields[0].offset == 0;
+    assert result.fields[1].offset == 8;
+    assert result.fields[2].offset == 16;
+    assert result.size == 24;
+}
