@@ -4,15 +4,12 @@ name: CI (branch push)
 #
 # This workflow validates that the branch is healthy.  It does NOT create
 # releases — use the manual "Release" workflow (release.yml) for that.
-
-env:
-    # Pinned seed used for self-host bootstrap in CI.
-    # 0.5.7: first release whose binary image does not carry the
-    # re-export miscompilation — see
-    # docs/rca/2026-04-18-reexport-diagnostic-gep.md.  Kept in sync with
-    # ci.yml, release-tag.yml, and nightly-selfhost.yml; every bump should
-    # update all four or this workflow falls behind and breaks push-to-main.
-    SEED_VERSION: 0.5.7
+#
+# The pinned seed version lives in `.seed-version` at the repo root.
+# A setup step below reads that file into $GITHUB_ENV so this workflow,
+# ci.yml, release-tag.yml, nightly-selfhost.yml, and the Makefile all
+# resolve to the same pin automatically. Bumping the seed is a one-line
+# edit to `.seed-version`.
 
 on:
     push:
@@ -56,6 +53,18 @@ jobs:
         steps:
             - name: Checkout repository
               uses: actions/checkout@v6.0.2
+
+            - name: Resolve seed version from .seed-version
+              shell: bash
+              run: |
+                  set -euo pipefail
+                  pin="$(tr -d '[:space:]' < .seed-version)"
+                  if [ -z "$pin" ]; then
+                      echo "[seed-pin] .seed-version is empty or missing" >&2
+                      exit 1
+                  fi
+                  echo "[seed-pin] using seed $pin"
+                  echo "SEED_VERSION=$pin" >> "$GITHUB_ENV"
 
             - name: Install clang (Linux)
               if: runner.os == 'Linux'

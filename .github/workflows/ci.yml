@@ -1,11 +1,12 @@
 name: CI (PR)
 
+# The pinned seed version lives in `.seed-version` at the repo root.
+# A setup step in each job reads that file into $GITHUB_ENV so this
+# workflow, release-branches.yml, release-tag.yml, nightly-selfhost.yml,
+# and the Makefile all resolve to the same pin automatically. Bumping
+# the seed is a one-line edit to `.seed-version`.
+
 env:
-  # Pinned seed used for self-host bootstrap in CI.
-  # 0.5.7: first release whose binary image does not carry the
-  # re-export miscompilation — see
-  # docs/rca/2026-04-18-reexport-diagnostic-gep.md.
-  SEED_VERSION: 0.5.7
   # Phase 0 / M0.5: pin arena allocator on for CI even after the
   # scripts/build.sh default. Belt-and-suspenders guard so a future
   # change to the build.sh default (or a caller that scrubs env) can't
@@ -56,6 +57,18 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6.0.2
+
+      - name: Resolve seed version from .seed-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(tr -d '[:space:]' < .seed-version)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] .seed-version is empty or missing" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "SEED_VERSION=$pin" >> "$GITHUB_ENV"
 
       - name: Install clang (Linux)
         if: runner.os == 'Linux'

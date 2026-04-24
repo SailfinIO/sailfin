@@ -1,11 +1,13 @@
 name: Release (tag)
 
+# The pinned seed version lives in `.seed-version` at the repo root.
+# A setup step in the build job reads that file (from the tag checkout)
+# into $GITHUB_ENV so this workflow, ci.yml, release-branches.yml,
+# nightly-selfhost.yml, and the Makefile all resolve to the same pin
+# automatically. The historical tag's `.seed-version` is what gets used,
+# which is the correct semantic for a retroactive tag rebuild.
+
 env:
-  # Seed used only for bootstrapping the tag build.  Keep this equal to
-  # the CI pin in ci.yml — a stale pin here is what shipped the
-  # 0.5.4–0.5.6 re-export miscompilation in the release binaries.
-  # See docs/rca/2026-04-18-reexport-diagnostic-gep.md.
-  SEED_VERSION: 0.5.7
   # Tag to build/upload (e.g. v0.1.1)
   RELEASE_TAG: ${{ inputs.tag }}
 
@@ -60,6 +62,18 @@ jobs:
             echo "[ci][error] expected ${RELEASE_TAG}, got $current" >&2
             exit 1
           fi
+
+      - name: Resolve seed version from .seed-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          pin="$(tr -d '[:space:]' < .seed-version)"
+          if [ -z "$pin" ]; then
+            echo "[seed-pin] .seed-version is empty or missing at tag ${RELEASE_TAG}" >&2
+            exit 1
+          fi
+          echo "[seed-pin] using seed $pin"
+          echo "SEED_VERSION=$pin" >> "$GITHUB_ENV"
 
       - name: Install clang (Linux)
         if: runner.os == 'Linux'
