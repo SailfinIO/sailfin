@@ -1,23 +1,48 @@
 # Build Performance: Root Cause Analysis & Fix Plan
 
-**Date:** 2026-04-19 (revised, post `.fn_*` channel removal)
-**Previous revision:** 2026-04-15 (revised, post-d2d0bf1/220c8b7), 2026-04-15 (morning), 2026-04-11
-**Context:** Self-hosting the compiler from the 0.5.2-alpha.1 seed via `build.sh` takes ~13-16 minutes for 121 modules single-threaded. Down from 60-90 minutes at the April 11 baseline thanks to partial IPC removal, string concat optimization, module splitting, and the Phase 1 accumulator sweep (`d2d0bf1`). Still far from the <5 minute target. The IPC-as-GC memory management blocker (formerly blocking ~146 Phase 2 channel refs) is now cleared: the arena allocator is default-on for selfhost as of the April 19 flip (see [Completed Work: Arena Allocator Default-On](#arena-allocator-default-on-april-19)). The two residual O(n²) copy sites (`concat_native_functions`, `append_local_binding`) that were reverted in `220c8b7` because callers rely on input-array immutability are now safe to convert to in-place push under arena — tracked as immediate follow-up work.
+**Date:** 2026-04-24 (revised, post 0.5.9 release — first IPC-free seed)
+**Previous revisions:** 2026-04-19 (post `.fn_*` channel removal), 2026-04-15 (post-d2d0bf1/220c8b7), 2026-04-15 (morning), 2026-04-11
+**Context:** 0.5.9 has shipped and is pinned as the seed (`.seed-version`). It is **the first release with no file-based data-flow IPC** — every cross-phase channel that used `build/sailfin/.xxx` files has been removed. The 48 remaining `build/sailfin/.xxx` references are debug/diag gates (`.trace_*`, `.phase_*_diagnostics`, `.skip_*`, `.test_runner_active`, `.dump_test_sources`), not data IPC. The structural cleanup arc opened in April 11's RCA is closed. The remaining wall-time win is **flipping on parallel builds** — the `xargs -P` machinery in `scripts/build.sh:766` has been mature for weeks, but the Makefile defaults to `BUILD_JOBS=1` and CI never overrides it, so every build today is single-threaded.
 
 ---
 
 ## Symptom Summary
 
-| Metric                          | April 11            | Current (April 19)   | Target           |
-| ------------------------------- | ------------------- | -------------------- | ---------------- |
-| Full build (121 modules, 1 job) | 60-90 min           | 13-16 min            | < 5 min          |
-| Per-module compile time (heavy) | 4-7 min             | 1-3 min              | < 30s            |
-| Per-module compile time (light) | 30s-2 min           | 10-30s               | < 5s             |
-| Per-module peak RAM             | 1-2 GB              | 0.5-1.5 GB           | < 256 MB         |
-| Parallel builds (`--jobs N`)    | Broken              | Functional but risky | Stable at 4 jobs |
-| `fs.*` calls (total)            | 667 across 42 files | 489 across 37 files  | < 50 per module  |
-| `build/sailfin/` IPC refs       | 487                 | 228 (dotfiles)       | 0                |
-| Seed memory limit               | 8 GB                | 12 GB                | < 4 GB           |
+| Metric                          | April 11            | April 19              | Current (April 24, 0.5.9) | Target           |
+| ------------------------------- | ------------------- | --------------------- | ------------------------- | ---------------- |
+| Full build (121 modules, 1 job) | 60-90 min           | 13-16 min             | ~13 min (CI Linux)        | < 5 min          |
+| Per-module compile time (heavy) | 4-7 min             | 1-3 min               | 1-3 min                   | < 30s            |
+| Per-module compile time (light) | 30s-2 min           | 10-30s                | 10-30s                    | < 5s             |
+| Per-module peak RAM             | 1-2 GB              | 0.5-1.5 GB            | 0.5-1.5 GB (4.7 GB worst) | < 256 MB         |
+| Parallel builds (`BUILD_JOBS`)  | Broken              | Functional but risky  | Mature, never enabled     | Default-on, ≥4 jobs Linux |
+| `fs.*` calls (total)            | 667 across 42 files | 489 across 37 files   | **212 across 24 files**   | bounded by CLI / capsule manifest reads |
+| `build/sailfin/` dotfile refs   | 487                 | 228 (dotfiles)        | **48 (diag/trace only)**  | 0 (post-Phase 5)        |
+| Active data-flow IPC channels   | 12+                 | 6                     | **0**                     | 0                |
+| Seed memory limit               | 8 GB                | 12 GB                 | 12 GB                     | < 4 GB           |
+
+---
+
+## Reassessed Roadmap (April 24)
+
+Status of every track named in the original RCA. "Shipped" means the work landed and the doc's **Completed Work** section has the entry.
+
+| Track                                                           | Status                                                                        | Expected wall-time delta (remaining work) |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------- |
+| Phase 0 — M0.5 arena allocator                                  | **Shipped** (default-on April 19)                                             | counted                                   |
+| Phase 1 — O(n²) array accumulation sweep                        | **Shipped** (1 residual aliasing site under arena, low-frequency)             | <2%                                       |
+| Phase 2 — File-based IPC channel removal                        | **Shipped** (0.5.9 — first IPC-free seed)                                     | counted                                   |
+| Phase 3a — Import-discovery fast-path scanner                   | **Shipped**                                                                   | counted                                   |
+| Phase 3b — Pre-parsed `.imports` sidecar                        | Not started; may be subsumed by Phase 5                                       | 5–10%                                     |
+| Phase 4 PR 1 — Light recovery off non-test primary path         | **Shipped**                                                                   | counted                                   |
+| Phase 4 PR 2 — `parse_native_artifact` primary swap             | **Unblocked by PR #229** (in-memory `compile_to_llvm_file_with_module`)       | 5–8%                                      |
+| Phase 4b — Defensive light-recovery arm deletion                | Not started; needs counters bake then delete ~600 LOC                         | trivial wall-time                         |
+| **Phase 6 — Parallel builds (NEW, primary remaining win)**      | Machinery in place; `BUILD_JOBS=1` default; never enabled in CI               | **40–60%** wall-time on Linux             |
+| Phase 5 — Long-lived compiler process                           | Post-1.0; needs `compile module` entry point and arena reset between modules  | 50–70% on top of Phase 6                  |
+
+Two follow-up tracks worth catalogueing:
+
+- **Per-module memory reduction** — heaviest module (`lowering_core`) still peaks at ~4.7 GB RSS with arena. Every GB shaved raises the safe `BUILD_JOBS` ceiling on memory-constrained hosts (macOS runners cap at 7 GB total). Profiling target: arena page count + per-pass pressure.
+- **Selfhost1 clang opt level** — `make check`'s first-pass binary doesn't need `-O2`; second-pass (the binary we ship as a seed) does. Easy 20–30% off the clang-compile stage in `make check`.
 
 ---
 
@@ -245,14 +270,11 @@ Per-site aliasing audit (see [runtime_architecture.md §4.4](runtime_architectur
 
 The win is concentrated on the target module; aggregate is within bench variance. `append_local_binding` conversions become cheap automatically under the M0.5 arena, so Phase 1b is complete as a pre-arena intervention.
 
-### Phase 2: Eliminate IPC Files (Resumed)
+### Phase 2: Eliminate IPC Files (✅ Shipped in 0.5.9)
 
-**Priority:** Highest — **Expected:** 40-60% time reduction, enables parallel builds
-**Depends on:** ~~Enabling the arena allocator by default~~ — cleared April 19 with the arena default-on flip. All Phase 2 channels are now pickable.
+**Status:** Complete. 0.5.9 is the first release with no file-based data-flow IPC. Every cross-phase channel has been removed; the 48 remaining `build/sailfin/.xxx` references are debug/diag gates (`.trace_*`, `.phase_*_diagnostics`, `.skip_*`, `.test_runner_active`, `.dump_test_sources`) — none of them carry pipeline data. The full removal arc is documented in **Completed Work** below; the per-channel entries (block_result, fn_*, expr_stmt, coerce_result, call_result, dispatch/let_result, instr_fn_name, enum_info, struct_info, async_inner_return_type, condition_locals, self_field, expr_stmt_temp, module_globals, function_metadata, emit-native.tmp / emit-llvm.tmp) cover every channel that ever existed.
 
-Most IPC channels were introduced as workarounds for v0.1.1-seed ABI corruption of array-of-struct parameters across module boundaries. The 0.5.x seed lineage no longer corrupts those parameters, so many channels are now dead-code fallbacks whose readers already have the data in-memory via an existing `bindings` or `locals` parameter.
-
-Channels that serialize per-instruction/per-binding control-flow state (dispatch, let result, block result, statement mutations) were previously blocked by the IPC-as-GC problem — removing them without arena caused OOM because the file write/read cycle was implicitly freeing the source values. Under the default-on arena, those values stay alive in the arena until process exit, but the arena is bulk-freed at exit; per-module peak RAM rises but never OOMs because the arena replaces ad-hoc malloc churn with bump allocation.
+**Original framing (kept for the historical record):** Most IPC channels were introduced as workarounds for v0.1.1-seed ABI corruption of array-of-struct parameters across module boundaries. The 0.5.x seed lineage no longer corrupts those parameters, so the channels were dead-code fallbacks whose readers already had the data in-memory via an existing `bindings` or `locals` parameter. Channels that serialized per-instruction/per-binding control-flow state (dispatch, let_result, block_result, statement mutations) were previously blocked by the IPC-as-GC problem — removing them without arena caused OOM because the file write/read cycle was implicitly freeing the source values. The April 19 arena default-on flip cleared that blocker and the rest of the channels came out in the following four weeks.
 
 #### Procedure: Removing an IPC Channel
 
@@ -302,7 +324,7 @@ Replace `recover_native_functions_light` (line-by-line scanning with 20+ `starts
 
 ### Phase 5: Long-Lived Compiler Process (Future)
 
-**Priority:** Future (post-1.0 or late pre-1.0) — **Expected:** 50-70% time reduction
+**Priority:** Future (post-1.0 or late pre-1.0) — **Expected:** 50-70% time reduction on top of Phase 6
 
 Replace the 121 separate compiler processes with a single long-lived process that compiles all modules in sequence (or in parallel with shared state):
 
@@ -312,6 +334,35 @@ Replace the 121 separate compiler processes with a single long-lived process tha
 - Arena allocator resets between modules instead of process exit
 
 This requires the compiler to support a "compile module" entry point that takes import context as an argument rather than reading it from the filesystem.
+
+### Phase 6: Parallel Builds (NEW — primary remaining pre-1.0 win)
+
+**Priority:** Highest — **Expected:** 40–60% wall-time on Linux (CI Linux build at `BUILD_JOBS=4` should drop ~13 min → ~5–7 min)
+**Depends on:** Phase 0 (arena default-on, shipped) and Phase 2 (IPC removal, shipped). Both prerequisites are met.
+
+The xargs-based parallel emit path (`scripts/build.sh:766-797`) has been mature for weeks. Each parallel worker runs `bash scripts/build.sh --_build_module_worker` in an isolated `seed_cwd`, copies the import-context, runs the seed, and appends one line to a shared `MODULES_LIST` (atomic for sub-PIPE_BUF lines). The list is `LC_ALL=C sort`ed before `llvm-link` consumption so link order is deterministic regardless of completion order.
+
+The reason it never went default is per-job memory: with the arena default-on, `lowering_core` (the heaviest module) peaks at ~4.7 GB RSS. With `BUILD_JOBS=4`, worst-case concurrent peak is ~18.8 GB. That fits ubuntu-24.04 GitHub runners (22 GB) but overcommits `macos-latest` (M1, 7 GB).
+
+#### Enablement plan (staged for safe rollout)
+
+1. **Stage 1 — parallelize `stage_import_context`.** The loop at `build.sh:747-751` is currently sequential ("for safety with older seeds"). 0.5.9 is the safe seed; this is the lowest-risk free win. Each `seed emit native <src> >dest` call writes to a distinct destination path with no shared state — the same `xargs -P` pattern from the build loop applies directly. ✅ **Shipped** April 24 — same commit as Stage 2.
+2. **Stage 2 — adaptive `BUILD_JOBS` default in the Makefile.** Compute `BUILD_JOBS` from `nproc` capped by a memory budget (5 GB per job ≈ heaviest-module peak under arena, plus headroom). On macOS, cap at 2 jobs because of the 7 GB total RAM ceiling on M1 runners. Per-host hardware determines the cap; nobody has to think about it. Existing `BUILD_JOBS=N` env override still wins. ✅ **Shipped** April 24.
+3. **Stage 3 — wire `BUILD_JOBS` through the CI composite action.** Add a `build_jobs` input to `.github/actions/sailfin-build/action.yml` (default `auto`); pass it to `make rebuild`. Run one `nightly-selfhost` cycle with the new default, compare wall-time against the 13-min baseline, then promote to PR CI. **Pending** — wait for Stage 1+2 to bake locally.
+4. **Stage 4 — drop `EMIT_RETRIES` default 3 → 1.** With 0.5.9 stable, the corruption corpus is dry; retries only hide regressions now. Keep the env knob for diagnostic builds. **Pending** — needs one full build with retries.log inspection to confirm zero retry hits in CI.
+
+#### Why each stage is safe
+
+- **Stage 1 (parallel staging):** Each `stage_import_context` call writes to `$IMPORT_CACHE/${slug}.sfn-asm` and `$IMPORT_CACHE/${slug}.layout-manifest`. Slugs are derived from source paths (`slug_from_path`), which are unique by construction. The seed runs from `REPO_ROOT` and writes only to the redirected destination — no shared scratch directory.
+- **Stage 2 (adaptive default):** Picks `min(nproc, total_ram_gb / 5)` clamped to `[1, 8]`. Falls back to 1 on any platform we can't probe (Windows, BSD without `/proc/meminfo` and without `sysctl hw.memsize`). The `BUILD_JOBS` env var still overrides — local users who know their hardware can pin a specific value.
+- **Stage 3 (CI wiring):** Adding the input is purely additive. Existing callers that don't set it inherit the auto-detected default.
+- **Stage 4 (retry budget):** The retry corpus (`build/selfhost/native/corrupted/`) is the canonical signal. If `find $WORK_DIR/corrupted -type f -newer build/native/sailfin | wc -l` is 0 across one full nightly, retries are dead weight.
+
+#### What this does NOT change
+
+- Determinism: link order is sorted post-emit; LLVM IR output is byte-identical to the serial path (the existing `make check` fixed-point comparison continues to gate this).
+- Memory ceiling: `SEED_MEM_LIMIT=12 GB` per process is unchanged. A future PR can lower this to 6 GB once we have telemetry showing no module needs more.
+- `make check` triple-pass logic: the seedcheck and stage3 builds use the same `BUILD_JOBS` knob, so the fixed-point comparison runs at parallel load too.
 
 ---
 
@@ -996,23 +1047,41 @@ The fix is not to guess at the ABI corner; the fix is to not rely on the cross-m
 
 ## Appendix: IPC Channel Census
 
-Total: **489 `fs.*` calls across 37 files.** 228 dotfile references to `build/sailfin/.xxx` temp paths across 27 files.
+**Current (April 24, post-0.5.9):** 212 `fs.*` calls across 24 files. 48 `build/sailfin/.xxx` references across 18 files. **Zero data-flow IPC channels.**
 
-### Top IPC files by build/sailfin/ reference count
+The remaining `fs.*` surface is concentrated in CLI / orchestration paths that legitimately read filesystem state (capsule manifest resolution, lock-file management, target-directory bookkeeping) — not pipeline IPC:
 
-| File                           | Dotfile refs |
-| ------------------------------ | ------------ |
-| `instructions_dispatch.sfn`    | 45           |
-| `instructions_let.sfn`         | 32           |
-| `instructions_helpers.sfn`     | 30           |
-| `statement.sfn`                | 16           |
-| `core_call_emission.sfn`       | 13           |
-| `core_literals_lowering.sfn`   | 12           |
-| `main.sfn`                     | 12           |
-| `statement_assignment.sfn`     | 9            |
-| `lowering_core.sfn`            | 9            |
-| `lowering_phase_types.sfn`     | 7            |
-| `cli_commands.sfn`             | 4            |
-| `emission.sfn`                 | 3            |
-| `lowering_phase_functions.sfn` | 2            |
-| `core_call_resolution.sfn`     | 1            |
+| File                                        | `fs.*` calls | Role                            |
+| ------------------------------------------- | -----------: | ------------------------------- |
+| `cli_commands.sfn`                          |           60 | CLI subcommand dispatch          |
+| `main.sfn`                                  |           36 | binary entry point + flag parsing |
+| `cli_main.sfn`                              |           22 | CLI argv routing                  |
+| `capsule_resolver.sfn`                      |           19 | capsule manifest + dep resolution |
+| `llvm/lowering/lowering_core.sfn`           |           14 | trace gates + diagnostic dumps    |
+| `llvm/imports.sfn`                          |           13 | import-context reads              |
+| `cli_commands_utils.sfn`                    |           13 | CLI helpers                       |
+| `llvm/lowering/lowering_io.sfn`             |            9 | LLVM IR output                    |
+| `version.sfn`                               |            6 | resolve compiler version          |
+| `llvm/runtime_helpers.sfn`                  |            5 | runtime IR file reads             |
+
+The 48 remaining `build/sailfin/.xxx` references are **all flag/diagnostic gates**:
+
+```
+build/sailfin/.dump_test_sources         build/sailfin/.skip_typecheck
+build/sailfin/.phase_functions_diagnostics build/sailfin/.test_runner_active
+build/sailfin/.phase_types_diagnostics   build/sailfin/.trace_argv
+build/sailfin/.skip_module_globals       build/sailfin/.trace_call_lowering
+build/sailfin/.skip_test_inlining        build/sailfin/.trace_emit
+                                         build/sailfin/.trace_lowering
+                                         build/sailfin/.trace_test_runner
+```
+
+These are checked via `fs.exists`/`fs.readFile` as a workaround for the lack of `--feature-flag X=Y` plumbing in the CLI. They carry no pipeline data and add no per-module I/O overhead in the common case (the seed checks once at startup). Migrating these to env vars or proper CLI flags is a hygiene cleanup, not a performance task.
+
+### Pre-0.5.9 census (kept for the historical record)
+
+| Date       | `fs.*` calls          | Dotfile refs | Active data-flow channels |
+| ---------- | --------------------- | -----------: | ------------------------: |
+| April 11   | 667 across 42 files   | 487          | 12+                       |
+| April 19   | 489 across 37 files   | 228          | 6                         |
+| **April 24 (0.5.9)** | **212 across 24 files** | **48**     | **0**                     |
