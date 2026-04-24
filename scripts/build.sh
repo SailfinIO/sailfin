@@ -52,6 +52,8 @@ EMIT_RETRIES="${EMIT_RETRIES:-3}"
 BUILD_MODULE_WORKER=0
 WORKER_INDEX=""
 WORKER_SRC=""
+STAGE_IMPORT_WORKER=0
+STAGE_IMPORT_SRC=""
 
 # Build directories (overridable via --work-dir)
 WORK_DIR="${WORK_DIR:-build/selfhost/native}"
@@ -89,6 +91,11 @@ while [[ $# -gt 0 ]]; do
             WORKER_INDEX="$2"
             WORKER_SRC="$3"
             shift 3
+            ;;
+        --_stage_import_worker)
+            STAGE_IMPORT_WORKER=1
+            STAGE_IMPORT_SRC="$2"
+            shift 2
             ;;
         *)          echo "[build] unknown option: $1" >&2; exit 1 ;;
     esac
@@ -743,15 +750,42 @@ stage_import_context() {
     grep '^\.\(layout\)' "$asm_dest" > "$manifest_dest" 2>/dev/null || true
 }
 
-# Stage import context (sequential for safety with older seeds)
+# Worker entry for parallel staging (mirrors --_build_module_worker).
+# Each worker emits one module's .sfn-asm + .layout-manifest into $IMPORT_CACHE
+# at a unique slug-derived path; no shared scratch directory, so workers cannot
+# collide. seed_run applies the same ulimit + timeout as the main flow.
+if [[ "$STAGE_IMPORT_WORKER" -eq 1 ]]; then
+    mkdir -p "$IMPORT_CACHE"
+    stage_import_context "$STAGE_IMPORT_SRC"
+    exit 0
+fi
+
+# Stage import context. Parallelism uses the same JOBS knob as the per-module
+# emit loop. Each invocation writes to a distinct ${slug}.sfn-asm path, so the
+# parallel and serial paths produce byte-identical $IMPORT_CACHE contents.
+# Pre-0.5.9 seeds were not safe under parallel staging; the 0.5.9 seed is.
 T_IMPORT_START="$(date +%s)"
-for src in "${SOURCES[@]}"; do
-    check_budget
-    stage_import_context "$src"
-done
+if [[ "$JOBS" -le 1 ]]; then
+    for src in "${SOURCES[@]}"; do
+        check_budget
+        stage_import_context "$src"
+    done
+else
+    mkdir -p "$IMPORT_CACHE"
+    # xargs splits on whitespace, so source paths must be NUL-delimited.
+    # `-0 -L 1` ensures one src per worker invocation; `-P "$JOBS"` runs up
+    # to JOBS workers concurrently. A failed stage warns but does not abort
+    # (matches the serial path's `warn + return 0` behavior in
+    # stage_import_context, which leaves the asm_dest absent — the same
+    # downstream effect as the serial loop).
+    printf '%s\0' "${SOURCES[@]}" | xargs -0 -P "$JOBS" -L 1 bash -c '
+        cd "'"$REPO_ROOT"'"
+        bash scripts/build.sh --seed "'"$SEED"'" --work-dir "'"$WORK_DIR"'" --_stage_import_worker "$@"
+    ' _ 2>"$RAW_DIR/stage_import_errors.txt" || warn "one or more import-context stages reported errors (see $RAW_DIR/stage_import_errors.txt)"
+fi
 T_IMPORT_END="$(date +%s)"
 
-log "staged import-context for ${#SOURCES[@]} modules"
+log "staged import-context for ${#SOURCES[@]} modules (jobs=$JOBS)"
 
 # ---------------------------------------------------------------------------
 # Step 3: Per-module emit + compile
