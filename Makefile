@@ -33,12 +33,20 @@ IS_WINDOWS := $(if $(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),1,)
 EXE_EXT := $(if $(IS_WINDOWS),.exe,)
 
 ifeq ($(UNAME_S),Darwin)
-TIMEOUT_CMD ?=
+# macOS ships no GNU `timeout`; pick up `gtimeout` from homebrew coreutils if present.
+# Empty is an acceptable fallback — callers must guard on non-empty before invoking.
+TIMEOUT_CMD ?= $(shell command -v gtimeout 2>/dev/null)
 else ifeq ($(IS_WINDOWS),1)
 TIMEOUT_CMD ?=
 else
 TIMEOUT_CMD ?= timeout
 endif
+
+# Portable SHA-256 hasher. `shasum -a 256` ships with Perl on both macOS and
+# every Linux distro we run on; `sha256sum` is GNU coreutils and not on macOS
+# by default. Using `shasum` keeps the fixed-point comparison in `check`
+# portable without adding a brew dep to CI.
+HASH_CMD ?= shasum -a 256
 
 # Bound clang when compiling LLVM IR modules in CI.
 # GitHub Actions can cancel jobs that emit no output for long stretches;
@@ -347,7 +355,12 @@ check:
 		bash scripts/build.sh
 	@echo "[check] validating seedcheck binary can run programs..."
 	@sc="build/native/sailfin-seedcheck"; \
-	output=$$(timeout 10 $$sc run examples/basics/hello-world.sfn 2>&1) || true; \
+	to="$(TIMEOUT_CMD)"; \
+	if [ -n "$$to" ]; then \
+		output=$$("$$to" 10 $$sc run examples/basics/hello-world.sfn 2>&1) || true; \
+	else \
+		output=$$($$sc run examples/basics/hello-world.sfn 2>&1) || true; \
+	fi; \
 	if ! echo "$$output" | grep -q "Hello, Sailfin!"; then \
 		echo "[check][FAIL] seedcheck binary cannot run hello-world.sfn (expected 'Hello, Sailfin!' in output)"; \
 		echo "[check][FAIL] got: $$output"; \
@@ -365,8 +378,8 @@ check:
 	@echo "[check] comparing stage2 vs stage3 LLVM IR (fixed-point check)..."
 	@s2="build/selfhost/native-seedcheck/raw"; \
 	s3="build/selfhost/native-stage3/raw"; \
-	s2_hashes=$$(find "$$s2" -name '*.ll' -exec sha256sum {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | sha256sum | awk '{print $$1}'); \
-	s3_hashes=$$(find "$$s3" -name '*.ll' -exec sha256sum {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | sha256sum | awk '{print $$1}'); \
+	s2_hashes=$$(find "$$s2" -name '*.ll' -exec $(HASH_CMD) {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | $(HASH_CMD) | awk '{print $$1}'); \
+	s3_hashes=$$(find "$$s3" -name '*.ll' -exec $(HASH_CMD) {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | $(HASH_CMD) | awk '{print $$1}'); \
 	if [ "$$s2_hashes" = "$$s3_hashes" ]; then \
 		echo "[check] stage2 == stage3: compiler is a fixed point ✓"; \
 	else \
@@ -376,8 +389,8 @@ check:
 			base=$$(basename "$$f"); \
 			s3f="$$s3/$$base"; \
 			if [ -f "$$s3f" ]; then \
-				h2=$$(sha256sum "$$f" | awk '{print $$1}'); \
-				h3=$$(sha256sum "$$s3f" | awk '{print $$1}'); \
+				h2=$$($(HASH_CMD) "$$f" | awk '{print $$1}'); \
+				h3=$$($(HASH_CMD) "$$s3f" | awk '{print $$1}'); \
 				if [ "$$h2" != "$$h3" ]; then \
 					echo "[check][WARN]   $$base (stage2=$$(printf '%.12s' "$$h2")... stage3=$$(printf '%.12s' "$$h3")...)"; \
 				fi; \
