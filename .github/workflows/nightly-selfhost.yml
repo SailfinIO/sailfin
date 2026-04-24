@@ -10,10 +10,14 @@ name: Nightly self-host check
 #   - nightly at 07:00 UTC
 #   - manual dispatch (use before cutting any release)
 #   - when the release-tag workflow runs (see release-tag.yml)
-
-env:
-  # Keep aligned with ci.yml's seed pin.
-  SEED_VERSION: 0.5.7
+#
+# The pinned seed version lives in `.seed-version` at the repo root.
+# A setup step below reads that file (or uses the `seed_version`
+# workflow_dispatch input when set) and exports the resolved value as
+# `steps.seed.outputs.seed_version`. Kept in sync with ci.yml,
+# release-branches.yml, release-tag.yml, and the Makefile — all four
+# read the same `.seed-version` file. Bumping the seed is a one-line
+# edit.
 
 on:
   schedule:
@@ -21,7 +25,7 @@ on:
   workflow_dispatch:
     inputs:
       seed_version:
-        description: "Seed version (defaults to env.SEED_VERSION)"
+        description: "Seed version (blank defaults to `.seed-version` from checkout)"
         required: false
         default: ""
 
@@ -51,6 +55,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6.0.2
 
+      - name: Resolve seed version (input override → .seed-version)
+        id: seed
+        shell: bash
+        env:
+          INPUT_SEED_VERSION: ${{ inputs.seed_version }}
+        run: |
+          set -euo pipefail
+          override="$(printf '%s' "$INPUT_SEED_VERSION" | tr -d '[:space:]')"
+          if [ -n "$override" ]; then
+            echo "[seed-pin] using seed $override (workflow_dispatch input override)"
+            pin="$override"
+          else
+            if [ ! -f .seed-version ]; then
+              echo "[seed-pin] .seed-version is missing from checkout" >&2
+              exit 1
+            fi
+            pin="$(tr -d '[:space:]' < .seed-version)"
+            if [ -z "$pin" ]; then
+              echo "[seed-pin] .seed-version is empty" >&2
+              exit 1
+            fi
+            echo "[seed-pin] using seed $pin from .seed-version"
+          fi
+          echo "seed_version=$pin" >> "$GITHUB_OUTPUT"
+
       - name: Install clang (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -68,12 +97,11 @@ jobs:
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SEED_VERSION: ${{ steps.seed.outputs.seed_version }}
         run: |
           set -euo pipefail
-          seed="${{ inputs.seed_version }}"
-          if [ -z "$seed" ]; then seed="$SEED_VERSION"; fi
-          echo "[nightly] seed version: $seed"
-          make fetch-seed SEED_VERSION="$seed"
+          echo "[nightly] seed version: $SEED_VERSION"
+          make fetch-seed SEED_VERSION="$SEED_VERSION"
           build/seed/bin/sailfin version
 
       - name: make check (first pass → seedcheck → stage3)

@@ -109,8 +109,13 @@ test: test-unit test-integration test-e2e
 
 # Install a released seed compiler into the workspace.
 # Requires a GitHub token in GITHUB_TOKEN.
+#
+# The canonical seed version lives in `.seed-version` at the repo root —
+# every CI workflow reads that same file via a setup step so the four
+# pins (Makefile + 4 workflows) never drift again. See the header of
+# `.github/workflows/ci.yml` for the workflow-side plumbing.
 SEED_REPO ?= SailfinIO/sailfin
-SEED_VERSION ?= 0.5.7
+SEED_VERSION ?= $(strip $(shell cat .seed-version 2>/dev/null))
 SEED_EXCLUDE_TAG ?=
 SEED_INSTALL_BASE ?= build/seed/versions
 SEED_GLOBAL_BIN_DIR ?= build/seed/bin
@@ -124,7 +129,17 @@ SEED ?= build/seed/bin/sailfin
 FETCHED_SEED ?= $(SEED_GLOBAL_BIN_DIR)/sailfin$(EXE_EXT)
 
 fetch-seed:
-	@echo "[fetch-seed] installing seed into $(SEED_INSTALL_BASE)"
+	@if [ -z "$(SEED_VERSION)" ]; then \
+		echo "[fetch-seed][error] SEED_VERSION is empty." >&2; \
+		echo "[fetch-seed][error] The pin lives in .seed-version at the repo root." >&2; \
+		if [ ! -f .seed-version ]; then \
+			echo "[fetch-seed][error] .seed-version is missing — restore it or pass SEED_VERSION=... explicitly." >&2; \
+		else \
+			echo "[fetch-seed][error] .seed-version is present but empty — write a version (e.g. 0.5.7) to it." >&2; \
+		fi; \
+		exit 1; \
+	fi
+	@echo "[fetch-seed] installing seed $(SEED_VERSION) into $(SEED_INSTALL_BASE)"
 	@mkdir -p build/seed
 	@REPO="$(SEED_REPO)" VERSION="$(SEED_VERSION)" EXCLUDE_TAG="$(SEED_EXCLUDE_TAG)" \
 		GLOBAL_BIN_DIR="$(SEED_GLOBAL_BIN_DIR)" INSTALL_BASE="$(SEED_INSTALL_BASE)" \
