@@ -321,11 +321,13 @@ fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io]
     return write_llvm_lines_chunked(out_path, lines);
 }
 
-// Build and write LLVM IR from a native text file, avoiding large string returns.
-fn write_llvm_ir_from_native_text_file(native_text_path: string, module_name: string, out_path: string) -> boolean ![io] {
-    // Delegate to lowering_core where all calls are intra-module (avoiding
-    // cross-module ABI bugs and struct literal drops in the seed).
-    return compile_native_text_to_llvm_file(native_text_path, module_name, out_path);
+// Build and write LLVM IR from raw native text, avoiding large string returns.
+// Uses the recovery parser (build_parse_result_from_text) via
+// `compile_native_text_to_llvm_file` to sidestep the structured-parser ABI
+// issue the first-pass binary built from the 0.5.7 seed hits on this path
+// (see docs/proposals/phase-4-eliminate-light-recovery.md).
+fn write_llvm_ir_from_native_text(native_text: string, module_name: string, out_path: string) -> boolean ![io] {
+    return compile_native_text_to_llvm_file(native_text, module_name, out_path);
 }
 
 fn lower_to_llvm_with_manifests(native_module: NativeModule, imported_manifests: LayoutManifest[]) -> LoweredLLVMResult {
