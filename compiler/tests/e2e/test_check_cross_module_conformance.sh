@@ -98,8 +98,16 @@ EOF
 # ---- Test 1: sfn check fires E0301 on the cross-module conformance gap ----
 test_e0301_fires() {
     cd "$SCRATCH" || return 1
-    "$BINARY" check src/triangle.sfn > "$SCRATCH/check.stdout" 2> "$SCRATCH/check.stderr"
-    local rc=$?
+    # `sfn check` exits 1 when diagnostics are found. Capture the exit
+    # explicitly inside an `if` block so `set -e` does not abort the
+    # script before we read $? — bash disables `-e` for commands inside
+    # an `if` condition, which is the safest portable form here.
+    local rc=0
+    if "$BINARY" check src/triangle.sfn > "$SCRATCH/check.stdout" 2> "$SCRATCH/check.stderr"; then
+        rc=0
+    else
+        rc=$?
+    fi
     if [ "$rc" -ne 1 ]; then
         echo "[test]   expected exit code 1 (diagnostics found), got $rc" >&2
         echo "[test]   stderr:" >&2
@@ -157,8 +165,12 @@ fn main() {
 
 export { Triangle };
 EOF
-    "$BINARY" check src/triangle.sfn > "$SCRATCH/check_ok.stdout" 2> "$SCRATCH/check_ok.stderr"
-    local rc=$?
+    local rc=0
+    if "$BINARY" check src/triangle.sfn > "$SCRATCH/check_ok.stdout" 2> "$SCRATCH/check_ok.stderr"; then
+        rc=0
+    else
+        rc=$?
+    fi
     if [ "$rc" -ne 0 ]; then
         echo "[test]   expected exit 0 with full impl, got $rc" >&2
         echo "[test]   stderr:" >&2

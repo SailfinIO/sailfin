@@ -91,7 +91,10 @@ sfn check [--quiet] [path...]
 | `sfn check --quiet file.sfn` | Exit code only; suppress diagnostic output |
 
 Exit codes: 0 = no diagnostics, 1 = one or more diagnostics found,
-2 = usage error (bad arguments).
+2 = setup error (bad arguments, missing path, slug collision in the
+project's capsule graph, or `stage_capsule_imports` failure). The
+common thread for exit 2 is "the command could not run analysis at
+all"; it is distinct from "analysis ran and found problems" (exit 1).
 
 Multiple paths can be given: `sfn check compiler/src/ runtime/prelude.sfn`.
 
