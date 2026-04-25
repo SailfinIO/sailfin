@@ -51,14 +51,19 @@ runs:
         set -euo pipefail
         # Forward build_jobs only when explicitly set; an empty value means
         # "let the Makefile auto-detect" (scripts/detect_build_jobs.sh).
-        BUILD_JOBS_ARG=()
+        # The if/else split avoids bash 3.2's "${arr[@]}" empty-array
+        # unbound-variable error under set -u (macOS still ships /bin/bash
+        # 3.2 by default).
         if [ -n "${{ inputs.build_jobs }}" ]; then
-          BUILD_JOBS_ARG=("BUILD_JOBS=${{ inputs.build_jobs }}")
+          make rebuild \
+            CLANG="${{ inputs.clang }}" \
+            SEED_NATIVE="build/seed/bin/sailfin" \
+            BUILD_JOBS="${{ inputs.build_jobs }}"
+        else
+          make rebuild \
+            CLANG="${{ inputs.clang }}" \
+            SEED_NATIVE="build/seed/bin/sailfin"
         fi
-        make rebuild \
-          CLANG="${{ inputs.clang }}" \
-          SEED_NATIVE="build/seed/bin/sailfin" \
-          "${BUILD_JOBS_ARG[@]}"
 
     - name: Prepare test artifacts
       shell: bash {0}

@@ -55,11 +55,7 @@ import {
     TraitMetadata,
     TypeContext
 } from "../types";
-import {
-    index_of,
-    number_to_string,
-    sanitize_symbol
-} from "../utils";
+import { index_of, number_to_string, sanitize_symbol } from "../utils";
 import {
     collect_defined_function_symbols,
     extend_native_enums,

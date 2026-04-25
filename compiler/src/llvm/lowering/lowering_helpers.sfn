@@ -28,8 +28,8 @@ import {
 } from "../../native_ir_api";
 import { split_lines } from "../../native_ir_utils_text";
 import { char_code, substring } from "../../string_utils";
-import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
 import { append_unique_effect } from "../effects";
+import { resolve_import_artifact_slug, resolve_import_module_slug_for_module } from "../imports";
 import { find_function_by_name, should_internalize_function } from "../rendering";
 import {
     CapabilityManifest,
