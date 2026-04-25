@@ -112,36 +112,9 @@ import {
     sanitize_structs
 } from "./lowering_phase_sanitize";
 import { build_type_context_with_recovery } from "./lowering_phase_types";
-import {
-    recover_functions_for_lowering,
-    recover_native_enums_light,
-    recover_native_functions_light,
-    recover_native_imports_light,
-    recover_native_structs_light
-} from "./lowering_recovery";
+import { recover_functions_for_lowering } from "./lowering_recovery";
 import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowering_text_utils";
 import { lower_module_bindings_to_globals } from "./module_globals";
-
-// Consolidated: parse all structure from native text using light recovery.
-// Retained for `write_llvm_ir_for_tests_from_text`; see PR 2 gating in
-// `docs/proposals/phase-4-eliminate-light-recovery.md` §2.2. The primary
-// non-test build path (`compile_native_text_to_llvm_file`) now calls
-// `parse_native_artifact` directly.
-fn build_parse_result_from_text(native_text: string) -> ParseNativeResult {
-    let recovered_functions = recover_native_functions_light(native_text);
-    let recovered_structs = recover_native_structs_light(native_text);
-    let recovered_imports = recover_native_imports_light(native_text);
-    let recovered_enums = recover_native_enums_light(native_text);
-    return ParseNativeResult {
-        functions: recovered_functions,
-        imports: recovered_imports,
-        structs: recovered_structs,
-        interfaces: [],
-        enums: recovered_enums,
-        bindings: [],
-        diagnostics: []
-    };
-}
 
 fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
     let mut native_text_for_recovery: string = "";
@@ -264,7 +237,7 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
         print.err("emit-llvm: empty native text for module " + module_name);
         return false;
     }
-    let parse = build_parse_result_from_text(native_text);
+    let parse = parse_native_artifact(native_text);
     let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = make_native_module_for_emit(module_name, native_text);
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
