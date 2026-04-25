@@ -1,8 +1,52 @@
 # Proposal: Unified Build Architecture for Sailfin
 
-Status: Draft
-Date: 2026-04-17
+Status: Stage A scoped, ready for grooming
+Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed)
 Authors: Core Team
+
+## Implementation Status (as of 2026-04-25)
+
+Drift since the original draft:
+
+- **Partial Stage B already shipped.** `compiler/src/capsule_resolver.sfn`
+  (~450 LOC) implements `discover_project_root` →
+  `enumerate_capsule_sources` → `stage_capsule_imports` →
+  `compile_capsule_modules`. `sfn build` and `sfn run` call it via
+  `_prepare_project_capsules` in `cli_main.sfn`, so manifest-declared
+  capsule deps no longer go through textual inlining when a
+  `capsule.toml` is present.
+- **`sfn check` shipped** (April 18 — see `docs/proposals/check-architecture.md`).
+  Provides the parser/typecheck/effect surface the unified driver will reuse.
+- **Phase 6 parallel selfhost shipped.** `make compile` is now ~2 min local
+  / 5:28 CI Linux (was ~13 min serial). The "process-per-module is a cost
+  floor" pressure (Problem 2.4) is partially relieved — Phase 5 (long-lived
+  process) is no longer urgent for the wall-time target.
+
+What is still **not** shipped (and remains the gating work for everything
+downstream):
+
+1. **Manifest schema.** `compiler/src/toml_parser.sfn` does not yet accept
+   `[build].kind`, `[build].implicit`, `[workspace]`, `[dev-dependencies]`,
+   `[targets.*]`, or `[exports]`.
+2. **No `workspace.toml`** at the repo root.
+3. **No `capsules/sfn/prelude/capsule.toml`** wrapping `runtime/prelude.sfn`.
+4. **Stdlib allowlist is still hard-coded** in `_is_stdlib_capsule_cmd`
+   (`compiler/src/cli_commands_utils.sfn:281`).
+5. **Textual inlining still in the fallback path.** `cli_main.sfn:590` calls
+   `inline_imports_for_source` whenever `_prepare_project_capsules` returns
+   empty (no manifest).
+6. **`llvm-objcopy --weaken` hack still in `sfn test`**
+   (`compiler/src/cli_commands.sfn:670`). Needs `sfn/compiler-lib`
+   extraction (Stage B) before it can retire.
+7. **`sfn build` is still single-file.** No `-p <path>`, no `kind=library`
+   artifacts, no `--release`/`--emit=`/`--target=`/`--jobs=`/`--json`.
+8. **Build-script fixups still load-bearing.** `EMIT_RETRIES=3`
+   (`scripts/build.sh:51`) — Stage 4 attempted `EMIT_RETRIES=1` and
+   reverted on April 25 because `instructions.sfn` flakes. The fallback
+   paths in `compile_to_llvm_file_with_module` are also still live.
+
+Stage A (manifest + workspace schema, parse-only) is the next pickable unit
+of work; see Part 5 for the scoped contract.
 
 ## Summary
 
@@ -841,27 +885,121 @@ and is individually revertible.
 **Goal:** Make the declarative future expressible without changing how
 builds actually run.
 
-- Extend `capsule.toml` parser to accept `[build].kind`,
-  `[build].implicit`, `[workspace]`, `[dev-dependencies]`,
-  `[targets.*]`, `[exports]`. The parser accepts them; nothing consumes
-  them yet.
-- Create `workspace.toml` at the repo root, enumerating `compiler`,
-  `runtime-native`, `runtime-prelude` (new — wrapping
-  `runtime/prelude.sfn`), and `capsules/sfn/*` as workspace members.
-- Create `capsules/sfn/prelude/capsule.toml` pointing at `runtime/prelude.sfn`.
-- `build.sh` continues to drive the build. No user-visible change.
+This stage ships parse-only. No consumers, no resolver changes, no
+behavior change in `make compile`, `sfn build`, `sfn run`, or `sfn test`.
+Its only job is to put the schema on disk so Stage B can lean on it.
 
-**Exit criteria:** `make compile && make check` passes; the new manifest
-fields round-trip through the parser; `workspace.toml` loads cleanly.
+#### Concrete work (sized **size:s**, type:refactor)
+
+**In:**
+
+- Extend `compiler/src/toml_parser.sfn` to accept and round-trip the new
+  manifest fields:
+  - `[build].kind` — string, one of `"binary" | "library" | "runtime"`
+  - `[build].implicit` — boolean
+  - `[workspace].members` — string array (glob-friendly: `"capsules/sfn/*"`)
+  - `[dev-dependencies]` — same shape as `[dependencies]`
+  - `[targets.<triple>]` — table with optional `runtime`, `cc`, `cc-flags`,
+    `link-libs`
+  - `[exports]` — string array (re-export allowlist; submodule paths)
+- Add a `ManifestExtensions` accessor module (or extend the existing
+  manifest reader in `capsule_resolver.sfn` / `cli_commands.sfn`) so a
+  caller can ask "does this manifest declare a workspace?" without
+  re-parsing. **No call sites yet** — this is a getter that returns
+  `None`/empty for every existing manifest.
+- Create `workspace.toml` at the repo root with members:
+  ```toml
+  [workspace]
+  members = [
+      "compiler",
+      "runtime-prelude",
+      "capsules/sfn/*",
+  ]
+  ```
+- Create `capsules/sfn/prelude/capsule.toml` (or, equivalently,
+  `runtime-prelude/capsule.toml` — pick one path and stick with it):
+  ```toml
+  [capsule]
+  name = "sfn/prelude"
+  version = "0.5.9"
+  description = "Sailfin standard prelude (collections, strings, type checks)"
+  [capabilities]
+  required = []
+  [build]
+  kind = "library"
+  entry = "../runtime/prelude.sfn"   # or move the file; see open question below
+  implicit = true
+  ```
+- Set the compiler's own `compiler/capsule.toml` to declare
+  `[build].kind = "binary"` (still no consumer; documents intent).
+- Add round-trip unit tests in `compiler/tests/unit/toml_parser_test.sfn`
+  covering each new field, plus a workspace-load test in
+  `compiler/tests/unit/manifest_workspace_test.sfn`.
+
+**Out (explicitly deferred to Stage B):**
+
+- The resolver does not learn about workspace members yet — keep the
+  hard-coded `_is_stdlib_capsule_cmd` allowlist.
+- `inline_imports_for_source` stays as the fallback in `cli_main.sfn:590`.
+- `sfn build -p <path>` is not added.
+- The `llvm-objcopy --weaken` path stays.
+- No changes to `scripts/build.sh` or the Makefile.
+- Do not move `runtime/prelude.sfn` on disk yet (the manifest's `entry`
+  can point at the existing path with `..`). Moving it is a Stage B
+  concern because every consumer's slug changes.
+
+#### Files affected
+
+- `compiler/src/toml_parser.sfn` (extend)
+- `compiler/tests/unit/toml_parser_test.sfn` (extend)
+- `compiler/tests/unit/manifest_workspace_test.sfn` (new)
+- `workspace.toml` (new, repo root)
+- `capsules/sfn/prelude/capsule.toml` (new)
+- `compiler/capsule.toml` (add `[build].kind = "binary"`)
+
+#### Verification
+
+- `ulimit -v 8388608 && make compile` — unchanged behavior.
+- `ulimit -v 8388608 && make test-unit` — new tests pass.
+- `ulimit -v 8388608 && make check` — fixed-point still holds.
+- Manual: `build/native/sailfin emit native workspace.toml` is **not**
+  expected to do anything meaningful; this stage adds parsing, not
+  loading semantics.
+
+#### Exit criteria
+
+- New manifest fields round-trip through `toml_parser.sfn` (covered by
+  unit tests).
+- `workspace.toml` and `capsules/sfn/prelude/capsule.toml` both parse
+  without error and produce the expected struct.
+- `make compile && make check` passes with no behavior delta.
+- The compiler binary size delta is negligible (< 1% — schema-only).
+
+#### Open question to resolve in this stage's PR
+
+- **`sfn/prelude` directory layout.** Either keep `runtime/prelude.sfn` in
+  place and have the new manifest's `entry` point at it via `..`, or move
+  it to `capsules/sfn/prelude/src/mod.sfn` now. Moving it changes every
+  consumer's import slug and `build.sh`'s `slug_from_path` special case
+  for `runtime__prelude`, which is squarely Stage B territory. Default to
+  **keep in place**; revisit at Stage B start.
 
 ### Stage B — Real resolver, retire textual inlining and the weaken hack
 
 **Goal:** One import-resolution code path, used by every CLI command.
 
-- Port `_inline_relative_imports_cmd` into a first-class resolver
-  `compiler/src/resolver/mod.sfn` that returns a `ResolvedGraph`.
+`compiler/src/capsule_resolver.sfn` already covers manifest-declared
+capsule deps (separate-compile via `discover_project_root` →
+`enumerate_capsule_sources` → `stage_capsule_imports` →
+`compile_capsule_modules`). Stage B unifies it with the relative-import
+walker and teaches it to consume the workspace file Stage A produces.
+
+- Fold `_inline_relative_imports_cmd` into `capsule_resolver.sfn` (or a
+  sibling module under `compiler/src/resolver/`) so relative and capsule
+  imports go through the same code path. The output type becomes a
+  `ResolvedGraph` that both `sfn build` and `sfn run` consume.
 - Retire `_is_stdlib_capsule_cmd` — the resolver reads the workspace
-  file to discover that `sfn/http` maps to `capsules/sfn/http`.
+  file (Stage A) to discover that `sfn/http` maps to `capsules/sfn/http`.
 - `sfn run` stops textually inlining imports; it compiles modules
   separately and links them. Diagnostics now reference original files.
 - `sfn test` stops weakening the compiler binary. Tests that need
