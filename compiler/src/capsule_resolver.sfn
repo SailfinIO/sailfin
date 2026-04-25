@@ -44,6 +44,7 @@ import { toml_get_dependencies, toml_get_name, toml_get_workspace_members } from
 
 export {
     CapsuleSource,
+    CheckCapsuleResolution,
     WorkspaceMember,
     collect_relative_import_specs,
     collect_scoped_import_specs,
@@ -55,6 +56,7 @@ export {
     load_workspace_members,
     parse_workspace_member_paths,
     prepare_project_capsules,
+    prepare_project_capsules_for_check,
     resolve_relative_import,
     stage_capsule_imports,
     compile_capsule_modules,
@@ -76,6 +78,17 @@ struct WorkspaceMember {
     name: string;  // canonical name, e.g. "sfn/http"
     member_path: string;  // path relative to workspace root, e.g. "capsules/sfn/http"
     src_dir: string;  // path to the member's src/ dir (workspace-rooted)
+}
+
+// Result of a check-mode resolver pass: same workspace + manifest +
+// relative-import enumeration as `prepare_project_capsules`, but the
+// pipeline stops after `stage_capsule_imports` so no `.ll` is emitted.
+// `asm_paths` is the list of staged `.sfn-asm` files the typechecker
+// should consume for cross-module interface conformance.
+struct CheckCapsuleResolution {
+    asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
+    capsule_count: number;  // post-dedupe count, for diagnostic output
+    staging_failed: boolean;  // true on slug collision or stage-write failure
 }
 
 // ---- Path helpers ----
@@ -1490,4 +1503,135 @@ fn prepare_project_capsules(input_path: string) -> string[] ![io] {
         return [];
     }
     return compile_capsule_modules(deduped);
+}
+
+// Resolver pass tuned for `sfn check`: enumerate, dedupe, and stage the
+// same `.sfn-asm` + `.layout-manifest` artifacts that the full builder
+// would, but skip `compile_capsule_modules` so no LLVM IR is produced.
+// Returns the staged `.sfn-asm` paths so the typechecker import-loader
+// can read interface declarations off disk and feed them into
+// `typecheck_diagnostics_with_imports`.
+//
+// Contract differences from `prepare_project_capsules`:
+//   - On slug collision, returns `staging_failed = true` instead of
+//     `[]`, so the CLI can distinguish "no deps" (clean exit 0/1) from
+//     "setup error" (exit 2).
+//   - On `stage_capsule_imports` failure, same: `staging_failed = true`.
+//   - Standalone files outside any capsule.toml are valid input and
+//     return an empty resolution (no error) — relative-import walking
+//     still happens via `enumerate_relative_sources`.
+fn prepare_project_capsules_for_check(input_path: string) -> CheckCapsuleResolution ![io] {
+    let base_dir = _cr_dirname(input_path);
+    let mut sources: CapsuleSource[] = [];
+
+    let relative = enumerate_relative_sources(input_path);
+    let mut ri: number = 0;
+    loop {
+        if ri >= relative.length { break; }
+        sources.push(relative[ri]);
+        ri += 1;
+    }
+
+    let project_root = discover_project_root(base_dir);
+    let mut covered_specs: string[] = [];
+    if project_root.length > 0 {
+        let manifest_path = _cr_path_join(project_root, "capsule.toml");
+        if fs.exists(manifest_path) {
+            let manifest_text = fs.readFile(manifest_path);
+            let deps_text = toml_get_dependencies(manifest_text);
+            covered_specs = _cr_dep_specs_from_text(deps_text);
+        }
+        let dep_sources = enumerate_capsule_sources(project_root);
+        let mut di: number = 0;
+        loop {
+            if di >= dep_sources.length { break; }
+            sources.push(dep_sources[di]);
+            di += 1;
+        }
+    }
+
+    let workspace_root = discover_workspace_root(base_dir);
+    if workspace_root.length > 0 {
+        let members = load_workspace_members(workspace_root);
+        let implicit = enumerate_workspace_implicit_sources(input_path, members, covered_specs);
+        let mut wi: number = 0;
+        loop {
+            if wi >= implicit.length { break; }
+            sources.push(implicit[wi]);
+            wi += 1;
+        }
+    }
+
+    let empty_paths: string[] = [];
+    if sources.length == 0 {
+        return CheckCapsuleResolution {
+            asm_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: false
+        };
+    }
+
+    let mut deduped: CapsuleSource[] = [];
+    let mut seen_slugs: string[] = [];
+    let mut seen_paths: string[] = [];
+    let mut si: number = 0;
+    loop {
+        if si >= sources.length { break; }
+        let candidate = sources[si];
+        let mut collision: boolean = false;
+        let mut sj: number = 0;
+        loop {
+            if sj >= seen_slugs.length { break; }
+            if strings_equal(seen_slugs[sj], candidate.slug) {
+                if !strings_equal(seen_paths[sj], candidate.source_path) {
+                    print.err("capsule-resolver: slug collision for \""
+                        + candidate.slug
+                        + "\":\n  "
+                        + seen_paths[sj]
+                        + "\n  "
+                        + candidate.source_path
+                        + "\nrename one of the modules so each maps to a distinct slug.");
+                    return CheckCapsuleResolution {
+                        asm_paths: empty_paths,
+                        capsule_count: 0,
+                        staging_failed: true
+                    };
+                }
+                collision = true;
+                break;
+            }
+            sj += 1;
+        }
+        if !collision {
+            seen_slugs.push(candidate.slug);
+            seen_paths.push(candidate.source_path);
+            deduped.push(candidate);
+        }
+        si += 1;
+    }
+
+    let staged = stage_capsule_imports(deduped);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return CheckCapsuleResolution {
+            asm_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true
+        };
+    }
+
+    let mut asm_paths: string[] = [];
+    let mut ai: number = 0;
+    loop {
+        if ai >= deduped.length { break; }
+        asm_paths.push("build/native/import-context/" + deduped[ai].slug
+            + ".sfn-asm");
+        ai += 1;
+    }
+
+    return CheckCapsuleResolution {
+        asm_paths: asm_paths,
+        capsule_count: deduped.length,
+        staging_failed: false
+    };
 }

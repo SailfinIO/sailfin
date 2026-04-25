@@ -1,0 +1,86 @@
+// compiler/src/typecheck_import_loader.sfn
+//
+// On-disk loader that turns staged `.sfn-asm` artifacts into the AST
+// interface declarations the typechecker consumes via
+// `typecheck_diagnostics_with_imports`.
+//
+// This module sits one layer above `typecheck_imports.sfn` (the pure
+// converter — deliberately a leaf depending only on `ast` and
+// `native_ir`). Adding the parser-and-I/O wiring here keeps the leaf
+// module's diamond-import discipline intact: any future unit test that
+// needs only the converters can import `typecheck_imports` without
+// pulling the native-IR parser graph (which reaches `string_utils`)
+// through a second path.
+//
+// Diamond rule for callers: `cli_check.sfn` is the only consumer in
+// Track A2. Other callers should audit transitive import paths to
+// `string_utils` before adopting — `sfn test` does not dedupe shared
+// modules across import paths, so two reachable copies trigger
+// duplicate-symbol cascades.
+import { Statement } from "./ast";
+import { parse_native_interfaces_for_import } from "./native_ir_api";
+import { interfaces_from_native } from "./typecheck_imports";
+
+// Result of loading a batch of `.sfn-asm` artifacts. Missing and
+// skipped paths are surfaced explicitly so the CLI can warn on stale
+// or empty artifacts rather than silently weakening cross-module
+// conformance.
+struct ImportedInterfaceLoadResult {
+    interfaces: Statement[];
+    missing_paths: string[];
+    skipped_paths: string[];
+}
+
+// Pure: parse a `.sfn-asm` text buffer and return its interface
+// declarations as AST `Statement.InterfaceDeclaration` nodes. Returns
+// the empty list when the artifact contains no interfaces (a common,
+// benign case for modules that export only structs/functions).
+fn interfaces_from_native_artifact(text: string) -> Statement[] {
+    let natives = parse_native_interfaces_for_import(text);
+    return interfaces_from_native(natives);
+}
+
+// Read each path, convert its interfaces, and accumulate. Paths that
+// don't exist on disk land in `missing_paths`; paths that exist but
+// produced zero interfaces land in `skipped_paths`. Neither condition
+// aborts the load — `sfn check` should always run analysis, just with
+// a possibly weakened import set, and surface the loss to the user.
+fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoadResult ![io] {
+    let mut interfaces: Statement[] = [];
+    let mut missing: string[] = [];
+    let mut skipped: string[] = [];
+
+    let mut i: number = 0;
+    loop {
+        if i >= paths.length { break; }
+        let path = paths[i];
+        if !fs.exists(path) {
+            missing.push(path);
+            i += 1;
+            continue;
+        }
+        let text = fs.readFile(path);
+        let converted = interfaces_from_native_artifact(text);
+        if converted.length == 0 { skipped.push(path); } else {
+            let mut j: number = 0;
+            loop {
+                if j >= converted.length { break; }
+                interfaces.push(converted[j]);
+                j += 1;
+            }
+        }
+        i += 1;
+    }
+
+    return ImportedInterfaceLoadResult {
+        interfaces: interfaces,
+        missing_paths: missing,
+        skipped_paths: skipped
+    };
+}
+
+export {
+    ImportedInterfaceLoadResult,
+    interfaces_from_native_artifact,
+    load_imported_interfaces_from_paths
+};
