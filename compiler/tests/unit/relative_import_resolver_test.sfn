@@ -1,0 +1,438 @@
+// Stage B regression tests for the relative-import scanner and resolver
+// helpers added to `compiler/src/capsule_resolver.sfn` to back the
+// unified import path (docs/proposals/build-architecture.md, Part 5,
+// Stage B).
+//
+// Helpers are inline-duplicated (mirroring `stdlib_capsule_allowlist_test.sfn`)
+// because importing from `capsule_resolver.sfn` pulls in the whole
+// compiler via `./main`, which trips the seed's per-module timeout. The
+// resolver this PR is wiring up ends that limitation; until then,
+// inlined helpers remain the established unit-test pattern.
+// -- Inline copies of the scanner + resolver helpers (must match
+//    `compiler/src/capsule_resolver.sfn`).
+fn _byte_at(text: string, index: number) -> string {
+    if text.length == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= text.length { return ""; }
+    return substring(text, index, index + 1);
+}
+
+fn _is_ident_char(ch: string) -> boolean {
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    if ch.length == 0 { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= allowed.length { break; }
+        if substring(allowed, i, i + 1) == ch { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _word_matches(source: string, index: number, word: string) -> boolean {
+    if word.length == 0 { return false; }
+    if index < 0 { return false; }
+    let end_pos = index + word.length;
+    if end_pos > source.length { return false; }
+    if substring(source, index, end_pos) != word { return false; }
+    if index > 0 {
+        if _is_ident_char(_byte_at(source, index - 1)) { return false; }
+    }
+    if end_pos < source.length {
+        if _is_ident_char(_byte_at(source, end_pos)) { return false; }
+    }
+    return true;
+}
+
+fn _collect_relative_import_specs(source: string) -> string[] {
+    let mut out: string[] = [];
+    let source_len = source.length;
+    if source_len == 0 { return out; }
+    let mut steps: number = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: number = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _byte_at(source, i);
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" {
+                if i + 1 < source_len {
+                    if _byte_at(source, i + 1) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" {
+            if i + 1 < source_len {
+                let next = _byte_at(source, i + 1);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if _word_matches(source, i, "import") {
+            let mut j: number = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: number = -1;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == "\n" { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == "*" {
+                        if j + 1 < source_len {
+                            if _byte_at(source, j + 1) == "/" {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == "/" {
+                    if j + 1 < source_len {
+                        let nj = _byte_at(source, j + 1);
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 {
+                    if _word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == " " { ws = true; }
+                            if wk == "\t" { ws = true; }
+                            if wk == "\n" { ws = true; }
+                            if wk == "\r" { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _byte_at(source, k) == "\"" {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    let mut is_relative: boolean = false;
+                    if spec.length >= 2 {
+                        if substring(spec, 0, 2) == "./" { is_relative = true; }
+                    }
+                    if spec.length >= 3 {
+                        if substring(spec, 0, 3) == "../" {
+                            is_relative = true;
+                        }
+                    }
+                    if is_relative { out.push(spec); }
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+fn _dirname(path: string) -> string {
+    let mut last_slash: number = -1;
+    let mut i: number = 0;
+    loop {
+        if i >= path.length { break; }
+        if path[i] == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return "."; }
+    if last_slash == 0 { return "/"; }
+    return substring(path, 0, last_slash);
+}
+
+fn _path_join(base: string, name: string) -> string {
+    if base.length == 0 { return name; }
+    if base[base.length - 1] == "/" { return base + name; }
+    return base + "/" + name;
+}
+
+fn _ends_with(text: string, suffix: string) -> boolean {
+    if suffix.length > text.length { return false; }
+    let start = text.length - suffix.length;
+    return strings_equal(substring(text, start, text.length), suffix);
+}
+
+fn _resolve_relative_import(base_dir: string, spec: string) -> string {
+    let mut current_base = base_dir;
+    let mut remainder = spec;
+    loop {
+        if remainder.length >= 3 {
+            if substring(remainder, 0, 3) == "../" {
+                current_base = _dirname(current_base);
+                remainder = substring(remainder, 3, remainder.length);
+                continue;
+            }
+        }
+        if remainder.length >= 2 {
+            if substring(remainder, 0, 2) == "./" {
+                remainder = substring(remainder, 2, remainder.length);
+                continue;
+            }
+        }
+        break;
+    }
+    let path = _path_join(current_base, remainder);
+    if _ends_with(path, ".sfn") { return path; }
+    return path + ".sfn";
+}
+
+fn _relative_slug(entry_dir: string, file_path: string) -> string {
+    let mut prefix = entry_dir;
+    if prefix.length > 0 {
+        if substring(prefix, prefix.length - 1, prefix.length) == "/" {
+            prefix = substring(prefix, 0, prefix.length - 1);
+        }
+    }
+    let mut tail: string = file_path;
+    if prefix.length > 0 {
+        let prefix_with_slash = prefix + "/";
+        if file_path.length >= prefix_with_slash.length {
+            if substring(file_path, 0, prefix_with_slash.length) == prefix_with_slash {
+                tail = substring(file_path, prefix_with_slash.length, file_path.length);
+            }
+        }
+    }
+    if _ends_with(tail, ".sfn") {
+        tail = substring(tail, 0, tail.length - 4);
+    }
+    return tail;
+}
+
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+// ---- collect_relative_import_specs ----
+test "scanner: empty source returns empty" {
+    assert _collect_relative_import_specs("").length == 0;
+}
+
+test "scanner: single relative import is captured" {
+    let src = "import { helper } from \"./helper\";\n";
+    let specs = _collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _str_eq(specs[0], "./helper");
+}
+
+test "scanner: parent-directory import is captured" {
+    let src = "import { foo } from \"../sibling/foo\";\n";
+    let specs = _collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _str_eq(specs[0], "../sibling/foo");
+}
+
+test "scanner: scoped imports are NOT captured" {
+    // sfn/http and acme/router are capsule deps, handled separately by
+    // enumerate_capsule_sources. The relative scanner must skip them.
+    let src = "import { handle } from \"sfn/http\";\nimport { router } from \"acme/router\";\n";
+    let specs = _collect_relative_import_specs(src);
+    assert specs.length == 0;
+}
+
+test "scanner: bare names are NOT captured" {
+    // Bare names like `http` may be stdlib shorthands; the workspace
+    // lookup handles them, not the relative walker.
+    let src = "import { handle } from \"http\";\n";
+    let specs = _collect_relative_import_specs(src);
+    assert specs.length == 0;
+}
+
+test "scanner: import inside string literal is ignored" {
+    let src = "let x = \"import { foo } from './fake'\";\nimport { real } from \"./real\";\n";
+    let specs = _collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _str_eq(specs[0], "./real");
+}
+
+test "scanner: import inside line comment is ignored" {
+    let src = "// import { fake } from \"./fake\";\nimport { real } from \"./real\";\n";
+    let specs = _collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _str_eq(specs[0], "./real");
+}
+
+test "scanner: import inside block comment is ignored" {
+    let src = "/* import { fake } from \"./fake\"; */\nimport { real } from \"./real\";\n";
+    let specs = _collect_relative_import_specs(src);
+    assert specs.length == 1;
+    assert _str_eq(specs[0], "./real");
+}
+
+test "scanner: multiple relative imports captured in order" {
+    let src = "import { a } from \"./a\";\nimport { b } from \"./b\";\nimport { c } from \"../c\";\n";
+    let specs = _collect_relative_import_specs(src);
+    assert specs.length == 3;
+    assert _str_eq(specs[0], "./a");
+    assert _str_eq(specs[1], "./b");
+    assert _str_eq(specs[2], "../c");
+}
+
+// ---- resolve_relative_import ----
+test "resolver: ./helper from a directory" {
+    assert _str_eq(_resolve_relative_import("project/src", "./helper"), "project/src/helper.sfn");
+}
+
+test "resolver: nested ./util/foo" {
+    assert _str_eq(_resolve_relative_import("project/src", "./util/foo"), "project/src/util/foo.sfn");
+}
+
+test "resolver: ../sibling walks up" {
+    assert _str_eq(_resolve_relative_import("project/src", "../tests/foo"), "project/tests/foo.sfn");
+}
+
+test "resolver: chained ../../grand walks up twice" {
+    assert _str_eq(_resolve_relative_import("a/b/c", "../../foo"), "a/foo.sfn");
+}
+
+test "resolver: spec already ending in .sfn is preserved" {
+    assert _str_eq(_resolve_relative_import("project/src", "./helper.sfn"), "project/src/helper.sfn");
+}
+
+// ---- _relative_slug ----
+test "slug: file in entry dir gets bare stem" {
+    assert _str_eq(_relative_slug("project/src", "project/src/helper.sfn"), "helper");
+}
+
+test "slug: file in subdir gets subdir/stem" {
+    assert _str_eq(_relative_slug("project/src", "project/src/util/foo.sfn"), "util/foo");
+}
+
+test "slug: file outside entry dir keeps path as-is" {
+    assert _str_eq(_relative_slug("project/src", "elsewhere/bar.sfn"), "elsewhere/bar");
+}
+
+test "slug: trailing slash on entry_dir is normalized" {
+    assert _str_eq(_relative_slug("project/src/", "project/src/helper.sfn"), "helper");
+}
+
+test "slug: empty entry_dir returns the file path stem" {
+    assert _str_eq(_relative_slug("", "helper.sfn"), "helper");
+}
