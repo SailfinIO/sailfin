@@ -21,6 +21,7 @@
 #endif
 #endif
 
+#include "sailfin_arena.h"
 #include "sailfin_runtime.h"
 
 // Entry point exported by the native compiler IR.
@@ -30,6 +31,68 @@ extern char *compile_to_llvm(char *source);
 // compiler versions (plain vs module-suffixed). Call the stable mangled symbol
 // for the underlying CLI implementation instead.
 extern double sailfin_cli_main__cli_main(SailfinPtrArray *argv);
+
+// Optional process-exit arena telemetry. Activated when both
+// SAILFIN_USE_ARENA=1 (arena allocator on) and SAILFIN_DUMP_ARENA_STATS=1
+// (this gate) are set. Prints one stderr line at exit with arena page count,
+// capacity, used bytes, and utilization plus a label so per-module compile
+// runs are easy to grep out of a build log. See docs/build-performance.md
+// Phase 0 for context.
+static char _arena_stats_label[256] = "<unknown>";
+
+static int _arena_stats_enabled(void)
+{
+    const char *flag = getenv("SAILFIN_DUMP_ARENA_STATS");
+    return flag && flag[0] != '\0' && flag[0] != '0';
+}
+
+static void _arena_stats_capture_label(int argc, char **argv)
+{
+    // Best-effort: prefer the trailing positional (typically the source file
+    // path on `seed emit -o out.ll llvm <src>`). Fall back to argv[1] then
+    // argv[0]. The label is purely informational; never fatal.
+    const char *picked = NULL;
+    for (int i = argc - 1; i >= 0; i--)
+    {
+        const char *a = argv[i];
+        if (!a || a[0] == '\0' || a[0] == '-')
+        {
+            continue;
+        }
+        // Skip --emit/--out values that follow a flag.
+        if (i > 0 && argv[i - 1] && argv[i - 1][0] == '-')
+        {
+            continue;
+        }
+        picked = a;
+        break;
+    }
+    if (!picked)
+    {
+        picked = (argc > 0 && argv[0]) ? argv[0] : "<unknown>";
+    }
+    strncpy(_arena_stats_label, picked, sizeof(_arena_stats_label) - 1);
+    _arena_stats_label[sizeof(_arena_stats_label) - 1] = '\0';
+}
+
+static void _arena_stats_atexit(void)
+{
+    if (!_arena_stats_enabled())
+    {
+        return;
+    }
+    if (!sfn_arena_enabled())
+    {
+        // Avoid creating the global arena just to dump empty stats.
+        fprintf(stderr,
+                "[sailfin-arena] label=%s stats=disabled "
+                "(SAILFIN_USE_ARENA not set)\n",
+                _arena_stats_label);
+        return;
+    }
+    fprintf(stderr, "[sailfin-arena] label=%s ", _arena_stats_label);
+    sfn_arena_print_stats(sfn_arena_global());
+}
 
 static int _trace_argv_enabled(void)
 {
@@ -383,6 +446,11 @@ static char *_resolve_runtime_root(const char *argv0)
 int main(int argc, char **argv)
 {
     _trace_argv("incoming", argc, argv);
+    if (_arena_stats_enabled())
+    {
+        _arena_stats_capture_label(argc, argv);
+        atexit(_arena_stats_atexit);
+    }
     // If invoked with an explicit subcommand/flag, delegate to the Sailfin-native CLI.
     // Otherwise, preserve the legacy interface: `sailfin [--emit MODE] file.sfn`.
     if (argc >= 2)
