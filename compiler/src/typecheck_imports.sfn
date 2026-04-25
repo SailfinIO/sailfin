@@ -15,10 +15,12 @@
 // - Pure converters from native-IR shapes (`NativeInterface`,
 //   `NativeInterfaceSignature`, `NativeParameter`) to AST shapes
 //   (`Statement.InterfaceDeclaration`, `FunctionSignature`, `Parameter`).
-// - No I/O. The companion I/O wrapper (added alongside the new typecheck
-//   entry point) lives in the same file once it lands; for now this
-//   module is converter-only so it can be exercised by unit tests
-//   without touching the filesystem.
+// - No I/O, no native-IR parser dependency. This module is a leaf
+//   (depends only on `ast` and `native_ir`, both of which are themselves
+//   type-only) so any test or future consumer can pull it in without
+//   incurring the heavier native-IR parser graph. The `.sfn-asm`-text
+//   helper and the on-disk loader live alongside the eventual
+//   `cli_check`/resolver integration in A2.
 //
 // See docs/proposals/check-architecture.md and
 // docs/proposals/build-architecture.md (Stage B PR2) for the design

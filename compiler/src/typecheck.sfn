@@ -36,9 +36,21 @@ import {
 } from "./typecheck_types";
 
 fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
+    let empty_imports: Statement[] = [];
+    return typecheck_diagnostics_with_imports(program, empty_imports);
+}
+
+// Cross-module-aware variant. `imported_interfaces` carries interface
+// declarations sourced from the import-context layer (see
+// typecheck_imports.sfn). They are concatenated onto the program's local
+// interface list so cross-module `implements` clauses are conformance-
+// checked against the actual member signatures rather than silently
+// no-oping when the lookup misses.
+fn typecheck_diagnostics_with_imports(program: Program, imported_interfaces: Statement[]) -> Diagnostic[] {
     let top_level = collect_top_level_symbols(program);
-    let interfaces = collect_interface_definitions(program);
-    let scoped_diagnostics = check_program_scopes(program, interfaces);
+    let local_interfaces = collect_interface_definitions(program);
+    let combined_interfaces = local_interfaces.concat(imported_interfaces);
+    let scoped_diagnostics = check_program_scopes(program, combined_interfaces);
 
     // Merge diagnostics using concat (avoids loop-with-if-break pattern that
     // the compiler lowers incorrectly — loops emit without exit conditions).
