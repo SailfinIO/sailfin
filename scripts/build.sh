@@ -46,9 +46,17 @@ SEED_TIMEOUT="${SEED_TIMEOUT:-180}"
 MAX_TOTAL="${MAX_TOTAL:-1200}"
 VERBOSE="${VERBOSE:-0}"
 # EMIT_RETRIES: how many times to re-run seed emit on empty/invalid output.
-#   Production default: 3 (tolerates sporadic memory corruption).
-#   Diagnostic runs:    1 (measures raw failure rate — no re-rolling the dice).
-EMIT_RETRIES="${EMIT_RETRIES:-3}"
+#   Default: 1 (no retries; first failure surfaces immediately).
+#   Set to 3+ when triaging an intermittent regression where you want to
+#   measure how often a retry recovers vs. how often it stays broken.
+#
+# Rationale (April 25): the corruption corpus has been dry across the post-0.5.9
+# build matrix — see retries.log absence on full local + CI runs. With every
+# file-IPC channel removed in 0.5.9 and the default-on arena (PR #186) the
+# previous sources of intermittent IR corruption are gone. Retries here used
+# to mask a real source of non-determinism; now they only mask regressions.
+# Keep the env knob so a diagnostic build can re-enable when needed.
+EMIT_RETRIES="${EMIT_RETRIES:-1}"
 BUILD_MODULE_WORKER=0
 WORKER_INDEX=""
 WORKER_SRC=""
@@ -613,8 +621,9 @@ build_module() {
     # Run from module_cwd so the seed picks up staged import-context.
     # Diagnostics go to stderr (via print.err) so stdout/file output is clean LLVM IR.
     #
-    # Retry policy: controlled by EMIT_RETRIES (default 3; set to 1 for
-    # diagnostic runs to measure raw per-module failure rate).
+    # Retry policy: controlled by EMIT_RETRIES (default 1; raise to 3+ when
+    # triaging an intermittent regression to measure how often a retry
+    # recovers vs. stays broken).
     #
     # Every failed attempt:
     #   - captures the bad .ll + stderr to $CORRUPTED_DIR (corpus-building)
@@ -624,8 +633,8 @@ build_module() {
     local stderr_log="${abs_ll_path}.stderr"
     local validate_log="${abs_ll_path}.validate"
     local attempt=0
-    local max_attempts="${EMIT_RETRIES:-3}"
-    [[ "$max_attempts" =~ ^[0-9]+$ ]] || max_attempts=3
+    local max_attempts="${EMIT_RETRIES:-1}"
+    [[ "$max_attempts" =~ ^[0-9]+$ ]] || max_attempts=1
     [[ "$max_attempts" -ge 1 ]] || max_attempts=1
     local seed_exit=0
     while [[ $attempt -lt $max_attempts ]]; do
