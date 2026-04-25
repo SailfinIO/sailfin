@@ -1,7 +1,7 @@
 # Architecture: `sfn check` — Fast Analysis Without Codegen
 
 Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`)
-Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026
+Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026; A3 (Phase 1 diagnostic infrastructure — severity + file_path on Diagnostic, structured load warnings) shipped April 25, 2026
 Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
 
 ## Implementation Status
@@ -48,20 +48,39 @@ sub-PRs:
   staging failures return exit code 2 (setup error) to match
   check-architecture.md's documented contract. Coverage:
   `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
-- **A3 — diagnostic enhancement.** Add `severity` and `file_path`
-  fields to `Diagnostic` (the deferred Phase 1 item below). With A2
-  in place every diagnostic naturally carries the originating module
-  path, so the renderer can drop its single-file assumption.
+- **A3 — diagnostic enhancement (shipped April 25, 2026).** The
+  `Diagnostic` struct now carries `severity: string` ("error" |
+  "warning" | "hint" | "info") and `file_path: string` directly. All
+  six factories in `compiler/src/typecheck_types.sfn` plus the inline
+  literal in `effect_violation_to_diagnostic` populate the new fields;
+  severity is hardcoded to `"error"` at every factory. The renderer
+  in `compiler/src/tools/check.sfn` drops its `file_path` parameter
+  and reads `d.severity` / `d.file_path` from the struct, with a
+  post-hoc stamping pass in `check_source_with_imports` writing the
+  originating module path onto each diagnostic before rendering.
+  `cli_check.sfn:_emit_load_warnings` was rewritten to emit
+  `Diagnostic { code: "W0001"|"W0002", severity: "warning", ... }`
+  and route through `render_diagnostic` with `kind="load"`. Coverage:
+  21 unit tests in `compiler/tests/unit/check_tool_test.sfn`
+  (including seven new tests guarding severity prefix invariance,
+  file_path on the location-only branch, and W01xx code distinctness).
+  Phase 2 features (`secondary` source locations,
+  `FixSuggestion`/`TextEdit`) remain deferred — they land alongside
+  `sfn fix` / `sfn lsp`.
 - **A4 — delete legacy helpers.** Remove `inline_imports_for_source`,
   `_inline_relative_imports_cmd`, and `_is_stdlib_capsule_cmd` once
   the test path (Stage B PR2's `sfn test` migration) lands too.
 
 ### Still deferred to a follow-up
 
-- Diagnostic struct enhancement (Phase 1 — `severity` and `file_path` fields).
-  The v1 renderer synthesises severity from the error code instead. Slated
-  for A3 above.
 - Fix-it suggestion edits (Phase 2 — `FixSuggestion`/`TextEdit` structs).
+- Source spans on effect violations — `EffectViolation` does not
+  carry tokens today, so effect diagnostics still ship with
+  `primary: null`. Plumbing tokens through `effect_checker.sfn` is
+  tracked as a separate workstream.
+- Harmonising `format_typecheck_diagnostic` in `main.sfn` (used by
+  full-build `report_typecheck_errors`) with the `sfn check`
+  renderer. A3 left it untouched to keep scope tight.
 - `make check-fast` target and CI pre-build wiring.
 - Parallel / cached multi-file checking.
 - `--json` output (LLM Adoption Strategy lever #3 — see CLAUDE.md).
@@ -268,30 +287,44 @@ check command normalizes these into the `Diagnostic` type before rendering.
 This keeps the renderer simple and prepares for the unified diagnostic
 infrastructure that `sfn vet`, `sfn fix`, and `sfn lsp` will share.
 
-## Prerequisite: Diagnostic Infrastructure Enhancement
+## Diagnostic Infrastructure Enhancement
 
-The current `Diagnostic` struct is minimal. `sfn check` can ship with the
-current struct, but the enhanced version makes the output dramatically more
-useful and unblocks downstream tools.
+A3 shipped Phase 1: `severity` and `file_path` fields on
+`Diagnostic`, plus structured warnings on the load/staging layer.
+Phase 2 (`secondary`, `suggestion`) is still deferred and lands
+alongside `sfn fix` / `sfn lsp`.
 
-### Current State
+### Phase 1 — Shipped (April 25, 2026)
 
 ```sfn
 // compiler/src/typecheck_types.sfn
 struct Diagnostic {
-    code: string;        // "E0001", "E0301", "E0302"
-    message: string;     // "duplicate function `foo` declared"
-    primary: Token?;     // Source location (line, column, lexeme)
+    code: string;        // "E0001", "E0301", "W0001", ...
+    severity: string;    // "error" | "warning" | "hint" | "info"
+    message: string;
+    file_path: string;   // originating module path; "" until stamped
+    primary: Token?;     // source location (or null for spans the
+                         // producer can't carry — e.g. effect
+                         // violations until EffectViolation gains
+                         // tokens)
 }
 ```
 
-This is sufficient for basic error reporting but lacks:
-- Severity levels (everything is an error)
-- Secondary locations ("first defined here")
-- Fix-it suggestions ("add `![io]` to function signature")
-- Structured source spans for multi-line annotations
+The renderer in `compiler/src/tools/check.sfn` reads `severity` and
+`file_path` from the struct directly. `check_source_with_imports`
+runs a post-hoc stamping pass over typecheck and effect diagnostics
+to populate `file_path` before rendering. `_emit_load_warnings` in
+`cli_check.sfn` emits structured `W01xx` warnings through the same
+renderer.
 
-### Target State
+### What Phase 1 still lacks
+
+- Severity levels are present; `secondary` and `suggestion` are not.
+- No `SourceLocation` struct yet (primary is still `Token?`).
+- No fix-it suggestions ("add `![io]` to function signature").
+- No structured source spans for multi-line annotations.
+
+### Target State (Phase 2 — deferred)
 
 ```sfn
 struct Diagnostic {
@@ -323,33 +356,24 @@ struct TextEdit {
 }
 ```
 
-### Enhancement Strategy: Ship in Two Phases
+### Enhancement Strategy: Two Phases
 
-**Phase 1 (ship with `sfn check` v1):** Add `severity` and `file_path`
-fields to `Diagnostic`. Leave `secondary` and `suggestion` as empty
-arrays / null. This is backwards-compatible — existing code that creates
-diagnostics just needs two more fields.
+**Phase 1 (shipped April 25, 2026 in A3):** `severity` and `file_path`
+on `Diagnostic`. All six factories in `typecheck_types.sfn` and the
+inline literal in `tools/check.sfn` populate the new fields; severity
+is hardcoded to `"error"` at every factory (the only `"warning"`
+producers today are the W01xx load-warning literals in
+`cli_check.sfn:_emit_load_warnings`, which build Diagnostic literals
+directly). The renderer in `tools/check.sfn` dropped its `file_path`
+parameter and reads from the struct. A post-hoc stamping pass in
+`check_source_with_imports` writes the originating module path onto
+each diagnostic before rendering.
 
-```sfn
-// Minimal enhancement — two new fields, all existing code still works
-struct Diagnostic {
-    code: string;
-    severity: string;          // NEW — default "error"
-    message: string;
-    file_path: string;         // NEW — default ""
-    primary: Token?;
-}
-```
-
-Update the five existing `make_*_diagnostic` factory functions to accept
-a severity parameter (default `"error"`). This is ~20 lines of changes
-across `typecheck_types.sfn`.
-
-**Phase 2 (before `sfn fix` / `sfn lsp`):** Add `secondary: SourceLocation[]`
-and `suggestion: FixSuggestion?`. This phase requires the `SourceLocation`,
-`FixSuggestion`, and `TextEdit` struct definitions. ~200 lines of new type
-definitions plus ~400 lines to update producers to emit secondary spans and
-suggestions.
+**Phase 2 (deferred, blocks `sfn fix` / `sfn lsp`):** Add
+`secondary: SourceLocation[]` and `suggestion: FixSuggestion?`. This
+phase requires the `SourceLocation`, `FixSuggestion`, and `TextEdit`
+struct definitions. ~200 lines of new type definitions plus ~400
+lines to update producers to emit secondary spans and suggestions.
 
 ### Effect Violation → Diagnostic Normalization
 
@@ -392,6 +416,22 @@ distinct from `E00xx` (symbol) and `E03xx` (interface) ranges:
 | `E0400` | Missing effect declaration |
 | `E0401` | Decorator-implied effect missing |
 | `E0402` | Transitive effect not propagated |
+
+**Warning code allocation:** `W01xx` is reserved for non-fatal
+load/staging warnings emitted by `sfn check` infrastructure (the
+import-context loader, capsule resolver staging, and any future
+artifact-loading layer). These warnings flow through the same
+`render_diagnostic` pipeline as errors with `severity: "warning"` and
+`kind: "load"`, so downstream consumers (`--json`, `sfn lsp`, CI
+scrapers) can filter on the producing layer. Program-analysis
+warnings (e.g. future `sfn vet` lints for unused imports or dead
+code) will live in `W02xx`+ to keep the load-vs-analysis distinction
+machine-checkable.
+
+| Code | Meaning |
+|---|---|
+| `W0001` | Missing import-context artifact (resolver staged a path that's no longer on disk) |
+| `W0002` | Import-context artifact parse failed (artifact existed but the native-IR parser produced diagnostics) |
 
 ## Data Flow: Single-File Check
 

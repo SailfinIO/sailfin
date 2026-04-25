@@ -33,6 +33,15 @@ feature availability.
   conformance (E0301) is now live for end users without any textual
   import inlining — covered by
   `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
+- **Diagnostic infrastructure Phase 1** (A3): the `Diagnostic` struct
+  now carries `severity` ("error" | "warning" | "hint" | "info") and
+  `file_path`; the renderer reads both from the struct rather than
+  hand-threaded parameters. Import-context load warnings (`W0001`
+  missing artifact, `W0002` parse failure) flow through the same
+  `render_diagnostic` pipeline as typecheck and effect errors,
+  unblocking the upcoming `--json` output flag and `sfn lsp`. Phase 2
+  (`secondary` source locations + `FixSuggestion`/`TextEdit` for
+  `sfn fix`) lands later.
 - **`sfn test` still uses textual inlining** via the legacy
   `_inline_relative_imports_cmd` and `inline_imports_for_source`
   helpers. Migrating it is the remaining work in Stage B PR2 (coupled
@@ -106,7 +115,7 @@ feature availability.
 | `unsafe` / `extern` | Parsed only | Syntax accepted; enforcement not active |
 | Policy decorators (`@policy(...)`) | Parsed only | No compiler or runtime effect |
 | `sfn fmt` (formatter) | **Shipped** | Token-stream formatter: indentation, spacing, inline blocks, unary operator handling, import sorting & specifier reordering, blank line normalization, `--check`/`--write` modes, CI enforcement; see `docs/proposals/fmt-architecture.md` for architecture and known limitations |
-| `sfn check` (fast analysis) | **Shipped (v1)** | Runs parse + typecheck + effect-check on `.sfn` sources without emitting IR or invoking `clang`. Reports diagnostics to stderr with a summary on stdout. Exits non-zero on findings. Currently runs on a single textually-inlined buffer per file; cross-module interface conformance will become live once A2 wires the unified resolver in. See `docs/proposals/check-architecture.md`. |
+| `sfn check` (fast analysis) | **Shipped (v1)** | Runs parse + typecheck + effect-check on `.sfn` sources without emitting IR or invoking `clang`. Reports diagnostics to stderr with a summary on stdout. Exits non-zero on findings. Cross-module `implements` conformance live via the unified resolver (A2). Diagnostics carry `severity` and `file_path` and route load warnings (`W0001`/`W0002`) through the same renderer as errors (A3). See `docs/proposals/check-architecture.md`. |
 | `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn doc` (doc generator) | Planned | 1.0; see `docs/proposals/tooling.md` |
