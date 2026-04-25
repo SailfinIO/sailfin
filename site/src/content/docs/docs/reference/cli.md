@@ -415,7 +415,9 @@ The build orchestrator compiles modules in parallel. Control the job count:
 make rebuild BUILD_JOBS=4
 ```
 
-The default is auto-detected from the host's CPU count and total RAM (`scripts/detect_build_jobs.sh`): roughly `min(nproc, total_ram_gb / 5)` clamped to `[1, 8]`, with a macOS cap of 2 because Apple Silicon GitHub runners only ship 7 GB of RAM. Set `BUILD_JOBS=N` explicitly to override. Set `BUILD_JOBS=1` to disable parallelism (useful for regression bisects). See `docs/build-performance.md` → Phase 6 for the rationale behind the per-job memory budget.
+The default is auto-detected from the host's CPU count and total RAM (`scripts/detect_build_jobs.sh`): roughly `min(nproc, total_ram_gb / 2)` clamped to `[1, 8]`, with a macOS cap of 2 because Apple Silicon GitHub runners only ship 7 GB of RAM. Set `BUILD_JOBS=N` explicitly to override. Set `BUILD_JOBS=1` to disable parallelism (useful for regression bisects). See `docs/build-performance.md` → Phase 6 for the rationale behind the per-job memory budget.
+
+The `~2 GB-per-job` divisor reflects the per-module peak RSS documented in `docs/build-performance.md` → Phase 6 (heaviest module ~1.76 GB after the `lowering_core.sfn` decomposition). With 2 jobs running the heaviest pair concurrently, peak concurrent memory is ~3.5 GB — fits the macOS 7 GB ceiling with OS + Actions agent overhead. Hosts with more RAM are still capped by `nproc` first.
 
 ---
 

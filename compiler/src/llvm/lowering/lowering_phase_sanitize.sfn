@@ -27,9 +27,6 @@ import {
     recover_native_structs_light
 } from "./lowering_recovery";
 
-// Note: build_parse_result_from_text lives in lowering_core.sfn.
-// We inline its logic here to avoid a circular import
-// (lowering_core imports from this file).
 // Sanitize a single collection: null-check + length guard.
 // Returns the sanitized array length (0 if dropped).
 // The caller must handle setting the variable; this function writes

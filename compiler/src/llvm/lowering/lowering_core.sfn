@@ -30,14 +30,11 @@ import {
 import {
     parse_native_artifact,
     parse_native_bindings_from_text,
-    parse_native_enums_for_import,
     parse_native_function_count_from_text,
-    parse_native_functions_from_text,
-    parse_native_structs_for_import
+    parse_native_functions_from_text
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 import {
-    append_unique_effect,
     collect_direct_function_effects,
     collect_function_call_graph,
     collect_runtime_helper_targets,
@@ -58,20 +55,15 @@ import {
     TraitMetadata,
     TypeContext
 } from "../types";
-import {
-    index_of,
-    number_to_string,
-    sanitize_symbol,
-    string_array_contains
-} from "../utils";
+import { index_of, number_to_string, sanitize_symbol } from "../utils";
 import {
     collect_defined_function_symbols,
     extend_native_enums,
-    extend_native_functions,
     extend_native_interfaces,
     extend_native_structs,
     is_test_module_slug,
-    render_test_harness_main_for_module
+    render_test_harness_main_for_module,
+    seed_default_runtime_helpers
 } from "./lowering_helpers";
 import {
     apply_module_symbol_mangling,
@@ -89,11 +81,7 @@ import {
     write_llvm_lines_chunked
 } from "./lowering_io";
 import { lower_all_functions } from "./lowering_phase_functions";
-import {
-    extract_import_struct_methods,
-    parse_single_import_functions,
-    parse_single_import_interfaces
-} from "./lowering_phase_imports";
+import { gather_imported_module_symbols } from "./lowering_phase_imports";
 import { render_llvm_preamble } from "./lowering_phase_render";
 // Phase modules
 import {
@@ -112,36 +100,9 @@ import {
     sanitize_structs
 } from "./lowering_phase_sanitize";
 import { build_type_context_with_recovery } from "./lowering_phase_types";
-import {
-    recover_functions_for_lowering,
-    recover_native_enums_light,
-    recover_native_functions_light,
-    recover_native_imports_light,
-    recover_native_structs_light
-} from "./lowering_recovery";
+import { recover_functions_for_lowering } from "./lowering_recovery";
 import { _parse_lowered_fn_string_constants, split_lines_local } from "./lowering_text_utils";
 import { lower_module_bindings_to_globals } from "./module_globals";
-
-// Consolidated: parse all structure from native text using light recovery.
-// Retained for `write_llvm_ir_for_tests_from_text`; see PR 2 gating in
-// `docs/proposals/phase-4-eliminate-light-recovery.md` §2.2. The primary
-// non-test build path (`compile_native_text_to_llvm_file`) now calls
-// `parse_native_artifact` directly.
-fn build_parse_result_from_text(native_text: string) -> ParseNativeResult {
-    let recovered_functions = recover_native_functions_light(native_text);
-    let recovered_structs = recover_native_structs_light(native_text);
-    let recovered_imports = recover_native_imports_light(native_text);
-    let recovered_enums = recover_native_enums_light(native_text);
-    return ParseNativeResult {
-        functions: recovered_functions,
-        imports: recovered_imports,
-        structs: recovered_structs,
-        interfaces: [],
-        enums: recovered_enums,
-        bindings: [],
-        diagnostics: []
-    };
-}
 
 fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule, parse: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
     let mut native_text_for_recovery: string = "";
@@ -264,7 +225,7 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
         print.err("emit-llvm: empty native text for module " + module_name);
         return false;
     }
-    let parse = build_parse_result_from_text(native_text);
+    let parse = parse_native_artifact(native_text);
     let import_context = collect_imported_module_context_for_module(parse.imports, module_name);
     let dummy_module = make_native_module_for_emit(module_name, native_text);
     let lowered_lines = lower_to_llvm_lines_with_parsed_context(dummy_module, parse, import_context.manifests, import_context.native_texts, import_context.diagnostics, true, native_text);
@@ -404,59 +365,16 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         print.err("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
-    let mut imported_structs: NativeStruct[] = [];
-    let mut imported_enums: NativeEnum[] = [];
-    let mut imported_interfaces: NativeInterface[] = [];
-    let mut imported_functions: NativeFunction[] = [];
-    let mut imported_struct_methods: NativeFunction[] = [];
-
-    let manifest_count = safe_imported_manifests.length;
-    let mut text_index: number = 0;
-    loop {
-        if text_index >= safe_imported_native_texts.length { break; }
-        let native_text = safe_imported_native_texts[text_index];
-        let mut manifest_for_module: LayoutManifest? = null;
-        if text_index < manifest_count {
-            manifest_for_module = safe_imported_manifests[text_index];
-        }
-        if native_text.length == 0 {
-            if manifest_for_module != null {
-                let manifest_only = manifest_for_module;
-                imported_structs = extend_native_structs(imported_structs, manifest_only.structs);
-                imported_enums = extend_native_enums(imported_enums, manifest_only.enums);
-            }
-            text_index += 1;
-            continue;
-        }
-        // Single-pass: parse structs+enums once, apply manifest once
-        let imported_structs_safe = parse_native_structs_for_import(native_text);
-        let imported_enums_safe = parse_native_enums_for_import(native_text);
-        let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
-        let mut applied_structs = applied_import.structs;
-        if applied_structs == null { applied_structs = []; }
-        let mut applied_enums = applied_import.enums;
-        if applied_enums == null { applied_enums = []; }
-        let applied_interfaces = parse_single_import_interfaces(native_text);
-        let applied_functions = parse_single_import_functions(native_text);
-        imported_structs = extend_native_structs(imported_structs, applied_structs);
-        imported_enums = extend_native_enums(imported_enums, applied_enums);
-        imported_interfaces = extend_native_interfaces(imported_interfaces, applied_interfaces);
-        imported_functions = extend_native_functions(imported_functions, applied_functions);
-        let imported_methods = extract_import_struct_methods(applied_structs);
-        imported_struct_methods = extend_native_functions(imported_struct_methods, imported_methods);
-        text_index += 1;
-    }
-
-    if safe_imported_native_texts.length < manifest_count {
-        let mut manifest_index: number = safe_imported_native_texts.length;
-        loop {
-            if manifest_index >= manifest_count { break; }
-            let leftover_manifest = safe_imported_manifests[manifest_index];
-            imported_structs = extend_native_structs(imported_structs, leftover_manifest.structs);
-            imported_enums = extend_native_enums(imported_enums, leftover_manifest.enums);
-            manifest_index += 1;
-        }
-    }
+    // Phase 2 body extracted to lowering_phase_imports.sfn::gather_imported_module_symbols.
+    // Immediate destructure into locals matches the PR #229 "same-module
+    // destructure before downstream use" pattern that closed the April 21
+    // ParseNativeResult cross-module ABI SEGV.
+    let imported_syms = gather_imported_module_symbols(safe_imported_native_texts, safe_imported_manifests);
+    let imported_structs = imported_syms.structs;
+    let imported_enums = imported_syms.enums;
+    let imported_interfaces = imported_syms.interfaces;
+    let imported_functions = imported_syms.functions;
+    let imported_struct_methods = imported_syms.struct_methods;
 
     if debug_lowering { print.err("emit-llvm: phase=imports"); }
 
@@ -521,88 +439,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     } else if trace {
         print.err("test llvm: skipping runtime helper collection for inlined tests");
     }
-    if !string_array_contains(runtime_helpers, "copy_bytes") {
-        runtime_helpers.push("copy_bytes");
-    }
-    if !string_array_contains(runtime_helpers, "array_push_slot") {
-        runtime_helpers.push("array_push_slot");
-    }
-    if !string_array_contains(runtime_helpers, "append_string") {
-        runtime_helpers.push("append_string");
-    }
-    runtime_helpers = append_unique_effect(runtime_helpers, "get_field");
-    runtime_helpers = append_unique_effect(runtime_helpers, "concat");
-    runtime_helpers = append_unique_effect(runtime_helpers, "print");
-    runtime_helpers = append_unique_effect(runtime_helpers, "print.err");
-    runtime_helpers = append_unique_effect(runtime_helpers, "print.info");
-    runtime_helpers = append_unique_effect(runtime_helpers, "print.warn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "print.error");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.length");
-    runtime_helpers = append_unique_effect(runtime_helpers, "substring");
-    runtime_helpers = append_unique_effect(runtime_helpers, "substring_unchecked");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.concat");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.append");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string.to_number");
-    runtime_helpers = append_unique_effect(runtime_helpers, "grapheme_at");
-    runtime_helpers = append_unique_effect(runtime_helpers, "number.to_string");
-    runtime_helpers = append_unique_effect(runtime_helpers, "number_to_string");
-    runtime_helpers = append_unique_effect(runtime_helpers, "strings_equal");
-    runtime_helpers = append_unique_effect(runtime_helpers, "char_code");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_raise_value_error_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime.bounds_check");
-    runtime_helpers = append_unique_effect(runtime_helpers, "mark_persistent");
-    // Runtime prelude helpers — these are module-level let bindings
-    // (e.g. `let runtime_array_filter_fn = runtime.array_filter;`) whose
-    // call targets are not discovered by the (currently skipped) dynamic
-    // helper collection.  Declare them unconditionally so the linker can
-    // resolve them against the C runtime.
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_array_map_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_array_filter_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_array_reduce_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_channel_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_char_code_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_grapheme_at_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_grapheme_count_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_instance_of_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_array_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_boolean_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_callable_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_number_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_string_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_is_void_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_log_execution_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_monotonic_millis_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_parallel_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_resolve_runtime_type_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_serve_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_sleep_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_spawn_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_to_debug_string_fn");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_capability_grant");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_filesystem_bridge");
-    runtime_helpers = append_unique_effect(runtime_helpers, "runtime_create_http_bridge");
-    // Filesystem adapters — the compiler emits direct calls to these C
-    // runtime symbols from modules that use fs.readFile, fs.exists, etc.
-    // Without unconditional declares, separate-compilation produces
-    // "use of undefined value" errors at clang time.
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.readFile");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.read");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.writeFile");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.write");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.appendFile");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.exists");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.deleteFile");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.listDirectory");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.writeLines");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.createDirectory");
-    runtime_helpers = append_unique_effect(runtime_helpers, "fs.read_bytes");
-    // Additional helpers used by the compiler but not auto-collected
-    runtime_helpers = append_unique_effect(runtime_helpers, "monotonic_millis");
-    runtime_helpers = append_unique_effect(runtime_helpers, "find_char");
-    runtime_helpers = append_unique_effect(runtime_helpers, "string_starts_with");
-    runtime_helpers = append_unique_effect(runtime_helpers, "process.run");
-    runtime_helpers = append_unique_effect(runtime_helpers, "process.exit");
-    runtime_helpers = append_unique_effect(runtime_helpers, "is_decimal_digit");
+    runtime_helpers = seed_default_runtime_helpers(runtime_helpers);
     let mut direct_effects: FunctionEffectEntry[] = [];
     let mut aggregated_effects: FunctionEffectEntry[] = [];
     if !skip_effects {

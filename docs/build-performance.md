@@ -1,49 +1,51 @@
 # Build Performance: Root Cause Analysis & Fix Plan
 
-**Date:** 2026-04-25 (revised, post Phase 6 Stage 1+2 flip)
-**Previous revisions:** 2026-04-24 (post 0.5.9 release — first IPC-free seed), 2026-04-19 (post `.fn_*` channel removal), 2026-04-15 (post-d2d0bf1/220c8b7), 2026-04-15 (morning), 2026-04-11
-**Context:** 0.5.9 has shipped and is pinned as the seed (`.seed-version`). It is **the first release with no file-based data-flow IPC** — every cross-phase channel that used `build/sailfin/.xxx` files has been removed. The 48 remaining `build/sailfin/.xxx` references are debug/diag gates (`.trace_*`, `.phase_*_diagnostics`, `.skip_*`, `.test_runner_active`, `.dump_test_sources`), not data IPC. The structural cleanup arc opened in April 11's RCA is closed. **Phase 6 Stages 1 and 2 flipped on April 24/25**: `stage_import_context` now runs in parallel under the same `JOBS` knob as the per-module emit loop (`build_module` parallel path was already in place), and the Makefile auto-detects `BUILD_JOBS` from CPU count and total RAM. First post-flip CI wall-times: **Linux x86_64 5:28 (was ~13 min single-threaded; 2.4× speedup)**, macOS arm64 10:37 (unchanged — heuristic picks `BUILD_JOBS=1` due to 7 GB total RAM cap). Stages 3 (CI flag wiring) and 4 (drop `EMIT_RETRIES` 3→1) remain queued.
+**Date:** 2026-04-25 (revised, post lowering_core per-module memory splits)
+**Previous revisions:** 2026-04-25 morning (post Phase 6 Stage 1+2 flip), 2026-04-24 (post 0.5.9 release — first IPC-free seed), 2026-04-19 (post `.fn_*` channel removal), 2026-04-15 (post-d2d0bf1/220c8b7), 2026-04-15 (morning), 2026-04-11
+**Context:** 0.5.9 has shipped and is pinned as the seed (`.seed-version`). It is **the first release with no file-based data-flow IPC** — every cross-phase channel that used `build/sailfin/.xxx` files has been removed. **Phase 6 Stages 1 and 2 flipped on April 24/25**: `stage_import_context` now runs in parallel under the same `JOBS` knob as the per-module emit loop, and the Makefile auto-detects `BUILD_JOBS` from CPU count and total RAM. Post-flip CI wall-times: **Linux x86_64 5:28** (was ~13 min single-threaded; 2.4× speedup), macOS arm64 10:37 (`BUILD_JOBS=1`, 7 GB RAM cap). Stage 3 (explicit CI input) shipped as a composite-action input. Stage 4 (`EMIT_RETRIES` 3→1) attempted and **reverted** — the post-0.5.9 corruption corpus is NOT dry; `llvm/lowering/instructions.sfn` surfaced one intermittent `invalid_ir` flake under `EMIT_RETRIES=1` that recovered on retry with `EMIT_RETRIES=3`. The knob is preserved; the default stays at 3 until the flake is root-caused (separate seed-stabilizer task). Two structural per-module-memory commits shipped on top: Phase 4 PR 2 (structured parser everywhere, `build_parse_result_from_text` deleted), and a `lowering_core.sfn` decomposition that shaved peak RSS from **2350 MB → 1594 MB (-756 MB, -32%)** via two extractions (`gather_imported_module_symbols`, `seed_default_runtime_helpers`). This clears the `min(nproc, mem/5)` gate in `scripts/detect_build_jobs.sh` for the first time on macOS — a follow-up can raise `BUILD_JOBS` to 2 on that runner without OOM.
 
 ---
 
 ## Symptom Summary
 
-| Metric                          | April 11            | April 19              | April 24 (0.5.9)          | Current (April 25, post-Phase 6 Stage 1+2) | Target           |
-| ------------------------------- | ------------------- | --------------------- | ------------------------- | ------------------------------------------ | ---------------- |
-| Full build (1 job, single-threaded) | 60-90 min       | 13-16 min             | ~13 min (CI Linux)        | ~13 min serial / **5:28 parallel** (CI Linux) | < 5 min          |
-| Full build (CI macOS arm64)     | n/a                 | n/a                   | ~13 min                   | **10:37** (BUILD_JOBS=1, mem-bound)       | < 5 min          |
-| Per-module compile time (heavy) | 4-7 min             | 1-3 min               | 1-3 min                   | 1-3 min                                    | < 30s            |
-| Per-module compile time (light) | 30s-2 min           | 10-30s                | 10-30s                    | 10-30s                                     | < 5s             |
-| Per-module peak RAM             | 1-2 GB              | 0.5-1.5 GB            | 0.5-1.5 GB (4.7 GB worst) | 0.5-1.5 GB (4.7 GB worst)                  | < 256 MB         |
-| Parallel builds (`BUILD_JOBS`)  | Broken              | Functional but risky  | Mature, never enabled     | **Auto-detected default; Linux ≈3 jobs, macOS 1 job** | Default-on, ≥4 jobs Linux |
-| `fs.*` calls (total)            | 667 across 42 files | 489 across 37 files   | 212 across 24 files       | 212 across 24 files                        | bounded by CLI / capsule manifest reads |
-| `build/sailfin/` dotfile refs   | 487                 | 228 (dotfiles)        | 48 (diag/trace only)      | 48 (diag/trace only)                       | 0 (post-Phase 5) |
-| Active data-flow IPC channels   | 12+                 | 6                     | 0                         | **0**                                       | 0                |
-| Seed memory limit               | 8 GB                | 12 GB                 | 12 GB                     | 12 GB                                      | < 4 GB           |
+| Metric                          | April 11            | April 19              | April 24 (0.5.9)          | April 25 AM (post Phase 6) | **Current (April 25 PM, post lowering_core split)** | Target           |
+| ------------------------------- | ------------------- | --------------------- | ------------------------- | -------------------------- | --------------------------------------------------- | ---------------- |
+| Full build (1 job, single-threaded) | 60-90 min       | 13-16 min             | ~13 min (CI Linux)        | ~13 min serial / 5:28 parallel | ~2:30 local (3 jobs, container) / 5:28 CI Linux     | < 5 min          |
+| Full build (CI macOS arm64)     | n/a                 | n/a                   | ~13 min                   | **10:37** (BUILD_JOBS=1)  | 10:37 (BUILD_JOBS=1; ≥2 now unblocked per-module)  | < 5 min          |
+| Per-module compile time (heavy) | 4-7 min             | 1-3 min               | 1-3 min                   | 13s (`lowering_core`)     | **7.65s (`lowering_core`)**                         | < 30s ✓          |
+| Per-module compile time (light) | 30s-2 min           | 10-30s                | 10-30s                    | 10-30s                    | 10-30s                                              | < 5s             |
+| Per-module peak RAM (heaviest)  | 1-2 GB              | 0.5-1.5 GB            | 4.7 GB (`lowering_core` under 0.5.7 seed) | 2350 MB (`lowering_core` under 0.5.9+dev post Phase 4 PR 2) | **1594 MB (`lowering_core`)** | < 2 GB (macOS parallelism gate) ✓ |
+| Parallel builds (`BUILD_JOBS`)  | Broken              | Functional but risky  | Mature, never enabled     | Auto-detected (Linux ≈3, macOS 1) | Auto-detected; **macOS can now safely go to 2** after detect_build_jobs.sh re-budgeted against new peak | Default-on, ≥4 jobs Linux |
+| `fs.*` calls (total)            | 667 across 42 files | 489 across 37 files   | 212 across 24 files       | 212 across 24 files        | 212 across 24 files                                 | bounded by CLI / capsule manifest reads |
+| `build/sailfin/` dotfile refs   | 487                 | 228 (dotfiles)        | 48 (diag/trace only)      | 48 (diag/trace only)       | 48 (diag/trace only)                                | 0 (post-Phase 5) |
+| Active data-flow IPC channels   | 12+                 | 6                     | 0                         | 0                          | **0**                                               | 0                |
+| Seed memory limit               | 8 GB                | 12 GB                 | 12 GB                     | 12 GB                      | 12 GB                                               | < 4 GB           |
 
 ---
 
-## Reassessed Roadmap (April 24)
+## Reassessed Roadmap (April 25)
 
 Status of every track named in the original RCA. "Shipped" means the work landed and the doc's **Completed Work** section has the entry.
 
 | Track                                                           | Status                                                                        | Expected wall-time delta (remaining work) |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------- |
-| Phase 0 — M0.5 arena allocator                                  | **Shipped** (default-on April 19)                                             | counted                                   |
-| Phase 1 — O(n²) array accumulation sweep                        | **Shipped** (1 residual aliasing site under arena, low-frequency)             | <2%                                       |
+| Phase 0 — M0.5 arena allocator                                  | **Shipped** (default-on April 19); arena stats env gate shipped April 25     | counted                                   |
+| Phase 1 — O(n²) array accumulation sweep                        | **Shipped** (April 25 re-audit confirms zero residual `.concat([x])` sites in `llvm/lowering` + `llvm/expression_lowering`; `extend_string_lines` is in-place push) | <2%                                       |
 | Phase 2 — File-based IPC channel removal                        | **Shipped** (0.5.9 — first IPC-free seed)                                     | counted                                   |
 | Phase 3a — Import-discovery fast-path scanner                   | **Shipped**                                                                   | counted                                   |
 | Phase 3b — Pre-parsed `.imports` sidecar                        | Not started; may be subsumed by Phase 5                                       | 5–10%                                     |
 | Phase 4 PR 1 — Light recovery off non-test primary path         | **Shipped**                                                                   | counted                                   |
-| Phase 4 PR 2 — `parse_native_artifact` primary swap             | **Unblocked by PR #229** (in-memory `compile_to_llvm_file_with_module`)       | 5–8%                                      |
+| Phase 4 PR 2 — `parse_native_artifact` primary swap             | **Shipped April 25** (commit `395a1c7`; swapped all 3 callers; `build_parse_result_from_text` + 4 `recover_*_light` imports deleted) | counted                                   |
 | Phase 4b — Defensive light-recovery arm deletion                | Not started; needs counters bake then delete ~600 LOC                         | trivial wall-time                         |
-| **Phase 6 — Parallel builds**                                   | **Stage 1+2 shipped April 24/25** (parallel `stage_import_context`, adaptive `BUILD_JOBS` default); Stages 3–4 (CI input + retry budget) pending | Linux measured: **2.4× speedup** (13 min → 5:28). Stage 3 wires CI; Stage 4 worth maybe 5%. |
+| **Per-module memory — `lowering_core.sfn` split**               | **Shipped April 25** (commits `072bea1`, `cd34d14`): peak RSS 2350 → **1594 MB** (-32%) via `gather_imported_module_symbols` + `seed_default_runtime_helpers` extractions. Clears macOS `BUILD_JOBS=2` gate. | wall delta ancillary; unblocks parallelism |
+| **Phase 6 — Parallel builds**                                   | **Stages 1+2 shipped April 24/25**; **Stage 3 shipped April 25** (`build_jobs` composite-action input); **Stage 4 reverted April 25** — `EMIT_RETRIES=1` attempted, hit a live flake on `instructions.sfn`; default stays at 3 until root-caused | Linux: **2.4× speedup** (13 min → 5:28); macOS unlock pending `detect_build_jobs.sh` rebudget against new 1594 MB peak |
 | Phase 5 — Long-lived compiler process                           | Post-1.0; needs `compile module` entry point and arena reset between modules  | 50–70% on top of Phase 6                  |
 
-Two follow-up tracks worth cataloguing:
+Follow-up tracks:
 
-- **Per-module memory reduction** — heaviest module (`lowering_core`) still peaks at ~4.7 GB RSS with arena. Every GB shaved raises the safe `BUILD_JOBS` ceiling on memory-constrained hosts (macOS runners cap at 7 GB total). Profiling target: arena page count + per-pass pressure.
-- **Selfhost1 clang opt level** — `make check`'s first-pass binary doesn't need `-O2`; second-pass (the binary we ship as a seed) does. Easy 20–30% off the clang-compile stage in `make check`.
+- **Per-module memory reduction** — done for `lowering_core.sfn`. Next worst offenders: `parser/declarations.sfn` (1759 MB), `lowering_recovery.sfn` (1570 MB — will go away with Phase 4b delete), `instructions_match.sfn` (1361 MB). Same playbook applies to declarations; flag for a follow-up branch.
+- **Selfhost1 clang opt level** — **Shipped April 25** (commit `85deb34`). `SELFHOST1_OPT ?= -O0` threaded into `make check`'s first-pass build; seedcheck + stage3 keep `$(NATIVE_OPT)`. Promotes seedcheck to canonical `build/native/sailfin` on successful fixed-point so subsequent `make compile` doesn't see a stale -O0 binary.
+- **Scripts/bench_compile.sh memory detection** — silently returns `0MB` for all modules when `/usr/bin/time` is not installed (the detection at `scripts/bench_compile.sh:55` correctly empties `GNU_TIME`, but the fallback path in `run_module` doesn't surface the warning in the per-module row). Low priority hygiene fix — standalone `/usr/bin/time -v <seed> emit -o ...` gives correct data today.
 
 ---
 
@@ -1052,6 +1054,61 @@ The fix is not to guess at the ABI corner; the fix is to not rely on the cross-m
 
 - **Phase 4 PR 2** — gating now expands to three conditions: (a) seedcheck typed-tag dispatch works, (b) seedcheck reads typed-variant payload fields correctly, (c) seed 0.5.7+ reliably marshals `ParseNativeResult` across module boundaries (or we route the structured parse through a same-module wrapper that destructures into flat arrays before crossing). Once all three clear, swap `compile_native_text_to_llvm_file:261` + `entrypoints_tests_writer.sfn:132` to `parse_native_artifact`, delete `build_parse_result_from_text` and its four light-recovery imports in `lowering_core.sfn`, and add a test-harness determinism check.
 - **Phase 4b (PR 3)** — instrument the three remaining defensive-fallback arms with `print.err` counters; after a release cycle with zero hits, delete the arms plus the `recover_*_light` function bodies from `lowering_recovery.sfn` (~600 LOC).
+
+### Phase 4 PR 2 — Structured Parser Everywhere (April 25)
+
+**Status: Implemented.** Swaps every live caller of `build_parse_result_from_text` in `lowering_core.sfn`, `entrypoints.sfn` (`print_llvm_ir_from_text`), and `entrypoints_tests_writer.sfn` (`write_llvm_ir_for_tests_from_text`) to `parse_native_artifact` (single-pass structured parser in `native_ir_api.sfn`). Deletes the wrapper + four `recover_*_light` import aliases from `lowering_core.sfn`; trims stale comments from `lowering_recovery.sfn` and `lowering_phase_sanitize.sfn`.
+
+**Unblocked by:** seed 0.5.9 (file-IPC-free; stable cross-module struct returns on the happy path) + PR #229 (routes `compile_to_llvm_file_with_module` through in-memory lowering, closing the April 21 sanitize-chain SEGV that had forced the previous revert).
+
+**Per-module overhead removed:** 4 full line-scanner walks (the `recover_*_light` helpers inside the old `build_parse_result_from_text` body) replaced with a single `parse_native_artifact_impl` pass per non-test module compile.
+
+**Scope:** 5 files, net -64 / +19. `recover_native_functions_light` / `recover_native_structs_light` remain defined in `lowering_recovery.sfn` — still have live defensive-fallback callers in `lowering_phase_sanitize.sfn` and `lowering_recovery.sfn` itself. Phase 4b will remove those arms after counter bake.
+
+**Determinism:** Fresh `make compile FORCE=1` selfhost completed in 155s on a 3-job Linux container. No new retries. No `invalid_ir` failures in the emit loop for modules that consume `parse_native_artifact` across boundaries — the Phase 4 PR 1 revert signal.
+
+**Commit:** `395a1c7`.
+
+### lowering_core.sfn Per-Module Memory Split — PR 1 + PR 2 (April 25)
+
+**Status: Implemented.** Two-commit decomposition of `lowering_core.sfn` (732 LOC after Phase 4 PR 2) driven by a new measurement: peak RSS on the heaviest module was **2350 MB** post-Phase-4-PR-2 on a Linux container with the freshly self-hosted 0.5.9+dev binary. Gate for `BUILD_JOBS=2` on the macOS GitHub runner (7 GB RAM, `min(nproc, mem/5)`) is 2 GB per module. Goal: get under 2 GB so the macOS `BUILD_JOBS` heuristic relaxes.
+
+**PR 1 — extract Phase 2 import-gather** (commit `072bea1`):
+Pulls the 52-line Phase 2 import-gather loop out of the orchestrator and into `lowering_phase_imports.gather_imported_module_symbols`. The orchestrator now calls the helper once and destructures the returned `ImportedModuleSymbols` into the 5 local arrays. Moves 6 imports (`parse_native_structs_for_import`, `parse_native_enums_for_import`, `extend_native_functions`, `parse_single_import_interfaces`, `parse_single_import_functions`, `extract_import_struct_methods`) out of `lowering_core`.
+
+**PR 2 — seed default runtime helpers** (commit `cd34d14`):
+Collapses the 82-line block of `runtime_helpers.append_unique_effect(...)` calls (67 unconditional + 3 conditional) in the orchestrator into a single call to the new `lowering_helpers.seed_default_runtime_helpers(initial)`. Normalizes the conditional `if !string_array_contains { push }` sites to the dedupe-equivalent `append_unique_effect`. Drops 2 imports from `lowering_core` (`append_unique_effect`, `string_array_contains`).
+
+**Measured peak RSS on `lowering_core.sfn`:**
+
+| Stage | Peak RSS | Wall | Delta |
+| --- | ---: | ---: | ---: |
+| Pre-branch baseline | 2350 MB | 13.42s | — |
+| After PR 1 | 2067 MB | 9.66s | **−283 MB / −28% wall** |
+| After PR 2 | **1594 MB** | 7.65s | **−473 MB further / −21% wall** |
+| **Cumulative** | — | — | **−756 MB (−32%) / −43% wall** |
+
+Result: `lowering_core.sfn` is now **406 MB under the 2 GB per-module gate**. macOS `BUILD_JOBS=2` is unblocked on the per-module memory axis.
+
+Other modules' peak RSS unchanged: `lowering_recovery` 1570 MB, `instructions_match` 1361 MB, `parser/declarations` 1759 MB. The new homes grew proportionally: `lowering_phase_imports.sfn` 92 MB (was ~30 MB), `lowering_helpers.sfn` 1292 MB (was ~800 MB) — both comfortably under the gate.
+
+**Determinism:** 3× `emit llvm` of `lowering_core.sfn` after each commit produced md5-identical IR.
+
+**Landmine discovered and documented:** the architect's original PR 1 plan named the new struct `ImportedModuleContext` — that name is already taken by an unrelated struct in `llvm/types.sfn` (manifests / native_texts / diagnostics, consumed by `collect_imported_module_context_for_module`). Defining a second `ImportedModuleContext` in `lowering_phase_imports.sfn` made the 0.5.9 seed produce a subtly miscompiled binary: it compiled cleanly and linked, but every `emit` invocation of the produced compiler segfaulted during struct-field access. Classic shadow-struct ABI symptom. Renamed to `ImportedModuleSymbols` → SEGV disappeared, IR byte-equal across runs. Any future cross-module struct extraction should grep the repo for the proposed name first.
+
+**Not shipped (deferred):** PR 3 (test-harness extraction, projected −50 to −100 MB) and PR 4a (delete dead `skip_effects=true` block) queued in the architect's plan. The 2 GB target is already hit with 406 MB of margin; PR 3+4a are pure code tidy at this point and can ship independently if a future regression pushes peak back above 2 GB.
+
+---
+
+### Additional Perf-Track Commits (April 25)
+
+**`SAILFIN_DUMP_ARENA_STATS` env gate** (commit `69b56bd`): wires `sfn_arena_print_stats` into `native_driver.c` as an `atexit` handler gated on `SAILFIN_DUMP_ARENA_STATS=1 && SAILFIN_USE_ARENA=1`. Output line includes a source-path label derived from argv. Sample on `lowering_core.sfn` solo compile: `pages=103 capacity=412.00MB used=409.18MB allocated=332.36MB utilization=99.3%`. This surfaced the critical insight that arena allocated bytes (~332 MB) are a small fraction of peak RSS (~2350 MB pre-split) — the bulk of the seed's per-module memory is non-arena (typecheck state, import-graph transitive closure, emission buffer). Splitting the file reduces *imports-side* of that budget, which is what PR 1+2 above exploit.
+
+**`SELFHOST1_OPT ?= -O0` thread-through** (commit `85deb34`): `make check`'s first-pass binary now builds at `-O0` by default (clang compile stage drops 20-30% in the validation flow). Seedcheck + stage3 keep `$(NATIVE_OPT)` (-O2) because they are the fixed-point binaries. `check` gets a seedcheck → canonical promotion step at the tail to avoid leaving a stale -O0 binary at `build/native/sailfin` after a successful run.
+
+**`build_jobs` composite-action input** (commit `3cd820d`): `.github/actions/sailfin-build/action.yml` gains an explicit `build_jobs` input that forwards into `make rebuild` as `BUILD_JOBS=N`. Empty (default) inherits the Makefile's auto-detect. Lets individual workflows pin a value (regression bisects, self-hosted runners) without editing the composite.
+
+**`EMIT_RETRIES` 3→1 attempted + reverted** (commits `e45730e` → `ff970fc`): the first `make compile` post-commit hit a one-shot `invalid_ir` flake on `llvm/lowering/instructions.sfn` (mid-struct-definition memory corruption, `%NativeBinding = type <garbage-utf8>`). Retried with `EMIT_RETRIES=3` and the same build cleanly produced valid IR on attempt 1 — i.e. a genuine flake, not deterministic. The post-0.5.9 corruption corpus is NOT dry; retries are still masking real intermittent IR corruption. Reverted the default change until a seed-stabilizer session can root-cause the flake. Env knob still works for diagnostic builds.
 
 ---
 

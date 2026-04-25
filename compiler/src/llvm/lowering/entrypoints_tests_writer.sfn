@@ -15,6 +15,7 @@ import {
     ParseNativeResult
 } from "../../native_ir";
 import {
+    parse_native_artifact,
     parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_interfaces_for_import,
@@ -72,10 +73,7 @@ import {
     string_array_contains
 } from "../utils";
 import { emit_llvm_function } from "./emission";
-import {
-    build_parse_result_from_text,
-    lower_to_llvm_lines_with_parsed_context_for_tests
-} from "./lowering_core";
+import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core";
 import { render_test_harness_main_for_module } from "./lowering_helpers";
 import {
     empty_trait_metadata,
@@ -117,15 +115,12 @@ fn write_llvm_ir_for_tests_from_text(native_text: string, module_name: string, o
         print.err("test llvm: empty native text");
         return false;
     }
-    // Use the recovery parser (build_parse_result_from_text) instead of the
-    // structured parser (parse_native_artifact).  The recovery parser
-    // creates ALL instructions as Expression(tag→21) with parseable text,
-    // which the tag-21 fallback handler in the instruction lowerer can
-    // dispatch correctly.  The structured parser creates typed variants
-    // (Let, Return, If) that the seedcheck's get_instruction_tag cannot
-    // distinguish (always returns 21) and whose payload fields are not
-    // accessible via the generic .expression accessor.
-    let parse = build_parse_result_from_text(native_text);
+    // Structured parser (Phase 4 PR 2). The 0.5.9 seed + PR #229's in-memory
+    // lowering handle typed-instruction variants (Let, Return, If, …)
+    // correctly across module boundaries, so the prior recovery-parser
+    // fallback (which flattened every instruction to Expression(tag→21)) is
+    // no longer needed.
+    let parse = parse_native_artifact(native_text);
     let dummy_module = NativeModule {
         module_name: module_name,
         artifacts: [NativeArtifact {
