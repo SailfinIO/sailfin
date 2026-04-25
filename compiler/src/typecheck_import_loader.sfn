@@ -17,37 +17,66 @@
 // `string_utils` before adopting — `sfn test` does not dedupe shared
 // modules across import paths, so two reachable copies trigger
 // duplicate-symbol cascades.
+//
+// Parse-failure handling: this loader uses
+// `parse_native_artifact_for_import_context` (not the thinner
+// `parse_native_interfaces_for_import` helper) so that diagnostics
+// emitted by the native-IR parser propagate to the caller. A
+// malformed `.sfn-asm` artifact produces zero interfaces *and*
+// non-empty diagnostics — keeping these distinct from the "parsed
+// fine, no interfaces declared" case prevents a silently-corrupt
+// artifact from looking like a benign module that just happened to
+// export only structs/functions.
 import { Statement } from "./ast";
-import { parse_native_interfaces_for_import } from "./native_ir_api";
+import { parse_native_artifact_for_import_context } from "./native_ir_api";
 import { interfaces_from_native } from "./typecheck_imports";
 
-// Result of loading a batch of `.sfn-asm` artifacts. Missing and
-// skipped paths are surfaced explicitly so the CLI can warn on stale
-// or empty artifacts rather than silently weakening cross-module
-// conformance.
+// Result of parsing a single `.sfn-asm` buffer. `diagnostics` is
+// non-empty only when the native-IR parser flagged a real problem;
+// callers should treat that case as a stale or corrupt artifact, not
+// as an empty-but-valid module.
+struct ArtifactInterfaceParse {
+    interfaces: Statement[];
+    diagnostics: string[];
+}
+
+// Result of loading a batch of `.sfn-asm` artifacts. The path lists
+// partition the input cleanly:
+//   - `missing_paths`: not on disk (resolver/staging out of sync).
+//   - `parse_failure_paths`: existed but the native-IR parser
+//      produced diagnostics — treat as corrupt/stale.
+//   - `skipped_paths`: parsed fine and contained zero interfaces
+//      (benign — common for modules that export only structs/fns).
 struct ImportedInterfaceLoadResult {
     interfaces: Statement[];
     missing_paths: string[];
+    parse_failure_paths: string[];
     skipped_paths: string[];
 }
 
-// Pure: parse a `.sfn-asm` text buffer and return its interface
-// declarations as AST `Statement.InterfaceDeclaration` nodes. Returns
-// the empty list when the artifact contains no interfaces (a common,
-// benign case for modules that export only structs/functions).
-fn interfaces_from_native_artifact(text: string) -> Statement[] {
-    let natives = parse_native_interfaces_for_import(text);
-    return interfaces_from_native(natives);
+// Pure: parse a `.sfn-asm` text buffer and return both its interface
+// declarations and any diagnostics the native-IR parser produced.
+fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
+    let parsed = parse_native_artifact_for_import_context(text);
+    let interfaces = interfaces_from_native(parsed.interfaces);
+    return ArtifactInterfaceParse {
+        interfaces: interfaces,
+        diagnostics: parsed.diagnostics
+    };
 }
 
-// Read each path, convert its interfaces, and accumulate. Paths that
-// don't exist on disk land in `missing_paths`; paths that exist but
-// produced zero interfaces land in `skipped_paths`. Neither condition
-// aborts the load — `sfn check` should always run analysis, just with
-// a possibly weakened import set, and surface the loss to the user.
+// Read each path, parse its artifact, and accumulate. Partitioning
+// follows the `ImportedInterfaceLoadResult` contract: missing files
+// surface in `missing_paths`, parse failures surface in
+// `parse_failure_paths`, and successfully-parsed artifacts that
+// happened to declare zero interfaces surface in `skipped_paths`.
+// No condition aborts the load — `sfn check` should always run
+// analysis; the partitioning lets the CLI decide which slices warrant
+// a warning.
 fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoadResult ![io] {
     let mut interfaces: Statement[] = [];
     let mut missing: string[] = [];
+    let mut parse_failures: string[] = [];
     let mut skipped: string[] = [];
 
     let mut i: number = 0;
@@ -60,12 +89,17 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
             continue;
         }
         let text = fs.readFile(path);
-        let converted = interfaces_from_native_artifact(text);
-        if converted.length == 0 { skipped.push(path); } else {
+        let parsed = interfaces_from_native_artifact(text);
+        if parsed.diagnostics.length > 0 {
+            parse_failures.push(path);
+            i += 1;
+            continue;
+        }
+        if parsed.interfaces.length == 0 { skipped.push(path); } else {
             let mut j: number = 0;
             loop {
-                if j >= converted.length { break; }
-                interfaces.push(converted[j]);
+                if j >= parsed.interfaces.length { break; }
+                interfaces.push(parsed.interfaces[j]);
                 j += 1;
             }
         }
@@ -75,11 +109,13 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
     return ImportedInterfaceLoadResult {
         interfaces: interfaces,
         missing_paths: missing,
+        parse_failure_paths: parse_failures,
         skipped_paths: skipped
     };
 }
 
 export {
+    ArtifactInterfaceParse,
     ImportedInterfaceLoadResult,
     interfaces_from_native_artifact,
     load_imported_interfaces_from_paths

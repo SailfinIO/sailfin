@@ -1394,37 +1394,80 @@ fn _cr_dep_specs_from_text(deps_text: string) -> string[] {
     return out;
 }
 
-// Resolve, stage, and compile every dependency reachable from `input_path`.
-// Returns the list of dependency .ll paths to feed the linker (empty
-// when no dependencies are needed).
-//
-// Three resolution paths run in sequence and are concatenated:
-//   1. Relative imports (`./foo`, `../bar`) reachable from the entry —
-//      always walked, even for standalone files without a manifest.
-//   2. Manifest-declared capsule deps (`[dependencies]` in the project's
-//      capsule.toml) — every .sfn under each dep's src/ tree.
-//   3. Workspace-implicit imports — any scoped import (`scope/name`) the
-//      source uses that maps to a workspace member but isn't declared in
-//      the project's `[dependencies]`. Replaces the legacy
-//      `_is_stdlib_capsule_cmd` allowlist; the workspace.toml file is now
-//      the single source of truth for which capsules are available
-//      without an explicit `sfn add`.
-fn prepare_project_capsules(input_path: string) -> string[] ![io] {
-    let base_dir = _cr_dirname(input_path);
-    let mut sources: CapsuleSource[] = [];
+// Result of the shared resolution + dedupe pass shared between the
+// build (`prepare_project_capsules`) and check
+// (`prepare_project_capsules_for_check`) entry points. `has_collision`
+// distinguishes "slug collision detected" from "nothing to compile":
+// callers that need to distinguish setup errors from no-deps (e.g.
+// `sfn check` returning exit code 2) consult this flag instead of
+// inferring intent from an empty source list.
+struct ResolverDedupeResult {
+    sources: CapsuleSource[];
+    has_collision: boolean;
+}
 
-    // (1) Relative imports — always.
-    let relative = enumerate_relative_sources(input_path);
-    let mut ri: number = 0;
-    loop {
-        if ri >= relative.length { break; }
-        sources.push(relative[ri]);
-        ri += 1;
+// Shared resolution + dedupe used by both `prepare_project_capsules`
+// and `prepare_project_capsules_for_check`. Walks three resolution
+// paths and concatenates their `CapsuleSource` outputs:
+//
+//   1. Relative imports (`./foo`, `../bar`) reachable from each entry
+//      in `entry_paths` — always walked, even for standalone files
+//      outside any capsule.toml. Walking from multiple entry paths
+//      lets `sfn check pathA pathB` (multi-path invocation) pick up
+//      relative-import graphs that aren't transitively reachable from
+//      a single anchor file.
+//   2. Manifest-declared capsule deps (`[dependencies]` in the
+//      project's capsule.toml) — every .sfn under each dep's src/.
+//      Resolved against `entry_paths[0]`'s discovered project root
+//      (which by construction is shared by every entry in the same
+//      group, so any entry's project root yields the same answer).
+//   3. Workspace-implicit imports — any scoped import (`scope/name`)
+//      any of the entries uses that maps to a workspace member but
+//      isn't declared in `[dependencies]`. Replaces the legacy
+//      `_is_stdlib_capsule_cmd` allowlist; workspace.toml is the
+//      single source of truth for which capsules are implicitly
+//      available.
+//
+// On slug collision (two distinct source paths producing the same
+// slug), prints a structured error to stderr and returns
+// `has_collision = true`. Same-slug-same-path entries are silently
+// deduped — that's an exact duplicate, not a conflict.
+fn _cr_resolve_and_dedupe(entry_paths: string[]) -> ResolverDedupeResult ![io] {
+    let mut sources: CapsuleSource[] = [];
+    let empty_sources: CapsuleSource[] = [];
+
+    if entry_paths.length == 0 {
+        return ResolverDedupeResult {
+            sources: empty_sources,
+            has_collision: false
+        };
     }
 
-    // (2) Manifest-declared capsule deps — only when a capsule.toml is
-    // discoverable from the entry's directory.
-    let project_root = discover_project_root(base_dir);
+    // (1) Relative imports — walked from every entry; the dedupe loop
+    // below collapses overlapping sets.
+    let mut ei: number = 0;
+    loop {
+        if ei >= entry_paths.length { break; }
+        let entry = entry_paths[ei];
+        let relative = enumerate_relative_sources(entry);
+        let mut ri: number = 0;
+        loop {
+            if ri >= relative.length { break; }
+            sources.push(relative[ri]);
+            ri += 1;
+        }
+        ei += 1;
+    }
+
+    // (2) Manifest-declared capsule deps and (3) workspace-implicit
+    // imports use the first entry's directory as the anchor. By
+    // construction (callers group entries by `(project_root,
+    // workspace_root)`), every entry in `entry_paths` resolves to the
+    // same project root and workspace root, so the choice of anchor
+    // doesn't change the result.
+    let anchor_dir = _cr_dirname(entry_paths[0]);
+
+    let project_root = discover_project_root(anchor_dir);
     let mut covered_specs: string[] = [];
     if project_root.length > 0 {
         let manifest_path = _cr_path_join(project_root, "capsule.toml");
@@ -1442,25 +1485,38 @@ fn prepare_project_capsules(input_path: string) -> string[] ![io] {
         }
     }
 
-    // (3) Workspace-implicit imports.
-    let workspace_root = discover_workspace_root(base_dir);
+    let workspace_root = discover_workspace_root(anchor_dir);
     if workspace_root.length > 0 {
         let members = load_workspace_members(workspace_root);
-        let implicit = enumerate_workspace_implicit_sources(input_path, members, covered_specs);
-        let mut wi: number = 0;
+        // Workspace-implicit enumeration is per-entry: each entry may
+        // reference a different scoped import, and the union is the
+        // set the project actually needs.
+        let mut wi_entry: number = 0;
         loop {
-            if wi >= implicit.length { break; }
-            sources.push(implicit[wi]);
-            wi += 1;
+            if wi_entry >= entry_paths.length { break; }
+            let implicit = enumerate_workspace_implicit_sources(entry_paths[wi_entry], members, covered_specs);
+            let mut wi: number = 0;
+            loop {
+                if wi >= implicit.length { break; }
+                sources.push(implicit[wi]);
+                wi += 1;
+            }
+            wi_entry += 1;
         }
     }
 
-    if sources.length == 0 { return []; }
+    if sources.length == 0 {
+        return ResolverDedupeResult {
+            sources: empty_sources,
+            has_collision: false
+        };
+    }
 
-    // Detect slug collisions across the three resolution paths. Two
-    // sources with the same slug but different source paths would
-    // overwrite each other under build/native/import-context/<slug>.* —
-    // fail loudly with the conflict so the user can rename or restructure.
+    // Slug-collision detection: two sources with the same slug but
+    // different source paths would clobber each other under
+    // build/native/import-context/<slug>.* — surface the conflict so
+    // the user can rename or restructure rather than silently picking
+    // one.
     let mut deduped: CapsuleSource[] = [];
     let mut seen_slugs: string[] = [];
     let mut seen_paths: string[] = [];
@@ -1468,7 +1524,7 @@ fn prepare_project_capsules(input_path: string) -> string[] ![io] {
     loop {
         if si >= sources.length { break; }
         let candidate = sources[si];
-        let mut collision: boolean = false;
+        let mut duplicate: boolean = false;
         let mut sj: number = 0;
         loop {
             if sj >= seen_slugs.length { break; }
@@ -1481,15 +1537,18 @@ fn prepare_project_capsules(input_path: string) -> string[] ![io] {
                         + "\n  "
                         + candidate.source_path
                         + "\nrename one of the modules so each maps to a distinct slug.");
-                    return [];
+                    return ResolverDedupeResult {
+                        sources: empty_sources,
+                        has_collision: true
+                    };
                 }
                 // Same slug AND same path → exact duplicate, drop silently.
-                collision = true;
+                duplicate = true;
                 break;
             }
             sj += 1;
         }
-        if !collision {
+        if !duplicate {
             seen_slugs.push(candidate.slug);
             seen_paths.push(candidate.source_path);
             deduped.push(candidate);
@@ -1497,20 +1556,44 @@ fn prepare_project_capsules(input_path: string) -> string[] ![io] {
         si += 1;
     }
 
-    let staged = stage_capsule_imports(deduped);
+    return ResolverDedupeResult { sources: deduped, has_collision: false };
+}
+
+// Resolve, stage, and compile every dependency reachable from
+// `input_path`. Returns the list of dependency .ll paths to feed the
+// linker (empty when no dependencies are needed). On slug collision
+// or stage failure, prints a structured error and returns `[]` —
+// `sfn build`'s call sites do not currently distinguish those cases
+// from "no deps", since clang link will surface any missing-symbol
+// follow-up downstream.
+fn prepare_project_capsules(input_path: string) -> string[] ![io] {
+    let entry_paths: string[] = [input_path];
+    let resolved = _cr_resolve_and_dedupe(entry_paths);
+    if resolved.has_collision { return []; }
+    if resolved.sources.length == 0 { return []; }
+
+    let staged = stage_capsule_imports(resolved.sources);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return [];
     }
-    return compile_capsule_modules(deduped);
+    return compile_capsule_modules(resolved.sources);
 }
 
-// Resolver pass tuned for `sfn check`: enumerate, dedupe, and stage the
-// same `.sfn-asm` + `.layout-manifest` artifacts that the full builder
-// would, but skip `compile_capsule_modules` so no LLVM IR is produced.
-// Returns the staged `.sfn-asm` paths so the typechecker import-loader
-// can read interface declarations off disk and feed them into
-// `typecheck_diagnostics_with_imports`.
+// Resolver pass tuned for `sfn check`: enumerate, dedupe, and stage
+// the same `.sfn-asm` + `.layout-manifest` artifacts that the full
+// builder would, but skip `compile_capsule_modules` so no LLVM IR is
+// produced. Returns the staged `.sfn-asm` paths so the typechecker
+// import-loader can read interface declarations off disk and feed
+// them into `typecheck_diagnostics_with_imports`.
+//
+// `entry_paths` is a list of source files that share the same
+// project + workspace roots. Callers (e.g. `cli_check.sfn`) group
+// `sfn check` arguments by `(discover_project_root,
+// discover_workspace_root)` and pass each group's file list as a
+// separate invocation, so a multi-path `sfn check pathA pathB` that
+// spans capsules gets a per-capsule resolution pass and isn't
+// silently anchored on whichever path happened to come first.
 //
 // Contract differences from `prepare_project_capsules`:
 //   - On slug collision, returns `staging_failed = true` instead of
@@ -1520,50 +1603,17 @@ fn prepare_project_capsules(input_path: string) -> string[] ![io] {
 //   - Standalone files outside any capsule.toml are valid input and
 //     return an empty resolution (no error) — relative-import walking
 //     still happens via `enumerate_relative_sources`.
-fn prepare_project_capsules_for_check(input_path: string) -> CheckCapsuleResolution ![io] {
-    let base_dir = _cr_dirname(input_path);
-    let mut sources: CapsuleSource[] = [];
-
-    let relative = enumerate_relative_sources(input_path);
-    let mut ri: number = 0;
-    loop {
-        if ri >= relative.length { break; }
-        sources.push(relative[ri]);
-        ri += 1;
-    }
-
-    let project_root = discover_project_root(base_dir);
-    let mut covered_specs: string[] = [];
-    if project_root.length > 0 {
-        let manifest_path = _cr_path_join(project_root, "capsule.toml");
-        if fs.exists(manifest_path) {
-            let manifest_text = fs.readFile(manifest_path);
-            let deps_text = toml_get_dependencies(manifest_text);
-            covered_specs = _cr_dep_specs_from_text(deps_text);
-        }
-        let dep_sources = enumerate_capsule_sources(project_root);
-        let mut di: number = 0;
-        loop {
-            if di >= dep_sources.length { break; }
-            sources.push(dep_sources[di]);
-            di += 1;
-        }
-    }
-
-    let workspace_root = discover_workspace_root(base_dir);
-    if workspace_root.length > 0 {
-        let members = load_workspace_members(workspace_root);
-        let implicit = enumerate_workspace_implicit_sources(input_path, members, covered_specs);
-        let mut wi: number = 0;
-        loop {
-            if wi >= implicit.length { break; }
-            sources.push(implicit[wi]);
-            wi += 1;
-        }
-    }
-
+fn prepare_project_capsules_for_check(entry_paths: string[]) -> CheckCapsuleResolution ![io] {
     let empty_paths: string[] = [];
-    if sources.length == 0 {
+    let resolved = _cr_resolve_and_dedupe(entry_paths);
+    if resolved.has_collision {
+        return CheckCapsuleResolution {
+            asm_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true
+        };
+    }
+    if resolved.sources.length == 0 {
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
             capsule_count: 0,
@@ -1571,46 +1621,7 @@ fn prepare_project_capsules_for_check(input_path: string) -> CheckCapsuleResolut
         };
     }
 
-    let mut deduped: CapsuleSource[] = [];
-    let mut seen_slugs: string[] = [];
-    let mut seen_paths: string[] = [];
-    let mut si: number = 0;
-    loop {
-        if si >= sources.length { break; }
-        let candidate = sources[si];
-        let mut collision: boolean = false;
-        let mut sj: number = 0;
-        loop {
-            if sj >= seen_slugs.length { break; }
-            if strings_equal(seen_slugs[sj], candidate.slug) {
-                if !strings_equal(seen_paths[sj], candidate.source_path) {
-                    print.err("capsule-resolver: slug collision for \""
-                        + candidate.slug
-                        + "\":\n  "
-                        + seen_paths[sj]
-                        + "\n  "
-                        + candidate.source_path
-                        + "\nrename one of the modules so each maps to a distinct slug.");
-                    return CheckCapsuleResolution {
-                        asm_paths: empty_paths,
-                        capsule_count: 0,
-                        staging_failed: true
-                    };
-                }
-                collision = true;
-                break;
-            }
-            sj += 1;
-        }
-        if !collision {
-            seen_slugs.push(candidate.slug);
-            seen_paths.push(candidate.source_path);
-            deduped.push(candidate);
-        }
-        si += 1;
-    }
-
-    let staged = stage_capsule_imports(deduped);
+    let staged = stage_capsule_imports(resolved.sources);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return CheckCapsuleResolution {
@@ -1623,15 +1634,15 @@ fn prepare_project_capsules_for_check(input_path: string) -> CheckCapsuleResolut
     let mut asm_paths: string[] = [];
     let mut ai: number = 0;
     loop {
-        if ai >= deduped.length { break; }
-        asm_paths.push("build/native/import-context/" + deduped[ai].slug
+        if ai >= resolved.sources.length { break; }
+        asm_paths.push("build/native/import-context/" + resolved.sources[ai].slug
             + ".sfn-asm");
         ai += 1;
     }
 
     return CheckCapsuleResolution {
         asm_paths: asm_paths,
-        capsule_count: deduped.length,
+        capsule_count: resolved.sources.length,
         staging_failed: false
     };
 }
