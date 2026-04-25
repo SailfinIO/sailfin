@@ -20,6 +20,10 @@ inputs:
     description: "Optional tag to exclude"
     required: false
     default: ""
+  build_jobs:
+    description: "Parallel module builds (BUILD_JOBS). Empty = let the Makefile auto-detect via scripts/detect_build_jobs.sh (CPU + RAM heuristic; macOS capped at 2). Set to a specific N to pin (e.g. for a regression bisect)."
+    required: false
+    default: ""
 runs:
   using: "composite"
   steps:
@@ -45,9 +49,16 @@ runs:
         GITHUB_TOKEN: ${{ env.GITHUB_TOKEN }}
       run: |
         set -euo pipefail
+        # Forward build_jobs only when explicitly set; an empty value means
+        # "let the Makefile auto-detect" (scripts/detect_build_jobs.sh).
+        BUILD_JOBS_ARG=()
+        if [ -n "${{ inputs.build_jobs }}" ]; then
+          BUILD_JOBS_ARG=("BUILD_JOBS=${{ inputs.build_jobs }}")
+        fi
         make rebuild \
           CLANG="${{ inputs.clang }}" \
-          SEED_NATIVE="build/seed/bin/sailfin"
+          SEED_NATIVE="build/seed/bin/sailfin" \
+          "${BUILD_JOBS_ARG[@]}"
 
     - name: Prepare test artifacts
       shell: bash {0}
