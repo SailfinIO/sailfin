@@ -1,7 +1,7 @@
 # Architecture: `sfn check` — Fast Analysis Without Codegen
 
 Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`)
-Date: April 15, 2026 (design); shipped April 18, 2026
+Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026
 Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
 
 ## Implementation Status
@@ -9,13 +9,49 @@ Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
 The initial implementation ships in `compiler/src/tools/check.sfn` and is wired
 into the CLI as `sfn check`. Covered by `compiler/tests/unit/check_tool_test.sfn`.
 
-Still deferred to a follow-up:
+### Continuation: Track A — retire textual import inlining
+
+Track A migrates `sfn check` off the legacy textual inliner so it can share
+the unified resolver introduced in Stage B PR1 of the build architecture
+(`docs/proposals/build-architecture.md`). The track splits into four
+sub-PRs:
+
+- **A1 — typechecker hookup (shipped April 25, 2026).**
+  New leaf module `compiler/src/typecheck_imports.sfn` converts
+  `NativeInterface` descriptors (extracted from `.sfn-asm` import-context
+  artifacts) into `Statement.InterfaceDeclaration` values the typechecker
+  understands. New entry point `typecheck_diagnostics_with_imports(program,
+  imported_interfaces)` accepts that converted list and concatenates it
+  onto the program's local interface set before running
+  `check_program_scopes`. The original `typecheck_diagnostics(program)`
+  becomes a one-line wrapper that calls the new entry with `[]`. Coverage:
+  16 unit tests in `compiler/tests/unit/typecheck_imports_test.sfn`. The
+  empty-imports path is exercised on every module during selfhost; the
+  stage2/stage3 fixed-point holds.
+- **A2 — resolver wiring (next).** Add the artifact-text helper and the
+  on-disk loader (`load_imported_interfaces_from_paths`) to a separate
+  module that depends on `native_ir_api`, then wire `cli_check.sfn`
+  through `prepare_project_capsules` and pass the resulting interface
+  list into `typecheck_diagnostics_with_imports`. Delete the
+  `inline_imports_for_source` call in `cli_check.sfn`. Cross-module
+  interface conformance becomes live for end users.
+- **A3 — diagnostic enhancement.** Add `severity` and `file_path`
+  fields to `Diagnostic` (the deferred Phase 1 item below). With A2
+  in place every diagnostic naturally carries the originating module
+  path, so the renderer can drop its single-file assumption.
+- **A4 — delete legacy helpers.** Remove `inline_imports_for_source`,
+  `_inline_relative_imports_cmd`, and `_is_stdlib_capsule_cmd` once
+  the test path (Stage B PR2's `sfn test` migration) lands too.
+
+### Still deferred to a follow-up
 
 - Diagnostic struct enhancement (Phase 1 — `severity` and `file_path` fields).
-  The v1 renderer synthesises severity from the error code instead.
+  The v1 renderer synthesises severity from the error code instead. Slated
+  for A3 above.
 - Fix-it suggestion edits (Phase 2 — `FixSuggestion`/`TextEdit` structs).
 - `make check-fast` target and CI pre-build wiring.
 - Parallel / cached multi-file checking.
+- `--json` output (LLM Adoption Strategy lever #3 — see CLAUDE.md).
 
 
 ## Overview

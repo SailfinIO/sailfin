@@ -1,7 +1,7 @@
 # Proposal: Unified Build Architecture for Sailfin
 
-Status: Stage A shipped; Stage B split into two PRs, PR1 shipped, PR2 next
-Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed)
+Status: Stage A shipped; Stage B split into two PRs, PR1 shipped, PR2 in progress (A1 hookup landed)
+Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed)
 Authors: Core Team
 
 ## Implementation Status (as of 2026-04-25, end of Stage B PR1)
@@ -69,10 +69,21 @@ that turned out to be architecturally coupled to libextract:
 
 2. **`sfn check` migration.** `tools/check.check_source` operates on a
    single source string and has no notion of cross-module symbols.
-   Today the textual inliner is the only reason imported names resolve.
-   Migrating means extending typecheck to load layout-manifests so
-   imported symbol references don't trip "undefined" diagnostics — a
-   non-trivial typechecker change.
+   Today the textual inliner is the only reason imported interface
+   declarations are visible to `check_struct_implements_interfaces`
+   in `typecheck_types.sfn`. (The typechecker does not currently emit
+   any "undefined symbol" diagnostic — earlier framing of this point
+   was wrong on that detail. The single load-bearing case the inliner
+   covers is cross-module interface conformance.)
+
+   A1 of Track A ships the typechecker-side hookup
+   (`compiler/src/typecheck_imports.sfn` plus
+   `typecheck_diagnostics_with_imports`). The remaining work for PR2
+   is the resolver-side hookup: extract `.sfn-asm` paths from the
+   project's resolved capsule graph, feed them into
+   `load_imported_interfaces_from_paths` (lands in A2 alongside
+   `cli_check.sfn` integration), and pass the resulting interface
+   list into the new typecheck entry point.
 
 3. **Delete the legacy helpers.** Once `sfn test` and `sfn check` are
    migrated, delete `_inline_relative_imports_cmd`,
@@ -1116,18 +1127,35 @@ coupled to the libextract work originally scoped here:
   for tests. PR1 reverted its test-runner wiring after confirming the
   link error empirically.
 - **`sfn check`**: `tools/check.check_source` operates on a single
-  source string with no notion of cross-module symbols. Without
-  textual inlining, every imported name becomes "undefined". Migrating
-  needs typecheck to load layout-manifests.
+  source string with no notion of cross-module symbols. The
+  load-bearing case the textual inliner covers is cross-module
+  interface conformance — without it, `check_struct_implements_interfaces`
+  silently no-ops on `implements` clauses that point at an interface
+  declared in another module. (Earlier framing assumed the inliner was
+  also preventing "undefined symbol" diagnostics; investigation showed
+  the typechecker emits no such diagnostic today.) Migrating means
+  feeding the typechecker the imported interface set explicitly.
 
-PR2's full scope:
+PR2's full scope, organized as Track A:
 
+- **A1 (shipped):** Add `compiler/src/typecheck_imports.sfn` (pure
+  `NativeInterface → Statement.InterfaceDeclaration` converter, leaf
+  module) and `typecheck_diagnostics_with_imports(program,
+  imported_interfaces)`. Original `typecheck_diagnostics` becomes a
+  one-line wrapper. Self-hosts; stage2/stage3 fixed point holds. See
+  `docs/proposals/check-architecture.md` for details.
+- **A2 (next):** Add the `.sfn-asm`-text helper plus on-disk loader
+  (`load_imported_interfaces_from_paths`) — likely in a new module
+  that depends on `native_ir_api`. Wire `cli_check.sfn` through the
+  unified resolver (`prepare_project_capsules`) and pass loaded
+  interfaces into the new typecheck entry point. Delete
+  `inline_imports_for_source`'s `sfn check` call site.
+- **A3:** Diagnostic struct enhancement (`severity`, `file_path`).
+- **A4:** Delete legacy helpers once the test path also migrates.
 - Pick a fix path for `sfn test` mangling (see PR1's
   `entrypoints_tests_writer.sfn` change for one starting attempt — it
   loaded import-context but the mangle-symbols mismatch defeated it)
   and migrate `handle_test_command` to consume the resolver.
-- Extend `check_source` to load layout-manifests so `sfn check`
-  resolves cross-module imports without textual inlining.
 - Extract `sfn/compiler-lib` from `compiler/src/` (everything except
   `cli_main.sfn`, `cli_commands.sfn`, `cli_commands_utils.sfn`) so
   tests that need compiler internals depend on it as a dev-dep.

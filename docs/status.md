@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 25, 2026
+Updated: April 25, 2026 (typecheck cross-module conformance hookup — A1)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -27,7 +27,10 @@ feature availability.
 - **`sfn test` and `sfn check` still use textual inlining** via the legacy
   `_inline_relative_imports_cmd` and `inline_imports_for_source` helpers.
   Migrating them is Stage B PR2 (coupled to the `sfn/compiler-lib`
-  extraction — see `docs/proposals/build-architecture.md`).
+  extraction — see `docs/proposals/build-architecture.md`). The
+  typechecker-side hookup for `sfn check`'s migration shipped in A1
+  (`compiler/src/typecheck_imports.sfn` + `typecheck_diagnostics_with_imports`)
+  — the in-process resolver wiring lands in A2.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
@@ -95,7 +98,7 @@ feature availability.
 | `unsafe` / `extern` | Parsed only | Syntax accepted; enforcement not active |
 | Policy decorators (`@policy(...)`) | Parsed only | No compiler or runtime effect |
 | `sfn fmt` (formatter) | **Shipped** | Token-stream formatter: indentation, spacing, inline blocks, unary operator handling, import sorting & specifier reordering, blank line normalization, `--check`/`--write` modes, CI enforcement; see `docs/proposals/fmt-architecture.md` for architecture and known limitations |
-| `sfn check` (fast analysis) | **Shipped** | Runs parse + typecheck + effect-check on `.sfn` sources without emitting IR or invoking `clang`. Reports diagnostics to stderr with a summary on stdout. Exits non-zero on findings. See `docs/proposals/check-architecture.md`. |
+| `sfn check` (fast analysis) | **Shipped (v1)** | Runs parse + typecheck + effect-check on `.sfn` sources without emitting IR or invoking `clang`. Reports diagnostics to stderr with a summary on stdout. Exits non-zero on findings. Currently runs on a single textually-inlined buffer per file; cross-module interface conformance will become live once A2 wires the unified resolver in. See `docs/proposals/check-architecture.md`. |
 | `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn doc` (doc generator) | Planned | 1.0; see `docs/proposals/tooling.md` |
