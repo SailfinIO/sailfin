@@ -10,6 +10,12 @@ struct SailToml {
     dependencies: TomlDependency[];
     dev_dependencies: TomlDependency[];
     capabilities: string[];
+    // Stage A additions (parse-only; no consumers yet — see
+    // docs/proposals/build-architecture.md, Part 5, Stage A).
+    build_kind: string;  // "binary" | "library" | "runtime" | ""
+    build_implicit: boolean;  // [build] implicit = true
+    workspace_members: string[];  // [workspace] members = [...]
+    exports: string[];  // [exports] modules = [...]
 }
 
 struct TomlDependency {
@@ -160,7 +166,11 @@ fn _parse_toml_internal(text: string) -> SailToml {
         entry: "src/main.sfn",
         dependencies: [],
         dev_dependencies: [],
-        capabilities: []
+        capabilities: [],
+        build_kind: "",
+        build_implicit: false,
+        workspace_members: [],
+        exports: []
     };
     let lines = _toml_split_lines(text);
     let mut section: string = "";
@@ -199,6 +209,22 @@ fn _parse_toml_internal(text: string) -> SailToml {
         if strings_equal(section, "build") {
             if strings_equal(stripped_key, "entry") {
                 toml.entry = stripped_value;
+            }
+            if strings_equal(stripped_key, "kind") {
+                toml.build_kind = stripped_value;
+            }
+            if strings_equal(stripped_key, "implicit") {
+                toml.build_implicit = strings_equal(stripped_value, "true");
+            }
+        }
+        if strings_equal(section, "workspace") {
+            if strings_equal(stripped_key, "members") {
+                toml.workspace_members = _toml_parse_string_array(value);
+            }
+        }
+        if strings_equal(section, "exports") {
+            if strings_equal(stripped_key, "modules") {
+                toml.exports = _toml_parse_string_array(value);
             }
         }
         if strings_equal(section, "dependencies") {
@@ -239,6 +265,132 @@ fn toml_get_entry(text: string) -> string {
 fn toml_get_description(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.description;
+}
+
+// ---- Stage A getters (parse-only; no consumers yet) ----
+// These getters expose manifest fields the unified-build proposal
+// (docs/proposals/build-architecture.md, Stage A) adds to the schema.
+// Stage B will start consuming them; Stage A only verifies round-trip.
+fn toml_get_build_kind(text: string) -> string {
+    let t = _parse_toml_internal(text);
+    return t.build_kind;
+}
+
+fn toml_get_build_implicit(text: string) -> boolean {
+    let t = _parse_toml_internal(text);
+    return t.build_implicit;
+}
+
+// Returns workspace members as a newline-separated string. Matches the
+// shape of toml_get_dependencies so callers split on "\n" without a
+// SailToml struct crossing module boundaries.
+fn toml_get_workspace_members(text: string) -> string {
+    let t = _parse_toml_internal(text);
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= t.workspace_members.length { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + t.workspace_members[i];
+        i += 1;
+    }
+    return out;
+}
+
+// Returns [exports] modules as a newline-separated string.
+fn toml_get_exports(text: string) -> string {
+    let t = _parse_toml_internal(text);
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= t.exports.length { break; }
+        if i > 0 { out = out + "\n"; }
+        out = out + t.exports[i];
+        i += 1;
+    }
+    return out;
+}
+
+// Enumerate every section header of the form `[targets.<triple>]` and
+// return the triples as a newline-separated string. Section bodies are
+// reachable via toml_get_string / toml_get_string_array with section
+// name "targets.<triple>".
+fn toml_get_target_triples(text: string) -> string {
+    let lines = _toml_split_lines(text);
+    let prefix = "targets.";
+    let mut out: string = "";
+    let mut found: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] != "[" { continue; }
+        let close = find_char(line, "]", 0);
+        if close <= 0 { continue; }
+        let section = _toml_trim(substring(line, 1, close));
+        if section.length <= prefix.length { continue; }
+        let mut matches: boolean = true;
+        let mut pi: number = 0;
+        loop {
+            if pi >= prefix.length { break; }
+            if section[pi] != prefix[pi] {
+                matches = false;
+                break;
+            }
+            pi += 1;
+        }
+        if !matches { continue; }
+        let triple = substring(section, prefix.length, section.length);
+        if triple.length == 0 { continue; }
+        if found > 0 { out = out + "\n"; }
+        out = out + triple;
+        found += 1;
+    }
+    return out;
+}
+
+// Read a string-array value at `[section] key = [ ... ]`. Returns "" if
+// absent. Items are returned newline-separated. Generalises the Stage A
+// getters above so callers can read [targets.<triple>].cc-flags without
+// adding a dedicated function per key.
+fn toml_get_string_array(text: string, section: string, key: string) -> string {
+    let lines = _toml_split_lines(text);
+    let mut current_section: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= lines.length { break; }
+        let line = _toml_trim(lines[i]);
+        i += 1;
+        if line.length == 0 { continue; }
+        if line[0] == "#" { continue; }
+        if line[0] == "[" {
+            let close = find_char(line, "]", 0);
+            if close > 0 {
+                current_section = _toml_trim(substring(line, 1, close));
+            }
+            continue;
+        }
+        if !strings_equal(current_section, section) { continue; }
+        let eq_pos = find_char(line, "=", 0);
+        if eq_pos < 0 { continue; }
+        let line_key = _toml_trim(substring(line, 0, eq_pos));
+        let stripped_key = _toml_strip_quotes(line_key);
+        if !strings_equal(stripped_key, key) { continue; }
+        let value = _toml_trim(substring(line, eq_pos + 1, line.length));
+        let arr = _toml_parse_string_array(value);
+        let mut out: string = "";
+        let mut ai: number = 0;
+        loop {
+            if ai >= arr.length { break; }
+            if ai > 0 { out = out + "\n"; }
+            out = out + arr[ai];
+            ai += 1;
+        }
+        return out;
+    }
+    return "";
 }
 
 // Read a string value at `[section] key = "value"`. Returns "" if absent.
@@ -386,5 +538,33 @@ fn _write_toml(toml: SailToml) -> string {
     out = out + "]\n";
     out = out + "\n[build]\n";
     out = out + "entry = \"" + toml.entry + "\"\n";
+    if toml.build_kind.length > 0 {
+        out = out + "kind = \"" + toml.build_kind + "\"\n";
+    }
+    if toml.build_implicit { out = out + "implicit = true\n"; }
+    if toml.workspace_members.length > 0 {
+        out = out + "\n[workspace]\n";
+        out = out + "members = [";
+        let mut wi: number = 0;
+        loop {
+            if wi >= toml.workspace_members.length { break; }
+            if wi > 0 { out = out + ", "; }
+            out = out + "\"" + toml.workspace_members[wi] + "\"";
+            wi += 1;
+        }
+        out = out + "]\n";
+    }
+    if toml.exports.length > 0 {
+        out = out + "\n[exports]\n";
+        out = out + "modules = [";
+        let mut ei: number = 0;
+        loop {
+            if ei >= toml.exports.length { break; }
+            if ei > 0 { out = out + ", "; }
+            out = out + "\"" + toml.exports[ei] + "\"";
+            ei += 1;
+        }
+        out = out + "]\n";
+    }
     return out;
 }
