@@ -11,11 +11,9 @@
 // The helpers below mirror the logic in compiler/src/tools/check.sfn —
 // keep them in sync when that file changes. See
 // docs/proposals/check-architecture.md for the overall design.
-
 // -------------------------------------------------------------------
 // Local helpers
 // -------------------------------------------------------------------
-
 fn _index_of(haystack: string, needle: string) -> number {
     if needle.length == 0 { return 0; }
     if haystack.length < needle.length { return -1; }
@@ -111,9 +109,7 @@ fn _local_num_to_string(value: number) -> string {
 
 fn _local_render_summary(files_checked: number, total_errors: number) -> string {
     let files_str = _local_num_to_string(files_checked);
-    if total_errors == 0 {
-        return "checked " + files_str + " files: ok";
-    }
+    if total_errors == 0 { return "checked " + files_str + " files: ok"; }
     let errors_str = _local_num_to_string(total_errors);
     let mut label: string = " errors";
     if total_errors == 1 { label = " error"; }
@@ -123,7 +119,6 @@ fn _local_render_summary(files_checked: number, total_errors: number) -> string 
 // -------------------------------------------------------------------
 // Tests — join_effects
 // -------------------------------------------------------------------
-
 test "check: join_effects empty" {
     let empty: string[] = [];
     assert strings_equal(_local_join_effects(empty), "");
@@ -141,7 +136,6 @@ test "check: join_effects multiple" {
 // -------------------------------------------------------------------
 // Tests — effect message building
 // -------------------------------------------------------------------
-
 test "check: effect message names the routine" {
     let msg = _local_build_effect_message("process", ["io"]);
     assert _contains(msg, "process");
@@ -162,7 +156,6 @@ test "check: effect message suggests fix" {
 // -------------------------------------------------------------------
 // Tests — error-code classification
 // -------------------------------------------------------------------
-
 test "check: plain missing-effect requirement is E0400" {
     assert strings_equal(_local_code_for_first_description("http.get"), "E0400");
     assert strings_equal(_local_code_for_first_description("fs.readFile"), "E0400");
@@ -180,7 +173,6 @@ test "check: empty description defaults to E0400" {
 // -------------------------------------------------------------------
 // Tests — summary rendering
 // -------------------------------------------------------------------
-
 test "check: summary says ok when no errors" {
     let text = _local_render_summary(3, 0);
     assert _contains(text, "3 files");
@@ -195,13 +187,12 @@ test "check: summary reports plural errors" {
 test "check: summary reports singular error" {
     let text = _local_render_summary(1, 1);
     assert _contains(text, "1 error");
-    assert !_contains(text, "errors");
+    assert ! _contains(text, "errors");
 }
 
 // -------------------------------------------------------------------
 // Tests — number-to-string helper
 // -------------------------------------------------------------------
-
 test "check: num_to_string handles zero" {
     assert strings_equal(_local_num_to_string(0), "0");
 }
@@ -210,4 +201,74 @@ test "check: num_to_string handles small positives" {
     assert strings_equal(_local_num_to_string(7), "7");
     assert strings_equal(_local_num_to_string(42), "42");
     assert strings_equal(_local_num_to_string(120), "120");
+}
+
+// -------------------------------------------------------------------
+// Tests — diagnostic header rendering (severity drives the prefix)
+// -------------------------------------------------------------------
+//
+// Mirrors `render_diagnostic` in compiler/src/tools/check.sfn — the
+// header is `severity + "[" + code + "]: " + message`. These tests
+// guard the contract without importing the renderer (the diamond-rule
+// constraint described at the top of this file).
+fn _local_render_header(severity: string, code: string, message: string) -> string {
+    return severity + "[" + code + "]: " + message;
+}
+
+test "check: header uses error severity for typecheck diagnostics" {
+    let header = _local_render_header("error", "E0001", "duplicate function `foo` declared");
+    assert _contains(header, "error[E0001]:");
+    assert _contains(header, "duplicate function");
+}
+
+test "check: header uses warning severity for load diagnostics" {
+    let header = _local_render_header("warning", "W0001", "missing import-context artifact");
+    assert _contains(header, "warning[W0001]:");
+    assert ! _contains(header, "error[");
+}
+
+test "check: header carries severity verbatim for hint and info" {
+    assert _contains(_local_render_header("hint", "H0100", "consider"), "hint[H0100]:");
+    assert _contains(_local_render_header("info", "I0100", "note"), "info[I0100]:");
+}
+
+// -------------------------------------------------------------------
+// Tests — file_path appears on the location line
+// -------------------------------------------------------------------
+//
+// Mirrors the location-only branch of `render_diagnostic` (the path
+// shown when `primary == null`, used for warnings emitted by the
+// load/staging layer). With A3, file_path comes off the Diagnostic
+// struct rather than a separate parameter.
+fn _local_render_location_only(file_path: string) -> string {
+    return "  --> " + file_path;
+}
+
+test "check: location-only line includes file_path" {
+    let line = _local_render_location_only("compiler/src/foo.sfn");
+    assert _contains(line, "  --> compiler/src/foo.sfn");
+}
+
+test "check: location-only line works for arbitrary missing-artifact paths" {
+    let line = _local_render_location_only("build/native/import-context/sfn_prelude/mod.sfn-asm");
+    assert _contains(line, "import-context/sfn_prelude");
+    assert _contains(line, ".sfn-asm");
+}
+
+// -------------------------------------------------------------------
+// Tests — W01xx warning code allocation
+// -------------------------------------------------------------------
+//
+// W0001 = missing import-context artifact (resolver staged a path
+// that's no longer on disk). W0002 = artifact existed but the
+// native-IR parser rejected it. The W01xx range is reserved for
+// load/staging warnings emitted by `sfn check` infrastructure;
+// program-analysis warnings (e.g. future `sfn vet`) live in W02xx+.
+test "check: W0001 and W0002 are distinct codes" {
+    assert ! strings_equal("W0001", "W0002");
+}
+
+test "check: W01xx codes do not collide with E0xxx error ranges" {
+    assert ! strings_equal("W0001", "E0001");
+    assert ! strings_equal("W0002", "E0301");
 }

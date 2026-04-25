@@ -92,7 +92,13 @@ fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
     }
 
     let code = _code_for_missing_effect(violation.missing_effects, violation.requirements);
-    return Diagnostic { code: code, message: message, primary: null };
+    return Diagnostic {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: null
+    };
 }
 
 // -------------------------------------------------------------------
@@ -141,10 +147,10 @@ fn _build_caret(lexeme: string, line_text: string, column: number) -> string {
     return out;
 }
 
-fn render_diagnostic(d: Diagnostic, source_lines: string[], file_path: string, kind: string) -> string {
+fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> string {
     let mut parts: string[] = [];
     let msg_lines = _render_message_lines(d.message);
-    let mut header: string = "error[" + d.code + "]: ";
+    let mut header: string = d.severity + "[" + d.code + "]: ";
     if msg_lines.length > 0 { header = header + msg_lines[0]; }
     parts.push(header);
 
@@ -168,7 +174,7 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], file_path: string, k
     }
 
     if has_location {
-        let loc = "  --> " + file_path + ":" + number_to_string(line_number)
+        let loc = "  --> " + d.file_path + ":" + number_to_string(line_number)
             + ":"
             + number_to_string(column_number);
         parts.push(loc);
@@ -180,7 +186,9 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], file_path: string, k
         let pointer_prefix = _build_pointer_prefix(column_number, line_text);
         let caret = _build_caret(lexeme, line_text, column_number);
         parts.push(" " + gutter + " | " + pointer_prefix + caret);
-    } else if file_path.length > 0 { parts.push("  --> " + file_path); }
+    } else if d.file_path.length > 0 {
+        parts.push("  --> " + d.file_path);
+    }
 
     let mut i: number = 1;
     loop {
@@ -223,22 +231,31 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     let source_lines = split_source_lines(source);
     let mut combined: Diagnostic[] = [];
     let mut rendered: string[] = [];
+    let mut errors: number = 0;
 
+    // Stamp the originating module path onto each typecheck diagnostic
+    // and render it in one pass. Factories mint diagnostics with an
+    // empty file_path; this is the single point that knows which
+    // module is currently being analyzed.
     let mut ti: number = 0;
     loop {
         if ti >= type_diags.length { break; }
+        type_diags[ti].file_path = file_path;
         let diag = type_diags[ti];
         combined.push(diag);
-        rendered.push(render_diagnostic(diag, source_lines, file_path, "typecheck"));
+        rendered.push(render_diagnostic(diag, source_lines, "typecheck"));
+        if strings_equal(diag.severity, "error") { errors += 1; }
         ti += 1;
     }
 
     let mut ei: number = 0;
     loop {
         if ei >= effect_violations.length { break; }
-        let diag = effect_violation_to_diagnostic(effect_violations[ei]);
+        let mut diag = effect_violation_to_diagnostic(effect_violations[ei]);
+        diag.file_path = file_path;
         combined.push(diag);
-        rendered.push(render_diagnostic(diag, source_lines, file_path, "effect"));
+        rendered.push(render_diagnostic(diag, source_lines, "effect"));
+        if strings_equal(diag.severity, "error") { errors += 1; }
         ei += 1;
     }
 
@@ -246,7 +263,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         file_path: file_path,
         diagnostics: combined,
         rendered: rendered,
-        error_count: combined.length
+        error_count: errors
     };
 }
 

@@ -27,10 +27,12 @@ import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
 import {
     CheckResult,
     check_source_with_imports,
+    render_diagnostic,
     render_summary,
     summarize
 } from "./tools/check";
 import { ImportedInterfaceLoadResult, load_imported_interfaces_from_paths } from "./typecheck_import_loader";
+import { Diagnostic } from "./typecheck_types";
 
 // One distinct `(project_root, workspace_root)` resolution group. Every
 // file in `entry_paths` shares those roots, so `prepare_project_capsules_for_check`
@@ -67,22 +69,41 @@ fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
 // interface declarations) is the common, benign case for any module
 // that exports only structs/functions, so emitting per-path warnings
 // for it would drown signal in noise on a typical project. The
-// skipped-path data remains on `ImportedInterfaceLoadResult` for A3's
-// structured diagnostics or any future audit consumer.
+// skipped-path data remains on `ImportedInterfaceLoadResult` for any
+// future audit consumer.
+//
+// Warnings flow through the same `render_diagnostic` pipeline as
+// typecheck and effect errors so downstream consumers (the upcoming
+// `--json` output, `sfn lsp`, and CI scrapers) see one diagnostic
+// shape across every severity. `W01xx` is reserved for load/staging
+// warnings; see docs/proposals/check-architecture.md.
 fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean) ![io] {
     if quiet { return; }
+    let empty_lines: string[] = [];
     let mut i: number = 0;
     loop {
         if i >= load_result.missing_paths.length { break; }
-        print.err("[check] warning: missing import-context artifact: "
-            + load_result.missing_paths[i]);
+        let diag = Diagnostic {
+            code: "W0001",
+            severity: "warning",
+            message: "missing import-context artifact",
+            file_path: load_result.missing_paths[i],
+            primary: null
+        };
+        print.err(render_diagnostic(diag, empty_lines, "load"));
         i += 1;
     }
     let mut p: number = 0;
     loop {
         if p >= load_result.parse_failure_paths.length { break; }
-        print.err("[check] warning: import-context artifact parse failed: "
-            + load_result.parse_failure_paths[p]);
+        let diag = Diagnostic {
+            code: "W0002",
+            severity: "warning",
+            message: "import-context artifact parse failed",
+            file_path: load_result.parse_failure_paths[p],
+            primary: null
+        };
+        print.err(render_diagnostic(diag, empty_lines, "load"));
         p += 1;
     }
 }
