@@ -5,9 +5,24 @@ description: |
   Product (DX/ergonomics/error messages), and Documentation (accuracy/completeness).
   Runs on every opened or updated PR.
 
+# TEMPORARILY DISABLED — see HEAD commit message.
+#
+# Background: PR #222 (Dependabot) bumped `github/gh-aw-actions` from 0.68.3
+# to 0.71.0 on 2026-04-24. The dep bump rewrote every `*.lock.yml` to load
+# the 0.71.0 setup action's helper scripts, but the lock files themselves
+# were emitted by the 0.68.3 gh-aw compiler (`gh-aw-metadata.compiler_version`
+# at the top of each lock confirms this). The 0.71.0 helpers have changed
+# enough that the agent step now exits 1 before producing structured output
+# (ERR_CONFIG: no structured log entries) on every PR triggered after the
+# bump (#235, #236).
+#
+# The proper fix is `gh aw compile` to regenerate every lock file against
+# 0.71.0. Until that runs, this workflow is gated on a manual dispatch so
+# it stops failing on every PR. Re-enable by reverting the `on:` change
+# below back to `pull_request: [opened, synchronize]` AFTER recompiling
+# the lock file.
 on:
-  pull_request:
-    types: [opened, synchronize]
+  workflow_dispatch:
 
 imports:
   - shared/build-mcp-server.md

@@ -56,11 +56,16 @@
 #   - node:lts-alpine
 
 name: "Sailfin PR Review"
+# TEMPORARILY DISABLED — gh-aw-actions bumped 0.68.3 -> 0.71.0 in PR #222
+# (2026-04-24) but this lock file was emitted by the 0.68.3 compiler. The
+# bumped helper scripts are incompatible with the lock-file run steps and
+# the agent step now exits 1 before producing structured output on every
+# PR. Re-enable by running `gh aw compile` to regenerate this file from
+# pr-review.md, then revert the `on:` block back to:
+#   pull_request:
+#     types: [opened, synchronize]
 "on":
-  pull_request:
-    types:
-    - opened
-    - synchronize
+  workflow_dispatch:
 
 permissions: {}
 
