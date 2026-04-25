@@ -50,6 +50,7 @@ export {
     enumerate_workspace_implicit_sources,
     load_workspace_members,
     parse_workspace_member_paths,
+    prepare_project_capsules,
     resolve_relative_import,
     stage_capsule_imports,
     compile_capsule_modules,
@@ -1286,4 +1287,112 @@ fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMe
         }
     }
     return out;
+}
+
+// ---- Top-level orchestrator ----
+// Parse the dep keys (e.g. "sfn/cli", "sfn/http") from the
+// `name=version\n` text returned by toml_get_dependencies. Used to seed the
+// "already covered" set for workspace-implicit lookup so that
+// manifest-declared deps don't double-up with workspace members.
+fn _cr_dep_specs_from_text(deps_text: string) -> string[] {
+    let mut out: string[] = [];
+    if deps_text.length == 0 { return out; }
+    let mut start: number = 0;
+    let len = deps_text.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if substring(deps_text, end, end + 1) == "\n" { break; }
+            end += 1;
+        }
+        if end > start {
+            let mut eq_pos: number = -1;
+            let mut ei: number = start;
+            loop {
+                if ei >= end { break; }
+                if substring(deps_text, ei, ei + 1) == "=" {
+                    eq_pos = ei;
+                    break;
+                }
+                ei += 1;
+            }
+            if eq_pos > start {
+                out.push(substring(deps_text, start, eq_pos));
+            }
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+// Resolve, stage, and compile every dependency reachable from `input_path`.
+// Returns the list of dependency .ll paths to feed the linker (empty
+// when no dependencies are needed).
+//
+// Three resolution paths run in sequence and are concatenated:
+//   1. Relative imports (`./foo`, `../bar`) reachable from the entry —
+//      always walked, even for standalone files without a manifest.
+//   2. Manifest-declared capsule deps (`[dependencies]` in the project's
+//      capsule.toml) — every .sfn under each dep's src/ tree.
+//   3. Workspace-implicit imports — any scoped import (`scope/name`) the
+//      source uses that maps to a workspace member but isn't declared in
+//      the project's `[dependencies]`. Replaces the legacy
+//      `_is_stdlib_capsule_cmd` allowlist; the workspace.toml file is now
+//      the single source of truth for which capsules are available
+//      without an explicit `sfn add`.
+fn prepare_project_capsules(input_path: string) -> string[] ![io] {
+    let base_dir = _cr_dirname(input_path);
+    let mut sources: CapsuleSource[] = [];
+
+    // (1) Relative imports — always.
+    let relative = enumerate_relative_sources(input_path);
+    let mut ri: number = 0;
+    loop {
+        if ri >= relative.length { break; }
+        sources.push(relative[ri]);
+        ri += 1;
+    }
+
+    // (2) Manifest-declared capsule deps — only when a capsule.toml is
+    // discoverable from the entry's directory.
+    let project_root = discover_project_root(base_dir);
+    let mut covered_specs: string[] = [];
+    if project_root.length > 0 {
+        let manifest_path = _cr_path_join(project_root, "capsule.toml");
+        if fs.exists(manifest_path) {
+            let manifest_text = fs.readFile(manifest_path);
+            let deps_text = toml_get_dependencies(manifest_text);
+            covered_specs = _cr_dep_specs_from_text(deps_text);
+        }
+        let dep_sources = enumerate_capsule_sources(project_root);
+        let mut di: number = 0;
+        loop {
+            if di >= dep_sources.length { break; }
+            sources.push(dep_sources[di]);
+            di += 1;
+        }
+    }
+
+    // (3) Workspace-implicit imports.
+    let workspace_root = discover_workspace_root(base_dir);
+    if workspace_root.length > 0 {
+        let members = load_workspace_members(workspace_root);
+        let implicit = enumerate_workspace_implicit_sources(input_path, members, covered_specs);
+        let mut wi: number = 0;
+        loop {
+            if wi >= implicit.length { break; }
+            sources.push(implicit[wi]);
+            wi += 1;
+        }
+    }
+
+    if sources.length == 0 { return []; }
+    let staged = stage_capsule_imports(sources);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return [];
+    }
+    return compile_capsule_modules(sources);
 }
