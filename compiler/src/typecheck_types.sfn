@@ -17,7 +17,9 @@ import { Token, TokenKind } from "./token";
 
 struct Diagnostic {
     code: string;
+    severity: string;
     message: string;
+    file_path: string;
     primary: Token?;
 }
 
@@ -411,10 +413,12 @@ fn has_symbol(symbols: SymbolEntry[], name: string) -> boolean {
 fn make_interface_missing_type_arguments_diagnostic(struct_name: string, interface_name: string, interface_signature: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
+        severity: "error",
         message: "struct " + struct_name + " implements " + interface_name
             + " but must specify "
             + interface_signature
             + " type arguments",
+        file_path: "",
         primary: null
     };
 }
@@ -422,10 +426,12 @@ fn make_interface_missing_type_arguments_diagnostic(struct_name: string, interfa
 fn make_interface_type_argument_mismatch_diagnostic(struct_name: string, annotation_text: string, interface_signature: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
+        severity: "error",
         message: "struct " + struct_name + " implements " + annotation_text
             + " but must match "
             + interface_signature
             + " type arguments",
+        file_path: "",
         primary: null
     };
 }
@@ -433,10 +439,12 @@ fn make_interface_type_argument_mismatch_diagnostic(struct_name: string, annotat
 fn make_interface_no_type_arguments_diagnostic(struct_name: string, annotation_text: string, interface_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0302",
+        severity: "error",
         message: "struct " + struct_name + " implements " + annotation_text
             + " but "
             + interface_name
             + " does not take type arguments",
+        file_path: "",
         primary: null
     };
 }
@@ -454,7 +462,9 @@ fn token_from_name(name: string, span: SourceSpan?) -> Token? {
 fn make_duplicate_symbol_diagnostic(name: string, kind: string, token: Token?) -> Diagnostic {
     return Diagnostic {
         code: "E0001",
+        severity: "error",
         message: "duplicate " + kind + " `" + name + "` declared",
+        file_path: "",
         primary: token
     };
 }
@@ -474,9 +484,11 @@ fn detect_removed_ai_keyword(text: string) -> string {
 fn make_removed_keyword_diagnostic(keyword: string) -> Diagnostic {
     return Diagnostic {
         code: "E0410",
+        severity: "error",
         message: "`" + keyword + "` block syntax was removed from the language;"
             + " AI functionality is planned for the post-1.0 `sfn/ai` library"
             + " capsule and the `![model]` effect remains as the capability gate",
+        file_path: "",
         primary: null
     };
 }
@@ -484,10 +496,12 @@ fn make_removed_keyword_diagnostic(keyword: string) -> Diagnostic {
 fn make_missing_interface_member_diagnostic(struct_name: string, interface_name: string, member_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0301",
+        severity: "error",
         message: "struct " + struct_name + " implements " + interface_name
             + " but is missing member `"
             + member_name
             + "`",
+        file_path: "",
         primary: null
     };
 }

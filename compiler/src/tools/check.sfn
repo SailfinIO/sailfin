@@ -92,7 +92,13 @@ fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
     }
 
     let code = _code_for_missing_effect(violation.missing_effects, violation.requirements);
-    return Diagnostic { code: code, message: message, primary: null };
+    return Diagnostic {
+        code: code,
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: null
+    };
 }
 
 // -------------------------------------------------------------------
