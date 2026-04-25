@@ -30,10 +30,8 @@ import {
 import {
     parse_native_artifact,
     parse_native_bindings_from_text,
-    parse_native_enums_for_import,
     parse_native_function_count_from_text,
-    parse_native_functions_from_text,
-    parse_native_structs_for_import
+    parse_native_functions_from_text
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 import {
@@ -67,7 +65,6 @@ import {
 import {
     collect_defined_function_symbols,
     extend_native_enums,
-    extend_native_functions,
     extend_native_interfaces,
     extend_native_structs,
     is_test_module_slug,
@@ -89,11 +86,7 @@ import {
     write_llvm_lines_chunked
 } from "./lowering_io";
 import { lower_all_functions } from "./lowering_phase_functions";
-import {
-    extract_import_struct_methods,
-    parse_single_import_functions,
-    parse_single_import_interfaces
-} from "./lowering_phase_imports";
+import { gather_imported_module_symbols } from "./lowering_phase_imports";
 import { render_llvm_preamble } from "./lowering_phase_render";
 // Phase modules
 import {
@@ -377,59 +370,16 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         print.err("test llvm: phase=manifest ms=" + number_to_string(monotonic_millis() - start_ms));
     }
 
-    let mut imported_structs: NativeStruct[] = [];
-    let mut imported_enums: NativeEnum[] = [];
-    let mut imported_interfaces: NativeInterface[] = [];
-    let mut imported_functions: NativeFunction[] = [];
-    let mut imported_struct_methods: NativeFunction[] = [];
-
-    let manifest_count = safe_imported_manifests.length;
-    let mut text_index: number = 0;
-    loop {
-        if text_index >= safe_imported_native_texts.length { break; }
-        let native_text = safe_imported_native_texts[text_index];
-        let mut manifest_for_module: LayoutManifest? = null;
-        if text_index < manifest_count {
-            manifest_for_module = safe_imported_manifests[text_index];
-        }
-        if native_text.length == 0 {
-            if manifest_for_module != null {
-                let manifest_only = manifest_for_module;
-                imported_structs = extend_native_structs(imported_structs, manifest_only.structs);
-                imported_enums = extend_native_enums(imported_enums, manifest_only.enums);
-            }
-            text_index += 1;
-            continue;
-        }
-        // Single-pass: parse structs+enums once, apply manifest once
-        let imported_structs_safe = parse_native_structs_for_import(native_text);
-        let imported_enums_safe = parse_native_enums_for_import(native_text);
-        let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
-        let mut applied_structs = applied_import.structs;
-        if applied_structs == null { applied_structs = []; }
-        let mut applied_enums = applied_import.enums;
-        if applied_enums == null { applied_enums = []; }
-        let applied_interfaces = parse_single_import_interfaces(native_text);
-        let applied_functions = parse_single_import_functions(native_text);
-        imported_structs = extend_native_structs(imported_structs, applied_structs);
-        imported_enums = extend_native_enums(imported_enums, applied_enums);
-        imported_interfaces = extend_native_interfaces(imported_interfaces, applied_interfaces);
-        imported_functions = extend_native_functions(imported_functions, applied_functions);
-        let imported_methods = extract_import_struct_methods(applied_structs);
-        imported_struct_methods = extend_native_functions(imported_struct_methods, imported_methods);
-        text_index += 1;
-    }
-
-    if safe_imported_native_texts.length < manifest_count {
-        let mut manifest_index: number = safe_imported_native_texts.length;
-        loop {
-            if manifest_index >= manifest_count { break; }
-            let leftover_manifest = safe_imported_manifests[manifest_index];
-            imported_structs = extend_native_structs(imported_structs, leftover_manifest.structs);
-            imported_enums = extend_native_enums(imported_enums, leftover_manifest.enums);
-            manifest_index += 1;
-        }
-    }
+    // Phase 2 body extracted to lowering_phase_imports.sfn::gather_imported_module_symbols.
+    // Immediate destructure into locals matches the PR #229 "same-module
+    // destructure before downstream use" pattern that closed the April 21
+    // ParseNativeResult cross-module ABI SEGV.
+    let imported_syms = gather_imported_module_symbols(safe_imported_native_texts, safe_imported_manifests);
+    let imported_structs = imported_syms.structs;
+    let imported_enums = imported_syms.enums;
+    let imported_interfaces = imported_syms.interfaces;
+    let imported_functions = imported_syms.functions;
+    let imported_struct_methods = imported_syms.struct_methods;
 
     if debug_lowering { print.err("emit-llvm: phase=imports"); }
 

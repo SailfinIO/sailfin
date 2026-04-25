@@ -1,17 +1,46 @@
 // compiler/src/llvm/lowering/lowering_phase_imports.sfn
 //
-// Phase 2 of LLVM lowering: helpers for imported module context.
+// Phase 2 of LLVM lowering: imported-module context gathering.
 //
-// Extracted from lowering_core.sfn to reduce per-file memory footprint.
-// The main import gathering loop lives in lowering_core.sfn (orchestrator)
-// to avoid duplicate parsing.  This module provides thin wrappers used
-// by the orchestrator for individual parse operations.
-import { NativeFunction, NativeInterface, NativeStruct } from "../../native_ir";
+// Extracted from lowering_core.sfn to reduce its per-module compile peak
+// RSS — moving the gather loop here removes ~6 sibling-module imports
+// (parse_native_*_for_import, apply_layout_manifest_to_module,
+// extend_native_functions) from the orchestrator's import set.
 import {
+    LayoutManifest,
+    NativeEnum,
+    NativeFunction,
+    NativeInterface,
+    NativeStruct
+} from "../../native_ir";
+import {
+    parse_native_enums_for_import,
     parse_native_functions_for_import,
-    parse_native_interfaces_for_import
+    parse_native_interfaces_for_import,
+    parse_native_structs_for_import
 } from "../../native_ir_api";
+import { apply_layout_manifest_to_module } from "../imports";
+import {
+    extend_native_enums,
+    extend_native_functions,
+    extend_native_interfaces,
+    extend_native_structs
+} from "./lowering_helpers";
 import { flatten_struct_methods } from "./lowering_helpers_mangling";
+
+// Flat-array bundle of everything the imported modules contribute to the
+// compile — structs, enums, interfaces, functions, and struct methods.
+// Consumed once by lowering_core.sfn's orchestrator, which immediately
+// destructures into local variables.  Distinct from the unrelated
+// `ImportedModuleContext` in llvm/types.sfn (manifests/native_texts/
+// diagnostics); the two types serve different phases of the pipeline.
+struct ImportedModuleSymbols {
+    structs: NativeStruct[];
+    enums: NativeEnum[];
+    interfaces: NativeInterface[];
+    functions: NativeFunction[];
+    struct_methods: NativeFunction[];
+}
 
 // Parse imported interfaces from a single import text.
 fn parse_single_import_interfaces(native_text: string) -> NativeInterface[] {
@@ -26,4 +55,74 @@ fn parse_single_import_functions(native_text: string) -> NativeFunction[] {
 // Extract struct methods from applied structs.
 fn extract_import_struct_methods(applied_structs: NativeStruct[]) -> NativeFunction[] {
     return flatten_struct_methods(applied_structs);
+}
+
+// Gather the per-import contribution (structs/enums/interfaces/functions/
+// struct-methods) for the whole import list.  Pure code-move from
+// lowering_core.sfn's Phase 2 loop; semantics are byte-for-byte preserved,
+// including the intentional drop of apply_layout_manifest_to_module's
+// diagnostics field (the same-module call in lowering_core still captures
+// them for local manifest application).
+fn gather_imported_module_symbols(safe_imported_native_texts: string[], safe_imported_manifests: LayoutManifest[]) -> ImportedModuleSymbols {
+    let mut imported_structs: NativeStruct[] = [];
+    let mut imported_enums: NativeEnum[] = [];
+    let mut imported_interfaces: NativeInterface[] = [];
+    let mut imported_functions: NativeFunction[] = [];
+    let mut imported_struct_methods: NativeFunction[] = [];
+
+    let manifest_count = safe_imported_manifests.length;
+    let mut text_index: number = 0;
+    loop {
+        if text_index >= safe_imported_native_texts.length { break; }
+        let native_text = safe_imported_native_texts[text_index];
+        let mut manifest_for_module: LayoutManifest? = null;
+        if text_index < manifest_count {
+            manifest_for_module = safe_imported_manifests[text_index];
+        }
+        if native_text.length == 0 {
+            if manifest_for_module != null {
+                let manifest_only = manifest_for_module;
+                imported_structs = extend_native_structs(imported_structs, manifest_only.structs);
+                imported_enums = extend_native_enums(imported_enums, manifest_only.enums);
+            }
+            text_index += 1;
+            continue;
+        }
+        // Single-pass: parse structs+enums once, apply manifest once
+        let imported_structs_safe = parse_native_structs_for_import(native_text);
+        let imported_enums_safe = parse_native_enums_for_import(native_text);
+        let applied_import = apply_layout_manifest_to_module(imported_structs_safe, imported_enums_safe, manifest_for_module);
+        let mut applied_structs = applied_import.structs;
+        if applied_structs == null { applied_structs = []; }
+        let mut applied_enums = applied_import.enums;
+        if applied_enums == null { applied_enums = []; }
+        let applied_interfaces = parse_single_import_interfaces(native_text);
+        let applied_functions = parse_single_import_functions(native_text);
+        imported_structs = extend_native_structs(imported_structs, applied_structs);
+        imported_enums = extend_native_enums(imported_enums, applied_enums);
+        imported_interfaces = extend_native_interfaces(imported_interfaces, applied_interfaces);
+        imported_functions = extend_native_functions(imported_functions, applied_functions);
+        let imported_methods = extract_import_struct_methods(applied_structs);
+        imported_struct_methods = extend_native_functions(imported_struct_methods, imported_methods);
+        text_index += 1;
+    }
+
+    if safe_imported_native_texts.length < manifest_count {
+        let mut manifest_index: number = safe_imported_native_texts.length;
+        loop {
+            if manifest_index >= manifest_count { break; }
+            let leftover_manifest = safe_imported_manifests[manifest_index];
+            imported_structs = extend_native_structs(imported_structs, leftover_manifest.structs);
+            imported_enums = extend_native_enums(imported_enums, leftover_manifest.enums);
+            manifest_index += 1;
+        }
+    }
+
+    return ImportedModuleSymbols {
+        structs: imported_structs,
+        enums: imported_enums,
+        interfaces: imported_interfaces,
+        functions: imported_functions,
+        struct_methods: imported_struct_methods
+    };
 }
