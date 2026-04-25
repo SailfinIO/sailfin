@@ -1,0 +1,160 @@
+// compiler/src/typecheck_imports.sfn
+//
+// Bridge between the native-IR import-context layer and the typechecker's
+// AST-level symbol model. Lets the typechecker see interface declarations
+// from imported modules so cross-module `implements` clauses are
+// conformance-checked against their actual interface definitions.
+//
+// Today the textual import inliner used by `sfn check` brings imported
+// interfaces into the typechecker's `interfaces` list as a side effect of
+// concatenating sources. As that inliner retires (Stage B PR2 of the
+// unified-build architecture), the typechecker needs an explicit channel
+// for cross-module interface info. This module is that channel.
+//
+// Scope of this module:
+// - Pure converters from native-IR shapes (`NativeInterface`,
+//   `NativeInterfaceSignature`, `NativeParameter`) to AST shapes
+//   (`Statement.InterfaceDeclaration`, `FunctionSignature`, `Parameter`).
+// - No I/O. The companion I/O wrapper (added alongside the new typecheck
+//   entry point) lives in the same file once it lands; for now this
+//   module is converter-only so it can be exercised by unit tests
+//   without touching the filesystem.
+//
+// See docs/proposals/check-architecture.md and
+// docs/proposals/build-architecture.md (Stage B PR2) for the design
+// rationale.
+import {
+    Decorator,
+    FunctionSignature,
+    Parameter,
+    Statement,
+    TypeAnnotation,
+    TypeParameter
+} from "./ast";
+import {
+    NativeInterface,
+    NativeInterfaceSignature,
+    NativeParameter
+} from "./native_ir";
+
+// -------------------------------------------------------------------
+// Field-level converters
+// -------------------------------------------------------------------
+
+fn _type_annotation_or_null_from_text(text: string) -> TypeAnnotation? {
+    if text.length == 0 { return null; }
+    return TypeAnnotation { text: text };
+}
+
+fn parameter_from_native(native: NativeParameter) -> Parameter {
+    let annotation: TypeAnnotation? = _type_annotation_or_null_from_text(native.type_annotation);
+    return Parameter {
+        name: native.name,
+        type_annotation: annotation,
+        default_value: null,
+        mutable: native.mutable,
+        span: null
+    };
+}
+
+fn parameters_from_native(natives: NativeParameter[]) -> Parameter[] {
+    let mut out: Parameter[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= natives.length { break; }
+        out.push(parameter_from_native(natives[i]));
+        i += 1;
+    }
+    return out;
+}
+
+fn type_parameter_from_name(name: string) -> TypeParameter {
+    return TypeParameter {
+        name: name,
+        bound: null,
+        span: null
+    };
+}
+
+fn type_parameters_from_names(names: string[]) -> TypeParameter[] {
+    let mut out: TypeParameter[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= names.length { break; }
+        out.push(type_parameter_from_name(names[i]));
+        i += 1;
+    }
+    return out;
+}
+
+fn _copy_string_array(items: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= items.length { break; }
+        out.push(items[i]);
+        i += 1;
+    }
+    return out;
+}
+
+fn function_signature_from_native_interface_signature(native: NativeInterfaceSignature) -> FunctionSignature {
+    let return_type: TypeAnnotation? = _type_annotation_or_null_from_text(native.return_type);
+    return FunctionSignature {
+        name: native.name,
+        is_async: native.is_async,
+        parameters: parameters_from_native(native.parameters),
+        return_type: return_type,
+        effects: _copy_string_array(native.effects),
+        type_parameters: type_parameters_from_names(native.type_parameters),
+        name_span: null
+    };
+}
+
+fn function_signatures_from_native(signatures: NativeInterfaceSignature[]) -> FunctionSignature[] {
+    let mut out: FunctionSignature[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= signatures.length { break; }
+        out.push(function_signature_from_native_interface_signature(signatures[i]));
+        i += 1;
+    }
+    return out;
+}
+
+// -------------------------------------------------------------------
+// Top-level converter
+// -------------------------------------------------------------------
+
+fn interface_statement_from_native(native: NativeInterface) -> Statement {
+    let empty_decorators: Decorator[] = [];
+    return Statement.InterfaceDeclaration {
+        name: native.name,
+        name_span: null,
+        type_parameters: type_parameters_from_names(native.type_parameters),
+        members: function_signatures_from_native(native.signatures),
+        decorators: empty_decorators
+    };
+}
+
+fn interfaces_from_native(natives: NativeInterface[]) -> Statement[] {
+    let mut out: Statement[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= natives.length { break; }
+        out.push(interface_statement_from_native(natives[i]));
+        i += 1;
+    }
+    return out;
+}
+
+export {
+    function_signature_from_native_interface_signature,
+    function_signatures_from_native,
+    interface_statement_from_native,
+    interfaces_from_native,
+    parameter_from_native,
+    parameters_from_native,
+    type_parameter_from_name,
+    type_parameters_from_names
+};

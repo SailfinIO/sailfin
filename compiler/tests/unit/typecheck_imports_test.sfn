@@ -1,0 +1,256 @@
+// Unit tests for compiler/src/typecheck_imports.sfn — pure converters
+// from native-IR interface descriptors to AST statements.
+//
+// Tests construct NativeInterface / NativeInterfaceSignature /
+// NativeParameter values via small helper functions. The helpers wrap
+// the struct literals so test bodies stay flat (some seed compilers
+// previously segfaulted on deeply nested struct-literal initialisers in
+// test bodies — see check_tool_test.sfn preamble).
+//
+// See docs/proposals/check-architecture.md.
+
+import {
+    NativeInterface,
+    NativeInterfaceSignature,
+    NativeParameter
+} from "../../src/native_ir";
+import {
+    interface_statement_from_native,
+    interfaces_from_native,
+    parameter_from_native,
+    type_parameter_from_name
+} from "../../src/typecheck_imports";
+
+// -------------------------------------------------------------------
+// Builder helpers (avoid nested struct literals in test bodies)
+// -------------------------------------------------------------------
+
+fn _make_native_parameter(name: string, type_annotation: string, mutable: boolean) -> NativeParameter {
+    return NativeParameter {
+        name: name,
+        type_annotation: type_annotation,
+        mutable: mutable,
+        default_value: null,
+        span: null
+    };
+}
+
+fn _make_native_interface_signature_no_params(name: string, return_type: string) -> NativeInterfaceSignature {
+    let no_params: NativeParameter[] = [];
+    let no_type_params: string[] = [];
+    let no_effects: string[] = [];
+    return NativeInterfaceSignature {
+        name: name,
+        is_async: false,
+        type_parameters: no_type_params,
+        parameters: no_params,
+        return_type: return_type,
+        effects: no_effects
+    };
+}
+
+fn _make_native_interface_signature_with(name: string, params: NativeParameter[], return_type: string, effects: string[]) -> NativeInterfaceSignature {
+    let no_type_params: string[] = [];
+    return NativeInterfaceSignature {
+        name: name,
+        is_async: false,
+        type_parameters: no_type_params,
+        parameters: params,
+        return_type: return_type,
+        effects: effects
+    };
+}
+
+fn _make_native_interface(name: string, type_parameters: string[], signatures: NativeInterfaceSignature[]) -> NativeInterface {
+    return NativeInterface {
+        name: name,
+        type_parameters: type_parameters,
+        signatures: signatures
+    };
+}
+
+// -------------------------------------------------------------------
+// Tests — parameter_from_native
+// -------------------------------------------------------------------
+
+test "typecheck_imports: parameter copies name and mutable" {
+    let native = _make_native_parameter("count", "number", true);
+    let converted = parameter_from_native(native);
+    assert strings_equal(converted.name, "count");
+    assert converted.mutable == true;
+}
+
+test "typecheck_imports: parameter wraps non-empty type annotation" {
+    let native = _make_native_parameter("payload", "Order", false);
+    let converted = parameter_from_native(native);
+    assert converted.type_annotation != null;
+    assert strings_equal(converted.type_annotation.text, "Order");
+}
+
+test "typecheck_imports: parameter leaves blank type annotation null" {
+    let native = _make_native_parameter("anon", "", false);
+    let converted = parameter_from_native(native);
+    assert converted.type_annotation == null;
+}
+
+test "typecheck_imports: parameter clears default and span" {
+    let native = _make_native_parameter("x", "number", false);
+    let converted = parameter_from_native(native);
+    assert converted.default_value == null;
+    assert converted.span == null;
+}
+
+// -------------------------------------------------------------------
+// Tests — type_parameter_from_name
+// -------------------------------------------------------------------
+
+test "typecheck_imports: type parameter preserves name" {
+    let tp = type_parameter_from_name("T");
+    assert strings_equal(tp.name, "T");
+    assert tp.bound == null;
+    assert tp.span == null;
+}
+
+// -------------------------------------------------------------------
+// Tests — interface_statement_from_native (single interface)
+// -------------------------------------------------------------------
+
+test "typecheck_imports: interface preserves name and variant" {
+    let no_type_params: string[] = [];
+    let no_sigs: NativeInterfaceSignature[] = [];
+    let native = _make_native_interface("Closeable", no_type_params, no_sigs);
+    let stmt = interface_statement_from_native(native);
+    assert strings_equal(stmt.variant, "InterfaceDeclaration");
+    assert strings_equal(stmt.name, "Closeable");
+}
+
+test "typecheck_imports: interface with no members yields empty members" {
+    let no_type_params: string[] = [];
+    let no_sigs: NativeInterfaceSignature[] = [];
+    let native = _make_native_interface("Empty", no_type_params, no_sigs);
+    let stmt = interface_statement_from_native(native);
+    assert stmt.members.length == 0;
+    assert stmt.type_parameters.length == 0;
+}
+
+test "typecheck_imports: interface with members preserves member names" {
+    let sig_a = _make_native_interface_signature_no_params("close", "void");
+    let sig_b = _make_native_interface_signature_no_params("flush", "void");
+    let sigs: NativeInterfaceSignature[] = [sig_a, sig_b];
+    let no_type_params: string[] = [];
+    let native = _make_native_interface("Closeable", no_type_params, sigs);
+
+    let stmt = interface_statement_from_native(native);
+    assert stmt.members.length == 2;
+    assert strings_equal(stmt.members[0].name, "close");
+    assert strings_equal(stmt.members[1].name, "flush");
+}
+
+test "typecheck_imports: interface preserves type parameter arity" {
+    let no_sigs: NativeInterfaceSignature[] = [];
+    let type_params: string[] = ["T", "E"];
+    let native = _make_native_interface("Result", type_params, no_sigs);
+
+    let stmt = interface_statement_from_native(native);
+    assert stmt.type_parameters.length == 2;
+    assert strings_equal(stmt.type_parameters[0].name, "T");
+    assert strings_equal(stmt.type_parameters[1].name, "E");
+}
+
+test "typecheck_imports: interface decorators default to empty" {
+    let no_type_params: string[] = [];
+    let no_sigs: NativeInterfaceSignature[] = [];
+    let native = _make_native_interface("Closeable", no_type_params, no_sigs);
+    let stmt = interface_statement_from_native(native);
+    assert stmt.decorators.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Tests — member signature fidelity
+// -------------------------------------------------------------------
+
+test "typecheck_imports: member signature roundtrips parameters" {
+    let p_a = _make_native_parameter("buf", "Bytes", false);
+    let p_b = _make_native_parameter("len", "number", false);
+    let params: NativeParameter[] = [p_a, p_b];
+    let no_effects: string[] = [];
+    let sig = _make_native_interface_signature_with("write", params, "number", no_effects);
+    let sigs: NativeInterfaceSignature[] = [sig];
+    let no_type_params: string[] = [];
+    let native = _make_native_interface("Writer", no_type_params, sigs);
+
+    let stmt = interface_statement_from_native(native);
+    assert stmt.members.length == 1;
+    let member = stmt.members[0];
+    assert member.parameters.length == 2;
+    assert strings_equal(member.parameters[0].name, "buf");
+    assert strings_equal(member.parameters[1].name, "len");
+    assert strings_equal(member.parameters[0].type_annotation.text, "Bytes");
+}
+
+test "typecheck_imports: member signature preserves effects" {
+    let no_params: NativeParameter[] = [];
+    let effects: string[] = ["io", "net"];
+    let sig = _make_native_interface_signature_with("send", no_params, "void", effects);
+    let sigs: NativeInterfaceSignature[] = [sig];
+    let no_type_params: string[] = [];
+    let native = _make_native_interface("Channel", no_type_params, sigs);
+
+    let stmt = interface_statement_from_native(native);
+    let member = stmt.members[0];
+    assert member.effects.length == 2;
+    assert strings_equal(member.effects[0], "io");
+    assert strings_equal(member.effects[1], "net");
+}
+
+test "typecheck_imports: member signature wraps return type when present" {
+    let no_params: NativeParameter[] = [];
+    let no_effects: string[] = [];
+    let sig = _make_native_interface_signature_with("name", no_params, "string", no_effects);
+    let sigs: NativeInterfaceSignature[] = [sig];
+    let no_type_params: string[] = [];
+    let native = _make_native_interface("Named", no_type_params, sigs);
+
+    let stmt = interface_statement_from_native(native);
+    let member = stmt.members[0];
+    assert member.return_type != null;
+    assert strings_equal(member.return_type.text, "string");
+}
+
+test "typecheck_imports: member signature leaves empty return type null" {
+    let no_params: NativeParameter[] = [];
+    let no_effects: string[] = [];
+    let sig = _make_native_interface_signature_with("init", no_params, "", no_effects);
+    let sigs: NativeInterfaceSignature[] = [sig];
+    let no_type_params: string[] = [];
+    let native = _make_native_interface("Bootstrappable", no_type_params, sigs);
+
+    let stmt = interface_statement_from_native(native);
+    let member = stmt.members[0];
+    assert member.return_type == null;
+}
+
+// -------------------------------------------------------------------
+// Tests — interfaces_from_native (batch)
+// -------------------------------------------------------------------
+
+test "typecheck_imports: empty native list yields empty statements" {
+    let empty: NativeInterface[] = [];
+    let result = interfaces_from_native(empty);
+    assert result.length == 0;
+}
+
+test "typecheck_imports: multiple natives are converted in order" {
+    let no_type_params: string[] = [];
+    let no_sigs: NativeInterfaceSignature[] = [];
+    let a = _make_native_interface("A", no_type_params, no_sigs);
+    let b = _make_native_interface("B", no_type_params, no_sigs);
+    let c = _make_native_interface("C", no_type_params, no_sigs);
+    let natives: NativeInterface[] = [a, b, c];
+
+    let result = interfaces_from_native(natives);
+    assert result.length == 3;
+    assert strings_equal(result[0].name, "A");
+    assert strings_equal(result[1].name, "B");
+    assert strings_equal(result[2].name, "C");
+}
