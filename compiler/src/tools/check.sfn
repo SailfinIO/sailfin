@@ -231,25 +231,21 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     let source_lines = split_source_lines(source);
     let mut combined: Diagnostic[] = [];
     let mut rendered: string[] = [];
+    let mut errors: number = 0;
 
-    // Stamp the originating module path onto each typecheck diagnostic so
-    // the renderer can drop its single-file assumption. Factories mint
-    // diagnostics with an empty file_path; this is the single point that
-    // knows which module is currently being analyzed.
+    // Stamp the originating module path onto each typecheck diagnostic
+    // and render it in one pass. Factories mint diagnostics with an
+    // empty file_path; this is the single point that knows which
+    // module is currently being analyzed.
     let mut ti: number = 0;
     loop {
         if ti >= type_diags.length { break; }
         type_diags[ti].file_path = file_path;
-        ti += 1;
-    }
-
-    let mut ri: number = 0;
-    loop {
-        if ri >= type_diags.length { break; }
-        let diag = type_diags[ri];
+        let diag = type_diags[ti];
         combined.push(diag);
         rendered.push(render_diagnostic(diag, source_lines, "typecheck"));
-        ri += 1;
+        if strings_equal(diag.severity, "error") { errors += 1; }
+        ti += 1;
     }
 
     let mut ei: number = 0;
@@ -259,6 +255,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         diag.file_path = file_path;
         combined.push(diag);
         rendered.push(render_diagnostic(diag, source_lines, "effect"));
+        if strings_equal(diag.severity, "error") { errors += 1; }
         ei += 1;
     }
 
@@ -266,7 +263,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         file_path: file_path,
         diagnostics: combined,
         rendered: rendered,
-        error_count: combined.length
+        error_count: errors
     };
 }
 
