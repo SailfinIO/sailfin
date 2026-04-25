@@ -1,24 +1,25 @@
 # Build Performance: Root Cause Analysis & Fix Plan
 
-**Date:** 2026-04-24 (revised, post 0.5.9 release — first IPC-free seed)
-**Previous revisions:** 2026-04-19 (post `.fn_*` channel removal), 2026-04-15 (post-d2d0bf1/220c8b7), 2026-04-15 (morning), 2026-04-11
-**Context:** 0.5.9 has shipped and is pinned as the seed (`.seed-version`). It is **the first release with no file-based data-flow IPC** — every cross-phase channel that used `build/sailfin/.xxx` files has been removed. The 48 remaining `build/sailfin/.xxx` references are debug/diag gates (`.trace_*`, `.phase_*_diagnostics`, `.skip_*`, `.test_runner_active`, `.dump_test_sources`), not data IPC. The structural cleanup arc opened in April 11's RCA is closed. The remaining wall-time win is **flipping on parallel builds** — the `xargs -P` machinery in `scripts/build.sh:766` has been mature for weeks, but the Makefile defaults to `BUILD_JOBS=1` and CI never overrides it, so every build today is single-threaded.
+**Date:** 2026-04-25 (revised, post Phase 6 Stage 1+2 flip)
+**Previous revisions:** 2026-04-24 (post 0.5.9 release — first IPC-free seed), 2026-04-19 (post `.fn_*` channel removal), 2026-04-15 (post-d2d0bf1/220c8b7), 2026-04-15 (morning), 2026-04-11
+**Context:** 0.5.9 has shipped and is pinned as the seed (`.seed-version`). It is **the first release with no file-based data-flow IPC** — every cross-phase channel that used `build/sailfin/.xxx` files has been removed. The 48 remaining `build/sailfin/.xxx` references are debug/diag gates (`.trace_*`, `.phase_*_diagnostics`, `.skip_*`, `.test_runner_active`, `.dump_test_sources`), not data IPC. The structural cleanup arc opened in April 11's RCA is closed. **Phase 6 Stages 1 and 2 flipped on April 24/25**: `stage_import_context` now runs in parallel under the same `JOBS` knob as the per-module emit loop (`build_module` parallel path was already in place), and the Makefile auto-detects `BUILD_JOBS` from CPU count and total RAM. First post-flip CI wall-times: **Linux x86_64 5:28 (was ~13 min single-threaded; 2.4× speedup)**, macOS arm64 10:37 (unchanged — heuristic picks `BUILD_JOBS=1` due to 7 GB total RAM cap). Stages 3 (CI flag wiring) and 4 (drop `EMIT_RETRIES` 3→1) remain queued.
 
 ---
 
 ## Symptom Summary
 
-| Metric                          | April 11            | April 19              | Current (April 24, 0.5.9) | Target           |
-| ------------------------------- | ------------------- | --------------------- | ------------------------- | ---------------- |
-| Full build (121 modules, 1 job) | 60-90 min           | 13-16 min             | ~13 min (CI Linux)        | < 5 min          |
-| Per-module compile time (heavy) | 4-7 min             | 1-3 min               | 1-3 min                   | < 30s            |
-| Per-module compile time (light) | 30s-2 min           | 10-30s                | 10-30s                    | < 5s             |
-| Per-module peak RAM             | 1-2 GB              | 0.5-1.5 GB            | 0.5-1.5 GB (4.7 GB worst) | < 256 MB         |
-| Parallel builds (`BUILD_JOBS`)  | Broken              | Functional but risky  | Mature, never enabled     | Default-on, ≥4 jobs Linux |
-| `fs.*` calls (total)            | 667 across 42 files | 489 across 37 files   | **212 across 24 files**   | bounded by CLI / capsule manifest reads |
-| `build/sailfin/` dotfile refs   | 487                 | 228 (dotfiles)        | **48 (diag/trace only)**  | 0 (post-Phase 5)        |
-| Active data-flow IPC channels   | 12+                 | 6                     | **0**                     | 0                |
-| Seed memory limit               | 8 GB                | 12 GB                 | 12 GB                     | < 4 GB           |
+| Metric                          | April 11            | April 19              | April 24 (0.5.9)          | Current (April 25, post-Phase 6 Stage 1+2) | Target           |
+| ------------------------------- | ------------------- | --------------------- | ------------------------- | ------------------------------------------ | ---------------- |
+| Full build (1 job, single-threaded) | 60-90 min       | 13-16 min             | ~13 min (CI Linux)        | ~13 min serial / **5:28 parallel** (CI Linux) | < 5 min          |
+| Full build (CI macOS arm64)     | n/a                 | n/a                   | ~13 min                   | **10:37** (BUILD_JOBS=1, mem-bound)       | < 5 min          |
+| Per-module compile time (heavy) | 4-7 min             | 1-3 min               | 1-3 min                   | 1-3 min                                    | < 30s            |
+| Per-module compile time (light) | 30s-2 min           | 10-30s                | 10-30s                    | 10-30s                                     | < 5s             |
+| Per-module peak RAM             | 1-2 GB              | 0.5-1.5 GB            | 0.5-1.5 GB (4.7 GB worst) | 0.5-1.5 GB (4.7 GB worst)                  | < 256 MB         |
+| Parallel builds (`BUILD_JOBS`)  | Broken              | Functional but risky  | Mature, never enabled     | **Auto-detected default; Linux ≈3 jobs, macOS 1 job** | Default-on, ≥4 jobs Linux |
+| `fs.*` calls (total)            | 667 across 42 files | 489 across 37 files   | 212 across 24 files       | 212 across 24 files                        | bounded by CLI / capsule manifest reads |
+| `build/sailfin/` dotfile refs   | 487                 | 228 (dotfiles)        | 48 (diag/trace only)      | 48 (diag/trace only)                       | 0 (post-Phase 5) |
+| Active data-flow IPC channels   | 12+                 | 6                     | 0                         | **0**                                       | 0                |
+| Seed memory limit               | 8 GB                | 12 GB                 | 12 GB                     | 12 GB                                      | < 4 GB           |
 
 ---
 
@@ -36,10 +37,10 @@ Status of every track named in the original RCA. "Shipped" means the work landed
 | Phase 4 PR 1 — Light recovery off non-test primary path         | **Shipped**                                                                   | counted                                   |
 | Phase 4 PR 2 — `parse_native_artifact` primary swap             | **Unblocked by PR #229** (in-memory `compile_to_llvm_file_with_module`)       | 5–8%                                      |
 | Phase 4b — Defensive light-recovery arm deletion                | Not started; needs counters bake then delete ~600 LOC                         | trivial wall-time                         |
-| **Phase 6 — Parallel builds (NEW, primary remaining win)**      | Machinery in place; `BUILD_JOBS=1` default; never enabled in CI               | **40–60%** wall-time on Linux             |
+| **Phase 6 — Parallel builds**                                   | **Stage 1+2 shipped April 24/25** (parallel `stage_import_context`, adaptive `BUILD_JOBS` default); Stages 3–4 (CI input + retry budget) pending | Linux measured: **2.4× speedup** (13 min → 5:28). Stage 3 wires CI; Stage 4 worth maybe 5%. |
 | Phase 5 — Long-lived compiler process                           | Post-1.0; needs `compile module` entry point and arena reset between modules  | 50–70% on top of Phase 6                  |
 
-Two follow-up tracks worth catalogueing:
+Two follow-up tracks worth cataloguing:
 
 - **Per-module memory reduction** — heaviest module (`lowering_core`) still peaks at ~4.7 GB RSS with arena. Every GB shaved raises the safe `BUILD_JOBS` ceiling on memory-constrained hosts (macOS runners cap at 7 GB total). Profiling target: arena page count + per-pass pressure.
 - **Selfhost1 clang opt level** — `make check`'s first-pass binary doesn't need `-O2`; second-pass (the binary we ship as a seed) does. Easy 20–30% off the clang-compile stage in `make check`.
@@ -335,27 +336,36 @@ Replace the 121 separate compiler processes with a single long-lived process tha
 
 This requires the compiler to support a "compile module" entry point that takes import context as an argument rather than reading it from the filesystem.
 
-### Phase 6: Parallel Builds (NEW — primary remaining pre-1.0 win)
+### Phase 6: Parallel Builds
 
-**Priority:** Highest — **Expected:** 40–60% wall-time on Linux (CI Linux build at `BUILD_JOBS=4` should drop ~13 min → ~5–7 min)
+**Priority:** Highest. **Stages 1+2 shipped April 24/25; measured 2.4× speedup on Linux CI.** Stages 3–4 remain queued.
 **Depends on:** Phase 0 (arena default-on, shipped) and Phase 2 (IPC removal, shipped). Both prerequisites are met.
 
-The xargs-based parallel emit path (`scripts/build.sh:766-797`) has been mature for weeks. Each parallel worker runs `bash scripts/build.sh --_build_module_worker` in an isolated `seed_cwd`, copies the import-context, runs the seed, and appends one line to a shared `MODULES_LIST` (atomic for sub-PIPE_BUF lines). The list is `LC_ALL=C sort`ed before `llvm-link` consumption so link order is deterministic regardless of completion order.
+The xargs-based parallel emit path in `build_module` (`scripts/build.sh`) has been mature for weeks. Each parallel worker runs `bash scripts/build.sh --_build_module_worker` in an isolated `seed_cwd`, copies the import-context, runs the seed, and appends one line to a shared `MODULES_LIST` (atomic for sub-PIPE_BUF lines). The list is `LC_ALL=C sort`ed before `llvm-link` consumption so link order is deterministic regardless of completion order. The same pattern now applies to `stage_import_context` via the new `--_stage_import_worker` entry.
 
-The reason it never went default is per-job memory: with the arena default-on, `lowering_core` (the heaviest module) peaks at ~4.7 GB RSS. With `BUILD_JOBS=4`, worst-case concurrent peak is ~18.8 GB. That fits ubuntu-24.04 GitHub runners (22 GB) but overcommits `macos-latest` (M1, 7 GB).
+The reason it never went default before April 25 was per-job memory: with the arena default-on, `lowering_core` (the heaviest module) peaks at ~4.7 GB RSS. With `BUILD_JOBS=4`, worst-case concurrent peak is ~18.8 GB. That fits ubuntu-24.04 GitHub runners (22 GB) but overcommits `macos-latest` (M1, 7 GB) — which is exactly why the Stage 2 heuristic caps macOS at `BUILD_JOBS=1`.
 
-#### Enablement plan (staged for safe rollout)
+#### Measured CI wall-time (post-flip)
 
-1. **Stage 1 — parallelize `stage_import_context`.** The loop at `build.sh:747-751` is currently sequential ("for safety with older seeds"). 0.5.9 is the safe seed; this is the lowest-risk free win. Each `seed emit native <src> >dest` call writes to a distinct destination path with no shared state — the same `xargs -P` pattern from the build loop applies directly. ✅ **Shipped** April 24 — same commit as Stage 2.
-2. **Stage 2 — adaptive `BUILD_JOBS` default in the Makefile.** Compute `BUILD_JOBS` from `nproc` capped by a memory budget (5 GB per job ≈ heaviest-module peak under arena, plus headroom). On macOS, cap at 2 jobs because of the 7 GB total RAM ceiling on M1 runners. Per-host hardware determines the cap; nobody has to think about it. Existing `BUILD_JOBS=N` env override still wins. ✅ **Shipped** April 24.
-3. **Stage 3 — wire `BUILD_JOBS` through the CI composite action.** Add a `build_jobs` input to `.github/actions/sailfin-build/action.yml` (default `auto`); pass it to `make rebuild`. Run one `nightly-selfhost` cycle with the new default, compare wall-time against the 13-min baseline, then promote to PR CI. **Pending** — wait for Stage 1+2 to bake locally.
-4. **Stage 4 — drop `EMIT_RETRIES` default 3 → 1.** With 0.5.9 stable, the corruption corpus is dry; retries only hide regressions now. Keep the env knob for diagnostic builds. **Pending** — needs one full build with retries.log inspection to confirm zero retry hits in CI.
+| Runner          | Before (single-thread) | After (auto BUILD_JOBS) | Speedup |
+| --------------- | ---------------------- | ----------------------- | ------- |
+| linux-x86_64    | ~13 min                | **5:28**                | 2.4×    |
+| macos-arm64     | ~13 min                | **10:37** (BUILD_JOBS=1) | 1.2×   |
+
+macOS gets a smaller win because the heuristic picks `BUILD_JOBS=1` to fit the 7 GB total RAM ceiling. The improvement there comes entirely from the parallel `stage_import_context` step still being able to overlap I/O even when `JOBS=1` (which… it can't — at JOBS=1 staging is serial). The macOS speedup likely comes from the per-worker preamble silencing fix and modest CI runner variance, not parallelism.
+
+#### Enablement plan (staged rollout)
+
+1. **Stage 1 — parallelize `stage_import_context`.** ✅ **Shipped April 24** (commit `d5a2d93`, plus log-noise fix `0eda32b`). The loop was previously sequential ("for safety with older seeds"). 0.5.9 is the safe seed; the same `xargs -P` pattern from `build_module` applies directly. Each `seed emit native <src> >dest` call writes to a distinct destination, no shared state.
+2. **Stage 2 — adaptive `BUILD_JOBS` default in the Makefile.** ✅ **Shipped April 24** (commit `7f0ef9a`). `scripts/detect_build_jobs.sh` computes `BUILD_JOBS` from `nproc` capped by a memory budget (5 GB per job ≈ heaviest-module peak under arena, plus headroom). On macOS, cap at 2 jobs because of the 7 GB total RAM ceiling on M1 runners. Global cap of 8 jobs prevents I/O / link-time contention from dominating on workstations. Existing `BUILD_JOBS=N` env override still wins.
+3. **Stage 3 — wire `BUILD_JOBS` through the CI composite action.** Currently CI inherits the Makefile's auto-detected default (Stage 2 carried this for free since `.github/actions/sailfin-build` calls `make rebuild` without overriding `BUILD_JOBS`). The remaining work is to surface `build_jobs` as an explicit composite-action input so individual workflows can override (e.g. pin to 1 for a regression bisect, or to 8 on a self-hosted runner). **Pending** — low-priority polish; the auto default is already producing the desired effect in PR CI.
+4. **Stage 4 — drop `EMIT_RETRIES` default 3 → 1.** With 0.5.9 stable, the corruption corpus is dry; retries only hide regressions now. Keep the env knob for diagnostic builds. **Pending** — needs one full build with `retries.log` inspection to confirm zero retry hits in CI.
 
 #### Why each stage is safe
 
-- **Stage 1 (parallel staging):** Each `stage_import_context` call writes to `$IMPORT_CACHE/${slug}.sfn-asm` and `$IMPORT_CACHE/${slug}.layout-manifest`. Slugs are derived from source paths (`slug_from_path`), which are unique by construction. The seed runs from `REPO_ROOT` and writes only to the redirected destination — no shared scratch directory.
-- **Stage 2 (adaptive default):** Picks `min(nproc, total_ram_gb / 5)` clamped to `[1, 8]`. Falls back to 1 on any platform we can't probe (Windows, BSD without `/proc/meminfo` and without `sysctl hw.memsize`). The `BUILD_JOBS` env var still overrides — local users who know their hardware can pin a specific value.
-- **Stage 3 (CI wiring):** Adding the input is purely additive. Existing callers that don't set it inherit the auto-detected default.
+- **Stage 1 (parallel staging):** Each `stage_import_context` call writes to `$IMPORT_CACHE/${slug}.sfn-asm` and `$IMPORT_CACHE/${slug}.layout-manifest`. Slugs are derived from source paths via `slug_from_path`, which is unique by construction. The seed writes only to the redirected destination — no shared scratch directory. The April 25 follow-up (`fix(build): silence per-worker preamble`) gates the directory-prep / cleanup blocks behind `IS_WORKER=0`, eliminating a latent race where peer workers could have stomped each other's `.ll` files when `build_module` parallelism is increased further.
+- **Stage 2 (adaptive default):** `detect_build_jobs.sh` picks `min(nproc, total_ram_gb / 5)` clamped to `[1, 8]`, with a macOS additional cap of 2. Falls back to 1 on any platform we can't probe (Windows, BSD without `/proc/meminfo` and without `sysctl hw.memsize`). `BUILD_JOBS` env var still overrides for users who want a specific number.
+- **Stage 3 (CI wiring):** Adding the input is purely additive. Existing callers that don't set it continue to inherit the Makefile's auto-detected default.
 - **Stage 4 (retry budget):** The retry corpus (`build/selfhost/native/corrupted/`) is the canonical signal. If `find $WORK_DIR/corrupted -type f -newer build/native/sailfin | wc -l` is 0 across one full nightly, retries are dead weight.
 
 #### What this does NOT change

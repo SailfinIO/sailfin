@@ -55,6 +55,13 @@ case "$uname_s" in
         ;;
 esac
 
+# Global upper bound. Matches the [1, 8] contract documented in
+# docs/build-performance.md → Phase 6. Without this, a 32-core / 256 GB
+# workstation would emit 32 — well past the point of diminishing returns
+# for a 121-module build, and risks I/O contention plus llvm-link
+# memory pressure dominating wall-time.
+[ "$jobs" -gt 8 ] && jobs=8
+
 [ "$jobs" -lt 1 ] && jobs=1
 
 echo "$jobs"
