@@ -12,10 +12,10 @@ struct SailToml {
     capabilities: string[];
     // Stage A additions (parse-only; no consumers yet — see
     // docs/proposals/build-architecture.md, Part 5, Stage A).
-    build_kind: string;             // "binary" | "library" | "runtime" | ""
-    build_implicit: boolean;        // [build] implicit = true
-    workspace_members: string[];    // [workspace] members = [...]
-    exports: string[];              // [exports] modules = [...]
+    build_kind: string;  // "binary" | "library" | "runtime" | ""
+    build_implicit: boolean;  // [build] implicit = true
+    workspace_members: string[];  // [workspace] members = [...]
+    exports: string[];  // [exports] modules = [...]
 }
 
 struct TomlDependency {
@@ -271,7 +271,6 @@ fn toml_get_description(text: string) -> string {
 // These getters expose manifest fields the unified-build proposal
 // (docs/proposals/build-architecture.md, Stage A) adds to the schema.
 // Stage B will start consuming them; Stage A only verifies round-trip.
-
 fn toml_get_build_kind(text: string) -> string {
     let t = _parse_toml_internal(text);
     return t.build_kind;
@@ -336,7 +335,10 @@ fn toml_get_target_triples(text: string) -> string {
         let mut pi: number = 0;
         loop {
             if pi >= prefix.length { break; }
-            if section[pi] != prefix[pi] { matches = false; break; }
+            if section[pi] != prefix[pi] {
+                matches = false;
+                break;
+            }
             pi += 1;
         }
         if !matches { continue; }
@@ -539,9 +541,7 @@ fn _write_toml(toml: SailToml) -> string {
     if toml.build_kind.length > 0 {
         out = out + "kind = \"" + toml.build_kind + "\"\n";
     }
-    if toml.build_implicit {
-        out = out + "implicit = true\n";
-    }
+    if toml.build_implicit { out = out + "implicit = true\n"; }
     if toml.workspace_members.length > 0 {
         out = out + "\n[workspace]\n";
         out = out + "members = [";

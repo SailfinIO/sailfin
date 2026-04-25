@@ -5,7 +5,6 @@
 // [workspace].members, [exports].modules, and [targets.<triple>] fields.
 // No consumers exist yet — these tests exist to lock down the schema so
 // Stage B has a stable contract to lean on.
-
 import {
     toml_get_build_kind,
     toml_get_build_implicit,
@@ -20,9 +19,7 @@ import {
     toml_add_dependency
 } from "../../src/toml_parser";
 
-fn _str_eq(a: string, b: string) -> boolean {
-    return strings_equal(a, b);
-}
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
 
 fn _contains(haystack: string, needle: string) -> boolean {
     if needle.length == 0 { return true; }
@@ -47,7 +44,6 @@ fn _contains(haystack: string, needle: string) -> boolean {
 }
 
 // ---- [build].kind ----
-
 test "manifest: build.kind absent returns empty string" {
     let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.sfn\"\n";
     assert _str_eq(toml_get_build_kind(toml), "");
@@ -69,7 +65,6 @@ test "manifest: build.kind runtime parses" {
 }
 
 // ---- [build].implicit ----
-
 test "manifest: build.implicit absent defaults to false" {
     let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.sfn\"\n";
     assert toml_get_build_implicit(toml) == false;
@@ -86,7 +81,6 @@ test "manifest: build.implicit false parses" {
 }
 
 // ---- [workspace].members ----
-
 test "manifest: workspace.members absent returns empty string" {
     let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n";
     assert _str_eq(toml_get_workspace_members(toml), "");
@@ -113,7 +107,6 @@ test "manifest: workspace-only file (no [capsule]) parses" {
 }
 
 // ---- [exports].modules ----
-
 test "manifest: exports.modules absent returns empty string" {
     let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n";
     assert _str_eq(toml_get_exports(toml), "");
@@ -127,7 +120,6 @@ test "manifest: exports.modules parses newline-separated" {
 }
 
 // ---- [dev-dependencies] (already supported pre-Stage A; lock the contract) ----
-
 test "manifest: dev-dependencies do not leak into [dependencies]" {
     let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"http\" = \"0.2.0\"\n\n[dev-dependencies]\n\"test\" = \"0.4.0\"\n";
     let deps = toml_get_dependencies(toml);
@@ -138,7 +130,6 @@ test "manifest: dev-dependencies do not leak into [dependencies]" {
 }
 
 // ---- [targets.<triple>] ----
-
 test "manifest: targets section absent returns empty string" {
     let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n";
     assert _str_eq(toml_get_target_triples(toml), "");
@@ -181,7 +172,6 @@ test "manifest: toml_get_string_array missing key returns empty" {
 }
 
 // ---- Round-trip via toml_add_dependency (writes preserve new fields) ----
-
 test "manifest: toml_add_dependency preserves build.kind" {
     let original = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/mod.sfn\"\nkind = \"library\"\n";
     let updated = toml_add_dependency(original, "http", "0.2.0");
@@ -212,7 +202,6 @@ test "manifest: toml_add_dependency preserves exports" {
 }
 
 // ---- Existing fields still parse after extension ----
-
 test "manifest: existing fields unaffected by Stage A extensions" {
     let toml = "[capsule]\nname = \"sailfin\"\nversion = \"0.5.9\"\ndescription = \"the compiler\"\n\n[dependencies]\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nentry = \"src/main.sfn\"\nkind = \"binary\"\n";
     assert _str_eq(toml_get_name(toml), "sailfin");
