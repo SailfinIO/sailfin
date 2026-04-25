@@ -1,0 +1,140 @@
+// Stage B regression tests for the workspace-aware capsule resolver.
+//
+// Locks down the parsing, discovery, and lookup helpers introduced in
+// `compiler/src/capsule_resolver.sfn` to back the unified import path
+// (docs/proposals/build-architecture.md, Part 5, Stage B).
+//
+// IO-touching helpers (discover_workspace_root, load_workspace_members)
+// are exercised by the e2e capsule build script. These unit tests cover
+// the pure-string parsing and the in-memory lookup.
+//
+// The helpers under test are inline-duplicated (mirroring
+// `stdlib_capsule_allowlist_test.sfn`) because the test runner can't
+// resolve `compile_to_llvm_file_with_module` (and the rest of the
+// compiler) through the `capsule_resolver.sfn → main.sfn` import chain
+// — until the unified resolver actually lands and replaces text-level
+// inlining (Stage B itself), inlining the whole compiler into a unit
+// test trips the seed's per-module timeout.
+// -- Inline copy of WorkspaceMember (from capsule_resolver.sfn) --
+struct WorkspaceMember {
+    name: string;
+    member_path: string;
+    src_dir: string;
+}
+
+// -- Inline copy of parse_workspace_member_paths (from capsule_resolver.sfn) --
+fn _parse_workspace_member_paths(members_text: string) -> string[] {
+    let mut out: string[] = [];
+    if members_text.length == 0 { return out; }
+    let mut start: number = 0;
+    let len = members_text.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if substring(members_text, end, end + 1) == "\n" { break; }
+            end += 1;
+        }
+        if end > start {
+            let entry = substring(members_text, start, end);
+            let mut has_glob: boolean = false;
+            let mut gi: number = 0;
+            loop {
+                if gi >= entry.length { break; }
+                if substring(entry, gi, gi + 1) == "*" {
+                    has_glob = true;
+                    break;
+                }
+                gi += 1;
+            }
+            if !has_glob { out.push(entry); }
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+// -- Inline copy of workspace_member_for_spec (from capsule_resolver.sfn) --
+fn _workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string {
+    let mut i: number = 0;
+    loop {
+        if i >= members.length { break; }
+        if strings_equal(members[i].name, spec) {
+            return members[i].src_dir;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
+
+// ---- parse_workspace_member_paths ----
+test "workspace: empty member list parses to empty array" {
+    let parsed = _parse_workspace_member_paths("");
+    assert parsed.length == 0;
+}
+
+test "workspace: single member parses" {
+    let parsed = _parse_workspace_member_paths("compiler");
+    assert parsed.length == 1;
+    assert _str_eq(parsed[0], "compiler");
+}
+
+test "workspace: multiple members parse newline-separated" {
+    let parsed = _parse_workspace_member_paths("compiler\ncapsules/sfn/http\ncapsules/sfn/test");
+    assert parsed.length == 3;
+    assert _str_eq(parsed[0], "compiler");
+    assert _str_eq(parsed[1], "capsules/sfn/http");
+    assert _str_eq(parsed[2], "capsules/sfn/test");
+}
+
+test "workspace: glob entries are skipped" {
+    // Globs (e.g. "capsules/sfn/*") aren't supported yet; the parser
+    // must drop them silently rather than treat the literal "*" as a
+    // directory name.
+    let parsed = _parse_workspace_member_paths("compiler\ncapsules/sfn/*\ncapsules/sfn/http");
+    assert parsed.length == 2;
+    assert _str_eq(parsed[0], "compiler");
+    assert _str_eq(parsed[1], "capsules/sfn/http");
+}
+
+test "workspace: trailing newline does not add empty entry" {
+    let parsed = _parse_workspace_member_paths("compiler\ncapsules/sfn/http\n");
+    assert parsed.length == 2;
+    assert _str_eq(parsed[1], "capsules/sfn/http");
+}
+
+// ---- workspace_member_for_spec ----
+test "workspace: spec lookup returns matching member src_dir" {
+    let mut members: WorkspaceMember[] = [];
+    members.push(WorkspaceMember {
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src"
+    });
+    members.push(WorkspaceMember {
+        name: "sfn/test", member_path: "capsules/sfn/test", src_dir: "/repo/capsules/sfn/test/src"
+    });
+    assert _str_eq(_workspace_member_for_spec(members, "sfn/http"), "/repo/capsules/sfn/http/src");
+    assert _str_eq(_workspace_member_for_spec(members, "sfn/test"), "/repo/capsules/sfn/test/src");
+}
+
+test "workspace: spec lookup returns empty when missing" {
+    let mut members: WorkspaceMember[] = [];
+    members.push(WorkspaceMember {
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src"
+    });
+    assert _str_eq(_workspace_member_for_spec(members, "sfn/missing"), "");
+    assert _str_eq(_workspace_member_for_spec(members, ""), "");
+}
+
+test "workspace: spec lookup is exact match (sfn/http != http)" {
+    let mut members: WorkspaceMember[] = [];
+    members.push(WorkspaceMember {
+        name: "sfn/http", member_path: "capsules/sfn/http", src_dir: "/repo/capsules/sfn/http/src"
+    });
+    // Bare names must NOT match a scoped member — the resolver walks the
+    // import surface in scoped form ("sfn/http") and the workspace file is
+    // the source of truth for whether that scoped name exists.
+    assert _str_eq(_workspace_member_for_spec(members, "http"), "");
+}

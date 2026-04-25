@@ -36,15 +36,20 @@
 // capsule symbols resolved.
 import { compile_to_llvm_file_with_module, write_native_text_file_with_module } from "./main";
 import { substring } from "./string_utils";
-import { toml_get_dependencies } from "./toml_parser";
+import { toml_get_dependencies, toml_get_name, toml_get_workspace_members } from "./toml_parser";
 
 export {
     CapsuleSource,
+    WorkspaceMember,
     discover_project_root,
+    discover_workspace_root,
     enumerate_capsule_sources,
+    load_workspace_members,
+    parse_workspace_member_paths,
     stage_capsule_imports,
     compile_capsule_modules,
-    mangle_slug
+    mangle_slug,
+    workspace_member_for_spec
 };
 
 struct CapsuleSource {
@@ -52,6 +57,15 @@ struct CapsuleSource {
     source_path: string;  // absolute path to the .sfn file
     slug: string;  // e.g. "sfn/cli/mod" — used for staging + symbol mangling
     ll_path: string;  // e.g. "build/sailfin/capsules/sfn__cli__mod.ll"
+}
+
+// One entry from the workspace's [workspace].members list, with the
+// member's canonical name (read from the member's own capsule.toml) and
+// its src/ directory pre-resolved against the workspace root.
+struct WorkspaceMember {
+    name: string;  // canonical name, e.g. "sfn/http"
+    member_path: string;  // path relative to workspace root, e.g. "capsules/sfn/http"
+    src_dir: string;  // path to the member's src/ dir (workspace-rooted)
 }
 
 // ---- Path helpers ----
@@ -447,4 +461,116 @@ fn compile_capsule_modules(sources: CapsuleSource[]) -> string[] ![io] {
         i += 1;
     }
     return out;
+}
+
+// ---- Workspace discovery ----
+// Parse the newline-separated member list returned by toml_get_workspace_members
+// into a string array. Pure string utility — exported so tests can exercise it
+// without writing a workspace.toml to disk.
+fn parse_workspace_member_paths(members_text: string) -> string[] {
+    let mut out: string[] = [];
+    if members_text.length == 0 { return out; }
+    let mut start: number = 0;
+    let len = members_text.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if substring(members_text, end, end + 1) == "\n" { break; }
+            end += 1;
+        }
+        if end > start {
+            let entry = substring(members_text, start, end);
+            // Globs (e.g. "capsules/sfn/*") are deferred to a later stage —
+            // workspace.toml today must list members literally. Skip glob
+            // entries so an accidental wildcard never silently expands here.
+            let mut has_glob: boolean = false;
+            let mut gi: number = 0;
+            loop {
+                if gi >= entry.length { break; }
+                if substring(entry, gi, gi + 1) == "*" {
+                    has_glob = true;
+                    break;
+                }
+                gi += 1;
+            }
+            if !has_glob { out.push(entry); }
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+// Walk up from start_dir looking for workspace.toml. Returns the directory
+// containing it, or "" if none is found within 16 levels. The workspace
+// root is independent of (and may differ from) the project root: a project
+// inside a workspace has both, while a standalone capsule has only the
+// project root.
+fn discover_workspace_root(start_dir: string) -> string ![io] {
+    let mut dir: string = start_dir;
+    if dir.length == 0 { dir = "."; }
+    let mut depth: number = 0;
+    loop {
+        if depth >= 16 { break; }
+        let manifest = _cr_path_join(dir, "workspace.toml");
+        if fs.exists(manifest) { return dir; }
+        let parent = _cr_dirname(dir);
+        if strings_equal(parent, dir) { break; }
+        if parent.length == 0 { break; }
+        dir = parent;
+        depth += 1;
+    }
+    return "";
+}
+
+// Read the canonical name of a workspace member by loading its capsule.toml.
+// Returns "" if the member directory has no capsule.toml or no [capsule].name.
+fn _cr_read_member_name(workspace_root: string, member_path: string) -> string ![io] {
+    let manifest = _cr_path_join(_cr_path_join(workspace_root, member_path), "capsule.toml");
+    if !fs.exists(manifest) { return ""; }
+    return toml_get_name(fs.readFile(manifest));
+}
+
+// Load every workspace member listed in `<workspace_root>/workspace.toml`
+// into a WorkspaceMember[] with each member's canonical name pre-resolved.
+// Members whose capsule.toml is missing or unnamed are skipped with a warning.
+fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
+    let mut out: WorkspaceMember[] = [];
+    if workspace_root.length == 0 { return out; }
+    let manifest = _cr_path_join(workspace_root, "workspace.toml");
+    if !fs.exists(manifest) { return out; }
+    let text = fs.readFile(manifest);
+    let members_text = toml_get_workspace_members(text);
+    let paths = parse_workspace_member_paths(members_text);
+    let mut i: number = 0;
+    loop {
+        if i >= paths.length { break; }
+        let path = paths[i];
+        let name = _cr_read_member_name(workspace_root, path);
+        if name.length > 0 {
+            let src = _cr_path_join(_cr_path_join(workspace_root, path), "src");
+            out.push(WorkspaceMember {
+                name: name, member_path: path, src_dir: src
+            });
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Look up a workspace member by canonical name (e.g. "sfn/http") and return
+// its src_dir. Returns "" if no such member exists. The compiler binary
+// itself, plus the prelude, may declare names that are not import-targets;
+// the caller decides whether the lookup result is meaningful.
+fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string {
+    let mut i: number = 0;
+    loop {
+        if i >= members.length { break; }
+        if strings_equal(members[i].name, spec) {
+            return members[i].src_dir;
+        }
+        i += 1;
+    }
+    return "";
 }
