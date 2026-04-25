@@ -42,10 +42,12 @@ export {
     CapsuleSource,
     WorkspaceMember,
     collect_relative_import_specs,
+    collect_scoped_import_specs,
     discover_project_root,
     discover_workspace_root,
     enumerate_capsule_sources,
     enumerate_relative_sources,
+    enumerate_workspace_implicit_sources,
     load_workspace_members,
     parse_workspace_member_paths,
     resolve_relative_import,
@@ -953,6 +955,334 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
                 }
             }
             i += 1;
+        }
+    }
+    return out;
+}
+
+// ---- Scoped (capsule) import scanning ----
+// Sibling of `collect_relative_import_specs` that returns specs containing
+// `/` and not starting with `./`, `../`, or `runtime/`. These are the
+// candidate inputs for capsule resolution: either declared in the project
+// manifest's `[dependencies]` (handled by `enumerate_capsule_sources`) or
+// resolved against workspace members (handled by
+// `enumerate_workspace_implicit_sources`).
+fn collect_scoped_import_specs(source: string) -> string[] {
+    let mut out: string[] = [];
+    let source_len = source.length;
+    if source_len == 0 { return out; }
+    let mut steps: number = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: number = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if _cr_word_matches(source, i, "import") {
+            let mut j: number = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: number = -1;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == "\n" { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == "*" {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == "/" {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == "/" {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == " " { ws = true; }
+                            if wk == "\t" { ws = true; }
+                            if wk == "\n" { ws = true; }
+                            if wk == "\r" { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == "\"" {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    let mut is_relative: boolean = false;
+                    if spec.length >= 2 {
+                        if substring(spec, 0, 2) == "./" { is_relative = true; }
+                    }
+                    if spec.length >= 3 {
+                        if substring(spec, 0, 3) == "../" {
+                            is_relative = true;
+                        }
+                    }
+                    let mut is_runtime: boolean = false;
+                    if spec.length >= 8 {
+                        if substring(spec, 0, 8) == "runtime/" {
+                            is_runtime = true;
+                        }
+                    }
+                    let mut has_slash: boolean = false;
+                    let mut si: number = 0;
+                    loop {
+                        if si >= spec.length { break; }
+                        if substring(spec, si, si + 1) == "/" {
+                            has_slash = true;
+                            break;
+                        }
+                        si += 1;
+                    }
+                    if !is_relative {
+                        if !is_runtime {
+                            if has_slash { out.push(spec); }
+                        }
+                    }
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Look up a workspace member src dir from a scoped import spec like
+// "sfn/http". Submodule paths ("sfn/http/client") strip the trailing
+// segments down to the canonical "scope/name" before lookup so the spec
+// shape matches what `workspace_member_for_spec` indexes by.
+fn _cr_member_src_for_spec(members: WorkspaceMember[], spec: string) -> string {
+    let first = _cr_find_char(spec, "/", 0);
+    if first <= 0 { return ""; }
+    let second = _cr_find_char(spec, "/", first + 1);
+    let mut canonical = spec;
+    if second > 0 { canonical = substring(spec, 0, second); }
+    return workspace_member_for_spec(members, canonical);
+}
+
+fn _cr_string_array_contains(items: string[], needle: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= items.length { break; }
+        if strings_equal(items[i], needle) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Walk every scoped import reachable from `entry_path` and, for any spec
+// that maps to a workspace member but is NOT in `excluded_specs`, return
+// CapsuleSource entries for every .sfn file under that member's src/.
+//
+// `excluded_specs` is the set of specs already covered by
+// `enumerate_capsule_sources` (manifest-declared deps). The intent is
+// "anything the workspace ships that the user imports without
+// declaring" — the unified replacement for the hard-coded
+// `_is_stdlib_capsule_cmd` allowlist that gated implicit stdlib resolution.
+//
+// BFS-walks transitively through each enumerated workspace member's
+// sources so an import of sfn/http that internally imports sfn/json
+// pulls both in.
+fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMember[], excluded_specs: string[]) -> CapsuleSource[] ![io] {
+    let mut out: CapsuleSource[] = [];
+    if entry_path.length == 0 { return out; }
+    if members.length == 0 { return out; }
+    let mut covered: string[] = [];
+    let mut ei: number = 0;
+    loop {
+        if ei >= excluded_specs.length { break; }
+        covered.push(excluded_specs[ei]);
+        ei += 1;
+    }
+    let mut paths_to_scan: string[] = [entry_path];
+    let mut head: number = 0;
+    let max_iterations: number = 1024;
+    let mut iterations: number = 0;
+    loop {
+        if head >= paths_to_scan.length { break; }
+        if iterations >= max_iterations { break; }
+        iterations += 1;
+        let path = paths_to_scan[head];
+        head += 1;
+        if !fs.exists(path) { continue; }
+        let source = fs.readFile(path);
+        let specs = collect_scoped_import_specs(source);
+        let mut i: number = 0;
+        loop {
+            if i >= specs.length { break; }
+            let spec = specs[i];
+            i += 1;
+            // Canonicalise to "scope/name" for the covered-set check.
+            let first = _cr_find_char(spec, "/", 0);
+            if first <= 0 { continue; }
+            let second = _cr_find_char(spec, "/", first + 1);
+            let mut canonical = spec;
+            if second > 0 { canonical = substring(spec, 0, second); }
+            if _cr_string_array_contains(covered, canonical) { continue; }
+            let src_dir = workspace_member_for_spec(members, canonical);
+            if src_dir.length == 0 { continue; }
+            covered.push(canonical);
+            let found = _cr_collect_capsule_sources(src_dir, canonical);
+            let mut j: number = 0;
+            loop {
+                if j >= found.length { break; }
+                out.push(found[j]);
+                paths_to_scan.push(found[j].source_path);
+                j += 1;
+            }
         }
     }
     return out;

@@ -10,3 +10,4 @@ required = ["net", "io"]
 
 [build]
 entry = "src/mod.sfn"
+kind = "library"

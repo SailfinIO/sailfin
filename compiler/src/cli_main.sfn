@@ -5,7 +5,11 @@ import {
     CapsuleSource,
     compile_capsule_modules,
     discover_project_root,
+    discover_workspace_root,
     enumerate_capsule_sources,
+    enumerate_relative_sources,
+    enumerate_workspace_implicit_sources,
+    load_workspace_members,
     stage_capsule_imports
 } from "./capsule_resolver";
 import { handle_check_command } from "./cli_check";
@@ -17,8 +21,7 @@ import {
     handle_init_command,
     handle_login_command,
     handle_publish_command,
-    handle_test_command,
-    inline_imports_for_source
+    handle_test_command
 } from "./cli_commands";
 import {
     compile_to_llvm_file_with_module,
@@ -31,13 +34,14 @@ import {
     print_llvm_with_module,
     write_native_text_file_with_module
 } from "./main";
+import { toml_get_build_kind, toml_get_dependencies, toml_get_entry } from "./toml_parser";
 import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
     let mut out: string = "usage: sfn <command> [options]\n";
     out = out + "\n";
     out = out + "build & run:\n";
-    out = out + "  sfn build [-o OUTPUT] <file.sfn>\n";
+    out = out + "  sfn build [-o OUTPUT] (<file.sfn> | -p <capsule-path>)\n";
     out = out + "  sfn run   <file.sfn | exe>\n";
     out = out
         + "  sfn emit  [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n";
@@ -252,28 +256,146 @@ fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string)
     return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, "-O2", "build/sailfin");
 }
 
-// Resolve, stage, and compile every capsule declared in the project's
-// capsule.toml. Returns the list of capsule .ll paths to feed the linker
-// (empty if the source file has no project manifest or declares no deps).
-// Prints diagnostics on failure and returns [] to signal the caller to
-// bail before linking.
+// Parse the dep keys (e.g. "sfn/cli", "sfn/http") from the
+// `name=version\n` text returned by toml_get_dependencies. Used to seed the
+// "already covered" set for workspace-implicit lookup so that
+// manifest-declared deps don't double-up with workspace members.
+fn _dep_specs_from_text(deps_text: string) -> string[] {
+    let mut out: string[] = [];
+    if deps_text.length == 0 { return out; }
+    let mut start: number = 0;
+    let len = deps_text.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if substring(deps_text, end, end + 1) == "\n" { break; }
+            end += 1;
+        }
+        if end > start {
+            let mut eq_pos: number = -1;
+            let mut ei: number = start;
+            loop {
+                if ei >= end { break; }
+                if substring(deps_text, ei, ei + 1) == "=" {
+                    eq_pos = ei;
+                    break;
+                }
+                ei += 1;
+            }
+            if eq_pos > start {
+                out.push(substring(deps_text, start, eq_pos));
+            }
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+// Resolve, stage, and compile every dependency reachable from `input_path`.
+// Returns the list of dependency .ll paths to feed the linker (empty
+// when no dependencies are needed).
+//
+// Three resolution paths run in sequence and are concatenated:
+//   1. Relative imports (`./foo`, `../bar`) reachable from the entry —
+//      always walked, even for standalone files without a manifest.
+//   2. Manifest-declared capsule deps (`[dependencies]` in the project's
+//      capsule.toml) — every .sfn under each dep's src/ tree.
+//   3. Workspace-implicit imports — any scoped import (`scope/name`) the
+//      source uses that maps to a workspace member but isn't declared in
+//      the project's `[dependencies]`. Replaces the legacy
+//      `_is_stdlib_capsule_cmd` allowlist; the workspace.toml file is now
+//      the single source of truth for which capsules are available
+//      without an explicit `sfn add`.
 fn _prepare_project_capsules(input_path: string) -> string[] ![io] {
     let base_dir = _dirname(input_path);
-    let project_root = discover_project_root(base_dir);
-    if project_root.length == 0 {
-        // No capsule.toml found — the source file is standalone and has
-        // no declared deps. Single-module compile is the right path.
-        return [];
+    let mut sources: CapsuleSource[] = [];
+
+    // (1) Relative imports — always.
+    let relative = enumerate_relative_sources(input_path);
+    let mut ri: number = 0;
+    loop {
+        if ri >= relative.length { break; }
+        sources.push(relative[ri]);
+        ri += 1;
     }
-    let sources = enumerate_capsule_sources(project_root);
+
+    // (2) Manifest-declared capsule deps — only when a capsule.toml is
+    // discoverable from the entry's directory.
+    let project_root = discover_project_root(base_dir);
+    let mut covered_specs: string[] = [];
+    if project_root.length > 0 {
+        let manifest_path = _path_join(project_root, "capsule.toml");
+        if fs.exists(manifest_path) {
+            let manifest_text = fs.readFile(manifest_path);
+            let deps_text = toml_get_dependencies(manifest_text);
+            covered_specs = _dep_specs_from_text(deps_text);
+        }
+        let dep_sources = enumerate_capsule_sources(project_root);
+        let mut di: number = 0;
+        loop {
+            if di >= dep_sources.length { break; }
+            sources.push(dep_sources[di]);
+            di += 1;
+        }
+    }
+
+    // (3) Workspace-implicit imports.
+    let workspace_root = discover_workspace_root(base_dir);
+    if workspace_root.length > 0 {
+        let members = load_workspace_members(workspace_root);
+        let implicit = enumerate_workspace_implicit_sources(input_path, members, covered_specs);
+        let mut wi: number = 0;
+        loop {
+            if wi >= implicit.length { break; }
+            sources.push(implicit[wi]);
+            wi += 1;
+        }
+    }
+
     if sources.length == 0 { return []; }
     let staged = stage_capsule_imports(sources);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return [];
     }
-    let capsule_lls = compile_capsule_modules(sources);
-    return capsule_lls;
+    return compile_capsule_modules(sources);
+}
+
+struct _CapsuleBuildSpec {
+    entry_path: string;
+    kind: string;
+}
+
+// Resolve `-p <path>` for `sfn build`. The path is either a directory
+// containing a capsule.toml or a path to capsule.toml directly. Returns
+// the entry source path (manifest's [build].entry resolved against the
+// manifest's directory) plus the build kind from `[build].kind` (defaults
+// to "binary" when unset, matching historical sfn build behaviour).
+// `entry_path` is "" with an error printed on failure.
+fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
+    let mut spec = _CapsuleBuildSpec { entry_path: "", kind: "binary" };
+    if p.length == 0 { return spec; }
+    let mut manifest_path = p;
+    if !_ends_with(p, "capsule.toml") {
+        manifest_path = _path_join(p, "capsule.toml");
+    }
+    if !fs.exists(manifest_path) {
+        print("capsule manifest not found: " + manifest_path);
+        return spec;
+    }
+    let manifest_text = fs.readFile(manifest_path);
+    let entry_rel = toml_get_entry(manifest_text);
+    if entry_rel.length == 0 {
+        print("capsule manifest at " + manifest_path + " has no [build].entry");
+        return spec;
+    }
+    let manifest_dir = _dirname(manifest_path);
+    spec.entry_path = _path_join(manifest_dir, entry_rel);
+    let declared_kind = toml_get_build_kind(manifest_text);
+    if declared_kind.length > 0 { spec.kind = declared_kind; }
+    return spec;
 }
 
 fn sailfin_cli_main(argv: string[]) -> number ![io] {
@@ -486,25 +608,75 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
     }
 
     if is_build {
-        // build [-o OUTPUT] file
+        // build [-o OUTPUT] (file | -p <capsule-path>)
         let mut out_path: string = "";
         let mut input_path: string = "";
+        let mut capsule_path: string = "";
 
-        if args.length == 2 {
-            input_path = args[1];
-            out_path = "build/sailfin/program";
-        } else if args.length == 4 {
-            if strings_equal(args[1], "-o") {
-                out_path = args[2];
-                input_path = args[3];
-            } else {
+        // Parse args: support -o OUTPUT and -p PATH in any combination.
+        let mut bi: number = 1;
+        loop {
+            if bi >= args.length { break; }
+            let a = args[bi];
+            if strings_equal(a, "-o") {
+                if bi + 1 >= args.length {
+                    print(_usage());
+                    return 2;
+                }
+                out_path = args[bi + 1];
+                bi += 2;
+                continue;
+            }
+            if strings_equal(a, "-p") {
+                if bi + 1 >= args.length {
+                    print(_usage());
+                    return 2;
+                }
+                capsule_path = args[bi + 1];
+                bi += 2;
+                continue;
+            }
+            // Positional argument: the source file.
+            if input_path.length > 0 {
                 print(_usage());
                 return 2;
             }
-        } else {
-            print(_usage());
+            input_path = a;
+            bi += 1;
+        }
 
+        // -p resolves the entry path + build kind from the capsule's
+        // manifest. The build then proceeds as for a positional source
+        // file, with the kind controlling whether we link an executable
+        // (binary) or just emit an object (library/runtime).
+        let mut build_kind: string = "binary";
+        if capsule_path.length > 0 {
+            if input_path.length > 0 {
+                print("sfn build: -p and positional source are mutually exclusive");
+                return 2;
+            }
+            let cap_spec = _resolve_capsule_build_spec(capsule_path);
+            if cap_spec.entry_path.length == 0 { return 1; }
+            input_path = cap_spec.entry_path;
+            build_kind = cap_spec.kind;
+        }
+        if input_path.length == 0 {
+            print(_usage());
             return 2;
+        }
+
+        let is_library_build = strings_equal(build_kind, "library");
+        let is_runtime_build = strings_equal(build_kind, "runtime");
+        let no_link = is_library_build;
+        if is_runtime_build {
+            print("sfn build: kind = \"runtime\" not yet supported (Stage F).");
+            return 2;
+        }
+
+        if out_path.length == 0 {
+            if no_link { out_path = "build/sailfin/program.o"; } else {
+                out_path = "build/sailfin/program";
+            }
         }
 
         if !fs.exists(input_path) {
@@ -530,6 +702,20 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
             print("failed to compile LLVM for: " + input_path);
 
             return 1;
+        }
+
+        // Library builds stop after `clang -c` on the main .ll — no link,
+        // no main symbol required. Capsule deps stay as their own .ll/.o
+        // pairs under build/sailfin/capsules/ for downstream consumers.
+        if no_link {
+            let rc_obj = process.run(["clang", "-O2", "-Wno-override-module", "-c", ll_path, "-o", out_path,]);
+            if rc_obj != 0 {
+                print("library build failed (clang exit=" + number_to_string(rc_obj)
+                    + ")");
+                return rc_obj;
+            }
+            print("built: " + out_path);
+            return 0;
         }
 
         let exe_path = out_path;
@@ -576,19 +762,12 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         let exe_path = "build/sailfin/run";
 
         // Resolve and compile capsule deps before lowering the main file.
-        // This replaces the older inline_imports_for_source text hack with
-        // real separate-compilation via the standard import-context path.
+        // The unified resolver covers relative imports, manifest-declared
+        // capsule deps, and workspace-implicit imports in one pass —
+        // text-level fallback retired with Stage B.
         let capsule_lls = _prepare_project_capsules(input_path);
 
-        // Fall back to text-level inlining only if capsule resolution
-        // produced no output AND the source still references capsule
-        // imports — keeps relative imports (./helper.sfn) working in
-        // single-file programs without a manifest.
-        let mut source = fs.readFile(input_path);
-        if capsule_lls.length == 0 {
-            let base_dir = _dirname(input_path);
-            source = inline_imports_for_source(source, base_dir);
-        }
+        let source = fs.readFile(input_path);
         let module_name = module_name_from_path(input_path);
         let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
         if !ok {
