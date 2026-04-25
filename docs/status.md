@@ -24,13 +24,21 @@ feature availability.
   `[build].kind`: `"library"` (default for stdlib capsules) emits a `.o`
   via `clang -c`; `"binary"` links an executable; `"runtime"` errors as a
   Stage F deferral.
-- **`sfn test` and `sfn check` still use textual inlining** via the legacy
-  `_inline_relative_imports_cmd` and `inline_imports_for_source` helpers.
-  Migrating them is Stage B PR2 (coupled to the `sfn/compiler-lib`
-  extraction — see `docs/proposals/build-architecture.md`). The
-  typechecker-side hookup for `sfn check`'s migration shipped in A1
-  (`compiler/src/typecheck_imports.sfn` + `typecheck_diagnostics_with_imports`)
-  — the in-process resolver wiring lands in A2.
+- **`sfn check` runs through the unified resolver** as of A2: a single
+  `prepare_project_capsules_for_check` pass stages every dep's
+  `.sfn-asm` artifact, `typecheck_import_loader.sfn` converts those
+  artifacts into AST interface declarations, and
+  `check_source_with_imports` feeds them to
+  `typecheck_diagnostics_with_imports`. Cross-module `implements`
+  conformance (E0301) is now live for end users without any textual
+  import inlining — covered by
+  `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
+- **`sfn test` still uses textual inlining** via the legacy
+  `_inline_relative_imports_cmd` and `inline_imports_for_source`
+  helpers. Migrating it is the remaining work in Stage B PR2 (coupled
+  to the `sfn/compiler-lib` extraction — see
+  `docs/proposals/build-architecture.md`). The legacy helpers stay
+  defined until A4 deletes them after `sfn test` migrates.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —

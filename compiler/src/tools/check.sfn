@@ -7,6 +7,7 @@
 // validate_effects. No new analysis logic is introduced here.
 //
 // See docs/proposals/check-architecture.md for design rationale.
+import { Statement } from "../ast";
 import { EffectRequirement, EffectViolation, validate_effects } from "../effect_checker";
 import {
     join_lines,
@@ -17,7 +18,7 @@ import {
 import { parse_program } from "../parser/mod";
 import { substring } from "../string_utils";
 import { Token } from "../token";
-import { typecheck_diagnostics } from "../typecheck";
+import { typecheck_diagnostics_with_imports } from "../typecheck";
 import { Diagnostic } from "../typecheck_types";
 
 // -------------------------------------------------------------------
@@ -204,8 +205,19 @@ fn _is_sfn_file(path: string) -> boolean {
 }
 
 fn check_source(source: string, file_path: string) -> CheckResult {
+    let no_imports: Statement[] = [];
+    return check_source_with_imports(source, file_path, no_imports);
+}
+
+// Cross-module-aware variant: `imported_interfaces` carries
+// `Statement.InterfaceDeclaration` values sourced from staged
+// `.sfn-asm` artifacts (see `typecheck_import_loader.sfn`). They are
+// passed through to `typecheck_diagnostics_with_imports` so cross-
+// module `implements` clauses are conformance-checked against the
+// real interface definitions instead of silently no-oping.
+fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[]) -> CheckResult {
     let program = parse_program(source);
-    let type_diags = typecheck_diagnostics(program);
+    let type_diags = typecheck_diagnostics_with_imports(program, imported_interfaces);
     let effect_violations = validate_effects(program);
 
     let source_lines = split_source_lines(source);
@@ -275,6 +287,7 @@ export {
     CheckSummary,
     check_file,
     check_source,
+    check_source_with_imports,
     effect_violation_to_diagnostic,
     render_diagnostic,
     render_summary,

@@ -6,14 +6,42 @@
 // the seed compiler can emit within its per-module timeout.
 //
 // See docs/proposals/check-architecture.md for the end-to-end design.
-import { inline_imports_for_source } from "./cli_commands";
+// Track A2 wires this through the unified resolver: each invocation
+// groups its files by `(project_root, workspace_root)`, runs a single
+// `prepare_project_capsules_for_check` pass per group, loads the
+// resulting `.sfn-asm` import-context once per group, and feeds the
+// converted interface list into `check_source_with_imports`.
+// Cross-module `implements` clauses are now conformance-checked
+// end-to-end without any textual import inlining, and `sfn check
+// pathA pathB` invocations that span different capsules / workspaces
+// resolve each project independently rather than silently anchoring
+// on whichever path came first.
+import { Statement } from "./ast";
+import {
+    CheckCapsuleResolution,
+    discover_project_root,
+    discover_workspace_root,
+    prepare_project_capsules_for_check
+} from "./capsule_resolver";
 import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
 import {
     CheckResult,
-    check_source,
+    check_source_with_imports,
     render_summary,
     summarize
 } from "./tools/check";
+import { ImportedInterfaceLoadResult, load_imported_interfaces_from_paths } from "./typecheck_import_loader";
+
+// One distinct `(project_root, workspace_root)` resolution group. Every
+// file in `entry_paths` shares those roots, so `prepare_project_capsules_for_check`
+// runs once per group with the group's full file list as anchors —
+// avoiding the multi-path workspace bug where files past `files[0]`
+// would otherwise inherit a resolution computed from the wrong root.
+struct CheckGroup {
+    key: string;
+    entry_paths: string[];
+    interfaces: Statement[];
+}
 
 fn _emit_check_header(path: string, quiet: boolean) ![io] {
     if quiet { return; }
@@ -28,6 +56,58 @@ fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
         print.err(result.rendered[i]);
         i += 1;
     }
+}
+
+// Per-path warnings the CLI surfaces when import-context loading is
+// less than complete. `missing_paths` (resolver staged a path that's
+// no longer on disk) and `parse_failure_paths` (artifact existed but
+// the native-IR parser produced diagnostics) are loud — both indicate
+// a stale or corrupt build state that can silently weaken cross-
+// module conformance. `skipped_paths` (parsed cleanly with zero
+// interface declarations) is the common, benign case for any module
+// that exports only structs/functions, so emitting per-path warnings
+// for it would drown signal in noise on a typical project. The
+// skipped-path data remains on `ImportedInterfaceLoadResult` for A3's
+// structured diagnostics or any future audit consumer.
+fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean) ![io] {
+    if quiet { return; }
+    let mut i: number = 0;
+    loop {
+        if i >= load_result.missing_paths.length { break; }
+        print.err("[check] warning: missing import-context artifact: "
+            + load_result.missing_paths[i]);
+        i += 1;
+    }
+    let mut p: number = 0;
+    loop {
+        if p >= load_result.parse_failure_paths.length { break; }
+        print.err("[check] warning: import-context artifact parse failed: "
+            + load_result.parse_failure_paths[p]);
+        p += 1;
+    }
+}
+
+// Compute the resolution-group key for a file path. Two files share a
+// group iff `discover_project_root` and `discover_workspace_root`
+// return the same value when walked from each file's directory. The
+// "::" delimiter is unambiguous because filesystem paths cannot
+// contain a literal "::" in any of the path-discovery contexts here.
+fn _check_group_key(file_path: string) -> string ![io] {
+    let dir = _dirname_cmd(file_path);
+    let project_root = discover_project_root(dir);
+    let workspace_root = discover_workspace_root(dir);
+    return project_root + "::" + workspace_root;
+}
+
+// Find the group whose key matches `key`; return its index or -1.
+fn _find_group(groups: CheckGroup[], key: string) -> number {
+    let mut i: number = 0;
+    loop {
+        if i >= groups.length { break; }
+        if strings_equal(groups[i].key, key) { return i; }
+        i += 1;
+    }
+    return -1;
 }
 
 fn handle_check_command(args: string[]) -> number ![io] {
@@ -76,16 +156,84 @@ fn handle_check_command(args: string[]) -> number ![io] {
         return 1;
     }
 
+    // Partition files into resolution groups. Within a group, every
+    // file shares `(project_root, workspace_root)` so a single
+    // resolver pass anchored on the group's full file list covers
+    // every relative-import graph the typechecker needs. Between
+    // groups (e.g. `sfn check capsuleA/foo.sfn capsuleB/bar.sfn`),
+    // each project resolves independently.
+    let mut groups: CheckGroup[] = [];
+    let mut file_group_index: number[] = [];
+    let mut gpi: number = 0;
+    loop {
+        if gpi >= files.length { break; }
+        let path = files[gpi];
+        let key = _check_group_key(path);
+        let mut idx = _find_group(groups, key);
+        if idx < 0 {
+            let empty_entries: string[] = [];
+            let empty_interfaces: Statement[] = [];
+            groups.push(CheckGroup {
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces
+            });
+            idx = groups.length - 1;
+        }
+        groups[idx].entry_paths.push(path);
+        file_group_index.push(idx);
+        gpi += 1;
+    }
+
+    // Per-group resolution + load. Aggregated warnings are emitted
+    // after the per-file analysis loop so they group together at the
+    // bottom of stderr regardless of how many groups produced them.
+    let mut aggregate_missing: string[] = [];
+    let mut aggregate_parse_failures: string[] = [];
+    let mut aggregate_skipped: string[] = [];
+    let mut gi: number = 0;
+    loop {
+        if gi >= groups.length { break; }
+        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths);
+        if resolution.staging_failed {
+            // The resolver already wrote a structured error to
+            // stderr (slug collision or stage-write failure).
+            // Returning 2 distinguishes setup errors from analysis
+            // diagnostics (exit 1) so CI scripts can react
+            // appropriately.
+            return 2;
+        }
+        let load = load_imported_interfaces_from_paths(resolution.asm_paths);
+        groups[gi].interfaces = load.interfaces;
+
+        let mut mi: number = 0;
+        loop {
+            if mi >= load.missing_paths.length { break; }
+            aggregate_missing.push(load.missing_paths[mi]);
+            mi += 1;
+        }
+        let mut pfi: number = 0;
+        loop {
+            if pfi >= load.parse_failure_paths.length { break; }
+            aggregate_parse_failures.push(load.parse_failure_paths[pfi]);
+            pfi += 1;
+        }
+        let mut ski: number = 0;
+        loop {
+            if ski >= load.skipped_paths.length { break; }
+            aggregate_skipped.push(load.skipped_paths[ski]);
+            ski += 1;
+        }
+        gi += 1;
+    }
+
     let mut results: CheckResult[] = [];
     let mut total_errors: number = 0;
     let mut fi: number = 0;
     loop {
         if fi >= files.length { break; }
         let path = files[fi];
+        let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
-        let base_dir = _dirname_cmd(path);
-        let inlined = inline_imports_for_source(source, base_dir);
-        let result = check_source(inlined, path);
+        let result = check_source_with_imports(source, path, groups[group_idx].interfaces);
         if result.error_count > 0 {
             _emit_check_header(path, quiet);
             _emit_check_diagnostics(result, quiet);
@@ -94,6 +242,15 @@ fn handle_check_command(args: string[]) -> number ![io] {
         results.push(result);
         fi += 1;
     }
+
+    let empty_interfaces: Statement[] = [];
+    let aggregate_load_result = ImportedInterfaceLoadResult {
+        interfaces: empty_interfaces,
+        missing_paths: aggregate_missing,
+        parse_failure_paths: aggregate_parse_failures,
+        skipped_paths: aggregate_skipped
+    };
+    _emit_load_warnings(aggregate_load_result, quiet);
 
     let summary = summarize(results);
     print(render_summary(summary));
