@@ -46,16 +46,40 @@ fn typecheck_diagnostics(program: Program) -> Diagnostic[] {
 // interface list so cross-module `implements` clauses are conformance-
 // checked against the actual member signatures rather than silently
 // no-oping when the lookup misses.
+//
+// Defensive variant filter: `resolve_interface_annotation` looks up
+// interfaces by `.name` without checking the discriminator, and
+// `check_struct_implements_interfaces` then reads `.members`, so any
+// non-InterfaceDeclaration statement passing through here would either
+// crash or misbehave on the `.members` access. Today the only producer
+// is `interface_statement_from_native` which only emits
+// `Statement.InterfaceDeclaration`, but filtering at the API boundary
+// keeps the contract enforceable for future callers (e.g. `sfn lsp`).
 fn typecheck_diagnostics_with_imports(program: Program, imported_interfaces: Statement[]) -> Diagnostic[] {
     let top_level = collect_top_level_symbols(program);
     let local_interfaces = collect_interface_definitions(program);
-    let combined_interfaces = local_interfaces.concat(imported_interfaces);
+    let filtered_imports = _filter_interface_declarations(imported_interfaces);
+    let combined_interfaces = local_interfaces.concat(filtered_imports);
     let scoped_diagnostics = check_program_scopes(program, combined_interfaces);
 
     // Merge diagnostics using concat (avoids loop-with-if-break pattern that
     // the compiler lowers incorrectly — loops emit without exit conditions).
     let diagnostics_with_scopes = top_level.diagnostics.concat(scoped_diagnostics);
     return diagnostics_with_scopes;
+}
+
+fn _filter_interface_declarations(statements: Statement[]) -> Statement[] {
+    let mut out: Statement[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= statements.length { break; }
+        let s = statements[i];
+        if strings_equal(s.variant, "InterfaceDeclaration") {
+            out.push(s);
+        }
+        i += 1;
+    }
+    return out;
 }
 
 fn typecheck_error_count(program: Program) -> number {

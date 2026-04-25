@@ -8,12 +8,7 @@
 // test bodies — see check_tool_test.sfn preamble).
 //
 // See docs/proposals/check-architecture.md.
-
-import {
-    NativeInterface,
-    NativeInterfaceSignature,
-    NativeParameter
-} from "../../src/native_ir";
+import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "../../src/native_ir";
 import {
     interface_statement_from_native,
     interfaces_from_native,
@@ -24,7 +19,6 @@ import {
 // -------------------------------------------------------------------
 // Builder helpers (avoid nested struct literals in test bodies)
 // -------------------------------------------------------------------
-
 fn _make_native_parameter(name: string, type_annotation: string, mutable: boolean) -> NativeParameter {
     return NativeParameter {
         name: name,
@@ -72,7 +66,6 @@ fn _make_native_interface(name: string, type_parameters: string[], signatures: N
 // -------------------------------------------------------------------
 // Tests — parameter_from_native
 // -------------------------------------------------------------------
-
 test "typecheck_imports: parameter copies name and mutable" {
     let native = _make_native_parameter("count", "number", true);
     let converted = parameter_from_native(native);
@@ -103,7 +96,6 @@ test "typecheck_imports: parameter clears default and span" {
 // -------------------------------------------------------------------
 // Tests — type_parameter_from_name
 // -------------------------------------------------------------------
-
 test "typecheck_imports: type parameter preserves name" {
     let tp = type_parameter_from_name("T");
     assert strings_equal(tp.name, "T");
@@ -114,7 +106,6 @@ test "typecheck_imports: type parameter preserves name" {
 // -------------------------------------------------------------------
 // Tests — interface_statement_from_native (single interface)
 // -------------------------------------------------------------------
-
 test "typecheck_imports: interface preserves name and variant" {
     let no_type_params: string[] = [];
     let no_sigs: NativeInterfaceSignature[] = [];
@@ -168,7 +159,6 @@ test "typecheck_imports: interface decorators default to empty" {
 // -------------------------------------------------------------------
 // Tests — member signature fidelity
 // -------------------------------------------------------------------
-
 test "typecheck_imports: member signature roundtrips parameters" {
     let p_a = _make_native_parameter("buf", "Bytes", false);
     let p_b = _make_native_parameter("len", "number", false);
@@ -230,10 +220,30 @@ test "typecheck_imports: member signature leaves empty return type null" {
     assert member.return_type == null;
 }
 
+test "typecheck_imports: native \"void\" return type maps to null" {
+    // The .sfn-asm parser (`native_ir_utils_parse.sfn`) defaults
+    // `return_type` to the literal "void" when no `-> T` clause is
+    // present. The converter must collapse that back to null so
+    // imported interface signatures match the source-level AST shape
+    // produced by the parser for `fn bar();`-style declarations.
+    // Without this mapping, future cross-module signature-fidelity
+    // checks would see false mismatches against locally-parsed
+    // signatures whose return type is null.
+    let no_params: NativeParameter[] = [];
+    let no_effects: string[] = [];
+    let sig = _make_native_interface_signature_with("close", no_params, "void", no_effects);
+    let sigs: NativeInterfaceSignature[] = [sig];
+    let no_type_params: string[] = [];
+    let native = _make_native_interface("Closeable", no_type_params, sigs);
+
+    let stmt = interface_statement_from_native(native);
+    let member = stmt.members[0];
+    assert member.return_type == null;
+}
+
 // -------------------------------------------------------------------
 // Tests — interfaces_from_native (batch)
 // -------------------------------------------------------------------
-
 test "typecheck_imports: empty native list yields empty statements" {
     let empty: NativeInterface[] = [];
     let result = interfaces_from_native(empty);

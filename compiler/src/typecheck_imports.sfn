@@ -33,18 +33,26 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "./ast";
-import {
-    NativeInterface,
-    NativeInterfaceSignature,
-    NativeParameter
-} from "./native_ir";
+import { NativeInterface, NativeInterfaceSignature, NativeParameter } from "./native_ir";
 
 // -------------------------------------------------------------------
 // Field-level converters
 // -------------------------------------------------------------------
-
+// The .sfn-asm round-trip is intentionally lossy on the absence of an
+// explicit return type: the emitter writes nothing after `()` when the
+// source-level FunctionSignature has `return_type: null`, and the
+// parser (`native_ir_utils_parse.sfn`) defaults the parsed return type
+// to the literal string "void" when no `-> T` clause is present. So
+// when we convert back to AST, "void" is the canonical signal for "no
+// return type" and must map to `null` to match the parser's typical
+// output for `fn bar();`-style signatures. Source-level
+// `fn bar() -> void;` collapses to the same shape — the language
+// treats both as "returns no useful value" so the conformance and
+// signature-fidelity checks downstream already need to consider them
+// equivalent.
 fn _type_annotation_or_null_from_text(text: string) -> TypeAnnotation? {
     if text.length == 0 { return null; }
+    if strings_equal(text, "void") { return null; }
     return TypeAnnotation { text: text };
 }
 
@@ -71,11 +79,7 @@ fn parameters_from_native(natives: NativeParameter[]) -> Parameter[] {
 }
 
 fn type_parameter_from_name(name: string) -> TypeParameter {
-    return TypeParameter {
-        name: name,
-        bound: null,
-        span: null
-    };
+    return TypeParameter { name: name, bound: null, span: null };
 }
 
 fn type_parameters_from_names(names: string[]) -> TypeParameter[] {
@@ -127,7 +131,6 @@ fn function_signatures_from_native(signatures: NativeInterfaceSignature[]) -> Fu
 // -------------------------------------------------------------------
 // Top-level converter
 // -------------------------------------------------------------------
-
 fn interface_statement_from_native(native: NativeInterface) -> Statement {
     let empty_decorators: Decorator[] = [];
     return Statement.InterfaceDeclaration {
