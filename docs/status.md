@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 17, 2026
+Updated: April 25, 2026
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -12,10 +12,22 @@ feature availability.
   pure shell, no fixups. It stages in-tree capsule sources
   (`capsules/<scope>/<name>/src/`) as import-context artifacts so the seed can
   resolve imports like `from "sfn/cli"` during the bootstrap.
-- End-user builds (`sfn build`, `sfn run`) resolve capsule deps via
-  `compiler/src/capsule_resolver.sfn` — real separate-compilation of capsule
-  modules through the same `build/native/import-context/<slug>.*` path the
-  compiler uses on itself. No text-level inlining for declared capsule deps.
+- End-user `sfn build` and `sfn run` resolve every dependency through one
+  unified resolver in `compiler/src/capsule_resolver.sfn`
+  (`prepare_project_capsules`). The resolver combines three paths in one
+  pass: (1) relative imports walked from the entry, (2) manifest-declared
+  `[dependencies]`, (3) **workspace-implicit** imports — any `sfn/X`
+  reference the source uses without declaring, resolved against the
+  workspace.toml member list. The textual `inline_imports_for_source`
+  fallback in `sfn run` is gone (Stage B PR1).
+- `sfn build -p <capsule-path>` builds a capsule by manifest path. Reads
+  `[build].kind`: `"library"` (default for stdlib capsules) emits a `.o`
+  via `clang -c`; `"binary"` links an executable; `"runtime"` errors as a
+  Stage F deferral.
+- **`sfn test` and `sfn check` still use textual inlining** via the legacy
+  `_inline_relative_imports_cmd` and `inline_imports_for_source` helpers.
+  Migrating them is Stage B PR2 (coupled to the `sfn/compiler-lib`
+  extraction — see `docs/proposals/build-architecture.md`).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
