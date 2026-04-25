@@ -10,6 +10,14 @@ CLANG ?= clang
 # CI may override this to speed up builds.
 NATIVE_OPT ?= -O2
 
+# Optimization level for `make check`'s first-pass binary. The first-pass
+# binary only has to be correct enough to compile itself one more time; it is
+# never shipped, so the clang -O2 cost on its 121-module .ll → .o stage is
+# pure waste in the validation flow. Seedcheck and stage3 keep $(NATIVE_OPT)
+# because *they* are the ones that have to byte-fixed-point against each
+# other. See docs/build-performance.md → Phase 6 follow-ups.
+SELFHOST1_OPT ?= -O0
+
 # Extra flags used when compiling LLVM IR (.ll) with clang.
 # Some distros ship clang builds that default to typed pointers, but the native
 # compiler emits
@@ -352,7 +360,7 @@ compile:
 	fi
 
 check:
-	@$(MAKE) compile
+	@$(MAKE) compile NATIVE_OPT="$(SELFHOST1_OPT)"
 	@seed="build/native/sailfin"; \
 	if [ ! -x "$$seed" ]; then \
 		echo "[check][error] missing $$seed (run: make compile)"; \
@@ -411,6 +419,15 @@ check:
 			fi; \
 		done; \
 		echo "[check][WARN] this may indicate intermittent IR corruption — rerun or investigate"; \
+	fi
+	@# Promote the fully-validated, $(NATIVE_OPT)-built seedcheck binary back
+	@# over the canonical $(NATIVE_BIN) path. The first-pass binary is built
+	@# with $(SELFHOST1_OPT) (default -O0) for speed; without this promotion
+	@# step a subsequent `make compile` would see a stale -O0 binary as
+	@# "up-to-date" and skip the rebuild.
+	@if [ -x "build/native/sailfin-seedcheck" ]; then \
+		cp -f "build/native/sailfin-seedcheck" "build/native/sailfin"; \
+		echo "[check] promoted seedcheck → $(NATIVE_BIN)"; \
 	fi
 
 # Pre-release determinism gate. Runs the emit harness at parallel load to
