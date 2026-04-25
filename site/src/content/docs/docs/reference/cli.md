@@ -415,7 +415,7 @@ The build orchestrator compiles modules in parallel. Control the job count:
 make rebuild BUILD_JOBS=4
 ```
 
-The default is `BUILD_JOBS=1` to keep peak memory usage conservative. Increase on machines with abundant RAM.
+The default is auto-detected from the host's CPU count and total RAM (`scripts/detect_build_jobs.sh`): roughly `min(nproc, total_ram_gb / 5)` clamped to `[1, 8]`, with a macOS cap of 2 because Apple Silicon GitHub runners only ship 7 GB of RAM. Set `BUILD_JOBS=N` explicitly to override. Set `BUILD_JOBS=1` to disable parallelism (useful for regression bisects). See `docs/build-performance.md` → Phase 6 for the rationale behind the per-job memory budget.
 
 ---
 
