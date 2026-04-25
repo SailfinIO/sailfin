@@ -9,6 +9,7 @@ description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm
 required = ["io"]
 
 [build]
+kind = "binary"
 entry = "src/main.sfn"
 
 # The compiler reads its version from this file at runtime via

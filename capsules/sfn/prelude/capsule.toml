@@ -1,0 +1,18 @@
+[capsule]
+name = "sfn/prelude"
+version = "0.5.9"
+description = "Sailfin standard prelude (collections, strings, type checks)"
+
+[capabilities]
+required = []
+
+[build]
+kind = "library"
+entry = "../../../runtime/prelude.sfn"
+implicit = true
+
+# Stage A: parse-only. The entry path points back at the existing
+# runtime/prelude.sfn rather than moving the file under this capsule's
+# src/ — moving it changes every consumer's import slug and is squarely
+# Stage B work (see docs/proposals/build-architecture.md, Part 5,
+# Stage A "Open question to resolve in this stage's PR").

@@ -1,0 +1,221 @@
+// Stage A regression tests for the unified-build manifest schema
+// (docs/proposals/build-architecture.md, Part 5, Stage A).
+//
+// Verifies parse + round-trip of the new [build].kind, [build].implicit,
+// [workspace].members, [exports].modules, and [targets.<triple>] fields.
+// No consumers exist yet — these tests exist to lock down the schema so
+// Stage B has a stable contract to lean on.
+
+import {
+    toml_get_build_kind,
+    toml_get_build_implicit,
+    toml_get_workspace_members,
+    toml_get_exports,
+    toml_get_target_triples,
+    toml_get_string_array,
+    toml_get_string,
+    toml_get_name,
+    toml_get_entry,
+    toml_get_dependencies,
+    toml_add_dependency
+} from "../../src/toml_parser";
+
+fn _str_eq(a: string, b: string) -> boolean {
+    return strings_equal(a, b);
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// ---- [build].kind ----
+
+test "manifest: build.kind absent returns empty string" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.sfn\"\n";
+    assert _str_eq(toml_get_build_kind(toml), "");
+}
+
+test "manifest: build.kind binary parses" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.sfn\"\nkind = \"binary\"\n";
+    assert _str_eq(toml_get_build_kind(toml), "binary");
+}
+
+test "manifest: build.kind library parses" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nkind = \"library\"\nentry = \"src/mod.sfn\"\n";
+    assert _str_eq(toml_get_build_kind(toml), "library");
+}
+
+test "manifest: build.kind runtime parses" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nkind = \"runtime\"\n";
+    assert _str_eq(toml_get_build_kind(toml), "runtime");
+}
+
+// ---- [build].implicit ----
+
+test "manifest: build.implicit absent defaults to false" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/main.sfn\"\n";
+    assert toml_get_build_implicit(toml) == false;
+}
+
+test "manifest: build.implicit true parses" {
+    let toml = "[capsule]\nname = \"prelude\"\nversion = \"0.1.0\"\n\n[build]\nkind = \"library\"\nimplicit = true\nentry = \"src/mod.sfn\"\n";
+    assert toml_get_build_implicit(toml) == true;
+}
+
+test "manifest: build.implicit false parses" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nimplicit = false\n";
+    assert toml_get_build_implicit(toml) == false;
+}
+
+// ---- [workspace].members ----
+
+test "manifest: workspace.members absent returns empty string" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n";
+    assert _str_eq(toml_get_workspace_members(toml), "");
+}
+
+test "manifest: workspace.members single entry parses" {
+    let toml = "[workspace]\nmembers = [\"compiler\"]\n";
+    assert _str_eq(toml_get_workspace_members(toml), "compiler");
+}
+
+test "manifest: workspace.members multiple entries parse newline-separated" {
+    let toml = "[workspace]\nmembers = [\"compiler\", \"capsules/sfn/*\"]\n";
+    let members = toml_get_workspace_members(toml);
+    assert _contains(members, "compiler");
+    assert _contains(members, "capsules/sfn/*");
+    assert _contains(members, "\n");
+}
+
+test "manifest: workspace-only file (no [capsule]) parses" {
+    let toml = "[workspace]\nmembers = [\"compiler\", \"capsules/sfn/*\"]\n";
+    assert _str_eq(toml_get_name(toml), "");
+    let members = toml_get_workspace_members(toml);
+    assert _contains(members, "compiler");
+}
+
+// ---- [exports].modules ----
+
+test "manifest: exports.modules absent returns empty string" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n";
+    assert _str_eq(toml_get_exports(toml), "");
+}
+
+test "manifest: exports.modules parses newline-separated" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[exports]\nmodules = [\"client\", \"server\"]\n";
+    let exports = toml_get_exports(toml);
+    assert _contains(exports, "client");
+    assert _contains(exports, "server");
+}
+
+// ---- [dev-dependencies] (already supported pre-Stage A; lock the contract) ----
+
+test "manifest: dev-dependencies do not leak into [dependencies]" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[dependencies]\n\"http\" = \"0.2.0\"\n\n[dev-dependencies]\n\"test\" = \"0.4.0\"\n";
+    let deps = toml_get_dependencies(toml);
+    assert _contains(deps, "http=0.2.0");
+    let mut leaked: boolean = false;
+    if _contains(deps, "test=0.4.0") { leaked = true; }
+    assert leaked == false;
+}
+
+// ---- [targets.<triple>] ----
+
+test "manifest: targets section absent returns empty string" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n";
+    assert _str_eq(toml_get_target_triples(toml), "");
+}
+
+test "manifest: single targets section enumerated" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[targets.x86_64-w64-mingw32]\nruntime = \"sfn/runtime-native\"\n";
+    assert _str_eq(toml_get_target_triples(toml), "x86_64-w64-mingw32");
+}
+
+test "manifest: multiple targets sections enumerated newline-separated" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[targets.x86_64-w64-mingw32]\nruntime = \"sfn/runtime-native\"\n\n[targets.wasm32-unknown-unknown]\nruntime = \"sfn/runtime-wasm\"\n";
+    let triples = toml_get_target_triples(toml);
+    assert _contains(triples, "x86_64-w64-mingw32");
+    assert _contains(triples, "wasm32-unknown-unknown");
+    assert _contains(triples, "\n");
+}
+
+test "manifest: targets section string fields readable via toml_get_string" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[targets.x86_64-w64-mingw32]\nruntime = \"sfn/runtime-native\"\ncc = \"x86_64-w64-mingw32-gcc\"\n";
+    let runtime = toml_get_string(toml, "targets.x86_64-w64-mingw32", "runtime");
+    let cc = toml_get_string(toml, "targets.x86_64-w64-mingw32", "cc");
+    assert _str_eq(runtime, "sfn/runtime-native");
+    assert _str_eq(cc, "x86_64-w64-mingw32-gcc");
+}
+
+test "manifest: targets section array fields readable via toml_get_string_array" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[targets.x86_64-w64-mingw32]\ncc-flags = [\"-static\", \"-O2\"]\nlink-libs = [\"-lm\"]\n";
+    let flags = toml_get_string_array(toml, "targets.x86_64-w64-mingw32", "cc-flags");
+    let libs = toml_get_string_array(toml, "targets.x86_64-w64-mingw32", "link-libs");
+    assert _contains(flags, "-static");
+    assert _contains(flags, "-O2");
+    assert _contains(flags, "\n");
+    assert _str_eq(libs, "-lm");
+}
+
+test "manifest: toml_get_string_array missing key returns empty" {
+    let toml = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n";
+    assert _str_eq(toml_get_string_array(toml, "targets.nope", "cc-flags"), "");
+}
+
+// ---- Round-trip via toml_add_dependency (writes preserve new fields) ----
+
+test "manifest: toml_add_dependency preserves build.kind" {
+    let original = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/mod.sfn\"\nkind = \"library\"\n";
+    let updated = toml_add_dependency(original, "http", "0.2.0");
+    assert _str_eq(toml_get_build_kind(updated), "library");
+    assert _contains(toml_get_dependencies(updated), "http=0.2.0");
+}
+
+test "manifest: toml_add_dependency preserves build.implicit" {
+    let original = "[capsule]\nname = \"prelude\"\nversion = \"0.1.0\"\n\n[build]\nentry = \"src/mod.sfn\"\nimplicit = true\n";
+    let updated = toml_add_dependency(original, "fmt", "0.3.0");
+    assert toml_get_build_implicit(updated) == true;
+}
+
+test "manifest: toml_add_dependency preserves workspace members" {
+    let original = "[capsule]\nname = \"root\"\nversion = \"0.1.0\"\n\n[workspace]\nmembers = [\"compiler\", \"capsules/sfn/*\"]\n";
+    let updated = toml_add_dependency(original, "fmt", "0.3.0");
+    let members = toml_get_workspace_members(updated);
+    assert _contains(members, "compiler");
+    assert _contains(members, "capsules/sfn/*");
+}
+
+test "manifest: toml_add_dependency preserves exports" {
+    let original = "[capsule]\nname = \"x\"\nversion = \"0.1.0\"\n\n[exports]\nmodules = [\"client\", \"server\"]\n";
+    let updated = toml_add_dependency(original, "fmt", "0.3.0");
+    let exports = toml_get_exports(updated);
+    assert _contains(exports, "client");
+    assert _contains(exports, "server");
+}
+
+// ---- Existing fields still parse after extension ----
+
+test "manifest: existing fields unaffected by Stage A extensions" {
+    let toml = "[capsule]\nname = \"sailfin\"\nversion = \"0.5.9\"\ndescription = \"the compiler\"\n\n[dependencies]\n\n[capabilities]\nrequired = [\"io\"]\n\n[build]\nentry = \"src/main.sfn\"\nkind = \"binary\"\n";
+    assert _str_eq(toml_get_name(toml), "sailfin");
+    assert _str_eq(toml_get_entry(toml), "src/main.sfn");
+    assert _str_eq(toml_get_build_kind(toml), "binary");
+}
