@@ -55,6 +55,14 @@ WORKER_SRC=""
 STAGE_IMPORT_WORKER=0
 STAGE_IMPORT_SRC=""
 
+# Worker invocations re-enter build.sh to dispatch a single
+# stage_import_context or build_module call. They only need a small subset of
+# the parent's setup (helpers, SEED, dirname helpers); the SOURCES collection,
+# directory cleanup, and most preamble logging are wasted work that — at
+# JOBS=N parallelism — also produces N copies of every banner line in the
+# build log. IS_WORKER gates that preamble out.
+IS_WORKER=0
+
 # Build directories (overridable via --work-dir)
 WORK_DIR="${WORK_DIR:-build/selfhost/native}"
 
@@ -100,6 +108,12 @@ while [[ $# -gt 0 ]]; do
         *)          echo "[build] unknown option: $1" >&2; exit 1 ;;
     esac
 done
+
+# Worker mode if either dispatch flag is set. Computed after argv parsing so
+# downstream blocks (preamble logs, SOURCES collection) can short-circuit.
+if [[ "$BUILD_MODULE_WORKER" -eq 1 || "$STAGE_IMPORT_WORKER" -eq 1 ]]; then
+    IS_WORKER=1
+fi
 
 # ---------------------------------------------------------------------------
 # Arena allocator default (Phase 0 / M0.5 — see docs/build-performance.md)
@@ -374,7 +388,9 @@ SEED="$(command -v "$SEED" 2>/dev/null || echo "$SEED")"
 SEED="$(cd "$REPO_ROOT" && realpath "$SEED")"
 [[ -x "$SEED" ]] || die "seed compiler not executable: $SEED"
 
-log "seed: $SEED ($("$SEED" version 2>/dev/null || "$SEED" --version 2>/dev/null || echo 'unknown'))"
+if [[ "$IS_WORKER" -eq 0 ]]; then
+    log "seed: $SEED ($("$SEED" version 2>/dev/null || "$SEED" --version 2>/dev/null || echo 'unknown'))"
+fi
 
 # ---------------------------------------------------------------------------
 # Collect sources
@@ -419,46 +435,51 @@ collect_compiler_capsule_deps() {
     ' "$manifest"
 }
 
-# Collect all .sfn files in deterministic order
+# Collect all .sfn files in deterministic order. Workers receive their target
+# source path as an argument and don't enumerate the tree, so skip this work
+# (and the per-worker log line) in worker mode — it's redundant and produces
+# JOBS copies of every banner line in the build log when fan-out is high.
 SOURCES=()
-while IFS= read -r -d '' f; do
-    SOURCES+=("$f")
-done < <(find "$COMPILER_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
-while IFS= read -r -d '' f; do
-    SOURCES+=("$f")
-done < <(find "$RUNTIME_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
-
-# Pull in declared capsule dependencies. For now we resolve them against
-# the in-tree `capsules/<scope>/<name>/src/` layout.
-#
-# Resolution policy:
-#   - sfn/* deps MUST have an in-tree source — fail fast if missing, since
-#     that indicates a stale allowlist or a typo in compiler/capsule.toml.
-#   - Third-party (non-sfn/) deps that only live in the user cache
-#     (~/.sfn/cache/capsules/...) are warned-and-skipped for now. Wire
-#     them up here once the compiler actually takes a third-party dep.
 CAPSULE_DEP_COUNT=0
-while IFS= read -r dep; do
-    [[ -n "$dep" ]] || continue
-    cap_dir="$CAPSULES_DIR/$dep/src"
-    if [[ ! -d "$cap_dir" ]]; then
-        if [[ "$dep" == sfn/* ]]; then
-            die "capsule dep '$dep' declared in compiler/capsule.toml but no in-tree source at $cap_dir"
-        fi
-        warn "capsule dep '$dep' has no in-tree source at $cap_dir; skipping (user-cache resolution not yet wired)"
-        continue
-    fi
+if [[ "$IS_WORKER" -eq 0 ]]; then
     while IFS= read -r -d '' f; do
         SOURCES+=("$f")
-        CAPSULE_DEP_COUNT=$((CAPSULE_DEP_COUNT + 1))
-    done < <(find "$cap_dir" -name '*.sfn' -print0 | LC_ALL=C sort -z)
-done < <(collect_compiler_capsule_deps "$COMPILER_MANIFEST")
+    done < <(find "$COMPILER_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
+    while IFS= read -r -d '' f; do
+        SOURCES+=("$f")
+    done < <(find "$RUNTIME_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
 
-[[ ${#SOURCES[@]} -gt 0 ]] || die "no .sfn sources found"
-if [[ $CAPSULE_DEP_COUNT -gt 0 ]]; then
-    log "found ${#SOURCES[@]} source modules (includes $CAPSULE_DEP_COUNT from capsule deps)"
-else
-    log "found ${#SOURCES[@]} source modules"
+    # Pull in declared capsule dependencies. For now we resolve them against
+    # the in-tree `capsules/<scope>/<name>/src/` layout.
+    #
+    # Resolution policy:
+    #   - sfn/* deps MUST have an in-tree source — fail fast if missing, since
+    #     that indicates a stale allowlist or a typo in compiler/capsule.toml.
+    #   - Third-party (non-sfn/) deps that only live in the user cache
+    #     (~/.sfn/cache/capsules/...) are warned-and-skipped for now. Wire
+    #     them up here once the compiler actually takes a third-party dep.
+    while IFS= read -r dep; do
+        [[ -n "$dep" ]] || continue
+        cap_dir="$CAPSULES_DIR/$dep/src"
+        if [[ ! -d "$cap_dir" ]]; then
+            if [[ "$dep" == sfn/* ]]; then
+                die "capsule dep '$dep' declared in compiler/capsule.toml but no in-tree source at $cap_dir"
+            fi
+            warn "capsule dep '$dep' has no in-tree source at $cap_dir; skipping (user-cache resolution not yet wired)"
+            continue
+        fi
+        while IFS= read -r -d '' f; do
+            SOURCES+=("$f")
+            CAPSULE_DEP_COUNT=$((CAPSULE_DEP_COUNT + 1))
+        done < <(find "$cap_dir" -name '*.sfn' -print0 | LC_ALL=C sort -z)
+    done < <(collect_compiler_capsule_deps "$COMPILER_MANIFEST")
+
+    [[ ${#SOURCES[@]} -gt 0 ]] || die "no .sfn sources found"
+    if [[ $CAPSULE_DEP_COUNT -gt 0 ]]; then
+        log "found ${#SOURCES[@]} source modules (includes $CAPSULE_DEP_COUNT from capsule deps)"
+    else
+        log "found ${#SOURCES[@]} source modules"
+    fi
 fi
 
 # ---------------------------------------------------------------------------
@@ -711,21 +732,26 @@ if [[ "$BUILD_MODULE_WORKER" -eq 1 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 1: Prepare directories
+# Step 1: Prepare directories (parent only — workers must NOT wipe artifacts
+# concurrently with peer workers).
 # ---------------------------------------------------------------------------
-log "preparing build directories..."
-cd "$REPO_ROOT"
-mkdir -p "$RAW_DIR" "$OBJ_DIR" "$OBJ_DIR/runtime"
-mkdir -p "$SEED_CWD/build/native/import-context"
+if [[ "$IS_WORKER" -eq 0 ]]; then
+    log "preparing build directories..."
+    cd "$REPO_ROOT"
+    mkdir -p "$RAW_DIR" "$OBJ_DIR" "$OBJ_DIR/runtime"
+    mkdir -p "$SEED_CWD/build/native/import-context"
 
-# Clean stale artifacts from prior builds (Python selfhost leaves .attempt*.ll files)
-find "$RAW_DIR" -name '*.ll' -delete 2>/dev/null || true
-find "$OBJ_DIR" -name '*.o' -delete 2>/dev/null || true
+    # Clean stale artifacts from prior builds (Python selfhost leaves .attempt*.ll files)
+    find "$RAW_DIR" -name '*.ll' -delete 2>/dev/null || true
+    find "$OBJ_DIR" -name '*.o' -delete 2>/dev/null || true
+fi
 
 # ---------------------------------------------------------------------------
 # Step 2: Stage import-context artifacts
 # ---------------------------------------------------------------------------
-log "staging import-context artifacts..."
+if [[ "$IS_WORKER" -eq 0 ]]; then
+    log "staging import-context artifacts..."
+fi
 
 stage_import_context() {
     local src="$1"
