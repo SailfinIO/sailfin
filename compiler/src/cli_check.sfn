@@ -6,14 +6,23 @@
 // the seed compiler can emit within its per-module timeout.
 //
 // See docs/proposals/check-architecture.md for the end-to-end design.
-import { inline_imports_for_source } from "./cli_commands";
-import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
+// Track A2 wires this through the unified resolver: a single
+// `prepare_project_capsules_for_check` pass stages every dep's
+// `.sfn-asm` artifact, the loader converts the artifacts into AST
+// interface declarations, and the typechecker consumes them via
+// `check_source_with_imports`. Cross-module `implements` clauses are
+// now conformance-checked end-to-end without any textual import
+// inlining.
+import { Statement } from "./ast";
+import { CheckCapsuleResolution, prepare_project_capsules_for_check } from "./capsule_resolver";
+import { _collect_sfn_files_cmd } from "./cli_commands_utils";
 import {
     CheckResult,
-    check_source,
+    check_source_with_imports,
     render_summary,
     summarize
 } from "./tools/check";
+import { ImportedInterfaceLoadResult, load_imported_interfaces_from_paths } from "./typecheck_import_loader";
 
 fn _emit_check_header(path: string, quiet: boolean) ![io] {
     if quiet { return; }
@@ -26,6 +35,26 @@ fn _emit_check_diagnostics(result: CheckResult, quiet: boolean) ![io] {
     loop {
         if i >= result.rendered.length { break; }
         print.err(result.rendered[i]);
+        i += 1;
+    }
+}
+
+// Emit per-path warnings only for *missing* import-context artifacts —
+// those indicate the resolver staged an artifact path that no longer
+// exists on disk, which is a real "your build is stale" signal users
+// should see. `skipped_paths` (artifact exists but contains zero
+// interfaces) is the common, benign case for any module that exports
+// only structs/functions, so emitting per-path warnings for it would
+// drown signal in noise on a typical project. The skipped-path data
+// remains on `ImportedInterfaceLoadResult` for A3's structured
+// diagnostics or any future audit consumer.
+fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean) ![io] {
+    if quiet { return; }
+    let mut i: number = 0;
+    loop {
+        if i >= load_result.missing_paths.length { break; }
+        print.err("[check] warning: missing import-context artifact: "
+            + load_result.missing_paths[i]);
         i += 1;
     }
 }
@@ -76,6 +105,30 @@ fn handle_check_command(args: string[]) -> number ![io] {
         return 1;
     }
 
+    // One-shot project resolution. Every file in this `sfn check`
+    // invocation walks up to the same workspace + manifest, so the
+    // resolved capsule set is identical regardless of which file we
+    // anchor on. Loading the import-context once and reusing the
+    // converted interface set across every file keeps the work
+    // O(capsules) rather than O(files × capsules).
+    let mut imported_interfaces: Statement[] = [];
+    let empty_load_paths: string[] = [];
+    let mut load_result = ImportedInterfaceLoadResult {
+        interfaces: imported_interfaces,
+        missing_paths: empty_load_paths,
+        skipped_paths: empty_load_paths
+    };
+    let resolution = prepare_project_capsules_for_check(files[0]);
+    if resolution.staging_failed {
+        // The resolver already wrote a structured error to stderr
+        // (slug collision or stage-write failure). Returning 2
+        // distinguishes setup errors from analysis diagnostics
+        // (exit 1) so CI scripts can react appropriately.
+        return 2;
+    }
+    load_result = load_imported_interfaces_from_paths(resolution.asm_paths);
+    imported_interfaces = load_result.interfaces;
+
     let mut results: CheckResult[] = [];
     let mut total_errors: number = 0;
     let mut fi: number = 0;
@@ -83,9 +136,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
         if fi >= files.length { break; }
         let path = files[fi];
         let source = fs.readFile(path);
-        let base_dir = _dirname_cmd(path);
-        let inlined = inline_imports_for_source(source, base_dir);
-        let result = check_source(inlined, path);
+        let result = check_source_with_imports(source, path, imported_interfaces);
         if result.error_count > 0 {
             _emit_check_header(path, quiet);
             _emit_check_diagnostics(result, quiet);
@@ -94,6 +145,8 @@ fn handle_check_command(args: string[]) -> number ![io] {
         results.push(result);
         fi += 1;
     }
+
+    _emit_load_warnings(load_result, quiet);
 
     let summary = summarize(results);
     print(render_summary(summary));
