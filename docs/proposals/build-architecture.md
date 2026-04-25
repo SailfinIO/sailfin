@@ -1,52 +1,124 @@
 # Proposal: Unified Build Architecture for Sailfin
 
-Status: Stage A scoped, ready for grooming
-Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed)
+Status: Stage A shipped; Stage B split into two PRs, PR1 shipped, PR2 next
+Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed)
 Authors: Core Team
 
-## Implementation Status (as of 2026-04-25)
+## Implementation Status (as of 2026-04-25, end of Stage B PR1)
 
-Drift since the original draft:
+**Stage A — shipped.** Manifest schema, `workspace.toml`,
+`capsules/sfn/prelude/capsule.toml`, and `[build].kind = "binary"` on the
+compiler's own manifest all landed. Parse-only — no consumers wired in
+Stage A itself.
 
-- **Partial Stage B already shipped.** `compiler/src/capsule_resolver.sfn`
-  (~450 LOC) implements `discover_project_root` →
-  `enumerate_capsule_sources` → `stage_capsule_imports` →
-  `compile_capsule_modules`. `sfn build` and `sfn run` call it via
-  `_prepare_project_capsules` in `cli_main.sfn`, so manifest-declared
-  capsule deps no longer go through textual inlining when a
-  `capsule.toml` is present.
-- **`sfn check` shipped** (April 18 — see `docs/proposals/check-architecture.md`).
-  Provides the parser/typecheck/effect surface the unified driver will reuse.
-- **Phase 6 parallel selfhost shipped.** `make compile` is now ~2 min local
-  / 5:28 CI Linux (was ~13 min serial). The "process-per-module is a cost
-  floor" pressure (Problem 2.4) is partially relieved — Phase 5 (long-lived
-  process) is no longer urgent for the wall-time target.
+**Stage B — split into PR1 (resolver + sfn build/run) and PR2 (test + check
++ libextract).** This avoids bundling the high-risk `sfn/compiler-lib`
+extraction with the lower-risk resolver wiring.
 
-What is still **not** shipped (and remains the gating work for everything
-downstream):
+### Stage B PR1 — shipped on `claude/build-stage-b-hlXw1`
 
-1. **Manifest schema.** `compiler/src/toml_parser.sfn` does not yet accept
-   `[build].kind`, `[build].implicit`, `[workspace]`, `[dev-dependencies]`,
-   `[targets.*]`, or `[exports]`.
-2. **No `workspace.toml`** at the repo root.
-3. **No `capsules/sfn/prelude/capsule.toml`** wrapping `runtime/prelude.sfn`.
-4. **Stdlib allowlist is still hard-coded** in `_is_stdlib_capsule_cmd`
-   (`compiler/src/cli_commands_utils.sfn:281`).
-5. **Textual inlining still in the fallback path.** `cli_main.sfn:590` calls
-   `inline_imports_for_source` whenever `_prepare_project_capsules` returns
-   empty (no manifest).
-6. **`llvm-objcopy --weaken` hack still in `sfn test`**
-   (`compiler/src/cli_commands.sfn:670`). Needs `sfn/compiler-lib`
-   extraction (Stage B) before it can retire.
-7. **`sfn build` is still single-file.** No `-p <path>`, no `kind=library`
-   artifacts, no `--release`/`--emit=`/`--target=`/`--jobs=`/`--json`.
-8. **Build-script fixups still load-bearing.** `EMIT_RETRIES=3`
-   (`scripts/build.sh:51`) — Stage 4 attempted `EMIT_RETRIES=1` and
-   reverted on April 25 because `instructions.sfn` flakes. The fallback
-   paths in `compile_to_llvm_file_with_module` are also still live.
+Four commits, all green through `make compile` (~133-148s):
 
-Stage A (manifest + workspace schema, parse-only) is the next pickable unit
-of work; see Part 5 for the scoped contract.
+1. `feat(resolver): add WorkspaceMember + workspace.toml discovery to capsule_resolver`
+   — `WorkspaceMember`, `parse_workspace_member_paths`,
+   `discover_workspace_root`, `load_workspace_members`,
+   `workspace_member_for_spec`. 8 inlined-helper unit tests.
+2. `feat(resolver): add enumerate_relative_sources to capsule_resolver`
+   — string-/comment-aware import scanner, `resolve_relative_import`,
+   BFS-walking `enumerate_relative_sources(entry)`. 19 unit tests.
+3. `refactor(cli): wire sfn build/run to unified resolver; add sfn build -p`
+   — `_prepare_project_capsules` now combines (1) relative imports,
+   (2) manifest-declared capsule deps, (3) workspace-implicit imports
+   (`scope/name` references the source uses but doesn't `[depends]` on,
+   resolved against `workspace.toml`). The textual-inline fallback in
+   `sfn run` is **deleted**. `sfn build -p <capsule-path>` ships, with
+   `[build].kind = "library"` capsules emitting a `.o` instead of
+   linking. All 19 stdlib `capsules/sfn/*` manifests gain
+   `[build].kind = "library"`. `compiler/tests/e2e/test_capsule_build.sh`:
+   4/4 PASS.
+4. `refactor(resolver): move prepare_project_capsules into capsule_resolver`
+   — clean move from `cli_main.sfn` so `cli_commands.sfn` (PR2) can
+   import it for the test path.
+
+### Stage B PR2 — what the next session needs to ship
+
+PR2 was originally scoped as just "extract `sfn/compiler-lib` and retire
+`llvm-objcopy --weaken`". After PR1, it inherits four additional items
+that turned out to be architecturally coupled to libextract:
+
+1. **`sfn test` migration.** `compile_tests_to_llvm_file_with_module`
+   (in `compiler/src/main.sfn:313`) lowers test sources with
+   `mangle_symbols = false` so the synthesized harness in
+   `lower_to_llvm_lines_with_parsed_context_for_tests`
+   (`compiler/src/llvm/lowering/lowering_core.sfn:107`) can call
+   `test:foo` functions by their bare names. The unified resolver
+   compiles capsule modules with `mangle_symbols = true`, which mangles
+   `helper_answer` → `helper_answer__fixtures__inlining_helper`. Result:
+   a test source's `import { helper_answer } from "./helper"` emits a
+   bare `@helper_answer` reference but the helper `.ll` defines the
+   mangled symbol — link error. PR1 confirmed this empirically with
+   `compiler/tests/e2e/test_runner_import_inlining_test.sfn`.
+
+   Two fix paths, both natural alongside libextract:
+   - **(a)** Teach the test harness to emit mangled call sites
+     (`call @test_foo__module_name`). One-line change in the harness
+     emitter; needs every existing test re-verified.
+   - **(b)** Compile capsule helpers without mangling for tests (forks
+     the resolver's compile path). Less risky for the harness; doubles
+     resolver surface area.
+
+2. **`sfn check` migration.** `tools/check.check_source` operates on a
+   single source string and has no notion of cross-module symbols.
+   Today the textual inliner is the only reason imported names resolve.
+   Migrating means extending typecheck to load layout-manifests so
+   imported symbol references don't trip "undefined" diagnostics — a
+   non-trivial typechecker change.
+
+3. **Delete the legacy helpers.** Once `sfn test` and `sfn check` are
+   migrated, delete `_inline_relative_imports_cmd`,
+   `inline_imports_for_source` (both in `compiler/src/cli_commands.sfn`),
+   `_is_stdlib_capsule_cmd` (`compiler/src/cli_commands_utils.sfn:281`),
+   and `_is_stdlib` in `compiler/src/toml_parser.sfn:115`. Drop
+   `compiler/tests/unit/stdlib_capsule_allowlist_test.sfn` (it tests
+   the deleted code).
+
+4. **Original PR2 scope:** extract `sfn/compiler-lib` from
+   `compiler/src/` (everything except `cli_main.sfn`,
+   `cli_commands.sfn`, `cli_commands_utils.sfn`); update
+   `compiler/capsule.toml` to depend on it; update `scripts/build.sh`
+   to walk the new locations. With `sfn/compiler-lib` in place, retire
+   the `llvm-objcopy --weaken` block in
+   `compiler/src/cli_commands.sfn:670` (`_clang_link_test_cmd`).
+
+### What remains for Stages C–G
+
+Unchanged from the original plan (Part 5):
+
+- **Stage C** — In-process driver for user capsules; content-addressed
+  cache; `sfn package` and `sfn bench` subsume the shell scripts.
+- **Stage D** — Compiler builds itself via `sfn build`; delete
+  `scripts/build.sh` and the Makefile.
+- **Stage E** — Long-lived process, arena, incremental builds; hit the
+  <5 min build target.
+- **Stage F** — Sailfin runtime rewrite; `sfn/runtime-native` retires.
+- **Stage G (post-1.0)** — Compiler decomposition into sub-capsules.
+
+### Other unblocked drift since the original draft
+
+- **Phase 6 parallel selfhost shipped.** `make compile` is ~2 min local
+  / 5:28 CI Linux (was ~13 min serial). Phase 5 (long-lived process)
+  is no longer urgent for the wall-time target.
+- **`sfn check` shipped** (April 18 — see
+  `docs/proposals/check-architecture.md`). Provides the parser /
+  typecheck / effect surface the unified driver reuses.
+
+### Build-script fixups still load-bearing (unchanged)
+
+- `EMIT_RETRIES=3` (`scripts/build.sh:51`) — Stage 4 attempted
+  `EMIT_RETRIES=1` and reverted on April 25 because `instructions.sfn`
+  flakes. Stage D is when this can finally retire.
+- The fallback paths in `compile_to_llvm_file_with_module`
+  (`compiler/src/main.sfn:480`) are also still live.
 
 ## Summary
 
@@ -994,28 +1066,95 @@ capsule deps (separate-compile via `discover_project_root` →
 `compile_capsule_modules`). Stage B unifies it with the relative-import
 walker and teaches it to consume the workspace file Stage A produces.
 
-- Fold `_inline_relative_imports_cmd` into `capsule_resolver.sfn` (or a
-  sibling module under `compiler/src/resolver/`) so relative and capsule
-  imports go through the same code path. The output type becomes a
-  `ResolvedGraph` that both `sfn build` and `sfn run` consume.
-- Retire `_is_stdlib_capsule_cmd` — the resolver reads the workspace
-  file (Stage A) to discover that `sfn/http` maps to `capsules/sfn/http`.
-- `sfn run` stops textually inlining imports; it compiles modules
-  separately and links them. Diagnostics now reference original files.
-- `sfn test` stops weakening the compiler binary. Tests that need
-  compiler internals depend on a new `sfn/compiler-lib` capsule
-  (extracted from `compiler/src/`, excluding `cli_main.sfn` and
-  `cli_commands.sfn`) as a dev-dep. Tests that don't need compiler
-  internals lose the weakening step entirely and get faster.
-- `sfn build` accepts `-p <path>` and reads the manifest to resolve the
-  entry + dep graph, but still hands off to the single-file emit path.
-- Stdlib capsules can now ship patch versions: `sfn/http@0.2.2` is
-  valid without a compiler release.
+Stage B splits into two PRs to keep the libextract risk isolated from
+the resolver wiring:
 
-**Exit criteria:** `sfn test` passes with zero uses of `llvm-objcopy`;
-`_inline_relative_imports_cmd` is deleted; stdlib allowlist is deleted;
-`sfn build -p capsules/sfn/http` produces the same `mod.o` that
-`build.sh` would.
+#### Stage B PR1 — resolver + sfn build/run (shipped on `claude/build-stage-b-hlXw1`)
+
+- Workspace machinery in `capsule_resolver.sfn`: `WorkspaceMember`,
+  `parse_workspace_member_paths`, `discover_workspace_root`,
+  `load_workspace_members`, `workspace_member_for_spec`.
+- Relative-import scanner + walker in `capsule_resolver.sfn`:
+  `collect_relative_import_specs`, `resolve_relative_import`,
+  `enumerate_relative_sources(entry_path)`.
+- Workspace-implicit imports in `capsule_resolver.sfn`:
+  `collect_scoped_import_specs`,
+  `enumerate_workspace_implicit_sources(entry, members, excluded_specs)`
+  — replaces the hard-coded stdlib allowlist as the source of truth for
+  which `sfn/X` imports resolve without an explicit `[dependencies]`
+  entry.
+- `prepare_project_capsules(input_path)` orchestrator combines (1)
+  relative imports, (2) manifest-declared capsule deps, (3)
+  workspace-implicit imports into one staged + compiled set.
+- `sfn build` and `sfn run` consume the unified resolver. The
+  `inline_imports_for_source` text-fallback path in `sfn run` is
+  **deleted**.
+- `sfn build -p <capsule-path>` reads `[build].entry` + `[build].kind`
+  from the capsule manifest. `kind = "library"` emits a `.o` via
+  `clang -c`; `kind = "binary"` (default) links as before; `kind =
+  "runtime"` errors with a Stage F deferral note.
+- All 19 stdlib `capsules/sfn/*` manifests gain `[build].kind =
+  "library"`.
+- 27 new unit tests across `workspace_resolver_test.sfn` and
+  `relative_import_resolver_test.sfn` (inlined helpers, mirroring
+  `stdlib_capsule_allowlist_test.sfn` — the resolver imports `./main`
+  so direct importing in a unit test pulls in the whole compiler and
+  trips the seed's per-module timeout).
+
+#### Stage B PR2 — sfn test, sfn check, libextract, weaken retirement
+
+PR1 hit two architectural walls that turned out to be naturally
+coupled to the libextract work originally scoped here:
+
+- **`sfn test`**: `compile_tests_to_llvm_file_with_module` uses
+  `mangle_symbols = false` so the synthesized harness can call
+  `test:foo` by bare name. The unified resolver compiles capsule
+  helpers with `mangle_symbols = true`, producing
+  `helper_answer__fixtures__inlining_helper`. Result: test source's
+  `@helper_answer` reference can't link. Either teach the harness to
+  emit mangled call sites, or compile capsule helpers without mangling
+  for tests. PR1 reverted its test-runner wiring after confirming the
+  link error empirically.
+- **`sfn check`**: `tools/check.check_source` operates on a single
+  source string with no notion of cross-module symbols. Without
+  textual inlining, every imported name becomes "undefined". Migrating
+  needs typecheck to load layout-manifests.
+
+PR2's full scope:
+
+- Pick a fix path for `sfn test` mangling (see PR1's
+  `entrypoints_tests_writer.sfn` change for one starting attempt — it
+  loaded import-context but the mangle-symbols mismatch defeated it)
+  and migrate `handle_test_command` to consume the resolver.
+- Extend `check_source` to load layout-manifests so `sfn check`
+  resolves cross-module imports without textual inlining.
+- Extract `sfn/compiler-lib` from `compiler/src/` (everything except
+  `cli_main.sfn`, `cli_commands.sfn`, `cli_commands_utils.sfn`) so
+  tests that need compiler internals depend on it as a dev-dep.
+- Retire the `llvm-objcopy --weaken` block in `_clang_link_test_cmd`
+  (`compiler/src/cli_commands.sfn:670`).
+- Delete the legacy helpers: `_inline_relative_imports_cmd`,
+  `inline_imports_for_source`, `_is_stdlib_capsule_cmd`,
+  `_resolve_capsule_name_cmd`, plus `_is_stdlib` in `toml_parser.sfn`.
+- Delete `compiler/tests/unit/stdlib_capsule_allowlist_test.sfn` (it
+  tests the deleted code).
+
+#### Combined Stage B exit criteria
+
+- `sfn test` passes with zero uses of `llvm-objcopy --weaken` anywhere
+  in the codebase.
+- `_inline_relative_imports_cmd`, `inline_imports_for_source`, and
+  `_is_stdlib_capsule_cmd` no longer exist.
+- `sfn build -p capsules/sfn/http` produces the same `mod.o` that
+  `build.sh` would (compare `objdump -t` symbol tables; bit-exact is
+  the goal but not strictly required). **PR1 ships the `sfn build -p`
+  surface; symbol-table parity is achievable today.**
+- `make compile && make check` still passes; the stage2/stage3
+  fixed-point still holds.
+- `sfn fmt --check` is clean on every touched file.
+
+PR1 meets `sfn build -p` and the `make compile` invariant. PR2 meets
+the rest.
 
 ### Stage C — In-process driver for user capsules
 

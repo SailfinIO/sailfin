@@ -10,3 +10,4 @@ required = ["gpu"]
 
 [build]
 entry = "src/mod.sfn"
+kind = "library"

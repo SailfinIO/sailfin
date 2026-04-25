@@ -34,17 +34,32 @@
 // Consumers then call `_clang_link_multi` with the main .ll and the
 // capsule .ll paths, and clang produces a linked binary with all
 // capsule symbols resolved.
-import { compile_to_llvm_file_with_module, write_native_text_file_with_module } from "./main";
+import {
+    compile_to_llvm_file_with_module,
+    number_to_string,
+    write_native_text_file_with_module
+} from "./main";
 import { substring } from "./string_utils";
-import { toml_get_dependencies } from "./toml_parser";
+import { toml_get_dependencies, toml_get_name, toml_get_workspace_members } from "./toml_parser";
 
 export {
     CapsuleSource,
+    WorkspaceMember,
+    collect_relative_import_specs,
+    collect_scoped_import_specs,
     discover_project_root,
+    discover_workspace_root,
     enumerate_capsule_sources,
+    enumerate_relative_sources,
+    enumerate_workspace_implicit_sources,
+    load_workspace_members,
+    parse_workspace_member_paths,
+    prepare_project_capsules,
+    resolve_relative_import,
     stage_capsule_imports,
     compile_capsule_modules,
-    mangle_slug
+    mangle_slug,
+    workspace_member_for_spec
 };
 
 struct CapsuleSource {
@@ -52,6 +67,15 @@ struct CapsuleSource {
     source_path: string;  // absolute path to the .sfn file
     slug: string;  // e.g. "sfn/cli/mod" — used for staging + symbol mangling
     ll_path: string;  // e.g. "build/sailfin/capsules/sfn__cli__mod.ll"
+}
+
+// One entry from the workspace's [workspace].members list, with the
+// member's canonical name (read from the member's own capsule.toml) and
+// its src/ directory pre-resolved against the workspace root.
+struct WorkspaceMember {
+    name: string;  // canonical name, e.g. "sfn/http"
+    member_path: string;  // path relative to workspace root, e.g. "capsules/sfn/http"
+    src_dir: string;  // path to the member's src/ dir (workspace-rooted)
 }
 
 // ---- Path helpers ----
@@ -447,4 +471,1023 @@ fn compile_capsule_modules(sources: CapsuleSource[]) -> string[] ![io] {
         i += 1;
     }
     return out;
+}
+
+// ---- Workspace discovery ----
+// Parse the newline-separated member list returned by toml_get_workspace_members
+// into a string array. Pure string utility — exported so tests can exercise it
+// without writing a workspace.toml to disk.
+fn parse_workspace_member_paths(members_text: string) -> string[] {
+    let mut out: string[] = [];
+    if members_text.length == 0 { return out; }
+    let mut start: number = 0;
+    let len = members_text.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if substring(members_text, end, end + 1) == "\n" { break; }
+            end += 1;
+        }
+        if end > start {
+            let entry = substring(members_text, start, end);
+            // Globs (e.g. "capsules/sfn/*") are deferred to a later stage —
+            // workspace.toml today must list members literally. Skip glob
+            // entries so an accidental wildcard never silently expands here.
+            let mut has_glob: boolean = false;
+            let mut gi: number = 0;
+            loop {
+                if gi >= entry.length { break; }
+                if substring(entry, gi, gi + 1) == "*" {
+                    has_glob = true;
+                    break;
+                }
+                gi += 1;
+            }
+            if !has_glob { out.push(entry); }
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+// Walk up from start_dir looking for workspace.toml. Returns the directory
+// containing it, or "" if none is found within 16 levels. The workspace
+// root is independent of (and may differ from) the project root: a project
+// inside a workspace has both, while a standalone capsule has only the
+// project root.
+fn discover_workspace_root(start_dir: string) -> string ![io] {
+    let mut dir: string = start_dir;
+    if dir.length == 0 { dir = "."; }
+    let mut depth: number = 0;
+    loop {
+        if depth >= 16 { break; }
+        let manifest = _cr_path_join(dir, "workspace.toml");
+        if fs.exists(manifest) { return dir; }
+        let parent = _cr_dirname(dir);
+        if strings_equal(parent, dir) { break; }
+        if parent.length == 0 { break; }
+        dir = parent;
+        depth += 1;
+    }
+    return "";
+}
+
+// Read the canonical name of a workspace member by loading its capsule.toml.
+// Returns "" if the member directory has no capsule.toml or no [capsule].name.
+fn _cr_read_member_name(workspace_root: string, member_path: string) -> string ![io] {
+    let manifest = _cr_path_join(_cr_path_join(workspace_root, member_path), "capsule.toml");
+    if !fs.exists(manifest) { return ""; }
+    return toml_get_name(fs.readFile(manifest));
+}
+
+// Check that a workspace member path is safe to join onto the workspace
+// root: relative, no `..` traversal, no backslashes. Absolute paths and
+// `..` segments would let a manifest reach outside the workspace.
+fn _cr_is_safe_member_path(path: string) -> boolean {
+    if path.length == 0 { return false; }
+    // Reject absolute paths.
+    if substring(path, 0, 1) == "/" { return false; }
+    // Reject backslashes (Windows-style separators are disallowed in
+    // workspace.toml).
+    if _cr_find_char(path, "\\", 0) >= 0 { return false; }
+    // Reject any `..` segment. Walk segments separated by `/`.
+    let mut start: number = 0;
+    loop {
+        if start >= path.length { break; }
+        let mut end: number = start;
+        loop {
+            if end >= path.length { break; }
+            if substring(path, end, end + 1) == "/" { break; }
+            end += 1;
+        }
+        let segment = substring(path, start, end);
+        if strings_equal(segment, "..") { return false; }
+        if strings_equal(segment, ".") { return false; }
+        start = end + 1;
+    }
+    return true;
+}
+
+// Load every workspace member listed in `<workspace_root>/workspace.toml`
+// into a WorkspaceMember[] with each member's canonical name pre-resolved.
+// Unsafe paths and members whose capsule.toml is missing or unnamed are
+// skipped with a `print.err` warning.
+fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
+    let mut out: WorkspaceMember[] = [];
+    if workspace_root.length == 0 { return out; }
+    let manifest = _cr_path_join(workspace_root, "workspace.toml");
+    if !fs.exists(manifest) { return out; }
+    let text = fs.readFile(manifest);
+    let members_text = toml_get_workspace_members(text);
+    let paths = parse_workspace_member_paths(members_text);
+    let mut i: number = 0;
+    loop {
+        if i >= paths.length { break; }
+        let path = paths[i];
+        if !_cr_is_safe_member_path(path) {
+            print.err("workspace: skipping unsafe member path \"" + path
+                + "\" (must be relative, no `..`, no backslashes)");
+            i += 1;
+            continue;
+        }
+        let name = _cr_read_member_name(workspace_root, path);
+        if name.length == 0 {
+            print.err("workspace: skipping member \"" + path
+                + "\" — capsule.toml missing or has no [capsule].name");
+            i += 1;
+            continue;
+        }
+        let src = _cr_path_join(_cr_path_join(workspace_root, path), "src");
+        out.push(WorkspaceMember {
+            name: name, member_path: path, src_dir: src
+        });
+        i += 1;
+    }
+    return out;
+}
+
+// Look up a workspace member by canonical name (e.g. "sfn/http") and return
+// its src_dir. Returns "" if no such member exists. The compiler binary
+// itself, plus the prelude, may declare names that are not import-targets;
+// the caller decides whether the lookup result is meaningful.
+fn workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> string {
+    let mut i: number = 0;
+    loop {
+        if i >= members.length { break; }
+        if strings_equal(members[i].name, spec) {
+            return members[i].src_dir;
+        }
+        i += 1;
+    }
+    return "";
+}
+
+// ---- Source-level import scanning ----
+// These helpers replace the cli_commands.sfn `_collect_relative_import_spans_cmd`
+// state machine so the resolver owns the only import-spec scanner. Skip-aware
+// of string literals, line comments, and block comments — must stay in sync
+// with the legacy implementation until that is deleted.
+fn _cr_byte_at(text: string, index: number) -> string {
+    if text.length == 0 { return ""; }
+    if index < 0 { return ""; }
+    if index >= text.length { return ""; }
+    return substring(text, index, index + 1);
+}
+
+fn _cr_is_ident_char(ch: string) -> boolean {
+    let allowed = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_";
+    if ch.length == 0 { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= allowed.length { break; }
+        if substring(allowed, i, i + 1) == ch { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _cr_word_matches(source: string, index: number, word: string) -> boolean {
+    if word.length == 0 { return false; }
+    if index < 0 { return false; }
+    let end_pos = index + word.length;
+    if end_pos > source.length { return false; }
+    if substring(source, index, end_pos) != word { return false; }
+    if index > 0 {
+        if _cr_is_ident_char(_cr_byte_at(source, index - 1)) { return false; }
+    }
+    if end_pos < source.length {
+        if _cr_is_ident_char(_cr_byte_at(source, end_pos)) { return false; }
+    }
+    return true;
+}
+
+// Walk the source for `import { ... } from "spec"` statements and return
+// every spec string that begins with `./` or `../`. The walker is
+// string-, line-comment-, and block-comment-aware so it doesn't trip on
+// import-shaped strings inside comments or string literals.
+fn collect_relative_import_specs(source: string) -> string[] {
+    let mut out: string[] = [];
+    let source_len = source.length;
+    if source_len == 0 { return out; }
+    let mut steps: number = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: number = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if _cr_word_matches(source, i, "import") {
+            let mut j: number = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: number = -1;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == "\n" { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == "*" {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == "/" {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == "/" {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == " " { ws = true; }
+                            if wk == "\t" { ws = true; }
+                            if wk == "\n" { ws = true; }
+                            if wk == "\r" { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == "\"" {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    let mut is_relative: boolean = false;
+                    if spec.length >= 2 {
+                        if substring(spec, 0, 2) == "./" { is_relative = true; }
+                    }
+                    if spec.length >= 3 {
+                        if substring(spec, 0, 3) == "../" {
+                            is_relative = true;
+                        }
+                    }
+                    if is_relative { out.push(spec); }
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Resolve a relative import spec ("./foo", "../bar/baz") against `base_dir`
+// (the importer's directory) to a filesystem path with `.sfn` appended.
+// Pure path arithmetic — does not check existence; the caller decides
+// whether to fall back to a `<spec>/mod.sfn` directory layout.
+fn resolve_relative_import(base_dir: string, spec: string) -> string {
+    let mut current_base = base_dir;
+    let mut remainder = spec;
+    loop {
+        if remainder.length >= 3 {
+            if substring(remainder, 0, 3) == "../" {
+                current_base = _cr_dirname(current_base);
+                remainder = substring(remainder, 3, remainder.length);
+                continue;
+            }
+        }
+        if remainder.length >= 2 {
+            if substring(remainder, 0, 2) == "./" {
+                remainder = substring(remainder, 2, remainder.length);
+                continue;
+            }
+        }
+        break;
+    }
+    let path = _cr_path_join(current_base, remainder);
+    if _cr_ends_with(path, ".sfn") { return path; }
+    return path + ".sfn";
+}
+
+// Compute the slug for a relatively-imported file by stripping `entry_dir`
+// from the front of the file path and the `.sfn` suffix from the end. The
+// resulting slug matches what the compiler's import resolver produces for
+// `import { X } from "./<rel>"` issued from the entry — keeping per-module
+// `.sfn-asm` lookups in sync.
+fn _cr_relative_slug(entry_dir: string, file_path: string) -> string {
+    // Normalise entry_dir to end without a trailing slash for clean prefix
+    // checks. The empty entry_dir corresponds to a current-dir entry.
+    let mut prefix = entry_dir;
+    if prefix.length > 0 {
+        if substring(prefix, prefix.length - 1, prefix.length) == "/" {
+            prefix = substring(prefix, 0, prefix.length - 1);
+        }
+    }
+    let mut tail: string = file_path;
+    if prefix.length > 0 {
+        let prefix_with_slash = prefix + "/";
+        if file_path.length >= prefix_with_slash.length {
+            if substring(file_path, 0, prefix_with_slash.length) == prefix_with_slash {
+                tail = substring(file_path, prefix_with_slash.length, file_path.length);
+            }
+        }
+    }
+    if _cr_ends_with(tail, ".sfn") {
+        tail = substring(tail, 0, tail.length - 4);
+    }
+    return tail;
+}
+
+// Walk relative imports (`./foo`, `../foo`) reachable from `entry_path` and
+// return one CapsuleSource per discovered file. The entry itself is NOT
+// included — the caller compiles it via the standard single-file path.
+//
+// `runtime/*` and scoped (`scope/name`) imports are handled by
+// `enumerate_capsule_sources` (manifest-declared deps) and the workspace
+// member lookup; this enumerator only walks intra-project relative imports.
+fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
+    let mut out: CapsuleSource[] = [];
+    if entry_path.length == 0 { return out; }
+    let entry_dir = _cr_dirname(entry_path);
+    let mut visited: string[] = [entry_path];
+    let mut queue: string[] = [entry_path];
+    let mut head: number = 0;
+    // Belt-and-suspenders cap on top of the visited-set dedupe, in case
+    // the visited check is ever broken by a slug bug. If we hit it we
+    // surface a diagnostic rather than silently dropping reachable
+    // modules — a silent drop would later show up as missing
+    // import-context artifacts during lowering with no clear cause.
+    let max_iterations: number = 4096;
+    let mut iterations: number = 0;
+    loop {
+        if head >= queue.length { break; }
+        if iterations >= max_iterations {
+            print.err("capsule-resolver: enumerate_relative_sources hit "
+                + "iteration cap ("
+                + number_to_string(max_iterations)
+                + ") — some relative imports may be missing; please file a bug");
+            break;
+        }
+        iterations += 1;
+        let current_path = queue[head];
+        head += 1;
+        if !fs.exists(current_path) { continue; }
+        let source = fs.readFile(current_path);
+        let specs = collect_relative_import_specs(source);
+        let cur_dir = _cr_dirname(current_path);
+        let mut i: number = 0;
+        loop {
+            if i >= specs.length { break; }
+            let spec = specs[i];
+            let mut dep_path = resolve_relative_import(cur_dir, spec);
+            if !fs.exists(dep_path) {
+                // Directory import fallback: ./dir → dir/mod.sfn
+                if _cr_ends_with(dep_path, ".sfn") {
+                    let mod_fallback = substring(dep_path, 0, dep_path.length - 4)
+                        + "/mod.sfn";
+                    if fs.exists(mod_fallback) { dep_path = mod_fallback; }
+                }
+            }
+            if fs.exists(dep_path) {
+                let mut already_seen: boolean = false;
+                let mut vi: number = 0;
+                loop {
+                    if vi >= visited.length { break; }
+                    if strings_equal(visited[vi], dep_path) {
+                        already_seen = true;
+                        break;
+                    }
+                    vi += 1;
+                }
+                if !already_seen {
+                    visited.push(dep_path);
+                    queue.push(dep_path);
+                    let slug = _cr_relative_slug(entry_dir, dep_path);
+                    let ll = "build/sailfin/capsules/" + mangle_slug(slug)
+                        + ".ll";
+                    out.push(CapsuleSource {
+                        spec: "", source_path: dep_path, slug: slug, ll_path: ll
+                    });
+                }
+            }
+            i += 1;
+        }
+    }
+    return out;
+}
+
+// ---- Scoped (capsule) import scanning ----
+// Sibling of `collect_relative_import_specs` that returns specs containing
+// `/` and not starting with `./`, `../`, or `runtime/`. These are the
+// candidate inputs for capsule resolution: either declared in the project
+// manifest's `[dependencies]` (handled by `enumerate_capsule_sources`) or
+// resolved against workspace members (handled by
+// `enumerate_workspace_implicit_sources`).
+fn collect_scoped_import_specs(source: string) -> string[] {
+    let mut out: string[] = [];
+    let source_len = source.length;
+    if source_len == 0 { return out; }
+    let mut steps: number = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: number = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if _cr_word_matches(source, i, "import") {
+            let mut j: number = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: number = -1;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == "\n" { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == "*" {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == "/" {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == "/" {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == " " { ws = true; }
+                            if wk == "\t" { ws = true; }
+                            if wk == "\n" { ws = true; }
+                            if wk == "\r" { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == "\"" {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    let mut is_relative: boolean = false;
+                    if spec.length >= 2 {
+                        if substring(spec, 0, 2) == "./" { is_relative = true; }
+                    }
+                    if spec.length >= 3 {
+                        if substring(spec, 0, 3) == "../" {
+                            is_relative = true;
+                        }
+                    }
+                    let mut is_runtime: boolean = false;
+                    if spec.length >= 8 {
+                        if substring(spec, 0, 8) == "runtime/" {
+                            is_runtime = true;
+                        }
+                    }
+                    let mut has_slash: boolean = false;
+                    let mut si: number = 0;
+                    loop {
+                        if si >= spec.length { break; }
+                        if substring(spec, si, si + 1) == "/" {
+                            has_slash = true;
+                            break;
+                        }
+                        si += 1;
+                    }
+                    if !is_relative {
+                        if !is_runtime {
+                            if has_slash { out.push(spec); }
+                        }
+                    }
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Look up a workspace member src dir from a scoped import spec like
+// "sfn/http". Submodule paths ("sfn/http/client") strip the trailing
+// segments down to the canonical "scope/name" before lookup so the spec
+// shape matches what `workspace_member_for_spec` indexes by.
+fn _cr_member_src_for_spec(members: WorkspaceMember[], spec: string) -> string {
+    let first = _cr_find_char(spec, "/", 0);
+    if first <= 0 { return ""; }
+    let second = _cr_find_char(spec, "/", first + 1);
+    let mut canonical = spec;
+    if second > 0 { canonical = substring(spec, 0, second); }
+    return workspace_member_for_spec(members, canonical);
+}
+
+fn _cr_string_array_contains(items: string[], needle: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= items.length { break; }
+        if strings_equal(items[i], needle) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Walk every scoped import reachable from `entry_path` and, for any spec
+// that maps to a workspace member but is NOT in `excluded_specs`, return
+// CapsuleSource entries for every .sfn file under that member's src/.
+//
+// `excluded_specs` is the set of specs already covered by
+// `enumerate_capsule_sources` (manifest-declared deps). The intent is
+// "anything the workspace ships that the user imports without
+// declaring" — the unified replacement for the hard-coded
+// `_is_stdlib_capsule_cmd` allowlist that gated implicit stdlib resolution.
+//
+// BFS-walks transitively through each enumerated workspace member's
+// sources so an import of sfn/http that internally imports sfn/json
+// pulls both in.
+fn enumerate_workspace_implicit_sources(entry_path: string, members: WorkspaceMember[], excluded_specs: string[]) -> CapsuleSource[] ![io] {
+    let mut out: CapsuleSource[] = [];
+    if entry_path.length == 0 { return out; }
+    if members.length == 0 { return out; }
+    let mut covered: string[] = [];
+    let mut ei: number = 0;
+    loop {
+        if ei >= excluded_specs.length { break; }
+        covered.push(excluded_specs[ei]);
+        ei += 1;
+    }
+    let mut paths_to_scan: string[] = [entry_path];
+    let mut head: number = 0;
+    let max_iterations: number = 1024;
+    let mut iterations: number = 0;
+    loop {
+        if head >= paths_to_scan.length { break; }
+        if iterations >= max_iterations { break; }
+        iterations += 1;
+        let path = paths_to_scan[head];
+        head += 1;
+        if !fs.exists(path) { continue; }
+        let source = fs.readFile(path);
+        let specs = collect_scoped_import_specs(source);
+        let mut i: number = 0;
+        loop {
+            if i >= specs.length { break; }
+            let spec = specs[i];
+            i += 1;
+            // Canonicalise to "scope/name" for the covered-set check.
+            let first = _cr_find_char(spec, "/", 0);
+            if first <= 0 { continue; }
+            let second = _cr_find_char(spec, "/", first + 1);
+            let mut canonical = spec;
+            if second > 0 { canonical = substring(spec, 0, second); }
+            if _cr_string_array_contains(covered, canonical) { continue; }
+            let src_dir = workspace_member_for_spec(members, canonical);
+            if src_dir.length == 0 { continue; }
+            covered.push(canonical);
+            let found = _cr_collect_capsule_sources(src_dir, canonical);
+            let mut j: number = 0;
+            loop {
+                if j >= found.length { break; }
+                out.push(found[j]);
+                paths_to_scan.push(found[j].source_path);
+                j += 1;
+            }
+        }
+    }
+    return out;
+}
+
+// ---- Top-level orchestrator ----
+// Parse the dep keys (e.g. "sfn/cli", "sfn/http") from the
+// `name=version\n` text returned by toml_get_dependencies. Used to seed the
+// "already covered" set for workspace-implicit lookup so that
+// manifest-declared deps don't double-up with workspace members.
+fn _cr_dep_specs_from_text(deps_text: string) -> string[] {
+    let mut out: string[] = [];
+    if deps_text.length == 0 { return out; }
+    let mut start: number = 0;
+    let len = deps_text.length;
+    loop {
+        if start >= len { break; }
+        let mut end: number = start;
+        loop {
+            if end >= len { break; }
+            if substring(deps_text, end, end + 1) == "\n" { break; }
+            end += 1;
+        }
+        if end > start {
+            let mut eq_pos: number = -1;
+            let mut ei: number = start;
+            loop {
+                if ei >= end { break; }
+                if substring(deps_text, ei, ei + 1) == "=" {
+                    eq_pos = ei;
+                    break;
+                }
+                ei += 1;
+            }
+            if eq_pos > start {
+                out.push(substring(deps_text, start, eq_pos));
+            }
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+// Resolve, stage, and compile every dependency reachable from `input_path`.
+// Returns the list of dependency .ll paths to feed the linker (empty
+// when no dependencies are needed).
+//
+// Three resolution paths run in sequence and are concatenated:
+//   1. Relative imports (`./foo`, `../bar`) reachable from the entry —
+//      always walked, even for standalone files without a manifest.
+//   2. Manifest-declared capsule deps (`[dependencies]` in the project's
+//      capsule.toml) — every .sfn under each dep's src/ tree.
+//   3. Workspace-implicit imports — any scoped import (`scope/name`) the
+//      source uses that maps to a workspace member but isn't declared in
+//      the project's `[dependencies]`. Replaces the legacy
+//      `_is_stdlib_capsule_cmd` allowlist; the workspace.toml file is now
+//      the single source of truth for which capsules are available
+//      without an explicit `sfn add`.
+fn prepare_project_capsules(input_path: string) -> string[] ![io] {
+    let base_dir = _cr_dirname(input_path);
+    let mut sources: CapsuleSource[] = [];
+
+    // (1) Relative imports — always.
+    let relative = enumerate_relative_sources(input_path);
+    let mut ri: number = 0;
+    loop {
+        if ri >= relative.length { break; }
+        sources.push(relative[ri]);
+        ri += 1;
+    }
+
+    // (2) Manifest-declared capsule deps — only when a capsule.toml is
+    // discoverable from the entry's directory.
+    let project_root = discover_project_root(base_dir);
+    let mut covered_specs: string[] = [];
+    if project_root.length > 0 {
+        let manifest_path = _cr_path_join(project_root, "capsule.toml");
+        if fs.exists(manifest_path) {
+            let manifest_text = fs.readFile(manifest_path);
+            let deps_text = toml_get_dependencies(manifest_text);
+            covered_specs = _cr_dep_specs_from_text(deps_text);
+        }
+        let dep_sources = enumerate_capsule_sources(project_root);
+        let mut di: number = 0;
+        loop {
+            if di >= dep_sources.length { break; }
+            sources.push(dep_sources[di]);
+            di += 1;
+        }
+    }
+
+    // (3) Workspace-implicit imports.
+    let workspace_root = discover_workspace_root(base_dir);
+    if workspace_root.length > 0 {
+        let members = load_workspace_members(workspace_root);
+        let implicit = enumerate_workspace_implicit_sources(input_path, members, covered_specs);
+        let mut wi: number = 0;
+        loop {
+            if wi >= implicit.length { break; }
+            sources.push(implicit[wi]);
+            wi += 1;
+        }
+    }
+
+    if sources.length == 0 { return []; }
+
+    // Detect slug collisions across the three resolution paths. Two
+    // sources with the same slug but different source paths would
+    // overwrite each other under build/native/import-context/<slug>.* —
+    // fail loudly with the conflict so the user can rename or restructure.
+    let mut deduped: CapsuleSource[] = [];
+    let mut seen_slugs: string[] = [];
+    let mut seen_paths: string[] = [];
+    let mut si: number = 0;
+    loop {
+        if si >= sources.length { break; }
+        let candidate = sources[si];
+        let mut collision: boolean = false;
+        let mut sj: number = 0;
+        loop {
+            if sj >= seen_slugs.length { break; }
+            if strings_equal(seen_slugs[sj], candidate.slug) {
+                if !strings_equal(seen_paths[sj], candidate.source_path) {
+                    print.err("capsule-resolver: slug collision for \""
+                        + candidate.slug
+                        + "\":\n  "
+                        + seen_paths[sj]
+                        + "\n  "
+                        + candidate.source_path
+                        + "\nrename one of the modules so each maps to a distinct slug.");
+                    return [];
+                }
+                // Same slug AND same path → exact duplicate, drop silently.
+                collision = true;
+                break;
+            }
+            sj += 1;
+        }
+        if !collision {
+            seen_slugs.push(candidate.slug);
+            seen_paths.push(candidate.source_path);
+            deduped.push(candidate);
+        }
+        si += 1;
+    }
+
+    let staged = stage_capsule_imports(deduped);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return [];
+    }
+    return compile_capsule_modules(deduped);
 }

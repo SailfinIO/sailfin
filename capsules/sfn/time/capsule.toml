@@ -10,3 +10,4 @@ required = ["clock"]
 
 [build]
 entry = "src/mod.sfn"
+kind = "library"
