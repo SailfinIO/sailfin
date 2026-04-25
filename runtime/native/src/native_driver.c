@@ -32,11 +32,13 @@ extern char *compile_to_llvm(char *source);
 // for the underlying CLI implementation instead.
 extern double sailfin_cli_main__cli_main(SailfinPtrArray *argv);
 
-// Optional process-exit arena telemetry. Activated when both
-// SAILFIN_USE_ARENA=1 (arena allocator on) and SAILFIN_DUMP_ARENA_STATS=1
-// (this gate) are set. Prints one stderr line at exit with arena page count,
-// capacity, used bytes, and utilization plus a label so per-module compile
-// runs are easy to grep out of a build log. See docs/build-performance.md
+// Optional process-exit arena telemetry. Gated on SAILFIN_DUMP_ARENA_STATS=1
+// alone — when set, the atexit hook always runs.  At exit it checks
+// SAILFIN_USE_ARENA: if the arena is on, prints the page/capacity/utilization
+// stats line; otherwise prints a single "stats=disabled" line so the user
+// knows they probably forgot to set SAILFIN_USE_ARENA=1.  Both lines carry
+// a label derived from argv so per-module aggregation across a parallel
+// build log is just a grep + awk away.  See docs/build-performance.md
 // Phase 0 for context.
 static char _arena_stats_label[256] = "<unknown>";
 
@@ -46,11 +48,32 @@ static int _arena_stats_enabled(void)
     return flag && flag[0] != '\0' && flag[0] != '0';
 }
 
+static int _arg_starts_value_flag(const char *arg)
+{
+    // Whitelist of flags the seed CLI takes a value for.  Conservative —
+    // adding a flag that takes no value here would only cause a positional
+    // argument to be skipped during label selection (telemetry-only impact).
+    if (!arg || arg[0] != '-')
+    {
+        return 0;
+    }
+    return strcmp(arg, "-o") == 0 || strcmp(arg, "--out") == 0 ||
+           strcmp(arg, "--emit") == 0 || strcmp(arg, "--seed") == 0 ||
+           strcmp(arg, "--clang") == 0 || strcmp(arg, "--timeout") == 0 ||
+           strcmp(arg, "--max-total") == 0 || strcmp(arg, "--work-dir") == 0 ||
+           strcmp(arg, "--jobs") == 0 || strcmp(arg, "--opt") == 0 ||
+           strcmp(arg, "--runtime-root") == 0 ||
+           strcmp(arg, "--binary-dir") == 0;
+}
+
 static void _arena_stats_capture_label(int argc, char **argv)
 {
     // Best-effort: prefer the trailing positional (typically the source file
-    // path on `seed emit -o out.ll llvm <src>`). Fall back to argv[1] then
-    // argv[0]. The label is purely informational; never fatal.
+    // path on `seed emit -o out.ll llvm <src>`). Skip flags and any argument
+    // that follows a known value-taking flag (e.g. `-o <path>`); a boolean
+    // flag like `--verbose` is not in the value-taking list and so does not
+    // mask the next positional. Fall back to argv[1] then argv[0]. The label
+    // is purely informational; never fatal.
     const char *picked = NULL;
     for (int i = argc - 1; i >= 0; i--)
     {
@@ -59,8 +82,8 @@ static void _arena_stats_capture_label(int argc, char **argv)
         {
             continue;
         }
-        // Skip --emit/--out values that follow a flag.
-        if (i > 0 && argv[i - 1] && argv[i - 1][0] == '-')
+        // Skip values that follow a known value-taking flag (e.g. `-o <path>`).
+        if (i > 0 && _arg_starts_value_flag(argv[i - 1]))
         {
             continue;
         }

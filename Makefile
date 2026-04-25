@@ -425,8 +425,8 @@ check:
 	@# with $(SELFHOST1_OPT) (default -O0) for speed; without this promotion
 	@# step a subsequent `make compile` would see a stale -O0 binary as
 	@# "up-to-date" and skip the rebuild.
-	@if [ -x "build/native/sailfin-seedcheck" ]; then \
-		cp -f "build/native/sailfin-seedcheck" "build/native/sailfin"; \
+	@if [ -x "build/native/sailfin-seedcheck$(EXE_EXT)" ]; then \
+		cp -f "build/native/sailfin-seedcheck$(EXE_EXT)" "$(NATIVE_BIN)"; \
 		echo "[check] promoted seedcheck → $(NATIVE_BIN)"; \
 	fi
 
