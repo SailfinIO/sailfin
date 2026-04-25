@@ -34,7 +34,11 @@
 // Consumers then call `_clang_link_multi` with the main .ll and the
 // capsule .ll paths, and clang produces a linked binary with all
 // capsule symbols resolved.
-import { compile_to_llvm_file_with_module, write_native_text_file_with_module } from "./main";
+import {
+    compile_to_llvm_file_with_module,
+    number_to_string,
+    write_native_text_file_with_module
+} from "./main";
 import { substring } from "./string_utils";
 import { toml_get_dependencies, toml_get_name, toml_get_workspace_members } from "./toml_parser";
 
@@ -538,9 +542,38 @@ fn _cr_read_member_name(workspace_root: string, member_path: string) -> string !
     return toml_get_name(fs.readFile(manifest));
 }
 
+// Check that a workspace member path is safe to join onto the workspace
+// root: relative, no `..` traversal, no backslashes. Absolute paths and
+// `..` segments would let a manifest reach outside the workspace.
+fn _cr_is_safe_member_path(path: string) -> boolean {
+    if path.length == 0 { return false; }
+    // Reject absolute paths.
+    if substring(path, 0, 1) == "/" { return false; }
+    // Reject backslashes (Windows-style separators are disallowed in
+    // workspace.toml).
+    if _cr_find_char(path, "\\", 0) >= 0 { return false; }
+    // Reject any `..` segment. Walk segments separated by `/`.
+    let mut start: number = 0;
+    loop {
+        if start >= path.length { break; }
+        let mut end: number = start;
+        loop {
+            if end >= path.length { break; }
+            if substring(path, end, end + 1) == "/" { break; }
+            end += 1;
+        }
+        let segment = substring(path, start, end);
+        if strings_equal(segment, "..") { return false; }
+        if strings_equal(segment, ".") { return false; }
+        start = end + 1;
+    }
+    return true;
+}
+
 // Load every workspace member listed in `<workspace_root>/workspace.toml`
 // into a WorkspaceMember[] with each member's canonical name pre-resolved.
-// Members whose capsule.toml is missing or unnamed are skipped with a warning.
+// Unsafe paths and members whose capsule.toml is missing or unnamed are
+// skipped with a `print.err` warning.
 fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
     let mut out: WorkspaceMember[] = [];
     if workspace_root.length == 0 { return out; }
@@ -553,13 +586,23 @@ fn load_workspace_members(workspace_root: string) -> WorkspaceMember[] ![io] {
     loop {
         if i >= paths.length { break; }
         let path = paths[i];
-        let name = _cr_read_member_name(workspace_root, path);
-        if name.length > 0 {
-            let src = _cr_path_join(_cr_path_join(workspace_root, path), "src");
-            out.push(WorkspaceMember {
-                name: name, member_path: path, src_dir: src
-            });
+        if !_cr_is_safe_member_path(path) {
+            print.err("workspace: skipping unsafe member path \"" + path
+                + "\" (must be relative, no `..`, no backslashes)");
+            i += 1;
+            continue;
         }
+        let name = _cr_read_member_name(workspace_root, path);
+        if name.length == 0 {
+            print.err("workspace: skipping member \"" + path
+                + "\" — capsule.toml missing or has no [capsule].name");
+            i += 1;
+            continue;
+        }
+        let src = _cr_path_join(_cr_path_join(workspace_root, path), "src");
+        out.push(WorkspaceMember {
+            name: name, member_path: path, src_dir: src
+        });
         i += 1;
     }
     return out;
@@ -908,11 +951,22 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
     let mut visited: string[] = [entry_path];
     let mut queue: string[] = [entry_path];
     let mut head: number = 0;
-    let max_iterations: number = 256;
+    // Belt-and-suspenders cap on top of the visited-set dedupe, in case
+    // the visited check is ever broken by a slug bug. If we hit it we
+    // surface a diagnostic rather than silently dropping reachable
+    // modules — a silent drop would later show up as missing
+    // import-context artifacts during lowering with no clear cause.
+    let max_iterations: number = 4096;
     let mut iterations: number = 0;
     loop {
         if head >= queue.length { break; }
-        if iterations >= max_iterations { break; }
+        if iterations >= max_iterations {
+            print.err("capsule-resolver: enumerate_relative_sources hit "
+                + "iteration cap ("
+                + number_to_string(max_iterations)
+                + ") — some relative imports may be missing; please file a bug");
+            break;
+        }
         iterations += 1;
         let current_path = queue[head];
         head += 1;
@@ -1389,10 +1443,51 @@ fn prepare_project_capsules(input_path: string) -> string[] ![io] {
     }
 
     if sources.length == 0 { return []; }
-    let staged = stage_capsule_imports(sources);
+
+    // Detect slug collisions across the three resolution paths. Two
+    // sources with the same slug but different source paths would
+    // overwrite each other under build/native/import-context/<slug>.* —
+    // fail loudly with the conflict so the user can rename or restructure.
+    let mut deduped: CapsuleSource[] = [];
+    let mut seen_slugs: string[] = [];
+    let mut seen_paths: string[] = [];
+    let mut si: number = 0;
+    loop {
+        if si >= sources.length { break; }
+        let candidate = sources[si];
+        let mut collision: boolean = false;
+        let mut sj: number = 0;
+        loop {
+            if sj >= seen_slugs.length { break; }
+            if strings_equal(seen_slugs[sj], candidate.slug) {
+                if !strings_equal(seen_paths[sj], candidate.source_path) {
+                    print.err("capsule-resolver: slug collision for \""
+                        + candidate.slug
+                        + "\":\n  "
+                        + seen_paths[sj]
+                        + "\n  "
+                        + candidate.source_path
+                        + "\nrename one of the modules so each maps to a distinct slug.");
+                    return [];
+                }
+                // Same slug AND same path → exact duplicate, drop silently.
+                collision = true;
+                break;
+            }
+            sj += 1;
+        }
+        if !collision {
+            seen_slugs.push(candidate.slug);
+            seen_paths.push(candidate.source_path);
+            deduped.push(candidate);
+        }
+        si += 1;
+    }
+
+    let staged = stage_capsule_imports(deduped);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return [];
     }
-    return compile_capsule_modules(sources);
+    return compile_capsule_modules(deduped);
 }

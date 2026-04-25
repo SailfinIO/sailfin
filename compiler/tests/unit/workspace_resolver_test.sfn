@@ -68,6 +68,38 @@ fn _workspace_member_for_spec(members: WorkspaceMember[], spec: string) -> strin
     return "";
 }
 
+// -- Inline copy of _cr_is_safe_member_path (from capsule_resolver.sfn) --
+fn _find_char(text: string, ch: string, start: number) -> number {
+    let mut i: number = start;
+    loop {
+        if i >= text.length { break; }
+        if substring(text, i, i + 1) == ch { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _is_safe_member_path(path: string) -> boolean {
+    if path.length == 0 { return false; }
+    if substring(path, 0, 1) == "/" { return false; }
+    if _find_char(path, "\\", 0) >= 0 { return false; }
+    let mut start: number = 0;
+    loop {
+        if start >= path.length { break; }
+        let mut end: number = start;
+        loop {
+            if end >= path.length { break; }
+            if substring(path, end, end + 1) == "/" { break; }
+            end += 1;
+        }
+        let segment = substring(path, start, end);
+        if strings_equal(segment, "..") { return false; }
+        if strings_equal(segment, ".") { return false; }
+        start = end + 1;
+    }
+    return true;
+}
+
 fn _str_eq(a: string, b: string) -> boolean { return strings_equal(a, b); }
 
 // ---- parse_workspace_member_paths ----
@@ -137,4 +169,36 @@ test "workspace: spec lookup is exact match (sfn/http != http)" {
     // import surface in scoped form ("sfn/http") and the workspace file is
     // the source of truth for whether that scoped name exists.
     assert _str_eq(_workspace_member_for_spec(members, "http"), "");
+}
+
+// ---- _cr_is_safe_member_path ----
+test "workspace: ordinary relative paths are safe" {
+    assert _is_safe_member_path("compiler");
+    assert _is_safe_member_path("capsules/sfn/http");
+    assert _is_safe_member_path("nested/many/levels/deep");
+}
+
+test "workspace: empty path is unsafe" { assert ! _is_safe_member_path(""); }
+
+test "workspace: absolute path is unsafe" {
+    assert ! _is_safe_member_path("/etc/passwd");
+    assert ! _is_safe_member_path("/absolute/dir");
+}
+
+test "workspace: parent traversal is unsafe" {
+    assert ! _is_safe_member_path("..");
+    assert ! _is_safe_member_path("../escape");
+    assert ! _is_safe_member_path("a/../b");
+    assert ! _is_safe_member_path("a/b/..");
+}
+
+test "workspace: current-dir segment is unsafe" {
+    assert ! _is_safe_member_path(".");
+    assert ! _is_safe_member_path("./compiler");
+    assert ! _is_safe_member_path("a/./b");
+}
+
+test "workspace: backslash is unsafe" {
+    assert ! _is_safe_member_path("windows\\path");
+    assert ! _is_safe_member_path("trailing\\");
 }

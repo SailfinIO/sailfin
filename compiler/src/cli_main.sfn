@@ -260,10 +260,14 @@ struct _CapsuleBuildSpec {
 fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     let mut spec = _CapsuleBuildSpec { entry_path: "", kind: "binary" };
     if p.length == 0 { return spec; }
+    // Treat `p` as a manifest path only when its final segment is exactly
+    // `capsule.toml`. Substring-only checks would also accept paths like
+    // `notcapsule.toml`, which the user almost certainly didn't mean.
+    let mut is_manifest_path: boolean = false;
+    if strings_equal(p, "capsule.toml") { is_manifest_path = true; }
+    if _ends_with(p, "/capsule.toml") { is_manifest_path = true; }
     let mut manifest_path = p;
-    if !_ends_with(p, "capsule.toml") {
-        manifest_path = _path_join(p, "capsule.toml");
-    }
+    if !is_manifest_path { manifest_path = _path_join(p, "capsule.toml"); }
     if !fs.exists(manifest_path) {
         print("capsule manifest not found: " + manifest_path);
         return spec;
@@ -277,7 +281,23 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     let manifest_dir = _dirname(manifest_path);
     spec.entry_path = _path_join(manifest_dir, entry_rel);
     let declared_kind = toml_get_build_kind(manifest_text);
-    if declared_kind.length > 0 { spec.kind = declared_kind; }
+    if declared_kind.length > 0 {
+        // Validate against the supported set so a typo in capsule.toml
+        // (e.g. `kind = "lybrary"`) doesn't silently fall back to binary.
+        let mut kind_ok: boolean = false;
+        if strings_equal(declared_kind, "binary") { kind_ok = true; }
+        if strings_equal(declared_kind, "library") { kind_ok = true; }
+        if strings_equal(declared_kind, "runtime") { kind_ok = true; }
+        if !kind_ok {
+            print("capsule manifest at " + manifest_path
+                + ": unknown [build].kind \""
+                + declared_kind
+                + "\" (expected binary | library | runtime)");
+            spec.entry_path = "";
+            return spec;
+        }
+        spec.kind = declared_kind;
+    }
     return spec;
 }
 
@@ -588,8 +608,11 @@ fn sailfin_cli_main(argv: string[]) -> number ![io] {
         }
 
         // Library builds stop after `clang -c` on the main .ll — no link,
-        // no main symbol required. Capsule deps stay as their own .ll/.o
-        // pairs under build/sailfin/capsules/ for downstream consumers.
+        // no main symbol required. Capsule deps remain as `.ll` files
+        // under build/sailfin/capsules/ (compiled in `prepare_project_capsules`
+        // but not lowered to `.o` here). Downstream consumers that need
+        // dep object files will compile them on demand once Stage C lands
+        // the in-process driver.
         if no_link {
             let rc_obj = process.run(["clang", "-O2", "-Wno-override-module", "-c", ll_path, "-o", out_path,]);
             if rc_obj != 0 {
