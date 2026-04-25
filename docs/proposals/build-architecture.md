@@ -1,7 +1,7 @@
 # Proposal: Unified Build Architecture for Sailfin
 
-Status: Stage A shipped; Stage B split into two PRs, PR1 shipped, PR2 in progress (A1 hookup landed)
-Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed)
+Status: Stage A shipped; Stage B split into two PRs, PR1 shipped, PR2 in progress (A1 + A2 landed; A3/A4 next)
+Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed)
 Authors: Core Team
 
 ## Implementation Status (as of 2026-04-25, end of Stage B PR1)
@@ -1144,12 +1144,25 @@ PR2's full scope, organized as Track A:
   imported_interfaces)`. Original `typecheck_diagnostics` becomes a
   one-line wrapper. Self-hosts; stage2/stage3 fixed point holds. See
   `docs/proposals/check-architecture.md` for details.
-- **A2 (next):** Add the `.sfn-asm`-text helper plus on-disk loader
-  (`load_imported_interfaces_from_paths`) — likely in a new module
-  that depends on `native_ir_api`. Wire `cli_check.sfn` through the
-  unified resolver (`prepare_project_capsules`) and pass loaded
-  interfaces into the new typecheck entry point. Delete
-  `inline_imports_for_source`'s `sfn check` call site.
+- **A2 (shipped):** New leaf-plus-one module
+  `compiler/src/typecheck_import_loader.sfn` (`![io]`) reads staged
+  `.sfn-asm` artifacts and converts them to
+  `Statement.InterfaceDeclaration[]` via the A1 converter; missing
+  and zero-interface paths are surfaced explicitly via
+  `ImportedInterfaceLoadResult` so the CLI can warn on stale
+  artifacts rather than silently weakening conformance checks.
+  `compiler/src/capsule_resolver.sfn` gains
+  `prepare_project_capsules_for_check` — same enumerate + dedupe +
+  stage as `prepare_project_capsules`, but no
+  `compile_capsule_modules` (check-mode skips LLVM lowering).
+  `compiler/src/tools/check.sfn` adds `check_source_with_imports`;
+  `compiler/src/cli_check.sfn` runs one resolver pass per
+  invocation, loads import-context once, and reuses the converted
+  `Statement[]` across every file in the run. Cross-module
+  conformance (E0301) is now live for end users. Coverage:
+  `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
+  `inline_imports_for_source`'s `sfn check` call site is gone;
+  the function itself stays defined for `sfn test` until A4.
 - **A3:** Diagnostic struct enhancement (`severity`, `file_path`).
 - **A4:** Delete legacy helpers once the test path also migrates.
 - Pick a fix path for `sfn test` mangling (see PR1's

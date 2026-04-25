@@ -1,7 +1,7 @@
 # Architecture: `sfn check` — Fast Analysis Without Codegen
 
 Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`)
-Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026
+Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026
 Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
 
 ## Implementation Status
@@ -28,13 +28,26 @@ sub-PRs:
   16 unit tests in `compiler/tests/unit/typecheck_imports_test.sfn`. The
   empty-imports path is exercised on every module during selfhost; the
   stage2/stage3 fixed-point holds.
-- **A2 — resolver wiring (next).** Add the artifact-text helper and the
-  on-disk loader (`load_imported_interfaces_from_paths`) to a separate
-  module that depends on `native_ir_api`, then wire `cli_check.sfn`
-  through `prepare_project_capsules` and pass the resulting interface
-  list into `typecheck_diagnostics_with_imports`. Delete the
-  `inline_imports_for_source` call in `cli_check.sfn`. Cross-module
-  interface conformance becomes live for end users.
+- **A2 — resolver wiring (shipped April 25, 2026).** New module
+  `compiler/src/typecheck_import_loader.sfn` exports
+  `interfaces_from_native_artifact(text)` (pure) and
+  `load_imported_interfaces_from_paths(paths) ![io]` returning
+  `ImportedInterfaceLoadResult { interfaces, missing_paths,
+  skipped_paths }`. `compiler/src/capsule_resolver.sfn` gains
+  `prepare_project_capsules_for_check(input_path) ->
+  CheckCapsuleResolution` — same enumerate + dedupe + stage as
+  `prepare_project_capsules`, but stops before
+  `compile_capsule_modules` so no `.ll` is emitted (check-mode is
+  `O(stage)` not `O(stage + lower)`). `compiler/src/tools/check.sfn`
+  exposes `check_source_with_imports(source, file_path,
+  imported_interfaces)` and `check_source` delegates with `[]`.
+  `compiler/src/cli_check.sfn` no longer imports
+  `inline_imports_for_source`; one resolver pass anchored on
+  `files[0]` loads imports once and reuses the converted
+  `Statement[]` across every file in the run. Slug collisions /
+  staging failures return exit code 2 (setup error) to match
+  check-architecture.md's documented contract. Coverage:
+  `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
 - **A3 — diagnostic enhancement.** Add `severity` and `file_path`
   fields to `Diagnostic` (the deferred Phase 1 item below). With A2
   in place every diagnostic naturally carries the originating module
