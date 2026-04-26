@@ -393,6 +393,36 @@ fn toml_get_string_array(text: string, section: string, key: string) -> string {
     return "";
 }
 
+// Phase F: read `[capabilities] required = [...]` from a capsule
+// manifest. Returns the parsed list of capability names as a real
+// `string[]` (not newline-joined like `toml_get_string_array`) so
+// downstream consumers can pass it straight into the effect-checker
+// `validate_capsule_capabilities` call without round-tripping
+// through `_split_lines`. An empty list means either:
+//   - the manifest declares `required = []` (no capabilities granted)
+//   - the manifest has no `[capabilities]` section at all
+//   - the input text isn't a capsule manifest (e.g. caller passed
+//     "" because the file wasn't on disk)
+// All three resolve to the same caller behaviour: skip the
+// capability cross-check, since there's no surface to compare
+// against. The effect-checker treats "no capabilities declared"
+// as "all capabilities allowed" — `compiler/capsule.toml` and the
+// stdlib capsules opt in by listing their required set explicitly.
+fn toml_get_capabilities_required(text: string) -> string[] {
+    let joined = toml_get_string_array(text, "capabilities", "required");
+    if joined.length == 0 { return []; }
+    let lines = _toml_split_lines(joined);
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= lines.length { break; }
+        let trimmed = _toml_trim(lines[i]);
+        if trimmed.length > 0 { out.push(trimmed); }
+        i += 1;
+    }
+    return out;
+}
+
 // Read a string value at `[section] key = "value"`. Returns "" if absent.
 // Lets callers read ad-hoc config (e.g. ~/.sfn/config.toml) without the
 // manifest-shaped SailToml struct.

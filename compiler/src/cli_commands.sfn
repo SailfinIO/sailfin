@@ -302,6 +302,11 @@ struct TestGroup {
     // that calls an imported effectful helper without declaring the
     // effect produces an `E0402` diagnostic.
     function_effects: ImportSymbolTable;
+    // Phase F: capsule manifest's `[capabilities] required = [...]`
+    // surface, populated from the same per-group resolver pass. A
+    // test body declaring an effect outside this surface produces
+    // an `E0403` diagnostic.
+    capabilities_required: string[];
 }
 
 // Compute the resolution-group key for a test file path. Two files
@@ -373,8 +378,9 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
             let empty_interfaces: Statement[] = [];
             let empty_texts: string[] = [];
             let empty_lls: string[] = [];
+            let empty_caps: string[] = [];
             groups.push(TestGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols()
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls, function_effects: empty_import_symbols(), capabilities_required: empty_caps
             });
             idx = groups.length - 1;
         }
@@ -420,6 +426,11 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         // `compile_tests_to_llvm_file_with_module_imports` alongside
         // the interface list.
         groups[gi].function_effects = load.function_effects;
+        // Phase F: stash the capsule manifest's
+        // `[capabilities] required` surface from the resolver pass
+        // so the per-test compile produces `E0403` for any test
+        // body declaring an effect outside the surface.
+        groups[gi].capabilities_required = resolution.capabilities_required;
         if trace_runner {
             print.err("test runner: resolver pass done (group="
                 + number_to_string(gi)
@@ -451,7 +462,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         if trace_runner { print.err("test runner: compile start"); }
         _clean_lowering_state("build/sailfin");
         let empty_manifests: LayoutManifest[] = [];
-        let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects);
+        let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
         if !_compiled {
             print("test runner: compile failed for " + path);
             fs.deleteFile(test_runner_active_path);

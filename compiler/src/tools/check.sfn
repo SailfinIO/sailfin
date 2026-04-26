@@ -22,11 +22,12 @@
 // See docs/proposals/check-architecture.md for the broader design.
 import { Statement } from "../ast";
 import {
+    capability_violation_to_diagnostic,
     effect_violation_to_diagnostic,
     render_diagnostic,
     split_source_lines
 } from "../diagnostics_render";
-import { validate_effects_with_imports } from "../effect_checker";
+import { validate_capsule_capabilities, validate_effects_with_imports } from "../effect_checker";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { number_to_string } from "../main";
@@ -61,7 +62,8 @@ fn _is_sfn_file(path: string) -> boolean {
 
 fn check_source(source: string, file_path: string) -> CheckResult ![io] {
     let no_interfaces: Statement[] = [];
-    return check_source_with_imports(source, file_path, no_interfaces, empty_import_symbols());
+    let no_caps: string[] = [];
+    return check_source_with_imports(source, file_path, no_interfaces, empty_import_symbols(), no_caps);
 }
 
 // Cross-module-aware variant: `imported_interfaces` carries
@@ -76,10 +78,18 @@ fn check_source(source: string, file_path: string) -> CheckResult ![io] {
 // It is threaded into `validate_effects_with_imports` so a caller
 // missing `![<imported_callee_effect>]` produces an `E0402`
 // diagnostic alongside any in-module `E0400` / `E0401` findings.
-fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable) -> CheckResult ![io] {
+//
+// Phase F: `capabilities_required` carries the project manifest's
+// `[capabilities] required = [...]` surface so `sfn check`
+// surfaces `E0403` for any function declaring an effect outside
+// the manifest-allowed set. Empty list = no manifest in scope =
+// skip the cross-check (standalone .sfn files outside any capsule
+// keep working unchanged).
+fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable, capabilities_required: string[]) -> CheckResult ![io] {
     let program = parse_program(source);
     let type_diags = typecheck_diagnostics_with_imports(program, imported_interfaces);
     let effect_violations = validate_effects_with_imports(program, function_effects);
+    let capability_violations = validate_capsule_capabilities(program, capabilities_required);
 
     let source_lines = split_source_lines(source);
     let mut combined: Diagnostic[] = [];
@@ -134,6 +144,23 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         rendered.push(render_diagnostic(diag, source_lines, "effect"));
         if strings_equal(diag.severity, "error") { errors += 1; }
         ei += 1;
+    }
+
+    // Phase F: capsule capability cross-check renders alongside
+    // the in-module / cross-module effect findings. Same severity
+    // contract — `sfn check` ignores `=off` so these diagnostics
+    // still surface even when the build path is bypassed.
+    let mut ci: number = 0;
+    loop {
+        if ci >= capability_violations.length { break; }
+        let mut cv = capability_violations[ci];
+        cv.severity = effect_severity;
+        let mut cdiag = capability_violation_to_diagnostic(cv);
+        cdiag.file_path = file_path;
+        combined.push(cdiag);
+        rendered.push(render_diagnostic(cdiag, source_lines, "effect"));
+        if strings_equal(cdiag.severity, "error") { errors += 1; }
+        ci += 1;
     }
 
     return CheckResult {

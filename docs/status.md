@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 26, 2026 (effect validation Phase E — cross-module propagation)
+Updated: April 26, 2026 (effect validation Phase F — capability cross-check vs capsule.toml)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -151,6 +151,34 @@ feature availability.
   entry's effects. E1 covers direct `Identifier` callees;
   `Member`-callee resolution (`mod.fn()`) and decorator-implied
   transitives are deferred to a follow-up Phase E2.
+- **Capsule capability cross-check (Phase F — shipped 2026-04-26).**
+  The capsule manifest's `[capabilities] required = [...]` list is
+  now a real compile-time contract. Any function declaring an
+  effect outside the manifest's allowed surface fails with
+  diagnostic code `E0403` ("declares effect ![X] outside capsule
+  capability surface ![A, B, ...]"). Empty surface (no
+  `[capabilities]` section, or standalone .sfn outside any capsule)
+  degrades the check to a no-op, so pre-Phase-F projects keep
+  building.
+
+  Plumbing: `toml_get_capabilities_required` parses the manifest;
+  `capsule_resolver.sfn` exposes `capabilities_required: string[]`
+  on `CheckCapsuleResolution` and `TestCapsuleResolution`;
+  `effect_checker.validate_capsule_capabilities` does the cross-
+  check; `diagnostics_render.capability_violation_to_diagnostic`
+  emits the diagnostic with a fix-it hint suggesting either widening
+  the manifest or narrowing the function. `effect_gate.sfn` exposes
+  `validate_and_render_effects_with_capabilities` so build-path
+  callers (`compile_tests_to_llvm_file_with_module_imports`) and
+  the `sfn check` path render E0400/E0401/E0402/E0403 through the
+  same severity contract.
+
+  Audit: `compiler/capsule.toml` widened from `["io"]` to
+  `["io", "clock"]` so `compile_to_llvm_with_module_timed`'s
+  `![io, clock]` declaration (used by `sfn emit llvm --timing`)
+  fits the surface. All `capsules/sfn/*/capsule.toml` manifests
+  were already correct against their declared effects — no
+  changes needed.
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
   and attach release assets.
@@ -181,7 +209,8 @@ feature availability.
 | Effect enforcement — `clock` | **Enforced** | Checker detects `sleep` / `runtime.sleep`; build fails on undeclared usage by default |
 | Effect enforcement — `gpu`, `rand` | Parsed only | Reserved at 1.0 in the canonical taxonomy; no detector logic yet |
 | Effect enforcement as compilation gate | **Shipped (Phase D, 2026-04-26)** | `validate_and_render_effects` runs after typecheck in every `compile_to_*` entry; default severity is `error` so undeclared effects fail the build. `SAILFIN_EFFECT_ENFORCE=warning` opt-in for capsule authors mid-migration; `=off` build-path escape hatch (proposal §4.7) |
-| Cross-module effect propagation | **Shipped (Phase E, 2026-04-26)** | A caller of an imported function inherits the callee's declared effects; missing propagation fails the build with `E0402`. Aliased imports (`import { foo as bar }`) resolve under the local name. E1 covers direct `Identifier` calls; `Member`-callee resolution and decorator-implied transitives deferred to Phase E2. Phase F (capsule.toml capability cross-check) is next |
+| Cross-module effect propagation | **Shipped (Phase E, 2026-04-26)** | A caller of an imported function inherits the callee's declared effects; missing propagation fails the build with `E0402`. Aliased imports (`import { foo as bar }`) resolve under the local name. E1 covers direct `Identifier` calls; `Member`-callee resolution and decorator-implied transitives deferred to Phase E2 |
+| Capsule capability cross-check | **Shipped (Phase F, 2026-04-26)** | `[capabilities] required = [...]` in `capsule.toml` is a real compile-time contract; functions declaring an effect outside the surface fail with `E0403`. Empty surface skips the check (standalone .sfn unchanged). Phase G (post-1.0) replaces the text-pattern checker with name-resolution detection and adds effect polymorphism |
 | Generic type inference | Partial | Type params captured; inference coverage is limited |
 | Interface conformance validation | Partial | Basic checks; variance not yet enforced |
 | `Affine<T>` / `Linear<T>` | Parsed only | Ownership wrappers accepted; move/consume rules not enforced |

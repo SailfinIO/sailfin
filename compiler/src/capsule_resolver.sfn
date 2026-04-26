@@ -41,7 +41,12 @@ import {
     write_native_text_file_with_module
 } from "./main";
 import { substring } from "./string_utils";
-import { toml_get_dependencies, toml_get_name, toml_get_workspace_members } from "./toml_parser";
+import {
+    toml_get_capabilities_required,
+    toml_get_dependencies,
+    toml_get_name,
+    toml_get_workspace_members
+} from "./toml_parser";
 
 export {
     CapsuleSource,
@@ -92,6 +97,13 @@ struct CheckCapsuleResolution {
     asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
     capsule_count: number;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision or stage-write failure
+    // Phase F (`docs/proposals/effect-validation.md` §5): the
+    // project manifest's `[capabilities] required = [...]`. Empty
+    // when no manifest is present (standalone .sfn files outside
+    // any capsule). The effect-checker treats empty as "skip
+    // capability cross-check"; non-empty as "fail E0403 on any
+    // function declaring an effect outside this surface."
+    capabilities_required: string[];
 }
 
 // Result of a test-mode resolver pass: same workspace + manifest +
@@ -107,6 +119,12 @@ struct TestCapsuleResolution {
     ll_paths: string[];  // build/sailfin/capsules/<mangled-slug>.ll
     capsule_count: number;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision, stage-write, or compile failure
+    // Phase F: same `[capabilities] required` surfacing as
+    // `CheckCapsuleResolution`. The test runner threads this into
+    // `compile_tests_to_llvm_file_with_module_imports` so a test
+    // body declaring an effect the capsule manifest doesn't grant
+    // produces an `E0403` diagnostic.
+    capabilities_required: string[];
 }
 
 // ---- Path helpers ----
@@ -1471,6 +1489,13 @@ fn _cr_dep_specs_from_text(deps_text: string) -> string[] {
 struct ResolverDedupeResult {
     sources: CapsuleSource[];
     has_collision: boolean;
+    // Phase F (`docs/proposals/effect-validation.md` §5): the
+    // project manifest's `[capabilities] required = [...]` list.
+    // Empty when no manifest is present (standalone .sfn files
+    // outside any capsule) — the effect-checker treats that as
+    // "no capability surface to compare against" and skips the
+    // E0403 cross-check.
+    capabilities_required: string[];
 }
 
 // Shared resolution + dedupe used by both `prepare_project_capsules`
@@ -1503,10 +1528,12 @@ fn _cr_resolve_and_dedupe(entry_paths: string[]) -> ResolverDedupeResult ![io] {
     let mut sources: CapsuleSource[] = [];
     let empty_sources: CapsuleSource[] = [];
 
+    let mut empty_caps: string[] = [];
     if entry_paths.length == 0 {
         return ResolverDedupeResult {
             sources: empty_sources,
-            has_collision: false
+            has_collision: false,
+            capabilities_required: empty_caps
         };
     }
 
@@ -1536,12 +1563,20 @@ fn _cr_resolve_and_dedupe(entry_paths: string[]) -> ResolverDedupeResult ![io] {
 
     let project_root = discover_project_root(anchor_dir);
     let mut covered_specs: string[] = [];
+    let mut capabilities_required: string[] = [];
     if project_root.length > 0 {
         let manifest_path = _cr_path_join(project_root, "capsule.toml");
         if fs.exists(manifest_path) {
             let manifest_text = fs.readFile(manifest_path);
             let deps_text = toml_get_dependencies(manifest_text);
             covered_specs = _cr_dep_specs_from_text(deps_text);
+            // Phase F: extract `[capabilities] required = [...]` so
+            // the effect-checker can compare every function's
+            // declared effects against the manifest-allowed surface.
+            // Empty list (no [capabilities] section, or `required =
+            // []`) tells the checker to skip the cross-check —
+            // that's the right call for projects mid-migration.
+            capabilities_required = toml_get_capabilities_required(manifest_text);
         }
         let dep_sources = enumerate_capsule_sources(project_root);
         let mut di: number = 0;
@@ -1575,7 +1610,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[]) -> ResolverDedupeResult ![io] {
     if sources.length == 0 {
         return ResolverDedupeResult {
             sources: empty_sources,
-            has_collision: false
+            has_collision: false,
+            capabilities_required: capabilities_required
         };
     }
 
@@ -1606,7 +1642,8 @@ fn _cr_resolve_and_dedupe(entry_paths: string[]) -> ResolverDedupeResult ![io] {
                         + "\nrename one of the modules so each maps to a distinct slug.");
                     return ResolverDedupeResult {
                         sources: empty_sources,
-                        has_collision: true
+                        has_collision: true,
+                        capabilities_required: capabilities_required
                     };
                 }
                 // Same slug AND same path → exact duplicate, drop silently.
@@ -1623,7 +1660,11 @@ fn _cr_resolve_and_dedupe(entry_paths: string[]) -> ResolverDedupeResult ![io] {
         si += 1;
     }
 
-    return ResolverDedupeResult { sources: deduped, has_collision: false };
+    return ResolverDedupeResult {
+        sources: deduped,
+        has_collision: false,
+        capabilities_required: capabilities_required
+    };
 }
 
 // Resolve, stage, and compile every dependency reachable from
@@ -1673,18 +1714,26 @@ fn prepare_project_capsules(input_path: string) -> string[] ![io] {
 fn prepare_project_capsules_for_check(entry_paths: string[]) -> CheckCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let resolved = _cr_resolve_and_dedupe(entry_paths);
+    // Phase F: surface the manifest's capability surface even on
+    // the early-exit paths. A collision/stage failure shouldn't
+    // silently disable E0403 for a clean re-run; the failure modes
+    // here are about staging artifacts, not about manifest
+    // semantics. We pass through whatever `_cr_resolve_and_dedupe`
+    // already extracted from the manifest read.
     if resolved.has_collision {
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
             capsule_count: 0,
-            staging_failed: true
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
         };
     }
     if resolved.sources.length == 0 {
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
             capsule_count: 0,
-            staging_failed: false
+            staging_failed: false,
+            capabilities_required: resolved.capabilities_required
         };
     }
 
@@ -1694,7 +1743,8 @@ fn prepare_project_capsules_for_check(entry_paths: string[]) -> CheckCapsuleReso
         return CheckCapsuleResolution {
             asm_paths: empty_paths,
             capsule_count: 0,
-            staging_failed: true
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
         };
     }
 
@@ -1710,7 +1760,8 @@ fn prepare_project_capsules_for_check(entry_paths: string[]) -> CheckCapsuleReso
     return CheckCapsuleResolution {
         asm_paths: asm_paths,
         capsule_count: resolved.sources.length,
-        staging_failed: false
+        staging_failed: false,
+        capabilities_required: resolved.capabilities_required
     };
 }
 
@@ -1742,12 +1793,18 @@ fn prepare_project_capsules_for_check(entry_paths: string[]) -> CheckCapsuleReso
 fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let resolved = _cr_resolve_and_dedupe(entry_paths);
+    // Phase F: thread `capabilities_required` through every exit
+    // path. Same rationale as `prepare_project_capsules_for_check`:
+    // staging failures are setup-time concerns, not manifest
+    // semantics — the gate still needs to know the capability
+    // surface to render `E0403` correctly on a clean retry.
     if resolved.has_collision {
         return TestCapsuleResolution {
             asm_paths: empty_paths,
             ll_paths: empty_paths,
             capsule_count: 0,
-            staging_failed: true
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
         };
     }
     if resolved.sources.length == 0 {
@@ -1755,7 +1812,8 @@ fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolu
             asm_paths: empty_paths,
             ll_paths: empty_paths,
             capsule_count: 0,
-            staging_failed: false
+            staging_failed: false,
+            capabilities_required: resolved.capabilities_required
         };
     }
 
@@ -1766,7 +1824,8 @@ fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolu
             asm_paths: empty_paths,
             ll_paths: empty_paths,
             capsule_count: 0,
-            staging_failed: true
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
         };
     }
 
@@ -1790,7 +1849,8 @@ fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolu
             asm_paths: asm_paths,
             ll_paths: empty_paths,
             capsule_count: resolved.sources.length,
-            staging_failed: true
+            staging_failed: true,
+            capabilities_required: resolved.capabilities_required
         };
     }
 
@@ -1798,6 +1858,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolu
         asm_paths: asm_paths,
         ll_paths: ll_paths,
         capsule_count: resolved.sources.length,
-        staging_failed: false
+        staging_failed: false,
+        capabilities_required: resolved.capabilities_required
     };
 }

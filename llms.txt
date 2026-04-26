@@ -1,6 +1,6 @@
 # Sailfin Language Reference for LLMs
 
-> Version: 0.5.9 | Updated: 2026-04-26 (Phase E)
+> Version: 0.5.9 | Updated: 2026-04-26 (Phase F)
 > Source: https://github.com/SailfinIO/sailfin | Site: https://sailfin.dev
 
 Sailfin is a compiled systems language with compile-time capability enforcement
@@ -22,6 +22,13 @@ calls it, A must declare every effect B declares (diagnostic code
 `E0402`). Aliased imports (`import { foo as bar }`) resolve under the
 local name. `Member`-callee resolution (`mod.fn()`) is a follow-up
 (Phase E2 in `docs/proposals/effect-validation.md`).
+
+Capsule manifests are a compile-time contract: every function's
+declared effects must be a subset of the capsule's
+`[capabilities] required = [...]` surface (diagnostic code `E0403`).
+A function declaring `![net]` inside a capsule that lists only
+`["io"]` fails the build. Empty surface (no `[capabilities]`
+section, or standalone .sfn outside any capsule) skips the check.
 
     fn read_config(path: string) -> string ![io] {
         return fs.readFile(path);
