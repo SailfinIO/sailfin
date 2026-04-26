@@ -119,16 +119,6 @@ fn _resolve_llvm_objcopy_cmd() -> string ![io] {
     return "";
 }
 
-// Resolve the `cp` binary similarly. Bare `cp` is in coreutils on
-// every supported platform, but checking for it explicitly turns a
-// silent missing-tool into a clear diagnostic and matches the
-// llvm-objcopy probe shape.
-fn _resolve_cp_cmd() -> string ![io] {
-    let rc = process.run(["cp", "--version"]);
-    if rc == 0 { return "cp"; }
-    return "";
-}
-
 fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> number ![io] {
     let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
     let mut di: number = 0;
@@ -178,21 +168,18 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
         // weak so resolver-produced dependency `.ll` files (which
         // define some of the same compiler-internal symbols, e.g.
         // `_strict_capsule_version__version` when a test imports
-        // `../../src/version`) win at link time. If either tool is
-        // missing, the file's symbols stay strong and the link fails
-        // with a confusing "multiple definition" error from ld. Bail
-        // loudly with a clear hint rather than letting that happen.
-        let cp_bin = _resolve_cp_cmd();
-        if cp_bin.length == 0 {
-            print.err("test runner: cp not found on PATH — cannot stage weakened compiler object for the test link step");
-            return 1;
-        }
+        // `../../src/version`) win at link time. If `llvm-objcopy` is
+        // missing or fails, the file's symbols stay strong and the
+        // link fails with a confusing "multiple definition" error
+        // from ld. Bail loudly with a clear hint rather than letting
+        // that happen. `cp` is POSIX-universal so we don't probe it,
+        // but its return code is still checked.
         let objcopy_bin = _resolve_llvm_objcopy_cmd();
         if objcopy_bin.length == 0 {
-            print.err("test runner: llvm-objcopy not found on PATH (tried llvm-objcopy and llvm-objcopy-{14..30}) — install LLVM tools (e.g. `apt-get install llvm-18` on Debian/Ubuntu) so the test runner can weaken the self-hosted compiler's linked object before linking each test binary");
+            print.err("test runner: llvm-objcopy not found on PATH (tried llvm-objcopy and llvm-objcopy-{14..30}) — install LLVM tools (e.g. `apt-get install llvm-18` on Debian/Ubuntu, `brew install llvm` on macOS) so the test runner can weaken the self-hosted compiler's linked object before linking each test binary");
             return 1;
         }
-        let cp_rc = process.run([cp_bin, selfhost_linked, weak_path]);
+        let cp_rc = process.run(["cp", selfhost_linked, weak_path]);
         if cp_rc != 0 {
             print.err("test runner: cp " + selfhost_linked + " " + weak_path
                 + " failed (exit="
