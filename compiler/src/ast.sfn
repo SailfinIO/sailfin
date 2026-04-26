@@ -33,15 +33,25 @@ struct SourceSpan {
 }
 
 enum Expression {
-    Identifier { name: string },
+    // Per-expression source spans land on the variants the effect
+    // checker needs for call-site attribution (B1, see
+    // docs/proposals/check-architecture.md). Spans are appended as
+    // the last field so the seed compiler's positional GEP indexing
+    // doesn't shift for existing field reads. Variants without a
+    // span field stay layout-stable.
+    Identifier { name: string, span: SourceSpan? },
     NumberLiteral { value: string },
     StringLiteral { value: string },
     BooleanLiteral { value: string },
     NullLiteral,
     Unary { operator: string, operand: Expression },
     Binary { operator: string, left: Expression, right: Expression },
-    Member { object: Expression, member: string },
-    Call { callee: Expression, arguments: Expression[] },
+    Member { object: Expression, member: string, span: SourceSpan? },
+    Call {
+        callee: Expression,
+        arguments: Expression[],
+        span: SourceSpan?
+    },
     Index { sequence: Expression, index: Expression },
     Array { elements: Expression[] },
     Object { fields: ObjectField[] },

@@ -138,14 +138,20 @@ test "effect violation: signature_token populated from name_span" {
     assert tok.lexeme == "boom";
 }
 
-test "effect violation: trigger defaults to signature_token in Phase A" {
+test "effect violation: trigger falls back to signature_token on Raw text bodies" {
+    // The `Raw` text-pattern path (used by routines whose bodies the
+    // parser couldn't fully descend into) has no AST node to attach
+    // a span to, so per-requirement triggers are null and the
+    // violation falls back to signature_token. B1 promotes the
+    // primary path (Identifier / Member walk) to per-call-site
+    // triggers; this test locks the fallback in for the residual
+    // text-pattern path so synthesized routines and parser-recovery
+    // edges keep their declaration-site caret.
     let stmt = _make_io_violating_routine("ping", [], 12);
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 1;
     let v = violations[0];
-    // Phase A: trigger == signature_token. Per-expression spans land
-    // in a follow-up PR once `enum Expression` variants gain spans.
     assert v.trigger != null;
     let trig: Token? = v.trigger;
     assert trig.line == 12;
@@ -300,4 +306,200 @@ test "effect violation: TestDeclaration plumbs name_span" {
     assert tok.line == 42;
     assert tok.column == 6;
     assert tok.lexeme == "exercises print";
+}
+
+// -------------------------------------------------------------------
+// B1 — Per-Expression call-site trigger plumbing
+// -------------------------------------------------------------------
+//
+// `EffectRequirement` now carries a `trigger: Token?`. The body
+// walker populates it from `Expression.Identifier.span` (for bare
+// callees like `spawn(...)`) and `Expression.Member.object.span`
+// (for `fs.<x>` / `print.<x>` / `http.<x>` etc.). `analyze_routine`
+// picks the first non-null trigger from the missing-requirements
+// list as the violation's `trigger` so the diagnostic carets at the
+// offending call rather than at the function declaration. The
+// fallback to signature_token is exercised by the Raw-text test
+// above.
+//
+// These tests construct AST bodies directly so we don't depend on
+// the parser. They exercise the two trigger-emitting branches of
+// `collect_effects_from_expression`: `Member` (with `Identifier`
+// object, e.g. `fs.exists(...)`) and `Call` with `Identifier`
+// callee (e.g. `spawn(...)`).
+fn _routine_with_member_call(name: string, declared_effects: string[], sig_line: number, namespace: string, member: string, namespace_line: number, namespace_column: number) -> Statement {
+    let sig_span = _span(sig_line, 4);
+    let object_span = _span(namespace_line, namespace_column);
+    let member_span = _span(namespace_line, namespace_column + namespace.length
+        + 1);
+    let object = Expression.Identifier { name: namespace, span: object_span };
+    let member_expr = Expression.Member {
+        object: object,
+        member: member,
+        span: member_span
+    };
+    let no_args: Expression[] = [];
+    let call_expr = Expression.Call {
+        callee: member_expr,
+        arguments: no_args,
+        span: null
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, declared_effects, sig_span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+}
+
+fn _routine_with_bare_call(name: string, declared_effects: string[], sig_line: number, callee: string, call_line: number, call_column: number) -> Statement {
+    let sig_span = _span(sig_line, 4);
+    let call_span = _span(call_line, call_column);
+    let callee_expr = Expression.Identifier { name: callee, span: call_span };
+    let no_args: Expression[] = [];
+    let call_expr = Expression.Call {
+        callee: callee_expr,
+        arguments: no_args,
+        span: null
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, declared_effects, sig_span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+}
+
+test "effect violation: Member call carets at the namespace identifier" {
+    // `fs.exists(...)` should caret at `fs` (the namespace) — that's
+    // what flags the operation as effectful. Function declared at
+    // line 4; the offending call is at line 17. The caret must land
+    // on the call, not the declaration.
+    let stmt = _routine_with_member_call("read_config", [], 4, "fs", "exists", 17, 9);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "read_config";
+    // signature_token still points at the declaration site for fix-it
+    // suggestions ("add ![io] here").
+    assert v.signature_token != null;
+    let sig: Token? = v.signature_token;
+    assert sig.line == 4;
+    // …but trigger now points at the call site.
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 17;
+    assert trig.column == 9;
+    assert trig.lexeme == "fs";
+}
+
+test "effect violation: print.<x> Member call carets at print" {
+    let stmt = _routine_with_member_call("noisy", [], 1, "print", "info", 22, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 22;
+    assert trig.column == 5;
+    assert trig.lexeme == "print";
+}
+
+test "effect violation: http.<x> Member call carets at http" {
+    let stmt = _routine_with_member_call("fetch_user", [], 100, "http", "get", 105, 12);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 105;
+    assert trig.column == 12;
+    assert trig.lexeme == "http";
+    // E0400 message text references the namespace, not the member.
+    let mut found_net: boolean = false;
+    let mut i: number = 0;
+    loop {
+        if i >= v.missing_effects.length { break; }
+        if v.missing_effects[i] == "net" { found_net = true; }
+        i += 1;
+    }
+    assert found_net;
+}
+
+test "effect violation: bare spawn() Call carets at the callee identifier" {
+    // `spawn(...)` is the in-module synthetic effect (no Member
+    // chain). The trigger should be the callee identifier's span,
+    // not the function signature.
+    let stmt = _routine_with_bare_call("worker", [], 8, "spawn", 11, 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 11;
+    assert trig.column == 5;
+    assert trig.lexeme == "spawn";
+}
+
+test "effect violation: bare sleep() Call carets at the callee for clock effect" {
+    let stmt = _routine_with_bare_call("backoff", [], 30, "sleep", 33, 9);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    let mut found_clock: boolean = false;
+    let mut i: number = 0;
+    loop {
+        if i >= v.missing_effects.length { break; }
+        if v.missing_effects[i] == "clock" { found_clock = true; }
+        i += 1;
+    }
+    assert found_clock;
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 33;
+    assert trig.column == 9;
+    assert trig.lexeme == "sleep";
+}
+
+test "effect violation: AST trigger overrides signature fallback" {
+    // Lock the precedence rule in: when the body walker captures a
+    // per-call-site trigger, that trigger wins over the signature
+    // token. Otherwise effect diagnostics on long routines would
+    // continue carets at the declaration.
+    let stmt = _routine_with_bare_call("longfn", [], 50, "spawn", 200, 4);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.signature_token != null;
+    let sig: Token? = v.signature_token;
+    assert sig.line == 50;
+    // 150 lines between declaration and call site — the diagnostic
+    // must caret at the call (200), not the declaration (50).
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 200;
 }

@@ -100,9 +100,29 @@ feature availability.
   `tools/check.sfn` to consume it (e.g. rejecting unknown effect names
   in `analyze_routine`, sorting `missing_effects` for deterministic
   rendering) lands later in Phase G alongside the name-resolution
-  detector. Per-expression trigger tokens still default to the
-  signature location; threading per-`Expression` spans is deferred to
-  a follow-up that adds span fields to the AST's expression variants.
+  detector. Per-expression trigger tokens were threaded into the AST
+  in Track B PR1 (B1, see below); the renderer now carets effect
+  diagnostics at the offending call site rather than the routine
+  declaration.
+- **Effect diagnostic per-call-site carets (Track B PR1 / B1 —
+  shipped 2026-04-26).** `Expression.Identifier`, `Expression.Member`,
+  and `Expression.Call` now carry an optional `span: SourceSpan?`
+  populated by the parser at every construction site.
+  `EffectRequirement` gained a `trigger: Token?` slot; the body walker
+  in `collect_effects_from_expression` populates it from the namespace
+  identifier (`fs` / `print` / `http` / `console` / `websocket`) or
+  the bare-callee identifier (`spawn` / `sleep` / `serve`) so each
+  per-effect requirement remembers where it came from. `analyze_routine`
+  picks the first non-null trigger from the missing-requirements list
+  as the violation's `trigger`; the synthesized signature_token stays
+  as the fallback for the residual text-pattern (`Raw`-body) path,
+  decorator-implied effects, and synthesized expressions. End-to-end
+  result: a long routine with one effectful call deep in the body now
+  carets the diagnostic at that call (`--> file:N:M`) rather than the
+  signature line. Coverage: 6 new B1 unit tests in
+  `compiler/tests/unit/effect_checker_test.sfn` (16 total) plus
+  `compiler/tests/e2e/test_check_effect_call_site_caret.sh` (4 e2e
+  cases). Tracked by `docs/proposals/check-architecture.md` Track B.
 - **Effect validation as build gate (Phases B/C/D — shipped 2026-04-26).**
   `validate_and_render_effects` (in `compiler/src/effect_gate.sfn`)
   runs after typecheck in every `compile_to_*` entry point. The

@@ -52,6 +52,15 @@ import { Token, TokenKind } from "./token";
 struct EffectRequirement {
     effect: string;
     description: string;
+    // Source-token attribution for the operation that introduced
+    // this requirement. Populated by `collect_effects_from_expression`
+    // when the AST node carries a span (Identifier / Member). Stays
+    // null on the text-pattern (`Raw` body) path and on synthesized
+    // decorator-implied effects, where no Expression is available.
+    // `analyze_routine` reads the first non-null trigger from the
+    // missing-requirements list to caret the diagnostic at the call
+    // site rather than the function declaration.
+    trigger: Token?;
 }
 
 struct EffectViolation {
@@ -126,6 +135,23 @@ fn _token_from_signature(span: SourceSpan?, name: string) -> Token? {
     return Token {
         kind: TokenKind.Identifier(),
         lexeme: name,
+        line: span.start_line,
+        column: span.start_column
+    };
+}
+
+// Build a Token from any expression-bearing SourceSpan. Same shape
+// as `_token_from_signature` but parameterized for call-site spans
+// landed in B1: the renderer reads `token.line`/`token.column` for
+// the caret position and `token.lexeme` for caret width, so the
+// lexeme should match the actual identifier at the source position
+// (e.g. "fs" for an `fs.exists(...)` trigger, "spawn" for a bare
+// `spawn(...)` call).
+fn _token_from_span(span: SourceSpan?, lexeme: string) -> Token? {
+    if span == null { return null; }
+    return Token {
+        kind: TokenKind.Identifier(),
+        lexeme: lexeme,
         line: span.start_line,
         column: span.start_column
     };
@@ -341,27 +367,44 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     }
     if missing.length == 0 { return []; }
     // Synthesize a Token from the routine's signature span so the
-    // diagnostic renders at the declaration site. `trigger` is set
-    // to the same token in Phase A because `enum Expression`
-    // variants don't carry per-node spans yet — when they do, the
-    // walker will overwrite `trigger` with the offending call's
-    // token. The signature-level Token is the actionable location
-    // either way (the fix is "add ![effect] here"), so until the AST
-    // refactor lands the diagnostic still points the user at the
-    // line they need to edit.
+    // diagnostic always has at least the declaration site to fall
+    // back to. B1 promotes `trigger` to the first per-requirement
+    // call-site token captured during the body walk — that's where
+    // the offending operation actually lives, so the caret lands on
+    // the user-actionable line. When no per-requirement trigger
+    // exists (text-pattern Raw bodies, decorator-implied effects,
+    // synthesized expressions), the trigger falls back to
+    // signature_token so diagnostics never lose source attribution.
     //
-    // Use `signature.name` (the bare identifier) for the Token's
-    // lexeme so the renderer's caret has the right width — `name`
-    // here can be a qualified display string like `Struct.method` or
-    // `test "<name>"` that we use for the user-facing message but
-    // that doesn't match the actual identifier token at the source
-    // location.
+    // Use `signature.name` (the bare identifier) for the
+    // signature_token's lexeme so the fallback caret has the right
+    // width — `name` here can be a qualified display string like
+    // `Struct.method` or `test "<name>"` that we use for the user-
+    // facing message but that doesn't match the actual identifier
+    // token at the source location.
     let sig_token = _token_from_signature(signature.name_span, signature.name);
+    let trigger_token = _first_requirement_trigger(missing_requirements, sig_token);
     let mut result: EffectViolation[] = [];
     result = append_violation(result, EffectViolation {
-        routine_name: name, missing_effects: missing, requirements: missing_requirements, signature_token: sig_token, trigger: sig_token, severity: "error"
+        routine_name: name, missing_effects: missing, requirements: missing_requirements, signature_token: sig_token, trigger: trigger_token, severity: "error"
     });
     return result;
+}
+
+// B1: pick the first per-requirement trigger token captured by the
+// body walker; fall back to the signature token if every requirement
+// came from a non-AST path (text patterns, decorator-implied effects,
+// synthesized expressions). The caller passes signature_token as the
+// fallback so the violation always carries a source location.
+fn _first_requirement_trigger(missing_requirements: EffectRequirement[], fallback: Token?) -> Token? {
+    let mut i: number = 0;
+    loop {
+        if i >= missing_requirements.length { break; }
+        let req = missing_requirements[i];
+        if req.trigger != null { return req.trigger; }
+        i += 1;
+    }
+    return fallback;
 }
 
 fn required_effects(body: Block, imports: ImportSymbolTable) -> EffectRequirement[] {
@@ -480,7 +523,7 @@ fn collect_effects_from_match_case(case: MatchCase, imports: ImportSymbolTable) 
 // cross-module `E0402`. Each effect produces its own requirement so
 // missing-effect rendering preserves the per-effect "required by"
 // breakdown the user sees in the caret diagnostic.
-fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, base: EffectRequirement[]) -> EffectRequirement[] {
+fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, base: EffectRequirement[], callee_trigger: Token?) -> EffectRequirement[] {
     let entry_opt = lookup_imported_function(imports, name);
     if entry_opt == null { return base; }
     let entry: ImportedFunctionSignature? = entry_opt;
@@ -492,7 +535,7 @@ fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, 
         if e >= entry.effects.length { break; }
         let effect = entry.effects[e];
         required = append_requirement(required, EffectRequirement {
-            effect: effect, description: prefix + effect + "]"
+            effect: effect, description: prefix + effect + "]", trigger: callee_trigger
         });
         e += 1;
     }
@@ -507,19 +550,24 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         // Capture runtime helpers that imply effects.
         if expression.callee.variant == "Identifier" {
             let name = expression.callee.name;
+            // B1: caret the diagnostic at the callee identifier
+            // (the offending call site). `expression.callee.span`
+            // is populated by the parser; null only for synthesized
+            // call expressions (e.g. the runtime fail-call wrapper).
+            let callee_trigger = _token_from_span(expression.callee.span, name);
             if name == "spawn" {
                 required = append_requirement(required, EffectRequirement {
-                    effect: "io", description: "spawn call"
+                    effect: "io", description: "spawn call", trigger: callee_trigger
                 });
             }
             if name == "sleep" {
                 required = append_requirement(required, EffectRequirement {
-                    effect: "clock", description: "sleep call"
+                    effect: "clock", description: "sleep call", trigger: callee_trigger
                 });
             }
             if name == "serve" {
                 required = append_requirement(required, EffectRequirement {
-                    effect: "net", description: "serve call"
+                    effect: "net", description: "serve call", trigger: callee_trigger
                 });
             }
             // Phase E: cross-module call resolution. The imports
@@ -528,7 +576,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // both correct and fast. Member-callee resolution
             // (`mod.fn()`) and decorator-implied transitives are
             // out of scope for E1; see proposal §5 (Phase E).
-            required = _propagate_imported_callee_effects(name, imports, required);
+            required = _propagate_imported_callee_effects(name, imports, required, callee_trigger);
         }
 
         // Member-callee effects (e.g. `fs.exists(...)`) are already
@@ -550,9 +598,18 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
         let mut required = collect_effects_from_expression(expression.object, imports);
         if expression.object.variant == "Identifier" {
             let root = expression.object.name;
+            // B1: caret the diagnostic at the namespace identifier
+            // (`fs` in `fs.exists(...)`, `print` in `print.info(...)`)
+            // — the user-visible cue that flags the operation as
+            // effectful. The Member-token span lives on
+            // `expression.span`; the namespace span lives on
+            // `expression.object.span`. Use the object span because
+            // the namespace name is what the diagnostic message
+            // references ("filesystem helper usage").
+            let object_trigger = _token_from_span(expression.object.span, root);
             if root == "fs" {
                 required = append_requirement(required, EffectRequirement {
-                    effect: "io", description: "filesystem helper usage"
+                    effect: "io", description: "filesystem helper usage", trigger: object_trigger
                 });
             }
             let mut _if16: boolean = false;
@@ -560,7 +617,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             if root == "console" { _if16 = true; }
             if _if16 {
                 required = append_requirement(required, EffectRequirement {
-                    effect: "io", description: "print/console helper usage"
+                    effect: "io", description: "print/console helper usage", trigger: object_trigger
                 });
             }
             let mut _if17: boolean = false;
@@ -568,7 +625,7 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             if root == "websocket" { _if17 = true; }
             if _if17 {
                 required = append_requirement(required, EffectRequirement {
-                    effect: "net", description: "network helper usage"
+                    effect: "net", description: "network helper usage", trigger: object_trigger
                 });
             }
         }
@@ -636,9 +693,11 @@ fn collect_effects_from_text(text: string) -> EffectRequirement[] {
 
     // Keep this conservative: false positives are worse than missing a hint.
     // This checker exists to produce friendly diagnostics, not enforce soundness.
+    // The text-pattern path has no AST node, so trigger stays null —
+    // diagnostics fall back to the routine's signature span.
     if contains_code(text, "fs.") {
         required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "filesystem helper usage"
+            effect: "io", description: "filesystem helper usage", trigger: null
         });
     }
     let mut _if18: boolean = false;
@@ -646,37 +705,37 @@ fn collect_effects_from_text(text: string) -> EffectRequirement[] {
     if contains_code(text, "print.") { _if18 = true; }
     if _if18 {
         required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "print helper usage"
+            effect: "io", description: "print helper usage", trigger: null
         });
     }
     if contains_code(text, "console.") {
         required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "console helper usage"
+            effect: "io", description: "console helper usage", trigger: null
         });
     }
     if contains_code(text, "http.") {
         required = append_requirement(required, EffectRequirement {
-            effect: "net", description: "http helper usage"
+            effect: "net", description: "http helper usage", trigger: null
         });
     }
     if contains_code(text, "websocket.") {
         required = append_requirement(required, EffectRequirement {
-            effect: "net", description: "websocket helper usage"
+            effect: "net", description: "websocket helper usage", trigger: null
         });
     }
     if contains_code(text, "spawn(") {
         required = append_requirement(required, EffectRequirement {
-            effect: "io", description: "spawn call"
+            effect: "io", description: "spawn call", trigger: null
         });
     }
     if contains_code(text, "serve(") {
         required = append_requirement(required, EffectRequirement {
-            effect: "net", description: "serve call"
+            effect: "net", description: "serve call", trigger: null
         });
     }
     if contains_code(text, "sleep(") {
         required = append_requirement(required, EffectRequirement {
-            effect: "clock", description: "sleep call"
+            effect: "clock", description: "sleep call", trigger: null
         });
     }
 
