@@ -10,49 +10,52 @@ Related spec: [`site/src/content/docs/docs/reference/spec/07-effects.md`](../../
 
 Effect validation is Sailfin's flagship safety guarantee — the compile-time
 proof that a function declares every capability it actually uses. Today the
-checker (`compiler/src/effect_checker.sfn`) exists, has 559 lines of
-implementation, and is wired into `sfn check` via
-`compiler/src/tools/check.sfn:229`. **It is not wired into the build path**:
+checker (`compiler/src/effect_checker.sfn`) exists and is wired into
+`sfn check` from `check_source_with_imports` in
+`compiler/src/tools/check.sfn`. **It is not wired into the build path**:
 `make compile`, `sfn build`, `sfn run`, and `sfn test` all bypass it.
-Roughly 8% of compiler functions carry `![effect]` annotations; the remaining
-92% have never been audited because no compile run has ever forced them to be.
-This proposal lays out a seven-phase migration that turns effect validation
-from a soft hint emitted by an opt-in tool into the language's primary
-compile-time safety gate. Phases A–F ship pre-1.0 and end with the compiler
-self-hosting under strict effect enforcement plus capability cross-checking
-against `capsule.toml`. Phase G (effect polymorphism + name-resolution-driven
-detection) is post-1.0.
+Roughly 8% of compiler functions carry `![effect]` annotations; the
+remaining 92% have never been audited because no compile run has ever
+forced them to be. This proposal lays out a seven-phase migration that
+turns effect validation from a soft hint emitted by an opt-in tool into
+the language's primary compile-time safety gate. Phases A–F ship pre-1.0
+and end with the compiler self-hosting under strict effect enforcement
+plus capability cross-checking against `capsule.toml`. Phase G (effect
+polymorphism + name-resolution-driven detection) is post-1.0.
 
 ## Implementation Status
 
 **What exists today:**
 
-- `validate_effects(program: Program) -> EffectViolation[]` at
-  `compiler/src/effect_checker.sfn:31`. Walks `Program.statements`, handles
-  `FunctionDeclaration`, `TestDeclaration`, and `StructDeclaration` (method
-  bodies). Recursion into nested blocks, lambdas, and decorator-implied
-  effects is implemented.
-- `EffectViolation { routine_name: string, missing_effects: string[],
-  requirements: EffectRequirement[] }` at `effect_checker.sfn:23`. **No
-  Token field** — diagnostics ship with `primary: null`.
-- `EffectRequirement { effect: string, description: string }` at
-  `effect_checker.sfn:18`.
+- `validate_effects(program: Program) -> EffectViolation[]` in
+  `compiler/src/effect_checker.sfn`. Walks `Program.statements`, handles
+  `FunctionDeclaration`, `TestDeclaration`, and `StructDeclaration`
+  (method bodies). Recursion into nested blocks, lambdas, and
+  decorator-implied effects is implemented.
+- `EffectViolation { routine_name, missing_effects, requirements,
+  signature_token, trigger, severity }` and
+  `EffectRequirement { effect, description }` in
+  `compiler/src/effect_checker.sfn`. As of Phase A, violations carry a
+  synthesized signature token in `trigger` so diagnostics render with
+  caret pointers; per-`Expression` triggers are still deferred.
 - Body-effect detection is text-pattern based:
-  `collect_effects_from_text` at `effect_checker.sfn:364` greps for `fs.`,
-  `print(`, `print.`, `console.`, `http.`, `websocket.`, `spawn(`, `serve(`,
-  `sleep(`. Comment at line 367 explicitly disclaims soundness:
-  > "Keep this conservative: false positives are worse than missing a hint.
-  > This checker exists to produce friendly diagnostics, not enforce soundness."
+  `collect_effects_from_text` greps for `fs.`, `print(`, `print.`,
+  `console.`, `http.`, `websocket.`, `spawn(`, `serve(`, `sleep(`. The
+  fn's leading comment explicitly disclaims soundness:
+  > "Keep this conservative: false positives are worse than missing a
+  > hint. This checker exists to produce friendly diagnostics, not
+  > enforce soundness."
 - Decorator-implied effects: `@trace`, `@logExecution` synthetically add
-  `![io]` to declared effects (`analyze_routine` at `effect_checker.sfn:78`).
+  `![io]` to declared effects inside `analyze_routine`.
 - Diagnostic codes: `E0400` (missing effect), `E0401` (decorator-implied
-  effect missing). `E0402` (transitive cross-module) is reserved but unused.
-- Single call site in the compiler:
-  `compiler/src/tools/check.sfn:229` (inside `check_source_with_imports`).
-- `NativeFunction` in `compiler/src/native_ir.sfn:75` already carries an
-  `effects: string[]` field, copied through `typecheck_imports.sfn:114`.
-  The wire format already supports cross-module effect propagation; the
-  checker just doesn't read it.
+  effect missing). `E0402` (transitive cross-module) is reserved but
+  unused.
+- Single call site in the compiler is inside `check_source_with_imports`
+  in `compiler/src/tools/check.sfn`.
+- `NativeFunction` in `compiler/src/native_ir.sfn` already carries an
+  `effects: string[]` field, copied through
+  `compiler/src/typecheck_imports.sfn`. The wire format already supports
+  cross-module effect propagation; the checker just doesn't read it.
 
 **What does not exist today:**
 
@@ -104,35 +107,38 @@ and proposes a phased migration.
 check_source_with_imports(source, file_path, imported_interfaces)
   ├── parse_program(source)
   ├── typecheck_diagnostics_with_imports(program, imported_interfaces)
-  └── validate_effects(program)        ← effect_checker.sfn:31
+  └── validate_effects(program)
         └── for each routine:
               required = collect_effects_from_text(body_text)   ← text patterns
               missing  = required ∖ declared
-              if missing: emit EffectViolation { primary: null }
+              if missing: emit EffectViolation { primary: null (pre-Phase A) }
 ```
 
-Each violation is wrapped via `effect_violation_to_diagnostic`
-(`tools/check.sfn:67`) into a `Diagnostic` with `severity: "error"`,
-`code: "E0400"` (or `E0401` for decorator-implied), and `primary: null`.
-The renderer (`render_diagnostic` at `tools/check.sfn:188`) detects the null
-token and falls back to a location-only line (`--> file.sfn`) — no line
-number, no column, no caret.
+Each violation is wrapped via `effect_violation_to_diagnostic` in
+`compiler/src/tools/check.sfn` into a `Diagnostic` with `severity:
+"error"` and `code: "E0400"` (or `E0401` for decorator-implied). Before
+Phase A, `primary` was hardcoded to null and the renderer
+(`render_diagnostic` in the same module) fell back to a location-only
+line (`--> file.sfn`) — no line number, no column, no caret. Phase A
+threads a synthesized signature token into `primary`, so the renderer
+draws a normal caret-bearing diagnostic.
 
 ### 1.2 Where it's called
 
 **Called from:**
 
-- `compiler/src/tools/check.sfn:229` — `sfn check` only.
+- `check_source_with_imports` in `compiler/src/tools/check.sfn` —
+  `sfn check` only.
 
 **Not called from:**
 
-- `compiler/src/main.sfn:compile_to_sailfin` (legacy entry; line ~60).
-- `compiler/src/main.sfn:compile_to_llvm` (line ~150).
-- `compiler/src/main.sfn:compile_to_llvm_with_module` (line ~210).
-- `compiler/src/main.sfn:compile_to_llvm_file_with_module` (file-output
-  variant used by `make compile`).
-- `compiler/src/main.sfn:compile_tests_to_llvm_file_with_module_imports`
-  (test compilation; called by `sfn test`).
+- `compile_to_sailfin` in `compiler/src/main.sfn` (legacy entry).
+- `compile_to_llvm` in `compiler/src/main.sfn`.
+- `compile_to_llvm_with_module` in `compiler/src/main.sfn`.
+- `compile_to_llvm_file_with_module` in `compiler/src/main.sfn` (the
+  file-output variant `make compile` consumes).
+- `compile_tests_to_llvm_file_with_module_imports` in
+  `compiler/src/main.sfn` (test compilation; called by `sfn test`).
 - The build pipeline orchestrated by `scripts/build.sh`.
 
 This means: every `make compile` run, every `build/native/sailfin run foo.sfn`
@@ -170,13 +176,14 @@ struct NativeFunction {
     name: string;
     parameters: NativeParameter[];
     return_type: string;
-    effects: string[];     // ← line 75: already wired
+    effects: string[];     // ← already wired
     ...
 }
 ```
 
-`compiler/src/typecheck_imports.sfn:114` copies `native.effects` through
-when reconstructing `Statement.InterfaceDeclaration` from staged `.sfn-asm`.
+The interface converter in `compiler/src/typecheck_imports.sfn` copies
+`native.effects` through when reconstructing
+`Statement.InterfaceDeclaration` from staged `.sfn-asm`.
 This means **the .sfn-asm artifact format already records and round-trips
 effect annotations across capsule boundaries**. Phase E is therefore
 plumbing-only — no new file format, no migration of existing artifacts.
@@ -301,11 +308,13 @@ that will widen as the ecosystem grows unless we close it now.
 
 ### 2.8 No severity model for soft warnings
 
-Today every effect violation is hardcoded `severity: "error"` (see
-`effect_violation_to_diagnostic` at `tools/check.sfn:84`). When we wire the
-checker into the build path, we need a phased rollout — warning first, error
-second — but the current code path can't express "warning" for an effect
-diagnostic. Phase A introduces severity selection; Phase B uses it.
+Before Phase A, every effect violation hardcoded `severity: "error"`
+inside `effect_violation_to_diagnostic` in `compiler/src/tools/check.sfn`.
+When we wire the checker into the build path, we need a phased rollout —
+warning first, error second — but the pre-Phase-A code path couldn't
+express "warning" for an effect diagnostic. Phase A introduced severity
+selection (the `severity` slot on `EffectViolation` plus renderer
+plumbing); Phase B uses it via `SAILFIN_EFFECT_ENFORCE`.
 
 ## Part 3 — Design Principles
 
@@ -616,9 +625,10 @@ the caret at the trigger and offers a fix-it at the signature.
 
 ### 4.9 Cross-module propagation (Phase E)
 
-When the typechecker resolves a call to an imported function, it reads the
-imported function's effects from `Statement.InterfaceDeclaration` (already
-populated by `typecheck_imports.sfn:114`). The effect checker's
+When the typechecker resolves a call to an imported function, it reads
+the imported function's effects from `Statement.InterfaceDeclaration`
+(already populated by the interface converter in
+`compiler/src/typecheck_imports.sfn`). The effect checker's
 `collect_effects_from_block` is extended to walk call expressions and look
 up resolved callees in the symbol table.
 

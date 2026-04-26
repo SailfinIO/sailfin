@@ -13,10 +13,14 @@ import {
     Block,
     Decorator,
     Expression,
+    FieldDeclaration,
     FunctionSignature,
+    MethodDeclaration,
     Program,
     SourceSpan,
-    Statement
+    Statement,
+    TypeAnnotation,
+    TypeParameter
 } from "../../src/ast";
 import { EffectViolation, validate_effects } from "../../src/effect_checker";
 import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
@@ -199,4 +203,101 @@ test "effect violation: declared effect suppresses violation" {
     let program = Program { statements: [stmt] };
     let violations = validate_effects(program);
     assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Regressions for PR #241 review feedback
+// -------------------------------------------------------------------
+test "effect violation: struct method uses bare identifier in token lexeme" {
+    // PR #241 review #1: when `analyze_routine` is called for a
+    // struct method, the qualified `routine_name` is `Struct.method`
+    // but the synthesized Token.lexeme must be the bare method
+    // identifier — otherwise the renderer's caret width covers the
+    // wrong span. Lock the bare-vs-qualified split in.
+    let span = _span(5, 8);
+    let body_text = "print.info(\"hi\");";
+    let body_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: body_text },
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: body_text,
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let method_sig = _signature("noisy", [], span);
+    let method = MethodDeclaration {
+        signature: method_sig,
+        body: body_block,
+        decorators: empty_decorators
+    };
+    let mut empty_type_params: TypeParameter[] = [];
+    let mut empty_implements: TypeAnnotation[] = [];
+    let mut empty_fields: FieldDeclaration[] = [];
+    let mut struct_decorators: Decorator[] = [];
+    let stmt = Statement.StructDeclaration {
+        name: "Speaker",
+        name_span: null,
+        type_parameters: empty_type_params,
+        implements_types: empty_implements,
+        fields: empty_fields,
+        methods: [method],
+        decorators: struct_decorators
+    };
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    // routine_name carries the qualified display string for the
+    // user-facing message…
+    assert v.routine_name == "Speaker.noisy";
+    // …but Token.lexeme is the bare identifier so the caret width
+    // matches `noisy`'s actual source span.
+    assert v.signature_token != null;
+    let tok: Token? = v.signature_token;
+    assert tok.lexeme == "noisy";
+    assert tok.line == 5;
+    assert tok.column == 8;
+}
+
+test "effect violation: TestDeclaration plumbs name_span" {
+    // PR #241 review #2: `Statement.TestDeclaration.name_span` is
+    // recorded by the parser; analyze_statement must thread it into
+    // the synthesized FunctionSignature so test diagnostics get the
+    // same signature-token attribution functions/methods get.
+    let span = _span(42, 6);
+    let body_text = "print.info(\"x\");";
+    let body_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: body_text },
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: body_text,
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let mut empty_effects: string[] = [];
+    let stmt = Statement.TestDeclaration {
+        name: "exercises print",
+        name_span: span,
+        body: body_block,
+        effects: empty_effects,
+        decorators: empty_decorators
+    };
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    // routine_name still includes the `test "name"` qualifier for
+    // the diagnostic message.
+    assert v.routine_name == "test exercises print";
+    // …but the Token comes from the parser-recorded span. Lexeme is
+    // the bare test name (matches the qualified-name fix in #1).
+    assert v.signature_token != null;
+    let tok: Token? = v.signature_token;
+    assert tok.line == 42;
+    assert tok.column == 6;
+    assert tok.lexeme == "exercises print";
 }

@@ -92,11 +92,15 @@ feature availability.
   caret pointing at the function declaration — matching typecheck output
   shape. New `compiler/src/effect_taxonomy.sfn` exports the locked-in
   canonical effect set (`canonical_effects()` returns `["clock", "gpu",
-  "io", "model", "net", "rand"]`) so the checker, renderer, and future
-  capability cross-check (Phase F) all agree on the 1.0 surface. Per-
-  expression trigger tokens still default to the signature location;
-  threading per-`Expression` spans is deferred to a follow-up that adds
-  span fields to the AST's expression variants.
+  "io", "model", "net", "rand"]`) as the authoritative 1.0 list. The
+  taxonomy module is the regression-test anchor and the future home for
+  every effect-name decision; wiring `effect_checker.sfn` and
+  `tools/check.sfn` to consume it (e.g. rejecting unknown effect names
+  in `analyze_routine`, sorting `missing_effects` for deterministic
+  rendering) lands in Phase B alongside the build-pipeline gate.
+  Per-expression trigger tokens still default to the signature
+  location; threading per-`Expression` spans is deferred to a follow-up
+  that adds span fields to the AST's expression variants.
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
   and attach release assets.

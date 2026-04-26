@@ -45,12 +45,11 @@ struct EffectViolation {
     // that's missing one or more effects. Synthesized from
     // `FunctionSignature.name_span` so the renderer can show the
     // diagnostic at the signature site, where the user must add
-    // `![effect, ...]`. Null when the declaration's span isn't
-    // available (e.g. synthesized routines from `analyze_statement`'s
-    // TestDeclaration branch — currently uses `name_span: null`
-    // because the parser doesn't yet record a span for `test "name"`
-    // declarations. Phase A leaves that gap intentional; closing it
-    // is a small follow-up that needs parser changes).
+    // `![effect, ...]`. Parsed `fn`, struct methods, and `test`
+    // declarations all propagate their recorded `name_span`; the
+    // field is null only when a synthesized routine genuinely has
+    // no declaration site (no in-tree path produces that today, but
+    // the renderer still has to handle null gracefully).
     signature_token: Token?;
     // Token pointing at the effect-triggering operation inside the
     // body. Today `trigger` is set to `signature_token` because
@@ -110,7 +109,7 @@ fn analyze_statement(statement: Statement) -> EffectViolation[] {
             return_type: null,
             effects: statement.effects,
             type_parameters: [],
-            name_span: null
+            name_span: statement.name_span
         };
         let qualified = "test " + statement.name;
         return analyze_routine(signature, statement.body, statement.decorators, qualified);
@@ -191,7 +190,14 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     // either way (the fix is "add ![effect] here"), so until the AST
     // refactor lands the diagnostic still points the user at the
     // line they need to edit.
-    let sig_token = _token_from_signature(signature.name_span, name);
+    //
+    // Use `signature.name` (the bare identifier) for the Token's
+    // lexeme so the renderer's caret has the right width — `name`
+    // here can be a qualified display string like `Struct.method` or
+    // `test "<name>"` that we use for the user-facing message but
+    // that doesn't match the actual identifier token at the source
+    // location.
+    let sig_token = _token_from_signature(signature.name_span, signature.name);
     let mut result: EffectViolation[] = [];
     result = append_violation(result, EffectViolation {
         routine_name: name, missing_effects: missing, requirements: missing_requirements, signature_token: sig_token, trigger: sig_token, severity: "error"
