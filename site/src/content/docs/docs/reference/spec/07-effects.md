@@ -27,7 +27,7 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 | Random | `rand` | Random generation | Reserved (no detector yet) |
 
 **Enforcement rules**:
-1. Any function calling an effectful operation directly must declare that effect — missing declarations are compile errors with fix-it hints
+1. Any function calling an effectful operation directly must declare that effect — violations produce diagnostics with fix-it hints and are errors by default
 2. Enforcement runs on every build path (`make compile`, `sfn build`, `sfn run`, `sfn test`, `sfn check`); the `SAILFIN_EFFECT_ENFORCE` env var lets capsule authors opt into `=warning` (telemetry-only) or `=off` (build-path bypass; `sfn check` still validates)
 3. Tests follow the same rules as functions
 4. Call-graph–transitive enforcement (A must declare B's effects when A calls B) is planned for Phase E and not yet implemented

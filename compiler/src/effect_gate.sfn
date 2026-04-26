@@ -5,13 +5,16 @@
 //
 // Wires `validate_effects` from `effect_checker.sfn` into every
 // `compile_to_*` entry point in `main.sfn` and lets operators steer
-// the gate via the `SAILFIN_EFFECT_ENFORCE` environment variable:
+// the gate via the `SAILFIN_EFFECT_ENFORCE` environment variable.
+// Effective behavior on the build path:
 //
 //   unset / "" / "error"     → severity "error" (build fails on violation;
 //                              this is the post-Phase-D default)
 //   "warning"                → severity "warning" (audit-mode opt-in;
 //                              build proceeds even with violations)
-//   "off"                    → skip effect validation entirely + notice
+//   "off"                    → skip effect validation on the build path
+//                              entirely; emit a per-file stderr notice
+//                              (see proposal §4.7 — escape hatch only)
 //
 // Phase B shipped this gate as warning-by-default. Phase C audited
 // the in-tree compiler tree and added `![io]` annotations to the 11
@@ -23,9 +26,12 @@
 // pre-Phase-D telemetry-only mode while they migrate.
 //
 // `sfn check` (`tools/check.sfn`) shares `resolve_effect_enforcement`
-// so the same env-var contract drives both surfaces — a contributor
-// who runs `sfn check` after Phase B sees the same severity the
-// build-path gate would emit.
+// for the warning/error/unset cases but **does not honour `=off`**:
+// per proposal §4.7, "does not turn off `sfn check` validation, only
+// the build path." `sfn check` coerces `off` back to the unset-default
+// severity (currently "error" post-Phase-D) so contributors who set
+// `=off` for emergency builds still see effect diagnostics when they
+// run `sfn check` explicitly.
 //
 // **Implementation note: env-var read avoids the `env.get` intrinsic.**
 // The 0.5.x seed compiler emits `call @sailfin_runtime_getenv` for
@@ -100,9 +106,12 @@ fn _unique_suffix_for_path(file_path: string) -> string {
 fn _read_env_via_shell(name: string, unique_suffix: string) -> string ![io] {
     let tmp = "/tmp/.sfn_effect_enforce_" + unique_suffix;
     // `printf '%s'` (no trailing newline) lets `fs.readFile` return
-    // exactly the env-var value — important so `=error` stays
-    // exactly five characters and doesn't accidentally include a
-    // stray newline that would defeat the `raw == "error"` check.
+    // exactly the env-var value — important so `resolve_effect_enforcement`
+    // can do exact-match comparisons (`raw == "off"`, `raw == "warning"`).
+    // A stray newline would make a user's `SAILFIN_EFFECT_ENFORCE=warning`
+    // arrive as `"warning\n"`, miss both branches, and silently fall
+    // through to the default ("error" post-Phase-D) instead of the
+    // intended audit-mode opt-in.
     let cmd = "printf '%s' \"$" + name + "\" > " + tmp + " 2>/dev/null";
     let rc = process.run(["sh", "-c", cmd]);
     if rc != 0 { return ""; }

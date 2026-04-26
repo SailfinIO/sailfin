@@ -58,8 +58,11 @@ test "effect_gate: explicit off value resolves to off" {
     // `=off` is the §4.7 escape hatch — emergency-builds bypass
     // gates without removing the env var or touching source.
     // (The build path honors `off` directly; `sfn check` coerces
-    // `off` back to `warning` because §4.7 scopes the escape hatch
-    // to the build path.)
+    // `off` back to the unset-env-var default — currently `error`
+    // post-Phase-D — because §4.7 scopes the escape hatch to the
+    // build path. `tools/check.sfn` does the coercion via
+    // `resolve_effect_enforcement("")`, not by hardcoding "warning",
+    // so the Phase D flip propagates automatically.)
     assert strings_equal(resolve_effect_enforcement("off"), "off");
 }
 
