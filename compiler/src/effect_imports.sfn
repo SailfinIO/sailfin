@@ -32,10 +32,15 @@
 import { Program } from "./ast";
 
 // One callable signature exposed to a downstream caller. `name` is
-// the identifier the importing module sees (after alias resolution
-// in the caller's `Statement.ImportDeclaration` specifiers); the
-// effect_checker handles aliases at lookup time so this struct
-// always carries the original exporting-module name.
+// the identifier the importing module sees after alias resolution
+// in the caller's `Statement.ImportDeclaration` specifiers.
+// `localize_import_symbols_for_program` rewrites imported symbols
+// to that caller-visible local name, so consumers (the AST walker
+// in `effect_checker.collect_effects_from_expression`) should look
+// up the localized identifier directly rather than the
+// exporting-module name. The global table fed in from the loader
+// keys by exporting-module name; the localized table swaps the
+// keys to local names before the AST walk runs.
 struct ImportedFunctionSignature {
     name: string;
     effects: string[];

@@ -404,11 +404,14 @@ fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbo
             // out of scope for E1; see proposal §5 (Phase E).
             required = _propagate_imported_callee_effects(name, imports, required);
         }
-        if expression.callee.variant == "Member" {
-            // Member access effect is handled below, but calls are a strong signal.
-            required = merge_requirements(required, collect_effects_from_expression(expression.callee, imports));
-        }
 
+        // Member-callee effects (e.g. `fs.exists(...)`) are already
+        // captured by the unconditional `collect_effects_from_expression(
+        // expression.callee, imports)` at the top of this branch — the
+        // Member case in that recursive call walks the object identifier
+        // and emits the right requirement (`fs` → io, `http` → net,
+        // etc.). Don't re-analyze the callee here; doing so would
+        // double-count every Member-callee effect.
         let mut argument_index: number = 0;
         loop {
             if argument_index >= expression.arguments.length { break; }

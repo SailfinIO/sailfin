@@ -52,7 +52,7 @@ import {
     split_source_lines
 } from "./diagnostics_render";
 import { EffectViolation, validate_effects_with_imports } from "./effect_checker";
-import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
+import { ImportSymbolTable } from "./effect_imports";
 import { sanitize_symbol, substring } from "./string_utils";
 import { Diagnostic } from "./typecheck_types";
 
