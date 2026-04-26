@@ -170,7 +170,17 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         if parse.functions[ti].name.length >= 5 {
             if substring(parse.functions[ti].name, 0, 5) == "test:" {
                 let bare_sym = sanitize_symbol(parse.functions[ti].name);
-                let sym = bare_sym + "__" + harness_module_suffix;
+                // Mirror `apply_module_symbol_mangling`'s guard: it
+                // skips symbols that already contain `__` to avoid
+                // double-qualification, leaving such definitions
+                // unmangled. If a user names a test function whose
+                // sanitized form already has `__`, the harness must
+                // call the bare symbol — appending `__<suffix>` here
+                // would produce an undefined reference at link time.
+                let mut sym = bare_sym;
+                if index_of(bare_sym, "__") < 0 {
+                    sym = bare_sym + "__" + harness_module_suffix;
+                }
                 let label = substring(parse.functions[ti].name, 5, parse.functions[ti].name.length);
                 let msg = "  RUN  " + label;
                 let idx_s = number_to_string(test_idx);

@@ -51,9 +51,10 @@ feature availability.
   `compile_tests_to_llvm_file_with_module_imports` and link through
   `_clang_link_test_cmd_with_deps` — same shape `cli_check.sfn`
   adopted in A2. Test sources lower with `mangle_symbols=true`; the
-  inline harness in `lower_to_llvm_lines_with_parsed_context_for_-
-  tests` appends the test module's `__<module_suffix>` to each
-  `test:` symbol so harness call sites match the mangled definition.
+  inline harness in
+  `lower_to_llvm_lines_with_parsed_context_for_tests` appends the
+  test module's `__<module_suffix>` to each `test:` symbol so
+  harness call sites match the mangled definition.
   The textual import inliner (`_inline_relative_imports_cmd`,
   `inline_imports_for_source`, the test-specific writer chain) is
   gone — A4 of Track A in `docs/proposals/check-architecture.md` is

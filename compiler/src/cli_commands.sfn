@@ -52,10 +52,7 @@ import {
     toml_get_version
 } from "./toml_parser";
 import { format_source } from "./tools/fmt";
-import {
-    load_imported_interfaces_from_paths,
-    load_imported_native_texts_from_paths
-} from "./typecheck_import_loader";
+import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
 
 // Validate a path segment (scope, name) contains no traversal or illegal chars.
 fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
@@ -96,6 +93,42 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
 // (1) + (2) + (3) supply every strong symbol the test could reference;
 // (4) only fills gaps. If a dep `.ll` defined a symbol that also lives
 // in the weakened object, the strong dep wins.
+// Resolve the `llvm-objcopy` binary by trying the bare name first
+// (Homebrew, manual installs, distros that ship a current llvm
+// metapackage), then falling back to versioned binaries
+// (`llvm-objcopy-18`, `…-17`, …) that distros like Ubuntu install
+// alongside `clang-18`. Returns "" when none of the candidates are
+// runnable; the caller must surface that as a hard failure rather
+// than letting the link step proceed against a non-weakened
+// `native.linked.o`. Mirrors the discovery pattern `scripts/build.sh`
+// uses for `llvm-link` / `llvm-as`.
+fn _resolve_llvm_objcopy_cmd() -> string ![io] {
+    let candidates: string[] = ["llvm-objcopy", "llvm-objcopy-30", "llvm-objcopy-29", "llvm-objcopy-28", "llvm-objcopy-27", "llvm-objcopy-26", "llvm-objcopy-25", "llvm-objcopy-24", "llvm-objcopy-23", "llvm-objcopy-22", "llvm-objcopy-21", "llvm-objcopy-20", "llvm-objcopy-19", "llvm-objcopy-18", "llvm-objcopy-17", "llvm-objcopy-16", "llvm-objcopy-15", "llvm-objcopy-14"];
+    let mut i: number = 0;
+    loop {
+        if i >= candidates.length { break; }
+        let cand = candidates[i];
+        // `--version` exits 0 on a working binary, non-zero / 127 if
+        // the command is missing. Probing once per test-runner
+        // invocation is cheap; the result isn't cached because the
+        // PATH could legitimately change between runs.
+        let rc = process.run([cand, "--version"]);
+        if rc == 0 { return cand; }
+        i += 1;
+    }
+    return "";
+}
+
+// Resolve the `cp` binary similarly. Bare `cp` is in coreutils on
+// every supported platform, but checking for it explicitly turns a
+// silent missing-tool into a clear diagnostic and matches the
+// llvm-objcopy probe shape.
+fn _resolve_cp_cmd() -> string ![io] {
+    let rc = process.run(["cp", "--version"]);
+    if rc == 0 { return "cp"; }
+    return "";
+}
+
 fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> number ![io] {
     let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
     let mut di: number = 0;
@@ -140,8 +173,41 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     if fs.exists(selfhost_linked) {
         _ensure_dir_cmd("build/sailfin/test-o0");
         let weak_path = "build/sailfin/test-o0/native.linked.weak.o";
-        process.run(["cp", selfhost_linked, weak_path]);
-        process.run(["llvm-objcopy", "--weaken", weak_path]);
+        // The test runner depends on `llvm-objcopy --weaken` to make
+        // every symbol in the self-hosted compiler's linked object
+        // weak so resolver-produced dependency `.ll` files (which
+        // define some of the same compiler-internal symbols, e.g.
+        // `_strict_capsule_version__version` when a test imports
+        // `../../src/version`) win at link time. If either tool is
+        // missing, the file's symbols stay strong and the link fails
+        // with a confusing "multiple definition" error from ld. Bail
+        // loudly with a clear hint rather than letting that happen.
+        let cp_bin = _resolve_cp_cmd();
+        if cp_bin.length == 0 {
+            print.err("test runner: cp not found on PATH — cannot stage weakened compiler object for the test link step");
+            return 1;
+        }
+        let objcopy_bin = _resolve_llvm_objcopy_cmd();
+        if objcopy_bin.length == 0 {
+            print.err("test runner: llvm-objcopy not found on PATH (tried llvm-objcopy and llvm-objcopy-{14..30}) — install LLVM tools (e.g. `apt-get install llvm-18` on Debian/Ubuntu) so the test runner can weaken the self-hosted compiler's linked object before linking each test binary");
+            return 1;
+        }
+        let cp_rc = process.run([cp_bin, selfhost_linked, weak_path]);
+        if cp_rc != 0 {
+            print.err("test runner: cp " + selfhost_linked + " " + weak_path
+                + " failed (exit="
+                + number_to_string(cp_rc)
+                + ")");
+            return cp_rc;
+        }
+        let weaken_rc = process.run([objcopy_bin, "--weaken", weak_path]);
+        if weaken_rc != 0 {
+            print.err("test runner: " + objcopy_bin + " --weaken " + weak_path
+                + " failed (exit="
+                + number_to_string(weaken_rc)
+                + ")");
+            return weaken_rc;
+        }
         args.push(weak_path);
         let shim_path = "build/selfhost/native/obj/cross_module_shim.o";
         if fs.exists(shim_path) { args.push(shim_path); }
@@ -346,10 +412,13 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
             fs.deleteFile(test_runner_active_path);
             return 2;
         }
+        // Single-pass loader: returns both the parsed interface set
+        // (for typecheck-with-imports) and the raw `.sfn-asm` text set
+        // (for `apply_module_symbol_mangling`'s provider-name lookup),
+        // reading each artifact off disk exactly once.
         let load = load_imported_interfaces_from_paths(resolution.asm_paths);
-        let texts = load_imported_native_texts_from_paths(resolution.asm_paths);
         groups[gi].interfaces = load.interfaces;
-        groups[gi].native_texts = texts;
+        groups[gi].native_texts = load.native_texts;
         groups[gi].dep_ll_paths = resolution.ll_paths;
         if trace_runner {
             print.err("test runner: resolver pass done (group="

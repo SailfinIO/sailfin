@@ -69,8 +69,9 @@ sub-PRs:
   `sfn fix` / `sfn lsp`.
 - **A4 — delete legacy helpers (shipped April 26, 2026).** Removed
   `inline_imports_for_source`, `_inline_relative_imports_cmd`, and
-  the entire textual-inliner support cast (`_strip_relative_import_-
-  lines_cmd`, `_collect_relative_import_spans_cmd`, the
+  the entire textual-inliner support cast
+  (`_strip_relative_import_lines_cmd`,
+  `_collect_relative_import_spans_cmd`, the
   `_RelativeImportSpanCmd` struct, `_lookup_dep_version_cmd`,
   `_resolve_cached_capsule_path_cmd`, `_resolve_import_path_cmd`,
   `_clang_link_test_cmd`) alongside the dead test-LLVM writer chain

@@ -58,7 +58,7 @@ one remains as a follow-up workstream:
    `prepare_project_capsules_for_test` pass per `(project_root,
    workspace_root)` group, mirroring the structure
    `cli_check.sfn` adopted in A2; the test compile uses
-   `compile_tests_to_llvm_file_with_module_imports` (typecheck-with-
+   `compile_tests_to_llvm_file_with_module_imports` (typecheck with
    imports + import-context-in-LLVM threading) and the link uses
    `_clang_link_test_cmd_with_deps` (dep `.ll` files prepended ahead
    of the still-weakened `native.linked.o`).
@@ -1131,12 +1131,12 @@ the resolver-driven path for both, and A4 deleted the legacy helpers.
   A2 pattern), runs `prepare_project_capsules_for_test` once per
   group to stage `.sfn-asm` import-context AND compile each capsule
   dependency to its own `.ll`, then per-test calls
-  `compile_tests_to_llvm_file_with_module_imports` (typecheck-with-
+  `compile_tests_to_llvm_file_with_module_imports` (typecheck with
   imports + import-context-in-LLVM threading) and
   `_clang_link_test_cmd_with_deps` (dep `.ll` files prepended ahead
-  of the still-weakened `native.linked.o`). Path (a) from the two-
-  fix-paths analysis — chosen for symbol parity with the rest of
-  the compile pipeline. The `.skip_test_inlining` flag is gone
+  of the still-weakened `native.linked.o`). Path (a) from the
+  original two-fix-paths analysis — chosen for symbol parity with
+  the rest of the compile pipeline. The `.skip_test_inlining` flag is gone
   (vestigial after the inliner retired). A latent slug-naming
   inconsistency in `_cr_relative_slug` was fixed: it now delegates
   to `module_name_from_path` so dependency slugs match the slug the
