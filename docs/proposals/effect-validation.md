@@ -1,7 +1,7 @@
 # Proposal: Effect Validation as Build Gate
 
-Status: Draft (proposal — not yet approved for implementation)
-Date: April 26, 2026
+Status: Approved for implementation (gating decisions §7.1, §7.2, §7.4 resolved 2026-04-26 by repo owner)
+Date: April 26, 2026 (drafted) · 2026-04-26 (gating decisions locked)
 Authors: compiler-architect (drafted via `/architect` invocation)
 Parent: [docs/proposals/build-architecture.md](./build-architecture.md), [docs/proposals/check-architecture.md](./check-architecture.md)
 Related spec: [`site/src/content/docs/docs/reference/spec/07-effects.md`](../../site/src/content/docs/docs/reference/spec/07-effects.md)
@@ -1286,36 +1286,29 @@ the spec in lockstep, drift compounds.
 These require user input before implementation begins. The proposal commits
 to a default for each but flags them for review.
 
-### 7.1 Should `clock` be folded into `io`?
+### 7.1 Should `clock` be folded into `io`? — **DECIDED: keep separate**
 
-**Default:** keep `clock` separate.
+**Decision (2026-04-26):** Keep `clock` distinct from `io`.
 
-**Rationale for keeping:** Determinism boundary. A pure-`io` function that
-reads files is reproducible; a `clock` function isn't (output depends on
-wall-time). Tests, simulators, and replays benefit from the distinction.
+**Rationale:** Determinism boundary. A pure-`io` function that reads files
+is reproducible; a `clock` function isn't (output depends on wall-time).
+Tests, simulators, and post-1.0 deterministic replay tooling assume
+`clock` is observable independently of `io`. Folding would have shaved one
+effect off the user-facing surface but would have erased a useful
+type-level signal that the function's output is non-deterministic.
 
-**Rationale for folding:** Reduces the user-facing effect set from six
-to five. Most uses of `sleep` and `time.now` happen alongside I/O anyway.
+### 7.2 Should `model` exist before `sfn/ai` ships? — **DECIDED: reserve at 1.0**
 
-**Recommendation:** Keep separate. Decision drivers: post-1.0 deterministic
-replay tooling assumes `clock` is observable independently of `io`.
+**Decision (2026-04-26):** Reserve `model` in the canonical taxonomy at 1.0
+even though `sfn/ai` is post-1.0.
 
-### 7.2 Should `model` exist before `sfn/ai` ships?
-
-**Default:** Yes, reserve `model` at 1.0 even though `sfn/ai` is post-1.0.
-
-**Rationale for yes:** Prevents a language-level breaking change later.
-The taxonomy is locked at 1.0; adding `model` post-1.0 either breaks
-old code (wider effect surface than declared) or quietly subsumes
-existing effects.
-
-**Rationale for no:** Ships an effect with no enforceable surface — at
-1.0, no function declares `![model]` because nothing in stdlib does
-LLM calls. Users would never see `model` enforcement.
-
-**Recommendation:** Reserve at 1.0; add a regression test that uses
-`![model]` on a manually-annotated function so the parser+checker paths
-stay covered.
+**Rationale:** Prevents a language-level breaking change later. The
+taxonomy is locked at 1.0; adding `model` post-1.0 would either break old
+code (wider effect surface than declared) or quietly subsume existing
+effects. Reserving costs ~0 — the parser already accepts `![model]`, and
+Phase C adds a regression test exercising a manually-annotated `![model]`
+function so the parser/checker paths stay covered until `sfn/ai` ships
+real consumers.
 
 ### 7.3 What's the env-var name?
 
@@ -1328,22 +1321,24 @@ binary on/off rather than the warning/error/off triad we want).
 **Recommendation:** `SAILFIN_EFFECT_ENFORCE` with values `warning`, `error`,
 `off`. Match `SAILFIN_*` prefix used elsewhere in the codebase.
 
-### 7.4 Should Phase D ship in the same alpha as Phase C, or one alpha later?
+### 7.4 Should Phase D ship in the same alpha as Phase C, or one alpha later? — **DECIDED: one alpha later**
 
-**Default:** Same alpha. The flip is documented in release notes; the
-override `SAILFIN_EFFECT_ENFORCE=warning` is available for users who
-need to delay updating.
+**Decision (2026-04-26):** Phase D ships **one alpha after Phase C**, giving
+the in-tree compiler and any external capsule consumers one full release
+cycle of warning-mode telemetry before the gate flips to errors.
 
-**Rationale for same alpha:** Effect-as-gate is a marketing claim —
-the longer it's "warning by default" the longer the claim is
-aspirational.
+**Rationale:** Phase C is a 3-PR audit with the explicit goal "compiler
+has zero effect warnings". Even if the in-tree audit lands clean, third-
+party capsules built against the alpha that ships Phase B will surface
+warnings — those authors deserve a release cycle to react before their
+build breaks. The cost is one extra release cycle of "marketing claim is
+aspirational"; the architect explicitly framed that as the trade-off.
+Owner accepted the cost.
 
-**Rationale for one-alpha-later:** Gives users one cycle of warnings
-before the gate goes live.
-
-**Recommendation:** Same alpha if Phase C audit lands clean (no leftover
-suppressions). One alpha later if Phase C leaves suppressions or the
-ecosystem shows untested capsules in the field.
+**Implementation note:** Phase D's release-notes entry must call out the
+upcoming flip explicitly (one alpha in advance), and `sfn check` should
+keep `[effect]` warnings visible at warning severity in the meantime so
+contributors see the migration path before the gate trips them.
 
 ### 7.5 Phase E2 split: when does the AST-walk for call resolution graduate?
 
@@ -1523,18 +1518,26 @@ ulimit -v 8388608 && timeout 30 build/native/sailfin check /tmp/cap_test/
 
 ---
 
-## Decision Required
+## Decisions Locked (2026-04-26)
 
-The user requested this proposal to surface decisions, not to start
-implementation. Before any branch is cut, we need:
+The repo owner reviewed this proposal and signed off on:
 
-1. **Sign-off on the canonical effect taxonomy** (Part 4.1) — six effects:
-   `io`, `net`, `clock`, `rand`, `model`, `gpu`.
-2. **Sign-off on the phase ordering** (Part 5) — A → B → C → D → E → F
-   pre-1.0; G post-1.0.
-3. **Sign-off on the env-var name and semantics** (§7.3, §4.7).
-4. **Resolution on §7.1 (clock as separate effect), §7.4 (Phase D timing),
-   §7.7 (`main` requires effects).**
+- **Canonical effect taxonomy** (Part 4.1) — six effects: `io`, `net`,
+  `clock`, `rand`, `model`, `gpu`. `clock` stays distinct from `io`
+  (§7.1); `model` is reserved at 1.0 even though `sfn/ai` is post-1.0
+  (§7.2).
+- **Phase ordering** (Part 5) — A → B → C → D → E → F pre-1.0; G
+  post-1.0. **Phase D ships one alpha after Phase C** (§7.4), giving
+  in-tree and external capsule consumers one full release cycle of
+  warning-mode telemetry before the gate flips to errors.
+- **Env-var name** (§7.3, §4.7) — `SAILFIN_EFFECT_ENFORCE` with values
+  `warning` (default in Phase B), `error` (default after Phase D), `off`.
 
-Once decisions land, the work begins on the `effect-validation` branch
-with Phase A.
+Open questions §7.5 (Phase E2 split), §7.6 (`prompt {}` blocks), §7.7
+(`main` requires effects), §7.8 (`main.sfn` `sfn check` timeout), and
+§7.9 (effects on `extern fn`) remain open and will be resolved in
+their respective implementation phases — they don't gate Phase A.
+
+Implementation begins now on `claude/effect-validation-gate` with
+Phase A (source-span attribution on `EffectViolation`). Each phase
+ships as its own PR; this proposal's status header tracks the rollout.
