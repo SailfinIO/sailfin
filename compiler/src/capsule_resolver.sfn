@@ -36,6 +36,7 @@
 // capsule symbols resolved.
 import {
     compile_to_llvm_file_with_module,
+    module_name_from_path,
     number_to_string,
     write_native_text_file_with_module
 } from "./main";
@@ -938,33 +939,31 @@ fn resolve_relative_import(base_dir: string, spec: string) -> string {
     return path + ".sfn";
 }
 
-// Compute the slug for a relatively-imported file by stripping `entry_dir`
-// from the front of the file path and the `.sfn` suffix from the end. The
-// resulting slug matches what the compiler's import resolver produces for
-// `import { X } from "./<rel>"` issued from the entry — keeping per-module
-// `.sfn-asm` lookups in sync.
+// Compute the slug for a relatively-imported file. Delegates to
+// `module_name_from_path` so dependency slugs match the slug the
+// importer's mangling pass derives via
+// `resolve_import_module_slug_for_module`. Stripping `entry_dir` (the
+// pre-Stage-B-PR2 behavior) produced a shorter slug for relative
+// dependencies than the importing module computed for the same
+// import directive — the divergence was harmless for `sfn check`
+// (which only consumes staged `.sfn-asm` text) but broke `sfn test`
+// the moment dependency `.ll` files joined the link line: a test
+// source whose slug is `compiler/tests/e2e/foo_test` resolves
+// `./fixtures/helper` to provider slug
+// `compiler/tests/e2e/fixtures/helper`, but the dep was compiled as
+// `fixtures/helper`, leaving the link with an undefined reference to
+// `<sym>__compiler__tests__e2e__fixtures__helper`. Sharing
+// `module_name_from_path` keeps importer + importee in lockstep
+// across both the build and the test paths.
+//
+// `entry_dir` is retained as a parameter for call-site stability
+// (`enumerate_relative_sources` plumbs it through anyway) but is no
+// longer consulted; flag it `_` would shadow no other binding here,
+// but keeping the descriptive name documents what the call site
+// passes.
 fn _cr_relative_slug(entry_dir: string, file_path: string) -> string {
-    // Normalise entry_dir to end without a trailing slash for clean prefix
-    // checks. The empty entry_dir corresponds to a current-dir entry.
-    let mut prefix = entry_dir;
-    if prefix.length > 0 {
-        if substring(prefix, prefix.length - 1, prefix.length) == "/" {
-            prefix = substring(prefix, 0, prefix.length - 1);
-        }
-    }
-    let mut tail: string = file_path;
-    if prefix.length > 0 {
-        let prefix_with_slash = prefix + "/";
-        if file_path.length >= prefix_with_slash.length {
-            if substring(file_path, 0, prefix_with_slash.length) == prefix_with_slash {
-                tail = substring(file_path, prefix_with_slash.length, file_path.length);
-            }
-        }
-    }
-    if _cr_ends_with(tail, ".sfn") {
-        tail = substring(tail, 0, tail.length - 4);
-    }
-    return tail;
+    let _unused_dir = entry_dir;
+    return module_name_from_path(file_path);
 }
 
 // Walk relative imports (`./foo`, `../foo`) reachable from `entry_path` and

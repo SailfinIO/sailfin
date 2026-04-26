@@ -2,6 +2,13 @@
 //
 // CLI command handlers extracted from cli_main.sfn to keep
 // sailfin_cli_main under ~500 .sfn-asm instructions (avoids seed OOM).
+import { Statement } from "./ast";
+import {
+    TestCapsuleResolution,
+    discover_project_root,
+    discover_workspace_root,
+    prepare_project_capsules_for_test
+} from "./capsule_resolver";
 import {
     _byte_at_cmd,
     _collect_sfn_files_cmd,
@@ -36,10 +43,12 @@ import {
 import { lock_add_entry, lock_get_version, lock_get_versions } from "./lock";
 import {
     compile_tests_to_llvm_file_with_module,
+    compile_tests_to_llvm_file_with_module_imports,
     compile_to_llvm_file_with_module,
     module_name_from_path,
     number_to_string
 } from "./main";
+import { LayoutManifest } from "./native_ir";
 import { substring } from "./string_utils";
 import {
     toml_add_dependency,
@@ -51,6 +60,10 @@ import {
     toml_get_version
 } from "./toml_parser";
 import { format_source } from "./tools/fmt";
+import {
+    load_imported_interfaces_from_paths,
+    load_imported_native_texts_from_paths
+} from "./typecheck_import_loader";
 
 struct _RelativeImportSpanCmd {
     start: number;
@@ -677,6 +690,80 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
     return process.run(args);
 }
 
+// Resolver-driven test linker. Identical to `_clang_link_test_cmd`
+// but takes a list of dependency `.ll` paths produced by
+// `prepare_project_capsules_for_test` and prepends them to the link
+// line, AHEAD of the weakened compiler object. With strong helper
+// definitions in scope, clang resolves the test source's mangled
+// imported call sites against the dependency `.ll` files; the weak
+// `native.linked.o` continues to backstop everything else (runtime
+// helpers, parser exports, AST constructors) until libextract retires
+// the `--weaken` block in a separate workstream.
+//
+// Link order (head → tail):
+//   1. Test source `.ll` (strong)
+//   2. Resolver-produced dependency `.ll` files (strong)
+//   3. Runtime sources + globals + prelude (strong)
+//   4. Weakened compiler object + cross_module_shim (weak)
+//
+// (1) + (2) + (3) supply every strong symbol the test could reference;
+// (4) only fills gaps. If a dep `.ll` defined a symbol that also lives
+// in the weakened object, the strong dep wins.
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> number ![io] {
+    let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
+    let mut di: number = 0;
+    loop {
+        if di >= dep_ll_paths.length { break; }
+        args.push(dep_ll_paths[di]);
+        di += 1;
+    }
+    if runtime_root.length > 0 {
+        let src_dir = runtime_root + "/native/src";
+        let include_dir = runtime_root + "/native/include";
+        if fs.exists(src_dir) {
+            if fs.exists(include_dir) { args.push("-I" + include_dir); }
+            let entries = fs.listDirectory(src_dir);
+            let mut i: number = 0;
+            loop {
+                if i >= entries.length { break; }
+                if _ends_with_cmd(entries[i], ".c") {
+                    if entries[i] != "native_driver.c" {
+                        args.push(src_dir + "/" + entries[i]);
+                    }
+                }
+                i += 1;
+            }
+        }
+        let globals_ll = runtime_root + "/native/ir/runtime_globals.ll";
+        if fs.exists(globals_ll) { args.push(globals_ll); }
+        let prelude_paths: string[] = ["build/selfhost/native/obj/runtime/prelude.o", "build/native/obj/runtime/prelude.o", "build/native/obj/prelude.o", runtime_root
+            + "/native/obj/runtime/prelude.o", runtime_root
+            + "/native/obj/prelude.o",];
+        let mut pi: number = 0;
+        loop {
+            if pi >= prelude_paths.length { break; }
+            if fs.exists(prelude_paths[pi]) {
+                args.push(prelude_paths[pi]);
+                break;
+            }
+            pi += 1;
+        }
+    }
+    let selfhost_linked = "build/selfhost/native/obj/native.linked.o";
+    if fs.exists(selfhost_linked) {
+        _ensure_dir_cmd("build/sailfin/test-o0");
+        let weak_path = "build/sailfin/test-o0/native.linked.weak.o";
+        process.run(["cp", selfhost_linked, weak_path]);
+        process.run(["llvm-objcopy", "--weaken", weak_path]);
+        args.push(weak_path);
+        let shim_path = "build/selfhost/native/obj/cross_module_shim.o";
+        if fs.exists(shim_path) { args.push(shim_path); }
+    }
+    args.push("-lm");
+    args.push("-pthread");
+    return process.run(args);
+}
+
 // ---- Exported command handlers ----
 // Remove stale LLVM lowering scratchpad files from build/sailfin/ so that
 // inter-phase data from a previous compilation doesn't corrupt the next one.
@@ -753,6 +840,45 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
     return 0;
 }
 
+// One distinct `(project_root, workspace_root)` resolution group for
+// the test runner. Every file in `entry_paths` shares those roots, so
+// `prepare_project_capsules_for_test` runs once per group with the
+// group's full file list as anchors. Mirrors `cli_check.sfn`'s
+// `CheckGroup`: per-group resolution avoids the multi-path workspace
+// bug where files past `files[0]` would otherwise inherit a
+// resolution computed from the wrong root, and amortises capsule
+// staging + compilation across every test file in the group.
+struct TestGroup {
+    key: string;
+    entry_paths: string[];
+    interfaces: Statement[];
+    native_texts: string[];
+    dep_ll_paths: string[];
+}
+
+// Compute the resolution-group key for a test file path. Two files
+// share a group iff `discover_project_root` and
+// `discover_workspace_root` return the same value when walked from
+// each file's directory. Mirrors `cli_check.sfn:_check_group_key` —
+// kept in this module rather than lifted into a shared helper to keep
+// commit 4's blast radius bounded; consolidation is a follow-up.
+fn _test_group_key(file_path: string) -> string ![io] {
+    let dir = _dirname_cmd(file_path);
+    let project_root = discover_project_root(dir);
+    let workspace_root = discover_workspace_root(dir);
+    return project_root + "::" + workspace_root;
+}
+
+fn _find_test_group(groups: TestGroup[], key: string) -> number {
+    let mut i: number = 0;
+    loop {
+        if i >= groups.length { break; }
+        if strings_equal(groups[i].key, key) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
 fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     let mut root: string = ".";
     if args.length == 2 { root = args[1]; } else if args.length != 1 {
@@ -778,40 +904,98 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     let exe_path = "build/sailfin/test";
     let dump_sources = fs.exists("build/sailfin/.dump_test_sources");
     let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
-    let skip_inlining = fs.exists("build/sailfin/.skip_test_inlining");
 
+    // Partition test files into resolution groups. Within a group,
+    // every file shares `(project_root, workspace_root)`, so a single
+    // resolver pass anchored on the group's full file list covers
+    // every relative-import + capsule-dep + workspace-implicit graph
+    // the test compile + link needs. Between groups (e.g. running
+    // tests from two different capsules in one invocation), each
+    // project resolves independently.
+    let mut groups: TestGroup[] = [];
+    let mut file_group_index: number[] = [];
+    let mut gpi: number = 0;
+    loop {
+        if gpi >= test_files.length { break; }
+        let path = test_files[gpi];
+        let key = _test_group_key(path);
+        let mut idx = _find_test_group(groups, key);
+        if idx < 0 {
+            let empty_entries: string[] = [];
+            let empty_interfaces: Statement[] = [];
+            let empty_texts: string[] = [];
+            let empty_lls: string[] = [];
+            groups.push(TestGroup {
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls
+            });
+            idx = groups.length - 1;
+        }
+        groups[idx].entry_paths.push(path);
+        file_group_index.push(idx);
+        gpi += 1;
+    }
+
+    // Per-group resolver pass: stage `.sfn-asm` import-context, load
+    // it for typecheck-with-imports, and compile each capsule
+    // dependency to its own `.ll` so the link step can resolve
+    // imported helper definitions strongly. Setup errors (slug
+    // collision, stage-write failure, capsule-compile failure) all
+    // collapse to `staging_failed = true` and exit 2 to distinguish
+    // setup from test failure (exit 1).
+    let mut gi: number = 0;
+    loop {
+        if gi >= groups.length { break; }
+        if trace_runner {
+            print.err("test runner: resolver pass start (group="
+                + number_to_string(gi)
+                + ", files="
+                + number_to_string(groups[gi].entry_paths.length)
+                + ")");
+        }
+        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths);
+        if resolution.staging_failed {
+            // Resolver already emitted a structured error to stderr
+            // (slug collision, stage-write, or compile failure).
+            fs.deleteFile(test_runner_active_path);
+            return 2;
+        }
+        let load = load_imported_interfaces_from_paths(resolution.asm_paths);
+        let texts = load_imported_native_texts_from_paths(resolution.asm_paths);
+        groups[gi].interfaces = load.interfaces;
+        groups[gi].native_texts = texts;
+        groups[gi].dep_ll_paths = resolution.ll_paths;
+        if trace_runner {
+            print.err("test runner: resolver pass done (group="
+                + number_to_string(gi)
+                + ", deps="
+                + number_to_string(resolution.ll_paths.length)
+                + ")");
+        }
+        gi += 1;
+    }
+
+    // Per-test compile + link + run. The test source is compiled
+    // fresh each iteration; dependency `.ll` files were compiled once
+    // by the resolver pass above and reused across every test in the
+    // group.
     let mut index: number = 0;
     loop {
         if index >= test_files.length { break; }
         let path = test_files[index];
+        let group_idx = file_group_index[index];
         print("test: " + path);
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
 
-        let base_dir = _dirname_cmd(path);
-        let mut combined_source = source;
-        if skip_inlining {
-            if trace_runner {
-                print.err("test runner: skipping import inlining");
-            }
-        } else {
-            if trace_runner { print.err("test runner: inlining start"); }
-            combined_source = _inline_relative_imports_cmd(source, base_dir, 10, []);
-            if trace_runner {
-                print.err("test runner: inlining done (bytes="
-                    + number_to_string(combined_source.length)
-                    + ")");
-            }
-        }
-
         if dump_sources {
             let safe = _sanitize_filename_cmd(path);
-            _write_text_cmd("build/sailfin/test-source-" + safe + ".sfn", combined_source);
+            _write_text_cmd("build/sailfin/test-source-" + safe + ".sfn", source);
         }
 
         if trace_runner { print.err("test runner: compile start"); }
         _clean_lowering_state("build/sailfin");
-        let _compiled = compile_tests_to_llvm_file_with_module(combined_source, module_name, ll_path);
+        let empty_manifests: LayoutManifest[] = [];
+        let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts);
         if !_compiled {
             print("test runner: compile failed for " + path);
             fs.deleteFile(test_runner_active_path);
@@ -819,7 +1003,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         }
 
         if trace_runner { print.err("test runner: link start"); }
-        let link_rc = _clang_link_test_cmd(ll_path, exe_path, runtime_root);
+        let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths);
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
             fs.deleteFile(test_runner_active_path);
