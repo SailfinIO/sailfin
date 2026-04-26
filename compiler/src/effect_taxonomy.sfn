@@ -1,0 +1,44 @@
+// compiler/src/effect_taxonomy.sfn
+//
+// Canonical effect taxonomy for the Sailfin language. The set of
+// effect names a function can declare in its `![effect, ...]` clause
+// is locked at 1.0 and lives here so every consumer (the effect
+// checker, the diagnostic renderer, future capability cross-checks)
+// agrees on which strings are recognized.
+//
+// Decisions captured in `docs/proposals/effect-validation.md` (locked
+// 2026-04-26):
+//   - `clock` stays distinct from `io` (§7.1) — determinism boundary.
+//   - `model` is reserved at 1.0 even though `sfn/ai` is post-1.0
+//     (§7.2) — prevents a future breaking change to the taxonomy.
+//   - `gpu` is reserved at 1.0 for the same reason — tensor-on-GPU
+//     work is post-1.0 but the effect surface stays stable.
+//
+// The list is intentionally short. Six concepts cover every
+// runtime-visible side effect a Sailfin function can have today, and
+// each maps cleanly onto a capability the capsule manifest can
+// require in `[capabilities] required = [...]`. Adding a seventh
+// effect post-1.0 means breaking the lock — do not extend without an
+// explicit RFC.
+//
+// The list is also stored in canonical sort order so callers that
+// render `missing_effects` see deterministic output. `![clock, io]`
+// always renders the same way regardless of detection order, which
+// matters when effect strings show up in error messages that get
+// pasted into bug reports and code-review threads.
+fn canonical_effects() -> string[] {
+    return ["clock", "gpu", "io", "model", "net", "rand"];
+}
+
+fn is_canonical_effect(name: string) -> boolean {
+    let canonical = canonical_effects();
+    let mut i: number = 0;
+    loop {
+        if i >= canonical.length { break; }
+        if canonical[i] == name { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+export { canonical_effects, is_canonical_effect };

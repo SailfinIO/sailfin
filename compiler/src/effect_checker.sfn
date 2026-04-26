@@ -1,8 +1,21 @@
 // compiler/src/effect_checker.sfn
 //
-// Minimal effect validation for the Sailfin self-hosted compiler. This mirrors
-// the bootstrap checker by scanning routine bodies for constructs that require
-// explicit capability declarations.
+// Effect validation for the Sailfin self-hosted compiler. Scans
+// routine bodies for constructs that require explicit `![effect]`
+// declarations on the function signature and emits one
+// `EffectViolation` per under-declared routine.
+//
+// Phase A (Stage B+1 — `docs/proposals/effect-validation.md`)
+// extended `EffectViolation` with source-span attribution
+// (`signature_token`, `trigger`) and a `severity` slot. The renderer
+// in `tools/check.sfn` consumes those fields to produce
+// `--> file:line:column` + caret diagnostics matching typecheck
+// output. Per-expression trigger tokens are still left at the
+// signature location for now: the AST's `enum Expression` variants
+// don't carry per-node spans today, and threading them through is a
+// separate refactor scoped for a follow-up. Pointing the diagnostic
+// at the function declaration is also the actionable location — the
+// fix is "add `![effect]` to the signature on this line."
 import {
     Block,
     Decorator,
@@ -12,10 +25,12 @@ import {
     MatchCase,
     MethodDeclaration,
     Program,
+    SourceSpan,
     Statement,
     decorator_names
 } from "./ast";
 import { substring } from "./string_utils";
+import { Token, TokenKind } from "./token";
 
 struct EffectRequirement {
     effect: string;
@@ -26,6 +41,50 @@ struct EffectViolation {
     routine_name: string;
     missing_effects: string[];
     requirements: EffectRequirement[];
+    // Token pointing at the function (or test/method) declaration
+    // that's missing one or more effects. Synthesized from
+    // `FunctionSignature.name_span` so the renderer can show the
+    // diagnostic at the signature site, where the user must add
+    // `![effect, ...]`. Null when the declaration's span isn't
+    // available (e.g. synthesized routines from `analyze_statement`'s
+    // TestDeclaration branch — currently uses `name_span: null`
+    // because the parser doesn't yet record a span for `test "name"`
+    // declarations. Phase A leaves that gap intentional; closing it
+    // is a small follow-up that needs parser changes).
+    signature_token: Token?;
+    // Token pointing at the effect-triggering operation inside the
+    // body. Today `trigger` is set to `signature_token` because
+    // `enum Expression` variants don't carry per-node spans yet.
+    // When per-expression spans land, this slot graduates to point
+    // at the offending call site (e.g. the `print.info(…)` token).
+    // The Diagnostic renderer reads `trigger` into `Diagnostic.primary`,
+    // so callers that want signature-level rendering (Phase A
+    // default) and callers that want call-site rendering (post-AST-
+    // span work) both go through the same field.
+    trigger: Token?;
+    // "error" | "warning" | "hint". Phase A hardcodes "error" at
+    // every factory call site — the value is decoupled from the
+    // gate decision so Phase B can wire `SAILFIN_EFFECT_ENFORCE` to
+    // toggle without touching the violation construction code.
+    severity: string;
+}
+
+// Build a Token from a SourceSpan + lexeme. The renderer in
+// `tools/check.sfn` reads `token.line`, `token.column`, and
+// `token.lexeme` (for the caret width). We synthesize an Identifier-
+// kinded token because the location refers to a function name; the
+// kind is cosmetic in this context (the renderer doesn't use it),
+// but using Identifier rather than the EOF sentinel keeps the
+// synthetic token introspectable in the same shape as parser-emitted
+// ones for any future tooling that walks `token.kind`.
+fn _token_from_signature(span: SourceSpan?, name: string) -> Token? {
+    if span == null { return null; }
+    return Token {
+        kind: TokenKind.Identifier(),
+        lexeme: name,
+        line: span.start_line,
+        column: span.start_column
+    };
 }
 
 fn validate_effects(program: Program) -> EffectViolation[] {
@@ -123,9 +182,19 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
         index += 1;
     }
     if missing.length == 0 { return []; }
+    // Synthesize a Token from the routine's signature span so the
+    // diagnostic renders at the declaration site. `trigger` is set
+    // to the same token in Phase A because `enum Expression`
+    // variants don't carry per-node spans yet — when they do, the
+    // walker will overwrite `trigger` with the offending call's
+    // token. The signature-level Token is the actionable location
+    // either way (the fix is "add ![effect] here"), so until the AST
+    // refactor lands the diagnostic still points the user at the
+    // line they need to edit.
+    let sig_token = _token_from_signature(signature.name_span, name);
     let mut result: EffectViolation[] = [];
     result = append_violation(result, EffectViolation {
-        routine_name: name, missing_effects: missing, requirements: missing_requirements
+        routine_name: name, missing_effects: missing, requirements: missing_requirements, signature_token: sig_token, trigger: sig_token, severity: "error"
     });
     return result;
 }

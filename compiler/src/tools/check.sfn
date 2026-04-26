@@ -92,12 +92,23 @@ fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
     }
 
     let code = _code_for_missing_effect(violation.missing_effects, violation.requirements);
+    // Phase A — `EffectViolation` now carries a synthesized
+    // signature Token in `trigger` (via `_token_from_signature` in
+    // `effect_checker.sfn`) and a severity slot. The renderer reads
+    // both directly so effect diagnostics render with
+    // `--> file:line:column` + caret like typecheck diagnostics.
+    // `severity` flowing through the violation (rather than being
+    // hardcoded "error" here) keeps Phase B's `SAILFIN_EFFECT_ENFORCE`
+    // wiring contained to `effect_checker.sfn` — the renderer doesn't
+    // need to know about the env var.
+    let mut sev = violation.severity;
+    if sev.length == 0 { sev = "error"; }
     return Diagnostic {
         code: code,
-        severity: "error",
+        severity: sev,
         message: message,
         file_path: "",
-        primary: null
+        primary: violation.trigger
     };
 }
 
