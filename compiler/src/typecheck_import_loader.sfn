@@ -114,9 +114,37 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
     };
 }
 
+// Read every staged `.sfn-asm` artifact into a string array, in the
+// same order as `paths`. Missing paths are silently skipped — this
+// loader is paired with `load_imported_interfaces_from_paths` whose
+// `ImportedInterfaceLoadResult.missing_paths` is the canonical signal
+// for "resolver staged a path that's no longer on disk", so emitting
+// the same warning twice would just create noise.
+//
+// The resulting `string[]` is the input shape
+// `lower_to_llvm_lines_with_parsed_context_for_tests` expects for
+// `imported_native_texts`: each element is the raw `.sfn-asm` text
+// the production lowering pipeline reads in
+// `apply_module_symbol_mangling` to discover available import
+// modules during call-site rewriting (see
+// `collect_available_import_module_names` in
+// `compiler/src/llvm/lowering/lowering_helpers.sfn`).
+fn load_imported_native_texts_from_paths(paths: string[]) -> string[] ![io] {
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= paths.length { break; }
+        let path = paths[i];
+        if fs.exists(path) { out.push(fs.readFile(path)); }
+        i += 1;
+    }
+    return out;
+}
+
 export {
     ArtifactInterfaceParse,
     ImportedInterfaceLoadResult,
     interfaces_from_native_artifact,
-    load_imported_interfaces_from_paths
+    load_imported_interfaces_from_paths,
+    load_imported_native_texts_from_paths
 };
