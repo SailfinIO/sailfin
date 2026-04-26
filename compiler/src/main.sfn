@@ -3,6 +3,7 @@
 // Sailfin compiler main module and compilation entry points.
 import { Program, Statement } from "./ast";
 import { validate_and_render_effects } from "./effect_gate";
+import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
     NativeModule,
     collect_reexport_violations,
@@ -67,7 +68,9 @@ fn compile_to_sailfin(source: string) -> string ![io] {
         return "";
     }
     if _reject_reexport_violations(program) { return ""; }
-    if validate_and_render_effects(program, source, "main") > 0 { return ""; }
+    if validate_and_render_effects(program, source, "main", empty_import_symbols()) > 0 {
+        return "";
+    }
     return emit_program(program);
 }
 
@@ -157,7 +160,9 @@ fn compile_to_llvm(source: string) -> string ![io] {
         return "";
     }
     if _reject_reexport_violations(program) { return ""; }
-    if validate_and_render_effects(program, source, "main") > 0 { return ""; }
+    if validate_and_render_effects(program, source, "main", empty_import_symbols()) > 0 {
+        return "";
+    }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, "main");
     if trace_emit {
@@ -206,7 +211,7 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
         }
     }
     if _reject_reexport_violations(program) { return false; }
-    if validate_and_render_effects(program, source, module_name) > 0 {
+    if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return false;
     }
     let native_text = emit_native_text_with_module_name(program, module_name);
@@ -227,7 +232,7 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
         print.err("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
     if _reject_reexport_violations(program) { return ""; }
-    if validate_and_render_effects(program, source, module_name) > 0 {
+    if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return "";
     }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
@@ -286,7 +291,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
         print.err(_timing_line(module_name, "typecheck", t_typecheck));
         return "";
     }
-    if validate_and_render_effects(program, source, module_name) > 0 {
+    if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         print.err(_timing_line(module_name, "parse", t_parse));
         print.err(_timing_line(module_name, "typecheck", t_typecheck));
         return "";
@@ -353,7 +358,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
 // on the `Diagnostic` struct, so we filter for `severity == "error"`
 // before reporting and bailing. Warnings (e.g. future W01xx load
 // warnings) flow through without aborting the test compile.
-fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[]) -> boolean ![io] {
+fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable) -> boolean ![io] {
     let trace_file = fs.exists("build/sailfin/.trace_test_runner");
     let active_file = fs.exists("build/sailfin/.test_runner_active");
     let mut _let_trace: boolean = false;
@@ -379,7 +384,12 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
         return false;
     }
     if _reject_reexport_violations(program) { return false; }
-    if validate_and_render_effects(program, source, module_name) > 0 {
+    // Phase E: thread the resolver-built function-effect table so
+    // a test source that calls an imported `![net]` helper without
+    // declaring `![net]` produces an `E0402` diagnostic. Pre-Phase-E
+    // tests that only use in-module fns get an empty table from the
+    // caller and behave identically to before.
+    if validate_and_render_effects(program, source, module_name, imported_function_effects) > 0 {
         return false;
     }
     if trace {
@@ -430,7 +440,7 @@ fn compile_to_native_text_with_module(source: string, module_name: string) -> st
         return "";
     }
     if _reject_reexport_violations(program) { return ""; }
-    if validate_and_render_effects(program, source, module_name) > 0 {
+    if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return "";
     }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
@@ -454,7 +464,7 @@ fn write_native_text_file_with_module(source: string, module_name: string, out_p
         return false;
     }
     if _reject_reexport_violations(program) { return false; }
-    if validate_and_render_effects(program, source, module_name) > 0 {
+    if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return false;
     }
     return emit_native_text_to_file_with_module_name(program, module_name, out_path);
@@ -539,7 +549,7 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
         print.err("emit-llvm-file: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
     if _reject_reexport_violations(program) { return false; }
-    if validate_and_render_effects(program, source, module_name) > 0 {
+    if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
         return false;
     }
 

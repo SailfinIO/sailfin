@@ -30,6 +30,6 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 1. Any function calling an effectful operation directly must declare that effect — violations produce diagnostics with fix-it hints and are errors by default
 2. Enforcement runs on every build path (`make compile`, `sfn build`, `sfn run`, `sfn test`, `sfn check`); the `SAILFIN_EFFECT_ENFORCE` env var lets capsule authors opt into `=warning` (telemetry-only) or `=off` (build-path bypass; `sfn check` still validates)
 3. Tests follow the same rules as functions
-4. Call-graph–transitive enforcement (A must declare B's effects when A calls B) is planned for Phase E and not yet implemented
+4. **Cross-module call-graph propagation** (Phase E, shipped): if A imports B and calls it, A must declare every effect B declares. Diagnostic code `E0402`. Aliased imports (`import { foo as bar }`) resolve under the local name. `Member`-callee resolution (`mod.fn()`) is a Phase E2 follow-up
 
 See [Effect System Reference](/docs/reference/effects) for the complete API surface per effect.

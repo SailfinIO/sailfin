@@ -69,6 +69,15 @@ fn _local_build_effect_message(routine_name: string, missing_effects: string[]) 
 fn _local_code_for_first_description(first_desc: string) -> string {
     if first_desc.length == 0 { return "E0400"; }
     if substring(first_desc, 0, 1) == "@" { return "E0401"; }
+    // Phase E: cross-module call resolution attaches descriptions
+    // of the form `imported \`<name>\` declares !\[…\]` so the
+    // diagnostic code promotes from in-module E0400 to E0402.
+    let imported_prefix = "imported `";
+    if first_desc.length >= imported_prefix.length {
+        if substring(first_desc, 0, imported_prefix.length) == imported_prefix {
+            return "E0402";
+        }
+    }
     return "E0400";
 }
 
@@ -168,6 +177,25 @@ test "check: decorator-implied effect is E0401" {
 
 test "check: empty description defaults to E0400" {
     assert strings_equal(_local_code_for_first_description(""), "E0400");
+}
+
+test "check: cross-module imported description is E0402" {
+    // Phase E: descriptions emitted by
+    // `effect_checker._propagate_imported_callee_effects` carry the
+    // prefix `imported \`<name>\` declares !\[…\]`. Pin the prefix
+    // → E0402 mapping so a refactor that "tidies" the description
+    // string (e.g. drops the backtick or capitalises) doesn't
+    // silently regress the cross-module diagnostic to E0400.
+    assert strings_equal(_local_code_for_first_description("imported `fetch` declares ![net]"), "E0402");
+    assert strings_equal(_local_code_for_first_description("imported `read_file` declares ![io]"), "E0402");
+}
+
+test "check: imported substring without prefix stays E0400" {
+    // Defensive — make sure the prefix check doesn't false-match
+    // descriptions that merely contain the word "imported" later
+    // in the string (e.g. an in-module helper named "use_imported").
+    assert strings_equal(_local_code_for_first_description("use_imported_helper requires ![io]"), "E0400");
+    assert strings_equal(_local_code_for_first_description("filesystem helper usage"), "E0400");
 }
 
 // -------------------------------------------------------------------

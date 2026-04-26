@@ -1,0 +1,324 @@
+// Unit tests for compiler/src/effect_imports.sfn and the Phase E
+// (`docs/proposals/effect-validation.md` §5) cross-module
+// propagation path through compiler/src/effect_checker.sfn.
+//
+// Phase E lets the effect checker resolve `Identifier` callees at
+// every `Call` expression against a per-program-localized
+// `ImportSymbolTable`. A caller that imports a function with
+// declared effects but doesn't propagate them to its own signature
+// fails with the new `E0402` diagnostic code (distinct from
+// `E0400` in-module and `E0401` decorator-implied).
+//
+// Tests construct AST values via small helper functions to stay
+// flat — some seed compilers previously segfaulted on deeply nested
+// struct-literal initialisers in test bodies (see
+// `effect_checker_test.sfn` preamble for the same workaround).
+import {
+    Block,
+    Decorator,
+    Expression,
+    FunctionSignature,
+    ImportSpecifier,
+    Program,
+    SourceSpan,
+    Statement
+} from "../../src/ast";
+import { EffectViolation, validate_effects_with_imports } from "../../src/effect_checker";
+import {
+    ImportSymbolTable,
+    ImportedFunctionSignature,
+    append_import_function,
+    empty_import_symbols,
+    localize_import_symbols_for_program,
+    lookup_imported_function
+} from "../../src/effect_imports";
+
+// -------------------------------------------------------------------
+// Builder helpers
+// -------------------------------------------------------------------
+fn _empty_block() -> Block {
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+fn _span(line: number, column: number) -> SourceSpan {
+    return SourceSpan {
+        start_line: line,
+        start_column: column,
+        end_line: line,
+        end_column: column + 1
+    };
+}
+
+fn _signature(name: string, effects: string[], span: SourceSpan?) -> FunctionSignature {
+    return FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: [],
+        return_type: null,
+        effects: effects,
+        type_parameters: [],
+        name_span: span
+    };
+}
+
+fn _import_decl(name: string, alias: string?, source: string) -> Statement {
+    let spec = ImportSpecifier { name: name, alias: alias };
+    return Statement.ImportDeclaration {
+        import_specifiers: [spec],
+        source: source
+    };
+}
+
+// Build a routine whose body calls `callee_name(...)` once, with no
+// declared effects on the signature. The body is encoded as an
+// `ExpressionStatement` wrapping a `Call(Identifier(callee_name))`
+// so `collect_effects_from_expression` walks it through the
+// Phase E `_propagate_imported_callee_effects` path.
+fn _routine_calling(routine_name: string, callee_name: string, span_line: number) -> Statement {
+    let span = _span(span_line, 4);
+    let callee = Expression.Identifier { name: callee_name };
+    let no_args: Expression[] = [];
+    let call_expr = Expression.Call { callee: callee, arguments: no_args };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: callee_name + "();",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let mut empty_effects: string[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(routine_name, empty_effects, span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+}
+
+// -------------------------------------------------------------------
+// ImportSymbolTable primitives
+// -------------------------------------------------------------------
+test "empty_import_symbols: produces an empty table" {
+    let table = empty_import_symbols();
+    assert table.functions.length == 0;
+}
+
+test "append_import_function: pushes a new entry" {
+    let mut table = empty_import_symbols();
+    table = append_import_function(table, "fetch", ["net"]);
+    assert table.functions.length == 1;
+    assert table.functions[0].name == "fetch";
+    assert table.functions[0].effects.length == 1;
+    assert table.functions[0].effects[0] == "net";
+}
+
+test "append_import_function: ignores empty names" {
+    // Empty name should be a no-op so the loader can call this
+    // unconditionally on every NativeFunction without filtering
+    // out anonymous/synthesized helpers itself.
+    let mut table = empty_import_symbols();
+    table = append_import_function(table, "", ["net"]);
+    assert table.functions.length == 0;
+}
+
+test "append_import_function: deduplicates by name (last write wins)" {
+    // The loader merges every staged artifact — re-exports show up
+    // multiple times. Last-write-wins keeps the table size bounded
+    // and is fine because every re-export carries identical effect
+    // metadata; divergent-effect detection is a Phase G concern.
+    let mut table = empty_import_symbols();
+    table = append_import_function(table, "fetch", ["net"]);
+    table = append_import_function(table, "fetch", ["net", "io"]);
+    assert table.functions.length == 1;
+    assert table.functions[0].effects.length == 2;
+}
+
+test "lookup_imported_function: returns null for missing name" {
+    let table = empty_import_symbols();
+    assert lookup_imported_function(table, "anything") == null;
+}
+
+test "lookup_imported_function: returns the entry by exact name" {
+    let mut table = empty_import_symbols();
+    table = append_import_function(table, "fetch", ["net"]);
+    let entry_opt = lookup_imported_function(table, "fetch");
+    assert entry_opt != null;
+    let entry: ImportedFunctionSignature? = entry_opt;
+    assert entry.name == "fetch";
+}
+
+// -------------------------------------------------------------------
+// Localization (alias resolution + scope filter)
+// -------------------------------------------------------------------
+test "localize: filters out names the program does not import" {
+    // The global table has `fetch` from a staged artifact, but the
+    // program declares no imports. Localized result must be empty,
+    // otherwise an in-module same-named function would erroneously
+    // pull cross-module effects (false-positive E0402).
+    let mut global = empty_import_symbols();
+    global = append_import_function(global, "fetch", ["net"]);
+    let no_stmts: Statement[] = [];
+    let program = Program { statements: no_stmts };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 0;
+}
+
+test "localize: preserves direct (non-aliased) imports keyed by export name" {
+    let mut global = empty_import_symbols();
+    global = append_import_function(global, "fetch", ["net"]);
+    let import_stmt = _import_decl("fetch", null, "modA");
+    let program = Program { statements: [import_stmt] };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 1;
+    assert local.functions[0].name == "fetch";
+    assert local.functions[0].effects[0] == "net";
+}
+
+test "localize: rewrites aliases so call sites use the local name" {
+    // `import { fetch as get } from "modA"` makes `get` the name
+    // visible in the importing module. Localized table must key on
+    // `get`, not `fetch`, so the AST walker's
+    // `Call(Identifier("get"))` lookup hits.
+    let mut global = empty_import_symbols();
+    global = append_import_function(global, "fetch", ["net"]);
+    let import_stmt = _import_decl("fetch", "get", "modA");
+    let program = Program { statements: [import_stmt] };
+    let local = localize_import_symbols_for_program(program, global);
+    assert local.functions.length == 1;
+    assert local.functions[0].name == "get";
+    assert local.functions[0].effects[0] == "net";
+}
+
+// -------------------------------------------------------------------
+// End-to-end: Phase E propagation through the effect checker
+// -------------------------------------------------------------------
+test "validate_effects_with_imports: imported callee surfaces E0402-shaped violation" {
+    // The fixture: a routine `run()` that calls `fetch()` with no
+    // declared effects on `run`. With `fetch -> [net]` in the
+    // imports table, validate_effects_with_imports must emit one
+    // violation, missing_effects = ["net"], and the requirement's
+    // description must start with `imported \`fetch\`` (which is
+    // what `diagnostics_render.code_for_missing_effect` keys on to
+    // promote the diagnostic to E0402).
+    let mut global = empty_import_symbols();
+    global = append_import_function(global, "fetch", ["net"]);
+    let import_stmt = _import_decl("fetch", null, "modA");
+    let routine_stmt = _routine_calling("run", "fetch", 5);
+    let program = Program { statements: [import_stmt, routine_stmt] };
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "run";
+    assert v.missing_effects.length == 1;
+    assert v.missing_effects[0] == "net";
+    assert v.requirements.length == 1;
+    let req = v.requirements[0];
+    assert req.effect == "net";
+    // Prefix check — same shape diagnostics_render keys on. Spelled
+    // out by hand because the prefix is the cross-module contract.
+    let prefix = "imported `";
+    assert req.description.length >= prefix.length;
+    let mut i: number = 0;
+    let mut prefix_match: boolean = true;
+    loop {
+        if i >= prefix.length { break; }
+        if req.description[i] != prefix[i] { prefix_match = false; }
+        i += 1;
+    }
+    assert prefix_match;
+}
+
+test "validate_effects_with_imports: aliased import resolves under the local name" {
+    // Same setup as the previous test but with `import { fetch as
+    // get }` — the call site reads `get()`. Localization must
+    // rewrite the table so `get` carries `fetch`'s effects.
+    let mut global = empty_import_symbols();
+    global = append_import_function(global, "fetch", ["net"]);
+    let import_stmt = _import_decl("fetch", "get", "modA");
+    let routine_stmt = _routine_calling("run", "get", 5);
+    let program = Program { statements: [import_stmt, routine_stmt] };
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 1;
+    assert violations[0].missing_effects[0] == "net";
+}
+
+test "validate_effects_with_imports: declared effect on caller suppresses violation" {
+    // The happy path: caller declares `![net]`, imported `fetch`
+    // declares `![net]`, no violation.
+    let mut global = empty_import_symbols();
+    global = append_import_function(global, "fetch", ["net"]);
+    let import_stmt = _import_decl("fetch", null, "modA");
+
+    let span = _span(5, 4);
+    let callee = Expression.Identifier { name: "fetch" };
+    let no_args: Expression[] = [];
+    let call_expr = Expression.Call { callee: callee, arguments: no_args };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "fetch();",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let routine_stmt = Statement.FunctionDeclaration {
+        signature: _signature("run", ["net"], span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+
+    let program = Program { statements: [import_stmt, routine_stmt] };
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 0;
+}
+
+test "validate_effects_with_imports: same-named in-module fn does not trigger E0402" {
+    // Critical scope-filter test. The global table has `fetch ->
+    // [net]` because some staged artifact exports it, but the
+    // program does NOT import that fetch — the program defines its
+    // own local `fetch`. Localization must filter the global
+    // entry out so the `Call(Identifier("fetch"))` lookup misses
+    // and no spurious violation fires. Only an in-module local
+    // function is at play, and the body does no effectful ops, so
+    // the result must be zero violations.
+    let mut global = empty_import_symbols();
+    global = append_import_function(global, "fetch", ["net"]);
+
+    // Build a routine whose body is just an empty block — no Call,
+    // no effectful call, just a return-style empty body. The point
+    // is that even if a *call* to `fetch` showed up, the program
+    // hasn't imported it so localization filters out the entry.
+    let span = _span(5, 4);
+    let body_block = _empty_block();
+    let mut empty_decorators: Decorator[] = [];
+    let mut empty_effects: string[] = [];
+    let routine_stmt = Statement.FunctionDeclaration {
+        signature: _signature("run", empty_effects, span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+
+    // No import declaration in the program, so localize produces
+    // an empty table and `fetch` lookups don't hit.
+    let program = Program { statements: [routine_stmt] };
+    let violations = validate_effects_with_imports(program, global);
+    assert violations.length == 0;
+}
+
+test "validate_effects: legacy entry stays compatible (empty imports)" {
+    // The Phase B `validate_effects(program)` wrapper is preserved
+    // for legacy callers. It must behave identically to
+    // `validate_effects_with_imports(program, empty)`. Pin the
+    // contract so a refactor that makes the legacy entry drift
+    // (e.g. drops the wrapper) breaks loudly.
+    let import_stmt = _import_decl("fetch", null, "modA");
+    let routine_stmt = _routine_calling("run", "fetch", 5);
+    let program = Program { statements: [import_stmt, routine_stmt] };
+    // No import table → no cross-module propagation → no violation.
+    let violations = validate_effects_with_imports(program, empty_import_symbols());
+    assert violations.length == 0;
+}

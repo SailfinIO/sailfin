@@ -26,8 +26,9 @@ import {
     render_diagnostic,
     split_source_lines
 } from "../diagnostics_render";
-import { validate_effects } from "../effect_checker";
+import { validate_effects_with_imports } from "../effect_checker";
 import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
+import { ImportSymbolTable, empty_import_symbols } from "../effect_imports";
 import { number_to_string } from "../main";
 import { parse_program } from "../parser/mod";
 import { substring } from "../string_utils";
@@ -59,8 +60,8 @@ fn _is_sfn_file(path: string) -> boolean {
 }
 
 fn check_source(source: string, file_path: string) -> CheckResult ![io] {
-    let no_imports: Statement[] = [];
-    return check_source_with_imports(source, file_path, no_imports);
+    let no_interfaces: Statement[] = [];
+    return check_source_with_imports(source, file_path, no_interfaces, empty_import_symbols());
 }
 
 // Cross-module-aware variant: `imported_interfaces` carries
@@ -69,10 +70,16 @@ fn check_source(source: string, file_path: string) -> CheckResult ![io] {
 // passed through to `typecheck_diagnostics_with_imports` so cross-
 // module `implements` clauses are conformance-checked against the
 // real interface definitions instead of silently no-oping.
-fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[]) -> CheckResult ![io] {
+//
+// Phase E: `function_effects` carries the per-build cross-module
+// effect symbol table built from the same `.sfn-asm` artifacts.
+// It is threaded into `validate_effects_with_imports` so a caller
+// missing `![<imported_callee_effect>]` produces an `E0402`
+// diagnostic alongside any in-module `E0400` / `E0401` findings.
+fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[], function_effects: ImportSymbolTable) -> CheckResult ![io] {
     let program = parse_program(source);
     let type_diags = typecheck_diagnostics_with_imports(program, imported_interfaces);
-    let effect_violations = validate_effects(program);
+    let effect_violations = validate_effects_with_imports(program, function_effects);
 
     let source_lines = split_source_lines(source);
     let mut combined: Diagnostic[] = [];
