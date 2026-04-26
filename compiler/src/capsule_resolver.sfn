@@ -45,6 +45,7 @@ import { toml_get_dependencies, toml_get_name, toml_get_workspace_members } from
 export {
     CapsuleSource,
     CheckCapsuleResolution,
+    TestCapsuleResolution,
     WorkspaceMember,
     collect_relative_import_specs,
     collect_scoped_import_specs,
@@ -57,6 +58,7 @@ export {
     parse_workspace_member_paths,
     prepare_project_capsules,
     prepare_project_capsules_for_check,
+    prepare_project_capsules_for_test,
     resolve_relative_import,
     stage_capsule_imports,
     compile_capsule_modules,
@@ -89,6 +91,21 @@ struct CheckCapsuleResolution {
     asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
     capsule_count: number;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision or stage-write failure
+}
+
+// Result of a test-mode resolver pass: same workspace + manifest +
+// relative-import enumeration as `prepare_project_capsules`, but
+// returns BOTH the staged `.sfn-asm` paths (for the typechecker
+// import-loader) AND the compiled `.ll` paths (for the linker). The
+// test runner needs both — the loader feeds cross-module conformance
+// into typecheck, and clang link consumes the helper `.ll` files so
+// imported helper definitions resolve at link time without the
+// `llvm-objcopy --weaken` cross-module shim.
+struct TestCapsuleResolution {
+    asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
+    ll_paths: string[];  // build/sailfin/capsules/<mangled-slug>.ll
+    capsule_count: number;  // post-dedupe count, for diagnostic output
+    staging_failed: boolean;  // true on slug collision, stage-write, or compile failure
 }
 
 // ---- Path helpers ----
@@ -1642,6 +1659,94 @@ fn prepare_project_capsules_for_check(entry_paths: string[]) -> CheckCapsuleReso
 
     return CheckCapsuleResolution {
         asm_paths: asm_paths,
+        capsule_count: resolved.sources.length,
+        staging_failed: false
+    };
+}
+
+// Resolver pass tuned for `sfn test`: stages `.sfn-asm` import-context
+// (so the typechecker import-loader can read interface declarations
+// for cross-module conformance) AND compiles each capsule source to
+// its own `.ll` (so clang link can resolve imported helper definitions
+// without falling back to the weakened-compiler `cross_module_shim`).
+//
+// `entry_paths` is a list of test source files that share the same
+// project + workspace roots. The CLI groups discovered tests by
+// `(discover_project_root, discover_workspace_root)` and calls this
+// once per group, mirroring the per-group resolution `cli_check.sfn`
+// already performs. Resolution work is amortized across every test
+// in the group; per-(group, capsule) staging + compilation runs at
+// most once.
+//
+// Contract differences from `prepare_project_capsules`:
+//   - On slug collision, returns `staging_failed = true` (caller
+//     exits 2 to distinguish setup error from test failure).
+//   - On `stage_capsule_imports` failure, same: `staging_failed = true`.
+//   - On `compile_capsule_modules` failure, same: `staging_failed =
+//     true`, `ll_paths = []`.
+//   - Standalone test files outside any capsule.toml are valid input
+//     and return an empty resolution (no error) — the test source's
+//     own compile path still runs, and any relative-import walking
+//     happens inside the per-entry `enumerate_relative_sources`
+//     branch of `_cr_resolve_and_dedupe`.
+fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolution ![io] {
+    let empty_paths: string[] = [];
+    let resolved = _cr_resolve_and_dedupe(entry_paths);
+    if resolved.has_collision {
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true
+        };
+    }
+    if resolved.sources.length == 0 {
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: false
+        };
+    }
+
+    let staged = stage_capsule_imports(resolved.sources);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true
+        };
+    }
+
+    let mut asm_paths: string[] = [];
+    let mut ai: number = 0;
+    loop {
+        if ai >= resolved.sources.length { break; }
+        asm_paths.push("build/native/import-context/" + resolved.sources[ai].slug
+            + ".sfn-asm");
+        ai += 1;
+    }
+
+    let ll_paths = compile_capsule_modules(resolved.sources);
+    // `compile_capsule_modules` returns `[]` on compile failure for any
+    // source; with `resolved.sources.length > 0` (guarded above) an
+    // empty list unambiguously means failure. Surface it as a setup
+    // error so the test runner exits 2 instead of trying to link
+    // against missing helper objects.
+    if ll_paths.length == 0 {
+        return TestCapsuleResolution {
+            asm_paths: asm_paths,
+            ll_paths: empty_paths,
+            capsule_count: resolved.sources.length,
+            staging_failed: true
+        };
+    }
+
+    return TestCapsuleResolution {
+        asm_paths: asm_paths,
+        ll_paths: ll_paths,
         capsule_count: resolved.sources.length,
         staging_failed: false
     };
