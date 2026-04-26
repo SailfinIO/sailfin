@@ -1,10 +1,16 @@
 // compiler/src/llvm/lowering/entrypoints_tests_writer.sfn
 //
-// Test LLVM IR writer — write_llvm_ir_for_tests_from_text.
+// Test LLVM IR writer — write_llvm_ir_for_tests_from_text_with_context.
 //
-// The original write_llvm_ir_for_tests function (~600 lines duplicating
-// the entire lowering pipeline) was removed to fix OOM during selfhost.
-// Imports are preserved — the seed linker needs the full import graph.
+// Single resolver-driven entry point. Threads import-context (manifests
+// + native texts) from `prepare_project_capsules_for_test` (in
+// `capsule_resolver.sfn`) into `lower_to_llvm_lines_with_parsed_-
+// context_for_tests`, so the test source's mangled call sites bind to
+// the dependency `.ll` files the resolver produced. The earlier no-
+// context wrappers (`write_llvm_ir_for_tests`,
+// `write_llvm_ir_for_tests_from_text`) were retired in Stage B PR2's
+// A4 deletion alongside `compile_tests_to_llvm_file_with_module` and
+// the textual import inliner.
 import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
@@ -19,8 +25,7 @@ import {
     parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_interfaces_for_import,
-    parse_native_structs_for_import,
-    select_text_artifact
+    parse_native_structs_for_import
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 import {
@@ -95,31 +100,6 @@ import {
     module_source_filename
 } from "./lowering_io";
 import { lower_module_bindings_to_globals } from "./module_globals";
-
-// Stub: kept for import-graph compatibility (main.sfn imports this symbol).
-// The full implementation (~600 lines duplicating the entire lowering pipeline)
-// was removed to fix OOM during selfhost.
-fn write_llvm_ir_for_tests(native_module: NativeModule, out_path: string) -> boolean ![io] {
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        print.err("test llvm writer: no text artifact found");
-        return false;
-    }
-    return write_llvm_ir_for_tests_from_text(artifact.contents, native_module.module_name, out_path);
-}
-
-// Build and write LLVM IR for tests from raw native text, avoiding
-// NativeModule ABI issues. No-context variant — preserved for the
-// in-memory error-recovery branch in main.sfn that re-runs the test
-// pipeline against a previously-emitted artifact. Resolver-driven
-// callers go through the `_with_context` sibling so import-context
-// flows into mangling/call-site rewriting.
-fn write_llvm_ir_for_tests_from_text(native_text: string, module_name: string, out_path: string) -> boolean ![io] {
-    let empty_manifests: LayoutManifest[] = [];
-    let empty_texts: string[] = [];
-    let empty_diagnostics: string[] = [];
-    return write_llvm_ir_for_tests_from_text_with_context(native_text, module_name, out_path, empty_manifests, empty_texts, empty_diagnostics);
-}
 
 // Build and write LLVM IR for tests, threading import-context through
 // from the resolver pass. `imported_manifests` and

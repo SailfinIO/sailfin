@@ -20,11 +20,7 @@ import {
     write_llvm_ir_from_native_text
 } from "./llvm/lowering/entrypoints";
 import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
-import {
-    write_llvm_ir_for_tests,
-    write_llvm_ir_for_tests_from_text,
-    write_llvm_ir_for_tests_from_text_with_context
-} from "./llvm/lowering/entrypoints_tests_writer";
+import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
 import { LayoutManifest } from "./native_ir";
 import { split_lines } from "./native_ir_utils_text";
 import { parse_program } from "./parser/mod";
@@ -317,75 +313,6 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     print.err(_timing_line(module_name, "lower_llvm", t_lower_llvm));
     print.err(_timing_line(module_name, "total", _ms_since(t0)));
     return ir;
-}
-
-fn compile_tests_to_llvm_file_with_module(source: string, module_name: string, out_path: string) -> boolean ![io] {
-    let trace_file = fs.exists("build/sailfin/.trace_test_runner");
-    let active_file = fs.exists("build/sailfin/.test_runner_active");
-    let mut _let345: boolean = false;
-    if trace_file {
-        if active_file { _let345 = true; }
-    }
-    let trace = _let345;
-    let mut _if346: boolean = false;
-    if trace_file { _if346 = true; }
-    if active_file { _if346 = true; }
-    if _if346 {
-        if trace {
-            print.err("test compiler: trace enabled (trace_file=true, active_file=true)");
-        } else {
-            let mut trace_text: string = "false";
-            if trace_file { trace_text = "true"; }
-            let mut active_text: string = "false";
-            if active_file { active_text = "true"; }
-            print.err("test compiler: trace disabled (trace_file=" + trace_text
-                + ", active_file="
-                + active_text
-                + ")");
-        }
-    }
-    if trace { print.err("test compiler: parse_program start"); }
-    let program: Program = parse_program(source);
-    if typecheck_has_errors(program) {
-        let diagnostics = typecheck_diagnostics(program);
-        report_typecheck_errors(diagnostics, source);
-        return false;
-    }
-    if _reject_reexport_violations(program) { return false; }
-    if trace {
-        print.err("test compiler: emit_native_with_module_name start (module="
-            + module_name
-            + ")");
-    }
-    let native_text = emit_native_text_with_module_name(program, module_name);
-    if trace {
-        print.err("test compiler: native text bytes=" + number_to_string(native_text.length));
-        print.err("test compiler: lower_to_llvm_for_tests start");
-    }
-    if fs.exists(out_path) { fs.deleteFile(out_path); }
-    if trace {
-        if native_text.length > 0 {
-            fs.writeFile("build/sailfin/debug-test-native.sfn-asm", native_text);
-            print.err("test compiler: wrote build/sailfin/debug-test-native.sfn-asm");
-        }
-    }
-
-    write_llvm_ir_for_tests_from_text(native_text, module_name, out_path);
-    if !fs.exists(out_path) { return false; }
-    let content = fs.readFile(out_path);
-    if trace {
-        print.err("test compiler: write_llvm_ir_for_tests bytes="
-            + number_to_string(content.length));
-    }
-    if content.length <= 4 {
-        if trace {
-            print.err("test compiler: suspiciously short llvm output (len="
-                + number_to_string(content.length)
-                + ")");
-        }
-        return false;
-    }
-    return true;
 }
 
 // Resolver-driven test compile path. Mirrors
