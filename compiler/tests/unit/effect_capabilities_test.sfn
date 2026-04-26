@@ -1,0 +1,271 @@
+// Unit tests for compiler/src/effect_checker.sfn's Phase F
+// (`docs/proposals/effect-validation.md` §5) capability cross-check
+// path: `validate_capsule_capabilities(program, capabilities) ->
+// CapabilityViolation[]`.
+//
+// Phase F flips the capsule manifest's
+// `[capabilities] required = [...]` into a real compile-time
+// contract: any function declaring an effect outside the manifest's
+// allowed surface fails with diagnostic code `E0403`. Empty
+// `capabilities_required` means "no manifest in scope" and the
+// checker degrades to a no-op so standalone .sfn files outside any
+// capsule keep working unchanged.
+//
+// Tests construct AST values via small helper functions to stay
+// flat — some seed compilers previously segfaulted on deeply nested
+// struct-literal initialisers in test bodies (see
+// `effect_checker_test.sfn` preamble for the same workaround).
+import {
+    Block,
+    Decorator,
+    FieldDeclaration,
+    FunctionSignature,
+    MethodDeclaration,
+    Program,
+    SourceSpan,
+    Statement,
+    TypeAnnotation,
+    TypeParameter
+} from "../../src/ast";
+import { CapabilityViolation, validate_capsule_capabilities } from "../../src/effect_checker";
+
+// -------------------------------------------------------------------
+// Builder helpers
+// -------------------------------------------------------------------
+fn _empty_block() -> Block {
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+fn _span(line: number, column: number) -> SourceSpan {
+    return SourceSpan {
+        start_line: line,
+        start_column: column,
+        end_line: line,
+        end_column: column + 1
+    };
+}
+
+fn _signature(name: string, effects: string[], span: SourceSpan?) -> FunctionSignature {
+    return FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: [],
+        return_type: null,
+        effects: effects,
+        type_parameters: [],
+        name_span: span
+    };
+}
+
+// Build a `Statement.FunctionDeclaration` declaring the given
+// effects on its signature, with an empty body and no decorators.
+// Used to fixture the "function declares effects ![…]" half of the
+// capability cross-check.
+fn _function_declaring(name: string, effects: string[], span_line: number) -> Statement {
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, effects, _span(span_line, 4)),
+        body: _empty_block(),
+        decorators: empty_decorators
+    };
+}
+
+// -------------------------------------------------------------------
+// Empty-capabilities short-circuit (no manifest in scope)
+// -------------------------------------------------------------------
+test "capabilities: empty list skips the check entirely" {
+    // Standalone .sfn outside any capsule: even with effectful
+    // function declarations, the empty capability surface signals
+    // "no manifest constraint to enforce" and produces zero
+    // violations. This is the contract that lets `sfn check` of a
+    // bare file path keep working pre-manifest.
+    let stmt = _function_declaring("dangerous", ["io", "net", "model"], 1);
+    let program = Program { statements: [stmt] };
+    let no_caps: string[] = [];
+    let violations = validate_capsule_capabilities(program, no_caps);
+    assert violations.length == 0;
+}
+
+test "capabilities: empty list skips the check even on an empty program" {
+    // The fast-path early-return for empty `capabilities_required`
+    // happens before the program walk; pin it so a refactor that
+    // moves the check inside the loop can't accidentally start
+    // emitting violations for bare modules.
+    let no_stmts: Statement[] = [];
+    let program = Program { statements: no_stmts };
+    let no_caps: string[] = [];
+    let violations = validate_capsule_capabilities(program, no_caps);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// In-bounds: declared effects ⊆ capabilities
+// -------------------------------------------------------------------
+test "capabilities: in-bounds function produces no violation" {
+    let stmt = _function_declaring("read_log", ["io"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 0;
+}
+
+test "capabilities: in-bounds with multiple effects passes" {
+    // `![io, clock]` ⊆ `["io", "clock", "rand"]` — the function
+    // doesn't have to use every capability the manifest grants.
+    let stmt = _function_declaring("with_timing", ["io", "clock"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io", "clock", "rand"]);
+    assert violations.length == 0;
+}
+
+test "capabilities: function with no declared effects passes regardless" {
+    // A pure function (no `![…]` clause) trivially satisfies any
+    // capability surface, including an empty one. Lock this so a
+    // refactor of `_analyze_routine_capabilities` doesn't trigger
+    // `E0403` on every undecorated function in a clean tree.
+    let stmt = _function_declaring("pure_helper", [], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Out-of-bounds: declared effects ⊄ capabilities → E0403
+// -------------------------------------------------------------------
+test "capabilities: out-of-bounds function produces one violation per excess effect set" {
+    // Function declares `![net]`, capsule allows only `["io"]` —
+    // E0403 fires with `excess_effects = ["net"]`.
+    let stmt = _function_declaring("fetch_orders", ["net"], 7);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "fetch_orders";
+    assert v.excess_effects.length == 1;
+    assert v.excess_effects[0] == "net";
+    assert v.capabilities_required.length == 1;
+    assert v.capabilities_required[0] == "io";
+    assert v.severity == "error";
+}
+
+test "capabilities: violation carries signature_token from name_span" {
+    // The renderer points the diagnostic caret at the function
+    // name (Phase A's source-span attribution contract). Pin the
+    // span line/column propagation so a refactor that drops
+    // `name_span` doesn't silently regress the diagnostic to
+    // location-only rendering.
+    let stmt = _function_declaring("noisy", ["model"], 42);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.signature_token != null;
+    let tok = v.signature_token;
+    assert tok.line == 42;
+    assert tok.column == 4;
+    assert tok.lexeme == "noisy";
+}
+
+test "capabilities: mixed in-bounds + out-of-bounds collapses to excess only" {
+    // `![io, net]` against `["io"]` — `io` is allowed; `net` is
+    // not. The violation should report only `net` in
+    // `excess_effects`, not the full declared set. Otherwise a
+    // function declaring 5 effects with one out-of-bounds would
+    // produce a confusing "5 effects outside surface" diagnostic.
+    let stmt = _function_declaring("partial_overflow", ["io", "net"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.excess_effects.length == 1;
+    assert v.excess_effects[0] == "net";
+}
+
+test "capabilities: multiple out-of-bounds effects all surface" {
+    // `![net, model]` against `["io"]` — both `net` and `model`
+    // are excess. They should both appear in `excess_effects` so
+    // the user gets the full surface mismatch in one diagnostic.
+    let stmt = _function_declaring("very_dangerous", ["net", "model"], 5);
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.excess_effects.length == 2;
+    assert v.excess_effects[0] == "net";
+    assert v.excess_effects[1] == "model";
+}
+
+// -------------------------------------------------------------------
+// TestDeclaration paths
+// -------------------------------------------------------------------
+test "capabilities: test declaration with out-of-bounds effect surfaces violation" {
+    // Tests carry their own `effects` slot (no FunctionSignature),
+    // and the checker has to synthesize a signature for them. Pin
+    // the propagation so a refactor of the TestDeclaration arm
+    // doesn't silently skip tests in the capability check.
+    let body_block = _empty_block();
+    let mut empty_decorators: Decorator[] = [];
+    let stmt = Statement.TestDeclaration {
+        name: "exercises network",
+        name_span: _span(11, 6),
+        body: body_block,
+        effects: ["net"],
+        decorators: empty_decorators
+    };
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "test exercises network";
+    assert v.excess_effects[0] == "net";
+}
+
+// -------------------------------------------------------------------
+// StructDeclaration method paths
+// -------------------------------------------------------------------
+test "capabilities: struct method with out-of-bounds effect surfaces violation" {
+    // Methods are nested inside StructDeclaration; the checker has
+    // to walk into them. Without this path, a capsule could sneak
+    // an out-of-surface effect onto a method and bypass the
+    // capability check entirely.
+    let body_block = _empty_block();
+    let mut empty_decorators: Decorator[] = [];
+    let method = MethodDeclaration {
+        signature: _signature("send", ["net"], _span(8, 4)),
+        body: body_block,
+        decorators: empty_decorators
+    };
+    let mut empty_type_params: TypeParameter[] = [];
+    let mut empty_implements: TypeAnnotation[] = [];
+    let mut empty_fields: FieldDeclaration[] = [];
+    let mut struct_decorators: Decorator[] = [];
+    let stmt = Statement.StructDeclaration {
+        name: "Mailer",
+        name_span: null,
+        type_parameters: empty_type_params,
+        implements_types: empty_implements,
+        fields: empty_fields,
+        methods: [method],
+        decorators: struct_decorators
+    };
+    let program = Program { statements: [stmt] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "Mailer.send";
+    assert v.excess_effects[0] == "net";
+}
+
+// -------------------------------------------------------------------
+// Aggregation across multiple statements
+// -------------------------------------------------------------------
+test "capabilities: multiple offending functions produce separate violations" {
+    let one = _function_declaring("a", ["net"], 1);
+    let two = _function_declaring("b", ["model"], 2);
+    let program = Program { statements: [one, two] };
+    let violations = validate_capsule_capabilities(program, ["io"]);
+    assert violations.length == 2;
+    assert violations[0].routine_name == "a";
+    assert violations[0].excess_effects[0] == "net";
+    assert violations[1].routine_name == "b";
+    assert violations[1].excess_effects[0] == "model";
+}

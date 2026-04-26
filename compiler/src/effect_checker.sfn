@@ -85,6 +85,34 @@ struct EffectViolation {
     severity: string;
 }
 
+// Phase F (`docs/proposals/effect-validation.md` §5): a function
+// declared an effect outside the surrounding capsule's
+// `[capabilities] required = [...]` set. Distinct from
+// `EffectViolation` because the failure shape is different:
+//
+//   - `EffectViolation` = "function X is missing required effects ![…]"
+//     (the body uses an effectful operation that the signature doesn't
+//     declare).
+//   - `CapabilityViolation` = "function X declares effect ![Y] outside
+//     capsule capability surface" (the signature *does* declare the
+//     effect, but the capsule manifest doesn't grant it).
+//
+// Renderer (`diagnostics_render.capability_violation_to_diagnostic`)
+// emits diagnostic code `E0403` and a fix-it hint suggesting either
+// "add Y to capsule.toml [capabilities] required" or "remove ![Y]
+// from this function." Severity threading mirrors `EffectViolation`
+// — the gate flips it to "warning" / "off" via
+// `SAILFIN_EFFECT_ENFORCE` if the operator opts out of the strict
+// post-Phase-D default.
+struct CapabilityViolation {
+    routine_name: string;
+    excess_effects: string[];  // effects declared but outside the capability surface
+    capabilities_required: string[];  // the capsule's allowed surface (for the diagnostic note)
+    signature_token: Token?;
+    trigger: Token?;
+    severity: string;
+}
+
 // Build a Token from a SourceSpan + lexeme. The renderer in
 // `tools/check.sfn` reads `token.line`, `token.column`, and
 // `token.lexeme` (for the caret width). We synthesize an Identifier-
@@ -128,6 +156,104 @@ fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -
         index += 1;
     }
     return violations;
+}
+
+// Phase F entry: cross-check every function's *declared* effects
+// against the capsule manifest's `[capabilities] required = [...]`
+// surface. Any effect on the function signature that isn't in the
+// surface produces a `CapabilityViolation`, rendered as `E0403`
+// downstream.
+//
+// Empty `capabilities_required` means "no manifest declared a
+// capability surface" (standalone .sfn outside any capsule, or a
+// manifest mid-migration). The checker treats that as "skip the
+// cross-check entirely" rather than "no capabilities allowed" —
+// otherwise every function would fail E0403, breaking every
+// project that hasn't opted into the new manifest contract yet.
+//
+// Capsules that opt in by listing `required = [...]` get the
+// strict check: a function declaring `![net]` inside a capsule
+// whose manifest lists only `["io"]` fails, with a fix-it hint
+// pointing at both the manifest entry and the function signature.
+fn validate_capsule_capabilities(program: Program, capabilities_required: string[]) -> CapabilityViolation[] {
+    let mut violations: CapabilityViolation[] = [];
+    if capabilities_required.length == 0 { return violations; }
+    let mut index: number = 0;
+    loop {
+        if index >= program.statements.length { break; }
+        violations = _append_capability_violations(violations, _analyze_statement_capabilities(program.statements[index], capabilities_required));
+        index += 1;
+    }
+    return violations;
+}
+
+fn _analyze_statement_capabilities(statement: Statement, capabilities: string[]) -> CapabilityViolation[] {
+    if statement.variant == "FunctionDeclaration" {
+        return _analyze_routine_capabilities(statement.signature, statement.signature.name, capabilities);
+    }
+    if statement.variant == "TestDeclaration" {
+        // Tests carry their own `effects` list (no full
+        // FunctionSignature), so synthesize a minimal one that
+        // `_analyze_routine_capabilities` can read. Mirrors the
+        // shape `analyze_statement` constructs for the
+        // missing-effect path.
+        let signature = FunctionSignature {
+            name: statement.name,
+            is_async: false,
+            parameters: [],
+            return_type: null,
+            effects: statement.effects,
+            type_parameters: [],
+            name_span: statement.name_span
+        };
+        let qualified = "test " + statement.name;
+        return _analyze_routine_capabilities(signature, qualified, capabilities);
+    }
+    if statement.variant == "StructDeclaration" {
+        let mut issues: CapabilityViolation[] = [];
+        let mut method_index: number = 0;
+        loop {
+            if method_index >= statement.methods.length { break; }
+            let method = statement.methods[method_index];
+            let qualified = statement.name + "." + method.signature.name;
+            issues = _append_capability_violations(issues, _analyze_routine_capabilities(method.signature, qualified, capabilities));
+            method_index += 1;
+        }
+        return issues;
+    }
+    return [];
+}
+
+fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, capabilities: string[]) -> CapabilityViolation[] {
+    if signature.effects.length == 0 { return []; }
+    let mut excess: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= signature.effects.length { break; }
+        let effect = signature.effects[i];
+        if !contains_effect(capabilities, effect) {
+            excess = append_unique_effect(excess, effect);
+        }
+        i += 1;
+    }
+    if excess.length == 0 { return []; }
+    let sig_token = _token_from_signature(signature.name_span, signature.name);
+    let mut result: CapabilityViolation[] = [];
+    result.push(CapabilityViolation {
+        routine_name: name, excess_effects: excess, capabilities_required: capabilities, signature_token: sig_token, trigger: sig_token, severity: "error"
+    });
+    return result;
+}
+
+fn _append_capability_violations(violations: CapabilityViolation[], new_violations: CapabilityViolation[]) -> CapabilityViolation[] {
+    let mut result = violations;
+    let mut i: number = 0;
+    loop {
+        if i >= new_violations.length { break; }
+        result.push(new_violations[i]);
+        i += 1;
+    }
+    return result;
 }
 
 fn analyze_statement(statement: Statement, imports: ImportSymbolTable) -> EffectViolation[] {

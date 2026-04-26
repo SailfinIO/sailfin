@@ -49,6 +49,12 @@ struct CheckGroup {
     // `check_source_with_imports` so a caller missing
     // `![<callee_effect>]` produces an `E0402` diagnostic.
     function_effects: ImportSymbolTable;
+    // Phase F: capsule manifest's `[capabilities] required = [...]`
+    // surface, sourced from the same per-group resolver pass that
+    // populates `interfaces`. Threaded into
+    // `check_source_with_imports` so any function declaring an
+    // effect outside the surface produces an `E0403` diagnostic.
+    capabilities_required: string[];
 }
 
 fn _emit_check_header(path: string, quiet: boolean) ![io] {
@@ -200,8 +206,9 @@ fn handle_check_command(args: string[]) -> number ![io] {
         if idx < 0 {
             let empty_entries: string[] = [];
             let empty_interfaces: Statement[] = [];
+            let empty_caps: string[] = [];
             groups.push(CheckGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols()
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols(), capabilities_required: empty_caps
             });
             idx = groups.length - 1;
         }
@@ -234,6 +241,12 @@ fn handle_check_command(args: string[]) -> number ![io] {
         // the per-file analysis loop below can hand it to
         // `check_source_with_imports` alongside the interface list.
         groups[gi].function_effects = load.function_effects;
+        // Phase F: stash the capsule manifest's
+        // `[capabilities] required` surface from the resolver pass.
+        // The per-file loop hands it to `check_source_with_imports`
+        // so any function declaring an effect outside the surface
+        // produces an `E0403` diagnostic.
+        groups[gi].capabilities_required = resolution.capabilities_required;
 
         let mut mi: number = 0;
         loop {
@@ -264,7 +277,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
         let path = files[fi];
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
-        let result = check_source_with_imports(source, path, groups[group_idx].interfaces, groups[group_idx].function_effects);
+        let result = check_source_with_imports(source, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually
         // see the effect-violation output. Pre-Phase-B effect

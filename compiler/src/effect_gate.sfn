@@ -47,11 +47,17 @@
 // `/tmp/.sfn_*` file.
 import { Program } from "./ast";
 import {
+    capability_violation_to_diagnostic,
     effect_violation_to_diagnostic,
     render_diagnostic,
     split_source_lines
 } from "./diagnostics_render";
-import { EffectViolation, validate_effects_with_imports } from "./effect_checker";
+import {
+    CapabilityViolation,
+    EffectViolation,
+    validate_capsule_capabilities,
+    validate_effects_with_imports
+} from "./effect_checker";
 import { ImportSymbolTable } from "./effect_imports";
 import { sanitize_symbol, substring } from "./string_utils";
 import { Diagnostic } from "./typecheck_types";
@@ -149,6 +155,22 @@ fn read_effect_enforcement_env(unique_key: string) -> string ![io] {
 // refactor than Phase B should take. Phase E (cross-module
 // propagation) revisits the path-plumbing question.
 fn validate_and_render_effects(program: Program, source: string, file_path: string, imports: ImportSymbolTable) -> number ![io] {
+    let no_caps: string[] = [];
+    return validate_and_render_effects_with_capabilities(program, source, file_path, imports, no_caps);
+}
+
+// Phase F entry — accepts the project manifest's
+// `[capabilities] required = [...]` surface in addition to the Phase E
+// import table. Empty `capabilities_required` means "no capability
+// surface to compare against" (standalone .sfn outside any capsule);
+// the function then degrades to the Phase B/C/D/E behavior — only
+// in-module + cross-module effect validation runs.
+//
+// On a capsule with a non-empty surface, `validate_capsule_capabilities`
+// also runs, emitting `E0403` for any function declaring an effect
+// outside the manifest-allowed set. Both violation streams flow
+// through the same `SAILFIN_EFFECT_ENFORCE` severity contract.
+fn validate_and_render_effects_with_capabilities(program: Program, source: string, file_path: string, imports: ImportSymbolTable, capabilities_required: string[]) -> number ![io] {
     let raw = read_effect_enforcement_env(file_path);
     let severity = resolve_effect_enforcement(raw);
     if severity == "off" {
@@ -160,23 +182,17 @@ fn validate_and_render_effects(program: Program, source: string, file_path: stri
             + file_path);
         return 0;
     }
-    // Phase E: pass the per-build import symbol table so
-    // `validate_effects_with_imports` can localize it to this
-    // program's `Statement.ImportDeclaration` specifiers and resolve
-    // cross-module call sites. Empty-table callers (legacy
-    // `compile_to_sailfin`, `compile_to_llvm`) get the same
-    // in-module-only behavior they had pre-Phase-E.
-    let violations = validate_effects_with_imports(program, imports);
-    if violations.length == 0 { return 0; }
     let source_lines = split_source_lines(source);
     let mut errors: number = 0;
+
+    // Phase B/C/D/E: in-module + cross-module effect propagation.
+    // Empty-table callers (legacy `compile_to_sailfin`,
+    // `compile_to_llvm`) get the same in-module-only behavior they
+    // had pre-Phase-E.
+    let violations = validate_effects_with_imports(program, imports);
     let mut i: number = 0;
     loop {
         if i >= violations.length { break; }
-        // Mutate severity in place — the violation is a value-typed
-        // struct so the caller's collection is unaffected. Phase A
-        // hardcoded "error" at construction; Phase B overrides per
-        // the env-var contract.
         let mut v: EffectViolation = violations[i];
         v.severity = severity;
         let mut diag: Diagnostic = effect_violation_to_diagnostic(v);
@@ -186,11 +202,29 @@ fn validate_and_render_effects(program: Program, source: string, file_path: stri
         if severity == "error" { errors += 1; }
         i += 1;
     }
+
+    // Phase F: capsule capability cross-check. Skipped when no
+    // manifest provided a surface (empty `capabilities_required`).
+    let capability_violations = validate_capsule_capabilities(program, capabilities_required);
+    let mut k: number = 0;
+    loop {
+        if k >= capability_violations.length { break; }
+        let mut cv: CapabilityViolation = capability_violations[k];
+        cv.severity = severity;
+        let mut cdiag: Diagnostic = capability_violation_to_diagnostic(cv);
+        cdiag.file_path = file_path;
+        let rendered = render_diagnostic(cdiag, source_lines, "effect");
+        print.err(rendered);
+        if severity == "error" { errors += 1; }
+        k += 1;
+    }
+
     return errors;
 }
 
 export {
     read_effect_enforcement_env,
     resolve_effect_enforcement,
-    validate_and_render_effects
+    validate_and_render_effects,
+    validate_and_render_effects_with_capabilities
 };

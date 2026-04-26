@@ -2,7 +2,10 @@
 //
 // Sailfin compiler main module and compilation entry points.
 import { Program, Statement } from "./ast";
-import { validate_and_render_effects } from "./effect_gate";
+import {
+    validate_and_render_effects,
+    validate_and_render_effects_with_capabilities
+} from "./effect_gate";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
     NativeModule,
@@ -358,7 +361,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
 // on the `Diagnostic` struct, so we filter for `severity == "error"`
 // before reporting and bailing. Warnings (e.g. future W01xx load
 // warnings) flow through without aborting the test compile.
-fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable) -> boolean ![io] {
+fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[]) -> boolean ![io] {
     let trace_file = fs.exists("build/sailfin/.trace_test_runner");
     let active_file = fs.exists("build/sailfin/.test_runner_active");
     let mut _let_trace: boolean = false;
@@ -384,12 +387,12 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
         return false;
     }
     if _reject_reexport_violations(program) { return false; }
-    // Phase E: thread the resolver-built function-effect table so
-    // a test source that calls an imported `![net]` helper without
-    // declaring `![net]` produces an `E0402` diagnostic. Pre-Phase-E
-    // tests that only use in-module fns get an empty table from the
-    // caller and behave identically to before.
-    if validate_and_render_effects(program, source, module_name, imported_function_effects) > 0 {
+    // Phase E + F: thread the resolver-built function-effect table
+    // (E0402) and capsule capability surface (E0403). Empty
+    // capability list = standalone test outside any capsule = skip
+    // E0403 cross-check; the tests in `compiler/tests/unit/` run
+    // without a manifest in scope today and rely on this fallback.
+    if validate_and_render_effects_with_capabilities(program, source, module_name, imported_function_effects, imported_capabilities_required) > 0 {
         return false;
     }
     if trace {

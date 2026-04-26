@@ -31,7 +31,7 @@
 // and the seed compiler does not handle import cycles cleanly. The
 // duplication is small (~50 lines, four pure string helpers) and
 // changes here are decoupled from changes to `main.sfn`'s own copies.
-import { EffectRequirement, EffectViolation } from "./effect_checker";
+import { CapabilityViolation, EffectRequirement, EffectViolation } from "./effect_checker";
 import { substring } from "./string_utils";
 import { Token } from "./token";
 import { Diagnostic } from "./typecheck_types";
@@ -129,6 +129,72 @@ fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
         file_path: "",
         primary: violation.trigger
     };
+}
+
+// Phase F: render a `CapabilityViolation` as an `E0403` diagnostic.
+// Distinct from the `EffectViolation` shape — the failure here is
+// "function declares an effect that the capsule manifest doesn't
+// grant", not "function is missing an effect its body uses". The
+// diagnostic includes:
+//
+//   - The header `function X declares effect ![Y] outside capsule
+//     capability surface ![A, B, ...]`.
+//   - A note line listing the capsule's full capability surface so
+//     the user can see at a glance what's allowed.
+//   - A two-pronged fix-it suggestion: either widen the manifest
+//     (add Y to `[capabilities] required`) or narrow the function
+//     (drop ![Y] from the signature).
+//
+// Severity threading mirrors `effect_violation_to_diagnostic`:
+// `SAILFIN_EFFECT_ENFORCE=warning` flips this to a warning, `=off`
+// silences it on the build path. `=error` (the post-Phase-D default)
+// fails the build.
+fn capability_violation_to_diagnostic(violation: CapabilityViolation) -> Diagnostic {
+    let excess_text = join_effects(violation.excess_effects);
+    let surface_text = join_effects(violation.capabilities_required);
+    let mut message = "function `" + violation.routine_name
+        + "` declares effect"
+        + _excess_plural_suffix(violation.excess_effects)
+        + " !["
+        + excess_text
+        + "] outside capsule capability surface !["
+        + surface_text
+        + "]";
+    message = message + "\nnote: capsule declares capabilities = !["
+        + surface_text
+        + "]";
+    if violation.excess_effects.length > 0 {
+        message = message + "\nsuggestion: add " + _quoted_effects_csv(violation.excess_effects)
+            + " to capsule.toml [capabilities] required, or remove !["
+            + excess_text
+            + "] from this function";
+    }
+    let mut sev = violation.severity;
+    if sev.length == 0 { sev = "error"; }
+    return Diagnostic {
+        code: "E0403",
+        severity: sev,
+        message: message,
+        file_path: "",
+        primary: violation.trigger
+    };
+}
+
+fn _excess_plural_suffix(excess: string[]) -> string {
+    if excess.length == 1 { return ""; }
+    return "s";
+}
+
+fn _quoted_effects_csv(effects: string[]) -> string {
+    if effects.length == 0 { return ""; }
+    let mut out = "\"" + effects[0] + "\"";
+    let mut i: number = 1;
+    loop {
+        if i >= effects.length { break; }
+        out = out + ", \"" + effects[i] + "\"";
+        i += 1;
+    }
+    return out;
 }
 
 // -------------------------------------------------------------------
@@ -325,6 +391,7 @@ fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> str
 }
 
 export {
+    capability_violation_to_diagnostic,
     code_for_missing_effect,
     effect_violation_to_diagnostic,
     join_effects,

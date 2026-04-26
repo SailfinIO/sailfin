@@ -6,7 +6,15 @@ description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm
 [dependencies]
 
 [capabilities]
-required = ["io"]
+# `io` covers fs.*, print.*, console.*, and process.* surface used
+# across emit/lower/CLI helpers and the print.err debug traces.
+# `clock` is required because compile_to_llvm_with_module_timed
+# (compiler/src/main.sfn) wraps the lower pipeline with
+# monotonic_millis() — `--timing` mode on `sfn emit llvm`.
+# Phase F (docs/proposals/effect-validation.md §5) enforces this
+# surface against every function's declared effects: any function
+# declaring an effect outside this list fails with E0403.
+required = ["io", "clock"]
 
 [build]
 kind = "binary"
