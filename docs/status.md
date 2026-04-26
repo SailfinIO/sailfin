@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 25, 2026 (typecheck cross-module conformance hookup — A1)
+Updated: April 26, 2026 (effect validation Phase B — build-path gate)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -75,14 +75,15 @@ feature availability.
   `make compile` produces `build/native/sailfin`.
 - Pipeline: Lexer → Parser → Type Checker → Native Emitter
   (`.sfn-asm` IR) → LLVM Lowering.
-- **Effect checker status**: `validate_effects()` exists in `effect_checker.sfn`
-  and runs through `sfn check`, but is **not invoked by the compiler or CLI
-  during normal builds** — users still don't see effect diagnostics during
-  compilation, and effect violations don't block compilation. Wiring effect
-  enforcement into the build is the top priority in the Effect System
-  Hardening track on the [roadmap](https://sailfin.dev/roadmap), tracked
-  by `docs/proposals/effect-validation.md` (Phases A–G; Phase A landed
-  2026-04-26).
+- **Effect checker status**: `validate_effects()` is invoked from every
+  `compile_to_*` entry point in `main.sfn` (Phase B — shipped 2026-04-26;
+  see below). Severity is steered by the `SAILFIN_EFFECT_ENFORCE` env
+  var: unset / `=warning` emits warnings (default through the audit
+  period), `=error` blocks the build, `=off` skips validation entirely.
+  The default flips to `=error` in Phase D after the in-tree audit
+  (Phase C) lands and one alpha cycle of warning-mode telemetry has
+  elapsed. Tracked by `docs/proposals/effect-validation.md`
+  (Phases A–G; Phases A and B landed 2026-04-26).
 - **Effect diagnostic source spans (Phase A — shipped 2026-04-26).** The
   `EffectViolation` struct now carries `signature_token`, `trigger`, and
   `severity` slots, populated from `FunctionSignature.name_span` via
@@ -97,10 +98,28 @@ feature availability.
   every effect-name decision; wiring `effect_checker.sfn` and
   `tools/check.sfn` to consume it (e.g. rejecting unknown effect names
   in `analyze_routine`, sorting `missing_effects` for deterministic
-  rendering) lands in Phase B alongside the build-pipeline gate.
-  Per-expression trigger tokens still default to the signature
-  location; threading per-`Expression` spans is deferred to a follow-up
-  that adds span fields to the AST's expression variants.
+  rendering) lands later in Phase G alongside the name-resolution
+  detector. Per-expression trigger tokens still default to the
+  signature location; threading per-`Expression` spans is deferred to
+  a follow-up that adds span fields to the AST's expression variants.
+- **Effect validation as build gate (Phase B — shipped 2026-04-26).**
+  `validate_and_render_effects` (in new `compiler/src/effect_gate.sfn`)
+  runs after typecheck in every `compile_to_*` entry point. The
+  rendering surface from `tools/check.sfn` extracted into new
+  `compiler/src/diagnostics_render.sfn` so the build path and
+  `sfn check` share one source of truth — diagnostic shape, severity
+  selection, and caret rendering match across both surfaces. Severity
+  is resolved from `SAILFIN_EFFECT_ENFORCE` via
+  `resolve_effect_enforcement`; the env-var read uses a
+  `process.run`-based shell helper because the 0.5.x seed compiler
+  has a known runtime-helper-collection bug for the `env.get`
+  intrinsic (it emits the call but not the LLVM `declare`). Each
+  build worker derives a process-unique tmp path from its file_path
+  to avoid races on `make compile -j4`. Off-mode emits a one-line
+  stderr notice per file so contributors can see the gate was
+  consciously bypassed. Phase C audits the in-tree compiler under
+  warning mode; Phase D flips the default severity from `warning` to
+  `error` in a later release.
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
   and attach release assets.
@@ -125,12 +144,12 @@ feature availability.
 | String interpolation (`{{ }}`) | Shipped | |
 | Pattern matching exhaustiveness | Partial | Runtime backstop via `match_exhaustive_failed` |
 | Effect annotations (`![...]`) | Shipped | Parsing and declaration |
-| Effect enforcement — `io` | Not enforced | Checker logic exists for `print.*`, `console.*`, `fs.*`, `@logExecution` but is not run during compilation |
-| Effect enforcement — `net` | Not enforced | Checker logic exists for `http.*`, `websocket.*`, `serve` but is not run during compilation |
-| Effect enforcement — `model` | Not enforced | Effect is declarable; future enforcement for `sfn/ai` calls requires wiring `validate_effects()` into compilation and adding signature-based transitive analysis once that capsule ships |
-| Effect enforcement — `clock` | Not enforced | Checker logic exists for `sleep`/`runtime.sleep` but is not run during compilation |
-| Effect enforcement — `gpu`, `rand` | Parsed only | Accepted syntactically; no checker logic |
-| Effect enforcement as compilation gate | **Not yet** | `validate_effects()` exists but is not invoked by the compiler; top priority |
+| Effect enforcement — `io` | Warning (Phase B) | Checker detects `print.*`, `console.*`, `fs.*`, `@logExecution`; runs during build under `SAILFIN_EFFECT_ENFORCE=warning` (default). Phase D flip to `=error` ships in a later alpha. |
+| Effect enforcement — `net` | Warning (Phase B) | Checker detects `http.*`, `websocket.*`, `serve`; runs during build under the same env-var contract |
+| Effect enforcement — `model` | Reserved | Declarable; effect-checker has no detector yet. The `sfn/ai` capsule (post-1.0) supplies the call sites Phase G's name-resolution detector will key on |
+| Effect enforcement — `clock` | Warning (Phase B) | Checker detects `sleep` / `runtime.sleep`; runs during build under the same env-var contract |
+| Effect enforcement — `gpu`, `rand` | Parsed only | Reserved at 1.0 in the canonical taxonomy; no detector logic yet |
+| Effect enforcement as compilation gate | **Phase B (warning) shipped** | `validate_and_render_effects` runs in every `compile_to_*` entry; severity steered by `SAILFIN_EFFECT_ENFORCE` (warning default; error/off opt-in). Phase D flips default to error after the in-tree audit (Phase C) lands |
 | Generic type inference | Partial | Type params captured; inference coverage is limited |
 | Interface conformance validation | Partial | Basic checks; variance not yet enforced |
 | `Affine<T>` / `Linear<T>` | Parsed only | Ownership wrappers accepted; move/consume rules not enforced |

@@ -2,6 +2,7 @@
 //
 // Sailfin compiler main module and compilation entry points.
 import { Program, Statement } from "./ast";
+import { validate_and_render_effects } from "./effect_gate";
 import {
     NativeModule,
     collect_reexport_violations,
@@ -66,6 +67,7 @@ fn compile_to_sailfin(source: string) -> string ![io] {
         return "";
     }
     if _reject_reexport_violations(program) { return ""; }
+    if validate_and_render_effects(program, source, "main") > 0 { return ""; }
     return emit_program(program);
 }
 
@@ -155,6 +157,7 @@ fn compile_to_llvm(source: string) -> string ![io] {
         return "";
     }
     if _reject_reexport_violations(program) { return ""; }
+    if validate_and_render_effects(program, source, "main") > 0 { return ""; }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, "main");
     if trace_emit {
@@ -203,6 +206,9 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
         }
     }
     if _reject_reexport_violations(program) { return false; }
+    if validate_and_render_effects(program, source, module_name) > 0 {
+        return false;
+    }
     let native_text = emit_native_text_with_module_name(program, module_name);
     if native_text.length == 0 { return false; }
     return print_llvm_ir_from_text(native_text, module_name);
@@ -221,6 +227,9 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
         print.err("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
     if _reject_reexport_violations(program) { return ""; }
+    if validate_and_render_effects(program, source, module_name) > 0 {
+        return "";
+    }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
@@ -273,6 +282,11 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
         print.err("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
     if _reject_reexport_violations(program) {
+        print.err(_timing_line(module_name, "parse", t_parse));
+        print.err(_timing_line(module_name, "typecheck", t_typecheck));
+        return "";
+    }
+    if validate_and_render_effects(program, source, module_name) > 0 {
         print.err(_timing_line(module_name, "parse", t_parse));
         print.err(_timing_line(module_name, "typecheck", t_typecheck));
         return "";
@@ -365,6 +379,9 @@ fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: s
         return false;
     }
     if _reject_reexport_violations(program) { return false; }
+    if validate_and_render_effects(program, source, module_name) > 0 {
+        return false;
+    }
     if trace {
         print.err("test compiler (imports): emit_native_with_module_name start (module="
             + module_name
@@ -413,6 +430,9 @@ fn compile_to_native_text_with_module(source: string, module_name: string) -> st
         return "";
     }
     if _reject_reexport_violations(program) { return ""; }
+    if validate_and_render_effects(program, source, module_name) > 0 {
+        return "";
+    }
     let trace_emit = fs.exists("build/sailfin/.trace_emit");
     let text = emit_native_text_with_module_name(program, module_name);
     if trace_emit {
@@ -434,6 +454,9 @@ fn write_native_text_file_with_module(source: string, module_name: string, out_p
         return false;
     }
     if _reject_reexport_violations(program) { return false; }
+    if validate_and_render_effects(program, source, module_name) > 0 {
+        return false;
+    }
     return emit_native_text_to_file_with_module_name(program, module_name, out_path);
 }
 
@@ -516,6 +539,9 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
         print.err("emit-llvm-file: skipping typecheck (build/sailfin/.skip_typecheck present)");
     }
     if _reject_reexport_violations(program) { return false; }
+    if validate_and_render_effects(program, source, module_name) > 0 {
+        return false;
+    }
 
     let native_text = emit_native_text_with_module_name(program, module_name);
     if native_text.length == 0 {

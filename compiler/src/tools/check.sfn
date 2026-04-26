@@ -3,21 +3,34 @@
 // Fast analysis pass for Sailfin source files. Runs parse, typecheck,
 // and effect-check without emitting native IR or invoking clang.
 //
-// Orchestration only — reuses parse_program, typecheck_diagnostics, and
-// validate_effects. No new analysis logic is introduced here.
+// Orchestration only — reuses parse_program, typecheck_diagnostics,
+// validate_effects, and (since Phase B) the shared rendering surface
+// in `compiler/src/diagnostics_render.sfn`. No new analysis logic is
+// introduced here.
 //
-// See docs/proposals/check-architecture.md for design rationale.
+// Phase B (`docs/proposals/effect-validation.md` §5) extracted the
+// effect-violation → Diagnostic conversion and `render_diagnostic`
+// out into `diagnostics_render.sfn` so the build path
+// (`main.sfn` via `effect_gate.sfn`) renders effect violations in
+// the same shape `sfn check` always has. Severity for effect
+// violations now flows through `resolve_effect_enforcement` so the
+// `SAILFIN_EFFECT_ENFORCE` env var steers `sfn check` and the build
+// path consistently — a `=warning` setting in Phase B keeps
+// `sfn check` green for the duration of the audit, while `=error`
+// reproduces the post-Phase-D gate locally for contributors.
+//
+// See docs/proposals/check-architecture.md for the broader design.
 import { Statement } from "../ast";
-import { EffectRequirement, EffectViolation, validate_effects } from "../effect_checker";
 import {
-    join_lines,
-    number_to_string,
-    repeat_character,
+    effect_violation_to_diagnostic,
+    render_diagnostic,
     split_source_lines
-} from "../main";
+} from "../diagnostics_render";
+import { validate_effects } from "../effect_checker";
+import { read_effect_enforcement_env, resolve_effect_enforcement } from "../effect_gate";
+import { number_to_string } from "../main";
 import { parse_program } from "../parser/mod";
 import { substring } from "../string_utils";
-import { Token } from "../token";
 import { typecheck_diagnostics_with_imports } from "../typecheck";
 import { Diagnostic } from "../typecheck_types";
 
@@ -37,184 +50,6 @@ struct CheckSummary {
 }
 
 // -------------------------------------------------------------------
-// Effect violation → Diagnostic normalization
-// -------------------------------------------------------------------
-fn _join_effects(effects: string[]) -> string {
-    if effects.length == 0 { return ""; }
-    let mut out = effects[0];
-    let mut i: number = 1;
-    loop {
-        if i >= effects.length { break; }
-        out = out + ", " + effects[i];
-        i += 1;
-    }
-    return out;
-}
-
-fn _code_for_missing_effect(missing_effects: string[], requirements: EffectRequirement[]) -> string {
-    // E0400 — missing effect declaration (general)
-    // E0401 — decorator-implied effect missing
-    let mut i: number = 0;
-    loop {
-        if i >= requirements.length { break; }
-        let desc = requirements[i].description;
-        if desc.length > 0 {
-            if desc[0] == "@" { return "E0401"; }
-        }
-        i += 1;
-    }
-    return "E0400";
-}
-
-fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
-    let effects_text = _join_effects(violation.missing_effects);
-    let mut message = "function `" + violation.routine_name
-        + "` is missing required effects: !["
-        + effects_text
-        + "]";
-
-    if violation.requirements.length > 0 {
-        message = message + "\nrequired by:";
-        let mut i: number = 0;
-        loop {
-            if i >= violation.requirements.length { break; }
-            let req = violation.requirements[i];
-            message = message + "\n  - " + req.description + " requires !["
-                + req.effect
-                + "]";
-            i += 1;
-        }
-    }
-
-    if violation.missing_effects.length > 0 {
-        message = message + "\nsuggestion: add ![" + effects_text
-            + "] to the function signature";
-    }
-
-    let code = _code_for_missing_effect(violation.missing_effects, violation.requirements);
-    // Phase A — `EffectViolation` now carries a synthesized
-    // signature Token in `trigger` (via `_token_from_signature` in
-    // `effect_checker.sfn`) and a severity slot. The renderer reads
-    // both directly so effect diagnostics render with
-    // `--> file:line:column` + caret like typecheck diagnostics.
-    // `severity` flowing through the violation (rather than being
-    // hardcoded "error" here) keeps Phase B's `SAILFIN_EFFECT_ENFORCE`
-    // wiring contained to `effect_checker.sfn` — the renderer doesn't
-    // need to know about the env var.
-    let mut sev = violation.severity;
-    if sev.length == 0 { sev = "error"; }
-    return Diagnostic {
-        code: code,
-        severity: sev,
-        message: message,
-        file_path: "",
-        primary: violation.trigger
-    };
-}
-
-// -------------------------------------------------------------------
-// Rendering
-// -------------------------------------------------------------------
-fn _render_message_lines(message: string) -> string[] {
-    return split_source_lines(message);
-}
-
-fn _pad_number_string(value: string, width: number) -> string {
-    if value.length >= width { return value; }
-    let pad_count = width - value.length;
-    return repeat_character(" ", pad_count) + value;
-}
-
-fn _build_pointer_prefix(column: number, line_text: string) -> string {
-    if column <= 1 { return ""; }
-    let mut prefix: string = "";
-    let mut index: number = 1;
-    loop {
-        if index >= column { break; }
-        if index <= line_text.length {
-            let ch = substring(line_text, index - 1, index);
-            if ch == "\t" { prefix = prefix + "\t"; } else {
-                prefix = prefix + " ";
-            }
-        } else { prefix = prefix + " "; }
-        index += 1;
-    }
-    return prefix;
-}
-
-fn _build_caret(lexeme: string, line_text: string, column: number) -> string {
-    let mut highlight: number = lexeme.length;
-    if highlight <= 0 { highlight = 1; }
-    let mut remaining: number = line_text.length - (column - 1);
-    if remaining <= 0 { remaining = 1; }
-    if highlight > remaining { highlight = remaining; }
-    let mut out: string = "";
-    let mut i: number = 0;
-    loop {
-        if i >= highlight { break; }
-        out = out + "^";
-        i += 1;
-    }
-    return out;
-}
-
-fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> string {
-    let mut parts: string[] = [];
-    let msg_lines = _render_message_lines(d.message);
-    let mut header: string = d.severity + "[" + d.code + "]: ";
-    if msg_lines.length > 0 { header = header + msg_lines[0]; }
-    parts.push(header);
-
-    let mut padding_width: number = 1;
-    if source_lines.length > 0 {
-        padding_width = number_to_string(source_lines.length).length;
-    }
-
-    let mut has_location: boolean = false;
-    let mut line_number: number = 0;
-    let mut column_number: number = 1;
-    let mut lexeme: string = "";
-    if d.primary != null {
-        let token: Token? = d.primary;
-        line_number = token.line;
-        column_number = token.column;
-        lexeme = token.lexeme;
-        if line_number >= 1 {
-            if line_number <= source_lines.length { has_location = true; }
-        }
-    }
-
-    if has_location {
-        let loc = "  --> " + d.file_path + ":" + number_to_string(line_number)
-            + ":"
-            + number_to_string(column_number);
-        parts.push(loc);
-        let gutter = repeat_character(" ", padding_width);
-        parts.push(" " + gutter + " |");
-        let line_text = source_lines[line_number - 1];
-        let line_label = _pad_number_string(number_to_string(line_number), padding_width);
-        parts.push(" " + line_label + " | " + line_text);
-        let pointer_prefix = _build_pointer_prefix(column_number, line_text);
-        let caret = _build_caret(lexeme, line_text, column_number);
-        parts.push(" " + gutter + " | " + pointer_prefix + caret);
-    } else if d.file_path.length > 0 {
-        parts.push("  --> " + d.file_path);
-    }
-
-    let mut i: number = 1;
-    loop {
-        if i >= msg_lines.length { break; }
-        parts.push("  = " + msg_lines[i]);
-        i += 1;
-    }
-
-    // Prefix tag (typecheck vs effect) helps grep/filtering.
-    if kind.length > 0 { parts.push("  [kind: " + kind + "]"); }
-
-    return join_lines(parts);
-}
-
-// -------------------------------------------------------------------
 // Orchestration
 // -------------------------------------------------------------------
 fn _is_sfn_file(path: string) -> boolean {
@@ -223,7 +58,7 @@ fn _is_sfn_file(path: string) -> boolean {
     return substring(path, start, path.length) == ".sfn";
 }
 
-fn check_source(source: string, file_path: string) -> CheckResult {
+fn check_source(source: string, file_path: string) -> CheckResult ![io] {
     let no_imports: Statement[] = [];
     return check_source_with_imports(source, file_path, no_imports);
 }
@@ -234,7 +69,7 @@ fn check_source(source: string, file_path: string) -> CheckResult {
 // passed through to `typecheck_diagnostics_with_imports` so cross-
 // module `implements` clauses are conformance-checked against the
 // real interface definitions instead of silently no-oping.
-fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[]) -> CheckResult {
+fn check_source_with_imports(source: string, file_path: string, imported_interfaces: Statement[]) -> CheckResult ![io] {
     let program = parse_program(source);
     let type_diags = typecheck_diagnostics_with_imports(program, imported_interfaces);
     let effect_violations = validate_effects(program);
@@ -259,10 +94,31 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         ti += 1;
     }
 
+    // Phase B: route effect-violation severity through the same
+    // env-var contract the build path uses. `sfn check` honors
+    // `SAILFIN_EFFECT_ENFORCE` so contributors can dry-run the
+    // post-Phase-D gate by exporting `=error` locally; the default
+    // ("warning") keeps the audit period non-disruptive.
+    //
+    // The unique suffix doubles as the env-read tmp-file slug —
+    // file_path is unique-per-source for the lifetime of this
+    // check loop, so concurrent `sfn check` invocations against
+    // the same file (rare but possible in a CI matrix) won't race
+    // on a shared `/tmp/.sfn_*` path.
+    let effect_severity = resolve_effect_enforcement(read_effect_enforcement_env(file_path));
     let mut ei: number = 0;
     loop {
         if ei >= effect_violations.length { break; }
-        let mut diag = effect_violation_to_diagnostic(effect_violations[ei]);
+        if effect_severity == "off" {
+            // §4.7 escape hatch — silence effect output entirely.
+            // The build path emits a per-file notice; `sfn check`
+            // does not, since the user invoked it explicitly and
+            // a notice on every check would be noise.
+            break;
+        }
+        let mut violation = effect_violations[ei];
+        violation.severity = effect_severity;
+        let mut diag = effect_violation_to_diagnostic(violation);
         diag.file_path = file_path;
         combined.push(diag);
         rendered.push(render_diagnostic(diag, source_lines, "effect"));
@@ -278,7 +134,7 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
     };
 }
 
-fn check_file(path: string, inlined_source: string) -> CheckResult {
+fn check_file(path: string, inlined_source: string) -> CheckResult ![io] {
     return check_source(inlined_source, path);
 }
 
@@ -310,14 +166,20 @@ fn summarize(results: CheckResult[]) -> CheckSummary {
     };
 }
 
+// Note: `effect_violation_to_diagnostic` and `render_diagnostic` are
+// not re-exported here — Sailfin's emitter rejects re-exports of
+// imported symbols without a local definition (see
+// `docs/rca/2026-04-18-reexport-diagnostic-gep.md` and the
+// `_reject_reexport_violations` gate in `main.sfn`). Consumers
+// (`cli_check.sfn`, future tooling) import them directly from
+// `compiler/src/diagnostics_render.sfn` — same source of truth as
+// the build-path gate in `effect_gate.sfn`.
 export {
     CheckResult,
     CheckSummary,
     check_file,
     check_source,
     check_source_with_imports,
-    effect_violation_to_diagnostic,
-    render_diagnostic,
     render_summary,
     summarize
 };

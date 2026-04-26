@@ -24,10 +24,10 @@ import {
     prepare_project_capsules_for_check
 } from "./capsule_resolver";
 import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
+import { render_diagnostic } from "./diagnostics_render";
 import {
     CheckResult,
     check_source_with_imports,
-    render_diagnostic,
     render_summary,
     summarize
 } from "./tools/check";

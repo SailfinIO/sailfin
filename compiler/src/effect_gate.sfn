@@ -1,0 +1,172 @@
+// compiler/src/effect_gate.sfn
+//
+// Phase B build-path effect gate
+// (`docs/proposals/effect-validation.md` §5, locked 2026-04-26).
+//
+// Wires `validate_effects` from `effect_checker.sfn` into every
+// `compile_to_*` entry point in `main.sfn` and lets operators steer
+// the gate via the `SAILFIN_EFFECT_ENFORCE` environment variable:
+//
+//   unset / "" / "warning"  → severity "warning" (Phase B default)
+//   "error"                  → severity "error" (build fails on violation)
+//   "off"                    → skip effect validation entirely + notice
+//
+// The default flips to "error" in Phase D after the in-tree audit
+// (Phase C) lands and one alpha cycle of warning-mode telemetry has
+// elapsed. Until then, `make compile` should succeed even with
+// outstanding effect violations so the audit work isn't a blocker.
+//
+// `sfn check` (`tools/check.sfn`) shares `resolve_effect_enforcement`
+// so the same env-var contract drives both surfaces — a contributor
+// who runs `sfn check` after Phase B sees the same severity the
+// build-path gate would emit.
+//
+// **Implementation note: env-var read avoids the `env.get` intrinsic.**
+// The 0.5.x seed compiler emits `call @sailfin_runtime_getenv` for
+// `env.get(name)` calls but does not emit a corresponding `declare`
+// in the LLVM preamble — the resulting IR fails `llvm-as` validation
+// during the bootstrap. Until the seed is rebased past that latent
+// runtime-helper-collection bug, this module reads `SAILFIN_EFFECT_ENFORCE`
+// via `process.run(["sh", "-c", "printf %s \"$VAR\" > tmp"])` plus
+// `fs.readFile` — the same shape `cli_commands_utils._shell_read_cmd`
+// uses for `SFN_REGISTRY`. The `tmp` path is process-unique
+// (suffixed by the caller's `file_path` slug) so 4-way parallel
+// `make compile` workers don't race each other on a shared
+// `/tmp/.sfn_*` file.
+import { Program } from "./ast";
+import {
+    effect_violation_to_diagnostic,
+    render_diagnostic,
+    split_source_lines
+} from "./diagnostics_render";
+import { EffectViolation, validate_effects } from "./effect_checker";
+import { sanitize_symbol, substring } from "./string_utils";
+import { Diagnostic } from "./typecheck_types";
+
+// -------------------------------------------------------------------
+// Severity selection
+// -------------------------------------------------------------------
+//
+// Pure function — exported separately from the gate so unit tests
+// can lock the env-var contract without spinning up a Program AST or
+// patching an env var inside a test process.
+fn resolve_effect_enforcement(raw: string) -> string {
+    if raw == "off" { return "off"; }
+    if raw == "error" { return "error"; }
+    // Empty string covers both "env var unset" (the shell read
+    // returns "" for missing vars) and an explicit empty value.
+    // Phase B treats both as the warning default; the default flips
+    // to "error" in Phase D, at which point this branch returns
+    // "error" instead.
+    return "warning";
+}
+
+// -------------------------------------------------------------------
+// Env-var read (process-unique tmp path)
+// -------------------------------------------------------------------
+//
+// Sailfin's tooling intrinsic for env reads is `env.get(name)` — but
+// the 0.5.x seed compiler doesn't emit a `declare` for the lowered
+// `sailfin_runtime_getenv` call, so any module the seed compiles
+// that calls `env.get` produces invalid LLVM IR. Until a newer seed
+// closes that bug, we shell out via `process.run` and write the
+// value to a process-unique tmp file the caller then reads with
+// `fs.readFile`.
+//
+// `unique_suffix` is a slug derived from the caller's `file_path` so
+// parallel build workers (`make compile -j4`) write to distinct
+// paths — no race on a shared `/tmp/.sfn_*` file. Callers in
+// `validate_and_render_effects` thread their `file_path` through
+// `_unique_suffix_for_path`.
+fn _unique_suffix_for_path(file_path: string) -> string {
+    if file_path.length == 0 { return "anon"; }
+    let slug = sanitize_symbol(file_path);
+    if slug.length == 0 { return "anon"; }
+    // sanitize_symbol can return very long strings for deeply nested
+    // module names; cap at 64 chars so we don't blow tmp-path limits.
+    if slug.length <= 64 { return slug; }
+    return substring(slug, 0, 64);
+}
+
+fn _read_env_via_shell(name: string, unique_suffix: string) -> string ![io] {
+    let tmp = "/tmp/.sfn_effect_enforce_" + unique_suffix;
+    // `printf '%s'` (no trailing newline) lets `fs.readFile` return
+    // exactly the env-var value — important so `=error` stays
+    // exactly five characters and doesn't accidentally include a
+    // stray newline that would defeat the `raw == "error"` check.
+    let cmd = "printf '%s' \"$" + name + "\" > " + tmp + " 2>/dev/null";
+    let rc = process.run(["sh", "-c", cmd]);
+    if rc != 0 { return ""; }
+    if !fs.exists(tmp) { return ""; }
+    let raw = fs.readFile(tmp);
+    process.run(["rm", "-f", tmp]);
+    return raw;
+}
+
+// Public alias used by `tools/check.sfn` (which has its own
+// `file_path`) and any future build-adjacent surface that wants to
+// honour the same env-var contract. The `unique_suffix` parameter is
+// a contract: callers must pass a value that's unique within the
+// current process tree (typically the file_path slug).
+fn read_effect_enforcement_env(unique_suffix: string) -> string ![io] {
+    return _read_env_via_shell("SAILFIN_EFFECT_ENFORCE", unique_suffix);
+}
+
+// -------------------------------------------------------------------
+// Build-path orchestrator
+// -------------------------------------------------------------------
+//
+// Returns the count of error-severity violations rendered (always 0
+// in warning mode, regardless of how many violations were emitted).
+// Callers in `main.sfn` use the return value as the gate signal:
+// non-zero means "abort this compile, the user has effect errors".
+//
+// `file_path` is what the diagnostic's `--> <file>:<line>:<col>` line
+// renders; the build-path callers thread `module_name` through
+// because they don't carry the originating source path. This is a
+// Phase-B compromise: module names like `parser/mod` are still
+// disambiguating enough for the audit work, and threading the real
+// source path through every `compile_to_*` signature is a bigger
+// refactor than Phase B should take. Phase E (cross-module
+// propagation) revisits the path-plumbing question.
+fn validate_and_render_effects(program: Program, source: string, file_path: string) -> number ![io] {
+    let unique = _unique_suffix_for_path(file_path);
+    let raw = read_effect_enforcement_env(unique);
+    let severity = resolve_effect_enforcement(raw);
+    if severity == "off" {
+        // Per proposal §4.7 — `=off` is an explicit, conscious
+        // bypass and emits a single-line stderr notice each
+        // invocation so it's visible in CI logs and dev terminals.
+        // Spec-mandated wording: do not silence this message.
+        print.err("[effect] SAILFIN_EFFECT_ENFORCE=off — skipping effect validation for "
+            + file_path);
+        return 0;
+    }
+    let violations = validate_effects(program);
+    if violations.length == 0 { return 0; }
+    let source_lines = split_source_lines(source);
+    let mut errors: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= violations.length { break; }
+        // Mutate severity in place — the violation is a value-typed
+        // struct so the caller's collection is unaffected. Phase A
+        // hardcoded "error" at construction; Phase B overrides per
+        // the env-var contract.
+        let mut v: EffectViolation = violations[i];
+        v.severity = severity;
+        let mut diag: Diagnostic = effect_violation_to_diagnostic(v);
+        diag.file_path = file_path;
+        let rendered = render_diagnostic(diag, source_lines, "effect");
+        print.err(rendered);
+        if severity == "error" { errors += 1; }
+        i += 1;
+    }
+    return errors;
+}
+
+export {
+    read_effect_enforcement_env,
+    resolve_effect_enforcement,
+    validate_and_render_effects
+};
