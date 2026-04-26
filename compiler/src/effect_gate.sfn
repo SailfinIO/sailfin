@@ -1,20 +1,26 @@
 // compiler/src/effect_gate.sfn
 //
-// Phase B build-path effect gate
+// Phase B/C/D build-path effect gate
 // (`docs/proposals/effect-validation.md` §5, locked 2026-04-26).
 //
 // Wires `validate_effects` from `effect_checker.sfn` into every
 // `compile_to_*` entry point in `main.sfn` and lets operators steer
 // the gate via the `SAILFIN_EFFECT_ENFORCE` environment variable:
 //
-//   unset / "" / "warning"  → severity "warning" (Phase B default)
-//   "error"                  → severity "error" (build fails on violation)
+//   unset / "" / "error"     → severity "error" (build fails on violation;
+//                              this is the post-Phase-D default)
+//   "warning"                → severity "warning" (audit-mode opt-in;
+//                              build proceeds even with violations)
 //   "off"                    → skip effect validation entirely + notice
 //
-// The default flips to "error" in Phase D after the in-tree audit
-// (Phase C) lands and one alpha cycle of warning-mode telemetry has
-// elapsed. Until then, `make compile` should succeed even with
-// outstanding effect violations so the audit work isn't a blocker.
+// Phase B shipped this gate as warning-by-default. Phase C audited
+// the in-tree compiler tree and added `![io]` annotations to the 11
+// debug-trace routines that were flagged. Phase D (this commit)
+// flips the unset default from "warning" to "error" — Sailfin's
+// "compile-time effect enforcement" claim is now backed by build
+// behavior, not a checker that has to be opted into. `=warning` is
+// kept as an explicit override for capsule consumers who want the
+// pre-Phase-D telemetry-only mode while they migrate.
 //
 // `sfn check` (`tools/check.sfn`) shares `resolve_effect_enforcement`
 // so the same env-var contract drives both surfaces — a contributor
@@ -52,13 +58,14 @@ import { Diagnostic } from "./typecheck_types";
 // patching an env var inside a test process.
 fn resolve_effect_enforcement(raw: string) -> string {
     if raw == "off" { return "off"; }
-    if raw == "error" { return "error"; }
+    if raw == "warning" { return "warning"; }
     // Empty string covers both "env var unset" (the shell read
     // returns "" for missing vars) and an explicit empty value.
-    // Phase B treats both as the warning default; the default flips
-    // to "error" in Phase D, at which point this branch returns
-    // "error" instead.
-    return "warning";
+    // Phase D flipped the default to "error" — `make compile`,
+    // `sfn build`, `sfn run`, `sfn test`, and `sfn check` all gate
+    // builds on declared effects. Capsule authors who want the
+    // pre-Phase-D telemetry-only mode opt in with `=warning`.
+    return "error";
 }
 
 // -------------------------------------------------------------------

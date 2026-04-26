@@ -397,7 +397,7 @@ fn resolve_borrow_base(target: string, locals: LocalBinding[]) -> string {
     return resolve_borrow_base_impl(target, locals);
 }
 
-fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+fn lower_expression(expression: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult ![io] {
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
     let empty_constants = empty_string_constant_set();

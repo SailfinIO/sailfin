@@ -41,7 +41,7 @@ import {
     should_keep_unmangled_abi_symbol
 } from "./lowering_helpers";
 
-fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], native_text_path: string) -> MangledModuleResult {
+fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], native_text_path: string) -> MangledModuleResult ![io] {
     let mut diagnostics: string[] = [];
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if debug_lowering {

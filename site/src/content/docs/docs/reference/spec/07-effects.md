@@ -21,15 +21,15 @@ fn analyze(text: string) ![io, model] { }      // multiple effects
 |--------|-------|--------|----------------|
 | IO | `io` | Filesystem, console, logging | Yes |
 | Network | `net` | HTTP, WebSocket, serve | Yes |
-| Model | `model` | AI library invocation via `sfn/ai` (post-1.0) | No (planned) |
-| Clock | `clock` | `sleep`, wall-clock | Partial |
-| GPU | `gpu` | Tensor operations | Parsed only |
-| Random | `rand` | Random generation | Parsed only |
+| Clock | `clock` | `sleep`, wall-clock | Yes |
+| Model | `model` | AI library invocation via `sfn/ai` (post-1.0) | Reserved (no detector yet) |
+| GPU | `gpu` | Tensor operations | Reserved (no detector yet) |
+| Random | `rand` | Random generation | Reserved (no detector yet) |
 
 **Enforcement rules**:
-1. Any function calling an effectful operation directly must declare that effect
-2. Call-graph–transitive enforcement (A must declare B's effects when A calls B) is planned but not yet implemented
+1. Any function calling an effectful operation directly must declare that effect — missing declarations are compile errors with fix-it hints
+2. Enforcement runs on every build path (`make compile`, `sfn build`, `sfn run`, `sfn test`, `sfn check`); the `SAILFIN_EFFECT_ENFORCE` env var lets capsule authors opt into `=warning` (telemetry-only) or `=off` (build-path bypass; `sfn check` still validates)
 3. Tests follow the same rules as functions
-4. Missing effects are compile errors with fix-it hints
+4. Call-graph–transitive enforcement (A must declare B's effects when A calls B) is planned for Phase E and not yet implemented
 
 See [Effect System Reference](/docs/reference/effects) for the complete API surface per effect.

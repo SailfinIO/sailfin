@@ -111,7 +111,7 @@ fn last_loop_context(values: LoopContext[]) -> LoopContext {
     return values[index];
 }
 
-fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, block_counter: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], loop_stack: LoopContext[], end: number, context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> BlockLoweringResult {
+fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_return: string, bindings: ParameterBinding[], locals: LocalBinding[], allocas: string[], lines: string[], temp_index: number, block_counter: number, next_local_id: number, next_region_id: number, functions: NativeFunction[], loop_stack: LoopContext[], end: number, context: TypeContext, scope_id: string, scope_depth: number, current_label: string) -> BlockLoweringResult ![io] {
     let mut diagnostics: string[] = [];
     let mut current_lines: string[] = lines;
     let mut current_allocas: string[] = allocas;
