@@ -60,7 +60,7 @@ fn sanitize_lowering_inputs(parse_in: ParseNativeResult, native_text_override_pa
 }
 
 // Sanitize imported manifests array: null-check + length guard.
-fn sanitize_imported_manifests(imported_manifests: LayoutManifest[], debug_lowering: boolean) -> LayoutManifest[] {
+fn sanitize_imported_manifests(imported_manifests: LayoutManifest[], debug_lowering: boolean) -> LayoutManifest[] ![io] {
     let mut safe = imported_manifests;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
@@ -73,7 +73,7 @@ fn sanitize_imported_manifests(imported_manifests: LayoutManifest[], debug_lower
 }
 
 // Sanitize imported native texts array: null-check + length guard.
-fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowering: boolean) -> string[] {
+fn sanitize_imported_native_texts(imported_native_texts: string[], debug_lowering: boolean) -> string[] ![io] {
     let mut safe = imported_native_texts;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
@@ -96,7 +96,7 @@ fn sanitize_diagnostics(diagnostics_in: string[]) -> string[] {
 }
 
 // Sanitize entry points array: null-check + length guard.
-fn sanitize_entry_points(entry_points: string[], debug_lowering: boolean) -> string[] {
+fn sanitize_entry_points(entry_points: string[], debug_lowering: boolean) -> string[] ![io] {
     let mut safe = entry_points;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
@@ -109,7 +109,7 @@ fn sanitize_entry_points(entry_points: string[], debug_lowering: boolean) -> str
 }
 
 // Sanitize imports array: null-check + length guard.
-fn sanitize_imports(imports: NativeImport[], debug_lowering: boolean) -> NativeImport[] {
+fn sanitize_imports(imports: NativeImport[], debug_lowering: boolean) -> NativeImport[] ![io] {
     let mut safe = imports;
     if safe == null { safe = []; }
     if safe.length != sanitize_collection_length(safe.length, 100000) {
@@ -141,7 +141,7 @@ fn sanitize_structs(structs: NativeStruct[], diagnostics: string[]) -> NativeStr
 }
 
 // Sanitize enums array: null-check + length guard + diagnostics.
-fn sanitize_enums(enums: NativeEnum[], diagnostics: string[], _trace_enums: boolean) -> NativeEnum[] {
+fn sanitize_enums(enums: NativeEnum[], diagnostics: string[], _trace_enums: boolean) -> NativeEnum[] ![io] {
     let mut safe = enums;
     if _trace_enums {
         let mut _enum_len_text: string = "null";

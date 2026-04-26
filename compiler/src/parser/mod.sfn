@@ -62,7 +62,7 @@ fn parse_program(source: string) -> Program {
     return parse_tokens(tokens);
 }
 
-fn parse_tokens(tokens: Token[]) -> Program {
+fn parse_tokens(tokens: Token[]) -> Program ![io] {
     let mut parser: Parser = Parser { tokens: tokens, index: 0 };
     let mut statements: Statement[] = [];
     parser = skip_trivia(parser);

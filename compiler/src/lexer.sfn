@@ -15,7 +15,7 @@ struct LexerState {
     column: number;
 }
 
-fn lex(source: string) -> Token[] {
+fn lex(source: string) -> Token[] ![io] {
     let length = source.length;
     let state: LexerState = LexerState {
         source: source,

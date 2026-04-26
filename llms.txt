@@ -1,6 +1,6 @@
 # Sailfin Language Reference for LLMs
 
-> Version: 0.5.3-alpha.1 | Updated: 2026-04-16
+> Version: 0.5.9 | Updated: 2026-04-26
 > Source: https://github.com/SailfinIO/sailfin | Site: https://sailfin.dev
 
 Sailfin is a compiled systems language with compile-time capability enforcement
@@ -11,9 +11,15 @@ runtime library exception.
 ## Core Differentiator: Effect Types
 
 Every function declares what capabilities it uses. Effect annotations are
-supported today; the effect checker logic exists but is not yet invoked during
-normal compilation. Wiring it into the compilation gate (so violations block
-the build) is the top priority on the roadmap.
+enforced at compile time: undeclared effect usage fails `make compile`,
+`sfn build`, `sfn run`, `sfn test`, and `sfn check` by default. The
+`SAILFIN_EFFECT_ENFORCE` env var lets capsule authors opt into
+`=warning` (telemetry-only mode) while migrating, or `=off` (build-path
+bypass; `sfn check` still validates per proposal §4.7).
+
+Cross-module call-graph propagation (A must declare B's effects when
+A calls B from another module) is the next milestone on the roadmap
+(Phase E in `docs/proposals/effect-validation.md`).
 
     fn read_config(path: string) -> string ![io] {
         return fs.readFile(path);
@@ -270,14 +276,14 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 - Lambdas (non-capturing)
 - Test declarations
 - Import/export across modules
-- Effect annotations (parsed and carried through to IR)
+- Effect annotations -- parsed AND enforced at compile time (build fails on undeclared effects by default; configurable via SAILFIN_EFFECT_ENFORCE)
 - Colon type annotations (x: Type) for params, variables, fields
 - Arrow return types (-> Type) for functions
 - Code formatting via sfn fmt (token-stream, idempotent, CI-enforced)
 
 ## What Is Parsed but Not Fully Implemented
 
-- Effect enforcement -- checker logic exists but is not invoked during compilation (top priority)
+- Cross-module effect propagation -- direct effect calls inside a function are enforced; transitive effects from imported callees are not yet (Phase E of effect-validation)
 - Closures with capture -- lambdas parse but don't capture enclosing scope
 - Generic constraints (<T: Bound>) -- parsed as text, not enforced
 - Affine<T> / Linear<T> ownership -- parsed, transparent (no enforcement)

@@ -1,25 +1,37 @@
 // compiler/src/effect_gate.sfn
 //
-// Phase B build-path effect gate
+// Phase B/C/D build-path effect gate
 // (`docs/proposals/effect-validation.md` §5, locked 2026-04-26).
 //
 // Wires `validate_effects` from `effect_checker.sfn` into every
 // `compile_to_*` entry point in `main.sfn` and lets operators steer
-// the gate via the `SAILFIN_EFFECT_ENFORCE` environment variable:
+// the gate via the `SAILFIN_EFFECT_ENFORCE` environment variable.
+// Effective behavior on the build path:
 //
-//   unset / "" / "warning"  → severity "warning" (Phase B default)
-//   "error"                  → severity "error" (build fails on violation)
-//   "off"                    → skip effect validation entirely + notice
+//   unset / "" / "error"     → severity "error" (build fails on violation;
+//                              this is the post-Phase-D default)
+//   "warning"                → severity "warning" (audit-mode opt-in;
+//                              build proceeds even with violations)
+//   "off"                    → skip effect validation on the build path
+//                              entirely; emit a per-file stderr notice
+//                              (see proposal §4.7 — escape hatch only)
 //
-// The default flips to "error" in Phase D after the in-tree audit
-// (Phase C) lands and one alpha cycle of warning-mode telemetry has
-// elapsed. Until then, `make compile` should succeed even with
-// outstanding effect violations so the audit work isn't a blocker.
+// Phase B shipped this gate as warning-by-default. Phase C audited
+// the in-tree compiler tree and added `![io]` annotations to the 11
+// debug-trace routines that were flagged. Phase D (this commit)
+// flips the unset default from "warning" to "error" — Sailfin's
+// "compile-time effect enforcement" claim is now backed by build
+// behavior, not a checker that has to be opted into. `=warning` is
+// kept as an explicit override for capsule consumers who want the
+// pre-Phase-D telemetry-only mode while they migrate.
 //
 // `sfn check` (`tools/check.sfn`) shares `resolve_effect_enforcement`
-// so the same env-var contract drives both surfaces — a contributor
-// who runs `sfn check` after Phase B sees the same severity the
-// build-path gate would emit.
+// for the warning/error/unset cases but **does not honour `=off`**:
+// per proposal §4.7, "does not turn off `sfn check` validation, only
+// the build path." `sfn check` coerces `off` back to the unset-default
+// severity (currently "error" post-Phase-D) so contributors who set
+// `=off` for emergency builds still see effect diagnostics when they
+// run `sfn check` explicitly.
 //
 // **Implementation note: env-var read avoids the `env.get` intrinsic.**
 // The 0.5.x seed compiler emits `call @sailfin_runtime_getenv` for
@@ -52,13 +64,14 @@ import { Diagnostic } from "./typecheck_types";
 // patching an env var inside a test process.
 fn resolve_effect_enforcement(raw: string) -> string {
     if raw == "off" { return "off"; }
-    if raw == "error" { return "error"; }
+    if raw == "warning" { return "warning"; }
     // Empty string covers both "env var unset" (the shell read
     // returns "" for missing vars) and an explicit empty value.
-    // Phase B treats both as the warning default; the default flips
-    // to "error" in Phase D, at which point this branch returns
-    // "error" instead.
-    return "warning";
+    // Phase D flipped the default to "error" — `make compile`,
+    // `sfn build`, `sfn run`, `sfn test`, and `sfn check` all gate
+    // builds on declared effects. Capsule authors who want the
+    // pre-Phase-D telemetry-only mode opt in with `=warning`.
+    return "error";
 }
 
 // -------------------------------------------------------------------
@@ -93,9 +106,12 @@ fn _unique_suffix_for_path(file_path: string) -> string {
 fn _read_env_via_shell(name: string, unique_suffix: string) -> string ![io] {
     let tmp = "/tmp/.sfn_effect_enforce_" + unique_suffix;
     // `printf '%s'` (no trailing newline) lets `fs.readFile` return
-    // exactly the env-var value — important so `=error` stays
-    // exactly five characters and doesn't accidentally include a
-    // stray newline that would defeat the `raw == "error"` check.
+    // exactly the env-var value — important so `resolve_effect_enforcement`
+    // can do exact-match comparisons (`raw == "off"`, `raw == "warning"`).
+    // A stray newline would make a user's `SAILFIN_EFFECT_ENFORCE=warning`
+    // arrive as `"warning\n"`, miss both branches, and silently fall
+    // through to the default ("error" post-Phase-D) instead of the
+    // intended audit-mode opt-in.
     let cmd = "printf '%s' \"$" + name + "\" > " + tmp + " 2>/dev/null";
     let rc = process.run(["sh", "-c", cmd]);
     if rc != 0 { return ""; }
