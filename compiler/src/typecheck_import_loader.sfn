@@ -47,11 +47,22 @@ struct ArtifactInterfaceParse {
 //      produced diagnostics — treat as corrupt/stale.
 //   - `skipped_paths`: parsed fine and contained zero interfaces
 //      (benign — common for modules that export only structs/fns).
+//
+// `native_texts` is the raw `.sfn-asm` text for every artifact that
+// existed on disk (i.e. NOT in `missing_paths`), in input-order. The
+// `sfn test` resolver feeds these into
+// `lower_to_llvm_lines_with_parsed_context_for_tests` so
+// `apply_module_symbol_mangling` can resolve provider module names
+// from the imported-text stream. Returning them alongside the parsed
+// interfaces in a single result avoids re-reading every artifact a
+// second time when both consumers want the same files (cli_test
+// today; future consumers would benefit too).
 struct ImportedInterfaceLoadResult {
     interfaces: Statement[];
     missing_paths: string[];
     parse_failure_paths: string[];
     skipped_paths: string[];
+    native_texts: string[];
 }
 
 // Pure: parse a `.sfn-asm` text buffer and return both its interface
@@ -78,6 +89,7 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
     let mut missing: string[] = [];
     let mut parse_failures: string[] = [];
     let mut skipped: string[] = [];
+    let mut native_texts: string[] = [];
 
     let mut i: number = 0;
     loop {
@@ -88,7 +100,13 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
             i += 1;
             continue;
         }
+        // Single read per artifact. `text` flows into both the
+        // interface-parse path AND the returned `native_texts` array
+        // so consumers (today: `sfn test`, which feeds
+        // `apply_module_symbol_mangling`) avoid a second
+        // `fs.readFile` round trip per dependency.
         let text = fs.readFile(path);
+        native_texts.push(text);
         let parsed = interfaces_from_native_artifact(text);
         if parsed.diagnostics.length > 0 {
             parse_failures.push(path);
@@ -110,13 +128,25 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
         interfaces: interfaces,
         missing_paths: missing,
         parse_failure_paths: parse_failures,
-        skipped_paths: skipped
+        skipped_paths: skipped,
+        native_texts: native_texts
     };
+}
+
+// Backwards-compat shim. `load_imported_interfaces_from_paths` now
+// returns `native_texts` in its result so consumers can pull both
+// shapes from a single read per artifact. Kept for any caller still
+// reaching for the old name, but new callers should use the unified
+// loader. Drop in a follow-up once the in-tree consumers migrate.
+fn load_imported_native_texts_from_paths(paths: string[]) -> string[] ![io] {
+    let load = load_imported_interfaces_from_paths(paths);
+    return load.native_texts;
 }
 
 export {
     ArtifactInterfaceParse,
     ImportedInterfaceLoadResult,
     interfaces_from_native_artifact,
-    load_imported_interfaces_from_paths
+    load_imported_interfaces_from_paths,
+    load_imported_native_texts_from_paths
 };

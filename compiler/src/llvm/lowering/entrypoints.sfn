@@ -117,7 +117,6 @@ import {
     insert_before_llvm_footer,
     is_test_module_slug,
     render_function_shim,
-    render_test_harness_main_for_module,
     resolve_import_provider_module_name,
     sanitize_collection_length
 } from "./lowering_helpers";

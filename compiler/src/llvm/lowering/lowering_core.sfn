@@ -62,7 +62,7 @@ import {
     extend_native_interfaces,
     extend_native_structs,
     is_test_module_slug,
-    render_test_harness_main_for_module,
+    sanitize_module_suffix,
     seed_default_runtime_helpers
 } from "./lowering_helpers";
 import {
@@ -116,7 +116,13 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
             }
         }
     }
-    let base = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, false, native_text_for_recovery);
+    // Mangling is on for test sources: `apply_module_symbol_mangling`
+    // rewrites the test source's import call sites (e.g. `@helper_answer`
+    // → `@helper_answer__fixtures__inlining_helper`) so they bind to the
+    // mangled definitions the resolver-driven dependency .ll files
+    // produce. The harness call sites below match by appending the same
+    // module suffix to each `test:` symbol.
+    let base = lower_to_llvm_lines_with_parsed_context(native_module, parse, imported_manifests, imported_native_texts, imported_diagnostics, true, native_text_for_recovery);
     if base.lines.length == 0 { return base; }
 
     let mut test_count: number = 0;
@@ -146,6 +152,15 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
     // (avoids struct .push() and struct .concat() which produce unresolvable symbols)
     // Emits RUN/PASS messages via stderr so failures identify the failing test
     // even when abort() kills the process before stdout flushes.
+    //
+    // Module suffix matches what `apply_module_symbol_mangling` derives
+    // from `native_module.module_name` for definition mangling, so the
+    // synthesized `call @<sym>__<suffix>` here lines up with the mangled
+    // `define void @<sym>__<suffix>` the lowering pipeline already
+    // produced for each `test:` function in this module. Test module
+    // names never start with `runtime/`, so the runtime-ABI mangling
+    // exemption in `apply_module_symbol_mangling` does not apply here.
+    let harness_module_suffix = sanitize_module_suffix(native_module.module_name);
     let mut harness_globals: string[] = [];
     let mut harness: string[] = ["define i32 @main(i32 %argc, i8** %argv) {", "entry:"];
     let mut ti: number = 0;
@@ -154,7 +169,18 @@ fn lower_to_llvm_lines_with_parsed_context_for_tests(native_module: NativeModule
         if ti >= parse.functions.length { break; }
         if parse.functions[ti].name.length >= 5 {
             if substring(parse.functions[ti].name, 0, 5) == "test:" {
-                let sym = sanitize_symbol(parse.functions[ti].name);
+                let bare_sym = sanitize_symbol(parse.functions[ti].name);
+                // Mirror `apply_module_symbol_mangling`'s guard: it
+                // skips symbols that already contain `__` to avoid
+                // double-qualification, leaving such definitions
+                // unmangled. If a user names a test function whose
+                // sanitized form already has `__`, the harness must
+                // call the bare symbol — appending `__<suffix>` here
+                // would produce an undefined reference at link time.
+                let mut sym = bare_sym;
+                if index_of(bare_sym, "__") < 0 {
+                    sym = bare_sym + "__" + harness_module_suffix;
+                }
                 let label = substring(parse.functions[ti].name, 5, parse.functions[ti].name.length);
                 let msg = "  RUN  " + label;
                 let idx_s = number_to_string(test_idx);

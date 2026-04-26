@@ -2,8 +2,14 @@
 //
 // CLI command handlers extracted from cli_main.sfn to keep
 // sailfin_cli_main under ~500 .sfn-asm instructions (avoids seed OOM).
+import { Statement } from "./ast";
 import {
-    _byte_at_cmd,
+    TestCapsuleResolution,
+    discover_project_root,
+    discover_workspace_root,
+    prepare_project_capsules_for_test
+} from "./capsule_resolver";
+import {
     _collect_sfn_files_cmd,
     _collect_test_files_cmd,
     _curl_download_cmd,
@@ -17,29 +23,24 @@ import {
     _get_env_cmd,
     _get_home_cmd,
     _has_prefix_cmd,
-    _has_slash_cmd,
-    _is_ident_char_cmd,
-    _is_stdlib_capsule_cmd,
     _looks_like_test_file_cmd,
-    _path_join_cmd,
     _resolve_capsule_name_cmd,
     _sanitize_filename_cmd,
     _sha256_of_file_cmd,
     _shell_read_cmd,
     _string_contains_cmd,
-    _string_list_contains_cmd,
     _toml_trim_cmd,
-    _word_matches_cmd,
     _write_text_cmd,
     find_char
 } from "./cli_commands_utils";
-import { lock_add_entry, lock_get_version, lock_get_versions } from "./lock";
+import { lock_add_entry, lock_get_version } from "./lock";
 import {
-    compile_tests_to_llvm_file_with_module,
+    compile_tests_to_llvm_file_with_module_imports,
     compile_to_llvm_file_with_module,
     module_name_from_path,
     number_to_string
 } from "./main";
+import { LayoutManifest } from "./native_ir";
 import { substring } from "./string_utils";
 import {
     toml_add_dependency,
@@ -51,342 +52,7 @@ import {
     toml_get_version
 } from "./toml_parser";
 import { format_source } from "./tools/fmt";
-
-struct _RelativeImportSpanCmd {
-    start: number;
-    end: number;
-    spec: string;
-}
-
-fn _collect_relative_import_spans_cmd(source: string) -> _RelativeImportSpanCmd[] {
-    let mut spans: _RelativeImportSpanCmd[] = [];
-    let source_len = source.length;
-    let mut steps: number = 0;
-    let max_steps = source_len * 6 + 1000;
-    let mut i: number = 0;
-    let mut in_string: boolean = false;
-    let mut escaping: boolean = false;
-    let mut in_line_comment: boolean = false;
-    let mut in_block_comment: boolean = false;
-
-    loop {
-        if i >= source_len { break; }
-        steps += 1;
-        if steps > max_steps { break; }
-        let ch = _byte_at_cmd(source, i);
-
-        if in_line_comment {
-            if ch == "\n" { in_line_comment = false; }
-            i += 1;
-            continue;
-        }
-        if in_block_comment {
-            if ch == "*" {
-                if i + 1 < source_len {
-                    if _byte_at_cmd(source, i + 1) == "/" {
-                        in_block_comment = false;
-                        i += 2;
-                        continue;
-                    }
-                }
-            }
-            i += 1;
-            continue;
-        }
-        if in_string {
-            if escaping {
-                escaping = false;
-                i += 1;
-                continue;
-            }
-            if ch == "\\" {
-                escaping = true;
-                i += 1;
-                continue;
-            }
-            if ch == "\"" {
-                in_string = false;
-                i += 1;
-                continue;
-            }
-            i += 1;
-            continue;
-        }
-        if ch == "/" {
-            if i + 1 < source_len {
-                let next = _byte_at_cmd(source, i + 1);
-                if next == "/" {
-                    in_line_comment = true;
-                    i += 2;
-                    continue;
-                }
-                if next == "*" {
-                    in_block_comment = true;
-                    i += 2;
-                    continue;
-                }
-            }
-        }
-        if ch == "\"" {
-            in_string = true;
-            i += 1;
-            continue;
-        }
-
-        if _word_matches_cmd(source, i, "import") {
-            let stmt_start = i;
-            let mut j: number = i;
-            let mut s_in_string: boolean = false;
-            let mut s_escaping: boolean = false;
-            let mut s_in_line_comment: boolean = false;
-            let mut s_in_block_comment: boolean = false;
-            let mut spec: string = "";
-            let mut stmt_end: number = -1;
-
-            loop {
-                if j >= source_len { break; }
-                steps += 1;
-                if steps > max_steps { break; }
-                let cj = _byte_at_cmd(source, j);
-                if s_in_line_comment {
-                    if cj == "\n" { s_in_line_comment = false; }
-                    j += 1;
-                    continue;
-                }
-                if s_in_block_comment {
-                    if cj == "*" {
-                        if j + 1 < source_len {
-                            if _byte_at_cmd(source, j + 1) == "/" {
-                                s_in_block_comment = false;
-                                j += 2;
-                                continue;
-                            }
-                        }
-                    }
-                    j += 1;
-                    continue;
-                }
-                if s_in_string {
-                    if s_escaping {
-                        s_escaping = false;
-                        j += 1;
-                        continue;
-                    }
-                    if cj == "\\" {
-                        s_escaping = true;
-                        j += 1;
-                        continue;
-                    }
-                    if cj == "\"" {
-                        s_in_string = false;
-                        j += 1;
-                        continue;
-                    }
-                    j += 1;
-                    continue;
-                }
-                if cj == "/" {
-                    if j + 1 < source_len {
-                        let nj = _byte_at_cmd(source, j + 1);
-                        if nj == "/" {
-                            s_in_line_comment = true;
-                            j += 2;
-                            continue;
-                        }
-                        if nj == "*" {
-                            s_in_block_comment = true;
-                            j += 2;
-                            continue;
-                        }
-                    }
-                }
-                if cj == "\"" {
-                    s_in_string = true;
-                    j += 1;
-                    continue;
-                }
-                if spec.length == 0 {
-                    if _word_matches_cmd(source, j, "from") {
-                        let mut k = j + 4;
-                        loop {
-                            if k >= source_len { break; }
-                            let wk = _byte_at_cmd(source, k);
-                            let mut ws: boolean = false;
-                            if wk == " " { ws = true; }
-                            if wk == "\t" { ws = true; }
-                            if wk == "\n" { ws = true; }
-                            if wk == "\r" { ws = true; }
-                            if ws {
-                                k += 1;
-                                continue;
-                            }
-                            break;
-                        }
-                        if k < source_len {
-                            if _byte_at_cmd(source, k) == "\"" {
-                                k += 1;
-                                let start = k;
-                                let mut esc: boolean = false;
-                                loop {
-                                    if k >= source_len { break; }
-                                    let sk = _byte_at_cmd(source, k);
-                                    if esc {
-                                        esc = false;
-                                        k += 1;
-                                        continue;
-                                    }
-                                    if sk == "\\" {
-                                        esc = true;
-                                        k += 1;
-                                        continue;
-                                    }
-                                    if sk == "\"" {
-                                        spec = substring(source, start, k);
-                                        break;
-                                    }
-                                    k += 1;
-                                }
-                            }
-                        }
-                    }
-                }
-                if cj == ";" {
-                    stmt_end = j + 1;
-                    break;
-                }
-                j += 1;
-            }
-            if stmt_end > 0 {
-                if spec.length > 0 {
-                    let mut is_relative: boolean = false;
-                    if _has_prefix_cmd(spec, "./") { is_relative = true; }
-                    if _has_prefix_cmd(spec, "../") { is_relative = true; }
-                    if is_relative {
-                        spans.push(_RelativeImportSpanCmd {
-                            start: stmt_start, end: stmt_end, spec: spec
-                        });
-                    } else {
-                        // Check for capsule imports: bare name ("test") or scoped ("sfn/test")
-                        let mut is_capsule: boolean = false;
-                        if _is_stdlib_capsule_cmd(spec) { is_capsule = true; }
-                        if !is_capsule {
-                            if _has_prefix_cmd(spec, "sfn/") {
-                                let capsule_suffix = substring(spec, 4, spec.length);
-                                if _is_stdlib_capsule_cmd(capsule_suffix) {
-                                    is_capsule = true;
-                                }
-                            }
-                        }
-                        if is_capsule {
-                            spans.push(_RelativeImportSpanCmd {
-                                start: stmt_start, end: stmt_end, spec: spec
-                            });
-                        } else {
-                            // Non-stdlib scoped import (e.g. "sfn/cli", "acme/router") —
-                            // may be a cached capsule dependency declared in capsule.toml.
-                            // Exclude runtime/* imports which are pre-built and handled
-                            // separately by the linker.
-                            if _has_slash_cmd(spec) {
-                                if !_has_prefix_cmd(spec, "runtime/") {
-                                    spans.push(_RelativeImportSpanCmd {
-                                        start: stmt_start, end: stmt_end, spec: spec
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            if stmt_end > 0 {
-                i = stmt_end;
-                continue;
-            }
-        }
-        i += 1;
-    }
-    return spans;
-}
-
-fn _resolve_import_path_cmd(base_dir: string, spec: string) -> string {
-    let mut current_base = base_dir;
-    let mut remainder = spec;
-    loop {
-        if _has_prefix_cmd(remainder, "../") {
-            current_base = _dirname_cmd(current_base);
-            remainder = substring(remainder, 3, remainder.length);
-            continue;
-        }
-        if _has_prefix_cmd(remainder, "./") {
-            remainder = substring(remainder, 2, remainder.length);
-            continue;
-        }
-        break;
-    }
-    let path = _path_join_cmd(current_base, remainder);
-    if _ends_with_cmd(path, ".sfn") { return path; }
-    return path + ".sfn";
-}
-
-fn _strip_relative_import_lines_cmd(source: string) -> string {
-    let spans = _collect_relative_import_spans_cmd(source);
-    if spans.length == 0 { return source; }
-    let mut out: string = "";
-    let mut keep_start: number = 0;
-    let mut index: number = 0;
-    loop {
-        if index >= spans.length { break; }
-        let span = spans[index];
-        if span.start > keep_start {
-            out = out + substring(source, keep_start, span.start);
-        }
-        keep_start = span.end;
-        index += 1;
-    }
-    if keep_start < source.length {
-        out = out + substring(source, keep_start, source.length);
-    }
-    return out;
-}
-
-// Look up a dependency version from the deps string returned by
-// toml_get_dependencies(). The deps string has the format
-// "name=version\nname=version\n...". Returns the version string
-// if found, or "" if not.
-fn _lookup_dep_version_cmd(deps: string, name: string) -> string {
-    if deps.length == 0 { return ""; }
-    if name.length == 0 { return ""; }
-    let mut start: number = 0;
-    let len = deps.length;
-    loop {
-        if start >= len { break; }
-        // Find end of current line
-        let mut end: number = start;
-        loop {
-            if end >= len { break; }
-            if deps[end] == "\n" { break; }
-            end += 1;
-        }
-        // Parse "capsule=version" from this line
-        let mut eq_pos: number = -1;
-        let mut ei: number = start;
-        loop {
-            if ei >= end { break; }
-            if deps[ei] == "=" {
-                eq_pos = ei;
-                break;
-            }
-            ei += 1;
-        }
-        if eq_pos > start {
-            let dep_name = substring(deps, start, eq_pos);
-            if strings_equal(dep_name, name) {
-                return substring(deps, eq_pos + 1, end);
-            }
-        }
-        start = end + 1;
-    }
-    return "";
-}
+import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
 
 // Validate a path segment (scope, name) contains no traversal or illegal chars.
 fn _is_safe_capsule_segment_cmd(value: string) -> boolean {
@@ -409,223 +75,58 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
     return true;
 }
 
-// Resolve a capsule import spec (e.g. "sfn/cli") to the cached source path
-// using the dependency version from capsule.toml. Returns "" if not found.
-// Validates that spec is exactly "scope/name" (single slash) and that all
-// path segments are safe to prevent directory traversal.
-fn _resolve_cached_capsule_path_cmd(spec: string, deps: string) -> string ![io] {
-    if deps.length == 0 { return ""; }
-    // Require exactly one slash (scope/name format)
-    let slash_pos = find_char(spec, "/", 0);
-    if slash_pos <= 0 { return ""; }
-    if slash_pos >= spec.length - 1 { return ""; }
-    // Reject specs with more than one slash
-    let second_slash = find_char(spec, "/", slash_pos + 1);
-    if second_slash >= 0 { return ""; }
-    let scope = substring(spec, 0, slash_pos);
-    let name = substring(spec, slash_pos + 1, spec.length);
-    if !_is_safe_capsule_segment_cmd(scope) { return ""; }
-    if !_is_safe_capsule_segment_cmd(name) { return ""; }
-    // Look up by the scoped spec (the canonical storage key). Fall back to
-    // the bare display name for backward compat with capsule.toml files
-    // generated by older `sfn add` versions that stripped the sfn/ scope.
-    let mut version = _lookup_dep_version_cmd(deps, spec);
-    if version.length == 0 {
-        let display_name = _display_capsule_name_cmd(spec);
-        if !strings_equal(display_name, spec) {
-            version = _lookup_dep_version_cmd(deps, display_name);
-        }
-    }
-    if version.length == 0 { return ""; }
-    if !_is_safe_capsule_version_cmd(version) { return ""; }
-    // Build cache path: ~/.sfn/cache/capsules/{scope}/{name}/{version}/src/mod.sfn
-    let home = _get_home_cmd();
-    if home.length == 0 { return ""; }
-    return home + "/.sfn/cache/capsules/" + scope + "/" + name + "/" + version
-        + "/src/mod.sfn";
-}
-
-fn _inline_relative_imports_cmd(source: string, base_dir: string, depth: number, visited: string[]) -> string ![io] {
-    if depth <= 0 { return _strip_relative_import_lines_cmd(source); }
-    let spans = _collect_relative_import_spans_cmd(source);
-    let mut combined: string = "";
-    let mut next_visited = visited;
-    let mut remove: _RelativeImportSpanCmd[] = [];
-
-    // Read project dependencies once for cached capsule resolution.
-    // Try capsule.toml in base_dir first, then CWD as fallback, then
-    // walk up from base_dir to find the nearest capsule.toml.
-    // When capsule.lock exists alongside capsule.toml, prefer locked versions.
-    let mut project_deps: string = "";
-    let mut toml_found: boolean = false;
-    let mut lock_deps: string = "";
-    let mut lock_found: boolean = false;
-    if base_dir.length > 0 {
-        let base_toml = _path_join_cmd(base_dir, "capsule.toml");
-        if fs.exists(base_toml) {
-            project_deps = toml_get_dependencies(fs.readFile(base_toml));
-            toml_found = true;
-            let base_lock = _path_join_cmd(base_dir, "capsule.lock");
-            if fs.exists(base_lock) {
-                lock_deps = lock_get_versions(fs.readFile(base_lock));
-                lock_found = true;
-            }
-        }
-        if !toml_found {
-            // Walk up parent directories from base_dir
-            let mut search_dir = _dirname_cmd(base_dir);
-            let mut walk_depth: number = 0;
-            loop {
-                if walk_depth >= 10 { break; }
-                if search_dir.length == 0 { break; }
-                let parent_toml = _path_join_cmd(search_dir, "capsule.toml");
-                if fs.exists(parent_toml) {
-                    project_deps = toml_get_dependencies(fs.readFile(parent_toml));
-                    toml_found = true;
-                    let parent_lock = _path_join_cmd(search_dir, "capsule.lock");
-                    if fs.exists(parent_lock) {
-                        lock_deps = lock_get_versions(fs.readFile(parent_lock));
-                        lock_found = true;
-                    }
-                    break;
-                }
-                let next_dir = _dirname_cmd(search_dir);
-                if strings_equal(next_dir, search_dir) { break; }
-                search_dir = next_dir;
-                walk_depth += 1;
-            }
-        }
-    }
-    if !toml_found {
-        if fs.exists("capsule.toml") {
-            project_deps = toml_get_dependencies(fs.readFile("capsule.toml"));
-            toml_found = true;
-            if fs.exists("capsule.lock") {
-                lock_deps = lock_get_versions(fs.readFile("capsule.lock"));
-                lock_found = true;
-            }
-        }
-    }
-    let mut index: number = 0;
+// Resolver-driven test linker. Takes a list of dependency `.ll` paths
+// produced by `prepare_project_capsules_for_test` and prepends them
+// to the link line, AHEAD of the weakened compiler object. With
+// strong helper definitions in scope, clang resolves the test
+// source's mangled imported call sites against the dependency `.ll`
+// files; the weak `native.linked.o` continues to backstop everything
+// else (runtime helpers, parser exports, AST constructors) until
+// libextract retires the `--weaken` block in a separate workstream.
+//
+// Link order (head → tail):
+//   1. Test source `.ll` (strong)
+//   2. Resolver-produced dependency `.ll` files (strong)
+//   3. Runtime sources + globals + prelude (strong)
+//   4. Weakened compiler object + cross_module_shim (weak)
+//
+// (1) + (2) + (3) supply every strong symbol the test could reference;
+// (4) only fills gaps. If a dep `.ll` defined a symbol that also lives
+// in the weakened object, the strong dep wins.
+// Resolve the `llvm-objcopy` binary by trying the bare name first
+// (Homebrew, manual installs, distros that ship a current llvm
+// metapackage), then falling back to versioned binaries
+// (`llvm-objcopy-18`, `…-17`, …) that distros like Ubuntu install
+// alongside `clang-18`. Returns "" when none of the candidates are
+// runnable; the caller must surface that as a hard failure rather
+// than letting the link step proceed against a non-weakened
+// `native.linked.o`. Mirrors the discovery pattern `scripts/build.sh`
+// uses for `llvm-link` / `llvm-as`.
+fn _resolve_llvm_objcopy_cmd() -> string ![io] {
+    let candidates: string[] = ["llvm-objcopy", "llvm-objcopy-30", "llvm-objcopy-29", "llvm-objcopy-28", "llvm-objcopy-27", "llvm-objcopy-26", "llvm-objcopy-25", "llvm-objcopy-24", "llvm-objcopy-23", "llvm-objcopy-22", "llvm-objcopy-21", "llvm-objcopy-20", "llvm-objcopy-19", "llvm-objcopy-18", "llvm-objcopy-17", "llvm-objcopy-16", "llvm-objcopy-15", "llvm-objcopy-14"];
+    let mut i: number = 0;
     loop {
-        if index >= spans.length { break; }
-        let spec = spans[index].spec;
-
-        // Resolve capsule imports to filesystem paths
-        let mut dep_path: string = "";
-        let mut is_capsule_import: boolean = false;
-        if _is_stdlib_capsule_cmd(spec) {
-            let resolved_name = _resolve_capsule_name_cmd(spec);
-            dep_path = "capsules/" + resolved_name + "/src/mod.sfn";
-            is_capsule_import = true;
-        } else if _has_prefix_cmd(spec, "sfn/") {
-            let capsule_suffix = substring(spec, 4, spec.length);
-            if _is_stdlib_capsule_cmd(capsule_suffix) {
-                dep_path = "capsules/" + spec + "/src/mod.sfn";
-                is_capsule_import = true;
-            }
-        }
-        // Check cached capsule dependencies — prefer lockfile, fall back to capsule.toml
-        if !is_capsule_import {
-            if _has_slash_cmd(spec) {
-                let mut cached_path: string = "";
-                if lock_found {
-                    cached_path = _resolve_cached_capsule_path_cmd(spec, lock_deps);
-                    if cached_path.length == 0 {
-                        // Not in lockfile — fall back to capsule.toml and warn
-                        cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
-                        if cached_path.length > 0 {
-                            print.err("warning: dependency \"" + spec
-                                + "\" is not in capsule.lock — run `sfn add "
-                                + spec
-                                + "` to lock it");
-                        }
-                    }
-                } else {
-                    cached_path = _resolve_cached_capsule_path_cmd(spec, project_deps);
-                }
-                if cached_path.length > 0 {
-                    dep_path = cached_path;
-                    is_capsule_import = true;
-                }
-            }
-        }
-        if !is_capsule_import {
-            // Scoped import not found in capsule.toml — hard error.
-            // Exclude runtime/* (pre-built) and relative imports.
-            if _has_slash_cmd(spec) {
-                if !_has_prefix_cmd(spec, "./") {
-                    if !_has_prefix_cmd(spec, "../") {
-                        if !_has_prefix_cmd(spec, "runtime/") {
-                            print.err("error: dependency \"" + spec
-                                + "\" is not declared in capsule.toml — run `sfn add "
-                                + spec
-                                + "` first");
-                            return "";
-                        }
-                    }
-                }
-            }
-            dep_path = _resolve_import_path_cmd(base_dir, spec);
-        }
-
-        let is_prebuilt = _has_prefix_cmd(dep_path, "runtime/");
-        if !is_prebuilt {
-            if !_string_list_contains_cmd(next_visited, dep_path) {
-                if !fs.exists(dep_path) {
-                    // Directory import fallback: ./dir -> dir/mod.sfn
-                    let mod_fallback = substring(dep_path, 0, dep_path.length - 4)
-                        + "/mod.sfn";
-                    if fs.exists(mod_fallback) { dep_path = mod_fallback; } else {
-                        if is_capsule_import {
-                            print.err("error: cached capsule not found: "
-                                + dep_path
-                                + " — run `sfn add "
-                                + spec
-                                + "` to download it");
-                        } else {
-                            print.err("import inlining: missing dependency: "
-                                + dep_path);
-                        }
-                        index += 1;
-                        continue;
-                    }
-                }
-                let dep_source = fs.readFile(dep_path);
-                next_visited.push(dep_path);
-                let dep_base = _dirname_cmd(dep_path);
-                let inlined_dep = _inline_relative_imports_cmd(dep_source, dep_base, depth - 1, next_visited);
-                combined = combined + inlined_dep + "\n";
-            }
-            remove.push(spans[index]);
-        }
-        index += 1;
+        if i >= candidates.length { break; }
+        let cand = candidates[i];
+        // `--version` exits 0 on a working binary, non-zero / 127 if
+        // the command is missing. Probing once per test-runner
+        // invocation is cheap; the result isn't cached because the
+        // PATH could legitimately change between runs.
+        let rc = process.run([cand, "--version"]);
+        if rc == 0 { return cand; }
+        i += 1;
     }
-    let mut stripped = source;
-    if remove.length > 0 {
-        let mut out: string = "";
-        let mut keep_start: number = 0;
-        index = 0;
-        loop {
-            if index >= remove.length { break; }
-            let span = remove[index];
-            if span.start > keep_start {
-                out = out + substring(source, keep_start, span.start);
-            }
-            keep_start = span.end;
-            index += 1;
-        }
-        if keep_start < source.length {
-            out = out + substring(source, keep_start, source.length);
-        }
-        stripped = out;
-    }
-    combined = combined + stripped;
-    return combined;
+    return "";
 }
 
-fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string) -> number ![io] {
+fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> number ![io] {
     let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
+    let mut di: number = 0;
+    loop {
+        if di >= dep_ll_paths.length { break; }
+        args.push(dep_ll_paths[di]);
+        di += 1;
+    }
     if runtime_root.length > 0 {
         let src_dir = runtime_root + "/native/src";
         let include_dir = runtime_root + "/native/include";
@@ -643,10 +144,8 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
                 i += 1;
             }
         }
-        // Link runtime globals (IR)
         let globals_ll = runtime_root + "/native/ir/runtime_globals.ll";
         if fs.exists(globals_ll) { args.push(globals_ll); }
-        // Link prelude object — check known locations
         let prelude_paths: string[] = ["build/selfhost/native/obj/runtime/prelude.o", "build/native/obj/runtime/prelude.o", "build/native/obj/prelude.o", runtime_root
             + "/native/obj/runtime/prelude.o", runtime_root
             + "/native/obj/prelude.o",];
@@ -660,14 +159,42 @@ fn _clang_link_test_cmd(ll_path: string, out_path: string, runtime_root: string)
             pi += 1;
         }
     }
-    // Weaken and link the native compiler object to provide cross-module symbols.
-    // Test-defined symbols (from inlined imports) take precedence over weak ones.
     let selfhost_linked = "build/selfhost/native/obj/native.linked.o";
     if fs.exists(selfhost_linked) {
         _ensure_dir_cmd("build/sailfin/test-o0");
         let weak_path = "build/sailfin/test-o0/native.linked.weak.o";
-        process.run(["cp", selfhost_linked, weak_path]);
-        process.run(["llvm-objcopy", "--weaken", weak_path]);
+        // The test runner depends on `llvm-objcopy --weaken` to make
+        // every symbol in the self-hosted compiler's linked object
+        // weak so resolver-produced dependency `.ll` files (which
+        // define some of the same compiler-internal symbols, e.g.
+        // `_strict_capsule_version__version` when a test imports
+        // `../../src/version`) win at link time. If `llvm-objcopy` is
+        // missing or fails, the file's symbols stay strong and the
+        // link fails with a confusing "multiple definition" error
+        // from ld. Bail loudly with a clear hint rather than letting
+        // that happen. `cp` is POSIX-universal so we don't probe it,
+        // but its return code is still checked.
+        let objcopy_bin = _resolve_llvm_objcopy_cmd();
+        if objcopy_bin.length == 0 {
+            print.err("test runner: llvm-objcopy not found on PATH (tried llvm-objcopy and llvm-objcopy-{14..30}) — install LLVM tools (e.g. `apt-get install llvm-18` on Debian/Ubuntu, `brew install llvm` on macOS) so the test runner can weaken the self-hosted compiler's linked object before linking each test binary");
+            return 1;
+        }
+        let cp_rc = process.run(["cp", selfhost_linked, weak_path]);
+        if cp_rc != 0 {
+            print.err("test runner: cp " + selfhost_linked + " " + weak_path
+                + " failed (exit="
+                + number_to_string(cp_rc)
+                + ")");
+            return cp_rc;
+        }
+        let weaken_rc = process.run([objcopy_bin, "--weaken", weak_path]);
+        if weaken_rc != 0 {
+            print.err("test runner: " + objcopy_bin + " --weaken " + weak_path
+                + " failed (exit="
+                + number_to_string(weaken_rc)
+                + ")");
+            return weaken_rc;
+        }
         args.push(weak_path);
         let shim_path = "build/selfhost/native/obj/cross_module_shim.o";
         if fs.exists(shim_path) { args.push(shim_path); }
@@ -753,6 +280,45 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
     return 0;
 }
 
+// One distinct `(project_root, workspace_root)` resolution group for
+// the test runner. Every file in `entry_paths` shares those roots, so
+// `prepare_project_capsules_for_test` runs once per group with the
+// group's full file list as anchors. Mirrors `cli_check.sfn`'s
+// `CheckGroup`: per-group resolution avoids the multi-path workspace
+// bug where files past `files[0]` would otherwise inherit a
+// resolution computed from the wrong root, and amortises capsule
+// staging + compilation across every test file in the group.
+struct TestGroup {
+    key: string;
+    entry_paths: string[];
+    interfaces: Statement[];
+    native_texts: string[];
+    dep_ll_paths: string[];
+}
+
+// Compute the resolution-group key for a test file path. Two files
+// share a group iff `discover_project_root` and
+// `discover_workspace_root` return the same value when walked from
+// each file's directory. Mirrors `cli_check.sfn:_check_group_key` —
+// kept in this module rather than lifted into a shared helper to keep
+// commit 4's blast radius bounded; consolidation is a follow-up.
+fn _test_group_key(file_path: string) -> string ![io] {
+    let dir = _dirname_cmd(file_path);
+    let project_root = discover_project_root(dir);
+    let workspace_root = discover_workspace_root(dir);
+    return project_root + "::" + workspace_root;
+}
+
+fn _find_test_group(groups: TestGroup[], key: string) -> number {
+    let mut i: number = 0;
+    loop {
+        if i >= groups.length { break; }
+        if strings_equal(groups[i].key, key) { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
 fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     let mut root: string = ".";
     if args.length == 2 { root = args[1]; } else if args.length != 1 {
@@ -778,40 +344,101 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     let exe_path = "build/sailfin/test";
     let dump_sources = fs.exists("build/sailfin/.dump_test_sources");
     let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
-    let skip_inlining = fs.exists("build/sailfin/.skip_test_inlining");
 
+    // Partition test files into resolution groups. Within a group,
+    // every file shares `(project_root, workspace_root)`, so a single
+    // resolver pass anchored on the group's full file list covers
+    // every relative-import + capsule-dep + workspace-implicit graph
+    // the test compile + link needs. Between groups (e.g. running
+    // tests from two different capsules in one invocation), each
+    // project resolves independently.
+    let mut groups: TestGroup[] = [];
+    let mut file_group_index: number[] = [];
+    let mut gpi: number = 0;
+    loop {
+        if gpi >= test_files.length { break; }
+        let path = test_files[gpi];
+        let key = _test_group_key(path);
+        let mut idx = _find_test_group(groups, key);
+        if idx < 0 {
+            let empty_entries: string[] = [];
+            let empty_interfaces: Statement[] = [];
+            let empty_texts: string[] = [];
+            let empty_lls: string[] = [];
+            groups.push(TestGroup {
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, native_texts: empty_texts, dep_ll_paths: empty_lls
+            });
+            idx = groups.length - 1;
+        }
+        groups[idx].entry_paths.push(path);
+        file_group_index.push(idx);
+        gpi += 1;
+    }
+
+    // Per-group resolver pass: stage `.sfn-asm` import-context, load
+    // it for typecheck-with-imports, and compile each capsule
+    // dependency to its own `.ll` so the link step can resolve
+    // imported helper definitions strongly. Setup errors (slug
+    // collision, stage-write failure, capsule-compile failure) all
+    // collapse to `staging_failed = true` and exit 2 to distinguish
+    // setup from test failure (exit 1).
+    let mut gi: number = 0;
+    loop {
+        if gi >= groups.length { break; }
+        if trace_runner {
+            print.err("test runner: resolver pass start (group="
+                + number_to_string(gi)
+                + ", files="
+                + number_to_string(groups[gi].entry_paths.length)
+                + ")");
+        }
+        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths);
+        if resolution.staging_failed {
+            // Resolver already emitted a structured error to stderr
+            // (slug collision, stage-write, or compile failure).
+            fs.deleteFile(test_runner_active_path);
+            return 2;
+        }
+        // Single-pass loader: returns both the parsed interface set
+        // (for typecheck-with-imports) and the raw `.sfn-asm` text set
+        // (for `apply_module_symbol_mangling`'s provider-name lookup),
+        // reading each artifact off disk exactly once.
+        let load = load_imported_interfaces_from_paths(resolution.asm_paths);
+        groups[gi].interfaces = load.interfaces;
+        groups[gi].native_texts = load.native_texts;
+        groups[gi].dep_ll_paths = resolution.ll_paths;
+        if trace_runner {
+            print.err("test runner: resolver pass done (group="
+                + number_to_string(gi)
+                + ", deps="
+                + number_to_string(resolution.ll_paths.length)
+                + ")");
+        }
+        gi += 1;
+    }
+
+    // Per-test compile + link + run. The test source is compiled
+    // fresh each iteration; dependency `.ll` files were compiled once
+    // by the resolver pass above and reused across every test in the
+    // group.
     let mut index: number = 0;
     loop {
         if index >= test_files.length { break; }
         let path = test_files[index];
+        let group_idx = file_group_index[index];
         print("test: " + path);
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
 
-        let base_dir = _dirname_cmd(path);
-        let mut combined_source = source;
-        if skip_inlining {
-            if trace_runner {
-                print.err("test runner: skipping import inlining");
-            }
-        } else {
-            if trace_runner { print.err("test runner: inlining start"); }
-            combined_source = _inline_relative_imports_cmd(source, base_dir, 10, []);
-            if trace_runner {
-                print.err("test runner: inlining done (bytes="
-                    + number_to_string(combined_source.length)
-                    + ")");
-            }
-        }
-
         if dump_sources {
             let safe = _sanitize_filename_cmd(path);
-            _write_text_cmd("build/sailfin/test-source-" + safe + ".sfn", combined_source);
+            _write_text_cmd("build/sailfin/test-source-" + safe + ".sfn", source);
         }
 
         if trace_runner { print.err("test runner: compile start"); }
         _clean_lowering_state("build/sailfin");
-        let _compiled = compile_tests_to_llvm_file_with_module(combined_source, module_name, ll_path);
+        let empty_manifests: LayoutManifest[] = [];
+        let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts);
         if !_compiled {
             print("test runner: compile failed for " + path);
             fs.deleteFile(test_runner_active_path);
@@ -819,7 +446,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         }
 
         if trace_runner { print.err("test runner: link start"); }
-        let link_rc = _clang_link_test_cmd(ll_path, exe_path, runtime_root);
+        let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths);
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
             fs.deleteFile(test_runner_active_path);
@@ -1588,13 +1215,6 @@ fn handle_fmt_command(args: string[]) -> number ![io] {
     return 0;
 }
 
-// Inline all imports (relative, stdlib, and cached capsule deps) for a
-// source file.  Exposed so `sfn run` can resolve capsule deps before
-// compilation.
-fn inline_imports_for_source(source: string, base_dir: string) -> string ![io] {
-    return _inline_relative_imports_cmd(source, base_dir, 10, []);
-}
-
 export {
     handle_test_command,
     handle_publish_command,
@@ -1603,6 +1223,5 @@ export {
     handle_init_command,
     handle_login_command,
     handle_guillermo_command,
-    handle_fmt_command,
-    inline_imports_for_source
+    handle_fmt_command
 };

@@ -1,10 +1,10 @@
 # Proposal: Unified Build Architecture for Sailfin
 
-Status: Stage A shipped; Stage B split into two PRs, PR1 shipped, PR2 in progress (A1 + A2 landed; A3/A4 next)
-Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed)
+Status: Stage A shipped; Stage B PR1 shipped; Stage B PR2 `sfn test` + `sfn check` migrations shipped (A1 + A2 + A3 + A4 landed); libextract / `llvm-objcopy --weaken` retirement remains as a follow-up workstream
+Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed) · 2026-04-26 (PR2 `sfn test` migration + A4 deletion landed)
 Authors: Core Team
 
-## Implementation Status (as of 2026-04-25, end of Stage B PR1)
+## Implementation Status (as of 2026-04-26, end of Stage B PR2 `sfn test` migration)
 
 **Stage A — shipped.** Manifest schema, `workspace.toml`,
 `capsules/sfn/prelude/capsule.toml`, and `[build].kind = "binary"` on the
@@ -40,66 +40,70 @@ Four commits, all green through `make compile` (~133-148s):
    — clean move from `cli_main.sfn` so `cli_commands.sfn` (PR2) can
    import it for the test path.
 
-### Stage B PR2 — what the next session needs to ship
+### Stage B PR2 — shipped (`sfn test` + `sfn check` migrations) + remaining libextract follow-up
 
-PR2 was originally scoped as just "extract `sfn/compiler-lib` and retire
-`llvm-objcopy --weaken`". After PR1, it inherits four additional items
-that turned out to be architecturally coupled to libextract:
+PR2 originally scoped to "extract `sfn/compiler-lib` and retire
+`llvm-objcopy --weaken`". After PR1, it grew to absorb four
+architecturally-coupled items. As of 2026-04-26, four are shipped and
+one remains as a follow-up workstream:
 
-1. **`sfn test` migration.** `compile_tests_to_llvm_file_with_module`
-   (in `compiler/src/main.sfn:313`) lowers test sources with
-   `mangle_symbols = false` so the synthesized harness in
-   `lower_to_llvm_lines_with_parsed_context_for_tests`
-   (`compiler/src/llvm/lowering/lowering_core.sfn:107`) can call
-   `test:foo` functions by their bare names. The unified resolver
-   compiles capsule modules with `mangle_symbols = true`, which mangles
-   `helper_answer` → `helper_answer__fixtures__inlining_helper`. Result:
-   a test source's `import { helper_answer } from "./helper"` emits a
-   bare `@helper_answer` reference but the helper `.ll` defines the
-   mangled symbol — link error. PR1 confirmed this empirically with
-   `compiler/tests/e2e/test_runner_import_inlining_test.sfn`.
+1. **`sfn test` migration — shipped (2026-04-26).**
+   `lower_to_llvm_lines_with_parsed_context_for_tests` now lowers test
+   sources with `mangle_symbols = true` and the inline harness
+   appends `__<sanitize_module_suffix(native_module.module_name)>` to
+   each `test:` symbol so harness call sites match the mangled
+   definition. Path (a) from the original two-fix-paths analysis,
+   chosen for symbol parity with the rest of the compile pipeline.
+   `handle_test_command` runs one
+   `prepare_project_capsules_for_test` pass per `(project_root,
+   workspace_root)` group, mirroring the structure
+   `cli_check.sfn` adopted in A2; the test compile uses
+   `compile_tests_to_llvm_file_with_module_imports` (typecheck with
+   imports + import-context-in-LLVM threading) and the link uses
+   `_clang_link_test_cmd_with_deps` (dep `.ll` files prepended ahead
+   of the still-weakened `native.linked.o`).
+   Fixed a latent slug-naming inconsistency: `_cr_relative_slug` now
+   delegates to `module_name_from_path` so dependency slugs match the
+   slug the importer's mangling pass derives via
+   `resolve_import_module_slug_for_module`.
+   `compiler/tests/e2e/test_runner_import_inlining_test.sfn`,
+   `cross_module_import_test.sfn`, and `directory_import_test.sfn`
+   all link and run via the resolver-driven path.
 
-   Two fix paths, both natural alongside libextract:
-   - **(a)** Teach the test harness to emit mangled call sites
-     (`call @test_foo__module_name`). One-line change in the harness
-     emitter; needs every existing test re-verified.
-   - **(b)** Compile capsule helpers without mangling for tests (forks
-     the resolver's compile path). Less risky for the harness; doubles
-     resolver surface area.
+2. **`sfn check` migration — shipped via Track A2 (2026-04-25).** See
+   the A2 notes in `docs/proposals/check-architecture.md`. The
+   typechecker-side hookup (A1) and the resolver wiring (A2) shipped
+   together; cross-module `implements` conformance (E0301) is now
+   live for end users without any textual import inlining.
 
-2. **`sfn check` migration.** `tools/check.check_source` operates on a
-   single source string and has no notion of cross-module symbols.
-   Today the textual inliner is the only reason imported interface
-   declarations are visible to `check_struct_implements_interfaces`
-   in `typecheck_types.sfn`. (The typechecker does not currently emit
-   any "undefined symbol" diagnostic — earlier framing of this point
-   was wrong on that detail. The single load-bearing case the inliner
-   covers is cross-module interface conformance.)
+3. **Delete the legacy helpers — shipped (2026-04-26, A4).**
+   `_inline_relative_imports_cmd`, `inline_imports_for_source`,
+   `_strip_relative_import_lines_cmd`,
+   `_collect_relative_import_spans_cmd`, the
+   `_RelativeImportSpanCmd` struct, `_lookup_dep_version_cmd`,
+   `_resolve_cached_capsule_path_cmd`,
+   `_resolve_import_path_cmd`, `_clang_link_test_cmd` (the no-deps
+   variant), `compile_tests_to_llvm_file_with_module`,
+   `write_llvm_ir_for_tests`, and `write_llvm_ir_for_tests_from_text`
+   are gone — net `-714` lines across `cli_commands.sfn`,
+   `main.sfn`, and `entrypoints_tests_writer.sfn`. The architect's
+   plan also listed `_is_stdlib_capsule_cmd` /
+   `_resolve_capsule_name_cmd` / `_is_stdlib` and
+   `stdlib_capsule_allowlist_test.sfn` for deletion; those survive
+   this cycle because `sfn add` still consumes the stdlib-name
+   resolution chain. They retire once `sfn add` migrates to
+   workspace.toml-driven resolution — separate workstream.
 
-   A1 of Track A ships the typechecker-side hookup
-   (`compiler/src/typecheck_imports.sfn` plus
-   `typecheck_diagnostics_with_imports`). The remaining work for PR2
-   is the resolver-side hookup: extract `.sfn-asm` paths from the
-   project's resolved capsule graph, feed them into
-   `load_imported_interfaces_from_paths` (lands in A2 alongside
-   `cli_check.sfn` integration), and pass the resulting interface
-   list into the new typecheck entry point.
-
-3. **Delete the legacy helpers.** Once `sfn test` and `sfn check` are
-   migrated, delete `_inline_relative_imports_cmd`,
-   `inline_imports_for_source` (both in `compiler/src/cli_commands.sfn`),
-   `_is_stdlib_capsule_cmd` (`compiler/src/cli_commands_utils.sfn:281`),
-   and `_is_stdlib` in `compiler/src/toml_parser.sfn:115`. Drop
-   `compiler/tests/unit/stdlib_capsule_allowlist_test.sfn` (it tests
-   the deleted code).
-
-4. **Original PR2 scope:** extract `sfn/compiler-lib` from
-   `compiler/src/` (everything except `cli_main.sfn`,
-   `cli_commands.sfn`, `cli_commands_utils.sfn`); update
-   `compiler/capsule.toml` to depend on it; update `scripts/build.sh`
-   to walk the new locations. With `sfn/compiler-lib` in place, retire
-   the `llvm-objcopy --weaken` block in
-   `compiler/src/cli_commands.sfn:670` (`_clang_link_test_cmd`).
+4. **`sfn/compiler-lib` extraction + `llvm-objcopy --weaken`
+   retirement — follow-up workstream.** The weakened compiler-object
+   block survives inside `_clang_link_test_cmd_with_deps` for now.
+   With strong dependency `.ll` files in scope the weakened object is
+   only the catch-all for runtime helpers, parser exports, and AST
+   constructors that the test source references but the resolver
+   wasn't asked to produce — but until libextract makes the compiler
+   into a real dep, the weak object is still the only way tests get
+   those symbols. File a follow-up issue: now that `sfn test` is
+   resolver-driven, the libextract path is unblocked.
 
 ### What remains for Stages C–G
 
@@ -1112,90 +1116,87 @@ the resolver wiring:
   so direct importing in a unit test pulls in the whole compiler and
   trips the seed's per-module timeout).
 
-#### Stage B PR2 — sfn test, sfn check, libextract, weaken retirement
+#### Stage B PR2 — sfn test, sfn check, A4 helper deletion (shipped); libextract + weaken retirement (follow-up)
 
 PR1 hit two architectural walls that turned out to be naturally
-coupled to the libextract work originally scoped here:
+coupled to the libextract work originally scoped here. PR2 delivered
+the resolver-driven path for both, and A4 deleted the legacy helpers.
 
-- **`sfn test`**: `compile_tests_to_llvm_file_with_module` uses
-  `mangle_symbols = false` so the synthesized harness can call
-  `test:foo` by bare name. The unified resolver compiles capsule
-  helpers with `mangle_symbols = true`, producing
-  `helper_answer__fixtures__inlining_helper`. Result: test source's
-  `@helper_answer` reference can't link. Either teach the harness to
-  emit mangled call sites, or compile capsule helpers without mangling
-  for tests. PR1 reverted its test-runner wiring after confirming the
-  link error empirically.
-- **`sfn check`**: `tools/check.check_source` operates on a single
-  source string with no notion of cross-module symbols. The
-  load-bearing case the textual inliner covers is cross-module
-  interface conformance — without it, `check_struct_implements_interfaces`
-  silently no-ops on `implements` clauses that point at an interface
-  declared in another module. (Earlier framing assumed the inliner was
-  also preventing "undefined symbol" diagnostics; investigation showed
-  the typechecker emits no such diagnostic today.) Migrating means
-  feeding the typechecker the imported interface set explicitly.
+- **`sfn test` migration — shipped (2026-04-26):**
+  `lower_to_llvm_lines_with_parsed_context_for_tests` lowers test
+  sources with `mangle_symbols = true`, and the inline harness
+  appends `__<sanitize_module_suffix(native_module.module_name)>` to
+  each `test:` symbol. `handle_test_command` partitions test files
+  by `(project_root, workspace_root)` (mirroring `cli_check.sfn`'s
+  A2 pattern), runs `prepare_project_capsules_for_test` once per
+  group to stage `.sfn-asm` import-context AND compile each capsule
+  dependency to its own `.ll`, then per-test calls
+  `compile_tests_to_llvm_file_with_module_imports` (typecheck with
+  imports + import-context-in-LLVM threading) and
+  `_clang_link_test_cmd_with_deps` (dep `.ll` files prepended ahead
+  of the still-weakened `native.linked.o`). Path (a) from the
+  original two-fix-paths analysis — chosen for symbol parity with
+  the rest of the compile pipeline. The `.skip_test_inlining` flag is gone
+  (vestigial after the inliner retired). A latent slug-naming
+  inconsistency in `_cr_relative_slug` was fixed: it now delegates
+  to `module_name_from_path` so dependency slugs match the slug the
+  importer's mangling pass derives via
+  `resolve_import_module_slug_for_module`.
 
-PR2's full scope, organized as Track A:
+- **`sfn check` migration — shipped via Track A (A1 + A2 + A3,
+  2026-04-25):** see `docs/proposals/check-architecture.md` for
+  the staged details. Cross-module `implements` conformance (E0301)
+  is now live without textual import inlining.
 
-- **A1 (shipped):** Add `compiler/src/typecheck_imports.sfn` (pure
-  `NativeInterface → Statement.InterfaceDeclaration` converter, leaf
-  module) and `typecheck_diagnostics_with_imports(program,
-  imported_interfaces)`. Original `typecheck_diagnostics` becomes a
-  one-line wrapper. Self-hosts; stage2/stage3 fixed point holds. See
-  `docs/proposals/check-architecture.md` for details.
-- **A2 (shipped):** New leaf-plus-one module
-  `compiler/src/typecheck_import_loader.sfn` (`![io]`) reads staged
-  `.sfn-asm` artifacts and converts them to
-  `Statement.InterfaceDeclaration[]` via the A1 converter; missing
-  and zero-interface paths are surfaced explicitly via
-  `ImportedInterfaceLoadResult` so the CLI can warn on stale
-  artifacts rather than silently weakening conformance checks.
-  `compiler/src/capsule_resolver.sfn` gains
-  `prepare_project_capsules_for_check` — same enumerate + dedupe +
-  stage as `prepare_project_capsules`, but no
-  `compile_capsule_modules` (check-mode skips LLVM lowering).
-  `compiler/src/tools/check.sfn` adds `check_source_with_imports`;
-  `compiler/src/cli_check.sfn` runs one resolver pass per
-  invocation, loads import-context once, and reuses the converted
-  `Statement[]` across every file in the run. Cross-module
-  conformance (E0301) is now live for end users. Coverage:
-  `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
-  `inline_imports_for_source`'s `sfn check` call site is gone;
-  the function itself stays defined for `sfn test` until A4.
-- **A3:** Diagnostic struct enhancement (`severity`, `file_path`).
-- **A4:** Delete legacy helpers once the test path also migrates.
-- Pick a fix path for `sfn test` mangling (see PR1's
-  `entrypoints_tests_writer.sfn` change for one starting attempt — it
-  loaded import-context but the mangle-symbols mismatch defeated it)
-  and migrate `handle_test_command` to consume the resolver.
-- Extract `sfn/compiler-lib` from `compiler/src/` (everything except
-  `cli_main.sfn`, `cli_commands.sfn`, `cli_commands_utils.sfn`) so
-  tests that need compiler internals depend on it as a dev-dep.
-- Retire the `llvm-objcopy --weaken` block in `_clang_link_test_cmd`
-  (`compiler/src/cli_commands.sfn:670`).
-- Delete the legacy helpers: `_inline_relative_imports_cmd`,
-  `inline_imports_for_source`, `_is_stdlib_capsule_cmd`,
-  `_resolve_capsule_name_cmd`, plus `_is_stdlib` in `toml_parser.sfn`.
-- Delete `compiler/tests/unit/stdlib_capsule_allowlist_test.sfn` (it
-  tests the deleted code).
+- **A4 (shipped 2026-04-26):** deleted
+  `_inline_relative_imports_cmd`, `inline_imports_for_source`,
+  `_strip_relative_import_lines_cmd`,
+  `_collect_relative_import_spans_cmd`, the
+  `_RelativeImportSpanCmd` struct, `_lookup_dep_version_cmd`,
+  `_resolve_cached_capsule_path_cmd`,
+  `_resolve_import_path_cmd`, `_clang_link_test_cmd` (the no-deps
+  variant), `compile_tests_to_llvm_file_with_module`,
+  `write_llvm_ir_for_tests`, and `write_llvm_ir_for_tests_from_text`.
+  Net `-714` lines across `cli_commands.sfn`, `main.sfn`, and
+  `entrypoints_tests_writer.sfn`. The architect's plan listed
+  `_is_stdlib_capsule_cmd`, `_resolve_capsule_name_cmd`, and
+  `_is_stdlib` (in `toml_parser.sfn`) for deletion too;
+  investigation showed they're still consumed by `sfn add` — they
+  retire once `sfn add` migrates to workspace.toml-driven
+  resolution (separate workstream).
+
+- **`sfn/compiler-lib` extraction + `llvm-objcopy --weaken`
+  retirement — follow-up workstream.** The weakened compiler-object
+  block stays inside `_clang_link_test_cmd_with_deps` for now.
+  Resolver-produced dep `.ll` files supply strong symbols for tests
+  that import their own helpers; the weak `native.linked.o` is the
+  catch-all for runtime helpers, parser exports, and AST
+  constructors that the test source references but the resolver
+  wasn't asked to produce. Until libextract makes the compiler into
+  a real dep, the weak object stays as the link-time backstop.
 
 #### Combined Stage B exit criteria
 
-- `sfn test` passes with zero uses of `llvm-objcopy --weaken` anywhere
-  in the codebase.
-- `_inline_relative_imports_cmd`, `inline_imports_for_source`, and
-  `_is_stdlib_capsule_cmd` no longer exist.
+- `_inline_relative_imports_cmd`, `inline_imports_for_source`,
+  `_strip_relative_import_lines_cmd`,
+  `_collect_relative_import_spans_cmd`, and the writer-chain
+  helpers (`compile_tests_to_llvm_file_with_module`,
+  `write_llvm_ir_for_tests`,
+  `write_llvm_ir_for_tests_from_text`) no longer exist. ✓
 - `sfn build -p capsules/sfn/http` produces the same `mod.o` that
   `build.sh` would (compare `objdump -t` symbol tables; bit-exact is
-  the goal but not strictly required). **PR1 ships the `sfn build -p`
-  surface; symbol-table parity is achievable today.**
+  the goal but not strictly required). **PR1 shipped the `sfn build
+  -p` surface; symbol-table parity is achievable today.** ✓
 - `make compile && make check` still passes; the stage2/stage3
-  fixed-point still holds.
-- `sfn fmt --check` is clean on every touched file.
+  fixed-point still holds. ✓
+- `sfn fmt --check` is clean on every touched file. ✓
+- `sfn test` passes with zero uses of `llvm-objcopy --weaken`
+  anywhere in the codebase. ✗ — `--weaken` retirement is bundled
+  with libextract (separate workstream).
 
-PR1 meets `sfn build -p` and the `make compile` invariant. PR2 meets
-the rest.
+Stage B PR2 meets every criterion except the `llvm-objcopy
+--weaken` one, which moves into a follow-up issue tied to the
+`sfn/compiler-lib` extraction.
 
 ### Stage C — In-process driver for user capsules
 

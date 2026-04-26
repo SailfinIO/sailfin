@@ -42,12 +42,25 @@ feature availability.
   unblocking the upcoming `--json` output flag and `sfn lsp`. Phase 2
   (`secondary` source locations + `FixSuggestion`/`TextEdit` for
   `sfn fix`) lands later.
-- **`sfn test` still uses textual inlining** via the legacy
-  `_inline_relative_imports_cmd` and `inline_imports_for_source`
-  helpers. Migrating it is the remaining work in Stage B PR2 (coupled
-  to the `sfn/compiler-lib` extraction — see
-  `docs/proposals/build-architecture.md`). The legacy helpers stay
-  defined until A4 deletes them after `sfn test` migrates.
+- **`sfn test` runs through the unified resolver** (Stage B PR2,
+  shipped 2026-04-26). `handle_test_command` partitions discovered
+  test files by `(project_root, workspace_root)`, invokes
+  `prepare_project_capsules_for_test` once per group to stage
+  `.sfn-asm` import-context AND compile each capsule dependency to
+  its own `.ll`, then per-test routes typecheck through
+  `compile_tests_to_llvm_file_with_module_imports` and link through
+  `_clang_link_test_cmd_with_deps` — same shape `cli_check.sfn`
+  adopted in A2. Test sources lower with `mangle_symbols=true`; the
+  inline harness in
+  `lower_to_llvm_lines_with_parsed_context_for_tests` appends the
+  test module's `__<module_suffix>` to each `test:` symbol so
+  harness call sites match the mangled definition.
+  The textual import inliner (`_inline_relative_imports_cmd`,
+  `inline_imports_for_source`, the test-specific writer chain) is
+  gone — A4 of Track A in `docs/proposals/check-architecture.md` is
+  complete. The `llvm-objcopy --weaken native.linked.o` block stays
+  inside `_clang_link_test_cmd_with_deps` until libextract retires
+  it (separate workstream).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —

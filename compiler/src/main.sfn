@@ -1,7 +1,7 @@
 // compiler/src/main.sfn
 //
 // Sailfin compiler main module and compilation entry points.
-import { Program } from "./ast";
+import { Program, Statement } from "./ast";
 import {
     NativeModule,
     collect_reexport_violations,
@@ -20,13 +20,18 @@ import {
     write_llvm_ir_from_native_text
 } from "./llvm/lowering/entrypoints";
 import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
-import { write_llvm_ir_for_tests, write_llvm_ir_for_tests_from_text } from "./llvm/lowering/entrypoints_tests_writer";
+import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
+import { LayoutManifest } from "./native_ir";
 import { split_lines } from "./native_ir_utils_text";
 import { parse_program } from "./parser/mod";
 import { substring } from "./string_utils";
 import { Token } from "./token";
 import { toml_get_dependencies } from "./toml_parser";
-import { typecheck_diagnostics, typecheck_has_errors } from "./typecheck";
+import {
+    typecheck_diagnostics,
+    typecheck_diagnostics_with_imports,
+    typecheck_has_errors
+} from "./typecheck";
 
 fn _ms_since(start_ms: number) -> number {
     let end_ms = monotonic_millis();
@@ -310,67 +315,88 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     return ir;
 }
 
-fn compile_tests_to_llvm_file_with_module(source: string, module_name: string, out_path: string) -> boolean ![io] {
+// Resolver-driven test compile path. Mirrors
+// `compile_tests_to_llvm_file_with_module` but threads three pieces of
+// import-context the resolver pass produces:
+//
+//   - `imported_interfaces` from `load_imported_interfaces_from_paths`
+//     — fed into `typecheck_diagnostics_with_imports` so cross-module
+//     `implements` clauses are conformance-checked end to end (same
+//     wiring `sfn check` adopted in Track A2).
+//   - `imported_manifests` reserved for layout-manifest plumbing —
+//     today `[]`; the test path doesn't currently exercise cross-
+//     module struct layout in any of the import-using tests, so
+//     deferring layout loading keeps commit 3 minimal. Layout-manifest
+//     loading lands as a follow-up if a regression appears.
+//   - `imported_native_texts` from
+//     `load_imported_native_texts_from_paths` — fed into
+//     `apply_module_symbol_mangling` via `lower_to_llvm_lines_with_-
+//     parsed_context_for_tests` so the test source's `@helper_answer`
+//     references rewrite to the mangled `@helper_answer__<dep_slug>`
+//     symbols the dependency `.ll` files define.
+//
+// Typecheck error handling matches the post-A3 contract: severity is
+// on the `Diagnostic` struct, so we filter for `severity == "error"`
+// before reporting and bailing. Warnings (e.g. future W01xx load
+// warnings) flow through without aborting the test compile.
+fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[]) -> boolean ![io] {
     let trace_file = fs.exists("build/sailfin/.trace_test_runner");
     let active_file = fs.exists("build/sailfin/.test_runner_active");
-    let mut _let345: boolean = false;
+    let mut _let_trace: boolean = false;
     if trace_file {
-        if active_file { _let345 = true; }
+        if active_file { _let_trace = true; }
     }
-    let trace = _let345;
-    let mut _if346: boolean = false;
-    if trace_file { _if346 = true; }
-    if active_file { _if346 = true; }
-    if _if346 {
-        if trace {
-            print.err("test compiler: trace enabled (trace_file=true, active_file=true)");
-        } else {
-            let mut trace_text: string = "false";
-            if trace_file { trace_text = "true"; }
-            let mut active_text: string = "false";
-            if active_file { active_text = "true"; }
-            print.err("test compiler: trace disabled (trace_file=" + trace_text
-                + ", active_file="
-                + active_text
-                + ")");
-        }
-    }
-    if trace { print.err("test compiler: parse_program start"); }
+    let trace = _let_trace;
+    if trace { print.err("test compiler (imports): parse_program start"); }
     let program: Program = parse_program(source);
-    if typecheck_has_errors(program) {
-        let diagnostics = typecheck_diagnostics(program);
+    let diagnostics = typecheck_diagnostics_with_imports(program, imported_interfaces);
+    let mut has_errors: boolean = false;
+    let mut di: number = 0;
+    loop {
+        if di >= diagnostics.length { break; }
+        if strings_equal(diagnostics[di].severity, "error") {
+            has_errors = true;
+            break;
+        }
+        di += 1;
+    }
+    if has_errors {
         report_typecheck_errors(diagnostics, source);
         return false;
     }
     if _reject_reexport_violations(program) { return false; }
     if trace {
-        print.err("test compiler: emit_native_with_module_name start (module="
+        print.err("test compiler (imports): emit_native_with_module_name start (module="
             + module_name
             + ")");
     }
     let native_text = emit_native_text_with_module_name(program, module_name);
     if trace {
-        print.err("test compiler: native text bytes=" + number_to_string(native_text.length));
-        print.err("test compiler: lower_to_llvm_for_tests start");
+        print.err("test compiler (imports): native text bytes="
+            + number_to_string(native_text.length));
+        print.err("test compiler (imports): lower_to_llvm_for_tests start (imports="
+            + number_to_string(imported_native_texts.length)
+            + ")");
     }
     if fs.exists(out_path) { fs.deleteFile(out_path); }
     if trace {
         if native_text.length > 0 {
             fs.writeFile("build/sailfin/debug-test-native.sfn-asm", native_text);
-            print.err("test compiler: wrote build/sailfin/debug-test-native.sfn-asm");
+            print.err("test compiler (imports): wrote build/sailfin/debug-test-native.sfn-asm");
         }
     }
 
-    write_llvm_ir_for_tests_from_text(native_text, module_name, out_path);
+    let empty_diagnostics: string[] = [];
+    write_llvm_ir_for_tests_from_text_with_context(native_text, module_name, out_path, imported_manifests, imported_native_texts, empty_diagnostics);
     if !fs.exists(out_path) { return false; }
     let content = fs.readFile(out_path);
     if trace {
-        print.err("test compiler: write_llvm_ir_for_tests bytes="
+        print.err("test compiler (imports): write_llvm_ir_for_tests bytes="
             + number_to_string(content.length));
     }
     if content.length <= 4 {
         if trace {
-            print.err("test compiler: suspiciously short llvm output (len="
+            print.err("test compiler (imports): suspiciously short llvm output (len="
                 + number_to_string(content.length)
                 + ")");
         }

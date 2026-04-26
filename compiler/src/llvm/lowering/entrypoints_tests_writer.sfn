@@ -1,10 +1,16 @@
 // compiler/src/llvm/lowering/entrypoints_tests_writer.sfn
 //
-// Test LLVM IR writer — write_llvm_ir_for_tests_from_text.
+// Test LLVM IR writer — write_llvm_ir_for_tests_from_text_with_context.
 //
-// The original write_llvm_ir_for_tests function (~600 lines duplicating
-// the entire lowering pipeline) was removed to fix OOM during selfhost.
-// Imports are preserved — the seed linker needs the full import graph.
+// Single resolver-driven entry point. Threads import-context (manifests
+// + native texts) from `prepare_project_capsules_for_test` (in
+// `capsule_resolver.sfn`) into `lower_to_llvm_lines_with_parsed_-
+// context_for_tests`, so the test source's mangled call sites bind to
+// the dependency `.ll` files the resolver produced. The earlier no-
+// context wrappers (`write_llvm_ir_for_tests`,
+// `write_llvm_ir_for_tests_from_text`) were retired in Stage B PR2's
+// A4 deletion alongside `compile_tests_to_llvm_file_with_module` and
+// the textual import inliner.
 import { NativeArtifact, NativeModule } from "../../emit_native";
 import {
     LayoutManifest,
@@ -19,8 +25,7 @@ import {
     parse_native_enums_for_import,
     parse_native_functions_for_import,
     parse_native_interfaces_for_import,
-    parse_native_structs_for_import,
-    select_text_artifact
+    parse_native_structs_for_import
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 import {
@@ -74,7 +79,6 @@ import {
 } from "../utils";
 import { emit_llvm_function } from "./emission";
 import { lower_to_llvm_lines_with_parsed_context_for_tests } from "./lowering_core";
-import { render_test_harness_main_for_module } from "./lowering_helpers";
 import {
     empty_trait_metadata,
     extend_native_enums,
@@ -97,20 +101,20 @@ import {
 } from "./lowering_io";
 import { lower_module_bindings_to_globals } from "./module_globals";
 
-// Stub: kept for import-graph compatibility (main.sfn imports this symbol).
-// The full implementation (~600 lines duplicating the entire lowering pipeline)
-// was removed to fix OOM during selfhost.
-fn write_llvm_ir_for_tests(native_module: NativeModule, out_path: string) -> boolean ![io] {
-    let artifact = select_text_artifact(native_module.artifacts);
-    if artifact == null {
-        print.err("test llvm writer: no text artifact found");
-        return false;
-    }
-    return write_llvm_ir_for_tests_from_text(artifact.contents, native_module.module_name, out_path);
-}
-
-// Build and write LLVM IR for tests from raw native text, avoiding NativeModule ABI issues.
-fn write_llvm_ir_for_tests_from_text(native_text: string, module_name: string, out_path: string) -> boolean ![io] {
+// Build and write LLVM IR for tests, threading import-context through
+// from the resolver pass. `imported_manifests` and
+// `imported_native_texts` come from
+// `prepare_project_capsules_for_test` (via
+// `load_imported_native_texts_from_paths`); they let
+// `apply_module_symbol_mangling` rewrite import call sites in the
+// test source to the same mangled names the dependency `.ll` files
+// define. `imported_diagnostics` is the slot the production lowering
+// would use for parser diagnostics on imported artifacts; the test
+// path leaves it empty because
+// `load_imported_interfaces_from_paths` already partitions
+// parse-failure artifacts upstream and surfaces them as W0002
+// warnings rather than re-feeding them into lowering.
+fn write_llvm_ir_for_tests_from_text_with_context(native_text: string, module_name: string, out_path: string, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> boolean ![io] {
     if native_text.length == 0 {
         print.err("test llvm: empty native text");
         return false;
@@ -129,7 +133,7 @@ fn write_llvm_ir_for_tests_from_text(native_text: string, module_name: string, o
         entry_points: [],
         symbol_count: 0
     };
-    let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(dummy_module, parse, [], [], []);
+    let lowered_lines = lower_to_llvm_lines_with_parsed_context_for_tests(dummy_module, parse, imported_manifests, imported_native_texts, imported_diagnostics);
     if lowered_lines.lines.length == 0 {
         print.err("test llvm: no lines emitted from native text");
         return false;

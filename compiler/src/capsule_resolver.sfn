@@ -36,6 +36,7 @@
 // capsule symbols resolved.
 import {
     compile_to_llvm_file_with_module,
+    module_name_from_path,
     number_to_string,
     write_native_text_file_with_module
 } from "./main";
@@ -45,6 +46,7 @@ import { toml_get_dependencies, toml_get_name, toml_get_workspace_members } from
 export {
     CapsuleSource,
     CheckCapsuleResolution,
+    TestCapsuleResolution,
     WorkspaceMember,
     collect_relative_import_specs,
     collect_scoped_import_specs,
@@ -57,6 +59,7 @@ export {
     parse_workspace_member_paths,
     prepare_project_capsules,
     prepare_project_capsules_for_check,
+    prepare_project_capsules_for_test,
     resolve_relative_import,
     stage_capsule_imports,
     compile_capsule_modules,
@@ -89,6 +92,21 @@ struct CheckCapsuleResolution {
     asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
     capsule_count: number;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision or stage-write failure
+}
+
+// Result of a test-mode resolver pass: same workspace + manifest +
+// relative-import enumeration as `prepare_project_capsules`, but
+// returns BOTH the staged `.sfn-asm` paths (for the typechecker
+// import-loader) AND the compiled `.ll` paths (for the linker). The
+// test runner needs both — the loader feeds cross-module conformance
+// into typecheck, and clang link consumes the helper `.ll` files so
+// imported helper definitions resolve at link time without the
+// `llvm-objcopy --weaken` cross-module shim.
+struct TestCapsuleResolution {
+    asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
+    ll_paths: string[];  // build/sailfin/capsules/<mangled-slug>.ll
+    capsule_count: number;  // post-dedupe count, for diagnostic output
+    staging_failed: boolean;  // true on slug collision, stage-write, or compile failure
 }
 
 // ---- Path helpers ----
@@ -921,33 +939,82 @@ fn resolve_relative_import(base_dir: string, spec: string) -> string {
     return path + ".sfn";
 }
 
-// Compute the slug for a relatively-imported file by stripping `entry_dir`
-// from the front of the file path and the `.sfn` suffix from the end. The
-// resulting slug matches what the compiler's import resolver produces for
-// `import { X } from "./<rel>"` issued from the entry — keeping per-module
-// `.sfn-asm` lookups in sync.
+// Canonicalise a filesystem path into the same shape
+// `resolve_import_module_slug_for_module` produces for the same logical
+// module: strip any leading `./` and collapse `/./` segments. Without
+// this normalisation, invoking `sfn test ./compiler/tests/...` would
+// hand `module_name_from_path` a path with a leading `./` that
+// survives into the slug; `sanitize_module_suffix` then turns it into
+// `___compiler__...` (three underscores from `.` + `/`) while the
+// importing module's slug — derived from a canonical no-`./` path —
+// produces `compiler__...`. The mangled call site and the dep
+// definition would diverge and the link would fail with an undefined
+// reference. Keeping the normalisation here (rather than in
+// `module_name_from_path`) keeps the behavior contained: every
+// existing consumer of `module_name_from_path` operates on already-
+// canonical paths produced by the path-discovery layer.
+// Find the first occurrence of `needle` in `haystack`, or -1. Local
+// to the resolver so we don't pull in `string_utils.sfn`'s richer
+// `index_of` (which would broaden the diamond) for a single use.
+fn _cr_find_substring(haystack: string, needle: string) -> number {
+    if needle.length == 0 { return 0; }
+    if haystack.length < needle.length { return -1; }
+    let limit = haystack.length - needle.length;
+    let mut i: number = 0;
+    loop {
+        if i > limit { break; }
+        if substring(haystack, i, i + needle.length) == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _cr_canonicalise_path(value: string) -> string {
+    let mut out = value;
+    // Strip leading `./` repeatedly (defensive — a single `./` is the
+    // common case but `././foo` is well-formed POSIX).
+    loop {
+        if out.length < 2 { break; }
+        if substring(out, 0, 2) != "./" { break; }
+        out = substring(out, 2, out.length);
+    }
+    // Collapse interior `/./` segments. Bounded by max iterations so a
+    // pathological input can't loop forever.
+    let mut max_iters: number = 64;
+    loop {
+        if max_iters <= 0 { break; }
+        let pos = _cr_find_substring(out, "/./");
+        if pos < 0 { break; }
+        out = substring(out, 0, pos) + substring(out, pos + 2, out.length);
+        max_iters -= 1;
+    }
+    return out;
+}
+
+// Compute the slug for a relatively-imported file. Delegates to
+// `module_name_from_path` (after canonicalising `./` artifacts) so
+// dependency slugs match the slug the importer's mangling pass derives
+// via `resolve_import_module_slug_for_module`. Stripping `entry_dir`
+// (the pre-Stage-B-PR2 behavior) produced a shorter slug for relative
+// dependencies than the importing module computed for the same import
+// directive — the divergence was harmless for `sfn check` (which only
+// consumes staged `.sfn-asm` text) but broke `sfn test` the moment
+// dependency `.ll` files joined the link line: a test source whose
+// slug is `compiler/tests/e2e/foo_test` resolves `./fixtures/helper`
+// to provider slug `compiler/tests/e2e/fixtures/helper`, but the dep
+// was compiled as `fixtures/helper`, leaving the link with an
+// undefined reference to
+// `<sym>__compiler__tests__e2e__fixtures__helper`. Sharing
+// `module_name_from_path` keeps importer + importee in lockstep
+// across both the build and the test paths.
+//
+// `entry_dir` is retained as a parameter for call-site stability
+// (`enumerate_relative_sources` plumbs it through anyway) but is no
+// longer consulted; the descriptive name documents what the call site
+// passes.
 fn _cr_relative_slug(entry_dir: string, file_path: string) -> string {
-    // Normalise entry_dir to end without a trailing slash for clean prefix
-    // checks. The empty entry_dir corresponds to a current-dir entry.
-    let mut prefix = entry_dir;
-    if prefix.length > 0 {
-        if substring(prefix, prefix.length - 1, prefix.length) == "/" {
-            prefix = substring(prefix, 0, prefix.length - 1);
-        }
-    }
-    let mut tail: string = file_path;
-    if prefix.length > 0 {
-        let prefix_with_slash = prefix + "/";
-        if file_path.length >= prefix_with_slash.length {
-            if substring(file_path, 0, prefix_with_slash.length) == prefix_with_slash {
-                tail = substring(file_path, prefix_with_slash.length, file_path.length);
-            }
-        }
-    }
-    if _cr_ends_with(tail, ".sfn") {
-        tail = substring(tail, 0, tail.length - 4);
-    }
-    return tail;
+    let _unused_dir = entry_dir;
+    return module_name_from_path(_cr_canonicalise_path(file_path));
 }
 
 // Walk relative imports (`./foo`, `../foo`) reachable from `entry_path` and
@@ -1642,6 +1709,94 @@ fn prepare_project_capsules_for_check(entry_paths: string[]) -> CheckCapsuleReso
 
     return CheckCapsuleResolution {
         asm_paths: asm_paths,
+        capsule_count: resolved.sources.length,
+        staging_failed: false
+    };
+}
+
+// Resolver pass tuned for `sfn test`: stages `.sfn-asm` import-context
+// (so the typechecker import-loader can read interface declarations
+// for cross-module conformance) AND compiles each capsule source to
+// its own `.ll` (so clang link can resolve imported helper definitions
+// without falling back to the weakened-compiler `cross_module_shim`).
+//
+// `entry_paths` is a list of test source files that share the same
+// project + workspace roots. The CLI groups discovered tests by
+// `(discover_project_root, discover_workspace_root)` and calls this
+// once per group, mirroring the per-group resolution `cli_check.sfn`
+// already performs. Resolution work is amortized across every test
+// in the group; per-(group, capsule) staging + compilation runs at
+// most once.
+//
+// Contract differences from `prepare_project_capsules`:
+//   - On slug collision, returns `staging_failed = true` (caller
+//     exits 2 to distinguish setup error from test failure).
+//   - On `stage_capsule_imports` failure, same: `staging_failed = true`.
+//   - On `compile_capsule_modules` failure, same: `staging_failed =
+//     true`, `ll_paths = []`.
+//   - Standalone test files outside any capsule.toml are valid input
+//     and return an empty resolution (no error) — the test source's
+//     own compile path still runs, and any relative-import walking
+//     happens inside the per-entry `enumerate_relative_sources`
+//     branch of `_cr_resolve_and_dedupe`.
+fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolution ![io] {
+    let empty_paths: string[] = [];
+    let resolved = _cr_resolve_and_dedupe(entry_paths);
+    if resolved.has_collision {
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true
+        };
+    }
+    if resolved.sources.length == 0 {
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: false
+        };
+    }
+
+    let staged = stage_capsule_imports(resolved.sources);
+    if !staged {
+        print.err("capsule-resolver: failed to stage import-context for project capsules");
+        return TestCapsuleResolution {
+            asm_paths: empty_paths,
+            ll_paths: empty_paths,
+            capsule_count: 0,
+            staging_failed: true
+        };
+    }
+
+    let mut asm_paths: string[] = [];
+    let mut ai: number = 0;
+    loop {
+        if ai >= resolved.sources.length { break; }
+        asm_paths.push("build/native/import-context/" + resolved.sources[ai].slug
+            + ".sfn-asm");
+        ai += 1;
+    }
+
+    let ll_paths = compile_capsule_modules(resolved.sources);
+    // `compile_capsule_modules` returns `[]` on compile failure for any
+    // source; with `resolved.sources.length > 0` (guarded above) an
+    // empty list unambiguously means failure. Surface it as a setup
+    // error so the test runner exits 2 instead of trying to link
+    // against missing helper objects.
+    if ll_paths.length == 0 {
+        return TestCapsuleResolution {
+            asm_paths: asm_paths,
+            ll_paths: empty_paths,
+            capsule_count: resolved.sources.length,
+            staging_failed: true
+        };
+    }
+
+    return TestCapsuleResolution {
+        asm_paths: asm_paths,
+        ll_paths: ll_paths,
         capsule_count: resolved.sources.length,
         staging_failed: false
     };

@@ -1,7 +1,7 @@
 # Architecture: `sfn check` — Fast Analysis Without Codegen
 
-Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`)
-Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026; A3 (Phase 1 diagnostic infrastructure — severity + file_path on Diagnostic, structured load warnings) shipped April 25, 2026
+Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`); Track A complete (A1–A4 all shipped)
+Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026; A3 (Phase 1 diagnostic infrastructure — severity + file_path on Diagnostic, structured load warnings) shipped April 25, 2026; A4 (legacy helper deletion) shipped April 26, 2026 alongside Stage B PR2's `sfn test` migration
 Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
 
 ## Implementation Status
@@ -67,9 +67,27 @@ sub-PRs:
   Phase 2 features (`secondary` source locations,
   `FixSuggestion`/`TextEdit`) remain deferred — they land alongside
   `sfn fix` / `sfn lsp`.
-- **A4 — delete legacy helpers.** Remove `inline_imports_for_source`,
-  `_inline_relative_imports_cmd`, and `_is_stdlib_capsule_cmd` once
-  the test path (Stage B PR2's `sfn test` migration) lands too.
+- **A4 — delete legacy helpers (shipped April 26, 2026).** Removed
+  `inline_imports_for_source`, `_inline_relative_imports_cmd`, and
+  the entire textual-inliner support cast
+  (`_strip_relative_import_lines_cmd`,
+  `_collect_relative_import_spans_cmd`, the
+  `_RelativeImportSpanCmd` struct, `_lookup_dep_version_cmd`,
+  `_resolve_cached_capsule_path_cmd`, `_resolve_import_path_cmd`,
+  `_clang_link_test_cmd`) alongside the dead test-LLVM writer chain
+  (`compile_tests_to_llvm_file_with_module`,
+  `write_llvm_ir_for_tests`, `write_llvm_ir_for_tests_from_text`).
+  Net `-714` lines. The architect's plan also listed
+  `_is_stdlib_capsule_cmd` and `_is_stdlib` for deletion;
+  investigation found `_resolve_capsule_name_cmd` (which `sfn add`
+  consumes at `cli_commands.sfn:handle_add_command`) transitively
+  needs `_is_stdlib_capsule_cmd`, so both stay until `sfn add`
+  migrates to workspace.toml-driven resolution. The
+  `compiler/tests/unit/stdlib_capsule_allowlist_test.sfn` regression
+  test stays for the same reason. The `--weaken` block retires
+  alongside the `sfn/compiler-lib` extraction in a separate
+  workstream now unblocked by `sfn test` going through the
+  resolver.
 
 ### Still deferred to a follow-up
 

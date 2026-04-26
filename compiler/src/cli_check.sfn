@@ -265,11 +265,13 @@ fn handle_check_command(args: string[]) -> number ![io] {
     }
 
     let empty_interfaces: Statement[] = [];
+    let empty_texts: string[] = [];
     let aggregate_load_result = ImportedInterfaceLoadResult {
         interfaces: empty_interfaces,
         missing_paths: aggregate_missing,
         parse_failure_paths: aggregate_parse_failures,
-        skipped_paths: aggregate_skipped
+        skipped_paths: aggregate_skipped,
+        native_texts: empty_texts
     };
     _emit_load_warnings(aggregate_load_result, quiet);
 

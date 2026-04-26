@@ -137,10 +137,13 @@ test_check_header() {
 run_test "stderr includes [check] file header" test_check_header
 
 # ---- Test 3: import-context staging happened (A2 went through the resolver) ----
+# Stage B PR2 aligned `_cr_relative_slug` with `module_name_from_path`, so
+# relative deps now stage under subdirs rooted at the dep's path-derived
+# slug (e.g. `import-context/src/shape.sfn-asm`) instead of flat paths.
+# Either layout indicates the resolver ran; recursive find covers both.
 test_import_context_staged() {
-    [ -f "$SCRATCH/build/native/import-context/check_cross_module_test/triangle.sfn-asm" ] \
-        || [ -f "$SCRATCH/build/native/import-context/check-cross-module-test/triangle.sfn-asm" ] \
-        || ls "$SCRATCH/build/native/import-context/" 2>/dev/null | grep -q "shape\|triangle"
+    find "$SCRATCH/build/native/import-context/" -type f -name '*.sfn-asm' 2>/dev/null \
+        | grep -q "shape\|triangle"
 }
 run_test "resolver staged import-context for the project" test_import_context_staged
 
