@@ -28,6 +28,7 @@
 // artifact from looking like a benign module that just happened to
 // export only structs/functions.
 import { Statement } from "./ast";
+import { ImportSymbolTable, append_import_function, empty_import_symbols } from "./effect_imports";
 import { parse_native_artifact_for_import_context } from "./native_ir_api";
 import { interfaces_from_native } from "./typecheck_imports";
 
@@ -37,6 +38,7 @@ import { interfaces_from_native } from "./typecheck_imports";
 // as an empty-but-valid module.
 struct ArtifactInterfaceParse {
     interfaces: Statement[];
+    function_effects: ImportSymbolTable;
     diagnostics: string[];
 }
 
@@ -47,6 +49,12 @@ struct ArtifactInterfaceParse {
 //      produced diagnostics — treat as corrupt/stale.
 //   - `skipped_paths`: parsed fine and contained zero interfaces
 //      (benign — common for modules that export only structs/fns).
+//
+// `function_effects` is the Phase E channel: an `ImportSymbolTable`
+// aggregating the `effects` field on every `NativeFunction` declared
+// across the loaded artifacts. The effect checker resolves caller
+// `Call` expressions against this table so cross-module effect
+// propagation lights up without re-parsing artifacts.
 //
 // `native_texts` is the raw `.sfn-asm` text for every artifact that
 // existed on disk (i.e. NOT in `missing_paths`), in input-order. The
@@ -59,19 +67,40 @@ struct ArtifactInterfaceParse {
 // today; future consumers would benefit too).
 struct ImportedInterfaceLoadResult {
     interfaces: Statement[];
+    function_effects: ImportSymbolTable;
     missing_paths: string[];
     parse_failure_paths: string[];
     skipped_paths: string[];
     native_texts: string[];
 }
 
-// Pure: parse a `.sfn-asm` text buffer and return both its interface
-// declarations and any diagnostics the native-IR parser produced.
+// Pure: parse a `.sfn-asm` text buffer and return its interface
+// declarations, the cross-module function-effect table contributed
+// by its top-level `NativeFunction` decls, and any diagnostics the
+// native-IR parser produced.
 fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     let parsed = parse_native_artifact_for_import_context(text);
     let interfaces = interfaces_from_native(parsed.interfaces);
+    let mut function_effects = empty_import_symbols();
+    let mut i: number = 0;
+    loop {
+        if i >= parsed.functions.length { break; }
+        let function = parsed.functions[i];
+        // Skip extern declarations — the effect-checker's `E0402`
+        // contract is "imported Sailfin function carries effects
+        // the caller must propagate". `extern fn` has no
+        // declared-effects metadata in the round-tripped artifact
+        // today; the C-runtime FFI surface is gated by the
+        // hardcoded helper roots (`fs.`, `print.`, etc.) that the
+        // in-module checker already handles.
+        if !function.is_extern {
+            function_effects = append_import_function(function_effects, function.name, function.effects);
+        }
+        i += 1;
+    }
     return ArtifactInterfaceParse {
         interfaces: interfaces,
+        function_effects: function_effects,
         diagnostics: parsed.diagnostics
     };
 }
@@ -86,6 +115,7 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
 // a warning.
 fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoadResult ![io] {
     let mut interfaces: Statement[] = [];
+    let mut function_effects = empty_import_symbols();
     let mut missing: string[] = [];
     let mut parse_failures: string[] = [];
     let mut skipped: string[] = [];
@@ -113,6 +143,19 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
             i += 1;
             continue;
         }
+        // Phase E: merge this artifact's exported function-effects
+        // into the per-batch table, regardless of whether the
+        // artifact also declared interfaces. A module that exports
+        // only standalone fns is `skipped` for interface purposes
+        // but still contributes effect entries for cross-module
+        // propagation.
+        let mut k: number = 0;
+        loop {
+            if k >= parsed.function_effects.functions.length { break; }
+            let entry = parsed.function_effects.functions[k];
+            function_effects = append_import_function(function_effects, entry.name, entry.effects);
+            k += 1;
+        }
         if parsed.interfaces.length == 0 { skipped.push(path); } else {
             let mut j: number = 0;
             loop {
@@ -126,6 +169,7 @@ fn load_imported_interfaces_from_paths(paths: string[]) -> ImportedInterfaceLoad
 
     return ImportedInterfaceLoadResult {
         interfaces: interfaces,
+        function_effects: function_effects,
         missing_paths: missing,
         parse_failure_paths: parse_failures,
         skipped_paths: skipped,

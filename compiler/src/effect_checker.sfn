@@ -16,6 +16,16 @@
 // separate refactor scoped for a follow-up. Pointing the diagnostic
 // at the function declaration is also the actionable location — the
 // fix is "add `![effect]` to the signature on this line."
+//
+// Phase E (this commit) adds cross-module call resolution: when the
+// caller invokes an `Identifier` that names an imported function,
+// the checker looks it up in the `ImportSymbolTable` threaded in
+// from the typecheck-import loader and propagates the callee's
+// declared effects. Diagnostics carry the description prefix
+// `imported \`<name>\`` so `diagnostics_render.code_for_missing_effect`
+// promotes them from `E0400` (in-module) to `E0402` (cross-module).
+// Member-callee resolution (`mod.fetch()`) and decorator-implied
+// transitives are out of scope for E1; see proposal §5 (Phase E).
 import {
     Block,
     Decorator,
@@ -29,6 +39,13 @@ import {
     Statement,
     decorator_names
 } from "./ast";
+import {
+    ImportSymbolTable,
+    ImportedFunctionSignature,
+    empty_import_symbols,
+    localize_import_symbols_for_program,
+    lookup_imported_function
+} from "./effect_imports";
 import { substring } from "./string_utils";
 import { Token, TokenKind } from "./token";
 
@@ -86,20 +103,36 @@ fn _token_from_signature(span: SourceSpan?, name: string) -> Token? {
     };
 }
 
+// Phase B/C/D entry — preserved for the legacy build-path callers
+// that don't have an import resolver in scope (synthesized fixtures,
+// `compile_to_sailfin`, etc.). New callers should use
+// `validate_effects_with_imports` so cross-module propagation
+// (Phase E) lights up.
 fn validate_effects(program: Program) -> EffectViolation[] {
+    return validate_effects_with_imports(program, empty_import_symbols());
+}
+
+// Phase E entry — accepts the global symbol table the loader
+// produced from the imported `.sfn-asm` artifacts. `localize_…`
+// filters the table down to just-this-program's imports and applies
+// alias rewrites, so the per-`Call` lookup in
+// `collect_effects_from_expression` keys directly off the local
+// identifier name.
+fn validate_effects_with_imports(program: Program, imports: ImportSymbolTable) -> EffectViolation[] {
+    let local_imports = localize_import_symbols_for_program(program, imports);
     let mut violations: EffectViolation[] = [];
     let mut index: number = 0;
     loop {
         if index >= program.statements.length { break; }
-        violations = append_violations(violations, analyze_statement(program.statements[index]));
+        violations = append_violations(violations, analyze_statement(program.statements[index], local_imports));
         index += 1;
     }
     return violations;
 }
 
-fn analyze_statement(statement: Statement) -> EffectViolation[] {
+fn analyze_statement(statement: Statement, imports: ImportSymbolTable) -> EffectViolation[] {
     if statement.variant == "FunctionDeclaration" {
-        return analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name);
+        return analyze_routine(statement.signature, statement.body, statement.decorators, statement.signature.name, imports);
     }
     if statement.variant == "TestDeclaration" {
         let signature = FunctionSignature {
@@ -112,7 +145,7 @@ fn analyze_statement(statement: Statement) -> EffectViolation[] {
             name_span: statement.name_span
         };
         let qualified = "test " + statement.name;
-        return analyze_routine(signature, statement.body, statement.decorators, qualified);
+        return analyze_routine(signature, statement.body, statement.decorators, qualified, imports);
     }
     if statement.variant == "StructDeclaration" {
         let mut issues: EffectViolation[] = [];
@@ -121,7 +154,7 @@ fn analyze_statement(statement: Statement) -> EffectViolation[] {
             if index >= statement.methods.length { break; }
             let method = statement.methods[index];
             let qualified = statement.name + "." + method.signature.name;
-            issues = append_violations(issues, analyze_routine(method.signature, method.body, method.decorators, qualified));
+            issues = append_violations(issues, analyze_routine(method.signature, method.body, method.decorators, qualified, imports));
             index += 1;
         }
         return issues;
@@ -129,7 +162,7 @@ fn analyze_statement(statement: Statement) -> EffectViolation[] {
     return [];
 }
 
-fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decorator[], name: string) -> EffectViolation[] {
+fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decorator[], name: string, imports: ImportSymbolTable) -> EffectViolation[] {
     let names = decorator_names(decorators);
     let mut declared: string[] = [];
     let mut declared_index: number = 0;
@@ -156,7 +189,7 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     if requires_io_from_decorators {
         declared = append_unique_effect(declared, "io");
     }
-    let required = required_effects(body);
+    let required = required_effects(body, imports);
     let mut missing: string[] = [];
     let mut missing_requirements: EffectRequirement[] = [];
     let mut index: number = 0;
@@ -205,91 +238,91 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     return result;
 }
 
-fn required_effects(body: Block) -> EffectRequirement[] {
-    return collect_effects_from_block(body);
+fn required_effects(body: Block, imports: ImportSymbolTable) -> EffectRequirement[] {
+    return collect_effects_from_block(body, imports);
 }
 
-fn collect_effects_from_block(block: Block) -> EffectRequirement[] {
+fn collect_effects_from_block(block: Block, imports: ImportSymbolTable) -> EffectRequirement[] {
     let mut required: EffectRequirement[] = [];
     let mut index: number = 0;
     loop {
         if index >= block.statements.length { break; }
-        required = merge_requirements(required, collect_effects_from_statement(block.statements[index]));
+        required = merge_requirements(required, collect_effects_from_statement(block.statements[index], imports));
         index += 1;
     }
     return required;
 }
 
-fn collect_effects_from_optional_block(block: Block?) -> EffectRequirement[] {
+fn collect_effects_from_optional_block(block: Block?, imports: ImportSymbolTable) -> EffectRequirement[] {
     if block == null { return []; }
-    return collect_effects_from_block(block);
+    return collect_effects_from_block(block, imports);
 }
 
-fn collect_effects_from_optional_statement(statement: Statement?) -> EffectRequirement[] {
+fn collect_effects_from_optional_statement(statement: Statement?, imports: ImportSymbolTable) -> EffectRequirement[] {
     if statement == null { return []; }
-    return collect_effects_from_statement(statement);
+    return collect_effects_from_statement(statement, imports);
 }
 
-fn collect_effects_from_statement(statement: Statement) -> EffectRequirement[] {
+fn collect_effects_from_statement(statement: Statement, imports: ImportSymbolTable) -> EffectRequirement[] {
     if statement.variant == "WithStatement" {
-        let mut required = collect_effects_from_block(statement.body);
+        let mut required = collect_effects_from_block(statement.body, imports);
         let mut clause_index: number = 0;
         loop {
             if clause_index >= statement.clauses.length { break; }
             let clause = statement.clauses[clause_index];
-            required = merge_requirements(required, collect_effects_from_expression(clause.expression));
+            required = merge_requirements(required, collect_effects_from_expression(clause.expression, imports));
             clause_index += 1;
         }
         return required;
     }
     if statement.variant == "ForStatement" {
-        let mut required = collect_effects_from_block(statement.body);
-        required = merge_requirements(required, collect_effects_from_expression(statement.clause.target));
-        required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable));
+        let mut required = collect_effects_from_block(statement.body, imports);
+        required = merge_requirements(required, collect_effects_from_expression(statement.clause.target, imports));
+        required = merge_requirements(required, collect_effects_from_expression(statement.clause.iterable, imports));
         return required;
     }
     if statement.variant == "LoopStatement" {
-        return collect_effects_from_block(statement.body);
+        return collect_effects_from_block(statement.body, imports);
     }
     if statement.variant == "MatchStatement" {
-        let mut required = collect_effects_from_expression(statement.expression);
+        let mut required = collect_effects_from_expression(statement.expression, imports);
         let mut case_index: number = 0;
         loop {
             if case_index >= statement.cases.length { break; }
-            required = merge_requirements(required, collect_effects_from_match_case(statement.cases[case_index]));
+            required = merge_requirements(required, collect_effects_from_match_case(statement.cases[case_index], imports));
             case_index += 1;
         }
         return required;
     }
     if statement.variant == "IfStatement" {
-        let mut required = collect_effects_from_expression(statement.condition);
-        required = merge_requirements(required, collect_effects_from_block(statement.then_block));
+        let mut required = collect_effects_from_expression(statement.condition, imports);
+        required = merge_requirements(required, collect_effects_from_block(statement.then_block, imports));
         let else_branch = statement.else_branch;
         if else_branch == null { return required; }
-        required = merge_requirements(required, collect_effects_from_else_branch(else_branch));
+        required = merge_requirements(required, collect_effects_from_else_branch(else_branch, imports));
         return required;
     }
     if statement.variant == "ReturnStatement" {
-        return collect_effects_from_expression(statement.expression);
+        return collect_effects_from_expression(statement.expression, imports);
     }
     if statement.variant == "ExpressionStatement" {
-        return collect_effects_from_expression(statement.expression);
+        return collect_effects_from_expression(statement.expression, imports);
     }
     if statement.variant == "VariableDeclaration" {
-        return collect_effects_from_expression(statement.initializer);
+        return collect_effects_from_expression(statement.initializer, imports);
     }
     if statement.variant == "FunctionDeclaration" {
-        return collect_effects_from_block(statement.body);
+        return collect_effects_from_block(statement.body, imports);
     }
     if statement.variant == "TestDeclaration" {
-        return collect_effects_from_block(statement.body);
+        return collect_effects_from_block(statement.body, imports);
     }
     if statement.variant == "StructDeclaration" {
         let mut required: EffectRequirement[] = [];
         let mut method_index: number = 0;
         loop {
             if method_index >= statement.methods.length { break; }
-            required = merge_requirements(required, collect_effects_from_block(statement.methods[method_index].body));
+            required = merge_requirements(required, collect_effects_from_block(statement.methods[method_index].body, imports));
             method_index += 1;
         }
         return required;
@@ -300,24 +333,50 @@ fn collect_effects_from_statement(statement: Statement) -> EffectRequirement[] {
     return [];
 }
 
-fn collect_effects_from_else_branch(branch: ElseBranch) -> EffectRequirement[] {
+fn collect_effects_from_else_branch(branch: ElseBranch, imports: ImportSymbolTable) -> EffectRequirement[] {
     let mut required: EffectRequirement[] = [];
-    required = merge_requirements(required, collect_effects_from_optional_block(branch.body));
-    required = merge_requirements(required, collect_effects_from_optional_statement(branch.statement));
+    required = merge_requirements(required, collect_effects_from_optional_block(branch.body, imports));
+    required = merge_requirements(required, collect_effects_from_optional_statement(branch.statement, imports));
     return required;
 }
 
-fn collect_effects_from_match_case(case: MatchCase) -> EffectRequirement[] {
-    let mut required = collect_effects_from_expression(case.pattern);
-    required = merge_requirements(required, collect_effects_from_expression(case.guard));
-    required = merge_requirements(required, collect_effects_from_block(case.body));
+fn collect_effects_from_match_case(case: MatchCase, imports: ImportSymbolTable) -> EffectRequirement[] {
+    let mut required = collect_effects_from_expression(case.pattern, imports);
+    required = merge_requirements(required, collect_effects_from_expression(case.guard, imports));
+    required = merge_requirements(required, collect_effects_from_block(case.body, imports));
     return required;
 }
 
-fn collect_effects_from_expression(expression: Expression?) -> EffectRequirement[] {
+// Phase E helper: append one requirement per declared effect on the
+// imported callee. The description prefix `imported \`<name>\``
+// is what `diagnostics_render.code_for_missing_effect` keys on to
+// promote the diagnostic from the in-module `E0400` to the
+// cross-module `E0402`. Each effect produces its own requirement so
+// missing-effect rendering preserves the per-effect "required by"
+// breakdown the user sees in the caret diagnostic.
+fn _propagate_imported_callee_effects(name: string, imports: ImportSymbolTable, base: EffectRequirement[]) -> EffectRequirement[] {
+    let entry_opt = lookup_imported_function(imports, name);
+    if entry_opt == null { return base; }
+    let entry: ImportedFunctionSignature? = entry_opt;
+    if entry.effects.length == 0 { return base; }
+    let mut required = base;
+    let prefix = "imported `" + name + "` declares ![";
+    let mut e: number = 0;
+    loop {
+        if e >= entry.effects.length { break; }
+        let effect = entry.effects[e];
+        required = append_requirement(required, EffectRequirement {
+            effect: effect, description: prefix + effect + "]"
+        });
+        e += 1;
+    }
+    return required;
+}
+
+fn collect_effects_from_expression(expression: Expression?, imports: ImportSymbolTable) -> EffectRequirement[] {
     if expression == null { return []; }
     if expression.variant == "Call" {
-        let mut required = collect_effects_from_expression(expression.callee);
+        let mut required = collect_effects_from_expression(expression.callee, imports);
 
         // Capture runtime helpers that imply effects.
         if expression.callee.variant == "Identifier" {
@@ -337,22 +396,29 @@ fn collect_effects_from_expression(expression: Expression?) -> EffectRequirement
                     effect: "net", description: "serve call"
                 });
             }
+            // Phase E: cross-module call resolution. The imports
+            // table is per-program-localized (alias-rewritten,
+            // scope-filtered) so a direct `Identifier` lookup is
+            // both correct and fast. Member-callee resolution
+            // (`mod.fn()`) and decorator-implied transitives are
+            // out of scope for E1; see proposal §5 (Phase E).
+            required = _propagate_imported_callee_effects(name, imports, required);
         }
         if expression.callee.variant == "Member" {
             // Member access effect is handled below, but calls are a strong signal.
-            required = merge_requirements(required, collect_effects_from_expression(expression.callee));
+            required = merge_requirements(required, collect_effects_from_expression(expression.callee, imports));
         }
 
         let mut argument_index: number = 0;
         loop {
             if argument_index >= expression.arguments.length { break; }
-            required = merge_requirements(required, collect_effects_from_expression(expression.arguments[argument_index]));
+            required = merge_requirements(required, collect_effects_from_expression(expression.arguments[argument_index], imports));
             argument_index += 1;
         }
         return required;
     }
     if expression.variant == "Member" {
-        let mut required = collect_effects_from_expression(expression.object);
+        let mut required = collect_effects_from_expression(expression.object, imports);
         if expression.object.variant == "Identifier" {
             let root = expression.object.name;
             if root == "fs" {
@@ -380,11 +446,11 @@ fn collect_effects_from_expression(expression: Expression?) -> EffectRequirement
         return required;
     }
     if expression.variant == "Unary" {
-        return collect_effects_from_expression(expression.operand);
+        return collect_effects_from_expression(expression.operand, imports);
     }
     if expression.variant == "Binary" {
-        let mut required = collect_effects_from_expression(expression.left);
-        required = merge_requirements(required, collect_effects_from_expression(expression.right));
+        let mut required = collect_effects_from_expression(expression.left, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.right, imports));
         return required;
     }
     if expression.variant == "Array" {
@@ -392,7 +458,7 @@ fn collect_effects_from_expression(expression: Expression?) -> EffectRequirement
         let mut element_index: number = 0;
         loop {
             if element_index >= expression.elements.length { break; }
-            required = merge_requirements(required, collect_effects_from_expression(expression.elements[element_index]));
+            required = merge_requirements(required, collect_effects_from_expression(expression.elements[element_index], imports));
             element_index += 1;
         }
         return required;
@@ -402,7 +468,7 @@ fn collect_effects_from_expression(expression: Expression?) -> EffectRequirement
         let mut field_index: number = 0;
         loop {
             if field_index >= expression.fields.length { break; }
-            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value));
+            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value, imports));
             field_index += 1;
         }
         return required;
@@ -412,22 +478,22 @@ fn collect_effects_from_expression(expression: Expression?) -> EffectRequirement
         let mut field_index: number = 0;
         loop {
             if field_index >= expression.fields.length { break; }
-            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value));
+            required = merge_requirements(required, collect_effects_from_expression(expression.fields[field_index].value, imports));
             field_index += 1;
         }
         return required;
     }
     if expression.variant == "Lambda" {
-        return collect_effects_from_block(expression.body);
+        return collect_effects_from_block(expression.body, imports);
     }
     if expression.variant == "Index" {
-        let mut required = collect_effects_from_expression(expression.sequence);
-        required = merge_requirements(required, collect_effects_from_expression(expression.index));
+        let mut required = collect_effects_from_expression(expression.sequence, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.index, imports));
         return required;
     }
     if expression.variant == "Range" {
-        let mut required = collect_effects_from_expression(expression.start);
-        required = merge_requirements(required, collect_effects_from_expression(expression.end));
+        let mut required = collect_effects_from_expression(expression.start, imports);
+        required = merge_requirements(required, collect_effects_from_expression(expression.end, imports));
         return required;
     }
     if expression.variant == "Raw" {

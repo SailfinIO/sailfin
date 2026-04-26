@@ -51,7 +51,8 @@ import {
     render_diagnostic,
     split_source_lines
 } from "./diagnostics_render";
-import { EffectViolation, validate_effects } from "./effect_checker";
+import { EffectViolation, validate_effects_with_imports } from "./effect_checker";
+import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import { sanitize_symbol, substring } from "./string_utils";
 import { Diagnostic } from "./typecheck_types";
 
@@ -147,7 +148,7 @@ fn read_effect_enforcement_env(unique_key: string) -> string ![io] {
 // source path through every `compile_to_*` signature is a bigger
 // refactor than Phase B should take. Phase E (cross-module
 // propagation) revisits the path-plumbing question.
-fn validate_and_render_effects(program: Program, source: string, file_path: string) -> number ![io] {
+fn validate_and_render_effects(program: Program, source: string, file_path: string, imports: ImportSymbolTable) -> number ![io] {
     let raw = read_effect_enforcement_env(file_path);
     let severity = resolve_effect_enforcement(raw);
     if severity == "off" {
@@ -159,7 +160,13 @@ fn validate_and_render_effects(program: Program, source: string, file_path: stri
             + file_path);
         return 0;
     }
-    let violations = validate_effects(program);
+    // Phase E: pass the per-build import symbol table so
+    // `validate_effects_with_imports` can localize it to this
+    // program's `Statement.ImportDeclaration` specifiers and resolve
+    // cross-module call sites. Empty-table callers (legacy
+    // `compile_to_sailfin`, `compile_to_llvm`) get the same
+    // in-module-only behavior they had pre-Phase-E.
+    let violations = validate_effects_with_imports(program, imports);
     if violations.length == 0 { return 0; }
     let source_lines = split_source_lines(source);
     let mut errors: number = 0;

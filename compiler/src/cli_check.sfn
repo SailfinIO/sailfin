@@ -25,6 +25,7 @@ import {
 } from "./capsule_resolver";
 import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
 import { render_diagnostic } from "./diagnostics_render";
+import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
     CheckResult,
     check_source_with_imports,
@@ -43,6 +44,11 @@ struct CheckGroup {
     key: string;
     entry_paths: string[];
     interfaces: Statement[];
+    // Phase E: cross-module effect propagation table built from the
+    // same artifacts the `interfaces` list pulls from. Threaded into
+    // `check_source_with_imports` so a caller missing
+    // `![<callee_effect>]` produces an `E0402` diagnostic.
+    function_effects: ImportSymbolTable;
 }
 
 fn _emit_check_header(path: string, quiet: boolean) ![io] {
@@ -195,7 +201,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
             let empty_entries: string[] = [];
             let empty_interfaces: Statement[] = [];
             groups.push(CheckGroup {
-                key: key, entry_paths: empty_entries, interfaces: empty_interfaces
+                key: key, entry_paths: empty_entries, interfaces: empty_interfaces, function_effects: empty_import_symbols()
             });
             idx = groups.length - 1;
         }
@@ -224,6 +230,10 @@ fn handle_check_command(args: string[]) -> number ![io] {
         }
         let load = load_imported_interfaces_from_paths(resolution.asm_paths);
         groups[gi].interfaces = load.interfaces;
+        // Phase E: stash the cross-module function-effect table so
+        // the per-file analysis loop below can hand it to
+        // `check_source_with_imports` alongside the interface list.
+        groups[gi].function_effects = load.function_effects;
 
         let mut mi: number = 0;
         loop {
@@ -254,7 +264,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
         let path = files[fi];
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
-        let result = check_source_with_imports(source, path, groups[group_idx].interfaces);
+        let result = check_source_with_imports(source, path, groups[group_idx].interfaces, groups[group_idx].function_effects);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually
         // see the effect-violation output. Pre-Phase-B effect
@@ -276,6 +286,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
     let empty_texts: string[] = [];
     let aggregate_load_result = ImportedInterfaceLoadResult {
         interfaces: empty_interfaces,
+        function_effects: empty_import_symbols(),
         missing_paths: aggregate_missing,
         parse_failure_paths: aggregate_parse_failures,
         skipped_paths: aggregate_skipped,

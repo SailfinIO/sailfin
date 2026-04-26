@@ -1,6 +1,6 @@
 # Sailfin Language Reference for LLMs
 
-> Version: 0.5.9 | Updated: 2026-04-26
+> Version: 0.5.9 | Updated: 2026-04-26 (Phase E)
 > Source: https://github.com/SailfinIO/sailfin | Site: https://sailfin.dev
 
 Sailfin is a compiled systems language with compile-time capability enforcement
@@ -17,9 +17,11 @@ enforced at compile time: undeclared effect usage fails `make compile`,
 `=warning` (telemetry-only mode) while migrating, or `=off` (build-path
 bypass; `sfn check` still validates per proposal §4.7).
 
-Cross-module call-graph propagation (A must declare B's effects when
-A calls B from another module) is the next milestone on the roadmap
-(Phase E in `docs/proposals/effect-validation.md`).
+Cross-module call-graph propagation is enforced: if A imports B and
+calls it, A must declare every effect B declares (diagnostic code
+`E0402`). Aliased imports (`import { foo as bar }`) resolve under the
+local name. `Member`-callee resolution (`mod.fn()`) is a follow-up
+(Phase E2 in `docs/proposals/effect-validation.md`).
 
     fn read_config(path: string) -> string ![io] {
         return fs.readFile(path);
@@ -283,7 +285,7 @@ These features parse, type-check, emit to .sfn-asm IR, and lower to LLVM:
 
 ## What Is Parsed but Not Fully Implemented
 
-- Cross-module effect propagation -- direct effect calls inside a function are enforced; transitive effects from imported callees are not yet (Phase E of effect-validation)
+- Member-callee cross-module effect propagation (`mod.fetch()`) -- direct `Identifier` callee resolution ships in Phase E1; member callees and decorator-implied transitives are deferred to Phase E2
 - Closures with capture -- lambdas parse but don't capture enclosing scope
 - Generic constraints (<T: Bound>) -- parsed as text, not enforced
 - Affine<T> / Linear<T> ownership -- parsed, transparent (no enforcement)

@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 26, 2026 (effect validation Phases C/D — audit + default flipped to error)
+Updated: April 26, 2026 (effect validation Phase E — cross-module propagation)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -129,6 +129,28 @@ feature availability.
   All `examples/*.sfn` build cleanly under the new default. Capsule
   authors who need to migrate gradually can opt into
   `SAILFIN_EFFECT_ENFORCE=warning` for telemetry-only mode.
+- **Cross-module effect propagation (Phase E — shipped 2026-04-26).**
+  When a caller invokes an `Identifier` that resolves to an imported
+  function with declared effects, `validate_effects_with_imports`
+  promotes the call into a per-call effect requirement and emits
+  `E0402` (cross-module) instead of the in-module `E0400` if the
+  caller's signature doesn't propagate the effect. The new
+  `compiler/src/effect_imports.sfn` module owns the
+  `ImportSymbolTable` data shape; the loader
+  (`typecheck_import_loader.sfn`) populates it as a side-channel of
+  the same `.sfn-asm` artifact read that already produces the
+  `Statement.InterfaceDeclaration` list. `tools/check.sfn`,
+  `effect_gate.sfn`, `cli_check.sfn`, and `cli_commands.sfn` thread
+  the table through to every analysis surface.
+
+  Alias resolution: `import { foo as bar } from "..."` registers
+  `bar` in the localized table with `foo`'s effect set, so the AST
+  walker sees `Call(Identifier("bar"))` and resolves correctly. The
+  scope filter in `localize_import_symbols_for_program` ensures a
+  same-named in-module function never picks up a global table
+  entry's effects. E1 covers direct `Identifier` callees;
+  `Member`-callee resolution (`mod.fn()`) and decorator-implied
+  transitives are deferred to a follow-up Phase E2.
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
   and attach release assets.
@@ -158,7 +180,8 @@ feature availability.
 | Effect enforcement — `model` | Reserved | Declarable; effect-checker has no detector yet. The `sfn/ai` capsule (post-1.0) supplies the call sites Phase G's name-resolution detector will key on |
 | Effect enforcement — `clock` | **Enforced** | Checker detects `sleep` / `runtime.sleep`; build fails on undeclared usage by default |
 | Effect enforcement — `gpu`, `rand` | Parsed only | Reserved at 1.0 in the canonical taxonomy; no detector logic yet |
-| Effect enforcement as compilation gate | **Shipped (Phase D, 2026-04-26)** | `validate_and_render_effects` runs after typecheck in every `compile_to_*` entry; default severity is `error` so undeclared effects fail the build. `SAILFIN_EFFECT_ENFORCE=warning` opt-in for capsule authors mid-migration; `=off` build-path escape hatch (proposal §4.7). Phase E (cross-module propagation) and Phase F (capsule.toml capability cross-check) are next on the roadmap |
+| Effect enforcement as compilation gate | **Shipped (Phase D, 2026-04-26)** | `validate_and_render_effects` runs after typecheck in every `compile_to_*` entry; default severity is `error` so undeclared effects fail the build. `SAILFIN_EFFECT_ENFORCE=warning` opt-in for capsule authors mid-migration; `=off` build-path escape hatch (proposal §4.7) |
+| Cross-module effect propagation | **Shipped (Phase E, 2026-04-26)** | A caller of an imported function inherits the callee's declared effects; missing propagation fails the build with `E0402`. Aliased imports (`import { foo as bar }`) resolve under the local name. E1 covers direct `Identifier` calls; `Member`-callee resolution and decorator-implied transitives deferred to Phase E2. Phase F (capsule.toml capability cross-check) is next |
 | Generic type inference | Partial | Type params captured; inference coverage is limited |
 | Interface conformance validation | Partial | Basic checks; variance not yet enforced |
 | `Affine<T>` / `Linear<T>` | Parsed only | Ownership wrappers accepted; move/consume rules not enforced |

@@ -1,0 +1,177 @@
+// compiler/src/effect_imports.sfn
+//
+// Phase E (`docs/proposals/effect-validation.md` §5) data shapes that
+// let the effect checker resolve cross-module call sites against the
+// effects declared on imported callees.
+//
+// The loader (`typecheck_import_loader.sfn`) reads the `effects: string[]`
+// field every `.sfn-asm` artifact already carries on each
+// `NativeFunction` and folds it into an `ImportSymbolTable` here.
+// The checker (`effect_checker.sfn`) walks the caller's AST, looks
+// each `Identifier` callee up in the table, and propagates the
+// callee's effects to the caller's required-effect set with a
+// description prefix `imported \`<name>\`` — that prefix is what
+// `diagnostics_render.code_for_missing_effect` keys on to emit
+// `E0402` instead of the in-module `E0400`.
+//
+// The module is intentionally a leaf:
+//   - No I/O (the loader does that).
+//   - No dependency on `ast`, `effect_checker`, or `native_ir` —
+//     callers wrap raw `(name, effects[])` pairs into the public
+//     constructor and the table stays a pure value.
+// That isolation lets unit tests synthesize tables directly without
+// faking a `.sfn-asm` round-trip and lets `tools/check.sfn`,
+// `effect_gate.sfn`, and `main.sfn` import the types without pulling
+// the disk loader into their import graphs.
+//
+// One AST dependency: `localize_import_symbols_for_program` walks
+// the caller's `Statement.ImportDeclaration` list to filter the
+// global table down to just-this-program's imports (and apply alias
+// rewrites). That keeps cross-module name collisions from emitting
+// spurious `E0402` against a same-named in-module function.
+import { Program } from "./ast";
+
+// One callable signature exposed to a downstream caller. `name` is
+// the identifier the importing module sees (after alias resolution
+// in the caller's `Statement.ImportDeclaration` specifiers); the
+// effect_checker handles aliases at lookup time so this struct
+// always carries the original exporting-module name.
+struct ImportedFunctionSignature {
+    name: string;
+    effects: string[];
+}
+
+// Aggregate of imported callable signatures exposed to a single
+// compilation unit. Today only standalone functions are populated —
+// interface methods are reachable through `imported_interfaces`
+// (the existing `Statement[]` channel) and are therefore not
+// duplicated here. If a future Phase E2 needs to resolve
+// `pkg.method()` member calls, the table can grow a parallel
+// `methods` field without breaking existing consumers.
+struct ImportSymbolTable {
+    functions: ImportedFunctionSignature[];
+}
+
+// Construct an empty table — used by build-path callers that don't
+// have an import resolver in scope (e.g. `compile_to_sailfin`,
+// `compile_to_llvm`, the legacy entry points that pre-date the
+// resolver migration). Returning a real value (not null) keeps the
+// effect_checker's lookup loop branchless.
+fn empty_import_symbols() -> ImportSymbolTable {
+    let empty: ImportedFunctionSignature[] = [];
+    return ImportSymbolTable { functions: empty };
+}
+
+// Push a single (name, effects) pair onto an existing table. The
+// helper de-duplicates by name — the loader can call it for every
+// `NativeFunction` in every staged `.sfn-asm` artifact without
+// worrying about double-staging when two artifacts re-export the
+// same symbol. Last-write-wins is fine for the common case (every
+// re-export carries identical effect annotations); a future
+// diagnostic for divergent effect lists can land in Phase G.
+fn append_import_function(table: ImportSymbolTable, name: string, effects: string[]) -> ImportSymbolTable {
+    if name.length == 0 { return table; }
+    let mut updated = table;
+    let mut existing_index: number = -1;
+    let mut i: number = 0;
+    loop {
+        if i >= updated.functions.length { break; }
+        if updated.functions[i].name == name {
+            existing_index = i;
+            break;
+        }
+        i += 1;
+    }
+    let mut effects_copy: string[] = [];
+    let mut j: number = 0;
+    loop {
+        if j >= effects.length { break; }
+        effects_copy.push(effects[j]);
+        j += 1;
+    }
+    let entry = ImportedFunctionSignature {
+        name: name,
+        effects: effects_copy
+    };
+    if existing_index >= 0 {
+        updated.functions[existing_index] = entry;
+        return updated;
+    }
+    updated.functions.push(entry);
+    return updated;
+}
+
+// O(N) name lookup. Returns null when the name is not an imported
+// function. The caller (`effect_checker.collect_effects_from_expression`)
+// uses null as the signal "this Identifier isn't a known import,
+// skip cross-module propagation for this Call". A scan is sufficient
+// at the table sizes this path sees (a few hundred imports per
+// compilation unit, called once per `Call` expression in the body).
+fn lookup_imported_function(table: ImportSymbolTable, name: string) -> ImportedFunctionSignature? {
+    let mut i: number = 0;
+    loop {
+        if i >= table.functions.length { break; }
+        if table.functions[i].name == name { return table.functions[i]; }
+        i += 1;
+    }
+    return null;
+}
+
+// Produce a per-program-localized symbol table from a global one.
+// The loader stages every standalone-fn `effects` field across every
+// dependency artifact, so the global `table` is keyed by exporting-
+// module symbol name. Two filters happen here:
+//
+//   1. **Scope filter** — the local table only contains entries the
+//      `program` actually imports. Without this, a same-named local
+//      function would be misidentified as "imported with effects
+//      ![X]" and trigger spurious `E0402` diagnostics. Only entries
+//      under a `Statement.ImportDeclaration` import-specifier survive.
+//
+//   2. **Alias rewrite** — `import { fetch as get } from "..."` lets
+//      the local name `get` stand in for the export `fetch`. The
+//      effect_checker walks the AST and sees `Call(Identifier("get"))`
+//      at the call site, so the localized entry is keyed by `get`
+//      with `fetch`'s effects. Non-aliased specifiers (`alias == null`
+//      or empty) keep the original export name.
+//
+// The function is pure — no I/O — so unit tests can synthesize a
+// global table + program in-memory and assert the localized result.
+fn localize_import_symbols_for_program(program: Program, table: ImportSymbolTable) -> ImportSymbolTable {
+    let mut local = empty_import_symbols();
+    let mut i: number = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let statement = program.statements[i];
+        if statement.variant == "ImportDeclaration" {
+            let mut s: number = 0;
+            loop {
+                if s >= statement.import_specifiers.length { break; }
+                let spec = statement.import_specifiers[s];
+                let entry_opt = lookup_imported_function(table, spec.name);
+                if entry_opt != null {
+                    let entry: ImportedFunctionSignature? = entry_opt;
+                    let mut local_name = spec.name;
+                    let alias = spec.alias;
+                    if alias != null {
+                        let alias_str: string? = alias;
+                        if alias_str.length > 0 { local_name = alias_str; }
+                    }
+                    local = append_import_function(local, local_name, entry.effects);
+                }
+                s += 1;
+            }
+        }
+        i += 1;
+    }
+    return local;
+}
+
+export {
+    ImportSymbolTable,
+    ImportedFunctionSignature,
+    append_import_function,
+    empty_import_symbols,
+    localize_import_symbols_for_program,
+    lookup_imported_function
+};

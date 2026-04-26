@@ -52,18 +52,41 @@ fn join_effects(effects: string[]) -> string {
 }
 
 fn code_for_missing_effect(missing_effects: string[], requirements: EffectRequirement[]) -> string {
-    // E0400 — missing effect declaration (general)
+    // E0400 — missing effect declaration (general, in-module)
     // E0401 — decorator-implied effect missing
+    // E0402 — cross-module effect not propagated from imported callee
+    //
+    // E0402 is identified by the description prefix `imported \``
+    // that `effect_checker._propagate_imported_callee_effects`
+    // attaches when the offending callee is an imported function.
+    // E0401 wins over E0402 when both apply (decorator-implied
+    // effects are typically I/O regardless of any cross-module
+    // propagation), matching the historical Phase A precedence.
+    let mut has_imported: boolean = false;
     let mut i: number = 0;
     loop {
         if i >= requirements.length { break; }
         let desc = requirements[i].description;
         if desc.length > 0 {
             if desc[0] == "@" { return "E0401"; }
+            if _description_starts_with_imported(desc) { has_imported = true; }
         }
         i += 1;
     }
+    if has_imported { return "E0402"; }
     return "E0400";
+}
+
+fn _description_starts_with_imported(desc: string) -> boolean {
+    let prefix = "imported `";
+    if desc.length < prefix.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= prefix.length { break; }
+        if desc[i] != prefix[i] { return false; }
+        i += 1;
+    }
+    return true;
 }
 
 fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
