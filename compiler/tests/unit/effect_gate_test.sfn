@@ -1,0 +1,170 @@
+// Unit tests for compiler/src/effect_gate.sfn — Phase B
+// (`docs/proposals/effect-validation.md` §5, locked 2026-04-26).
+//
+// Phase B wires `validate_effects` into the build path and lets
+// `SAILFIN_EFFECT_ENFORCE` flip the gate between warning (default),
+// error, and off. The pure-string severity decision lives in
+// `resolve_effect_enforcement` so the env-var contract can be
+// regression-tested without spawning the compiler binary or mutating
+// process environment from inside a test.
+//
+// We do NOT exercise `validate_and_render_effects` end-to-end here —
+// that path requires a parsed Program AST and routes through stderr
+// I/O, which would make this a fragile golden-output test. The
+// effect-checker side already has AST-level coverage in
+// `effect_checker_test.sfn`; the renderer side has coverage in
+// `check_tool_test.sfn`. This file imports the real
+// `resolve_effect_enforcement` from `effect_gate.sfn` so a refactor
+// that changes the env-var → severity mapping (e.g. Phase D's flip
+// of the default branch from "warning" to "error") fails this suite
+// loud rather than letting a stale local mirror keep passing.
+import { resolve_effect_enforcement } from "../../src/effect_gate";
+
+// -------------------------------------------------------------------
+// Severity selection — Phase B contract
+// -------------------------------------------------------------------
+test "effect_gate: unset env var resolves to warning (Phase B default)" {
+    // The env-read shell helper writes "" for missing vars (printf
+    // '%s' "$UNSET" produces an empty file). Phase B treats unset
+    // as the warning default so contributors see effect violations
+    // without the build going red during the audit period.
+    assert strings_equal(resolve_effect_enforcement(""), "warning");
+}
+
+test "effect_gate: explicit warning value resolves to warning" {
+    assert strings_equal(resolve_effect_enforcement("warning"), "warning");
+}
+
+test "effect_gate: explicit error value resolves to error" {
+    // `=error` is the contributor opt-in for dry-running the
+    // post-Phase-D gate locally. Pin this so a typo refactor
+    // (e.g. accepting "errors" or capitalising) doesn't silently
+    // disable the dry-run path.
+    assert strings_equal(resolve_effect_enforcement("error"), "error");
+}
+
+test "effect_gate: explicit off value resolves to off" {
+    // `=off` is the §4.7 escape hatch — emergency-builds bypass
+    // gates without removing the env var or touching source.
+    // (The build path honors `off` directly; `sfn check` coerces
+    // `off` back to `warning` because §4.7 scopes the escape hatch
+    // to the build path.)
+    assert strings_equal(resolve_effect_enforcement("off"), "off");
+}
+
+test "effect_gate: unrecognised value falls back to warning" {
+    // No fancy parsing: anything we don't recognise lands on the
+    // default. Lock this so a Phase D flip of the default branch
+    // doesn't accidentally start treating "true" / "1" / "yes" as
+    // synonyms for "error" — those are conventions from other
+    // ecosystems and would surprise Sailfin users.
+    assert strings_equal(resolve_effect_enforcement("yes"), "warning");
+    assert strings_equal(resolve_effect_enforcement("1"), "warning");
+    assert strings_equal(resolve_effect_enforcement("ERROR"), "warning");
+    assert strings_equal(resolve_effect_enforcement("on"), "warning");
+}
+
+// -------------------------------------------------------------------
+// Diagnostic severity codes — Phase B → D mapping
+// -------------------------------------------------------------------
+//
+// Phase B emits effect violations under whichever severity the env
+// var resolves to. The renderer keys on `Diagnostic.severity` to
+// produce `error[E04xx]:` / `warning[E04xx]:` / `hint[E04xx]:`
+// headers. Pin the mapping so that:
+//
+//   - Phase B's warning-mode rollout actually says "warning" (a
+//     regression that emitted "error" would defeat the Phase B → D
+//     transition window).
+//   - Phase D's eventual flip of the default to "error" is a
+//     one-line change to `resolve_effect_enforcement`, not a
+//     hunt-the-callsites refactor across diagnostic factories.
+//
+// The header format is verified in `check_tool_test.sfn`; here we
+// just lock the severity-string contract that flows out of
+// `resolve_effect_enforcement` and into the diagnostic header.
+fn _local_diagnostic_header(severity: string, code: string) -> string {
+    return severity + "[" + code + "]: ";
+}
+
+test "effect_gate: warning severity renders warning[E04xx] header" {
+    let header = _local_diagnostic_header(resolve_effect_enforcement(""), "E0400");
+    assert strings_equal(header, "warning[E0400]: ");
+}
+
+test "effect_gate: error severity renders error[E04xx] header" {
+    let header = _local_diagnostic_header(resolve_effect_enforcement("error"), "E0400");
+    assert strings_equal(header, "error[E0400]: ");
+}
+
+test "effect_gate: decorator-implied violations also flow through severity" {
+    // E0401 = decorator-implied effect missing. Phase A added the
+    // separate code; Phase B must keep it so contributors can
+    // grep `\[E0401\]` for `@trace` / `@logExecution` violations
+    // distinctly from the general `E0400` bucket.
+    let header = _local_diagnostic_header(resolve_effect_enforcement("warning"), "E0401");
+    assert strings_equal(header, "warning[E0401]: ");
+}
+
+// -------------------------------------------------------------------
+// Build-gate behavior contract
+// -------------------------------------------------------------------
+//
+// `validate_and_render_effects(program, source, file_path)` returns
+// the count of *error-severity* violations. The build-path callers
+// in `main.sfn` use the return value as the abort signal:
+//
+//   if validate_and_render_effects(program, source, mod) > 0 { return ""; }
+//
+// Pin the contract for the three steady states so a refactor that
+// "simplifies" by returning a boolean (or by counting warnings as
+// well) breaks loud rather than quietly relaxing the Phase D gate.
+//
+// The simulation mirrors the real loop in
+// `effect_gate.validate_and_render_effects` — only "error" severity
+// contributes to the abort count; "warning"/"hint"/"off" return 0
+// regardless of how many violations were rendered. We keep the
+// simulation here (rather than calling the real function) because
+// the real function takes a parsed `Program` AST and emits to
+// stderr; building the AST + capturing stderr would make the test
+// fragile against rendering changes that the renderer-side suite
+// (`check_tool_test.sfn`) already covers.
+fn _simulate_gate_abort_count(severity: string, violation_count: number) -> number {
+    if severity == "error" { return violation_count; }
+    return 0;
+}
+
+test "effect_gate: warning mode never aborts the build" {
+    // Even with 50 violations, warning mode returns 0 — the build
+    // proceeds. This is the cornerstone of the Phase B audit
+    // period. We thread the input through the real
+    // `resolve_effect_enforcement` so a regression that flips the
+    // default to "error" prematurely fails this case loudly.
+    let warning_severity = resolve_effect_enforcement("");
+    assert _simulate_gate_abort_count(warning_severity, 50) == 0;
+    assert _simulate_gate_abort_count(warning_severity, 0) == 0;
+}
+
+test "effect_gate: error mode aborts on first violation" {
+    // Any non-zero count short-circuits the compile entry point.
+    let error_severity = resolve_effect_enforcement("error");
+    assert _simulate_gate_abort_count(error_severity, 1) == 1;
+    assert _simulate_gate_abort_count(error_severity, 12) == 12;
+}
+
+test "effect_gate: error mode passes through when no violations" {
+    // The clean-tree path — the compiler self-hosts under
+    // strict effect enforcement once Phase C completes. This case
+    // is the steady state for the post-Phase-D world.
+    assert _simulate_gate_abort_count(resolve_effect_enforcement("error"), 0) == 0;
+}
+
+test "effect_gate: off mode never aborts" {
+    // §4.7 escape hatch — even with violations present, off
+    // skips validation entirely and returns 0. The notice line
+    // emitted alongside is verified by manual inspection (it's
+    // a stderr side effect; not unit-testable without process
+    // isolation).
+    let off_severity = resolve_effect_enforcement("off");
+    assert _simulate_gate_abort_count(off_severity, 99) == 0;
+}

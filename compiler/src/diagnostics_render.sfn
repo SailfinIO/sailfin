@@ -1,0 +1,310 @@
+// compiler/src/diagnostics_render.sfn
+//
+// Single source of truth for diagnostic rendering shared between
+// `sfn check` (`tools/check.sfn`) and the build path
+// (`main.sfn` via `effect_gate.sfn`). Phase B
+// (`docs/proposals/effect-validation.md` §5, locked 2026-04-26)
+// extracts this code from `tools/check.sfn` so the build pipeline
+// can render effect diagnostics in the same shape — same headers,
+// same caret pointers, same `[kind: effect]` suffix — without
+// pulling in a dependency cycle through `main.sfn`.
+//
+// The rendering API is intentionally narrow:
+//
+//   - `effect_violation_to_diagnostic(violation) -> Diagnostic` —
+//     converts an `EffectViolation` (carrying signature/trigger
+//     tokens since Phase A) into the typed `Diagnostic` value the
+//     renderer consumes.
+//   - `render_diagnostic(diag, source_lines, kind) -> string` —
+//     returns the multi-line rendered text (caret diagram included
+//     when `diag.primary` is non-null and the line index is in
+//     range; location-only `--> file_path` line otherwise).
+//   - `split_source_lines(source) -> string[]` — splits source on
+//     CR/LF/CRLF the same way `main.sfn`'s
+//     `format_typecheck_diagnostic` does, kept here so the renderer
+//     is self-contained and can be unit-tested without bootstrapping
+//     a full compile pipeline.
+//
+// Every other helper in this module is private (`_dr_*` prefix) and
+// is duplicated rather than imported from `main.sfn` on purpose:
+// `main.sfn` imports diagnostic-rendering helpers from this module,
+// and the seed compiler does not handle import cycles cleanly. The
+// duplication is small (~50 lines, four pure string helpers) and
+// changes here are decoupled from changes to `main.sfn`'s own copies.
+import { EffectRequirement, EffectViolation } from "./effect_checker";
+import { substring } from "./string_utils";
+import { Token } from "./token";
+import { Diagnostic } from "./typecheck_types";
+
+// -------------------------------------------------------------------
+// Effect-violation → Diagnostic
+// -------------------------------------------------------------------
+fn join_effects(effects: string[]) -> string {
+    if effects.length == 0 { return ""; }
+    let mut out = effects[0];
+    let mut i: number = 1;
+    loop {
+        if i >= effects.length { break; }
+        out = out + ", " + effects[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn code_for_missing_effect(missing_effects: string[], requirements: EffectRequirement[]) -> string {
+    // E0400 — missing effect declaration (general)
+    // E0401 — decorator-implied effect missing
+    let mut i: number = 0;
+    loop {
+        if i >= requirements.length { break; }
+        let desc = requirements[i].description;
+        if desc.length > 0 {
+            if desc[0] == "@" { return "E0401"; }
+        }
+        i += 1;
+    }
+    return "E0400";
+}
+
+fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
+    let effects_text = join_effects(violation.missing_effects);
+    let mut message = "function `" + violation.routine_name
+        + "` is missing required effects: !["
+        + effects_text
+        + "]";
+
+    if violation.requirements.length > 0 {
+        message = message + "\nrequired by:";
+        let mut i: number = 0;
+        loop {
+            if i >= violation.requirements.length { break; }
+            let req = violation.requirements[i];
+            message = message + "\n  - " + req.description + " requires !["
+                + req.effect
+                + "]";
+            i += 1;
+        }
+    }
+
+    if violation.missing_effects.length > 0 {
+        message = message + "\nsuggestion: add ![" + effects_text
+            + "] to the function signature";
+    }
+
+    let code = code_for_missing_effect(violation.missing_effects, violation.requirements);
+    // `severity` rides on the violation since Phase A so the gate
+    // (`effect_gate.sfn`) can flip warning/error from
+    // `SAILFIN_EFFECT_ENFORCE` without reaching into the renderer.
+    // Empty-string fallback keeps callers that never set severity
+    // (e.g. seed-compiler test fixtures) on the historical default.
+    let mut sev = violation.severity;
+    if sev.length == 0 { sev = "error"; }
+    return Diagnostic {
+        code: code,
+        severity: sev,
+        message: message,
+        file_path: "",
+        primary: violation.trigger
+    };
+}
+
+// -------------------------------------------------------------------
+// Diagnostic rendering
+// -------------------------------------------------------------------
+fn _dr_split_lines(source: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut current: string = "";
+    let mut index: number = 0;
+    loop {
+        if index >= source.length { break; }
+        let _ch_next = index + 1;
+        let ch = substring(source, index, _ch_next);
+        if ch == "\r" {
+            lines.push(current);
+            current = "";
+            if _ch_next < source.length {
+                let _ch_next2 = index + 2;
+                let next = substring(source, _ch_next, _ch_next2);
+                if next == "\n" {
+                    index += 2;
+                    continue;
+                }
+            }
+            index += 1;
+            continue;
+        }
+        if ch == "\n" {
+            lines.push(current);
+            current = "";
+            index += 1;
+            continue;
+        }
+        current = current + ch;
+        index += 1;
+    }
+    lines.push(current);
+    return lines;
+}
+
+fn split_source_lines(source: string) -> string[] {
+    return _dr_split_lines(source);
+}
+
+fn _dr_join_lines(lines: string[]) -> string {
+    if lines.length == 0 { return ""; }
+    let mut result: string = lines[0];
+    let mut index: number = 1;
+    loop {
+        if index >= lines.length { break; }
+        result = result + "\n" + lines[index];
+        index += 1;
+    }
+    return result;
+}
+
+fn _dr_number_to_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let mut working: number = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut remaining: number = working;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}
+
+fn _dr_repeat(ch: string, count: number) -> string {
+    if count <= 0 { return ""; }
+    let mut index: number = 0;
+    let mut result: string = "";
+    loop {
+        if index >= count { break; }
+        result = result + ch;
+        index += 1;
+    }
+    return result;
+}
+
+fn _dr_render_message_lines(message: string) -> string[] {
+    return _dr_split_lines(message);
+}
+
+fn _dr_pad_number_string(value: string, width: number) -> string {
+    if value.length >= width { return value; }
+    let pad_count = width - value.length;
+    return _dr_repeat(" ", pad_count) + value;
+}
+
+fn _dr_build_pointer_prefix(column: number, line_text: string) -> string {
+    if column <= 1 { return ""; }
+    let mut prefix: string = "";
+    let mut index: number = 1;
+    loop {
+        if index >= column { break; }
+        if index <= line_text.length {
+            let ch = substring(line_text, index - 1, index);
+            if ch == "\t" { prefix = prefix + "\t"; } else {
+                prefix = prefix + " ";
+            }
+        } else { prefix = prefix + " "; }
+        index += 1;
+    }
+    return prefix;
+}
+
+fn _dr_build_caret(lexeme: string, line_text: string, column: number) -> string {
+    let mut highlight: number = lexeme.length;
+    if highlight <= 0 { highlight = 1; }
+    let mut remaining: number = line_text.length - (column - 1);
+    if remaining <= 0 { remaining = 1; }
+    if highlight > remaining { highlight = remaining; }
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= highlight { break; }
+        out = out + "^";
+        i += 1;
+    }
+    return out;
+}
+
+fn render_diagnostic(d: Diagnostic, source_lines: string[], kind: string) -> string {
+    let mut parts: string[] = [];
+    let msg_lines = _dr_render_message_lines(d.message);
+    let mut header: string = d.severity + "[" + d.code + "]: ";
+    if msg_lines.length > 0 { header = header + msg_lines[0]; }
+    parts.push(header);
+
+    let mut padding_width: number = 1;
+    if source_lines.length > 0 {
+        padding_width = _dr_number_to_string(source_lines.length).length;
+    }
+
+    let mut has_location: boolean = false;
+    let mut line_number: number = 0;
+    let mut column_number: number = 1;
+    let mut lexeme: string = "";
+    if d.primary != null {
+        let token: Token? = d.primary;
+        line_number = token.line;
+        column_number = token.column;
+        lexeme = token.lexeme;
+        if line_number >= 1 {
+            if line_number <= source_lines.length { has_location = true; }
+        }
+    }
+
+    if has_location {
+        let loc = "  --> " + d.file_path + ":" + _dr_number_to_string(line_number)
+            + ":"
+            + _dr_number_to_string(column_number);
+        parts.push(loc);
+        let gutter = _dr_repeat(" ", padding_width);
+        parts.push(" " + gutter + " |");
+        let line_text = source_lines[line_number - 1];
+        let line_label = _dr_pad_number_string(_dr_number_to_string(line_number), padding_width);
+        parts.push(" " + line_label + " | " + line_text);
+        let pointer_prefix = _dr_build_pointer_prefix(column_number, line_text);
+        let caret = _dr_build_caret(lexeme, line_text, column_number);
+        parts.push(" " + gutter + " | " + pointer_prefix + caret);
+    } else if d.file_path.length > 0 {
+        parts.push("  --> " + d.file_path);
+    }
+
+    let mut i: number = 1;
+    loop {
+        if i >= msg_lines.length { break; }
+        parts.push("  = " + msg_lines[i]);
+        i += 1;
+    }
+
+    // Prefix tag (typecheck vs effect) helps grep/filtering.
+    if kind.length > 0 { parts.push("  [kind: " + kind + "]"); }
+
+    return _dr_join_lines(parts);
+}
+
+export {
+    code_for_missing_effect,
+    effect_violation_to_diagnostic,
+    join_effects,
+    render_diagnostic,
+    split_source_lines
+};
