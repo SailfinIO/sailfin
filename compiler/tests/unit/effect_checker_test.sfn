@@ -1,0 +1,303 @@
+// Unit tests for compiler/src/effect_taxonomy.sfn and the
+// Phase-A enrichments to compiler/src/effect_checker.sfn:
+// `EffectViolation` now carries `signature_token`, `trigger`, and
+// `severity` fields, populated from the routine's signature span.
+// See docs/proposals/effect-validation.md (Part 5, Phase A) for the
+// full design.
+//
+// The tests construct AST values via small helper functions to stay
+// flat — some seed compilers previously segfaulted on deeply nested
+// struct-literal initialisers in test bodies (see
+// check_tool_test.sfn preamble for the same dodge).
+import {
+    Block,
+    Decorator,
+    Expression,
+    FieldDeclaration,
+    FunctionSignature,
+    MethodDeclaration,
+    Program,
+    SourceSpan,
+    Statement,
+    TypeAnnotation,
+    TypeParameter
+} from "../../src/ast";
+import { EffectViolation, validate_effects } from "../../src/effect_checker";
+import { canonical_effects, is_canonical_effect } from "../../src/effect_taxonomy";
+import { Token } from "../../src/token";
+
+// -------------------------------------------------------------------
+// Builder helpers
+// -------------------------------------------------------------------
+fn _empty_block() -> Block {
+    return Block { tokens: [], text: "", statements: [] };
+}
+
+fn _span(line: number, column: number) -> SourceSpan {
+    return SourceSpan {
+        start_line: line,
+        start_column: column,
+        end_line: line,
+        end_column: column + 1
+    };
+}
+
+fn _signature(name: string, effects: string[], span: SourceSpan?) -> FunctionSignature {
+    return FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: [],
+        return_type: null,
+        effects: effects,
+        type_parameters: [],
+        name_span: span
+    };
+}
+
+// Build a FunctionDeclaration statement with a body that triggers
+// an `![io]` requirement (a `print.info(…)` call). The body is a
+// `Raw` expression wrapping the source text so the effect checker's
+// fallback `collect_effects_from_text` path picks it up — that's the
+// production path today and exactly what Phase A's signature-span
+// fix is supposed to attribute to the function declaration.
+fn _make_io_violating_routine(name: string, declared_effects: string[], span_line: number) -> Statement {
+    let span = _span(span_line, 4);
+    let body_text = "print.info(\"hello\");";
+    let body_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: body_text },
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: body_text,
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, declared_effects, span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+}
+
+// -------------------------------------------------------------------
+// Canonical taxonomy — locked at 1.0
+// -------------------------------------------------------------------
+test "canonical_effects: returns the locked 1.0 set" {
+    let effects = canonical_effects();
+    // Six effects, ordered for stable diagnostic rendering.
+    assert effects.length == 6;
+    assert effects[0] == "clock";
+    assert effects[1] == "gpu";
+    assert effects[2] == "io";
+    assert effects[3] == "model";
+    assert effects[4] == "net";
+    assert effects[5] == "rand";
+}
+
+test "is_canonical_effect: accepts every locked-in name" {
+    assert is_canonical_effect("io");
+    assert is_canonical_effect("net");
+    assert is_canonical_effect("clock");
+    assert is_canonical_effect("rand");
+    // §7.2 decision: `model` is reserved at 1.0 even though `sfn/ai`
+    // is post-1.0. Regression-guard the reservation here so a future
+    // refactor that "tidies up the taxonomy" can't quietly drop it.
+    assert is_canonical_effect("model");
+    // §7.4-adjacent: `gpu` is reserved at 1.0 for the same forward-
+    // compatibility reason.
+    assert is_canonical_effect("gpu");
+}
+
+test "is_canonical_effect: rejects non-canonical names" {
+    // None of these are part of the 1.0 set. The checker must reject
+    // them so user-defined effect names can't sneak through and
+    // create silent capability holes when Phase F's capability
+    // cross-check lands.
+    assert ! is_canonical_effect("filesystem");
+    assert ! is_canonical_effect("io_extra");
+    assert ! is_canonical_effect("");
+    assert ! is_canonical_effect("IO");
+    assert ! is_canonical_effect("net2");
+}
+
+// -------------------------------------------------------------------
+// EffectViolation source-span attribution
+// -------------------------------------------------------------------
+test "effect violation: signature_token populated from name_span" {
+    let stmt = _make_io_violating_routine("boom", [], 7);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "boom";
+    assert v.signature_token != null;
+    let tok: Token? = v.signature_token;
+    assert tok.line == 7;
+    assert tok.column == 4;
+    assert tok.lexeme == "boom";
+}
+
+test "effect violation: trigger defaults to signature_token in Phase A" {
+    let stmt = _make_io_violating_routine("ping", [], 12);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    // Phase A: trigger == signature_token. Per-expression spans land
+    // in a follow-up PR once `enum Expression` variants gain spans.
+    assert v.trigger != null;
+    let trig: Token? = v.trigger;
+    assert trig.line == 12;
+    assert trig.column == 4;
+    assert trig.lexeme == "ping";
+}
+
+test "effect violation: severity defaults to error" {
+    let stmt = _make_io_violating_routine("err", [], 3);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    // Phase A hardcodes "error" at the factory; Phase B will wire
+    // `SAILFIN_EFFECT_ENFORCE` to flip this to "warning". Lock the
+    // current default in so Phase B's wiring is an obvious change.
+    assert violations[0].severity == "error";
+}
+
+test "effect violation: routines without name_span produce a null trigger" {
+    // A FunctionDeclaration with `name_span: null` (not currently
+    // produced by the parser, but possible for synthesized routines)
+    // should still produce a violation, with `signature_token` and
+    // `trigger` left null. The renderer falls back to `file_path`-
+    // only rendering when primary is null, so this case must not
+    // crash.
+    let body_text = "print.info(\"hello\");";
+    let body_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: body_text },
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: body_text,
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let stmt = Statement.FunctionDeclaration {
+        signature: _signature("nameless", [], null),
+        body: body_block,
+        decorators: empty_decorators
+    };
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].signature_token == null;
+    assert violations[0].trigger == null;
+    assert violations[0].severity == "error";
+}
+
+test "effect violation: declared effect suppresses violation" {
+    // A function that declares the right effect should produce zero
+    // violations. Smoke-test the happy path so we know the
+    // span-attribution change didn't regress the underlying detection.
+    let stmt = _make_io_violating_routine("ok", ["io"], 1);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Regressions for PR #241 review feedback
+// -------------------------------------------------------------------
+test "effect violation: struct method uses bare identifier in token lexeme" {
+    // PR #241 review #1: when `analyze_routine` is called for a
+    // struct method, the qualified `routine_name` is `Struct.method`
+    // but the synthesized Token.lexeme must be the bare method
+    // identifier — otherwise the renderer's caret width covers the
+    // wrong span. Lock the bare-vs-qualified split in.
+    let span = _span(5, 8);
+    let body_text = "print.info(\"hi\");";
+    let body_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: body_text },
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: body_text,
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let method_sig = _signature("noisy", [], span);
+    let method = MethodDeclaration {
+        signature: method_sig,
+        body: body_block,
+        decorators: empty_decorators
+    };
+    let mut empty_type_params: TypeParameter[] = [];
+    let mut empty_implements: TypeAnnotation[] = [];
+    let mut empty_fields: FieldDeclaration[] = [];
+    let mut struct_decorators: Decorator[] = [];
+    let stmt = Statement.StructDeclaration {
+        name: "Speaker",
+        name_span: null,
+        type_parameters: empty_type_params,
+        implements_types: empty_implements,
+        fields: empty_fields,
+        methods: [method],
+        decorators: struct_decorators
+    };
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    // routine_name carries the qualified display string for the
+    // user-facing message…
+    assert v.routine_name == "Speaker.noisy";
+    // …but Token.lexeme is the bare identifier so the caret width
+    // matches `noisy`'s actual source span.
+    assert v.signature_token != null;
+    let tok: Token? = v.signature_token;
+    assert tok.lexeme == "noisy";
+    assert tok.line == 5;
+    assert tok.column == 8;
+}
+
+test "effect violation: TestDeclaration plumbs name_span" {
+    // PR #241 review #2: `Statement.TestDeclaration.name_span` is
+    // recorded by the parser; analyze_statement must thread it into
+    // the synthesized FunctionSignature so test diagnostics get the
+    // same signature-token attribution functions/methods get.
+    let span = _span(42, 6);
+    let body_text = "print.info(\"x\");";
+    let body_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: body_text },
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: body_text,
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let mut empty_effects: string[] = [];
+    let stmt = Statement.TestDeclaration {
+        name: "exercises print",
+        name_span: span,
+        body: body_block,
+        effects: empty_effects,
+        decorators: empty_decorators
+    };
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    // routine_name still includes the `test "name"` qualifier for
+    // the diagnostic message.
+    assert v.routine_name == "test exercises print";
+    // …but the Token comes from the parser-recorded span. Lexeme is
+    // the bare test name (matches the qualified-name fix in #1).
+    assert v.signature_token != null;
+    let tok: Token? = v.signature_token;
+    assert tok.line == 42;
+    assert tok.column == 6;
+    assert tok.lexeme == "exercises print";
+}

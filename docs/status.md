@@ -76,11 +76,31 @@ feature availability.
 - Pipeline: Lexer → Parser → Type Checker → Native Emitter
   (`.sfn-asm` IR) → LLVM Lowering.
 - **Effect checker status**: `validate_effects()` exists in `effect_checker.sfn`
-  but is **not invoked by the compiler or CLI during normal builds** — users will
-  not see effect diagnostics during compilation, and effect violations do not
-  block compilation. Wiring effect enforcement into the build is the top priority
-  in the Effect System Hardening track on the
-  [roadmap](https://sailfin.dev/roadmap).
+  and runs through `sfn check`, but is **not invoked by the compiler or CLI
+  during normal builds** — users still don't see effect diagnostics during
+  compilation, and effect violations don't block compilation. Wiring effect
+  enforcement into the build is the top priority in the Effect System
+  Hardening track on the [roadmap](https://sailfin.dev/roadmap), tracked
+  by `docs/proposals/effect-validation.md` (Phases A–G; Phase A landed
+  2026-04-26).
+- **Effect diagnostic source spans (Phase A — shipped 2026-04-26).** The
+  `EffectViolation` struct now carries `signature_token`, `trigger`, and
+  `severity` slots, populated from `FunctionSignature.name_span` via
+  `_token_from_signature` in `effect_checker.sfn`. The renderer in
+  `tools/check.sfn` reads `violation.trigger` into `Diagnostic.primary`,
+  so effect diagnostics now render with `--> file:line:column` and a
+  caret pointing at the function declaration — matching typecheck output
+  shape. New `compiler/src/effect_taxonomy.sfn` exports the locked-in
+  canonical effect set (`canonical_effects()` returns `["clock", "gpu",
+  "io", "model", "net", "rand"]`) as the authoritative 1.0 list. The
+  taxonomy module is the regression-test anchor and the future home for
+  every effect-name decision; wiring `effect_checker.sfn` and
+  `tools/check.sfn` to consume it (e.g. rejecting unknown effect names
+  in `analyze_routine`, sorting `missing_effects` for deterministic
+  rendering) lands in Phase B alongside the build-pipeline gate.
+  Per-expression trigger tokens still default to the signature
+  location; threading per-`Expression` spans is deferred to a follow-up
+  that adds span fields to the AST's expression variants.
 - Experimental LLVM JIT execution is available for targeted backend coverage.
 - CI uses the native build workflow (`.github/workflows/ci.yml`) to build, test,
   and attach release assets.
