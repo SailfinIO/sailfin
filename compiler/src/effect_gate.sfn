@@ -73,11 +73,13 @@ fn resolve_effect_enforcement(raw: string) -> string {
 // value to a process-unique tmp file the caller then reads with
 // `fs.readFile`.
 //
-// `unique_suffix` is a slug derived from the caller's `file_path` so
-// parallel build workers (`make compile -j4`) write to distinct
-// paths — no race on a shared `/tmp/.sfn_*` file. Callers in
-// `validate_and_render_effects` thread their `file_path` through
-// `_unique_suffix_for_path`.
+// `unique_key` is any caller-chosen string. The helper sanitizes it
+// internally via `_unique_suffix_for_path` so callers can pass a raw
+// `file_path` (slashes, dots, leading hyphens — all OK) without
+// constructing an invalid `/tmp/.sfn_effect_enforce_*` path. Parallel
+// build workers (`make compile -j4`) thread their distinct module
+// names through and end up with distinct sanitized paths, avoiding
+// cross-process races on a shared `/tmp/.sfn_*` file.
 fn _unique_suffix_for_path(file_path: string) -> string {
     if file_path.length == 0 { return "anon"; }
     let slug = sanitize_symbol(file_path);
@@ -103,13 +105,13 @@ fn _read_env_via_shell(name: string, unique_suffix: string) -> string ![io] {
     return raw;
 }
 
-// Public alias used by `tools/check.sfn` (which has its own
+// Public entry — used by `tools/check.sfn` (which has its own
 // `file_path`) and any future build-adjacent surface that wants to
-// honour the same env-var contract. The `unique_suffix` parameter is
-// a contract: callers must pass a value that's unique within the
-// current process tree (typically the file_path slug).
-fn read_effect_enforcement_env(unique_suffix: string) -> string ![io] {
-    return _read_env_via_shell("SAILFIN_EFFECT_ENFORCE", unique_suffix);
+// honour the same env-var contract. The `unique_key` is sanitized
+// internally; callers can pass a raw `file_path` or `module_name`
+// without worrying about slashes or other path-unsafe characters.
+fn read_effect_enforcement_env(unique_key: string) -> string ![io] {
+    return _read_env_via_shell("SAILFIN_EFFECT_ENFORCE", _unique_suffix_for_path(unique_key));
 }
 
 // -------------------------------------------------------------------
@@ -130,8 +132,7 @@ fn read_effect_enforcement_env(unique_suffix: string) -> string ![io] {
 // refactor than Phase B should take. Phase E (cross-module
 // propagation) revisits the path-plumbing question.
 fn validate_and_render_effects(program: Program, source: string, file_path: string) -> number ![io] {
-    let unique = _unique_suffix_for_path(file_path);
-    let raw = read_effect_enforcement_env(unique);
+    let raw = read_effect_enforcement_env(file_path);
     let severity = resolve_effect_enforcement(raw);
     if severity == "off" {
         // Per proposal §4.7 — `=off` is an explicit, conscious

@@ -255,7 +255,15 @@ fn handle_check_command(args: string[]) -> number ![io] {
         let group_idx = file_group_index[fi];
         let source = fs.readFile(path);
         let result = check_source_with_imports(source, path, groups[group_idx].interfaces);
-        if result.error_count > 0 {
+        // Emit any diagnostic — error or warning — so contributors
+        // running `sfn check` under Phase B (warning default) actually
+        // see the effect-violation output. Pre-Phase-B effect
+        // diagnostics were hardcoded "error" severity, so a non-zero
+        // error_count gated emission; with severity routed through
+        // `SAILFIN_EFFECT_ENFORCE` the gate has to widen to any
+        // diagnostic. The summary line still keys on error_count
+        // (warnings don't change the exit code).
+        if result.rendered.length > 0 {
             _emit_check_header(path, quiet);
             _emit_check_diagnostics(result, quiet);
         }

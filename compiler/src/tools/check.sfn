@@ -96,26 +96,29 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
 
     // Phase B: route effect-violation severity through the same
     // env-var contract the build path uses. `sfn check` honors
-    // `SAILFIN_EFFECT_ENFORCE` so contributors can dry-run the
+    // `=warning` and `=error` so contributors can dry-run the
     // post-Phase-D gate by exporting `=error` locally; the default
     // ("warning") keeps the audit period non-disruptive.
     //
-    // The unique suffix doubles as the env-read tmp-file slug —
-    // file_path is unique-per-source for the lifetime of this
-    // check loop, so concurrent `sfn check` invocations against
-    // the same file (rare but possible in a CI matrix) won't race
-    // on a shared `/tmp/.sfn_*` path.
-    let effect_severity = resolve_effect_enforcement(read_effect_enforcement_env(file_path));
+    // Per proposal §4.7, `=off` is a build-path escape hatch only
+    // — "does not turn off sfn check validation, only the build
+    // path." `sfn check` therefore ignores `=off` and falls back
+    // to whatever severity would apply for an unset env var. That
+    // way Phase B's warning default and Phase D's eventual error
+    // default both flow through naturally without a second knob
+    // for `sfn check` to track.
+    //
+    // `read_effect_enforcement_env` sanitizes the unique-key
+    // internally, so passing `file_path` directly is safe even
+    // when it contains slashes (e.g. `compiler/src/main.sfn`).
+    let raw_severity = resolve_effect_enforcement(read_effect_enforcement_env(file_path));
+    let mut effect_severity: string = raw_severity;
+    if effect_severity == "off" {
+        effect_severity = resolve_effect_enforcement("");
+    }
     let mut ei: number = 0;
     loop {
         if ei >= effect_violations.length { break; }
-        if effect_severity == "off" {
-            // §4.7 escape hatch — silence effect output entirely.
-            // The build path emits a per-file notice; `sfn check`
-            // does not, since the user invoked it explicitly and
-            // a notice on every check would be noise.
-            break;
-        }
         let mut violation = effect_violations[ei];
         violation.severity = effect_severity;
         let mut diag = effect_violation_to_diagnostic(violation);
