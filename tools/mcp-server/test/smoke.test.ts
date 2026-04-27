@@ -136,7 +136,7 @@ async function withServer<T>(
   }
 }
 
-test("tools/list exposes all five tools with correct names", async () => {
+test("tools/list exposes all six tools with correct names", async () => {
   const workspace = makeStubWorkspace();
   await withServer(workspace, async (client) => {
     const resp = await client.request("tools/list");
@@ -144,6 +144,7 @@ test("tools/list exposes all five tools with correct names", async () => {
     const names = result.tools.map((t) => t.name).sort();
     assert.deepEqual(names, [
       "sailfin_check",
+      "sailfin_diagnostics",
       "sailfin_emit_llvm",
       "sailfin_emit_native",
       "sailfin_fmt_check",
@@ -271,6 +272,120 @@ test("bad CLAUDE_PROJECT_DIR surfaces as a clean tool error, not a crash", async
     assert.ok(
       result.content[0].text.includes("Workspace root does not exist"),
       `expected workspace-missing error, got: ${result.content[0].text}`,
+    );
+  });
+});
+
+test("sailfin_diagnostics parses the JSON envelope into structuredContent", async () => {
+  // Stub `sfn check --json` output that mirrors the real
+  // sailfin-check/1 envelope. The MCP server parses it and surfaces
+  // the parsed object as structuredContent so MCP clients can act
+  // on diagnostics programmatically.
+  const envelope = JSON.stringify({
+    schema_version: "sailfin-check/1",
+    command: "sfn check",
+    exit_code: 1,
+    summary: { files_checked: 1, errors: 1, warnings: 0, duration_ms: 0 },
+    events: [
+      {
+        kind: "diagnostic",
+        code: "E0400",
+        severity: "error",
+        producer: "effect",
+        file_path: "foo.sfn",
+        message: "missing ![io]",
+        primary: { line: 4, column: 5, lexeme: "print", label: null },
+        secondary: [],
+        suggestion: null,
+      },
+    ],
+  });
+  const workspace = makeStubWorkspace({
+    exitCode: 1,
+    stdoutBody: envelope,
+    stderrBody: "",
+  });
+  await writeStubSfn(workspace, "foo.sfn");
+  await withServer(workspace, async (client) => {
+    const resp = await client.request("tools/call", {
+      name: "sailfin_diagnostics",
+      arguments: { path: "foo.sfn" },
+    });
+    const result = resp.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+      structuredContent?: Record<string, unknown>;
+    };
+    // Exit 1 with a parseable envelope is "ok" — diagnostics found
+    // but the tool successfully analyzed the input. isError is for
+    // tool-level failures (envelope unparseable, setup error, etc.).
+    assert.notEqual(
+      result.isError,
+      true,
+      "exit 1 with valid envelope should NOT be flagged as a tool error",
+    );
+    assert.ok(
+      result.structuredContent,
+      "structuredContent must carry the parsed envelope",
+    );
+    assert.equal(
+      result.structuredContent!.schema_version,
+      "sailfin-check/1",
+      "envelope schema_version round-trips through JSON parse",
+    );
+    const summary = result.structuredContent!.summary as {
+      errors: number;
+      files_checked: number;
+    };
+    assert.equal(summary.errors, 1);
+    assert.equal(summary.files_checked, 1);
+    const events = result.structuredContent!.events as Array<{
+      code: string;
+      producer: string;
+    }>;
+    assert.equal(events.length, 1);
+    assert.equal(events[0].code, "E0400");
+    assert.equal(events[0].producer, "effect");
+  });
+});
+
+test("sailfin_diagnostics flags isError when envelope does not parse", async () => {
+  // Stub the compiler to emit non-JSON on stdout. The MCP wrapper
+  // must surface this as isError + the raw stdout in
+  // structuredContent.parse_error so the client can react.
+  const workspace = makeStubWorkspace({
+    exitCode: 1,
+    stdoutBody: "this is not JSON at all",
+    stderrBody: "",
+  });
+  await writeStubSfn(workspace, "foo.sfn");
+  await withServer(workspace, async (client) => {
+    const resp = await client.request("tools/call", {
+      name: "sailfin_diagnostics",
+      arguments: { path: "foo.sfn" },
+    });
+    const result = resp.result as {
+      content: Array<{ type: string; text: string }>;
+      isError?: boolean;
+      structuredContent?: Record<string, unknown>;
+    };
+    assert.equal(
+      result.isError,
+      true,
+      "unparseable envelope must surface as a tool error",
+    );
+    assert.ok(
+      result.structuredContent,
+      "structuredContent must still carry diagnostic context",
+    );
+    assert.equal(
+      typeof result.structuredContent!.parse_error,
+      "string",
+      "parse_error reports the JSON.parse failure reason",
+    );
+    assert.equal(
+      result.structuredContent!.raw_stdout,
+      "this is not JSON at all",
     );
   });
 });

@@ -24,10 +24,17 @@ import {
     prepare_project_capsules_for_check
 } from "./capsule_resolver";
 import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
+import {
+    CheckJsonEvent,
+    CheckJsonSummary,
+    classify_producer,
+    render_check_json_envelope
+} from "./diagnostics_json";
 import { render_diagnostic } from "./diagnostics_render";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import {
     CheckResult,
+    CheckSummary,
     check_source_with_imports,
     render_summary,
     summarize
@@ -145,6 +152,7 @@ fn _find_group(groups: CheckGroup[], key: string) -> number {
 
 fn handle_check_command(args: string[]) -> number ![io] {
     let mut quiet: boolean = false;
+    let mut json: boolean = false;
     let mut paths: string[] = [];
 
     let mut argi: number = 1;
@@ -153,15 +161,26 @@ fn handle_check_command(args: string[]) -> number ![io] {
         let arg = args[argi];
         if strings_equal(arg, "--quiet") { quiet = true; } else if strings_equal(arg, "-q") {
             quiet = true;
+        } else if strings_equal(arg, "--json") {
+            // B2: machine-readable envelope on stdout. Mutually
+            // exclusive with the human renderer; `--json --quiet`
+            // is accepted but `--quiet` becomes a no-op (the JSON
+            // envelope IS the structured output, not noise).
+            json = true;
         } else if strings_equal(arg, "-h") {
-            print("usage: sfn check [--quiet] [path...]");
+            print("usage: sfn check [--quiet] [--json] [path...]");
             return 0;
         } else if strings_equal(arg, "--help") {
-            print("usage: sfn check [--quiet] [path...]");
+            print("usage: sfn check [--quiet] [--json] [path...]");
             return 0;
         } else { paths.push(arg); }
         argi += 1;
     }
+
+    // In JSON mode, suppress the human stderr stream entirely.
+    // Consumers reading the envelope on stdout don't want
+    // duplicated/divergent output on stderr.
+    if json { quiet = true; }
 
     if paths.length == 0 { paths.push("."); }
 
@@ -308,9 +327,89 @@ fn handle_check_command(args: string[]) -> number ![io] {
     _emit_load_warnings(aggregate_load_result, quiet);
 
     let summary = summarize(results);
+    if json {
+        let mut exit_code: number = 0;
+        if total_errors > 0 { exit_code = 1; }
+        let envelope = _build_json_envelope(results, aggregate_load_result, summary, exit_code);
+        print(envelope);
+        if total_errors > 0 { return 1; }
+        return 0;
+    }
     print(render_summary(summary));
     if total_errors > 0 { return 1; }
     return 0;
+}
+
+// Build the JSON envelope from the run's per-file results plus the
+// aggregated load warnings. Emitted whole on stdout; each event
+// carries its `producer` so consumers can filter on the producing
+// pass without inspecting `code` ranges. See
+// `docs/reference/check-json-schema.md` for the locked schema.
+fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResult, summary: CheckSummary, exit_code: number) -> string ![io] {
+    let mut events: CheckJsonEvent[] = [];
+
+    let mut ri: number = 0;
+    loop {
+        if ri >= results.length { break; }
+        let result = results[ri];
+        let mut di: number = 0;
+        loop {
+            if di >= result.diagnostics.length { break; }
+            let producer = result.producers[di];
+            events.push(CheckJsonEvent {
+                kind: "diagnostic", producer: producer, diagnostic: result.diagnostics[di]
+            });
+            di += 1;
+        }
+        ri += 1;
+    }
+
+    // Load warnings (W01xx) are minted by the import-context loader,
+    // not by the analysis passes. They share the Diagnostic shape so
+    // they ride the same event array — the `kind: "load_warning"`
+    // discriminator lets consumers filter for them specifically.
+    let mut mi: number = 0;
+    loop {
+        if mi >= load.missing_paths.length { break; }
+        let warn = Diagnostic {
+            code: "W0001",
+            severity: "warning",
+            message: "missing import-context artifact",
+            file_path: load.missing_paths[mi],
+            primary: null
+        };
+        events.push(CheckJsonEvent {
+            kind: "load_warning", producer: classify_producer("W0001"), diagnostic: warn
+        });
+        mi += 1;
+    }
+    let mut pi: number = 0;
+    loop {
+        if pi >= load.parse_failure_paths.length { break; }
+        let warn = Diagnostic {
+            code: "W0002",
+            severity: "warning",
+            message: "import-context artifact parse failed",
+            file_path: load.parse_failure_paths[pi],
+            primary: null
+        };
+        events.push(CheckJsonEvent {
+            kind: "load_warning", producer: classify_producer("W0002"), diagnostic: warn
+        });
+        pi += 1;
+    }
+
+    // Roll W01xx warnings into the summary so consumers reading just
+    // `summary.warnings` see the load-layer count without scanning.
+    let total_warnings = summary.total_warnings + load.missing_paths.length
+        + load.parse_failure_paths.length;
+    let json_summary = CheckJsonSummary {
+        files_checked: summary.files_checked,
+        errors: summary.total_errors,
+        warnings: total_warnings,
+        duration_ms: 0
+    };
+    return render_check_json_envelope(events, json_summary, exit_code);
 }
 
 export { handle_check_command };
