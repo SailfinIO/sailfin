@@ -419,12 +419,32 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
 // Emit .sfn-asm + .layout-manifest for a single capsule source. The
 // compiler's normal import resolver (llvm/imports.sfn:_resolve_layout_manifest_path_for_slug)
 // looks in build/native/import-context/<slug>.* so that's where we write.
+//
+// Cache invalidation contract: a present `.sfn-asm` artifact paired
+// with its `.layout-manifest` is treated as valid and re-used as-is.
+// Sailfin's emit is deterministic (proven by `make check`'s stage2 ==
+// stage3 byte-identical fixed-point), so re-emitting an already-staged
+// module produces the same bytes — making the re-emit pure overhead.
+// Pre-cache, `sfn check compiler/src/main.sfn` re-emitted ~130 modules
+// sequentially and crashed the seed compiler at ~84s; with the cache,
+// staging is a no-op when `make compile` has already produced the
+// artifacts. Refresh by `rm -rf build/native/import-context/` (or
+// `make rebuild`), the same invalidation contract `make` itself uses.
 fn _cr_stage_one(src: CapsuleSource) -> boolean ![io] {
     let asm_path = "build/native/import-context/" + src.slug + ".sfn-asm";
     let manifest_path = "build/native/import-context/" + src.slug
         + ".layout-manifest";
     let asm_dir = _cr_dirname(asm_path);
     _cr_ensure_dir(asm_dir);
+
+    // Cache hit: both the asm and the manifest are present. Trust the
+    // pair — they were produced by a prior `make compile` (or earlier
+    // staging pass) of this same source file.
+    if fs.exists(asm_path) {
+        if fs.exists(manifest_path) {
+            return true;
+        }
+    }
 
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);

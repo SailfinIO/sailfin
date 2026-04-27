@@ -290,8 +290,27 @@ fn handle_check_command(args: string[]) -> number ![io] {
         gi += 1;
     }
 
+    // Two accumulator strategies:
+    //
+    //   * Non-JSON mode (the common case, e.g. `make check-fast`): we
+    //     stream-print human diagnostics per file as they arrive and
+    //     ONLY accumulate running totals. The per-file `CheckResult`
+    //     (with its `Diagnostic[]`, `producers[]`, and `rendered[]`
+    //     arrays) is discarded immediately. This keeps in-process
+    //     memory bounded — earlier benchmarks showed the seed
+    //     compiler accumulates internal state per analysis pass and
+    //     SIGSEGVs around 60+ files when the loop also retained
+    //     full results.
+    //
+    //   * JSON mode (`--json`): the envelope needs every diagnostic
+    //     so we keep `results[]`. The output volume here is
+    //     consumer-facing structured data; users opting into `--json`
+    //     accept the memory cost. Even so, only diagnostics survive
+    //     into the envelope — `rendered[]` stays unused.
     let mut results: CheckResult[] = [];
     let mut total_errors: number = 0;
+    let mut total_warnings: number = 0;
+    let mut files_checked: number = 0;
     let mut fi: number = 0;
     loop {
         if fi >= files.length { break; }
@@ -301,18 +320,18 @@ fn handle_check_command(args: string[]) -> number ![io] {
         let result = check_source_with_imports(source, path, groups[group_idx].interfaces, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
         // Emit any diagnostic — error or warning — so contributors
         // running `sfn check` under Phase B (warning default) actually
-        // see the effect-violation output. Pre-Phase-B effect
-        // diagnostics were hardcoded "error" severity, so a non-zero
-        // error_count gated emission; with severity routed through
-        // `SAILFIN_EFFECT_ENFORCE` the gate has to widen to any
-        // diagnostic. The summary line still keys on error_count
-        // (warnings don't change the exit code).
-        if result.rendered.length > 0 {
-            _emit_check_header(path, quiet);
-            _emit_check_diagnostics(result, quiet);
+        // see the effect-violation output. The summary line keys on
+        // error_count (warnings don't change the exit code).
+        if !json {
+            if result.rendered.length > 0 {
+                _emit_check_header(path, quiet);
+                _emit_check_diagnostics(result, quiet);
+            }
         }
         total_errors += result.error_count;
-        results.push(result);
+        total_warnings += result.warning_count;
+        files_checked += 1;
+        if json { results.push(result); }
         fi += 1;
     }
 
@@ -326,10 +345,9 @@ fn handle_check_command(args: string[]) -> number ![io] {
         skipped_paths: aggregate_skipped,
         native_texts: empty_texts
     };
-    _emit_load_warnings(aggregate_load_result, quiet);
 
-    let summary = summarize(results);
     if json {
+        let summary = summarize(results);
         let mut exit_code: number = 0;
         if total_errors > 0 { exit_code = 1; }
         let envelope = _build_json_envelope(results, aggregate_load_result, summary, exit_code);
@@ -337,7 +355,17 @@ fn handle_check_command(args: string[]) -> number ![io] {
         if total_errors > 0 { return 1; }
         return 0;
     }
-    print(render_summary(summary));
+
+    // Non-JSON path: load warnings + summary printed at the end so
+    // the human renderer's output stays grouped (per-file diagnostics
+    // first, then any infra warnings, then the rollup line).
+    _emit_load_warnings(aggregate_load_result, quiet);
+    let streamed_summary = CheckSummary {
+        files_checked: files_checked,
+        total_errors: total_errors,
+        total_warnings: total_warnings
+    };
+    print(render_summary(streamed_summary));
     if total_errors > 0 { return 1; }
     return 0;
 }
