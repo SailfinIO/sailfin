@@ -441,9 +441,7 @@ fn _cr_stage_one(src: CapsuleSource) -> boolean ![io] {
     // pair — they were produced by a prior `make compile` (or earlier
     // staging pass) of this same source file.
     if fs.exists(asm_path) {
-        if fs.exists(manifest_path) {
-            return true;
-        }
+        if fs.exists(manifest_path) { return true; }
     }
 
     if !fs.exists(src.source_path) {
