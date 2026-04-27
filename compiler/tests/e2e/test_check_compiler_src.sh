@@ -129,12 +129,20 @@ run_test "exit code matches with/without trailing slash" test_exit_code_parity
 
 # ---- Test: file count matches `find` ----
 # Sanity check that the directory walk visits every .sfn file.
-# Reuses the no-slash log captured above.
+# Reuses the no-slash log captured above. Uses numeric comparison
+# (`-ne`) rather than string comparison: macOS BSD `wc -l` left-pads
+# its output (`     132`) while Linux GNU `wc -l` doesn't (`132`),
+# and a string-equality test would treat the same count as a
+# divergence. PR #251 first revision tripped this on macOS arm64.
 test_file_count() {
-    local expected; expected=$(find "$SRC_DIR" -name '*.sfn' | wc -l)
+    local expected; expected=$(find "$SRC_DIR" -name '*.sfn' | wc -l | tr -d '[:space:]')
     local actual; actual=$(grep -oE 'checked [0-9]+ files' "$LOG_NO_SLASH" | grep -oE '[0-9]+' | head -1)
-    if [ "$actual" != "$expected" ]; then
+    if [ "$actual" -ne "$expected" ] 2>/dev/null; then
         echo "[test]   file count mismatch: find=$expected, sfn check reported=$actual"
+        return 1
+    fi
+    if [ -z "$actual" ] || [ -z "$expected" ]; then
+        echo "[test]   file count empty: find='$expected', sfn check reported='$actual'"
         return 1
     fi
     return 0
