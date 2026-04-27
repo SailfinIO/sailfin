@@ -705,6 +705,16 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "char_code");
     helpers = append_unique_effect(helpers, "runtime_raise_value_error_fn");
     helpers = append_unique_effect(helpers, "runtime.bounds_check");
+    // Phase 5a: arena mark/rewind for in-process multi-module tools.
+    // No-op when SAILFIN_USE_ARENA is unset; declared unconditionally
+    // so the linker resolves the symbol whether or not the arena is
+    // active at runtime. Targets are the canonical C symbol names
+    // because Sailfin callers reach them via `extern fn` for now —
+    // the 0.5.9 seed predates the descriptors. After the next seed
+    // bump, callers will drop the extern fn and the descriptors
+    // become the canonical lookup path.
+    helpers = append_unique_effect(helpers, "sailfin_intrinsic_runtime_arena_mark");
+    helpers = append_unique_effect(helpers, "sailfin_intrinsic_runtime_arena_rewind");
     helpers = append_unique_effect(helpers, "mark_persistent");
     // Runtime prelude helpers — module-level let bindings
     // (e.g. `let runtime_array_filter_fn = runtime.array_filter;`) whose

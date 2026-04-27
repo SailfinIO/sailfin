@@ -177,6 +177,21 @@ extern "C"
     bool sailfin_adapter_fs_create_directory(void *path, bool recursive);
     bool sailfin_intrinsic_fs_exists(void *path);
 
+    // Arena mark/rewind. Phase 5a (`docs/proposals/phase-5a-arena-reset.md`)
+    // exposes the existing bump-allocator's mark/rewind primitive to
+    // Sailfin code so in-process multi-module tools (`sfn check`,
+    // `sfn test`'s test-discovery loop) can reclaim per-iteration
+    // scratch allocations without invalidating cross-iteration state.
+    //
+    // The mark is encoded as a Sailfin `number` (double-precision
+    // float; 53-bit mantissa holds any integer ≤ 2^53). Encoding:
+    // page_index * 2^32 + used. When the arena is disabled
+    // (SAILFIN_USE_ARENA unset) both functions are no-ops and the
+    // encoded mark is 0; the rewind side accepts any value without
+    // crashing.
+    double sailfin_intrinsic_runtime_arena_mark(void);
+    void sailfin_intrinsic_runtime_arena_rewind(double encoded_mark);
+
     // HTTP adapter stubs.
     void *sailfin_adapter_http_get(void *request);
     void *sailfin_adapter_http_post(void *request, void *body);

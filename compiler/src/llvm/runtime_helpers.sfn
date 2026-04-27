@@ -59,6 +59,33 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "fs.exists", symbol: "sailfin_intrinsic_fs_exists", return_type: "i1", parameter_types: ["i8*"], effects: ["io"]
     });
 
+    // Arena mark / rewind. Phase 5a (`docs/proposals/phase-5a-arena-reset.md`)
+    // exposes the existing C bump-allocator's mark/rewind primitive
+    // to Sailfin code so in-process multi-module tools (`sfn check`,
+    // `sfn test`'s test-discovery loop) can reclaim per-iteration
+    // scratch without invalidating cross-iteration state. The mark
+    // is encoded as a Sailfin `number` (LLVM `double`) — Sailfin's
+    // numeric type is double-precision floating point and the C
+    // wrapper packs (page_index, used) into the mantissa.
+    //
+    // Both helpers are no-ops when the arena is disabled
+    // (SAILFIN_USE_ARENA unset on the seed; default-on flip pending
+    // a follow-up PR). Calling them on a disabled arena is safe.
+    //
+    // Today's callers reach the C symbols via `extern fn` declarations
+    // (the 0.5.9 seed compiler doesn't carry these descriptors yet).
+    // The descriptors below register bare-name sugar for a future
+    // seed bump: once the next release seed includes them, callers
+    // can drop the extern-fn boilerplate and just write
+    // `sailfin_intrinsic_runtime_arena_mark()` (or a friendlier
+    // alias added at that time).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_runtime_arena_mark", symbol: "sailfin_intrinsic_runtime_arena_mark", return_type: "double", parameter_types: [], effects: []
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_intrinsic_runtime_arena_rewind", symbol: "sailfin_intrinsic_runtime_arena_rewind", return_type: "void", parameter_types: ["double"], effects: []
+    });
+
     // Network intrinsics
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "net_request", symbol: "sailfin_intrinsic_net_request", return_type: "i8*", parameter_types: ["i8*", "i8*", "i8*"], effects: ["net"]

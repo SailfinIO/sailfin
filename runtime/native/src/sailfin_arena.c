@@ -87,6 +87,42 @@ void sfn_arena_reset(SfnArena *arena)
     arena->total_allocated = 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Mark / rewind                                                       */
+/* ------------------------------------------------------------------ */
+
+SfnArenaMark sfn_arena_mark(SfnArena *arena)
+{
+    SfnArenaMark mark = {NULL, 0};
+    if (!arena || !arena->current)
+        return mark;
+    mark.page = arena->current;
+    mark.used = arena->current->used;
+    return mark;
+}
+
+void sfn_arena_rewind(SfnArena *arena, SfnArenaMark mark)
+{
+    if (!arena)
+        return;
+    /* Null mark: equivalent to a no-op. Callers can safely pair
+     * marks taken before the arena was initialized with a rewind. */
+    if (!mark.page)
+        return;
+
+    /* Walk pages allocated after the marked page and zero their
+     * `used` counters so subsequent allocations reuse them. */
+    for (SfnArenaPage *p = mark.page->next; p; p = p->next)
+        p->used = 0;
+
+    /* Rewind the marked page itself to the snapshot offset and
+     * make it the current allocation target. Pages strictly after
+     * the marked one stay attached for reuse on the next burst —
+     * we only release memory back to the OS at arena destruction. */
+    mark.page->used = mark.used;
+    arena->current = mark.page;
+}
+
 void sfn_arena_destroy(SfnArena *arena)
 {
     if (!arena)
@@ -122,7 +158,32 @@ void *sfn_arena_alloc(SfnArena *arena, size_t size, size_t align)
         return page->data + offset;
     }
 
-    /* Current page too small — allocate a new one. */
+    /* Current page too small — try to reuse downstream pages first.
+     *
+     * `sfn_arena_rewind` (Phase 5a) leaves zeroed pages attached
+     * after the rewind target so subsequent allocations can reuse
+     * the existing capacity instead of growing the page list. The
+     * old behavior allocated a fresh page on every overflow,
+     * leaking the rewound capacity behind the new page in the
+     * linked list. Walking forward here makes mark/rewind a true
+     * stack-discipline reuse. The walk is bounded by pages that
+     * survived the most-recent rewind; in steady state it's
+     * usually one hop. */
+    SfnArenaPage *candidate = page->next;
+    while (candidate)
+    {
+        size_t cand_offset = _align_up(candidate->used, align);
+        if (cand_offset <= candidate->capacity && size <= candidate->capacity - cand_offset)
+        {
+            candidate->used = cand_offset + size;
+            arena->current = candidate;
+            arena->total_allocated += size;
+            return candidate->data + cand_offset;
+        }
+        candidate = candidate->next;
+    }
+
+    /* No reusable downstream page — allocate a new one. */
     size_t needed = size + align; /* worst-case alignment padding */
     size_t page_size = arena->default_page_size;
     if (needed > page_size)
