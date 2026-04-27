@@ -5674,6 +5674,78 @@ bool sailfin_intrinsic_fs_exists(void *path)
     return stat(path_str, &st) == 0;
 }
 
+/* ------------------------------------------------------------------ */
+/* Phase 5a: arena mark / rewind                                      */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Encode an SfnArenaMark into a Sailfin `number` (LLVM `double`).
+ * Sailfin's runtime-helper-descriptor mechanism passes scalars
+ * through; structs would require ABI work the seed compiler isn't
+ * ready for. `double` has a 53-bit mantissa, so any integer up to
+ * 2^53 round-trips losslessly.
+ *
+ * Encoding: page_index * 2^32 + used. The value 0 therefore means
+ * "page 0, used 0" — a partial reset. A null page (arena disabled
+ * / never allocated) encodes as 0 and round-trips harmlessly:
+ * rewind on a disabled arena is a no-op.
+ */
+double sailfin_intrinsic_runtime_arena_mark(void)
+{
+    _runtime_enter();
+    if (!sfn_arena_enabled())
+        return 0.0;
+
+    SfnArena *arena = sfn_arena_global();
+    SfnArenaMark mark = sfn_arena_mark(arena);
+    if (!mark.page)
+        return 0.0;
+
+    /* Find the index of the marked page. */
+    int64_t page_index = 0;
+    for (SfnArenaPage *p = arena->first; p; p = p->next)
+    {
+        if (p == mark.page)
+            break;
+        page_index++;
+    }
+    int64_t encoded = (page_index << 32) | (int64_t)(mark.used & 0xFFFFFFFFu);
+    return (double)encoded;
+}
+
+void sailfin_intrinsic_runtime_arena_rewind(double encoded_mark)
+{
+    _runtime_enter();
+    if (!sfn_arena_enabled())
+        return;
+
+    SfnArena *arena = sfn_arena_global();
+    if (!arena || !arena->first)
+        return;
+
+    int64_t encoded = (int64_t)encoded_mark;
+    int64_t page_index = encoded >> 32;
+    size_t used = (size_t)(encoded & 0xFFFFFFFFu);
+
+    /* Walk to the marked page. If page_index is out of range
+     * (corrupt mark, arena reset between mark/rewind, etc.) bail
+     * silently — better than crashing. */
+    SfnArenaPage *page = arena->first;
+    int64_t i = 0;
+    while (page && i < page_index)
+    {
+        page = page->next;
+        i++;
+    }
+    if (!page)
+        return;
+
+    SfnArenaMark mark;
+    mark.page = page;
+    mark.used = used;
+    sfn_arena_rewind(arena, mark);
+}
+
 void *sailfin_adapter_http_get(void *request)
 {
     (void)request;

@@ -51,6 +51,34 @@ extern "C"
     /* Free all backing pages and the arena struct itself. */
     void sfn_arena_destroy(SfnArena *arena);
 
+    /* ---------- Mark / rewind ---------- */
+    /*
+     * Stack-discipline checkpoint into the arena. Phase 5a (see
+     * `docs/proposals/phase-5a-arena-reset.md`) ships these so
+     * in-process multi-module tools (`sfn check`, `sfn test`) can
+     * reclaim per-iteration scratch without invalidating allocations
+     * made before the loop.
+     *
+     * `sfn_arena_mark` snapshots the current page + used offset.
+     * `sfn_arena_rewind` walks pages back to the snapshot and zeros
+     * `used` on every page strictly after the marked page; the
+     * marked page itself rewinds to its snapshot offset. Pages
+     * allocated since the mark stay attached to the arena for reuse
+     * on the next allocation burst.
+     *
+     * Mark/rewind is strictly LIFO. Caller is responsible for not
+     * holding pointers to memory above the rewind target — same
+     * contract as `sfn_arena_reset`.
+     */
+    typedef struct SfnArenaMark
+    {
+        SfnArenaPage *page; /* Page that was current at mark time */
+        size_t used;        /* Used offset on that page at mark time */
+    } SfnArenaMark;
+
+    SfnArenaMark sfn_arena_mark(SfnArena *arena);
+    void sfn_arena_rewind(SfnArena *arena, SfnArenaMark mark);
+
     /* ---------- Allocation ---------- */
 
     /*
