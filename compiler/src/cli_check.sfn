@@ -311,6 +311,19 @@ fn handle_check_command(args: string[]) -> number ![io] {
     let mut total_errors: number = 0;
     let mut total_warnings: number = 0;
     let mut files_checked: number = 0;
+
+    // Phase 5a (`docs/proposals/phase-5a-arena-reset.md`): take an
+    // arena mark immediately before the per-file loop. Every value
+    // the loop body reads from outside the loop — `groups[]`,
+    // `aggregate_*`, `file_group_index`, `files` — is allocated
+    // above this point, so the rewind below is correctness-safe.
+    // Per-iteration scratch (parse AST, typecheck tables,
+    // result.diagnostics) lives above the mark and is reclaimed
+    // each rewind. No-op when the arena is disabled
+    // (`SAILFIN_USE_ARENA` unset) — the C wrapper short-circuits
+    // and returns 0 / accepts any value without effect.
+    let scratch_mark = sailfin_intrinsic_runtime_arena_mark();
+
     let mut fi: number = 0;
     loop {
         if fi >= files.length { break; }
@@ -331,7 +344,17 @@ fn handle_check_command(args: string[]) -> number ![io] {
         total_errors += result.error_count;
         total_warnings += result.warning_count;
         files_checked += 1;
-        if json { results.push(result); }
+        if json {
+            // JSON mode keeps every CheckResult alive across
+            // iterations for envelope construction; rewinding here
+            // would invalidate the diagnostics arrays we just
+            // pushed. The memory cost is the price of structured
+            // output. Non-JSON mode rewinds: total_errors /
+            // total_warnings / files_checked are scalars (not
+            // arena-allocated), and `result` itself goes out of
+            // scope at the loop bottom.
+            results.push(result);
+        } else { sailfin_intrinsic_runtime_arena_rewind(scratch_mark); }
         fi += 1;
     }
 
