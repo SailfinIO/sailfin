@@ -18,6 +18,8 @@ import {
     render_check_json_envelope
 } from "../../src/diagnostics_json";
 import { index_of } from "../../src/string_utils";
+import { Token, TokenKind } from "../../src/token";
+import { Diagnostic, FixSuggestion, TextEdit } from "../../src/typecheck_types";
 
 // -------------------------------------------------------------------
 // Builder helpers
@@ -135,4 +137,100 @@ test "envelope: encodes summary numbers" {
     assert _contains(out, "files_checked");
     assert _contains(out, "errors");
     assert _contains(out, "warnings");
+}
+
+// -------------------------------------------------------------------
+// B3: FixSuggestion / TextEdit encoder paths
+// -------------------------------------------------------------------
+fn _identifier_token(line: number, column: number, lexeme: string) -> Token {
+    return Token {
+        kind: TokenKind.Identifier(),
+        lexeme: lexeme,
+        line: line,
+        column: column
+    };
+}
+
+fn _diag_with_suggestion(suggestion: FixSuggestion?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0400",
+        severity: "error",
+        message: "msg",
+        file_path: "f.sfn",
+        primary: _identifier_token(1, 1, "x"),
+        suggestion: suggestion
+    };
+}
+
+fn _wrap_event(d: Diagnostic) -> CheckJsonEvent[] {
+    let mut events: CheckJsonEvent[] = [];
+    events.push(CheckJsonEvent {
+        kind: "diagnostic", producer: "effect", diagnostic: d
+    });
+    return events;
+}
+
+test "envelope: null suggestion renders as JSON null" {
+    let diag = _diag_with_suggestion(null);
+    let events = _wrap_event(diag);
+    let summary = _empty_summary();
+    let out = render_check_json_envelope(events, summary, 1);
+    assert _contains(out, "suggestion");
+    // The literal `\"suggestion\":null` is the wire shape pre-B3 and
+    // for diagnostics that legitimately have no fix-it (W01xx,
+    // typecheck factories, capability cross-check until later).
+    assert _contains(out, "null");
+}
+
+test "envelope: populated suggestion renders message + edits array" {
+    let mut edits: TextEdit[] = [];
+    edits.push(TextEdit {
+        start_line: 12, start_column: 38, end_line: 12, end_column: 38, replacement: "![io] "
+    });
+    let suggestion = FixSuggestion {
+        message: "add ![io] to the function signature",
+        edits: edits
+    };
+    let diag = _diag_with_suggestion(suggestion);
+    let events = _wrap_event(diag);
+    let summary = _empty_summary();
+    let out = render_check_json_envelope(events, summary, 1);
+    assert _contains(out, "add ![io] to the function signature");
+    assert _contains(out, "start_line");
+    assert _contains(out, "start_column");
+    assert _contains(out, "end_line");
+    assert _contains(out, "end_column");
+    assert _contains(out, "replacement");
+    assert _contains(out, "![io] ");
+}
+
+test "envelope: empty edits array renders as []" {
+    let no_edits: TextEdit[] = [];
+    let suggestion = FixSuggestion { message: "no-op", edits: no_edits };
+    let diag = _diag_with_suggestion(suggestion);
+    let events = _wrap_event(diag);
+    let summary = _empty_summary();
+    let out = render_check_json_envelope(events, summary, 1);
+    assert _contains(out, "no-op");
+    assert _contains(out, "edits");
+    // Empty array shape
+    assert _contains(out, "[]");
+}
+
+test "envelope: multi-edit suggestion preserves all entries" {
+    let mut edits: TextEdit[] = [];
+    edits.push(TextEdit {
+        start_line: 10, start_column: 1, end_line: 10, end_column: 1, replacement: "first"
+    });
+    edits.push(TextEdit {
+        start_line: 20, start_column: 5, end_line: 20, end_column: 5, replacement: "second"
+    });
+    let suggestion = FixSuggestion { message: "two-step", edits: edits };
+    let diag = _diag_with_suggestion(suggestion);
+    let events = _wrap_event(diag);
+    let summary = _empty_summary();
+    let out = render_check_json_envelope(events, summary, 1);
+    assert _contains(out, "first");
+    assert _contains(out, "second");
+    assert _contains(out, "two-step");
 }

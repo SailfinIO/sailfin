@@ -15,12 +15,48 @@ import {
 import { contains_string, starts_with } from "./string_utils";
 import { Token, TokenKind } from "./token";
 
+// One concrete edit to apply to a source file. `start_*` and `end_*`
+// are inclusive 1-based line/column coordinates the renderer and
+// `sfn fix` consume; for an insertion (no replaced range) `end_line ==
+// start_line` and `end_column == start_column`. `replacement` is the
+// literal text to splice in. The shape mirrors LSP's `TextEdit` so
+// `sfn lsp` Phase 2 (B5+ workstream) can convert it 1:1.
+struct TextEdit {
+    start_line: number;
+    start_column: number;
+    end_line: number;
+    end_column: number;
+    replacement: string;
+}
+
+// Machine-applicable fix-it suggestion attached to a `Diagnostic`.
+// `message` is the user-facing summary ("add `![io]` to the function
+// signature"); `edits` is the structured set of `TextEdit`s a tool
+// like `sfn fix` or an LSP code-action handler can apply atomically.
+// One `FixSuggestion` represents one cohesive fix; a diagnostic with
+// multiple alternative fixes (e.g. capability-cross-check's "widen
+// the manifest" vs "narrow the function") attaches the recommended
+// option here and documents the alternative in `message`.
+struct FixSuggestion {
+    message: string;
+    edits: TextEdit[];
+}
+
 struct Diagnostic {
     code: string;
     severity: string;
     message: string;
     file_path: string;
     primary: Token?;
+    // B3: optional structured fix-it. `null` for diagnostics that
+    // don't carry an automatic fix today (W01xx load warnings,
+    // typecheck factories until B3 stage 2 promotes them). Appended
+    // last so the seed compiler's positional GEP indexing stays
+    // stable for existing field reads — the canonical re-export RCA
+    // (`docs/rca/2026-04-18-reexport-diagnostic-gep.md`) bit this
+    // struct hard once already; the `_reject_reexport_violations`
+    // gate now backstops it but we still respect the discipline.
+    suggestion: FixSuggestion?;
 }
 
 struct SymbolEntry {
@@ -419,7 +455,8 @@ fn make_interface_missing_type_arguments_diagnostic(struct_name: string, interfa
             + interface_signature
             + " type arguments",
         file_path: "",
-        primary: null
+        primary: null,
+        suggestion: null
     };
 }
 
@@ -432,7 +469,8 @@ fn make_interface_type_argument_mismatch_diagnostic(struct_name: string, annotat
             + interface_signature
             + " type arguments",
         file_path: "",
-        primary: null
+        primary: null,
+        suggestion: null
     };
 }
 
@@ -445,7 +483,8 @@ fn make_interface_no_type_arguments_diagnostic(struct_name: string, annotation_t
             + interface_name
             + " does not take type arguments",
         file_path: "",
-        primary: null
+        primary: null,
+        suggestion: null
     };
 }
 
@@ -465,7 +504,8 @@ fn make_duplicate_symbol_diagnostic(name: string, kind: string, token: Token?) -
         severity: "error",
         message: "duplicate " + kind + " `" + name + "` declared",
         file_path: "",
-        primary: token
+        primary: token,
+        suggestion: null
     };
 }
 
@@ -489,7 +529,8 @@ fn make_removed_keyword_diagnostic(keyword: string) -> Diagnostic {
             + " AI functionality is planned for the post-1.0 `sfn/ai` library"
             + " capsule and the `![model]` effect remains as the capability gate",
         file_path: "",
-        primary: null
+        primary: null,
+        suggestion: null
     };
 }
 
@@ -502,6 +543,7 @@ fn make_missing_interface_member_diagnostic(struct_name: string, interface_name:
             + member_name
             + "`",
         file_path: "",
-        primary: null
+        primary: null,
+        suggestion: null
     };
 }

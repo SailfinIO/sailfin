@@ -298,13 +298,12 @@ test_json_quiets_stderr() {
 }
 run_test "--json suppresses stderr human output" test_json_quiets_stderr
 
-# ---- Test 12: secondary/suggestion reserved fields are present (and null/empty) ----
+# ---- Test 12: secondary field still stub pre-B5; suggestion is now structured (B3) ----
 test_reserved_fields_present() {
     local out
     out="$("$BINARY" check --json src/leak.sfn 2>/dev/null || true)"
     local has_suggestion; has_suggestion=$(jq -r '.events[0] | has("suggestion")' <<<"$out")
     local has_secondary; has_secondary=$(jq -r '.events[0] | has("secondary")' <<<"$out")
-    local suggestion; suggestion=$(jq -r '.events[0].suggestion' <<<"$out")
     local secondary; secondary=$(jq -r '.events[0].secondary | length' <<<"$out")
     if [ "$has_suggestion" != "true" ]; then
         echo "[test]   suggestion field missing"
@@ -314,17 +313,80 @@ test_reserved_fields_present() {
         echo "[test]   secondary field missing"
         return 1
     fi
-    if [ "$suggestion" != "null" ]; then
-        echo "[test]   suggestion should be null pre-B3, got: $suggestion"
-        return 1
-    fi
     if [ "$secondary" != "0" ]; then
         echo "[test]   secondary should be empty pre-B5, got length: $secondary"
         return 1
     fi
     return 0
 }
-run_test "reserved fields (secondary, suggestion) present and stub" test_reserved_fields_present
+run_test "reserved fields present (secondary stub pre-B5)" test_reserved_fields_present
+
+# ---- Test 13 (B3): structured FixSuggestion shape on E0400 ----
+test_b3_suggestion_shape() {
+    local out
+    out="$("$BINARY" check --json src/leak.sfn 2>/dev/null || true)"
+    # Suggestion must be a non-null object with `message` and `edits`.
+    local sug_msg; sug_msg=$(jq -r '.events[0].suggestion.message' <<<"$out")
+    if [ "$sug_msg" = "null" ] || [ -z "$sug_msg" ]; then
+        echo "[test]   E0400 suggestion.message missing"
+        return 1
+    fi
+    if ! echo "$sug_msg" | grep -q "io"; then
+        echo "[test]   suggestion.message should mention the missing effect; got: $sug_msg"
+        return 1
+    fi
+    local edits_keys; edits_keys=$(jq -r '.events[0].suggestion.edits[0] | keys | sort | join(",")' <<<"$out")
+    local expected="end_column,end_line,replacement,start_column,start_line"
+    if [ "$edits_keys" != "$expected" ]; then
+        echo "[test]   suggestion.edits[0] field set diverged"
+        echo "[test]   expected: $expected"
+        echo "[test]   actual:   $edits_keys"
+        return 1
+    fi
+    # The edit must be a zero-width insertion at the brace position
+    # (start == end). Replacement must contain the missing effect.
+    local sl; sl=$(jq -r '.events[0].suggestion.edits[0].start_line' <<<"$out")
+    local el; el=$(jq -r '.events[0].suggestion.edits[0].end_line' <<<"$out")
+    local sc; sc=$(jq -r '.events[0].suggestion.edits[0].start_column' <<<"$out")
+    local ec; ec=$(jq -r '.events[0].suggestion.edits[0].end_column' <<<"$out")
+    local rep; rep=$(jq -r '.events[0].suggestion.edits[0].replacement' <<<"$out")
+    if [ "$sl" != "$el" ] || [ "$sc" != "$ec" ]; then
+        echo "[test]   expected zero-width insertion (start == end); got start=$sl:$sc end=$el:$ec"
+        return 1
+    fi
+    if ! echo "$rep" | grep -q "io"; then
+        echo "[test]   replacement should contain the effect name; got: $rep"
+        return 1
+    fi
+    return 0
+}
+run_test "B3: E0400 carries structured FixSuggestion with insertion edit" test_b3_suggestion_shape
+
+# ---- Test 14 (B3): suggestion edit lands at the function body's opening brace ----
+test_b3_suggestion_anchored_at_brace() {
+    # Fixture: `fn noisy_helper(x: number) -> number {` → `{` is at
+    # column 38 on line 4 of src/leak.sfn (after the resolver-friendly
+    # 3-line preamble in the fixture).  We don't pin the exact column
+    # here (changes when the fixture changes), but assert the edit
+    # lands on the same line as the function's opening brace by
+    # finding `{` in the source and matching column.
+    local out
+    out="$("$BINARY" check --json src/leak.sfn 2>/dev/null || true)"
+    local sl; sl=$(jq -r '.events[0].suggestion.edits[0].start_line' <<<"$out")
+    local sc; sc=$(jq -r '.events[0].suggestion.edits[0].start_column' <<<"$out")
+    # Read the source line and confirm the char at the suggestion's
+    # column is `{`.
+    local line_text; line_text=$(sed -n "${sl}p" "$SCRATCH/src/leak.sfn")
+    local char_at_col; char_at_col=$(echo "$line_text" | cut -c"$sc")
+    if [ "$char_at_col" != "{" ]; then
+        echo "[test]   suggestion anchor not at '{'"
+        echo "[test]   line $sl: $line_text"
+        echo "[test]   column $sc: '$char_at_col'"
+        return 1
+    fi
+    return 0
+}
+run_test "B3: suggestion edit anchored at the function body's '{'" test_b3_suggestion_anchored_at_brace
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -ne 0 ]; then

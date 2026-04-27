@@ -23,7 +23,7 @@
 // keeps this module self-contained for unit testing.
 import { substring } from "./string_utils";
 import { Token } from "./token";
-import { Diagnostic } from "./typecheck_types";
+import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
 
 // Per-file/per-producer event in the envelope. `kind` discriminates
 // "diagnostic" (typecheck/effect/capability findings) from
@@ -156,7 +156,42 @@ fn _json_render_diagnostic_inner(d: Diagnostic, producer: string, kind: string) 
     parts.push(_json_string_field("message", d.message));
     parts.push(_json_field("primary", _json_render_token(d.primary)));
     parts.push(_json_field("secondary", "[]"));
-    parts.push(_json_field("suggestion", "null"));
+    parts.push(_json_field("suggestion", _json_render_suggestion(d.suggestion)));
+    return "{" + _join(parts, ",") + "}";
+}
+
+// Render `Diagnostic.suggestion` as either the JSON literal `null`
+// or a `{ message, edits[] }` object. The edits array carries the
+// 1-based line/column inserts; `sfn fix` (planned) and the LSP
+// code-action handler (also planned) consume this directly.
+fn _json_render_suggestion(s: FixSuggestion?) -> string {
+    if s == null { return "null"; }
+    let sug: FixSuggestion? = s;
+    let mut parts: string[] = [];
+    parts.push(_json_string_field("message", sug.message));
+    parts.push(_json_field("edits", _json_render_edits(sug.edits)));
+    return "{" + _join(parts, ",") + "}";
+}
+
+fn _json_render_edits(edits: TextEdit[]) -> string {
+    if edits.length == 0 { return "[]"; }
+    let mut parts: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= edits.length { break; }
+        parts.push(_json_render_edit(edits[i]));
+        i += 1;
+    }
+    return "[" + _join(parts, ",") + "]";
+}
+
+fn _json_render_edit(e: TextEdit) -> string {
+    let mut parts: string[] = [];
+    parts.push(_json_number_field("start_line", e.start_line));
+    parts.push(_json_number_field("start_column", e.start_column));
+    parts.push(_json_number_field("end_line", e.end_line));
+    parts.push(_json_number_field("end_column", e.end_column));
+    parts.push(_json_string_field("replacement", e.replacement));
     return "{" + _join(parts, ",") + "}";
 }
 

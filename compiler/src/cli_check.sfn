@@ -107,7 +107,8 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
             severity: "warning",
             message: "missing import-context artifact",
             file_path: load_result.missing_paths[i],
-            primary: null
+            primary: null,
+            suggestion: null
         };
         print.err(render_diagnostic(diag, empty_lines, "load"));
         i += 1;
@@ -120,7 +121,8 @@ fn _emit_load_warnings(load_result: ImportedInterfaceLoadResult, quiet: boolean)
             severity: "warning",
             message: "import-context artifact parse failed",
             file_path: load_result.parse_failure_paths[p],
-            primary: null
+            primary: null,
+            suggestion: null
         };
         print.err(render_diagnostic(diag, empty_lines, "load"));
         p += 1;
@@ -376,7 +378,8 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
             severity: "warning",
             message: "missing import-context artifact",
             file_path: load.missing_paths[mi],
-            primary: null
+            primary: null,
+            suggestion: null
         };
         events.push(CheckJsonEvent {
             kind: "load_warning", producer: classify_producer("W0001"), diagnostic: warn
@@ -391,7 +394,8 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
             severity: "warning",
             message: "import-context artifact parse failed",
             file_path: load.parse_failure_paths[pi],
-            primary: null
+            primary: null,
+            suggestion: null
         };
         events.push(CheckJsonEvent {
             kind: "load_warning", producer: classify_producer("W0002"), diagnostic: warn

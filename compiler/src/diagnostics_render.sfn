@@ -34,7 +34,7 @@
 import { CapabilityViolation, EffectRequirement, EffectViolation } from "./effect_checker";
 import { substring } from "./string_utils";
 import { Token } from "./token";
-import { Diagnostic } from "./typecheck_types";
+import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
 
 // -------------------------------------------------------------------
 // Effect-violation → Diagnostic
@@ -127,7 +127,38 @@ fn effect_violation_to_diagnostic(violation: EffectViolation) -> Diagnostic {
         severity: sev,
         message: message,
         file_path: "",
-        primary: violation.trigger
+        primary: violation.trigger,
+        // B3 stage 2: structured fix-it. When the effect checker
+        // captured a body-opening brace token AND there's at least
+        // one missing effect, splice `![effects] ` in at the brace
+        // column. Tools like `sfn fix` and the LSP code-action
+        // handler apply the edit directly; the textual
+        // "suggestion: add ..." line in `message` remains for
+        // human readers.
+        suggestion: _suggestion_for_missing_effect(violation.missing_effects, violation.body_open_token)
+    };
+}
+
+// Build the structured `FixSuggestion` for an `E0400`/`E0401`/`E0402`
+// diagnostic. Returns null when the editor wouldn't have a stable
+// anchor (no body-open token, or no effects to add). The edit is an
+// insertion (zero-width range) at the column of the body's `{` —
+// inserting `![effect, ...] ` produces
+// `fn foo(...) ![io] {` from `fn foo(...) {`.
+fn _suggestion_for_missing_effect(missing_effects: string[], body_open_token: Token?) -> FixSuggestion? {
+    if missing_effects.length == 0 { return null; }
+    if body_open_token == null { return null; }
+    let tok: Token? = body_open_token;
+    let effects_text = join_effects(missing_effects);
+    let mut edits: TextEdit[] = [];
+    edits.push(TextEdit {
+        start_line: tok.line, start_column: tok.column, end_line: tok.line, end_column: tok.column, replacement: "!["
+            + effects_text
+            + "] "
+    });
+    return FixSuggestion {
+        message: "add ![" + effects_text + "] to the function signature",
+        edits: edits
     };
 }
 
@@ -176,7 +207,13 @@ fn capability_violation_to_diagnostic(violation: CapabilityViolation) -> Diagnos
         severity: sev,
         message: message,
         file_path: "",
-        primary: violation.trigger
+        primary: violation.trigger,
+        // B3 stage 1: capability cross-check has no auto-fix today.
+        // The two-pronged fix-it (widen manifest vs narrow function)
+        // is documented in `message`; stage 2 may promote one branch
+        // to a `FixSuggestion` once we decide which is the
+        // less-risky default. Until then, leave it null.
+        suggestion: null
     };
 }
 

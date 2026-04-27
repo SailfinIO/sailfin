@@ -503,3 +503,70 @@ test "effect violation: AST trigger overrides signature fallback" {
     let trig: Token? = v.trigger;
     assert trig.line == 200;
 }
+
+// -------------------------------------------------------------------
+// B3 — body_open_token plumbing
+// -------------------------------------------------------------------
+//
+// `EffectViolation` now carries `body_open_token`, sourced from
+// `body.tokens[0]` in `analyze_routine`. The renderer in
+// `diagnostics_render.effect_violation_to_diagnostic` reads this slot
+// to construct the structured `FixSuggestion` (insert `![effects] `
+// at the brace column). Tests below construct `Block { tokens: [...] }`
+// fixtures directly to exercise the brace-capture path.
+fn _brace_token(line: number, column: number) -> Token {
+    return Token {
+        kind: TokenKind.Symbol(),
+        lexeme: "{",
+        line: line,
+        column: column
+    };
+}
+
+fn _routine_with_brace(name: string, sig_line: number, brace_line: number, brace_column: number) -> Statement {
+    let sig_span = _span(sig_line, 4);
+    let body_text = "print.info(\"hello\");";
+    let body_stmt = Statement.ExpressionStatement {
+        expression: Expression.Raw { text: body_text },
+        span: null
+    };
+    let mut block_tokens: Token[] = [];
+    block_tokens.push(_brace_token(brace_line, brace_column));
+    let body_block = Block {
+        tokens: block_tokens,
+        text: body_text,
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    let mut empty_effects: string[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature(name, empty_effects, sig_span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+}
+
+test "effect violation: body_open_token captures the body's opening brace" {
+    let stmt = _routine_with_brace("noisy", 3, 3, 38);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.body_open_token != null;
+    let brace: Token? = v.body_open_token;
+    assert brace.line == 3;
+    assert brace.column == 38;
+    assert brace.lexeme == "{";
+}
+
+test "effect violation: body_open_token is null when block has no tokens" {
+    // Synthesized routines and the `Raw` text-only path leave Block
+    // tokens empty. The renderer must accept the null and skip
+    // structured-suggestion generation; the human-readable
+    // suggestion line in the message stays.
+    let stmt = _make_io_violating_routine("nameless", [], 7);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    assert violations[0].body_open_token == null;
+}

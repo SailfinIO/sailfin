@@ -92,6 +92,15 @@ struct EffectViolation {
     // gate decision so Phase B can wire `SAILFIN_EFFECT_ENFORCE` to
     // toggle without touching the violation construction code.
     severity: string;
+    // Track B B3: token at the body's opening `{` so the structured
+    // `FixSuggestion` (built in `diagnostics_render`) knows where to
+    // splice in `![effects] `. Synthesized from `body.tokens[0]` in
+    // `analyze_routine` when available; null for synthesized routines
+    // and parser-recovery edges where the body has no tokens. When
+    // null, the renderer leaves `Diagnostic.suggestion` null too —
+    // the human-readable suggestion line in `Diagnostic.message`
+    // covers that path.
+    body_open_token: Token?;
 }
 
 // Phase F (`docs/proposals/effect-validation.md` §5): a function
@@ -384,9 +393,19 @@ fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decora
     // token at the source location.
     let sig_token = _token_from_signature(signature.name_span, signature.name);
     let trigger_token = _first_requirement_trigger(missing_requirements, sig_token);
+    // B3 stage 2: capture the body's opening `{` token so the
+    // renderer can splice `![effects] ` in at exactly that column.
+    // `parse_block` lays the block out as `[ '{', ..., '}' ]` and
+    // `trim_block_tokens_local` preserves both braces, so
+    // `body.tokens[0]` is the opening brace whenever it exists.
+    // Synthesized routines (no parser path) leave `tokens` empty;
+    // this stays null for them and the renderer keeps
+    // `Diagnostic.suggestion` null.
+    let mut body_brace: Token? = null;
+    if body.tokens.length > 0 { body_brace = body.tokens[0]; }
     let mut result: EffectViolation[] = [];
     result = append_violation(result, EffectViolation {
-        routine_name: name, missing_effects: missing, requirements: missing_requirements, signature_token: sig_token, trigger: trigger_token, severity: "error"
+        routine_name: name, missing_effects: missing, requirements: missing_requirements, signature_token: sig_token, trigger: trigger_token, severity: "error", body_open_token: body_brace
     });
     return result;
 }
