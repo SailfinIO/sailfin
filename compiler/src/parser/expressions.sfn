@@ -294,7 +294,10 @@ fn expression_from_single_token(token: Token) -> Expression? {
             return Expression.BooleanLiteral { value: "false" };
         }
         if strings_equal(value, "null") { return Expression.NullLiteral(); }
-        return Expression.Identifier { name: value };
+        return Expression.Identifier {
+            name: value,
+            span: source_span_from_tokens([token])
+        };
     }
     return null;
 }
@@ -436,7 +439,10 @@ fn parse_primary_expression(state: ExpressionTokens) -> ExpressionParseResult {
         }
         return ExpressionParseResult {
             state: expression_tokens_advance(state),
-            expression: Expression.Identifier { name: name },
+            expression: Expression.Identifier {
+                name: name,
+                span: source_span_from_tokens([token])
+            },
             success: true
         };
     }
@@ -505,9 +511,14 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
                 return expression_parse_failure(state);
             }
             current_state = expression_tokens_advance(after_dot);
+            // Caret lands on the member token (right-hand side of `.`)
+            // — the operation name the effect checker reads when
+            // detecting `fs.<x>` / `print.<x>` / `http.<x>` etc. The
+            // object's own span is preserved on its variant.
             current_expression = Expression.Member {
                 object: current_expression,
-                member: identifier_text(member_token)
+                member: identifier_text(member_token),
+                span: source_span_from_tokens([member_token])
             };
             continue;
         }
@@ -517,9 +528,15 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
                 return expression_parse_failure(state);
             }
             current_state = call_result.state;
+            // Call.span stays null — the effect checker derives the
+            // call-site caret from `callee.span` (an Identifier or
+            // Member whose variant span already points at the right
+            // token). A separate Call-level span lands when a
+            // consumer needs the full callee+args range.
             current_expression = Expression.Call {
                 callee: current_expression,
-                arguments: call_result.arguments
+                arguments: call_result.arguments,
+                span: null
             };
             continue;
         }

@@ -76,9 +76,13 @@ fn _import_decl(name: string, alias: string?, source: string) -> Statement {
 // Phase E `_propagate_imported_callee_effects` path.
 fn _routine_calling(routine_name: string, callee_name: string, span_line: number) -> Statement {
     let span = _span(span_line, 4);
-    let callee = Expression.Identifier { name: callee_name };
+    let callee = Expression.Identifier { name: callee_name, span: null };
     let no_args: Expression[] = [];
-    let call_expr = Expression.Call { callee: callee, arguments: no_args };
+    let call_expr = Expression.Call {
+        callee: callee,
+        arguments: no_args,
+        span: null
+    };
     let body_stmt = Statement.ExpressionStatement {
         expression: call_expr,
         span: null
@@ -252,9 +256,13 @@ test "validate_effects_with_imports: declared effect on caller suppresses violat
     let import_stmt = _import_decl("fetch", null, "modA");
 
     let span = _span(5, 4);
-    let callee = Expression.Identifier { name: "fetch" };
+    let callee = Expression.Identifier { name: "fetch", span: null };
     let no_args: Expression[] = [];
-    let call_expr = Expression.Call { callee: callee, arguments: no_args };
+    let call_expr = Expression.Call {
+        callee: callee,
+        arguments: no_args,
+        span: null
+    };
     let body_stmt = Statement.ExpressionStatement {
         expression: call_expr,
         span: null

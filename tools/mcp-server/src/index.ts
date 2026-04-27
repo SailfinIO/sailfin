@@ -4,7 +4,8 @@
 //
 // Exposes the self-hosted Sailfin compiler as tool calls over stdio MCP:
 //   - sailfin_version         — compiler version string
-//   - sailfin_check           — type + effect check
+//   - sailfin_check           — type + effect check (human stderr)
+//   - sailfin_diagnostics     — same analysis, machine-readable JSON
 //   - sailfin_emit_native     — emit .sfn-asm IR
 //   - sailfin_emit_llvm       — emit LLVM IR
 //   - sailfin_fmt_check       — formatting diagnostics (no rewrite)
@@ -129,6 +130,68 @@ server.registerTool(
     const out = await withResolvedPath(userPath, async (abs) => {
       const result = await runSailfin(["check", abs]);
       return formatResult("sailfin check", result);
+    });
+    return out as ToolResult;
+  },
+);
+
+// Machine-readable counterpart to `sailfin_check`. Returns the
+// `sailfin-check/1` envelope (documented at
+// `docs/reference/check-json-schema.md`) parsed into
+// `structuredContent` so MCP clients can act on diagnostics
+// programmatically. Falls back to surfacing the raw stdout on parse
+// failure — that path also signals isError so the client knows the
+// envelope was unusable rather than empty.
+server.registerTool(
+  "sailfin_diagnostics",
+  {
+    title: "Type + effect check (JSON envelope)",
+    description:
+      "Run the Sailfin compiler's type and effect checker on a single .sfn file and return the sailfin-check/1 JSON envelope (events array + summary). Use this for programmatic consumption — events carry code, severity, producer, file_path, message, and primary source location. Schema is documented at docs/reference/check-json-schema.md.",
+    inputSchema: { path: pathSchema },
+  },
+  async ({ path: userPath }) => {
+    const out = await withResolvedPath(userPath, async (abs) => {
+      const result = await runSailfin(["check", "--json", abs]);
+      // sfn check exits 0 (clean) or 1 (diagnostics found); both are
+      // expected outcomes that produce a valid envelope. Exit 2 is
+      // a setup error — the envelope may not be present.
+      if (result.exit !== 0 && result.exit !== 1) {
+        return formatResult("sailfin diagnostics", result);
+      }
+      let envelope: Record<string, unknown> | null = null;
+      let parseError: string | null = null;
+      try {
+        envelope = JSON.parse(result.stdout) as Record<string, unknown>;
+      } catch (err) {
+        parseError =
+          err instanceof Error ? err.message : String(err);
+      }
+      const ok = envelope !== null;
+      const header = ok
+        ? `sailfin diagnostics: ok (exit=${result.exit}, ${result.durationMs}ms)`
+        : `sailfin diagnostics: FAIL (envelope did not parse as JSON: ${parseError})`;
+      const body = [
+        header,
+        ok ? "" : `--- raw stdout ---\n${result.stdout}`,
+        result.stderr.length > 0 ? `--- stderr ---\n${result.stderr}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      const structured: Record<string, unknown> = ok && envelope !== null
+        ? envelope
+        : {
+            exit: result.exit,
+            duration_ms: result.durationMs,
+            parse_error: parseError ?? "",
+            raw_stdout: result.stdout,
+            raw_stderr: result.stderr,
+          };
+      return {
+        isError: !ok,
+        content: [{ type: "text", text: body }],
+        structuredContent: structured,
+      } satisfies ToolResult;
     });
     return out as ToolResult;
   },

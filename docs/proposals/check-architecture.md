@@ -1,7 +1,7 @@
 # Architecture: `sfn check` — Fast Analysis Without Codegen
 
-Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`); Track A complete (A1–A4 all shipped)
-Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026; A3 (Phase 1 diagnostic infrastructure — severity + file_path on Diagnostic, structured load warnings) shipped April 25, 2026; A4 (legacy helper deletion) shipped April 26, 2026 alongside Stage B PR2's `sfn test` migration
+Status: Shipped (initial v1 — parse + typecheck + effect-check, default stderr rendering, `--quiet`); Track A complete (A1–A4 all shipped); Track B designed (B1–B7), in progress
+Date: April 15, 2026 (design); shipped April 18, 2026; A1 (cross-module conformance hookup) shipped April 25, 2026; A2 (resolver wiring) shipped April 25, 2026; A3 (Phase 1 diagnostic infrastructure — severity + file_path on Diagnostic, structured load warnings) shipped April 25, 2026; A4 (legacy helper deletion) shipped April 26, 2026 alongside Stage B PR2's `sfn test` migration; Track B (production hardening) designed April 26, 2026
 Parent: [docs/proposals/tooling.md](../proposals/tooling.md)
 
 ## Implementation Status
@@ -1006,3 +1006,790 @@ a dependency isn't installed, the import is stripped (same as missing files).
   numbers in the combined (inlined) source, not the original file. A source
   map would translate back to original file + line. This is a significant
   enhancement that requires tracking source origins during inlining.
+
+## Track B — Production hardening
+
+Status: Designed (April 26, 2026); B1 in flight.
+Parent: Track A (A1–A4, all shipped April 25–26, 2026)
+Sibling: `docs/proposals/effect-validation.md` Phases A–F (shipped 2026-04-26)
+
+Track A retired the textual import inliner and got `Diagnostic` carrying
+`severity` + `file_path`. Track B closes the deferred items from Track A's
+"Still deferred to a follow-up" list (above) at the same production bar
+effect-validation Phases A–F just hit: every step ships green, every shipped
+surface has regression coverage, and every PR self-hosts.
+
+The work splits into seven sub-PRs ordered so each one ships standalone.
+B1–B3 are the high-leverage track and unblock `sfn lsp`, `sfn fix`, and the
+MCP server's richer tools (`sailfin_diagnostics`, `sailfin_effect_trace`).
+B4–B5 are correctness/uniformity work that pays back in long-tail bug
+avoidance. B6 is CI/dev-loop integration. B7 is the explicitly deferred
+parallel-checking pre-mortem — included so a contributor knows it has been
+considered and rejected for v1.
+
+### Top-level table
+
+| PR | Title | Size | Depends on | Unblocks | Exit criteria summary |
+|---|---|---|---|---|---|
+| B1 | Effect-violation token plumbing | M | none | sfn fix, sfn lsp | Per-`Expression` triggers carry tokens; effect diagnostics point at call site, not signature |
+| B2 | `--json` output for `sfn check` | M | B1 (only for trigger spans; can ship without) | MCP `sailfin_diagnostics`, sfn lsp Phase 1, CI scrapers | `sfn check --json` emits stable schema; documented; consumed by MCP |
+| B3 | Phase-2 diagnostic infra: `FixSuggestion` + `TextEdit` | M | B1 | sfn fix, sfn lsp quick-fix | All E04xx diagnostics carry `suggestion`; JSON envelope renders edits |
+| B4 | Renderer harmonization: `report_typecheck_errors` → `render_diagnostic` | S | B1 | One-source-of-truth for diagnostic shape | All `compile_to_*` paths use `diagnostics_render.render_diagnostic`; legacy `format_typecheck_diagnostic` deleted |
+| B5 | `secondary: SourceLocation[]` on `Diagnostic` | S | B3 | "first defined here" pointers; cross-module attribution | Duplicate-symbol diagnostics carry secondary span; renderer draws second caret |
+| B6 | `make check-fast` + CI pre-build wiring | S | B2 | Faster PR feedback (~5s vs ~13min) | New target documented; CI gate fails fast; pre-commit hook documented |
+| B7 | Parallel multi-file checking — pre-mortem | XS (doc only) | none | Track C scoping | Explicitly deferred to post-1.0; rationale documented; alternative listed |
+
+**Track B v1 = B1 + B2 + B3 + B4 + B6.** B5 ships when a consumer needs it
+(LSP cross-file rename is the natural forcing function). B7 is a doc-only PR
+that codifies the deferral so a future contributor doesn't reinvent the
+analysis.
+
+### Architectural decisions settled up front
+
+These answer the four open architectural questions and are referenced by each
+sub-PR below.
+
+#### Q1 — `--json` schema shape
+
+**Decision: flat `events` array + top-level summary, code-namespaced,
+schema-versioned.**
+
+```jsonc
+{
+  "schema_version": "sailfin-check/1",
+  "command": "sfn check",
+  "exit_code": 1,
+  "summary": {
+    "files_checked": 121,
+    "errors": 3,
+    "warnings": 2,
+    "duration_ms": 4870
+  },
+  "events": [
+    {
+      "kind": "diagnostic",                  // "diagnostic" | "load_warning"
+      "code": "E0400",                       // E0xxx error, W0xxx warning
+      "severity": "error",                   // error | warning | hint | info
+      "producer": "effect",                  // typecheck | effect | parse | load
+      "file_path": "compiler/src/foo.sfn",
+      "message": "function `process` is missing required effects: ![io]",
+      "primary": {                           // null when no source location
+        "line": 30, "column": 1,
+        "lexeme": "process",
+        "label": null                        // optional; reserved for B5
+      },
+      "secondary": [],                       // empty until B5
+      "suggestion": null                     // populated by B3 for fixable diags
+    }
+  ]
+}
+```
+
+Rationale:
+
+- **Flat array, not grouped by file.** MCP and CI scrapers iterate
+  diagnostics; LSP groups by file itself via `file_path`. Forcing the
+  group structure in the wire format costs the LSP nothing and saves
+  the other consumers a flatten step.
+- **`schema_version` first field.** Bumping to `sailfin-check/2` is
+  the contract for breaking changes; consumers can hard-fail on
+  unknown versions without inspecting unknown fields.
+- **`producer` discriminator.** Distinct from `code` because two
+  different producers can legitimately share a code range (today
+  W0001/W0002 are load-only; tomorrow `sfn vet` adds W02xx).
+- **`primary: null` when no token.** Today `EffectViolation` carries a
+  synthesized signature token, so most E04xx diagnostics will have a
+  primary. Load warnings (W01xx) genuinely have no source location
+  and ship `primary: null`. Consumers must handle null.
+- **`suggestion: null` until B3 lands.** Reserves the field shape so
+  consumers can write code today that ignores `suggestion`, then
+  start acting on it without a schema bump.
+- **Top-level `summary` always present**, even when `events` is empty.
+
+The schema lives at `docs/reference/check-json-schema.md` (new file in B2)
+and is locked by `compiler/tests/e2e/test_check_json_schema.sh`.
+
+#### Q2 — Phase-2 diagnostic infra ordering: B1 → B2 → B3
+
+`sfn fix` needs both spans and suggestions. `sfn lsp` Phase 1 needs only
+spans. The MCP server and CI scrapers need only JSON. So:
+
+1. **B1 first** — token plumbing on every diagnostic. Without per-call-
+   site spans, suggestions in B3 would target the wrong location and
+   `sfn fix` would corrupt source.
+2. **B2 second** — JSON shape. Lands `suggestion: null` placeholder.
+   MCP gains `sailfin_diagnostics` immediately.
+3. **B3 third** — `FixSuggestion`/`TextEdit` infrastructure. Wired
+   through the JSON envelope so `sfn fix` and LSP quick-fix can ship
+   from the same surface.
+
+This ordering also improves the build-path side effects: B1 takes the
+existing build-path effect diagnostics from "caret at signature" to
+"caret at call site" without any consumer-facing wire-format change.
+
+#### Q3 — `make check-fast` placement
+
+**Decision: `make check-fast` runs in CI as the first PR job, before
+`make compile`. Documented as a recommended pre-commit hook but not
+enforced as one.**
+
+- CI: `check-fast` runs in <10s on a clean tree; `make compile` takes
+  ~2 min on the parallel-build path. If `check-fast` fails the PR
+  author gets feedback in seconds rather than waiting for a full
+  build. The build job still runs (it catches lowering / linker / ABI
+  bugs that `check` can't see).
+- **Not a pre-commit hook by default**: enforcing pre-commit hooks
+  collides with `git rebase -i` flows and surprises contributors who
+  use multiple checkouts. Document the install path in
+  `CONTRIBUTING.md` as opt-in (`bash scripts/install_precommit.sh`).
+- **`make check-fast` runs `sfn check compiler/src/ runtime/`**. CI
+  also runs `sfn check compiler/tests/` separately because test files
+  exercise different effect contexts and shouldn't gate the main-
+  source check.
+
+Targets land in B6.
+
+#### Q4 — Parallel multi-file checking: deferred to post-1.0
+
+Sailfin has no concurrency runtime. `routine`/`spawn`/`channel`/`await`
+are not in the parser (`docs/status.md`); Phase 4 of the runtime
+enablement plan in `CLAUDE.md` is what lights them up.
+
+`process.run`-fork workaround analysis: a 121-file `sfn check` run forking
+N compiler processes incurs
+
+- **Resolution overhead per fork.** Each forked `sfn check` re-runs
+  `prepare_project_capsules_for_check`, which walks the capsule graph
+  and stages every `.sfn-asm` artifact. The current sequential path
+  amortizes that work across all 121 files. Forking destroys the
+  amortization — a 4-way fork would do 4 resolver passes instead of 1.
+- **Process startup cost.** Compiler binary is ~70 MB; cold-start
+  (especially macOS) adds ~200 ms per fork. For a check that currently
+  runs in ~5 s sequential, 4 forks of 30 files each spend ~800 ms on
+  startup — 16% overhead before any work happens.
+- **Diagnostic ordering.** Sequential output matches file enumeration
+  order; parallel output interleaves across processes.
+
+Net: the workaround is **not faster**. The real fix is structured
+concurrency in the language. **B7 ships as a doc-only PR** recording
+this so a future contributor knows the analysis was done.
+
+#### Q5 — Renderer harmonization
+
+**Decision: migrate. The full-build path adopts
+`diagnostics_render.render_diagnostic` (B4). `format_typecheck_diagnostic`,
+`format_typecheck_diagnostics`, and `report_typecheck_errors` are deleted
+from `main.sfn`.**
+
+- One source of truth for diagnostic shape. Today `sfn check` and
+  `sfn build` produce different formats for the same typecheck error.
+  Two formats = two test surfaces = two places for bugs to hide.
+- Backward-compat audit: `grep -rn "format_typecheck" compiler/tests/`
+  returns no goldens pinning the legacy `[typecheck] --> line N,
+  column N` format. The end-to-end format guard
+  (`test_check_cross_module_conformance.sh`) already asserts the
+  unified `error[Exxxx]: --> file:line:col` shape introduced in A3.
+- 9 call sites of `report_typecheck_errors` in `main.sfn`. Each lives
+  inside a `compile_to_*` entry point. Each becomes a small loop:
+  split source lines once, call `render_diagnostic(d, lines,
+  "typecheck")` for each diagnostic, write each rendered string to
+  stderr.
+
+### B1 — Effect-violation per-`Expression` token plumbing
+
+**Rationale.** Today `EffectViolation.trigger` is the synthesized signature
+token (Phase A behavior). Diagnostics caret-point at the function
+declaration, not the offending call. For `sfn fix` this is fatal: the fix
+surface "add `![io]` to the signature" works because the signature is the
+right edit point, but for any LSP quick-fix that inserts a missing effect
+requirement at the call site, or any future analysis that wants per-call
+attribution, the trigger must point at the call site.
+
+This is also the single biggest UX gap in `sfn check` today — a long
+function with one effectful call at line 47 still draws its caret at line
+1. Rust-quality diagnostics require the caret at the call.
+
+**Files affected.** Pipeline stage: AST + parse (token attachment to
+expressions).
+
+- `compiler/src/ast.sfn` — Add `span: SourceSpan?` to the
+  `Expression.Call`, `Expression.Member`, `Expression.Identifier`, and
+  `Expression.Decorator` variants. Other variants don't trigger effect
+  requirements and don't need spans. (Adding to all variants inflates
+  the AST struct cost across every walk; do it incrementally.)
+- `compiler/src/parser/expressions.sfn` (or wherever `Call` /
+  `Member` / `Identifier` are constructed during parse) — Populate
+  `span` from the leading token of each expression construction site.
+  `SourceSpan { start_line, start_column, end_line, end_column }` is
+  already defined.
+- `compiler/src/effect_checker.sfn` — Replace the
+  `signature_token`-as-trigger fallback in `collect_effects_from_block`
+  and `collect_effects_from_text` with per-Expression token
+  construction. New helper:
+
+  ```sfn
+  fn _token_from_expression(expr: Expression, lexeme: string) -> Token? {
+      if expr.span == null { return null; }
+      let span: SourceSpan = expr.span;
+      return Token {
+          kind: TokenKind.Identifier(),
+          lexeme: lexeme,
+          line: span.start_line,
+          column: span.start_column
+      };
+  }
+  ```
+
+  Each call-site detection (`collect_effects_from_text` greps for
+  `print.`, `fs.`, etc.) gains the offending span as the trigger.
+  Decorators reuse the existing pattern (decorator span).
+- `compiler/src/diagnostics_render.sfn` — No change. The renderer
+  already reads `d.primary` — once `trigger` is real, the renderer
+  draws the caret at the right place automatically.
+- `compiler/tests/unit/effect_checker_test.sfn` — Add tests that
+  `analyze_routine` populates `trigger` at the call-site line for
+  each missing-effect violation. Cover `print.info`, decorator-implied
+  `@logExecution`, lambda calling effectful helper, nested call inside
+  `if`.
+- `compiler/tests/e2e/test_check_effect_call_site_caret.sh` (new) —
+  Golden test: a fixture with an effectful call on line 5 of a 20-
+  line function; assert `--> file:5:` appears in output and the caret
+  points at the call.
+
+**New types and signatures.**
+
+```sfn
+// In compiler/src/ast.sfn — extend (don't replace) existing variants
+enum Expression {
+    Call(callee: Expression, args: Expression[], span: SourceSpan?);
+    Member(target: Expression, member: string, span: SourceSpan?);
+    Identifier(name: string, span: SourceSpan?);
+    // ... other variants unchanged ...
+}
+
+// In compiler/src/effect_checker.sfn — new internal helper
+fn _token_from_expression(expr: Expression, lexeme: string) -> Token?;
+
+// EffectViolation.trigger semantics: now points at the offending call
+// site when the producer can identify one; falls back to
+// signature_token for body-walk producers that don't carry expression
+// state (decorator-only and Phase-E imported-callee resolution stay
+// at signature).
+```
+
+**Self-host risk.** **Medium.** This widens an enum variant in the
+AST, which the seed compiler's struct/enum layout machinery has
+historically been fragile around (see the re-export RCA). Mitigations:
+
+1. **Add `span` as the last field** of each affected variant. The
+   seed compiler's GEP indexing is positional; new fields at the end
+   don't shift existing indices.
+2. **Initialize `span` to `null` everywhere a constructor is called
+   from non-parser code.** Synthesized calls in the emitter today
+   construct `Expression.Call` with no span; they can keep doing so.
+3. **Test on a stage2 binary first.** Run `make compile` after the
+   AST change but before the effect-checker change. If the AST
+   change alone breaks self-host, the compiler can still build the
+   pre-change effect checker and emit working diagnostics — just at
+   the signature site.
+
+**Verification commands.**
+
+```bash
+# Stage 1: AST change only
+ulimit -v 8388608 && timeout 300 make compile
+ulimit -v 8388608 && timeout 60 make test-unit
+
+# Stage 2: effect-checker uses spans
+ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/effect_checker_test.sfn
+ulimit -v 8388608 && timeout 30 bash compiler/tests/e2e/test_check_effect_call_site_caret.sh build/native/sailfin
+
+# Stage 3: full self-host validation
+ulimit -v 8388608 && timeout 1800 make check
+```
+
+**Exit criteria.**
+
+- [ ] `Expression.Call`, `Expression.Member`, `Expression.Identifier`,
+      `Expression.Decorator` carry an optional `span`.
+- [ ] Parser populates `span` for every construction site that has a
+      backing token.
+- [ ] `EffectViolation.trigger` points at the call site (not the
+      signature) for at least the `print.`, `fs.`, `http.`,
+      `console.`, `spawn(`, `serve(`, `sleep(` patterns from
+      `effect_checker.collect_effects_from_text`.
+- [ ] New unit tests in `effect_checker_test.sfn` verify trigger line
+      numbers.
+- [ ] New e2e test `test_check_effect_call_site_caret.sh` passes.
+- [ ] `make check` (triple-pass fixed-point) green on Linux + macOS.
+- [ ] No regression in `compiler/tests/e2e/test_check_cross_module_conformance.sh`.
+
+### B2 — `--json` output for `sfn check`
+
+**Rationale.** **LLM Adoption Strategy lever #3** from CLAUDE.md:
+"structured diagnostics that agents can parse and act on. Unblocks the MCP
+server and any agentic compile-check-fix loop." Also unblocks `sfn lsp`
+Phase 1 (the LSP server can shell out to `sfn check --json` before
+transitioning to in-process calls). The MCP server's deferred
+`sailfin_diagnostics` and `sailfin_effect_trace` tools require this output
+mode.
+
+The schema is locked in Q1 above. This PR ships:
+
+1. The encoder in `compiler/src/diagnostics_json.sfn`.
+2. The `--json` flag wiring in `cli_check.sfn`.
+3. Schema documentation at `docs/reference/check-json-schema.md`.
+4. A schema-lock test that parses the output and asserts the field set.
+
+**Files affected.** Pipeline stage: CLI / output rendering.
+
+- `compiler/src/diagnostics_json.sfn` (new, ~200 lines) — Pure
+  encoder. Takes `Diagnostic[]` + summary metadata + producer-tagged
+  load warnings, returns one JSON string. No I/O. Self-contained — no
+  JSON library dependency (sfn doesn't have one yet).
+- `compiler/src/cli_check.sfn` — Add `--json` flag parsing alongside
+  `--quiet`. Branch the output path: when `--json` is set, suppress
+  the per-file `[check]` headers and the human-readable rendered
+  output; instead, accumulate diagnostics across all files and emit a
+  single JSON envelope at the end. Exit codes unchanged.
+- `compiler/src/tools/check.sfn` — Add `producer` tagging to results.
+  Use a parallel-array form (`producers: string[]` indexed alongside
+  `diagnostics`) rather than widening `Diagnostic` itself — the
+  struct is the canonical re-export RCA hot spot.
+- `docs/reference/check-json-schema.md` (new) — The locked schema
+  document. Each field, type, allowed values, semver bump rules.
+  Linked from `docs/proposals/check-architecture.md` and
+  `tools/mcp-server/README.md`.
+- `compiler/tests/unit/diagnostics_json_test.sfn` (new) — Unit test
+  the encoder on a curated set of `Diagnostic` literal cases (one per
+  E04xx code, one per W01xx code, one with primary, one with primary
+  null). Assert exact byte output for at least the three canonical
+  cases.
+- `compiler/tests/e2e/test_check_json_schema.sh` (new) — Integration:
+  run `sfn check --json fixtures/check-json/` against a fixture tree
+  containing one clean file, one typecheck error, one effect
+  violation, and one missing-import-context warning. Pipe through
+  `jq` to validate the schema. Assert `summary.errors`,
+  `summary.warnings` match the human renderer's count.
+- `tools/mcp-server/src/index.ts` — Wire a new tool
+  `sailfin_diagnostics(path: string)` that runs `sfn check --json
+  <path>` and returns the parsed envelope as `structuredContent`.
+  The existing `sailfin_check` stays for human-readable usage.
+- `tools/mcp-server/test/smoke.test.ts` — Smoke test for
+  `sailfin_diagnostics` against a fixture file with a known error.
+
+**New types and signatures.**
+
+```sfn
+struct CheckJsonSummary {
+    files_checked: number;
+    errors: number;
+    warnings: number;
+    duration_ms: number;
+}
+
+struct CheckJsonEvent {
+    kind: string;          // "diagnostic" | "load_warning"
+    producer: string;      // "typecheck" | "effect" | "parse" | "load"
+    diagnostic: Diagnostic;
+}
+
+fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummary, exit_code: number) -> string;
+
+// Internal encoders (private, _ prefixed)
+fn _json_escape_string(s: string) -> string;
+fn _json_render_diagnostic(d: Diagnostic, producer: string) -> string;
+fn _json_render_token(t: Token?) -> string;
+fn _json_render_summary(s: CheckJsonSummary, exit_code: number) -> string;
+```
+
+**Self-host risk.** **Low.** Pure string-building module, no struct
+layout changes, no re-exports of imported symbols. The only seed-
+boundary concern: the JSON encoder builds strings by concatenation,
+and a 121-module check can produce ~50 KB of JSON output — well
+within current string-length tolerances.
+
+**Verification commands.**
+
+```bash
+ulimit -v 8388608 && timeout 300 make compile
+ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/diagnostics_json_test.sfn
+ulimit -v 8388608 && timeout 60 bash compiler/tests/e2e/test_check_json_schema.sh build/native/sailfin
+ulimit -v 8388608 && timeout 30 build/native/sailfin check --json compiler/src/main.sfn | jq .
+ulimit -v 8388608 && timeout 30 build/native/sailfin check --json compiler/src/ | jq '.summary'
+
+# MCP smoke
+make mcp-server
+cd tools/mcp-server && npm test
+```
+
+**Exit criteria.**
+
+- [ ] `sfn check --json file.sfn` emits valid JSON parsing under `jq`.
+- [ ] Schema documented at `docs/reference/check-json-schema.md`.
+- [ ] Schema-lock test asserts no fields silently leak.
+- [ ] `sailfin_diagnostics` MCP tool returns `structuredContent`.
+- [ ] Empty-event envelope still includes `summary`.
+- [ ] `make check` green.
+
+### B3 — `FixSuggestion` + `TextEdit` infrastructure
+
+**Rationale.** Phase 2 of the diagnostic enhancement plan above. Once
+this lands, every E04xx effect diagnostic carries a machine-applicable
+edit to add the missing effect to the signature. `sfn fix` reads those
+edits and applies them; `sfn lsp` exposes them as quick-fix code actions;
+the JSON envelope renders them as a structured `suggestion` field.
+
+This is the unblock for `sfn fix`. Without it, `sfn fix` has no edits
+to apply.
+
+**Files affected.** Pipeline stage: typecheck/effect → diagnostic.
+
+- `compiler/src/typecheck_types.sfn` — Define `FixSuggestion` and
+  `TextEdit` structs. Add `suggestion: FixSuggestion?` field to
+  `Diagnostic`.
+
+  ```sfn
+  struct TextEdit {
+      start_line: number;
+      start_column: number;
+      end_line: number;
+      end_column: number;
+      replacement: string;
+  }
+
+  struct FixSuggestion {
+      message: string;
+      edits: TextEdit[];
+  }
+
+  struct Diagnostic {
+      code: string;
+      severity: string;
+      message: string;
+      file_path: string;
+      primary: Token?;
+      suggestion: FixSuggestion?; // new field
+  }
+  ```
+
+- `compiler/src/diagnostics_render.sfn` —
+  `effect_violation_to_diagnostic` constructs a `FixSuggestion` with
+  one `TextEdit` that inserts ` ![<missing>]` immediately before the
+  function body's `{`. Requires the effect checker to carry the
+  body-open token, which is a new field on `EffectViolation`.
+  `capability_violation_to_diagnostic` builds two suggestions (widen
+  manifest, narrow function) — pick the narrower one as the
+  `suggestion`, document the alternative in the message.
+- `compiler/src/effect_checker.sfn` — Add `body_open_token: Token?`
+  to `EffectViolation` (synthesized from
+  `FunctionDeclaration.body.open_brace_token` if present). For Phase
+  E imported-callee violations the body-open is still the caller's
+  own; the suggestion still inserts at the caller.
+- `compiler/src/typecheck_types.sfn` factories — Update all six
+  factories to construct `Diagnostic` with `suggestion: null`. The
+  duplicate-symbol case can graduate to a real suggestion in a
+  follow-up; ship null in B3 to keep scope tight.
+- `compiler/src/diagnostics_json.sfn` — Render `suggestion` field
+  when non-null:
+  ```json
+  "suggestion": {
+    "message": "add ![io] to the function signature",
+    "edits": [
+      { "start_line": 12, "start_column": 18, "end_line": 12, "end_column": 18, "replacement": " ![io]" }
+    ]
+  }
+  ```
+- `compiler/tests/unit/diagnostics_render_test.sfn` (new or extended)
+  — Assert the suggestion is constructed correctly for an E0400
+  violation with a known body-open column.
+- `compiler/tests/e2e/test_check_json_suggestion.sh` (new) — Run
+  `sfn check --json` against a fixture with a missing-effect
+  violation; assert the JSON envelope's `events[0].suggestion.edits`
+  array matches the expected shape.
+
+**New types and signatures.** (See struct definitions above.)
+
+```sfn
+fn _suggestion_for_missing_effect(missing_effects: string[], body_open_token: Token?) -> FixSuggestion?;
+fn _suggestion_for_capability_overflow(excess_effects: string[], signature_token: Token?) -> FixSuggestion?;
+```
+
+**Self-host risk.** **Medium-high.** Adding `suggestion` to `Diagnostic`
+widens its layout. **This struct is the canonical re-export RCA hazard**
+(`docs/rca/2026-04-18-reexport-diagnostic-gep.md`) — it's the struct
+that, when its layout went out of sync across the re-export boundary,
+caused the
+`getelementptr %Diagnostic, %Diagnostic*` `llvm-as` failure that broke
+0.5.4–0.5.6.
+
+Mitigations:
+
+1. **Add `suggestion` as the last field.**
+2. **Initialize `suggestion: null` at every existing factory before
+   landing the renderer change.**
+3. **Run `make check` after the struct change alone.**
+4. **The `_reject_reexport_violations` gate already prevents the
+   class of bug from re-emerging.**
+
+**Verification commands.**
+
+```bash
+# Stage 1: struct-only patch
+ulimit -v 8388608 && timeout 300 make compile
+ulimit -v 8388608 && timeout 60 make test-unit
+
+# Stage 2: full B3
+ulimit -v 8388608 && timeout 60 build/native/sailfin test compiler/tests/unit/diagnostics_render_test.sfn
+ulimit -v 8388608 && timeout 30 bash compiler/tests/e2e/test_check_json_suggestion.sh build/native/sailfin
+
+# Stage 3: triple-pass fixed-point
+ulimit -v 8388608 && timeout 1800 make check
+```
+
+**Exit criteria.**
+
+- [ ] `Diagnostic.suggestion: FixSuggestion?` is set on every E0400
+      and E0401 effect violation.
+- [ ] `Diagnostic.suggestion` renders correctly in `--json` output.
+- [ ] All six existing factories in `typecheck_types.sfn` initialize
+      `suggestion: null`.
+- [ ] Triple-pass `make check` green on Linux + macOS.
+- [ ] CI re-export lint clean (`scripts/lint_no_implicit_reexports.py`).
+
+### B4 — Renderer harmonization (`report_typecheck_errors` → `render_diagnostic`)
+
+**Rationale.** Q5 above. One source of truth for diagnostic shape.
+Removes ~70 lines of duplicate rendering logic from `main.sfn` and
+makes future renderer changes (e.g. terminal color in B5+) land once.
+
+**Files affected.** Pipeline stage: build-path output rendering.
+
+- `compiler/src/main.sfn` — Delete `format_typecheck_diagnostic`
+  (~lines 690–716), `format_typecheck_diagnostics` (~lines 649–662),
+  `report_typecheck_errors` (~lines 664–688), `split_source_lines`
+  (already a duplicate of `diagnostics_render._dr_split_lines`),
+  `build_pointer_line`, `join_lines`.
+- `compiler/src/main.sfn` — Add a single internal helper:
+
+  ```sfn
+  fn _emit_typecheck_diagnostics(entries: Diagnostic[], source: string, file_path: string) ![io] {
+      let lines = split_source_lines(source);
+      let mut i: number = 0;
+      loop {
+          if i >= entries.length { break; }
+          entries[i].file_path = file_path;
+          let rendered = render_diagnostic(entries[i], lines, "typecheck");
+          print.err(rendered);
+          i += 1;
+      }
+  }
+  ```
+
+- `compiler/src/main.sfn` — Replace each of the 9 call sites of
+  `report_typecheck_errors` (lines 70, 162, 212, 231, 283, 386, 442,
+  466, 548) with `_emit_typecheck_diagnostics(diagnostics, source,
+  module_name)`. Module name is already in scope at every call site.
+- `compiler/src/main.sfn` — Add `import { render_diagnostic,
+  split_source_lines } from "./diagnostics_render";`. **Critical**:
+  do not re-export these symbols from `main.sfn` (per the RCA fix,
+  re-exports of imported symbols are refused).
+- `compiler/tests/integration/build_diagnostics_format_test.sh`
+  (new) — Compile a fixture with a typecheck error via `sfn
+  run`/`sfn build`; assert stderr contains `error[E0001]:` (new
+  format) not `[typecheck]` (old format).
+
+**New types and signatures.** None. Pure deletion + one new helper.
+
+**Self-host risk.** **Low.** Mechanical refactor, no struct layout
+changes. The single end-to-end format guard
+(`test_check_cross_module_conformance.sh`) already tests the new
+format from the `sfn check` path; after B4 the same format applies
+to the build path.
+
+**Verification commands.**
+
+```bash
+ulimit -v 8388608 && timeout 300 make compile
+ulimit -v 8388608 && timeout 60 make test
+ulimit -v 8388608 && timeout 60 bash compiler/tests/integration/build_diagnostics_format_test.sh build/native/sailfin
+ulimit -v 8388608 && timeout 1800 make check
+```
+
+**Exit criteria.**
+
+- [ ] `main.sfn` no longer defines `format_typecheck_diagnostic`,
+      `format_typecheck_diagnostics`, `report_typecheck_errors`,
+      `split_source_lines`, `build_pointer_line`, `join_lines`.
+- [ ] All 9 call sites use `_emit_typecheck_diagnostics`.
+- [ ] Build-path errors render with the unified `error[Exxxx]: ...
+      --> file:line:col` shape.
+- [ ] No re-export violations.
+- [ ] `make check` and `make test` green.
+
+### B5 — `secondary: SourceLocation[]` on `Diagnostic`
+
+**Rationale.** Phase 2 of the diagnostic enhancement plan, second half.
+Adds the structured "first defined here" / "this call requires ![io]"
+pointers Rust-quality diagnostics use for related context. Lowest-priority
+Track B item; land when LSP cross-file rename forces it.
+
+**Files affected.**
+
+- `compiler/src/typecheck_types.sfn` — Define `SourceLocation`,
+  add `secondary: SourceLocation[]` to `Diagnostic`.
+
+  ```sfn
+  struct SourceLocation {
+      token: Token?;
+      label: string;     // "first defined here", "this call requires ![io]"
+  }
+
+  struct Diagnostic {
+      code: string;
+      severity: string;
+      message: string;
+      file_path: string;
+      primary: Token?;
+      suggestion: FixSuggestion?;   // from B3
+      secondary: SourceLocation[];  // new
+  }
+  ```
+
+- `compiler/src/typecheck_types.sfn` factories — Update
+  `make_duplicate_symbol_diagnostic` to populate `secondary` with
+  the original-definition location.
+- `compiler/src/diagnostics_render.sfn` — Extend `render_diagnostic`
+  to draw a second caret block for each `secondary` entry.
+- `compiler/src/diagnostics_json.sfn` — Render `secondary` array.
+- Tests: extend `compiler/tests/unit/diagnostics_render_test.sfn`.
+
+**Self-host risk.** **Medium.** Same RCA-class hazard as B3. Same
+mitigation.
+
+**Exit criteria.**
+
+- [ ] `Diagnostic.secondary: SourceLocation[]` populated on
+      duplicate-symbol diagnostics.
+- [ ] Renderer draws second caret block.
+- [ ] JSON envelope renders `secondary` array.
+- [ ] `make check` green.
+
+### B6 — `make check-fast` + CI wiring
+
+**Rationale.** Q3 above. Closes the loop on Track A by giving
+contributors a sub-10s feedback path on every PR. Documents the opt-in
+pre-commit hook for contributors who want it.
+
+**Files affected.**
+
+- `Makefile` — Add target:
+
+  ```makefile
+  .PHONY: check-fast
+  check-fast:
+  	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+  		echo "[check-fast] missing $(NATIVE_BIN); run: make compile"; \
+  		exit 1; \
+  	fi
+  	@echo "[check-fast] running sfn check on compiler/src/ runtime/"
+  	@$(NATIVE_BIN) check compiler/src/ runtime/
+  	@echo "[check-fast] OK"
+  ```
+
+  Sibling `check-fast-tests` for the test tree (separate target so a
+  slow/unstable test source doesn't block source checks).
+- `.github/workflows/ci.yml` — Add a new job step **before** `Build +
+  test + package`:
+
+  ```yaml
+  - name: Fast check (sfn check compiler/src/ runtime/)
+    shell: bash {0}
+    run: |
+      set -euo pipefail
+      build/seed/bin/sailfin check compiler/src/ runtime/
+  ```
+
+  Runs after `fetch-seed` but before any `make compile`. Failures
+  short-circuit the rest of the pipeline.
+- `scripts/install_precommit.sh` (new) — Opt-in helper that installs
+  a pre-commit hook running `make check-fast` against staged `.sfn`
+  changes. Idempotent; refuses to overwrite an existing
+  `.git/hooks/pre-commit`.
+- `CONTRIBUTING.md` — Document the new target and the opt-in hook
+  install path.
+- `Makefile` — Update the `help` target to mention `check-fast`.
+
+**New types and signatures.** None.
+
+**Self-host risk.** **None.** No compiler-source changes.
+
+**Exit criteria.**
+
+- [ ] `make check-fast` runs in <10s on a clean compiled tree on Linux.
+- [ ] CI fails fast when `sfn check compiler/src/` finds errors.
+- [ ] `scripts/install_precommit.sh` documented in CONTRIBUTING.md.
+- [ ] `make help` lists `check-fast`.
+
+### B7 — Parallel multi-file checking pre-mortem (doc-only)
+
+**Rationale.** Q4 above. Records the analysis so a future contributor
+doesn't reinvent it.
+
+**Files affected.**
+
+- This document (`docs/proposals/check-architecture.md`) — Q4 above
+  contains the analysis; B7 ships when Track C is drafted and links
+  the deferral from there.
+
+**Exit criteria.**
+
+- [ ] Section linked from any `Track C — post-1.0` list.
+- [ ] Revisit triggers documented: structured concurrency lands;
+      check duration on a representative project exceeds 10s.
+
+### Cross-track interactions
+
+#### What Track B unblocks elsewhere
+
+| Consumer | Needs |
+|---|---|
+| `sfn fix` (`docs/proposals/tooling.md`) | B1 (call-site spans), B3 (FixSuggestion infra) |
+| `sfn lsp` Phase 1 | B2 (JSON envelope, can shell out) |
+| `sfn lsp` Phase 2 (quick-fix) | B3 (FixSuggestion → LSP code action) |
+| MCP `sailfin_diagnostics` | B2 (JSON envelope) |
+| MCP `sailfin_effect_trace` | B1 (per-call attribution) + B2 (JSON) |
+| `sfn vet` | Independent of Track B (uses existing `Diagnostic` shape) |
+| CI golden tests | B4 (single rendered format across paths) |
+
+#### What Track B does *not* change
+
+- The effect-validation gate (`docs/proposals/effect-validation.md`
+  Phases A–F) — already shipped; B1 only refines where the caret
+  lands.
+- The capsule resolver pipeline introduced in A2 — Track B consumes
+  its outputs, doesn't modify it.
+- The `SAILFIN_EFFECT_ENFORCE` env-var contract — the JSON envelope
+  reflects whatever severity the gate produced.
+- The build script (`scripts/build.sh`) — pure orchestration stays
+  pure. CI gains `check-fast` as a pre-step in B6, but the build
+  flow is unchanged.
+
+#### Sequencing rationale
+
+```
+B1 (per-Expression spans) ──┬──▶ B2 (--json)         ──┬──▶ B6 (CI check-fast)
+                            │                          │
+                            └──▶ B3 (FixSuggestion) ───┴──▶ B5 (secondary)
+                                          │
+                                          └──▶ sfn fix (post-Track-B)
+
+B4 (renderer harmonization) — independent of B1/B2/B3, but lands after
+B1 so the harmonized renderer uses real call-site spans on day one.
+
+B7 — doc only, can land any time after B6.
+```
+
+A contributor picking up B1 today can ship it without any other Track B
+change in flight. Each subsequent PR is additive — none require rolling
+back a predecessor.

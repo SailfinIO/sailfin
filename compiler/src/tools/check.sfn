@@ -42,13 +42,24 @@ import { Diagnostic } from "../typecheck_types";
 struct CheckResult {
     file_path: string;
     diagnostics: Diagnostic[];
+    // `producers` is parallel to `diagnostics`; producers[i] describes
+    // which analysis pass minted diagnostics[i]. Kept as a sibling
+    // array (rather than a field on `Diagnostic`) so widening the
+    // shared `Diagnostic` struct stays out of the re-export GEP
+    // hazard zone (see docs/rca/2026-04-18-reexport-diagnostic-gep.md
+    // — every `Diagnostic` widening risks reintroducing that bug).
+    // `cli_check.sfn`'s `--json` path consumes this directly; the
+    // human renderer ignores it.
+    producers: string[];
     rendered: string[];
     error_count: number;
+    warning_count: number;
 }
 
 struct CheckSummary {
     files_checked: number;
     total_errors: number;
+    total_warnings: number;
 }
 
 // -------------------------------------------------------------------
@@ -93,8 +104,10 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
 
     let source_lines = split_source_lines(source);
     let mut combined: Diagnostic[] = [];
+    let mut producers: string[] = [];
     let mut rendered: string[] = [];
     let mut errors: number = 0;
+    let mut warnings: number = 0;
 
     // Stamp the originating module path onto each typecheck diagnostic
     // and render it in one pass. Factories mint diagnostics with an
@@ -106,8 +119,10 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         type_diags[ti].file_path = file_path;
         let diag = type_diags[ti];
         combined.push(diag);
+        producers.push("typecheck");
         rendered.push(render_diagnostic(diag, source_lines, "typecheck"));
         if strings_equal(diag.severity, "error") { errors += 1; }
+        if strings_equal(diag.severity, "warning") { warnings += 1; }
         ti += 1;
     }
 
@@ -141,8 +156,10 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         let mut diag = effect_violation_to_diagnostic(violation);
         diag.file_path = file_path;
         combined.push(diag);
+        producers.push("effect");
         rendered.push(render_diagnostic(diag, source_lines, "effect"));
         if strings_equal(diag.severity, "error") { errors += 1; }
+        if strings_equal(diag.severity, "warning") { warnings += 1; }
         ei += 1;
     }
 
@@ -158,16 +175,20 @@ fn check_source_with_imports(source: string, file_path: string, imported_interfa
         let mut cdiag = capability_violation_to_diagnostic(cv);
         cdiag.file_path = file_path;
         combined.push(cdiag);
+        producers.push("effect");
         rendered.push(render_diagnostic(cdiag, source_lines, "effect"));
         if strings_equal(cdiag.severity, "error") { errors += 1; }
+        if strings_equal(cdiag.severity, "warning") { warnings += 1; }
         ci += 1;
     }
 
     return CheckResult {
         file_path: file_path,
         diagnostics: combined,
+        producers: producers,
         rendered: rendered,
-        error_count: errors
+        error_count: errors,
+        warning_count: warnings
     };
 }
 
@@ -190,16 +211,19 @@ fn render_summary(summary: CheckSummary) -> string {
 }
 
 fn summarize(results: CheckResult[]) -> CheckSummary {
-    let mut total: number = 0;
+    let mut total_err: number = 0;
+    let mut total_warn: number = 0;
     let mut i: number = 0;
     loop {
         if i >= results.length { break; }
-        total += results[i].error_count;
+        total_err += results[i].error_count;
+        total_warn += results[i].warning_count;
         i += 1;
     }
     return CheckSummary {
         files_checked: results.length,
-        total_errors: total
+        total_errors: total_err,
+        total_warnings: total_warn
     };
 }
 

@@ -100,9 +100,29 @@ feature availability.
   `tools/check.sfn` to consume it (e.g. rejecting unknown effect names
   in `analyze_routine`, sorting `missing_effects` for deterministic
   rendering) lands later in Phase G alongside the name-resolution
-  detector. Per-expression trigger tokens still default to the
-  signature location; threading per-`Expression` spans is deferred to
-  a follow-up that adds span fields to the AST's expression variants.
+  detector. Per-expression trigger tokens were threaded into the AST
+  in Track B PR1 (B1, see below); the renderer now carets effect
+  diagnostics at the offending call site rather than the routine
+  declaration.
+- **Effect diagnostic per-call-site carets (Track B PR1 / B1 —
+  shipped 2026-04-26).** `Expression.Identifier`, `Expression.Member`,
+  and `Expression.Call` now carry an optional `span: SourceSpan?`
+  populated by the parser at every construction site.
+  `EffectRequirement` gained a `trigger: Token?` slot; the body walker
+  in `collect_effects_from_expression` populates it from the namespace
+  identifier (`fs` / `print` / `http` / `console` / `websocket`) or
+  the bare-callee identifier (`spawn` / `sleep` / `serve`) so each
+  per-effect requirement remembers where it came from. `analyze_routine`
+  picks the first non-null trigger from the missing-requirements list
+  as the violation's `trigger`; the synthesized signature_token stays
+  as the fallback for the residual text-pattern (`Raw`-body) path,
+  decorator-implied effects, and synthesized expressions. End-to-end
+  result: a long routine with one effectful call deep in the body now
+  carets the diagnostic at that call (`--> file:N:M`) rather than the
+  signature line. Coverage: 6 new B1 unit tests in
+  `compiler/tests/unit/effect_checker_test.sfn` (16 total) plus
+  `compiler/tests/e2e/test_check_effect_call_site_caret.sh` (4 e2e
+  cases). Tracked by `docs/proposals/check-architecture.md` Track B.
 - **Effect validation as build gate (Phases B/C/D — shipped 2026-04-26).**
   `validate_and_render_effects` (in `compiler/src/effect_gate.sfn`)
   runs after typecheck in every `compile_to_*` entry point. The
@@ -228,7 +248,7 @@ feature availability.
 | `unsafe` / `extern` | Parsed only | Syntax accepted; enforcement not active |
 | Policy decorators (`@policy(...)`) | Parsed only | No compiler or runtime effect |
 | `sfn fmt` (formatter) | **Shipped** | Token-stream formatter: indentation, spacing, inline blocks, unary operator handling, import sorting & specifier reordering, blank line normalization, `--check`/`--write` modes, CI enforcement; see `docs/proposals/fmt-architecture.md` for architecture and known limitations |
-| `sfn check` (fast analysis) | **Shipped (v1)** | Runs parse + typecheck + effect-check on `.sfn` sources without emitting IR or invoking `clang`. Reports diagnostics to stderr with a summary on stdout. Exits non-zero on findings. Cross-module `implements` conformance live via the unified resolver (A2). Diagnostics carry `severity` and `file_path` and route load warnings (`W0001`/`W0002`) through the same renderer as errors (A3). See `docs/proposals/check-architecture.md`. |
+| `sfn check` (fast analysis) | **Shipped (v1 + Track B B1/B2/B3/B4)** | Runs parse + typecheck + effect-check on `.sfn` sources without emitting IR or invoking `clang`. Reports diagnostics to stderr with a summary on stdout. Exits non-zero on findings. Cross-module `implements` conformance live via the unified resolver (A2). Diagnostics carry `severity` and `file_path` and route load warnings (`W0001`/`W0002`) through the same renderer as errors (A3). Effect violations caret at the offending call site, not the function declaration (B1). `--json` emits the `sailfin-check/1` envelope (flat events array + summary) — schema documented at `docs/reference/check-json-schema.md`, locked by `compiler/tests/e2e/test_check_json_schema.sh`, and consumed by the MCP server's `sailfin_diagnostics` tool (B2). E0400/E0401/E0402 effect diagnostics now carry a structured `FixSuggestion` with a `TextEdit` that splices `![effects] ` in at the function body's opening brace — `sfn fix` and the upcoming LSP code-action handler consume the structured edit directly (B3). The build path (`sfn run`/`sfn build`/`sfn test`) now emits the same `error[Exxxx]: --> file:line:col` shape as `sfn check` — the legacy `[typecheck]`-prefixed renderer in `main.sfn` is gone (~150 lines deleted) and every `compile_to_*` entry routes through `diagnostics_render.render_diagnostic` (B4). See `docs/proposals/check-architecture.md`. |
 | `sfn vet` (static analyzer) | Planned | Pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn lsp` (language server) | Planned | Phase 1 pre-1.0; see `docs/proposals/tooling.md` |
 | `sfn doc` (doc generator) | Planned | 1.0; see `docs/proposals/tooling.md` |

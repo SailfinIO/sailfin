@@ -1,0 +1,295 @@
+// compiler/src/diagnostics_json.sfn
+//
+// JSON envelope encoder for `sfn check --json`. Pure module: no I/O,
+// no global state. Takes the per-file `Diagnostic[]` plus producer
+// tags + load warnings + top-level summary, returns one stable
+// schema-versioned JSON string.
+//
+// The schema is documented and locked in
+// `docs/reference/check-json-schema.md` and gated by
+// `compiler/tests/e2e/test_check_json_schema.sh`. Bumping the
+// `schema_version` field is the contract for breaking changes —
+// downstream consumers (the MCP server's `sailfin_diagnostics` tool,
+// `sfn lsp`, CI scrapers) hard-fail on unknown versions rather than
+// silently misinterpret unknown fields.
+//
+// Track B PR2 (B2) — see `docs/proposals/check-architecture.md`.
+//
+// Note: `_dj_number_to_string` is duplicated from `main.sfn` rather
+// than imported, mirroring `diagnostics_render.sfn`'s precedent for
+// the same dodge: `main.sfn` imports from sibling rendering modules,
+// and the seed compiler doesn't handle the resulting import cycle
+// cleanly. The duplication is small (one numeric formatter) and
+// keeps this module self-contained for unit testing.
+import { substring } from "./string_utils";
+import { Token } from "./token";
+import { Diagnostic, FixSuggestion, TextEdit } from "./typecheck_types";
+
+// Per-file/per-producer event in the envelope. `kind` discriminates
+// "diagnostic" (typecheck/effect/capability findings) from
+// "load_warning" (W01xx import-context loader output) — both ride the
+// same `Diagnostic` shape so consumers can write a single decoder.
+struct CheckJsonEvent {
+    kind: string;
+    producer: string;
+    diagnostic: Diagnostic;
+}
+
+// Top-level rollup over the entire run. Always emitted, even when
+// `events` is empty, so consumers checking "did anything happen" can
+// read `summary.errors` without scanning the array.
+struct CheckJsonSummary {
+    files_checked: number;
+    errors: number;
+    warnings: number;
+    duration_ms: number;
+}
+
+// -------------------------------------------------------------------
+// Primitive encoders
+// -------------------------------------------------------------------
+// JSON string escaping per RFC 8259. Mirrors `sfn/json`'s
+// `_escape_json_string` (capsules/sfn/json/src/mod.sfn) but is
+// duplicated here because the compiler proper doesn't import its own
+// stdlib capsules — we'd hit a build cycle. Same six escapes
+// (`\\"`, `\\\\`, `\\n`, `\\r`, `\\t`, `\\b`, `\\f`) plus a
+// literal-passthrough for everything else. Control characters below
+// 0x20 are NOT escaped; the diagnostic strings that flow through
+// here are all ASCII-clean human-readable text built by
+// `effect_violation_to_diagnostic` and the typecheck factories.
+fn _json_escape_string(s: string) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _json_quote(s: string) -> string {
+    return "\"" + _json_escape_string(s) + "\"";
+}
+
+fn _json_field(name: string, value: string) -> string {
+    return _json_quote(name) + ":" + value;
+}
+
+fn _json_string_field(name: string, value: string) -> string {
+    return _json_field(name, _json_quote(value));
+}
+
+fn _json_number_field(name: string, value: number) -> string {
+    return _json_field(name, _dj_number_to_string(value));
+}
+
+// Local copy of `number_to_string` (see preamble). Same algorithm as
+// `main.sfn`'s; kept here so the module stays self-contained for
+// unit tests and avoids the seed-compiler import-cycle limitation.
+fn _dj_number_to_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let mut working: number = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut remaining: number = working;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}
+
+// -------------------------------------------------------------------
+// Domain encoders
+// -------------------------------------------------------------------
+// Render a `Token?` as either `null` or a JSON object with
+// `line`, `column`, `lexeme`, and a reserved `label` slot. The
+// `label` field is null today and will be populated once Phase 2
+// diagnostic infra (B5) lands secondary source locations — keeping
+// the field present (with an explicit null) means consumers can
+// write `event.primary.label` today without a schema bump later.
+fn _json_render_token(t: Token?) -> string {
+    if t == null { return "null"; }
+    let tok: Token? = t;
+    let mut parts: string[] = [];
+    parts.push(_json_number_field("line", tok.line));
+    parts.push(_json_number_field("column", tok.column));
+    parts.push(_json_string_field("lexeme", tok.lexeme));
+    parts.push(_json_field("label", "null"));
+    return "{" + _join(parts, ",") + "}";
+}
+
+// Render one `Diagnostic` as a JSON event object. `producer`
+// distinguishes the source pass (typecheck, effect, parse, load) so
+// downstream consumers can filter on the producing layer without
+// inspecting the `code` range. `kind` rides on the wrapping event so
+// load warnings (no AST anchor) and analysis diagnostics (with
+// `primary` token) share one decoder.
+fn _json_render_diagnostic_inner(d: Diagnostic, producer: string, kind: string) -> string {
+    let mut parts: string[] = [];
+    parts.push(_json_string_field("kind", kind));
+    parts.push(_json_string_field("code", d.code));
+    parts.push(_json_string_field("severity", d.severity));
+    parts.push(_json_string_field("producer", producer));
+    parts.push(_json_string_field("file_path", d.file_path));
+    parts.push(_json_string_field("message", d.message));
+    parts.push(_json_field("primary", _json_render_token(d.primary)));
+    parts.push(_json_field("secondary", "[]"));
+    parts.push(_json_field("suggestion", _json_render_suggestion(d.suggestion)));
+    return "{" + _join(parts, ",") + "}";
+}
+
+// Render `Diagnostic.suggestion` as either the JSON literal `null`
+// or a `{ message, edits[] }` object. The edits array carries the
+// 1-based line/column inserts; `sfn fix` (planned) and the LSP
+// code-action handler (also planned) consume this directly.
+fn _json_render_suggestion(s: FixSuggestion?) -> string {
+    if s == null { return "null"; }
+    let sug: FixSuggestion? = s;
+    let mut parts: string[] = [];
+    parts.push(_json_string_field("message", sug.message));
+    parts.push(_json_field("edits", _json_render_edits(sug.edits)));
+    return "{" + _join(parts, ",") + "}";
+}
+
+fn _json_render_edits(edits: TextEdit[]) -> string {
+    if edits.length == 0 { return "[]"; }
+    let mut parts: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= edits.length { break; }
+        parts.push(_json_render_edit(edits[i]));
+        i += 1;
+    }
+    return "[" + _join(parts, ",") + "]";
+}
+
+fn _json_render_edit(e: TextEdit) -> string {
+    let mut parts: string[] = [];
+    parts.push(_json_number_field("start_line", e.start_line));
+    parts.push(_json_number_field("start_column", e.start_column));
+    parts.push(_json_number_field("end_line", e.end_line));
+    parts.push(_json_number_field("end_column", e.end_column));
+    parts.push(_json_string_field("replacement", e.replacement));
+    return "{" + _join(parts, ",") + "}";
+}
+
+fn _json_render_event(event: CheckJsonEvent) -> string {
+    return _json_render_diagnostic_inner(event.diagnostic, event.producer, event.kind);
+}
+
+fn _json_render_events(events: CheckJsonEvent[]) -> string {
+    if events.length == 0 { return "[]"; }
+    let mut parts: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= events.length { break; }
+        parts.push(_json_render_event(events[i]));
+        i += 1;
+    }
+    return "[" + _join(parts, ",") + "]";
+}
+
+fn _json_render_summary(s: CheckJsonSummary) -> string {
+    let mut parts: string[] = [];
+    parts.push(_json_number_field("files_checked", s.files_checked));
+    parts.push(_json_number_field("errors", s.errors));
+    parts.push(_json_number_field("warnings", s.warnings));
+    parts.push(_json_number_field("duration_ms", s.duration_ms));
+    return "{" + _join(parts, ",") + "}";
+}
+
+// -------------------------------------------------------------------
+// Top-level envelope
+// -------------------------------------------------------------------
+// Emit the `sailfin-check/1` envelope. Field ordering is fixed
+// (`schema_version` first so consumers can hard-fail on unknown
+// versions before reading anything else). One trailing newline so
+// stdout-piped consumers see a clean line boundary.
+fn render_check_json_envelope(events: CheckJsonEvent[], summary: CheckJsonSummary, exit_code: number) -> string {
+    let mut parts: string[] = [];
+    parts.push(_json_string_field("schema_version", "sailfin-check/1"));
+    parts.push(_json_string_field("command", "sfn check"));
+    parts.push(_json_number_field("exit_code", exit_code));
+    parts.push(_json_field("summary", _json_render_summary(summary)));
+    parts.push(_json_field("events", _json_render_events(events)));
+    return "{" + _join(parts, ",") + "}\n";
+}
+
+// Producer classifier for diagnostic codes. Mirrors the code-space
+// allocation locked in `docs/proposals/check-architecture.md`:
+//   E00xx, E03xx -> typecheck
+//   E04xx        -> effect
+//   W00xx        -> load
+// Anything else falls back to "unknown" so a future code range
+// shows up as an obvious-to-track default rather than silently
+// claiming the wrong producer.
+//
+// Note: the documentation refers to `W01xx` as the reserved range
+// for load/staging warnings; the actual codes minted today (W0001
+// missing artifact, W0002 parse failure) use the literal prefix
+// `W00`. The classifier checks the literal prefix.
+fn classify_producer(code: string) -> string {
+    if _starts_with(code, "E04") { return "effect"; }
+    if _starts_with(code, "W00") { return "load"; }
+    if _starts_with(code, "E00") { return "typecheck"; }
+    if _starts_with(code, "E03") { return "typecheck"; }
+    return "unknown";
+}
+
+// -------------------------------------------------------------------
+// Local helpers
+// -------------------------------------------------------------------
+fn _join(parts: string[], sep: string) -> string {
+    if parts.length == 0 { return ""; }
+    let mut out = parts[0];
+    let mut i: number = 1;
+    loop {
+        if i >= parts.length { break; }
+        out = out + sep + parts[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _starts_with(s: string, prefix: string) -> boolean {
+    if s.length < prefix.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= prefix.length { break; }
+        let _next = i + 1;
+        if substring(s, i, _next) != substring(prefix, i, _next) {
+            return false;
+        }
+        i += 1;
+    }
+    return true;
+}
+
+export {
+    CheckJsonEvent,
+    CheckJsonSummary,
+    classify_producer,
+    render_check_json_envelope
+};
