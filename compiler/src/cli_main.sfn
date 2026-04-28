@@ -40,7 +40,7 @@ fn _usage() -> string {
     out = out
         + "  sfn build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] (<file.sfn> | -p <capsule-path>)\n";
     out = out
-        + "  sfn run   [--no-cache] [--clean] [--cache-trace] <file.sfn | exe>\n";
+        + "  sfn run   [--no-cache] [--clean] [--cache-trace] (<file.sfn> | <exe>)\n";
     out = out
         + "  sfn emit  [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n";
     out = out + "\n";
