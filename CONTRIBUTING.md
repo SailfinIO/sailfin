@@ -24,10 +24,27 @@ repository.
    - Run tests: `make test`
    - Compile Sailfin sources: `make compile` (self-hosted native compiler).
    - Install the built compiler: `make install` (defaults to `~/.local/bin`).
+   - Fast PR gate: `make check-fast` runs `sfn check compiler/src/ runtime/`
+     in ~2 min. Surfaces parser, typecheck, and effect-system breakage
+     without a full selfhost rebuild.
 3. **Testing expectations**
    - Add or update unit tests under `compiler/tests/` for compiler changes.
    - Reflect behaviour updates in `docs/status.md` and the relevant module docs.
    - Run `make test` before submitting.
+
+### Optional Pre-Commit Hook
+
+Contributors actively touching `compiler/src/` or `runtime/` can opt into a
+pre-commit hook that runs `make check-fast` automatically:
+
+```bash
+bash scripts/install_precommit.sh           # install
+bash scripts/install_precommit.sh --remove  # uninstall
+```
+
+The hook only runs when staged changes touch `compiler/src/` or `runtime/`,
+and is silently skipped when `build/native/sailfin` is missing. Bypass with
+`SAILFIN_SKIP_PRECOMMIT=1 git commit ...` or the standard `--no-verify`.
 
 ### Notes on Release Automation
 

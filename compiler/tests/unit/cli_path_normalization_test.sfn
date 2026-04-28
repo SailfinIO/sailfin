@@ -1,0 +1,54 @@
+// Unit test for `_strip_trailing_slashes_cmd` — the path-normalization
+// helper extracted from `_collect_sfn_files_cmd` to make the regression
+// for `sfn check compiler/src/` (trailing slash → double-slashed paths
+// → SIGSEGV) cheaply testable without a full-tree e2e invocation.
+//
+// The e2e test (`compiler/tests/e2e/test_check_compiler_src.sh`) used
+// to run the full 132-file analysis loop twice — once per slash form
+// — to gate this regression. Each invocation costs ~2 min on Linux
+// CI. This unit test gates the same logic in milliseconds, so the
+// e2e test now runs the canonical scenario exactly once.
+
+import { _strip_trailing_slashes_cmd } from "../../src/cli_commands_utils";
+
+test "path-norm: bare directory unchanged" {
+    assert _strip_trailing_slashes_cmd("compiler/src") == "compiler/src";
+}
+
+test "path-norm: single trailing slash stripped" {
+    assert _strip_trailing_slashes_cmd("compiler/src/") == "compiler/src";
+}
+
+test "path-norm: multiple trailing slashes stripped" {
+    assert _strip_trailing_slashes_cmd("compiler/src///") == "compiler/src";
+}
+
+test "path-norm: root '/' preserved" {
+    assert _strip_trailing_slashes_cmd("/") == "/";
+}
+
+test "path-norm: empty string unchanged" {
+    assert _strip_trailing_slashes_cmd("") == "";
+}
+
+test "path-norm: single character preserved" {
+    assert _strip_trailing_slashes_cmd("x") == "x";
+}
+
+test "path-norm: relative path with trailing slash" {
+    assert _strip_trailing_slashes_cmd("./foo/bar/") == "./foo/bar";
+}
+
+test "path-norm: absolute path with trailing slash" {
+    assert _strip_trailing_slashes_cmd("/usr/local/lib/") == "/usr/local/lib";
+}
+
+test "path-norm: idempotent (double application)" {
+    let once = _strip_trailing_slashes_cmd("compiler/src/");
+    let twice = _strip_trailing_slashes_cmd(once);
+    assert once == twice;
+}
+
+test "path-norm: no internal slashes touched" {
+    assert _strip_trailing_slashes_cmd("a/b/c/d") == "a/b/c/d";
+}

@@ -19,6 +19,7 @@ export {
     _looks_like_test_file_cmd,
     _collect_test_files_cmd,
     _collect_sfn_files_cmd,
+    _strip_trailing_slashes_cmd,
     _curl_post_json_cmd,
     _curl_download_cmd,
     _sha256_of_file_cmd,
@@ -179,23 +180,31 @@ fn _collect_test_files_cmd(root: string, max_depth: number) -> string[] ![io] {
     return results;
 }
 
+// Strip trailing slashes from a directory path so downstream BFS
+// path concatenation (e.g. `dir + "/" + entry`) doesn't produce
+// double-slashed paths like `compiler/src//ast.sfn`. Double slashes
+// are filesystem-equivalent but trip downstream path-comparison
+// and resolver-grouping logic; the historic symptom was
+// `sfn check compiler/src/` SIGSEGVing at scale while
+// `sfn check compiler/src` succeeded with the same file set.
+//
+// Preserves "/" (root) — refusing to strip it bare. Idempotent.
+// Pure (no I/O) so it's covered by a fast unit test in
+// `compiler/tests/unit/cli_path_normalization_test.sfn`.
+fn _strip_trailing_slashes_cmd(path: string) -> string {
+    let mut result: string = path;
+    loop {
+        if result.length <= 1 { break; }
+        if !_ends_with_cmd(result, "/") { break; }
+        result = substring(result, 0, result.length - 1);
+    }
+    return result;
+}
+
 fn _collect_sfn_files_cmd(root: string, max_depth: number) -> string[] ![io] {
     let mut results: string[] = [];
     if _ends_with_cmd(root, ".sfn") { return [root]; }
-    // Strip a trailing slash from the root so BFS path concatenation
-    // (line below: `dir + "/" + entry`) doesn't produce double-
-    // slashed paths like `compiler/src//ast.sfn`. Double slashes
-    // are filesystem-equivalent but trip downstream path-
-    // comparison and resolver-grouping logic; the historic
-    // symptom was `sfn check compiler/src/` SIGSEGVing at scale
-    // while `sfn check compiler/src` succeeded with the same file
-    // set.
-    let mut root_norm: string = root;
-    loop {
-        if root_norm.length <= 1 { break; }
-        if !_ends_with_cmd(root_norm, "/") { break; }
-        root_norm = substring(root_norm, 0, root_norm.length - 1);
-    }
+    let root_norm: string = _strip_trailing_slashes_cmd(root);
     let mut queue: string[] = [root_norm];
     let mut depth: number = 0;
     loop {

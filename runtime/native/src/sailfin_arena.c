@@ -255,8 +255,47 @@ static pthread_once_t _arena_global_once = PTHREAD_ONCE_INIT;
 
 static void _init_arena_enabled(void)
 {
+    /*
+     * Arena is on by default. End-user `sfn check`, `sfn test`, and
+     * any future `sfn vet`/`sfn fix`/`sfn lsp` invocation needs the
+     * arena (Phase 5a's mark/rewind primitive only reclaims memory
+     * when the arena is active) — without it the in-process multi-
+     * module loop hits the unfreed-allocations wall documented in
+     * `docs/build-performance.md` Root Cause 5 and SIGSEGVs at
+     * scale. `make compile` already exported `SAILFIN_USE_ARENA=1`
+     * in `scripts/build.sh`; this flip extends the same default to
+     * installed binaries so end users don't have to set the env
+     * var themselves.
+     *
+     * Opt-out: `SAILFIN_USE_ARENA=0` (or any value starting with
+     * '0' or empty after explicit set) disables the arena and the
+     * runtime falls back to the malloc/owned-string-hash path.
+     * Useful for the `make test-arena` IR-equivalence harness and
+     * for diagnosing arena-vs-malloc divergences.
+     *
+     * Empty env: `SAILFIN_USE_ARENA=` (set but empty) is treated
+     * as opt-out, mirroring the `=0` case. This is a deliberate
+     * divergence from `unset` (which now means "take the default",
+     * i.e. arena ON): a script that explicitly clears the variable
+     * with `SAILFIN_USE_ARENA=` is signalling intent to disable,
+     * not "I have no opinion". `unset SAILFIN_USE_ARENA` is the
+     * way to ask for the default.
+     */
     const char *env = getenv("SAILFIN_USE_ARENA");
-    _arena_enabled = (env && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+    if (env == NULL)
+    {
+        /* Unset: take the default. */
+        _arena_enabled = 1;
+        return;
+    }
+    if (env[0] == '\0' || env[0] == '0')
+    {
+        /* Explicit opt-out: empty string or starts with '0'. */
+        _arena_enabled = 0;
+        return;
+    }
+    /* Any other value is opt-in (including the historical "1"). */
+    _arena_enabled = 1;
 }
 
 bool sfn_arena_enabled(void)

@@ -371,7 +371,7 @@ fn lower_to_llvm_with_context(native_module: NativeModule, imported_manifests: L
     };
 }
 
-fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult {
+fn lower_to_llvm_lines_with_context(native_module: NativeModule, imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_diagnostics: string[]) -> LoweredLLVMLinesResult ![io] {
     let mut diagnostics: string[] = [];
     if imported_diagnostics.length > 0 {
         let mut _ci0: number = 0;
