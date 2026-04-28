@@ -74,7 +74,9 @@ feature availability.
   every `sfn build` / `sfn run` honours by default:
   - **PR1 (#254)** — `compiler/src/build_cache.sfn` foundation:
     `cache_key_for(source, deps, version, flags)` derives a
-    sha256 digest sharded under `build/cache/v1/<prefix>/<key>/`;
+    sha256 digest sharded under `<cache_root>/<prefix>/<key>/`,
+    where `<cache_root>` defaults to `build/cache/v1` and can be
+    overridden via `$SAILFIN_BUILD_CACHE_DIR`;
     `cache_lookup_complete` / `cache_store` implement a
     content-addressed entry. Schema-versioned (`v1`) so a future
     key-shape change can age old entries out cleanly.

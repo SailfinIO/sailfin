@@ -1275,7 +1275,7 @@ Six PRs deliver an end-to-end content-addressed build cache. Every
   (`<root>/<key[0..2]>/<key>/{ir.sfn-asm, layout.manifest, mod.ll,
   mod.o}`), and the lookup/store primitives. Schema-versioned
   (`v1`) so a future key-shape change can age old entries out
-  cleanly. 23 unit tests lock the contract.
+  cleanly. Unit tests lock the contract.
 - **PR1b (#255) — wired into `_cr_compile_one`.** The per-capsule
   module compile checks the cache before invoking
   `compile_to_llvm_file_with_module` and stores the produced
@@ -1324,8 +1324,12 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
 - **C2 — Standard artifact layout** (next). Move `sfn build`'s
   outputs into the per-capsule tree from §4.4
   (`build/capsules/<scope>/<name>/{manifest.json, ir/, obj/, bin/}`).
-  Cache already follows this convention; the in-tree build tree
-  doesn't. Unblocks C4 (`sfn package` knows what's in a capsule).
+  The shipped cache already materializes much of the same artifact
+  set (IR / obj / etc.), but it is content-addressed under
+  `build/cache/v1/<shard>/<key>/...` rather than per-capsule; the
+  in-tree build tree does not yet follow the standardized
+  per-capsule layout. Unblocks C4 (`sfn package` knows what's in
+  a capsule).
 - **C3 — CI gate on stdlib.** Build every `capsules/sfn/*` with
   `sfn build -p` in CI and assert byte-for-byte parity vs `build.sh`
   + a cache-hit-rate floor on no-source-change reruns. Likely a
