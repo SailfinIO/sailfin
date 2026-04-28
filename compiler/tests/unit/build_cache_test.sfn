@@ -41,7 +41,8 @@ import {
     canonicalize_flags,
     cache_key_for,
     empty_build_cache_config,
-    empty_cache_stats
+    empty_cache_stats,
+    is_valid_digest
 } from "../../src/build_cache";
 
 // --------------------------------------------------------------
@@ -533,4 +534,31 @@ test "build_cache: cache_clean refuses to operate on root '/'" ![io] {
 
 test "build_cache: cache_clean refuses empty path" ![io] {
     assert ! cache_clean("");
+}
+
+// --------------------------------------------------------------
+// is_valid_digest predicate (Copilot review on PR #256 — line 647)
+// --------------------------------------------------------------
+// The resolver previously checked `digest.length == 64` to decide
+// whether to attempt a cache store. That treats a 64-char non-hex
+// digest as valid, which contradicts `_is_valid_digest`'s
+// contract. Exporting `is_valid_digest` as the single source of
+// truth closes the gap. These tests lock the contract.
+test "is_valid_digest: 64 lowercase hex chars accepted" {
+    assert is_valid_digest("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+}
+
+test "is_valid_digest: empty rejected" { assert ! is_valid_digest(""); }
+
+test "is_valid_digest: too short rejected" {
+    assert ! is_valid_digest("abcdef");
+}
+
+test "is_valid_digest: 64 uppercase chars rejected" {
+    assert ! is_valid_digest("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789");
+}
+
+test "is_valid_digest: 64 chars with non-hex letter rejected" {
+    // 'g' is outside [0-9a-f].
+    assert ! is_valid_digest("g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 }

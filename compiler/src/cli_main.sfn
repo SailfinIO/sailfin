@@ -5,7 +5,6 @@ import {
     BuildCacheConfig,
     CacheStats,
     cache_stats_is_empty,
-    empty_build_cache_config,
     resolve_build_cache_config
 } from "./build_cache";
 import { ProjectCapsuleResult, prepare_project_capsules } from "./capsule_resolver";
@@ -719,11 +718,11 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // Resolve and compile capsule deps before lowering the main file.
         // The unified resolver covers relative imports, manifest-declared
         // capsule deps, and workspace-implicit imports in one pass —
-        // text-level fallback retired with Stage B. `sfn run` uses the
-        // env-driven default cache config (no CLI flags wired yet);
-        // a follow-up PR can add `--no-cache` / `--clean` to `sfn run`
-        // by mirroring the build path's flag-parser block.
-        let run_cache_config = empty_build_cache_config();
+        // text-level fallback retired with Stage B. `sfn run` does not
+        // yet take CLI cache flags, so all overrides come from env
+        // (`SAILFIN_NO_CACHE` / `SAILFIN_CACHE_TRACE`); CLI flag plumbing
+        // is a follow-up that mirrors the build path's parser block.
+        let run_cache_config = resolve_build_cache_config(false, false, false);
         let run_capsule_result = prepare_project_capsules(input_path, run_cache_config);
         let capsule_lls = run_capsule_result.ll_paths;
 

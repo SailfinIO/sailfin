@@ -265,6 +265,17 @@ fn _cache_entry_dir(root: string, key: CacheKey) -> string {
 // nonsense paths like `<root>///ir.sfn-asm` and pollute the
 // cache root with cross-module collisions; treating them as a
 // hard miss is the safe default.
+// Public alias of `_is_valid_digest` so the resolver can use the
+// same predicate when classifying a freshly-derived `cache_key`.
+// Without sharing the validator, callers might check `digest.length
+// == 64` (which `sha256sum` always satisfies on success) but miss
+// the non-hex case (where a future hash function or an injected
+// digest could leak in). One source of truth keeps
+// `ModuleCacheEvent.invalid_key` honest.
+fn is_valid_digest(digest: string) -> boolean {
+    return _is_valid_digest(digest);
+}
+
 fn _is_valid_digest(digest: string) -> boolean {
     if digest.length != 64 { return false; }
     let mut i: number = 0;
@@ -574,5 +585,6 @@ export {
     cache_stats_is_empty,
     empty_build_cache_config,
     resolve_build_cache_config,
-    cache_clean
+    cache_clean,
+    is_valid_digest
 };
