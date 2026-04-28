@@ -210,6 +210,63 @@ fn cache_store(root: string, key: CacheKey, sfn_asm_src: string, layout_manifest
 }
 
 // ----------------------------------------------------------------
+// Single-artifact lookup / store / restore
+// ----------------------------------------------------------------
+// Build stages typically produce only a subset of the four
+// artifact kinds. `_cr_compile_one` in `capsule_resolver.sfn`,
+// for instance, produces only `.ll` — the `.sfn-asm` and
+// `.layout-manifest` are produced earlier by
+// `stage_capsule_imports`, and the `.o` is produced downstream by
+// clang. The single-artifact API lets a stage cache exactly what
+// it produced without needing to invent placeholders for the
+// other slots.
+//
+// `kind` must be one of the four recognised values
+// (`"sfn-asm"`, `"layout-manifest"`, `"ll"`, `"obj"`); unknown
+// kinds short-circuit to false the same way invalid digests do.
+fn _is_known_kind(kind: string) -> boolean {
+    return _filename_for_kind(kind).length > 0;
+}
+
+// True iff the artifact of `kind` for `key` is on disk under
+// `root`. Returns false on invalid digest or unknown kind so the
+// caller can treat both as a hard miss.
+fn cache_lookup_artifact(root: string, key: CacheKey, kind: string) -> boolean ![io] {
+    if !_is_valid_digest(key.digest) { return false; }
+    if !_is_known_kind(kind) { return false; }
+    return fs.exists(cache_artifact_path(root, key, kind));
+}
+
+// Copy a cached artifact out to `dst_path`. Returns true on
+// success, false on missing entry, invalid key, unknown kind, or
+// `cp` failure. Used on cache hits to materialise the cached
+// artifact into the location the build expects (e.g. copying a
+// cached `.ll` to the `CapsuleSource.ll_path` the linker reads).
+fn cache_copy_artifact_to(root: string, key: CacheKey, kind: string, dst_path: string) -> boolean ![io] {
+    if !_is_valid_digest(key.digest) { return false; }
+    if !_is_known_kind(kind) { return false; }
+    let src = cache_artifact_path(root, key, kind);
+    if !fs.exists(src) { return false; }
+    let cp = process.run(["cp", src, dst_path]);
+    return cp == 0;
+}
+
+// Copy `src_path` into the cache as the artifact of `kind` for
+// `key`. Creates the entry directory on demand. Returns true on
+// success, false on invalid key, unknown kind, or `cp` failure
+// (caller treats as a non-fatal cache write miss — the build
+// itself still produced the artifact at `src_path`).
+fn cache_store_artifact(root: string, key: CacheKey, kind: string, src_path: string) -> boolean ![io] {
+    if !_is_valid_digest(key.digest) { return false; }
+    if !_is_known_kind(kind) { return false; }
+    let entry_dir = _cache_entry_dir(root, key);
+    _ensure_dir_recursive_cmd(entry_dir);
+    let dst = cache_artifact_path(root, key, kind);
+    let cp = process.run(["cp", src_path, dst]);
+    return cp == 0;
+}
+
+// ----------------------------------------------------------------
 // Hashing helpers
 // ----------------------------------------------------------------
 // Hash a string by writing it to a tmp file and sha256ing.
@@ -386,6 +443,9 @@ export {
     cache_paths_for,
     cache_lookup_complete,
     cache_store,
+    cache_lookup_artifact,
+    cache_copy_artifact_to,
+    cache_store_artifact,
     canonicalize_flags,
     cache_key_for
 };

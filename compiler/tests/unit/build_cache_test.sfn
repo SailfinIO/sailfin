@@ -27,10 +27,13 @@ import {
     CacheKey,
     build_cache_schema_version,
     cache_artifact_path,
+    cache_copy_artifact_to,
+    cache_lookup_artifact,
     cache_lookup_complete,
     cache_paths_for,
     cache_root_with_override,
     cache_store,
+    cache_store_artifact,
     canonicalize_flags,
     cache_key_for
 } from "../../src/build_cache";
@@ -337,5 +340,96 @@ test "build_cache: cache_lookup_complete returns false on partial entry" ![io] {
 
     // Intentionally miss `paths.obj`.
     assert ! cache_lookup_complete(cache_root, key);
+    _cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// Single-artifact API (Stage C PR1b — cache wiring)
+// --------------------------------------------------------------
+// `cache_lookup_artifact` / `cache_store_artifact` /
+// `cache_copy_artifact_to` are the per-kind helpers used by the
+// resolver's `_cr_compile_one` hot path, which produces only the
+// `.ll` artifact. Verifying the round-trip locks the contract the
+// wiring relies on.
+test "build_cache: cache_store_artifact + cache_lookup_artifact round-trip ll" ![io] {
+    let scratch = _test_tmp_root("artifact_ll");
+    let cache_root = scratch + "/cache/v1";
+    let src_dir = scratch + "/build";
+    process.run(["mkdir", "-p", src_dir]);
+    let ll = src_dir + "/mod.ll";
+    _write_file(ll, "; ModuleID = 'foo'");
+
+    let key = CacheKey {
+        digest: "1111111111111111111111111111111111111111111111111111111111111111"
+    };
+
+    assert ! cache_lookup_artifact(cache_root, key, "ll");
+    let stored = cache_store_artifact(cache_root, key, "ll", ll);
+    assert stored;
+    assert cache_lookup_artifact(cache_root, key, "ll");
+
+    // Other artifact slots are untouched — store-of-ll does not
+    // imply a complete entry.
+    assert ! cache_lookup_artifact(cache_root, key, "sfn-asm");
+    assert ! cache_lookup_artifact(cache_root, key, "obj");
+
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_copy_artifact_to materialises cached ll" ![io] {
+    let scratch = _test_tmp_root("artifact_copy");
+    let cache_root = scratch + "/cache/v1";
+    let src_dir = scratch + "/build";
+    process.run(["mkdir", "-p", src_dir]);
+    let original = src_dir + "/mod.ll";
+    _write_file(original, "; ModuleID = 'cached'");
+
+    let key = CacheKey {
+        digest: "2222222222222222222222222222222222222222222222222222222222222222"
+    };
+    cache_store_artifact(cache_root, key, "ll", original);
+
+    let dst = src_dir + "/restored.ll";
+    let copied = cache_copy_artifact_to(cache_root, key, "ll", dst);
+    assert copied;
+    assert fs.exists(dst);
+    assert fs.readFile(dst) == "; ModuleID = 'cached'";
+
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_copy_artifact_to returns false on cache miss" ![io] {
+    let scratch = _test_tmp_root("artifact_miss");
+    let cache_root = scratch + "/cache/v1";
+    let key = CacheKey {
+        digest: "3333333333333333333333333333333333333333333333333333333333333333"
+    };
+    let dst = scratch + "/out.ll";
+    assert ! cache_copy_artifact_to(cache_root, key, "ll", dst);
+    assert ! fs.exists(dst);
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_store_artifact rejects unknown kind" ![io] {
+    let scratch = _test_tmp_root("artifact_unknown_kind");
+    let cache_root = scratch + "/cache/v1";
+    let src_dir = scratch + "/build";
+    process.run(["mkdir", "-p", src_dir]);
+    let f = src_dir + "/anything";
+    _write_file(f, "anything");
+    let key = CacheKey {
+        digest: "4444444444444444444444444444444444444444444444444444444444444444"
+    };
+    assert ! cache_store_artifact(cache_root, key, "this-kind-does-not-exist", f);
+    // Cache root must not have been created — invalid kind is a hard reject.
+    assert ! fs.exists(cache_root);
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_lookup_artifact rejects invalid digest" ![io] {
+    let scratch = _test_tmp_root("artifact_invalid_digest");
+    let cache_root = scratch + "/cache/v1";
+    let key = CacheKey { digest: "" };
+    assert ! cache_lookup_artifact(cache_root, key, "ll");
     _cleanup(scratch);
 }

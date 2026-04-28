@@ -35,6 +35,15 @@
 // capsule .ll paths, and clang produces a linked binary with all
 // capsule symbols resolved.
 import {
+    CacheKey,
+    cache_copy_artifact_to,
+    cache_key_for,
+    cache_lookup_artifact,
+    cache_root,
+    cache_store_artifact
+} from "./build_cache";
+import { _get_env_cmd } from "./cli_commands_utils";
+import {
     compile_to_llvm_file_with_module,
     module_name_from_path,
     number_to_string,
@@ -47,6 +56,7 @@ import {
     toml_get_name,
     toml_get_workspace_members
 } from "./toml_parser";
+import { resolve_compiler_version } from "./version";
 
 export {
     CapsuleSource,
@@ -504,37 +514,119 @@ fn stage_capsule_imports(sources: CapsuleSource[]) -> boolean ![io] {
     return true;
 }
 
+// ---- Cache wiring helpers (Stage C PR1b) ----
+// Build the dep-manifest list once per `compile_capsule_modules`
+// invocation. Conservative: include every staged manifest in the
+// resolved set, not just the ones THIS source actually imports.
+// Key cost is one extra hash-input per build, not per module —
+// stable, deterministic, and a future PR can refine this to
+// "manifests of imported modules only" once the resolver hands
+// us per-source import-edges.
+fn _cr_collect_dep_manifest_paths(sources: CapsuleSource[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= sources.length { break; }
+        out.push("build/native/import-context/" + sources[i].slug
+            + ".layout-manifest");
+        i += 1;
+    }
+    return out;
+}
+
+// `SAILFIN_NO_CACHE=1` disables both cache lookups and stores —
+// emergency rollback knob if a cache bug ever surfaces. Returns
+// true when caching is enabled (the default).
+fn _cr_cache_enabled() -> boolean ![io] {
+    let raw = _get_env_cmd("SAILFIN_NO_CACHE");
+    return !strings_equal(raw, "1");
+}
+
+// `SAILFIN_CACHE_TRACE=1` prints `[cache hit/miss/store] <slug>`
+// to stderr so a user (or an e2e test) can observe cache
+// behaviour without parsing an opaque build report. Quiet by
+// default.
+fn _cr_cache_trace_enabled() -> boolean ![io] {
+    let raw = _get_env_cmd("SAILFIN_CACHE_TRACE");
+    return strings_equal(raw, "1");
+}
+
 // ---- Capsule module compilation ----
 // Lower a single capsule source to its own .ll so the final link can
 // resolve the main module's external declarations to the capsule's
-// definitions.
-fn _cr_compile_one(src: CapsuleSource) -> boolean ![io] {
+// definitions. With `cache_enabled = true`, looks up an existing
+// `.ll` artifact under the content-addressed cache before
+// compiling, and stores the result on a clean compile.
+fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, cache_enabled: boolean, compiler_version: string, flags_canonical: string, trace: boolean) -> boolean ![io] {
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);
         return false;
     }
-    let source = fs.readFile(src.source_path);
     let ll_dir = _cr_dirname(src.ll_path);
     _cr_ensure_dir(ll_dir);
+
+    // Cache lookup. Suffix the slug-derived name to keep
+    // `_sha256_of_string`'s tmp paths unique across the dep-list
+    // and final-input hashes.
+    let mut cache_key: CacheKey = CacheKey { digest: "" };
+    if cache_enabled {
+        cache_key = cache_key_for(src.source_path, dep_manifests, compiler_version, flags_canonical, src.slug);
+        if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
+            if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
+                if trace { print.err("[cache hit] " + src.slug); }
+                return true;
+            }
+            if trace { print.err("[cache copy-failed] " + src.slug); }
+        } else {
+            if trace { print.err("[cache miss] " + src.slug); }
+        }
+    }
+
+    let source = fs.readFile(src.source_path);
     let ok = compile_to_llvm_file_with_module(source, src.slug, src.ll_path);
     if !ok {
         print.err("capsule-resolver: failed to lower " + src.slug
             + " to LLVM IR");
         return false;
     }
+
+    if cache_enabled {
+        let stored = cache_store_artifact(cache_root_path, cache_key, "ll", src.ll_path);
+        if trace {
+            if stored { print.err("[cache store] " + src.slug); } else {
+                print.err("[cache store-failed] " + src.slug);
+            }
+        }
+    }
     return true;
 }
 
 // Compile every capsule module to its own .ll and return the list of
-// .ll paths to feed the linker.
+// .ll paths to feed the linker. Resolves cache context once at the
+// top — dep-manifest paths, cache root, env-driven enable/trace —
+// and threads it into each per-module call.
 fn compile_capsule_modules(sources: CapsuleSource[]) -> string[] ![io] {
     _cr_ensure_dir("build/sailfin");
     _cr_ensure_dir("build/sailfin/capsules");
+    let dep_manifests = _cr_collect_dep_manifest_paths(sources);
+    let cache_root_path = cache_root();
+    let cache_enabled = _cr_cache_enabled();
+    let trace = _cr_cache_trace_enabled();
+    // The version is the same for every module in this build; pass
+    // empty `binary_dir` so the resolver consults
+    // `build/native/.build-stamp` and the in-tree `capsule.toml`
+    // instead of binary-relative paths (which only matter for
+    // installed binaries running outside the workspace).
+    let compiler_version = resolve_compiler_version("");
+    // Flag canonicalization is empty for now — `sfn build -p` does
+    // not yet take build flags. Once it does, thread the flag list
+    // through `canonicalize_flags(flags)` and pass the result here.
+    let flags_canonical = "[]";
     let mut out: string[] = [];
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
-        let ok = _cr_compile_one(sources[i]);
+        let ok = _cr_compile_one(sources[i], dep_manifests, cache_root_path, cache_enabled, compiler_version, flags_canonical, trace);
         if !ok { return []; }
         out.push(sources[i].ll_path);
         i += 1;
