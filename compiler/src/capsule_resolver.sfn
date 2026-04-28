@@ -543,19 +543,146 @@ fn stage_capsule_imports(sources: CapsuleSource[]) -> boolean ![io] {
 
 // ---- Cache wiring helpers (Stage C PR1b) ----
 // Build the dep-manifest list once per `compile_capsule_modules`
-// invocation. Conservative: include every staged manifest in the
-// resolved set, not just the ones THIS source actually imports.
-// Key cost is one extra hash-input per build, not per module —
-// stable, deterministic, and a future PR can refine this to
-// "manifests of imported modules only" once the resolver hands
-// us per-source import-edges.
-fn _cr_collect_dep_manifest_paths(sources: CapsuleSource[]) -> string[] {
+// invocation. PR1e refines this from "all staged manifests"
+// (conservative: any change anywhere busts every cache key) to a
+// per-source list of the manifests that source's direct imports
+// produce. The cache invalidation chain remains correct because
+// each `.layout-manifest` captures a module's interface — when a
+// transitive dep's interface changes, the consuming module's
+// manifest changes, which busts its consumers' keys in turn.
+//
+// Granularity:
+//   - Relative imports (`./util`, `../foo`) match by source path
+//     and produce a single dep slug per import.
+//   - Scoped imports (`sfn/math`, `sfn/http/client`) match by
+//     capsule prefix (`scope/name`) and pull in EVERY submodule
+//     of the imported capsule. This is intentionally coarse for
+//     PR1e — refining to per-submodule precision lands separately
+//     once the resolver retains submodule-resolution edges.
+// Linear-search membership predicate. Sailfin's runtime has no
+// `Set<string>`, so dedupe loops use parallel-array containment;
+// at the typical N (~5-30 deps per source) the constant cost is
+// dominated by the per-source filesystem read elsewhere.
+fn _cr_string_in_array(arr: string[], needle: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= arr.length { break; }
+        if strings_equal(arr[i], needle) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// Extract `scope/name` prefix from a scoped import spec. Returns:
+//   "sfn/math"        →  "sfn/math"
+//   "sfn/http/client" →  "sfn/http"
+//   "noslash"         →  ""              (not a scoped spec)
+fn _cr_scope_name_prefix(spec: string) -> string {
+    let mut slash_count: number = 0;
+    let mut second_slash: number = -1;
+    let mut i: number = 0;
+    loop {
+        if i >= spec.length { break; }
+        if substring(spec, i, i + 1) == "/" {
+            slash_count += 1;
+            if slash_count == 2 {
+                second_slash = i;
+                break;
+            }
+        }
+        i += 1;
+    }
+    if slash_count == 0 { return ""; }
+    if second_slash < 0 { return spec; }
+    return substring(spec, 0, second_slash);
+}
+
+// For source `src`, return the slugs in `sources` that this source
+// directly imports. Reads `src.source_path` once, scans relative
+// + scoped imports, and resolves each to a slug via the existing
+// CapsuleSource list. Conservative: scoped imports include every
+// submodule of the imported capsule (see comment above).
+fn _cr_direct_import_slugs_for(src: CapsuleSource, sources: CapsuleSource[]) -> string[] ![io] {
     let mut out: string[] = [];
+    if !fs.exists(src.source_path) { return out; }
+    let source_text = fs.readFile(src.source_path);
+    let cur_dir = _cr_dirname(src.source_path);
+
+    // Relative imports: resolve each spec to a path, find the
+    // matching CapsuleSource, push its slug.
+    let rel_specs = collect_relative_import_specs(source_text);
+    let mut r: number = 0;
+    loop {
+        if r >= rel_specs.length { break; }
+        let mut dep_path = resolve_relative_import(cur_dir, rel_specs[r]);
+        if !fs.exists(dep_path) {
+            // Directory import fallback: ./dir → dir/mod.sfn — same
+            // behaviour as `enumerate_relative_sources`.
+            if _cr_ends_with(dep_path, ".sfn") {
+                let mod_fallback = substring(dep_path, 0, dep_path.length - 4)
+                    + "/mod.sfn";
+                if fs.exists(mod_fallback) { dep_path = mod_fallback; }
+            }
+        }
+        let mut k: number = 0;
+        loop {
+            if k >= sources.length { break; }
+            if strings_equal(sources[k].source_path, dep_path) {
+                if !_cr_string_in_array(out, sources[k].slug) {
+                    out.push(sources[k].slug);
+                }
+                break;
+            }
+            k += 1;
+        }
+        r += 1;
+    }
+
+    // Scoped imports: match the import's capsule prefix against
+    // each source's `spec`. Sources from `enumerate_relative_sources`
+    // have `spec = ""` and never match a scoped prefix — exactly
+    // the right behaviour, since relative imports don't go through
+    // the scoped-import path.
+    let scoped_specs = collect_scoped_import_specs(source_text);
+    let mut s: number = 0;
+    loop {
+        if s >= scoped_specs.length { break; }
+        let scope_name = _cr_scope_name_prefix(scoped_specs[s]);
+        if scope_name.length > 0 {
+            let mut k2: number = 0;
+            loop {
+                if k2 >= sources.length { break; }
+                if strings_equal(sources[k2].spec, scope_name) {
+                    if !_cr_string_in_array(out, sources[k2].slug) {
+                        out.push(sources[k2].slug);
+                    }
+                }
+                k2 += 1;
+            }
+        }
+        s += 1;
+    }
+    return out;
+}
+
+// For each source, compute the manifest paths of its direct imports.
+// Result is a parallel array — index i is the dep manifest list for
+// `sources[i]`.
+fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[]) -> string[][] ![io] {
+    let mut out: string[][] = [];
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
-        out.push("build/native/import-context/" + sources[i].slug
-            + ".layout-manifest");
+        let dep_slugs = _cr_direct_import_slugs_for(sources[i], sources);
+        let mut paths: string[] = [];
+        let mut j: number = 0;
+        loop {
+            if j >= dep_slugs.length { break; }
+            paths.push("build/native/import-context/" + dep_slugs[j]
+                + ".layout-manifest");
+            j += 1;
+        }
+        out.push(paths);
         i += 1;
     }
     return out;
@@ -692,7 +819,15 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
 fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig) -> CompileCapsuleResult ![io] {
     _cr_ensure_dir("build/sailfin");
     _cr_ensure_dir("build/sailfin/capsules");
-    let dep_manifests = _cr_collect_dep_manifest_paths(sources);
+    // Per-source dep manifests (PR1e): each `_cr_compile_one` call
+    // sees only the manifests of modules it directly imports, so an
+    // unrelated capsule changing busts only the modules that
+    // transitively import it. Result is a parallel array — index i
+    // is the manifest list for `sources[i]`. Cost is one read per
+    // source plus a few linear scans; for the typical N≈30-130 the
+    // total is dominated by the per-module compile path the cache
+    // would otherwise trigger.
+    let per_source_dep_manifests = _cr_collect_per_source_dep_manifests(sources);
     let cache_root_path = cache_root();
     if config.clean {
         // `--clean` is a destructive opt-in. If the wipe fails
@@ -735,7 +870,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig) -
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
-        let evt = _cr_compile_one(sources[i], dep_manifests, cache_root_path, config, compiler_version, flags_canonical);
+        let evt = _cr_compile_one(sources[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical);
         if !evt.success {
             return CompileCapsuleResult {
                 ll_paths: out,
