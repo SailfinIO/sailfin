@@ -7,6 +7,7 @@ import {
     TestCapsuleResolution,
     discover_project_root,
     discover_workspace_root,
+    empty_resolver_consumer,
     prepare_project_capsules_for_test
 } from "./capsule_resolver";
 import {
@@ -349,7 +350,12 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
                 + number_to_string(groups[gi].entry_paths.length)
                 + ")");
         }
-        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths);
+        // `sfn test` does not yet take `-p`, so the consumer is
+        // empty and per-capsule `.ll` routing falls back to the
+        // legacy flat layout (Stage C2b2). Test-time link continues
+        // to consume `build/sailfin/capsules/<mangled>.ll` until
+        // `sfn test -p` ships.
+        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, empty_resolver_consumer());
         if resolution.staging_failed {
             // Resolver already emitted a structured error to stderr
             // (slug collision, stage-write, or compile failure).

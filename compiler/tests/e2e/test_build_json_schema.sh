@@ -125,6 +125,31 @@ test_deps_consistency() {
 }
 run_test "deps.count matches deps.ll_paths.length (>= 1)" test_deps_consistency
 
+# ---- Test 5b: every deps.ll_paths entry exists on disk ----
+# Hardens the schema test against future path-shape drift without
+# locking the prefix: any path the report names must be a real
+# `.ll` file the linker actually saw. Catches both stale path
+# strings and dropped-but-listed dep regressions. Stage C2b2.
+test_deps_ll_paths_exist() {
+    local missing=0
+    while IFS= read -r path; do
+        [ -z "$path" ] && continue
+        if [ ! -f "$SCRATCH/$path" ]; then
+            echo "[test]   missing dep .ll: $path" >&2
+            missing=1
+        fi
+        case "$path" in
+            *.ll) ;;
+            *)
+                echo "[test]   dep_ll_paths entry doesn't end in .ll: $path" >&2
+                missing=1
+                ;;
+        esac
+    done < <(jq -r '.deps.ll_paths[]' "$SCRATCH/cold.json")
+    [ "$missing" -eq 0 ]
+}
+run_test "every deps.ll_paths entry is a real .ll file" test_deps_ll_paths_exist
+
 # ---- Test 6: diagnostics is empty array (reserved for §4.11) ----
 test_diagnostics_reserved() {
     [ "$(jq -r '.diagnostics | length' "$SCRATCH/cold.json")" = "0" ]

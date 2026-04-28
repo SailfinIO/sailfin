@@ -8,14 +8,19 @@
 // unit tests lock the per-field invariants — the e2e exercises
 // the full pipeline.
 import {
+    CapsuleArtifactLayout,
     CapsuleArtifactManifest,
     capsule_artifact_bin_path,
     capsule_artifact_dir,
+    capsule_artifact_ir_dir,
+    capsule_artifact_layout_from_specs,
     capsule_artifact_manifest_path,
     capsule_artifact_manifest_to_json,
     capsule_artifact_obj_path,
     capsule_default_bin_name,
+    empty_capsule_artifact_layout,
     empty_capsule_artifact_manifest,
+    ir_path_for_slug,
     is_safe_scope_name,
     parse_scope_name,
     ScopeName
@@ -156,6 +161,143 @@ test "capsule_default_bin_name: trailing slash returns empty" {
 
 test "capsule_artifact_manifest_path: composes <dir>/manifest.json" {
     assert capsule_artifact_manifest_path("sfn", "math") == "build/capsules/sfn/math/manifest.json";
+}
+
+test "capsule_artifact_ir_dir: composes <dir>/ir" {
+    assert capsule_artifact_ir_dir("sfn", "math") == "build/capsules/sfn/math/ir";
+}
+
+// --------------------------------------------------------------
+// Stage C2b2 layout: capsule_artifact_layout_from_specs
+// --------------------------------------------------------------
+test "layout_from_specs: empty inputs produce empty layout" {
+    let empty: string[] = [];
+    let layout = capsule_artifact_layout_from_specs(empty, "", "");
+    assert layout.consumer_scope == "";
+    assert layout.consumer_name == "";
+    assert layout.dep_scopes.length == 0;
+    assert layout.dep_names.length == 0;
+}
+
+test "layout_from_specs: scoped specs split into parallel arrays" {
+    let specs = ["sfn/math", "sfn/http"];
+    let layout = capsule_artifact_layout_from_specs(specs, "demo", "widget");
+    assert layout.consumer_scope == "demo";
+    assert layout.consumer_name == "widget";
+    assert layout.dep_scopes.length == 2;
+    assert layout.dep_names.length == 2;
+    assert layout.dep_scopes[0] == "sfn";
+    assert layout.dep_names[0] == "math";
+    assert layout.dep_scopes[1] == "sfn";
+    assert layout.dep_names[1] == "http";
+}
+
+test "layout_from_specs: dedupes identical (scope, name) pairs" {
+    // The same dep can appear twice in the source list (e.g. once
+    // from the manifest, once from a workspace-implicit walk).
+    // The layout collapses them so the routing loop checks each
+    // prefix at most once.
+    let specs = ["sfn/math", "sfn/math", "sfn/http"];
+    let layout = capsule_artifact_layout_from_specs(specs, "", "");
+    assert layout.dep_scopes.length == 2;
+    assert layout.dep_names.length == 2;
+}
+
+test "layout_from_specs: empty/non-scoped specs are skipped" {
+    // Relative-import sources have empty `spec`; bare specs without
+    // a slash (rare, but possible if a manifest is malformed) get
+    // dropped because they aren't routable.
+    let specs = ["", "sfn/math", "noslash"];
+    let layout = capsule_artifact_layout_from_specs(specs, "", "");
+    assert layout.dep_scopes.length == 1;
+    assert layout.dep_scopes[0] == "sfn";
+    assert layout.dep_names[0] == "math";
+}
+
+test "layout_from_specs: unsafe scope/name filtered out" {
+    // A spec like `../etc/oops` would parse_scope_name to
+    // ("..", "etc/oops"); is_safe_scope_name rejects it. The
+    // routing layer must never see an unsafe pair.
+    let specs = ["../etc/oops", "sfn/math"];
+    let layout = capsule_artifact_layout_from_specs(specs, "", "");
+    assert layout.dep_scopes.length == 1;
+    assert layout.dep_scopes[0] == "sfn";
+    assert layout.dep_names[0] == "math";
+}
+
+// --------------------------------------------------------------
+// Stage C2b2 layout: ir_path_for_slug
+// --------------------------------------------------------------
+test "ir_path_for_slug: dep-prefix routes under the dep tree" {
+    let layout = capsule_artifact_layout_from_specs(["sfn/math"], "demo", "widget");
+    assert ir_path_for_slug(layout, "sfn/math/mod") == "build/capsules/sfn/math/ir/mod.ll";
+}
+
+test "ir_path_for_slug: dep submodule keeps slug subdirs" {
+    let layout = capsule_artifact_layout_from_specs(["sfn/http"], "demo", "widget");
+    assert ir_path_for_slug(layout, "sfn/http/internal/buffer") == "build/capsules/sfn/http/ir/internal/buffer.ll";
+}
+
+test "ir_path_for_slug: relative slug routes under consumer tree" {
+    let layout = capsule_artifact_layout_from_specs([], "demo", "widget");
+    assert ir_path_for_slug(layout, "util/helpers") == "build/capsules/demo/widget/ir/util/helpers.ll";
+}
+
+test "ir_path_for_slug: empty consumer + no dep match returns empty (legacy)" {
+    let layout = empty_capsule_artifact_layout();
+    assert ir_path_for_slug(layout, "anything") == "";
+}
+
+test "ir_path_for_slug: unsafe consumer scope falls through to legacy" {
+    let mut layout = empty_capsule_artifact_layout();
+    layout.consumer_scope = "..";
+    layout.consumer_name = "widget";
+    assert ir_path_for_slug(layout, "util") == "";
+}
+
+test "ir_path_for_slug: slug with .. segment rejected" {
+    let layout = capsule_artifact_layout_from_specs([], "demo", "widget");
+    assert ir_path_for_slug(layout, "../escape") == "";
+    assert ir_path_for_slug(layout, "good/../bad") == "";
+}
+
+test "ir_path_for_slug: slug with backslash rejected" {
+    let layout = capsule_artifact_layout_from_specs([], "demo", "widget");
+    assert ir_path_for_slug(layout, "win\\path") == "";
+}
+
+test "ir_path_for_slug: slug with leading slash rejected" {
+    let layout = capsule_artifact_layout_from_specs([], "demo", "widget");
+    assert ir_path_for_slug(layout, "/abs/path") == "";
+}
+
+test "ir_path_for_slug: empty slug returns empty" {
+    let layout = capsule_artifact_layout_from_specs([], "demo", "widget");
+    assert ir_path_for_slug(layout, "") == "";
+}
+
+test "ir_path_for_slug: slug equal to dep prefix without tail falls through to consumer" {
+    // A slug of exactly "sfn/math" (no trailing /<something>) does
+    // NOT match the `<scope>/<name>/<rest>` rule (it's missing the
+    // tail), so it falls through to the consumer rule. In practice
+    // capsule slugs always include a module name, so this case is
+    // theoretical — but the validator's behavior is locked here.
+    let layout = capsule_artifact_layout_from_specs(["sfn/math"], "demo", "widget");
+    assert ir_path_for_slug(layout, "sfn/math") == "build/capsules/demo/widget/ir/sfn/math.ll";
+}
+
+test "ir_path_for_slug: dep-prefix wins over consumer fallback" {
+    let layout = capsule_artifact_layout_from_specs(["sfn/math"], "demo", "widget");
+    // A slug that could be either a dep submodule OR something
+    // under the consumer tree must pick the dep route.
+    assert ir_path_for_slug(layout, "sfn/math/util") == "build/capsules/sfn/math/ir/util.ll";
+}
+
+test "ir_path_for_slug: single-segment consumer name accepted" {
+    // `is_safe_scope_name` accepts ("demo", "widget"). The
+    // sub-segment-only check applies to the name parts.
+    let layout = capsule_artifact_layout_from_specs([], "demo", "widget");
+    assert ir_path_for_slug(layout, "main") == "build/capsules/demo/widget/ir/main.ll";
 }
 
 // --------------------------------------------------------------

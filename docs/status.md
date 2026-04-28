@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 28, 2026 (Stage C cache milestone shipped — PR1–1f / #254–#259)
+Updated: April 28, 2026 (Stage C cache milestone + per-capsule layout milestones shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 in flight)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -113,6 +113,41 @@ feature availability.
     MCP server's structured compile feedback, CI cache-hit-rate
     gates, and future structured link errors (proposal §4.11 —
     the `diagnostics: []` slot is the forward-compat hook).
+- **Stage C2 per-capsule artifact layout (in flight, 2026-04-28).**
+  Three PRs land the §4.4 layout (`build/capsules/<scope>/<name>/`)
+  for everything `sfn build -p` produces:
+  - **C2a (#261)** — per-capsule manifest sidecar.
+    `compiler/src/capsule_artifact.sfn` defines
+    `CapsuleArtifactManifest` and the `schema_version: "1"`
+    JSON shape; after a successful `sfn build -p` the resolver
+    writes `build/capsules/<scope>/<name>/manifest.json`.
+    Path-traversal hardening via `is_safe_scope_name` rejects
+    malicious `[capsule].name = "../../etc"`. Locked by
+    `compiler/tests/e2e/test_capsule_artifact_sidecar.sh`.
+  - **C2b1 (#262)** — `-p` build outputs default to the
+    canonical per-capsule paths: library obj at
+    `build/capsules/<scope>/<name>/obj/mod.o`, binary at
+    `build/capsules/<scope>/<name>/bin/<bin-name>`. Positional
+    builds and explicit `-o` keep their existing locations.
+  - **C2b2 (this PR)** — dep `.ll` files migrate from the flat
+    `build/sailfin/capsules/<mangled>.ll` layout into the
+    per-capsule tree. Manifest-declared dep sources land at
+    `build/capsules/<dep-scope>/<dep-name>/ir/<rel>.ll`;
+    intra-capsule (relative-import) sources of a `-p`
+    consumer with safe scope/name land under the consumer's
+    own `ir/` tree. Positional builds and the compiler
+    self-host (`[capsule].name = "sailfin"` is single-segment)
+    keep the legacy fallback automatically. Centralised in
+    `capsule_artifact.sfn::ir_path_for_slug` + the resolver's
+    new `ResolverConsumer`. `BuildReport.dep_ll_paths` and the
+    sidecar's `deps.ll_paths` reflect the new path strings;
+    `schema_version` stays at "1" (string-array-of-paths shape
+    is unchanged — only path content drifted, same precedent
+    C2b1 set for `out_path`). Locked by new
+    `test_capsule_ir_layout.sh` and hardened
+    `test_build_json_schema.sh` /
+    `test_capsule_artifact_sidecar.sh` `dep_ll_paths`
+    file-exists assertions.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
