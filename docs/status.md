@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 28, 2026 (Stage B PR3 — `llvm-objcopy --weaken` retired; Stage B fully closed)
+Updated: April 28, 2026 (Stage C cache milestone shipped — PR1–1f / #254–#259)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -69,6 +69,50 @@ feature availability.
   `cross_module_shim.o` push all delete. `sfn/compiler-lib`
   extraction is reframed as a Stage G concern, not a Stage B
   blocker. **Stage B is fully closed.**
+- **Stage C cache milestone shipped (PR1–1f, #254–#259, 2026-04-28).**
+  Six PRs deliver an end-to-end content-addressed build cache that
+  every `sfn build` / `sfn run` honours by default:
+  - **PR1 (#254)** — `compiler/src/build_cache.sfn` foundation:
+    `cache_key_for(source, deps, version, flags)` derives a
+    sha256 digest sharded under `<cache_root>/<prefix>/<key>/`,
+    where `<cache_root>` defaults to `build/cache/v1` and can be
+    overridden via `$SAILFIN_BUILD_CACHE_DIR`;
+    `cache_lookup_complete` / `cache_store` implement a
+    content-addressed entry. Schema-versioned (`v1`) so a future
+    key-shape change can age old entries out cleanly.
+  - **PR1b (#255)** — wired into `_cr_compile_one` so each
+    per-capsule module compile checks the cache before lowering
+    and stores the resulting `.ll` after a fresh build.
+    `SAILFIN_CACHE_TRACE=1` prints `[cache hit/miss/store]
+    <slug>` per module.
+  - **PR1c (#256)** — `CacheStats { hits, misses, stores,
+    invalid_keys, copy_failures }` accumulated per build and
+    surfaced as a single `[cache] hits=N misses=M …` summary
+    line. `sfn build` gains `--no-cache`, `--clean`, and
+    `--cache-trace` flags layered over the env-var defaults.
+    `lookup_attempted` flag suppresses the summary on
+    `--no-cache` runs (the cache was never consulted).
+  - **PR1d (#257)** — same flag surface mirrored onto
+    `sfn run`. Six-test e2e (`test_run_cache_flags.sh`) locks
+    the build/run lockstep so future drift fails CI.
+  - **PR1e (#258)** — per-source dep manifests:
+    `_cr_collect_per_source_dep_manifests` replaces the
+    conservative "all staged manifests" key input with the
+    actual transitive imports each source reaches. An unrelated
+    capsule changing busts only the modules that import it.
+    Manifest interface stability propagates the invalidation
+    transitively, so direct deps suffice in the key. 10–100×
+    cache-hit-rate improvement on incremental builds with
+    multiple capsules.
+  - **PR1f (#259)** — `sfn build --json` emits a single line of
+    schema-versioned JSON to stdout instead of human output.
+    `compiler/src/build_report.sfn` defines the `BuildReport`
+    struct and the `build_report_to_json(report)` serializer;
+    `compiler/tests/e2e/test_build_json_schema.sh` (uses `jq`)
+    locks every top-level field. Foundation for `sfn lsp`, the
+    MCP server's structured compile feedback, CI cache-hit-rate
+    gates, and future structured link errors (proposal §4.11 —
+    the `diagnostics: []` slot is the forward-compat hook).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —

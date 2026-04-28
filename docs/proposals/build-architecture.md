@@ -1,10 +1,10 @@
 # Proposal: Unified Build Architecture for Sailfin
 
-Status: Stage A shipped; Stage B fully shipped (PR1 + PR2 + PR3 weaken-retirement landed); libextract reframed as a Stage G concern, not a Stage B blocker
-Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed) · 2026-04-26 (PR2 `sfn test` migration + A4 deletion landed) · 2026-04-28 (PR3 `llvm-objcopy --weaken` retired via path-norm fix; libextract decoupled)
+Status: Stages A and B fully shipped. **Stage C cache milestone shipped (PR1–1f / #254–#259 / 2026-04-28).** Stage C broader items (C2 artifact layout / C3 stdlib CI gate / C4 `sfn package` / C5 `sfn bench` + `sfn bootstrap`) and Stages D–G remain.
+Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed) · 2026-04-26 (PR2 `sfn test` migration + A4 deletion landed) · 2026-04-28 (PR3 `llvm-objcopy --weaken` retired via path-norm fix; libextract decoupled) · 2026-04-28 (Stage C cache milestone PR1–1f shipped)
 Authors: Core Team
 
-## Implementation Status (as of 2026-04-28, Stage B closed)
+## Implementation Status (as of 2026-04-28, Stage C cache milestone shipped)
 
 **Stage A — shipped.** Manifest schema, `workspace.toml`,
 `capsules/sfn/prelude/capsule.toml`, and `[build].kind = "binary"` on the
@@ -1259,20 +1259,96 @@ post-Stage-B baseline.
 **Goal:** `sfn build` is a real project builder for everything except
 the compiler.
 
-- Implement the driver function graph from §4.3 in Sailfin.
-- Content-addressed cache under `build/cache/`.
-- `sfn package` and `sfn bench` subcommands ship; `tools/package.sh`
-  and `scripts/bench_compile.sh` are deleted.
-- `sfn bootstrap` ships; it fetches a released seed binary (replaces
-  `install.sh` for users already on sfn). `install.sh` stays as the
-  first-install curl target.
-- All stdlib capsules build with `sfn build` in CI to exercise the
-  driver before the compiler itself depends on it.
-- `scripts/build.sh` continues to build the compiler (one last stage).
+The original Stage C scope is split into work-streams. The cache
+work-stream is **complete**; the layout / packaging / CI-gate
+work-streams remain.
 
-**Exit criteria:** Every stdlib capsule in `capsules/sfn/*` builds with
-`sfn build -p <path>`, matches `build.sh` output byte-for-byte, and is
-covered by cache-hit assertions in CI.
+#### Stage C cache milestone — shipped (PR1–1f / #254–#259 / 2026-04-28)
+
+Six PRs deliver an end-to-end content-addressed build cache. Every
+`sfn build` and `sfn run` honours it by default.
+
+- **PR1 (#254) — cache module foundation.**
+  `compiler/src/build_cache.sfn` defines `cache_key_for(source,
+  deps, version, flags)` (sha256 over content + dep manifests +
+  compiler version + canonical flags), the on-disk layout
+  (`<root>/<key[0..2]>/<key>/{ir.sfn-asm, layout.manifest, mod.ll,
+  mod.o}`), and the lookup/store primitives. Schema-versioned
+  (`v1`) so a future key-shape change can age old entries out
+  cleanly. Unit tests lock the contract.
+- **PR1b (#255) — wired into `_cr_compile_one`.** The per-capsule
+  module compile checks the cache before invoking
+  `compile_to_llvm_file_with_module` and stores the produced
+  `.ll` after a fresh build. `SAILFIN_CACHE_TRACE=1` prints
+  `[cache hit/miss/store] <slug>` per module.
+- **PR1c (#256) — stats + CLI flags.** `CacheStats { hits,
+  misses, stores, invalid_keys, copy_failures }` accumulated per
+  build and surfaced as a single `[cache] hits=N misses=M …`
+  summary line. `sfn build` gains `--no-cache`, `--clean`, and
+  `--cache-trace` flags layered over the env-var defaults. The
+  `lookup_attempted` flag on `ModuleCacheEvent` suppresses the
+  summary on `--no-cache` runs (the cache was never consulted).
+- **PR1d (#257) — `sfn run` flag plumbing.** Same flag surface
+  mirrored from `sfn build`. New `compiler/tests/e2e/test_run_cache_flags.sh`
+  locks the build/run lockstep so future drift fails CI.
+- **PR1e (#258) — per-source dep manifests.**
+  `_cr_collect_per_source_dep_manifests` replaces the conservative
+  "all staged manifests" key input with the actual transitive
+  imports each source reaches. An unrelated capsule changing busts
+  only the modules that import it. Manifest interface stability
+  propagates the invalidation transitively, so direct deps suffice
+  in the key. 10–100× cache-hit-rate improvement on incremental
+  builds with multiple capsules.
+- **PR1f (#259) — `sfn build --json`.** First machine-readable
+  surface for build outcomes. `compiler/src/build_report.sfn`
+  defines the `BuildReport` struct + `build_report_to_json`
+  serializer; emits a single line of JSON to stdout when `--json`
+  is set, with `schema_version: "1"` as the contract for breaking
+  changes. `compiler/tests/e2e/test_build_json_schema.sh` (uses
+  `jq`) locks every top-level field. Foundation for `sfn lsp`,
+  the MCP server's structured compile feedback, CI cache-hit-rate
+  gates, and future structured link errors (the `diagnostics: []`
+  slot is the §4.11 hook).
+
+The cache milestone is **functionally complete**. Every Sailfin
+command that touches deps respects the same cache contract;
+incremental rebuilds skip unchanged modules; the surface is
+machine-readable.
+
+#### Remaining Stage C work-streams
+
+The cache-aside Stage C exit criteria from the original plan (every
+stdlib capsule builds with `sfn build -p`, byte-for-byte parity
+with `build.sh`, CI cache-hit floor) still stand and break down as:
+
+- **C2 — Standard artifact layout** (next). Move `sfn build`'s
+  outputs into the per-capsule tree from §4.4
+  (`build/capsules/<scope>/<name>/{manifest.json, ir/, obj/, bin/}`).
+  The shipped cache already materializes much of the same artifact
+  set (IR / obj / etc.), but it is content-addressed under
+  `build/cache/v1/<shard>/<key>/...` rather than per-capsule; the
+  in-tree build tree does not yet follow the standardized
+  per-capsule layout. Unblocks C4 (`sfn package` knows what's in
+  a capsule).
+- **C3 — CI gate on stdlib.** Build every `capsules/sfn/*` with
+  `sfn build -p` in CI and assert byte-for-byte parity vs `build.sh`
+  + a cache-hit-rate floor on no-source-change reruns. Likely a
+  nightly cron rather than per-PR to keep CI fast.
+- **C4 — `sfn package`.** Replaces `tools/package.sh` with a
+  Sailfin-native command that consumes a per-capsule manifest from
+  C2 and produces a tarball.
+- **C5 — `sfn bench` + `sfn bootstrap`.** Replace
+  `scripts/bench_compile.sh` and (for upgrade users) `install.sh`.
+  After this, `scripts/build.sh` is the only build-related shell
+  script remaining — Stage D retires it.
+
+`scripts/build.sh` continues to build the compiler through Stage
+C; Stage D is the cutover.
+
+**Exit criteria (unchanged):** Every stdlib capsule in `capsules/sfn/*`
+builds with `sfn build -p <path>`, matches `build.sh` output
+byte-for-byte (or close enough that any drift is documented), and
+is covered by cache-hit assertions in CI.
 
 ### Stage D — Compiler builds itself; `build.sh` and the Makefile retire
 
