@@ -40,7 +40,8 @@ import {
     cache_key_for,
     cache_lookup_artifact,
     cache_root,
-    cache_store_artifact
+    cache_store_artifact,
+    canonicalize_flags
 } from "./build_cache";
 import { _get_env_cmd } from "./cli_commands_utils";
 import {
@@ -56,7 +57,7 @@ import {
     toml_get_name,
     toml_get_workspace_members
 } from "./toml_parser";
-import { resolve_compiler_version } from "./version";
+import { resolve_compiler_version_for_cache } from "./version";
 
 export {
     CapsuleSource,
@@ -612,16 +613,27 @@ fn compile_capsule_modules(sources: CapsuleSource[]) -> string[] ![io] {
     let cache_root_path = cache_root();
     let cache_enabled = _cr_cache_enabled();
     let trace = _cr_cache_trace_enabled();
-    // The version is the same for every module in this build; pass
-    // empty `binary_dir` so the resolver consults
-    // `build/native/.build-stamp` and the in-tree `capsule.toml`
-    // instead of binary-relative paths (which only matter for
-    // installed binaries running outside the workspace).
-    let compiler_version = resolve_compiler_version("");
+    // Strict compiler-version lookup: NEVER falls through to a CWD
+    // `capsule.toml` (the project's manifest), because the build
+    // cache keys IR against the compiler binary's identity — letting
+    // the project version creep into the key would silently reuse
+    // cached `.ll` across compiler upgrades. Threading `binary_dir`
+    // from the CLI entry into this call is the next refinement;
+    // until then, `resolve_compiler_version_for_cache("")` falls
+    // through to `build/native/.build-stamp` (in-tree dev) or
+    // `compiler/capsule.toml` (in-tree dev), and finally the
+    // compile-time `__version_fallback__` — which is stable per
+    // binary, so cache keys stay coherent for any single binary
+    // even when running outside the workspace.
+    let compiler_version = resolve_compiler_version_for_cache("");
     // Flag canonicalization is empty for now — `sfn build -p` does
-    // not yet take build flags. Once it does, thread the flag list
-    // through `canonicalize_flags(flags)` and pass the result here.
-    let flags_canonical = "[]";
+    // not yet take build flags. Constructing via `canonicalize_flags`
+    // keeps the empty form a single source of truth: if the encoder
+    // changes how it spells "no flags", this site picks up the new
+    // form automatically rather than drifting against a hardcoded
+    // string literal.
+    let empty_flags: string[] = [];
+    let flags_canonical = canonicalize_flags(empty_flags);
     let mut out: string[] = [];
     let mut i: number = 0;
     loop {

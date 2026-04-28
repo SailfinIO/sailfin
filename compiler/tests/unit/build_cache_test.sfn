@@ -398,6 +398,33 @@ test "build_cache: cache_copy_artifact_to materialises cached ll" ![io] {
     _cleanup(scratch);
 }
 
+// Regression for Copilot review on PR #255 (build_cache.sfn:251):
+// `cp` fails if the destination's parent directory doesn't exist.
+// Without auto-mkdir inside `cache_copy_artifact_to`, every cache
+// hit on a fresh build tree would silently flip to recompile. The
+// helper now creates the dst dir on demand.
+test "build_cache: cache_copy_artifact_to creates dst dir on demand" ![io] {
+    let scratch = _test_tmp_root("artifact_copy_mkdir");
+    let cache_root = scratch + "/cache/v1";
+    let src_dir = scratch + "/build";
+    process.run(["mkdir", "-p", src_dir]);
+    let original = src_dir + "/mod.ll";
+    _write_file(original, "; ModuleID = 'cached'");
+
+    let key = CacheKey {
+        digest: "5555555555555555555555555555555555555555555555555555555555555555"
+    };
+    cache_store_artifact(cache_root, key, "ll", original);
+
+    // Destination's parent dir does NOT exist yet.
+    let nested_dst = scratch + "/freshly/nested/dir/restored.ll";
+    let copied = cache_copy_artifact_to(cache_root, key, "ll", nested_dst);
+    assert copied;
+    assert fs.exists(nested_dst);
+
+    _cleanup(scratch);
+}
+
 test "build_cache: cache_copy_artifact_to returns false on cache miss" ![io] {
     let scratch = _test_tmp_root("artifact_miss");
     let cache_root = scratch + "/cache/v1";

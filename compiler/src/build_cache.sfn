@@ -54,6 +54,7 @@
 // variables. The convenience reader `cache_root()` is the
 // production-side wrapper that resolves `$SAILFIN_BUILD_CACHE_DIR`.
 import {
+    _dirname_cmd,
     _ensure_dir_recursive_cmd,
     _get_env_cmd,
     _sanitize_filename_cmd,
@@ -242,11 +243,18 @@ fn cache_lookup_artifact(root: string, key: CacheKey, kind: string) -> boolean !
 // `cp` failure. Used on cache hits to materialise the cached
 // artifact into the location the build expects (e.g. copying a
 // cached `.ll` to the `CapsuleSource.ll_path` the linker reads).
+//
+// The destination's parent directory is created on demand —
+// without that, `cp` would fail with "No such file or directory"
+// on the first build into a fresh tree, silently flipping every
+// cache hit into a recompile.
 fn cache_copy_artifact_to(root: string, key: CacheKey, kind: string, dst_path: string) -> boolean ![io] {
     if !_is_valid_digest(key.digest) { return false; }
     if !_is_known_kind(kind) { return false; }
     let src = cache_artifact_path(root, key, kind);
     if !fs.exists(src) { return false; }
+    let dst_dir = _dirname_cmd(dst_path);
+    if dst_dir.length > 0 { _ensure_dir_recursive_cmd(dst_dir); }
     let cp = process.run(["cp", src, dst_path]);
     return cp == 0;
 }
