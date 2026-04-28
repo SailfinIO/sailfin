@@ -89,6 +89,118 @@ struct CacheEntryPaths {
 }
 
 // ----------------------------------------------------------------
+// Cache stats
+// ----------------------------------------------------------------
+// Per-build counters surfaced to the CLI's end-of-build summary
+// (and, in a future PR, to `sfn build --json`'s build report).
+// All fields are simple counters with no allocation, so an empty
+// build that never touches the cache produces a single
+// zero-valued struct.
+//
+// Field semantics:
+//   - `hits` — the cache served the artifact; the producer pass
+//     was skipped entirely.
+//   - `misses` — no cached artifact for the key; the producer ran.
+//   - `stores` — a fresh artifact was successfully written into
+//     the cache after a miss. Counted independently of `misses`
+//     because a `cp` failure (e.g. read-only cache root) flips a
+//     successful build into "miss-but-not-stored", which CI may
+//     want to alarm on.
+//   - `invalid_keys` — `_is_valid_digest` rejected a digest before
+//     any filesystem access. Non-zero in production indicates a
+//     hash failure (sha256sum missing, source unreadable) — the
+//     build still succeeds, but cache hit rate goes to zero. CI
+//     gates can alarm on `invalid_keys > 0`.
+//   - `copy_failures` — the cache contained the artifact but
+//     `cache_copy_artifact_to` failed to materialise it (e.g.
+//     destination filesystem full). Treated as a miss for the
+//     producer, but tracked separately so the operator can
+//     distinguish "cache was empty" from "cache was poisoned".
+struct CacheStats {
+    hits: number;
+    misses: number;
+    stores: number;
+    invalid_keys: number;
+    copy_failures: number;
+}
+
+fn empty_cache_stats() -> CacheStats {
+    return CacheStats {
+        hits: 0,
+        misses: 0,
+        stores: 0,
+        invalid_keys: 0,
+        copy_failures: 0
+    };
+}
+
+// True iff the build produced no cache activity at all (zero
+// hits and zero misses). Useful for deciding whether to print
+// the cache summary line — empty stats from a manifest-less
+// project shouldn't show a `[cache] hits=0 misses=0 ...` line.
+fn cache_stats_is_empty(stats: CacheStats) -> boolean {
+    if stats.hits != 0 { return false; }
+    if stats.misses != 0 { return false; }
+    if stats.stores != 0 { return false; }
+    if stats.invalid_keys != 0 { return false; }
+    if stats.copy_failures != 0 { return false; }
+    return true;
+}
+
+// ----------------------------------------------------------------
+// Build-cache config (CLI flags + env-var overrides)
+// ----------------------------------------------------------------
+// Resolved once at the top of a build and threaded through the
+// resolver. Lets `sfn build --no-cache` and `sfn build --clean`
+// override the env-var defaults without setenv (Sailfin's runtime
+// env-var contract is read-only).
+//
+// Resolution rules:
+//   - `enabled` is true unless `SAILFIN_NO_CACHE=1` OR `--no-cache`.
+//   - `trace` is true if `SAILFIN_CACHE_TRACE=1` OR `--cache-trace`.
+//   - `clean` flips on only via `--clean`; no env-var equivalent
+//     because wiping the cache is a destructive op the user must
+//     opt into explicitly per invocation.
+struct BuildCacheConfig {
+    enabled: boolean;
+    trace: boolean;
+    clean: boolean;
+}
+
+fn empty_build_cache_config() -> BuildCacheConfig {
+    return BuildCacheConfig { enabled: true, trace: false, clean: false };
+}
+
+// `no_cache_flag` / `trace_flag` / `clean_flag` are the CLI
+// switches; this helper folds them with the env-var defaults.
+fn resolve_build_cache_config(no_cache_flag: boolean, trace_flag: boolean, clean_flag: boolean) -> BuildCacheConfig ![io] {
+    let env_disabled = strings_equal(_get_env_cmd("SAILFIN_NO_CACHE"), "1");
+    let env_trace = strings_equal(_get_env_cmd("SAILFIN_CACHE_TRACE"), "1");
+    return BuildCacheConfig {
+        enabled: !env_disabled && !no_cache_flag,
+        trace: env_trace || trace_flag,
+        clean: clean_flag
+    };
+}
+
+// Wipe the schema-versioned subtree under `root`. Returns true on
+// success (or no-op when the directory didn't exist), false if
+// `rm` failed. Defensive: refuses to operate on an empty path.
+//
+// Note: deletes the FULL `<override>/v<N>/...` tree the cache
+// stores under. Callers should resolve `cache_root()` first and
+// pass that — wiping `$SAILFIN_BUILD_CACHE_DIR` itself would
+// nuke any sibling schema versions that future compilers might
+// be relying on.
+fn cache_clean(root: string) -> boolean ![io] {
+    if root.length == 0 { return false; }
+    if strings_equal(root, "/") { return false; }
+    if !fs.exists(root) { return true; }
+    let rc = process.run(["rm", "-rf", root]);
+    return rc == 0;
+}
+
+// ----------------------------------------------------------------
 // Cache root resolution
 // ----------------------------------------------------------------
 // Pure variant — used by tests and by the production reader below.
@@ -444,6 +556,8 @@ fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compi
 export {
     CacheKey,
     CacheEntryPaths,
+    CacheStats,
+    BuildCacheConfig,
     build_cache_schema_version,
     cache_root_with_override,
     cache_root,
@@ -455,5 +569,10 @@ export {
     cache_copy_artifact_to,
     cache_store_artifact,
     canonicalize_flags,
-    cache_key_for
+    cache_key_for,
+    empty_cache_stats,
+    cache_stats_is_empty,
+    empty_build_cache_config,
+    resolve_build_cache_config,
+    cache_clean
 };
