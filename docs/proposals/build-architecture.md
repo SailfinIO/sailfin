@@ -1,10 +1,10 @@
 # Proposal: Unified Build Architecture for Sailfin
 
-Status: Stage A shipped; Stage B PR1 shipped; Stage B PR2 `sfn test` + `sfn check` migrations shipped (A1 + A2 + A3 + A4 landed); libextract / `llvm-objcopy --weaken` retirement remains as a follow-up workstream
-Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed) · 2026-04-26 (PR2 `sfn test` migration + A4 deletion landed)
+Status: Stage A shipped; Stage B fully shipped (PR1 + PR2 + PR3 weaken-retirement landed); libextract reframed as a Stage G concern, not a Stage B blocker
+Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed) · 2026-04-26 (PR2 `sfn test` migration + A4 deletion landed) · 2026-04-28 (PR3 `llvm-objcopy --weaken` retired via path-norm fix; libextract decoupled)
 Authors: Core Team
 
-## Implementation Status (as of 2026-04-26, end of Stage B PR2 `sfn test` migration)
+## Implementation Status (as of 2026-04-28, Stage B closed)
 
 **Stage A — shipped.** Manifest schema, `workspace.toml`,
 `capsules/sfn/prelude/capsule.toml`, and `[build].kind = "binary"` on the
@@ -94,16 +94,55 @@ one remains as a follow-up workstream:
    resolution chain. They retire once `sfn add` migrates to
    workspace.toml-driven resolution — separate workstream.
 
-4. **`sfn/compiler-lib` extraction + `llvm-objcopy --weaken`
-   retirement — follow-up workstream.** The weakened compiler-object
-   block survives inside `_clang_link_test_cmd_with_deps` for now.
-   With strong dependency `.ll` files in scope the weakened object is
-   only the catch-all for runtime helpers, parser exports, and AST
-   constructors that the test source references but the resolver
-   wasn't asked to produce — but until libextract makes the compiler
-   into a real dep, the weak object is still the only way tests get
-   those symbols. File a follow-up issue: now that `sfn test` is
-   resolver-driven, the libextract path is unblocked.
+4. **`llvm-objcopy --weaken` retirement — shipped (2026-04-28, PR3).**
+   The original PR2 plan assumed retiring the weaken hack required
+   first extracting `sfn/compiler-lib`. An empirical probe
+   (`SAILFIN_TEST_NO_WEAKEN=1` env-var gate, see commit `acc8af5`)
+   showed otherwise: the weakened-compiler-object backstop was
+   masking a path-normalization bug, not providing genuinely
+   missing symbols.
+
+   **The bug:** `_collect_test_files_cmd` (`cli_commands_utils.sfn`)
+   did not strip trailing slashes from its `root` argument before
+   walking the directory tree. `sfn test compiler/tests/unit/`
+   produced paths like `compiler/tests/unit//foo_test.sfn`, which
+   `_cr_resolve_and_dedupe`'s relative-import walker could not
+   navigate. The resolver returned `deps=0`, every test that
+   imported anything got `undefined reference` link errors, and
+   the weakened compiler binary backstopped them — masking the
+   resolver's correctness regression.
+
+   **Symbol-closure audit:** of 91 test files, only 22 import
+   anything from `compiler/src/`; the union of those imports is 10
+   modules whose transitive closure is exactly 13 files (`ast`,
+   `cli_commands_utils`, `diagnostics_render`, `effect_checker`,
+   `effect_gate`, `effect_imports`, `effect_taxonomy`, `native_ir`,
+   `string_utils`, `token`, `toml_parser`, `typecheck_types`,
+   `version`). The resolver was already producing strong `.ll`
+   files for that closure post-PR2 — when the path math worked.
+   Single-file invocations (`sfn test path/to/foo_test.sfn`)
+   already worked without weaken because they bypassed the
+   broken directory walker entirely.
+
+   **The fix:**
+   - `_collect_test_files_cmd` now calls `_strip_trailing_slashes_cmd`
+     on `root` (mirroring the Phase 5a fix to `_collect_sfn_files_cmd`).
+   - The 47-line `--weaken` block in `_clang_link_test_cmd_with_deps`
+     deletes — including the `cp` of `native.linked.o`, the
+     `args.push(weak_path)`, and the `cross_module_shim.o` push.
+   - `_resolve_llvm_objcopy_cmd` (the `llvm-objcopy-{14..30}`
+     PATH-probing helper, only consumed by the deleted block)
+     deletes — net 25 lines.
+   - `compiler/tests/unit/cli_path_normalization_test.sfn` gains
+     two regression tests asserting the slash-form invariant on
+     `_collect_test_files_cmd` directly.
+
+   **Decoupling outcome:** `sfn/compiler-lib` extraction is no longer
+   on Stage B's critical path. The architectural case for
+   sub-capsule decomposition (proposal §4.10) still stands as a
+   Stage G concern when the compiler grows enough sub-capsules to
+   benefit from independent caching, parallel sub-builds, and
+   independent versioning. It is not a 1.0 blocker.
 
 ### What remains for Stages C–G
 
@@ -1165,15 +1204,32 @@ the resolver-driven path for both, and A4 deleted the legacy helpers.
   retire once `sfn add` migrates to workspace.toml-driven
   resolution (separate workstream).
 
-- **`sfn/compiler-lib` extraction + `llvm-objcopy --weaken`
-  retirement — follow-up workstream.** The weakened compiler-object
-  block stays inside `_clang_link_test_cmd_with_deps` for now.
-  Resolver-produced dep `.ll` files supply strong symbols for tests
-  that import their own helpers; the weak `native.linked.o` is the
-  catch-all for runtime helpers, parser exports, and AST
-  constructors that the test source references but the resolver
-  wasn't asked to produce. Until libextract makes the compiler into
-  a real dep, the weak object stays as the link-time backstop.
+#### Stage B PR3 — `llvm-objcopy --weaken` retirement (shipped 2026-04-28)
+
+PR3 closes the last open Stage B item. The empirical investigation
+that drove this PR is documented in the Stage B PR2 §4 entry above
+(see "Implementation Status"). Net change:
+
+- `_collect_test_files_cmd` (`cli_commands_utils.sfn`) calls
+  `_strip_trailing_slashes_cmd` on `root` before walking. Mirrors
+  the Phase 5a fix to `_collect_sfn_files_cmd`.
+- `_clang_link_test_cmd_with_deps` (`cli_commands.sfn`) loses the
+  47-line weaken block (cp + objcopy + push of `native.linked.o`
+  + `cross_module_shim.o` push).
+- `_resolve_llvm_objcopy_cmd` (the `llvm-objcopy-{14..30}`
+  PATH-probing helper, only consumed by the deleted block) deletes.
+- `compiler/tests/unit/cli_path_normalization_test.sfn` gains two
+  regression tests for the slash-form invariant, asserting on
+  `_collect_test_files_cmd` directly.
+- The diagnostic `SAILFIN_TEST_NO_WEAKEN` env-var gate from commit
+  `acc8af5` reverts in the same PR.
+
+**Decoupling outcome:** `sfn/compiler-lib` extraction is no longer
+on Stage B's critical path. The architectural case for sub-capsule
+decomposition (proposal §4.10) still stands as a Stage G concern
+when the compiler grows enough sub-capsules to benefit from
+independent caching, parallel sub-builds, and independent
+versioning. It is not a 1.0 blocker.
 
 #### Combined Stage B exit criteria
 
@@ -1191,12 +1247,12 @@ the resolver-driven path for both, and A4 deleted the legacy helpers.
   fixed-point still holds. ✓
 - `sfn fmt --check` is clean on every touched file. ✓
 - `sfn test` passes with zero uses of `llvm-objcopy --weaken`
-  anywhere in the codebase. ✗ — `--weaken` retirement is bundled
-  with libextract (separate workstream).
+  anywhere in the codebase. ✓ (PR3, 2026-04-28)
 
-Stage B PR2 meets every criterion except the `llvm-objcopy
---weaken` one, which moves into a follow-up issue tied to the
-`sfn/compiler-lib` extraction.
+Stage B is now closed. Cutting a fresh seed (`gh workflow run
+release.yml`) is the recommended next action before Stage C work
+begins, so the Stage C in-process driver builds against a
+post-Stage-B baseline.
 
 ### Stage C — In-process driver for user capsules
 

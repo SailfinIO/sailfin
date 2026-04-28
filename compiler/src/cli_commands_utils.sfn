@@ -146,7 +146,18 @@ fn _looks_like_test_file_cmd(name: string) -> boolean {
 fn _collect_test_files_cmd(root: string, max_depth: number) -> string[] ![io] {
     let mut results: string[] = [];
     if _ends_with_cmd(root, ".sfn") { return [root]; }
-    let mut queue: string[] = [root];
+    // Mirror `_collect_sfn_files_cmd`'s normalization: a trailing
+    // slash on `root` would propagate through `dir + "/" + entry`
+    // into double-slashed paths like `compiler/tests/unit//foo_test.sfn`,
+    // which `_cr_resolve_and_dedupe` cannot navigate out of —
+    // `enumerate_relative_sources` returns zero hits, the resolver
+    // emits `deps=0`, and every test that imports anything fails
+    // with `undefined reference` at link time. The historical
+    // backstop for that surface was `llvm-objcopy --weaken` against
+    // the self-hosted compiler binary; with this normalization in
+    // place the backstop is dead code.
+    let root_norm: string = _strip_trailing_slashes_cmd(root);
+    let mut queue: string[] = [root_norm];
     let mut depth: number = 0;
     loop {
         if depth >= max_depth { break; }

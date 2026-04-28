@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 27, 2026 (Phase 5a — arena mark/rewind for in-process multi-module tools)
+Updated: April 28, 2026 (Stage B PR3 — `llvm-objcopy --weaken` retired; Stage B fully closed)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -58,9 +58,17 @@ feature availability.
   The textual import inliner (`_inline_relative_imports_cmd`,
   `inline_imports_for_source`, the test-specific writer chain) is
   gone — A4 of Track A in `docs/proposals/check-architecture.md` is
-  complete. The `llvm-objcopy --weaken native.linked.o` block stays
-  inside `_clang_link_test_cmd_with_deps` until libextract retires
-  it (separate workstream).
+  complete. **`llvm-objcopy --weaken native.linked.o` retired
+  (Stage B PR3, 2026-04-28).** Empirical investigation showed the
+  weak-object backstop was masking a trailing-slash bug in
+  `_collect_test_files_cmd`, not providing genuinely missing
+  symbols; a one-line `_strip_trailing_slashes_cmd` call (mirroring
+  the Phase 5a fix to `_collect_sfn_files_cmd`) lets the resolver
+  produce the full closure of dep `.ll` files, and the 47-line
+  weaken block + 25-line `_resolve_llvm_objcopy_cmd` helper +
+  `cross_module_shim.o` push all delete. `sfn/compiler-lib`
+  extraction is reframed as a Stage G concern, not a Stage B
+  blocker. **Stage B is fully closed.**
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
