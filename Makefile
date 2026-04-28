@@ -447,7 +447,7 @@ check:
 # (the triple-pass selfhost validator). Naming mirrors what end users
 # of the language will eventually run on their own capsules.
 check-fast:
-	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+	@if [ ! -x "$(NATIVE_BIN)" ] && [ ! -f "$(NATIVE_BIN)" ]; then \
 		echo "[check-fast] missing $(NATIVE_BIN); run: make compile"; \
 		exit 1; \
 	fi

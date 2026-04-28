@@ -21,7 +21,6 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-HOOK_PATH="$REPO_ROOT/.git/hooks/pre-commit"
 MARKER="# sailfin-precommit-v1"
 
 usage() {
@@ -29,9 +28,32 @@ usage() {
     exit 0
 }
 
+# Resolve the pre-commit hook path via `git rev-parse` so the installer
+# works in worktrees and submodules where `.git` is a file pointing at
+# the real git dir, not a directory.
+resolve_hook_path() {
+    if ! git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "[install-precommit] $REPO_ROOT is not a git working tree" >&2
+        exit 1
+    fi
+    local p
+    p="$(git -C "$REPO_ROOT" rev-parse --git-path hooks/pre-commit)"
+    if [ -z "$p" ]; then
+        echo "[install-precommit] git rev-parse returned empty hooks path" >&2
+        exit 1
+    fi
+    # `--git-path` returns a path relative to CWD when the result is
+    # inside the repo; absolutise it for the install/remove operations.
+    case "$p" in
+        /*) printf '%s\n' "$p" ;;
+        *)  printf '%s\n' "$REPO_ROOT/$p" ;;
+    esac
+}
+
 case "${1:-}" in
     -h|--help) usage ;;
     --remove)
+        HOOK_PATH="$(resolve_hook_path)"
         if [ ! -e "$HOOK_PATH" ]; then
             echo "[install-precommit] no hook installed at $HOOK_PATH"
             exit 0
@@ -52,10 +74,8 @@ case "${1:-}" in
         ;;
 esac
 
-if [ ! -d "$REPO_ROOT/.git" ]; then
-    echo "[install-precommit] $REPO_ROOT is not a git repository" >&2
-    exit 1
-fi
+HOOK_PATH="$(resolve_hook_path)"
+mkdir -p "$(dirname "$HOOK_PATH")"
 
 if [ -e "$HOOK_PATH" ] && ! grep -q "$MARKER" "$HOOK_PATH" 2>/dev/null; then
     backup="$HOOK_PATH.bak.$(date +%s)"
@@ -77,19 +97,20 @@ if [ "${SAILFIN_SKIP_PRECOMMIT:-0}" = "1" ]; then
     exit 0
 fi
 
-# Only run if a compiler/runtime source actually changed.
-changed=$(git diff --cached --name-only --diff-filter=ACMR | \
+# Only run if a compiler/runtime source actually changed. The diff filter
+# includes deletions (D) — removing a source file can break the build
+# just as easily as editing one, so the gate must fire either way.
+changed=$(git diff --cached --name-only --diff-filter=ACMRD | \
     grep -E '^(compiler/src/|runtime/)' || true)
 if [ -z "$changed" ]; then
     exit 0
 fi
 
-if [ ! -x build/native/sailfin ]; then
-    echo "[pre-commit] build/native/sailfin not built; skipping check-fast"
-    echo "[pre-commit] run 'make compile' to enable the pre-commit gate"
-    exit 0
-fi
-
+# Defer binary detection to `make check-fast` itself — it knows the
+# correct $(NATIVE_BIN) for the platform (including .exe on Windows)
+# and emits a clear "missing; run make compile" message when absent.
+# That way the hook stays platform-agnostic and doesn't drift from the
+# Makefile if NATIVE_BIN is overridden or EXE_EXT changes.
 echo "[pre-commit] running 'make check-fast' (set SAILFIN_SKIP_PRECOMMIT=1 to skip)"
 if ! make check-fast; then
     echo ""

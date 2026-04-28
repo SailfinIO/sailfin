@@ -274,8 +274,12 @@ static void _init_arena_enabled(void)
      * for diagnosing arena-vs-malloc divergences.
      *
      * Empty env: `SAILFIN_USE_ARENA=` (set but empty) is treated
-     * as opt-out for shell-script ergonomics — `unset` and
-     * `=""` should behave the same way historically.
+     * as opt-out, mirroring the `=0` case. This is a deliberate
+     * divergence from `unset` (which now means "take the default",
+     * i.e. arena ON): a script that explicitly clears the variable
+     * with `SAILFIN_USE_ARENA=` is signalling intent to disable,
+     * not "I have no opinion". `unset SAILFIN_USE_ARENA` is the
+     * way to ask for the default.
      */
     const char *env = getenv("SAILFIN_USE_ARENA");
     if (env == NULL)
