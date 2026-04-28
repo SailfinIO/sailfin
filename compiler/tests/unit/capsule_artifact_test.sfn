@@ -13,6 +13,7 @@ import {
     capsule_artifact_manifest_path,
     capsule_artifact_manifest_to_json,
     empty_capsule_artifact_manifest,
+    is_safe_scope_name,
     parse_scope_name,
     ScopeName
 } from "../../src/capsule_artifact";
@@ -58,6 +59,60 @@ test "parse_scope_name: trailing slash rejects (empty name)" {
     let p = parse_scope_name("sfn/");
     assert p.scope == "";
     assert p.name == "";
+}
+
+// --------------------------------------------------------------
+// is_safe_scope_name (path-traversal guard for sidecar emit)
+// --------------------------------------------------------------
+// `[capsule].name` is end-user-controlled. The validator MUST
+// reject anything that, after splitting on `/`, would let a
+// malicious manifest escape `build/capsules/`.
+test "is_safe_scope_name: simple scope+name accepted" {
+    assert is_safe_scope_name("sfn", "math");
+}
+
+test "is_safe_scope_name: submodule name with slashes accepted" {
+    assert is_safe_scope_name("sfn", "http/client");
+}
+
+test "is_safe_scope_name: empty scope rejected" {
+    assert ! is_safe_scope_name("", "math");
+}
+
+test "is_safe_scope_name: empty name rejected" {
+    assert ! is_safe_scope_name("sfn", "");
+}
+
+test "is_safe_scope_name: dot scope rejected" {
+    assert ! is_safe_scope_name(".", "math");
+}
+
+test "is_safe_scope_name: dotdot in name rejected" {
+    assert ! is_safe_scope_name("sfn", "..");
+    assert ! is_safe_scope_name("sfn", "../etc");
+    assert ! is_safe_scope_name("sfn", "good/../bad");
+}
+
+test "is_safe_scope_name: backslash in scope rejected" {
+    assert ! is_safe_scope_name("sfn\\evil", "math");
+}
+
+test "is_safe_scope_name: backslash in name segment rejected" {
+    assert ! is_safe_scope_name("sfn", "math\\evil");
+}
+
+test "is_safe_scope_name: leading slash in name rejected (absolute)" {
+    assert ! is_safe_scope_name("sfn", "/abs/path");
+}
+
+test "is_safe_scope_name: trailing slash in name rejected (empty last segment)" {
+    assert ! is_safe_scope_name("sfn", "math/");
+}
+
+test "is_safe_scope_name: scope with slash rejected" {
+    // Scope must be a single segment; any internal slash is a
+    // sign the parser should have run first.
+    assert ! is_safe_scope_name("sfn/extra", "math");
 }
 
 // --------------------------------------------------------------

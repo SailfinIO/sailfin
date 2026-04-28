@@ -118,6 +118,53 @@ fn capsule_artifact_dir(scope: string, name: string) -> string {
     return "build/capsules/" + scope + "/" + name;
 }
 
+// Path-segment validator: rejects empty / `.` / `..` / segments
+// containing `/` or `\` / segments starting with `/`.
+// `[capsule].name` is end-user-controlled (a malicious manifest
+// could set `name = "../../etc"`); the emitter MUST validate
+// before interpolating into a filesystem path.
+fn _ca_is_safe_segment(s: string) -> boolean {
+    if s.length == 0 { return false; }
+    if s == "." { return false; }
+    if s == ".." { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "/" { return false; }
+        if ch == "\\" { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// True iff `(scope, name)` produces a safe `build/capsules/...`
+// path: `scope` is a single safe segment; `name` may contain
+// `/`-separated segments (e.g. `http/client` for a submodule
+// capsule), and every segment must independently be safe.
+fn is_safe_scope_name(scope: string, name: string) -> boolean {
+    if !_ca_is_safe_segment(scope) { return false; }
+    if name.length == 0 { return false; }
+    // Reject leading slash so the emitter never lands at an
+    // absolute path. (parse_scope_name already drops the leading
+    // slash case, but defending here keeps the validator usable
+    // by other callers.)
+    if substring(name, 0, 1) == "/" { return false; }
+    let mut start: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= name.length { break; }
+        if substring(name, i, i + 1) == "/" {
+            let segment = substring(name, start, i);
+            if !_ca_is_safe_segment(segment) { return false; }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    let last = substring(name, start, name.length);
+    return _ca_is_safe_segment(last);
+}
+
 // `<artifact_dir>/manifest.json` — the sidecar this module writes.
 fn capsule_artifact_manifest_path(scope: string, name: string) -> string {
     return capsule_artifact_dir(scope, name) + "/manifest.json";
@@ -233,6 +280,7 @@ export {
     ScopeName,
     empty_capsule_artifact_manifest,
     parse_scope_name,
+    is_safe_scope_name,
     capsule_artifact_dir,
     capsule_artifact_manifest_path,
     capsule_artifact_manifest_to_json

@@ -16,6 +16,7 @@ import {
     capsule_artifact_manifest_path,
     capsule_artifact_manifest_to_json,
     empty_capsule_artifact_manifest,
+    is_safe_scope_name,
     parse_scope_name
 } from "./capsule_artifact";
 import { ProjectCapsuleResult, prepare_project_capsules } from "./capsule_resolver";
@@ -159,6 +160,17 @@ fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: strin
     if parts.scope.length == 0 {
         print.err("[capsule-artifact] capsule name \"" + spec_capsule_name
             + "\" is not in scope/name form; skipping sidecar");
+        return;
+    }
+    // Path-traversal guard: `[capsule].name` is end-user-controlled,
+    // and the scope/name is interpolated into a filesystem path. A
+    // malicious manifest could set `name = "../../etc"` and escape
+    // `build/capsules/`. Reject any segment that is empty, `.`, `..`,
+    // or contains `/` (in scope) or `\` (in either). See
+    // `capsule_artifact.sfn::is_safe_scope_name`.
+    if !is_safe_scope_name(parts.scope, parts.name) {
+        print.err("[capsule-artifact] capsule name \"" + spec_capsule_name
+            + "\" contains unsafe path segments; skipping sidecar");
         return;
     }
     let mut manifest = empty_capsule_artifact_manifest();
@@ -352,7 +364,6 @@ struct _CapsuleBuildSpec {
     kind: string;
     capsule_name: string;
     version: string;
-    manifest_dir: string;
     entry_relative: string;
 }
 
@@ -374,7 +385,6 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
         kind: "binary",
         capsule_name: "",
         version: "",
-        manifest_dir: "",
         entry_relative: ""
     };
     if p.length == 0 { return spec; }
@@ -398,7 +408,6 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     }
     let manifest_dir = _dirname(manifest_path);
     spec.entry_path = _path_join(manifest_dir, entry_rel);
-    spec.manifest_dir = manifest_dir;
     spec.entry_relative = entry_rel;
     spec.capsule_name = toml_get_name(manifest_text);
     spec.version = toml_get_version(manifest_text);
