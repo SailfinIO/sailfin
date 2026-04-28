@@ -1,0 +1,166 @@
+// Stage C C2a regression tests for `compiler/src/capsule_artifact.sfn`.
+//
+// `capsule_artifact_manifest_to_json` is the per-capsule sidecar
+// serializer that future `sfn package` (C4), `sfn lsp` capsule
+// discovery, and MCP tooling will consume. Schema is documented
+// inline in `capsule_artifact.sfn` and gated by
+// `compiler/tests/e2e/test_capsule_artifact_sidecar.sh`. These
+// unit tests lock the per-field invariants — the e2e exercises
+// the full pipeline.
+import {
+    CapsuleArtifactManifest,
+    capsule_artifact_dir,
+    capsule_artifact_manifest_path,
+    capsule_artifact_manifest_to_json,
+    empty_capsule_artifact_manifest,
+    parse_scope_name,
+    ScopeName
+} from "../../src/capsule_artifact";
+
+// --------------------------------------------------------------
+// parse_scope_name
+// --------------------------------------------------------------
+test "parse_scope_name: scope/name splits at the first slash" {
+    let p = parse_scope_name("sfn/math");
+    assert p.scope == "sfn";
+    assert p.name == "math";
+}
+
+test "parse_scope_name: submodule keeps everything after first slash" {
+    // For a sidecar we only care about the capsule (`scope/name`);
+    // submodule-level packaging is a future concern. The contract
+    // here is "split on the first slash"; what comes after stays
+    // intact.
+    let p = parse_scope_name("sfn/http/client");
+    assert p.scope == "sfn";
+    assert p.name == "http/client";
+}
+
+test "parse_scope_name: no slash returns empty parts" {
+    let p = parse_scope_name("noslash");
+    assert p.scope == "";
+    assert p.name == "";
+}
+
+test "parse_scope_name: empty input returns empty parts" {
+    let p = parse_scope_name("");
+    assert p.scope == "";
+    assert p.name == "";
+}
+
+test "parse_scope_name: leading slash rejects (empty scope)" {
+    let p = parse_scope_name("/math");
+    assert p.scope == "";
+    assert p.name == "";
+}
+
+test "parse_scope_name: trailing slash rejects (empty name)" {
+    let p = parse_scope_name("sfn/");
+    assert p.scope == "";
+    assert p.name == "";
+}
+
+// --------------------------------------------------------------
+// path helpers
+// --------------------------------------------------------------
+test "capsule_artifact_dir: composes build/capsules/<scope>/<name>" {
+    assert capsule_artifact_dir("sfn", "math") == "build/capsules/sfn/math";
+}
+
+test "capsule_artifact_manifest_path: composes <dir>/manifest.json" {
+    assert capsule_artifact_manifest_path("sfn", "math") == "build/capsules/sfn/math/manifest.json";
+}
+
+// --------------------------------------------------------------
+// empty_capsule_artifact_manifest defaults
+// --------------------------------------------------------------
+test "empty_capsule_artifact_manifest: kind defaults to 'library'" {
+    assert empty_capsule_artifact_manifest().kind == "library";
+}
+
+test "empty_capsule_artifact_manifest: dep_ll_paths is empty" {
+    assert empty_capsule_artifact_manifest().dep_ll_paths.length == 0;
+}
+
+// --------------------------------------------------------------
+// capsule_artifact_manifest_to_json — schema invariants
+// --------------------------------------------------------------
+test "manifest_to_json: includes schema_version 1" {
+    let json = capsule_artifact_manifest_to_json(empty_capsule_artifact_manifest());
+    // Schema version is the contract for breaking changes.
+    assert _contains(json, "\"schema_version\":\"1\"");
+}
+
+test "manifest_to_json: round-trips capsule + version + kind" {
+    let mut m = empty_capsule_artifact_manifest();
+    m.capsule_name = "sfn/math";
+    m.version = "0.1.0";
+    m.kind = "library";
+    let json = capsule_artifact_manifest_to_json(m);
+    assert _contains(json, "\"capsule\":\"sfn/math\"");
+    assert _contains(json, "\"version\":\"0.1.0\"");
+    assert _contains(json, "\"kind\":\"library\"");
+}
+
+test "manifest_to_json: round-trips entry + out paths" {
+    let mut m = empty_capsule_artifact_manifest();
+    m.entry_relative = "src/mod.sfn";
+    m.out_path = "build/sailfin/program.o";
+    let json = capsule_artifact_manifest_to_json(m);
+    assert _contains(json, "\"entry\":\"src/mod.sfn\"");
+    assert _contains(json, "\"out\":\"build/sailfin/program.o\"");
+}
+
+test "manifest_to_json: round-trips compiler_version" {
+    let mut m = empty_capsule_artifact_manifest();
+    m.compiler_version = "0.5.10-alpha.2+dev.abc123";
+    let json = capsule_artifact_manifest_to_json(m);
+    assert _contains(json, "\"compiler_version\":\"0.5.10-alpha.2+dev.abc123\"");
+}
+
+test "manifest_to_json: deps.count matches array length" {
+    let mut m = empty_capsule_artifact_manifest();
+    m.dep_ll_paths = ["a.ll", "b.ll"];
+    let json = capsule_artifact_manifest_to_json(m);
+    assert _contains(json, "\"count\":2");
+    assert _contains(json, "\"a.ll\"");
+    assert _contains(json, "\"b.ll\"");
+}
+
+test "manifest_to_json: empty deps produce count=0 and []" {
+    let json = capsule_artifact_manifest_to_json(empty_capsule_artifact_manifest());
+    assert _contains(json, "\"count\":0");
+    assert _contains(json, "\"ll_paths\":[]");
+}
+
+test "manifest_to_json: backslash + quote in paths escaped per RFC 8259" {
+    let mut m = empty_capsule_artifact_manifest();
+    m.entry_relative = "src\\with\"quote.sfn";
+    let json = capsule_artifact_manifest_to_json(m);
+    assert _contains(json, "\"entry\":\"src\\\\with\\\"quote.sfn\"");
+}
+
+// --------------------------------------------------------------
+// Helpers
+// --------------------------------------------------------------
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}

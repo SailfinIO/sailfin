@@ -1,0 +1,239 @@
+// compiler/src/capsule_artifact.sfn
+//
+// Stage C C2a — per-capsule build artifact manifest.
+//
+// After a successful `sfn build -p <capsule-path>`, we emit a
+// `build/capsules/<scope>/<name>/manifest.json` sidecar that
+// captures the resolved build state for that capsule. The sidecar
+// is purely additive — actual `.ll` / `.o` artifacts still live
+// at their pre-existing flat paths until C2b migrates them into
+// the canonical per-capsule tree.
+//
+// Why a per-capsule sidecar before the path migration:
+//   - Locks in the schema future stages (C4 `sfn package`,
+//     `sfn lsp` capsule discovery, MCP tooling) will consume.
+//   - Gives downstream consumers a stable file to read TODAY
+//     without waiting on C2b's larger refactor.
+//   - The C2b path migration is then "fill in `<scope>/<name>/{ir, obj, bin}/`"
+//     under directories the sidecar already names, rather than a
+//     simultaneous schema + path refactor.
+//
+// Schema is `schema_version: "1"`. Bumping the version is the
+// contract for breaking changes — downstream consumers hard-fail
+// on unknown values rather than silently misinterpret. Same
+// pattern as `build_report.sfn` and `diagnostics_json.sfn`.
+//
+// Self-contained module: duplicates JSON primitive encoders from
+// `build_report.sfn` rather than importing them — same precedent
+// (seed compiler doesn't handle the import cycle cleanly), and
+// the duplication keeps each emitter independently unit-testable.
+import { substring } from "./string_utils";
+
+// -------------------------------------------------------------------
+// Schema
+// -------------------------------------------------------------------
+//
+// {
+//   "schema_version": "1",
+//   "capsule": "sfn/math",
+//   "version": "0.1.0",
+//   "kind": "library",                  // "binary" | "library"
+//   "compiler_version": "0.5.10-alpha.2+dev.<hash>",
+//   "entry": "src/mod.sfn",              // relative to capsule.toml's dir
+//   "out": "build/sailfin/program.o",    // current ad-hoc location;
+//                                        //   migrates to <scope>/<name>/bin
+//                                        //   or <scope>/<name>/obj in C2b
+//   "deps": {
+//     "count": 1,
+//     "ll_paths": ["build/sailfin/capsules/sfn__runtime__mod.ll"]
+//   }
+// }
+struct ScopeName {
+    scope: string;
+    name: string;
+}
+
+struct CapsuleArtifactManifest {
+    capsule_name: string;
+    version: string;
+    kind: string;
+    compiler_version: string;
+    entry_relative: string;
+    out_path: string;
+    dep_ll_paths: string[];
+}
+
+fn empty_capsule_artifact_manifest() -> CapsuleArtifactManifest {
+    let empty: string[] = [];
+    return CapsuleArtifactManifest {
+        capsule_name: "",
+        version: "",
+        kind: "library",
+        compiler_version: "",
+        entry_relative: "",
+        out_path: "",
+        dep_ll_paths: empty
+    };
+}
+
+// -------------------------------------------------------------------
+// Path helpers
+// -------------------------------------------------------------------
+// Split `"scope/name"` into its two parts. Returns `("", "")` if
+// the input has no slash or is empty — invalid inputs are the
+// caller's responsibility to detect (the manifest must have a
+// scoped capsule name to be writable).
+fn parse_scope_name(capsule_name: string) -> ScopeName {
+    if capsule_name.length == 0 {
+        return ScopeName { scope: "", name: "" };
+    }
+    let mut i: number = 0;
+    let mut slash_at: number = -1;
+    loop {
+        if i >= capsule_name.length { break; }
+        if substring(capsule_name, i, i + 1) == "/" {
+            slash_at = i;
+            break;
+        }
+        i += 1;
+    }
+    if slash_at < 0 {
+        return ScopeName { scope: "", name: "" };
+    }
+    let scope = substring(capsule_name, 0, slash_at);
+    let name = substring(capsule_name, slash_at + 1, capsule_name.length);
+    if scope.length == 0 {
+        return ScopeName { scope: "", name: "" };
+    }
+    if name.length == 0 {
+        return ScopeName { scope: "", name: "" };
+    }
+    return ScopeName { scope: scope, name: name };
+}
+
+// `build/capsules/<scope>/<name>` — the canonical per-capsule
+// artifact tree from proposal §4.4. Pure; tests pass arbitrary
+// scope/name without requiring fs setup.
+fn capsule_artifact_dir(scope: string, name: string) -> string {
+    return "build/capsules/" + scope + "/" + name;
+}
+
+// `<artifact_dir>/manifest.json` — the sidecar this module writes.
+fn capsule_artifact_manifest_path(scope: string, name: string) -> string {
+    return capsule_artifact_dir(scope, name) + "/manifest.json";
+}
+
+// -------------------------------------------------------------------
+// JSON primitive encoders (duplicated; see top-of-file rationale)
+// -------------------------------------------------------------------
+fn _ca_json_escape(s: string) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _ca_json_quote(s: string) -> string {
+    return "\"" + _ca_json_escape(s) + "\"";
+}
+
+fn _ca_json_field(name: string, value: string) -> string {
+    return _ca_json_quote(name) + ":" + value;
+}
+
+fn _ca_json_string_field(name: string, value: string) -> string {
+    return _ca_json_field(name, _ca_json_quote(value));
+}
+
+fn _ca_json_number_field(name: string, value: number) -> string {
+    return _ca_json_field(name, _ca_number_to_string(value));
+}
+
+// Same repeated-subtraction algorithm as `build_report.sfn` and
+// `compiler/src/main.sfn::number_to_string` — Sailfin's `number`
+// is a float, so `working / 10` doesn't truncate.
+fn _ca_number_to_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let mut working: number = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut remaining: number = working;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}
+
+fn _ca_json_string_array(values: string[]) -> string {
+    let mut out: string = "[";
+    let mut i: number = 0;
+    loop {
+        if i >= values.length { break; }
+        if i > 0 { out = out + ","; }
+        out = out + _ca_json_quote(values[i]);
+        i += 1;
+    }
+    return out + "]";
+}
+
+fn _ca_json_deps_object(ll_paths: string[]) -> string {
+    return "{" + _ca_json_number_field("count", ll_paths.length) + ","
+        + _ca_json_field("ll_paths", _ca_json_string_array(ll_paths))
+        + "}";
+}
+
+// -------------------------------------------------------------------
+// Public encoder
+// -------------------------------------------------------------------
+fn capsule_artifact_manifest_to_json(m: CapsuleArtifactManifest) -> string {
+    return "{" + _ca_json_string_field("schema_version", "1") + ","
+        + _ca_json_string_field("capsule", m.capsule_name)
+        + ","
+        + _ca_json_string_field("version", m.version)
+        + ","
+        + _ca_json_string_field("kind", m.kind)
+        + ","
+        + _ca_json_string_field("compiler_version", m.compiler_version)
+        + ","
+        + _ca_json_string_field("entry", m.entry_relative)
+        + ","
+        + _ca_json_string_field("out", m.out_path)
+        + ","
+        + _ca_json_field("deps", _ca_json_deps_object(m.dep_ll_paths))
+        + "}";
+}
+
+export {
+    CapsuleArtifactManifest,
+    ScopeName,
+    empty_capsule_artifact_manifest,
+    parse_scope_name,
+    capsule_artifact_dir,
+    capsule_artifact_manifest_path,
+    capsule_artifact_manifest_to_json
+};
