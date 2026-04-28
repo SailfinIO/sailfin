@@ -179,6 +179,72 @@ test_positional_no_sidecar() {
 }
 run_test "positional sfn build writes no sidecar" test_positional_no_sidecar
 
+# ---- Test 11: kind = "binary" lands at <dir>/bin/<bin-name> ----
+# Stage C2b1 covers BOTH library and binary canonical paths; the
+# library coverage is in tests 6 + 9b above. This block exercises
+# the binary path: a `[build].kind = "binary"` capsule built via
+# `sfn build -p .` (no `-o`) must produce `<dir>/bin/<bin-name>`
+# AND the sidecar's `out` field must point at that same path.
+BIN_SCRATCH="$(mktemp -d -t sfn-capsule-artifact-bin-XXXXXX)"
+# Same-shell trap: unconditionally remove BIN_SCRATCH when this
+# script exits, in addition to the SCRATCH cleanup at the top.
+trap 'rm -rf "$SCRATCH" "$BIN_SCRATCH"' EXIT
+
+mkdir -p "$BIN_SCRATCH/src"
+ln -s "$REPO_ROOT/capsules" "$BIN_SCRATCH/capsules"
+
+cat > "$BIN_SCRATCH/capsule.toml" <<'EOF'
+[capsule]
+name = "demo/widgetcli"
+version = "0.5.1"
+description = "E2E fixture for the binary canonical path"
+
+[capabilities]
+required = ["io"]
+
+[build]
+kind = "binary"
+entry = "src/main.sfn"
+EOF
+
+cat > "$BIN_SCRATCH/src/main.sfn" <<'EOF'
+fn main() ![io] {
+    print("widgetcli ok");
+}
+EOF
+
+BIN_SIDECAR="$BIN_SCRATCH/build/capsules/demo/widgetcli/manifest.json"
+BIN_EXPECTED_OUT="build/capsules/demo/widgetcli/bin/widgetcli"
+
+test_binary_canonical_out() {
+    cd "$BIN_SCRATCH" || return 1
+    "$BINARY" build -p . > "$BIN_SCRATCH/build.stdout" 2>&1
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   sfn build -p (binary) exited with code $rc; output:" >&2
+        cat "$BIN_SCRATCH/build.stdout" >&2
+        return $rc
+    fi
+    [ -f "$BIN_SIDECAR" ] || return 1
+    [ -x "$BIN_SCRATCH/$BIN_EXPECTED_OUT" ] || return 1
+    [ "$(jq -r .out "$BIN_SIDECAR")" = "$BIN_EXPECTED_OUT" ] || return 1
+    [ "$(jq -r .kind "$BIN_SIDECAR")" = "binary" ]
+}
+run_test "kind=binary lands at build/capsules/<scope>/<name>/bin/<bin-name>" test_binary_canonical_out
+
+# ---- Test 12: produced binary actually runs ----
+# Confirms the binary path isn't just metadata — clang link
+# produced an executable that starts and prints the expected
+# marker. Catches a future regression where the canonical path
+# is reported but no real binary lands there.
+test_binary_runs() {
+    cd "$BIN_SCRATCH" || return 1
+    [ -x "$BIN_EXPECTED_OUT" ] || return 1
+    "$BIN_SCRATCH/$BIN_EXPECTED_OUT" > "$BIN_SCRATCH/run.stdout" 2>&1 || return 1
+    grep -q "^widgetcli ok$" "$BIN_SCRATCH/run.stdout"
+}
+run_test "binary at canonical path runs and prints expected marker" test_binary_runs
+
 echo ""
 echo "[test] $PASS passed, $FAIL failed"
 [ "$FAIL" -eq 0 ]
