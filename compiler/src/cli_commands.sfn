@@ -445,6 +445,19 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     // fresh each iteration; dependency `.ll` files were compiled once
     // by the resolver pass above and reused across every test in the
     // group.
+    //
+    // Phase 5a (`docs/proposals/phase-5a-arena-reset.md`): mark the
+    // arena before the loop and rewind at the bottom of each
+    // iteration. Cross-iteration state — `test_files`, `groups[]`,
+    // `file_group_index`, `runtime_root` — is allocated above this
+    // point. The test source / module-name string / compile output
+    // path / clang output are per-iteration and reclaimed each
+    // rewind. No-op when the arena is disabled
+    // (`SAILFIN_USE_ARENA` unset). Test discovery for the full
+    // compiler tree compiles ~75 tests in one process, hitting the
+    // same accumulating-allocation wall `sfn check` did pre-Phase-5a.
+    let test_scratch_mark = sailfin_intrinsic_runtime_arena_mark();
+
     let mut index: number = 0;
     loop {
         if index >= test_files.length { break; }
@@ -487,6 +500,13 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
             fs.deleteFile(test_runner_active_path);
             return run_rc;
         }
+        // Phase 5a: rewind arena scratch back to the per-test
+        // mark. Per-iteration allocations (parsed test AST,
+        // typecheck/effect tables, emitted .ll bytes, clang
+        // output buffers) live above this point and get reclaimed.
+        // Cross-iteration state (test_files, groups, paths) is
+        // below the mark and unaffected.
+        sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
         index += 1;
     }
     fs.deleteFile(test_runner_active_path);

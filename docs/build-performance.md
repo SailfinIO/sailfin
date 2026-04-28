@@ -39,7 +39,8 @@ Status of every track named in the original RCA. "Shipped" means the work landed
 | Phase 4b — Defensive light-recovery arm deletion                | Not started; needs counters bake then delete ~600 LOC                         | trivial wall-time                         |
 | **Per-module memory — `lowering_core.sfn` split**               | **Shipped April 25** (commits `072bea1`, `cd34d14`): peak RSS 2350 → **1594 MB** (-32%) via `gather_imported_module_symbols` + `seed_default_runtime_helpers` extractions. Clears macOS `BUILD_JOBS=2` gate. | wall delta ancillary; unblocks parallelism |
 | **Phase 6 — Parallel builds**                                   | **Stages 1+2 shipped April 24/25**; **Stage 3 shipped April 25** (`build_jobs` composite-action input); **Stage 4 reverted April 25** — `EMIT_RETRIES=1` attempted, hit a live flake on `instructions.sfn`; default stays at 3 until root-caused | Linux: **2.4× speedup** (13 min → 5:28); macOS unlock pending `detect_build_jobs.sh` rebudget against new 1594 MB peak |
-| Phase 5 — Long-lived compiler process                           | Post-1.0; needs `compile module` entry point and arena reset between modules  | 50–70% on top of Phase 6                  |
+| **Phase 5a — Arena mark/rewind for in-process multi-module tools** | **Shipped April 27** — `sfn_arena_mark` / `sfn_arena_rewind` C primitives + `sailfin_intrinsic_runtime_arena_*` runtime wrappers + descriptor registry entries; `sfn check` and `sfn test`'s test-discovery loops now mark the arena before the per-iteration loop and rewind at each iteration's bottom (`!json` only on the check path). `sfn_arena_alloc` got a forward-scan fix so rewound pages are reused instead of leaked. Path-normalization fix in `_collect_sfn_files_cmd` (strip trailing slash) eliminated a directory-walk SIGSEGV that surfaced once mark/rewind made the cross-iteration burst long-lived. | enables `sfn check compiler/src/` end-to-end (132 files, ~130s, was SIGSEGV at ~120s pre-Phase-5a) |
+| Phase 5 — Long-lived compiler process                           | Post-1.0; needs `compile module` entry point and arena reset between modules. **Phase 5a's mark/rewind primitive is the same shape Phase 5 needs** — when Phase 5 lands, it marks at process start, rewinds between modules, no new runtime work. | 50–70% on top of Phase 6                  |
 
 Follow-up tracks:
 
@@ -79,7 +80,7 @@ The C runtime (`runtime/native/src/sailfin_runtime.c`) has fundamental memory ma
 
 3. **Arrays are never freed.** No `array_drop` or array lifecycle management exists. Every `string[]` or `NativeFunction[]` allocated during compilation leaks.
 
-4. **No GC, no RC; arena allocator shipped but off by default.** The runtime tracks owned strings in a hash table for safe freeing, but this is opt-in and disabled. There is no generational GC or reference counting. The M0.5 bump-allocator arena landed in PR #174 (`runtime/native/src/sailfin_arena.c`) and is wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`, but it only activates when `SAILFIN_USE_ARENA=1`. The default selfhost build does not set the flag, and the M0.5 fast-fail criteria (per-module RAM < 512 MB, `make check` passes with arena on) have not yet been formally validated in CI.
+4. **No GC, no RC; arena allocator shipped, default-on for selfhost builds, off by default for installed binaries.** The runtime tracks owned strings in a hash table for safe freeing, but this is opt-in and disabled. There is no generational GC or reference counting. The M0.5 bump-allocator arena landed in PR #174 (`runtime/native/src/sailfin_arena.c`) and is wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`. `scripts/build.sh` exports `SAILFIN_USE_ARENA=1` for the selfhost build (April 19 flip), so `make compile`, `make check`, and `make test` all run under the arena. **Installed binaries do not yet get the arena by default** — end users running `sfn check` or `sfn test` need to set `SAILFIN_USE_ARENA=1` themselves until the runtime-side default-on flip lands as a separate workstream. The M0.5 fast-fail criteria (per-module RAM < 512 MB, `make check` passes with arena on) have not yet been formally validated in CI.
 
 ### The consequence
 
@@ -325,6 +326,45 @@ The BFS in `collect_imported_module_context_for_module` (`llvm/imports.sfn:37`) 
 
 Replace `recover_native_functions_light` (line-by-line scanning with 20+ `starts_with` checks) and `parse_native_artifact_safe` (per-field extraction workaround) with direct structured `parse_native_artifact` calls. The non-test primary path (`compile_native_text_to_llvm_file` + `sanitize_lowering_inputs` override-reparse) is done. The test-writer path (`write_llvm_ir_for_tests_from_text` in `entrypoints_tests_writer.sfn`) still routes through `build_parse_result_from_text` pending confirmation that seed 0.5.7's seedcheck correctly dispatches typed instruction variants and reads typed-variant payload fields.
 
+### Phase 5a: Arena Mark/Rewind for In-Process Multi-Module Tools (✅ Shipped April 27)
+
+**Priority:** Shipped pre-1.0 — **Expected:** unblocks `sfn check compiler/src/`, `sfn test` directory mode, and the entire `sfn lsp` pre-scaffold workstream.
+
+Phase 5's full long-lived-process redesign for `make compile` is post-1.0. But the underlying shape — "mark the arena, do work, rewind" — is exactly what `sfn check`, `sfn test`, and any future `sfn vet` / `sfn fix` / `sfn lsp` need *today*, since each of those tools already operates as a single long-lived process that walks N modules in a loop. Phase 5a ships that primitive without touching the build-system architecture.
+
+What landed:
+
+- **C runtime primitive** (`runtime/native/src/sailfin_arena.c`):
+  - `sfn_arena_mark()` snapshots `(current_page, used)` — ~5 LOC.
+  - `sfn_arena_rewind(mark)` walks pages back to the snapshot, zeroes `used` on every page strictly after the marked page, and resets `arena->current` to the marked page so subsequent allocations reuse the existing capacity. ~15 LOC.
+  - **Bug fix in `sfn_arena_alloc`**: when the current page fills up, scan `current->next` forward looking for an empty page (with capacity) before allocating a new one. Without this, rewound pages downstream of the mark target stayed attached but were never reused — every iteration allocated fresh pages and the page list grew linearly, defeating mark/rewind. Identified during integration testing on `sfn check compiler/src/` (124 pages × 4 MB = 496 MB after 30 analysis passes pre-fix; ~92 pages stable after).
+- **C runtime wrappers** (`runtime/native/src/sailfin_runtime.c`): `sailfin_intrinsic_runtime_arena_mark()` returns the encoded mark as `double` (Sailfin `number`); `sailfin_intrinsic_runtime_arena_rewind(double)` decodes and rewinds. Encoding packs `(page_index, used)` into the 53-bit mantissa. Both gated on `sfn_arena_enabled()` so they're no-ops with `SAILFIN_USE_ARENA` unset.
+- **Sailfin descriptor entries** (`compiler/src/llvm/runtime_helpers.sfn` + `compiler/src/llvm/lowering/lowering_helpers.sfn`): bare-name targets so the seed compiler's compiled-in descriptor table resolves the call to the C symbol the same way it does `monotonic_millis()`.
+- **Call sites**:
+  - `compiler/src/cli_check.sfn:handle_check_command`: mark before the per-file loop, rewind at the bottom of each iteration in non-JSON mode (JSON mode keeps `results[]` for envelope construction so it can't rewind). Cross-iteration state — `groups[].interfaces`, `function_effects`, `aggregate_*` arrays, `file_group_index`, `files` — is all populated *above* the mark, so the rewind is correctness-safe.
+  - `compiler/src/cli_commands.sfn:handle_test_command`: mark before the per-test loop, rewind at the bottom of each iteration. Cross-iteration state (`test_files`, `groups`, `runtime_root`) sits above the mark.
+- **Path-normalization fix** in `compiler/src/cli_commands_utils.sfn:_collect_sfn_files_cmd`: strip a trailing slash from the root directory before the BFS. Without this, `dir + "/" + entry` produced double-slashed paths (`compiler/src//ast.sfn`) that — once Phase 5a made the cross-iteration burst long-lived enough to expose it — tripped a downstream resolver-grouping path into a SIGSEGV during the late-tail batch of files.
+- **Acceptance test** (`compiler/tests/e2e/test_check_compiler_src.sh`, 4 cases):
+  1. `sfn check compiler/src` (no trailing slash) completes with exit 0 or 1 (never 139).
+  2. `sfn check compiler/src/` (trailing slash) — same.
+  3. Exit codes match between (1) and (2).
+  4. Directory walk visits every `.sfn` file under `compiler/src/`.
+
+Two-PR sequence:
+
+- **Step 1** (PR #249, merged into 0.5.10-alpha.1): C runtime primitive + descriptors + lowering helper declarations. **No Sailfin callers.** This is the seed-bootstrap step — the released compiler's compiled-in descriptor table now knows the helpers.
+- **Step 2** (this PR): bumped `.seed-version` to 0.5.10-alpha.1, added the `cli_check.sfn` / `cli_commands.sfn` callers via bare-name descriptor lookup, plus the path-normalization fix and the acceptance test.
+
+Headline measurement:
+
+| Scenario                            | Pre-Phase-5a               | Post-Phase-5a                       |
+| ----------------------------------- | -------------------------- | ----------------------------------- |
+| `sfn check` single file (`main.sfn`)| 84 s SIGSEGV (pre-cache)   | 8 s clean                           |
+| `sfn check` 60 files                | 98 s SIGSEGV               | ~80 s clean                         |
+| `sfn check compiler/src/` (132 files)| 120 s SIGSEGV             | 130 s clean (rc=1, 2 errors found)  |
+
+Open follow-up: `SAILFIN_USE_ARENA=1` is exported by `scripts/build.sh` (so `make compile`/`make check`/`make test` get the arena), but installed binaries used by end users do not get the arena by default. Phase 5a only helps when the arena is on. A separate PR flips `_init_arena_enabled` to default `1` (with `SAILFIN_USE_ARENA=0` as the opt-out) so `sfn check` for end users gets the arena without surfacing an env-var contract.
+
 ### Phase 5: Long-Lived Compiler Process (Future)
 
 **Priority:** Future (post-1.0 or late pre-1.0) — **Expected:** 50-70% time reduction on top of Phase 6
@@ -334,7 +374,7 @@ Replace the 121 separate compiler processes with a single long-lived process tha
 - Eliminates per-module startup overhead
 - Enables in-process import artifact caching (Phase 3 becomes trivial)
 - Eliminates per-module import-context directory copies
-- Arena allocator resets between modules instead of process exit
+- Arena allocator resets between modules instead of process exit — Phase 5a's `sfn_arena_mark` / `sfn_arena_rewind` primitives are exactly the right shape; Phase 5 marks at process start and rewinds between modules.
 
 This requires the compiler to support a "compile module" entry point that takes import context as an argument rather than reading it from the filesystem.
 
