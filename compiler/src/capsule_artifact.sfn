@@ -50,14 +50,16 @@ import { substring } from "./string_utils";
 // }
 //
 // schema_version is intentionally still "1" after the C2b2 dep `.ll`
-// path migration. `dep_ll_paths` describes a list of paths to dep
-// `.ll` files; the path strings drifted from the legacy
-// `build/sailfin/capsules/<mangled>.ll` form to the per-capsule
-// `build/capsules/<scope>/<name>/ir/<rel>.ll` tree, but the field
-// shape (string array of file paths) is unchanged. Same precedent as
-// C2b1, where `out_path` migrated from `build/sailfin/program{,.o}`
-// to `build/capsules/<scope>/<name>/{obj/mod.o, bin/<name>}` without
-// a schema bump. A *shape* change (entries become objects, etc.)
+// path migration. The `deps.ll_paths` JSON field (serialized from
+// the internal `CapsuleArtifactManifest.dep_ll_paths` struct field)
+// describes a list of paths to dep `.ll` files; the path strings
+// drifted from the legacy `build/sailfin/capsules/<mangled>.ll`
+// form to the per-capsule `build/capsules/<scope>/<name>/ir/<rel>.ll`
+// tree, but the field shape (string array of file paths) is
+// unchanged. Same precedent as C2b1, where `out_path` migrated from
+// `build/sailfin/program{,.o}` to
+// `build/capsules/<scope>/<name>/{obj/mod.o, bin/<name>}` without a
+// schema bump. A *shape* change (entries become objects, etc.)
 // would be a v2.
 struct ScopeName {
     scope: string;
@@ -271,14 +273,13 @@ struct CapsuleArtifactLayout {
 }
 
 fn empty_capsule_artifact_layout() -> CapsuleArtifactLayout {
-    let empty: string[] = [];
-    let empty2: string[] = [];
-    let empty3: string[] = [];
+    let empty_scopes: string[] = [];
+    let empty_names: string[] = [];
     return CapsuleArtifactLayout {
         consumer_scope: "",
         consumer_name: "",
-        dep_scopes: empty,
-        dep_names: empty2
+        dep_scopes: empty_scopes,
+        dep_names: empty_names
     };
 }
 

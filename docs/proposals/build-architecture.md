@@ -4,7 +4,7 @@ Status: Stages A and B fully shipped. **Stage C cache milestone shipped (PR1–1
 Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed) · 2026-04-26 (PR2 `sfn test` migration + A4 deletion landed) · 2026-04-28 (PR3 `llvm-objcopy --weaken` retired via path-norm fix; libextract decoupled) · 2026-04-28 (Stage C cache milestone PR1–1f shipped)
 Authors: Core Team
 
-## Implementation Status (as of 2026-04-28, Stage C cache + per-capsule artifact layout milestones shipped through C2b2)
+## Implementation Status (as of 2026-04-28, Stage C cache milestone shipped + per-capsule artifact layout shipped through C2b1; C2b2 in flight)
 
 **Stage A — shipped.** Manifest schema, `workspace.toml`,
 `capsules/sfn/prelude/capsule.toml`, and `[build].kind = "binary"` on the
