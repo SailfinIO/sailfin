@@ -9,7 +9,7 @@
 // CI. This unit test gates the same logic in milliseconds, so the
 // e2e test now runs the canonical scenario exactly once.
 
-import { _strip_trailing_slashes_cmd } from "../../src/cli_commands_utils";
+import { _collect_test_files_cmd, _strip_trailing_slashes_cmd } from "../../src/cli_commands_utils";
 
 test "path-norm: bare directory unchanged" {
     assert _strip_trailing_slashes_cmd("compiler/src") == "compiler/src";
@@ -51,4 +51,46 @@ test "path-norm: idempotent (double application)" {
 
 test "path-norm: no internal slashes touched" {
     assert _strip_trailing_slashes_cmd("a/b/c/d") == "a/b/c/d";
+}
+
+// Regression: `sfn test compiler/tests/unit/` (trailing slash) used
+// to produce paths like `compiler/tests/unit//foo_test.sfn`, which
+// `_cr_resolve_and_dedupe`'s relative-import walker could not
+// navigate. The resolver returned `deps=0` and the now-deleted
+// `llvm-objcopy --weaken` block in `_clang_link_test_cmd_with_deps`
+// silently masked every "missing" symbol with the weakened
+// self-hosted compiler binary. After normalizing `root` at the top
+// of `_collect_test_files_cmd` (mirroring the Phase 5a fix to
+// `_collect_sfn_files_cmd`), the slash-form invariant holds: the
+// returned file list contains no `//` substrings regardless of how
+// the user spells the root directory.
+test "collect-test-files: trailing slash on root produces clean paths" ![io] {
+    let with_slash = _collect_test_files_cmd("compiler/tests/unit/", 25);
+    assert with_slash.length > 0;
+    let mut i: number = 0;
+    loop {
+        if i >= with_slash.length { break; }
+        let p = with_slash[i];
+        let mut j: number = 0;
+        loop {
+            if j + 1 >= p.length { break; }
+            // No "//" should appear anywhere in any returned path.
+            // Pre-fix, paths looked like `compiler/tests/unit//foo_test.sfn`.
+            assert !(p[j] == "/" && p[j + 1] == "/");
+            j += 1;
+        }
+        i += 1;
+    }
+}
+
+test "collect-test-files: trailing-slash and bare root produce identical lists" ![io] {
+    let bare = _collect_test_files_cmd("compiler/tests/unit", 25);
+    let with_slash = _collect_test_files_cmd("compiler/tests/unit/", 25);
+    assert bare.length == with_slash.length;
+    let mut i: number = 0;
+    loop {
+        if i >= bare.length { break; }
+        assert bare[i] == with_slash[i];
+        i += 1;
+    }
 }

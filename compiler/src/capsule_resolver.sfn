@@ -112,8 +112,10 @@ struct CheckCapsuleResolution {
 // import-loader) AND the compiled `.ll` paths (for the linker). The
 // test runner needs both — the loader feeds cross-module conformance
 // into typecheck, and clang link consumes the helper `.ll` files so
-// imported helper definitions resolve at link time without the
-// `llvm-objcopy --weaken` cross-module shim.
+// imported helper definitions resolve at link time. (The earlier
+// `llvm-objcopy --weaken` backstop in the test linker was retired
+// once `_collect_test_files_cmd`'s trailing-slash bug — which had
+// been masking the resolver's correctness — was fixed.)
 struct TestCapsuleResolution {
     asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
     ll_paths: string[];  // build/sailfin/capsules/<mangled-slug>.ll
@@ -1787,7 +1789,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[]) -> CheckCapsuleReso
 // (so the typechecker import-loader can read interface declarations
 // for cross-module conformance) AND compiles each capsule source to
 // its own `.ll` (so clang link can resolve imported helper definitions
-// without falling back to the weakened-compiler `cross_module_shim`).
+// directly).
 //
 // `entry_paths` is a list of test source files that share the same
 // project + workspace roots. The CLI groups discovered tests by

@@ -77,49 +77,32 @@ fn _is_safe_capsule_version_cmd(value: string) -> boolean {
 }
 
 // Resolver-driven test linker. Takes a list of dependency `.ll` paths
-// produced by `prepare_project_capsules_for_test` and prepends them
-// to the link line, AHEAD of the weakened compiler object. With
-// strong helper definitions in scope, clang resolves the test
-// source's mangled imported call sites against the dependency `.ll`
-// files; the weak `native.linked.o` continues to backstop everything
-// else (runtime helpers, parser exports, AST constructors) until
-// libextract retires the `--weaken` block in a separate workstream.
+// produced by `prepare_project_capsules_for_test` and adds them to
+// the link line alongside the runtime sources + globals + prelude.
+// With strong helper definitions in scope from the resolver pass,
+// clang resolves the test source's mangled imported call sites
+// directly — no backstop needed.
 //
 // Link order (head → tail):
 //   1. Test source `.ll` (strong)
 //   2. Resolver-produced dependency `.ll` files (strong)
 //   3. Runtime sources + globals + prelude (strong)
-//   4. Weakened compiler object + cross_module_shim (weak)
 //
-// (1) + (2) + (3) supply every strong symbol the test could reference;
-// (4) only fills gaps. If a dep `.ll` defined a symbol that also lives
-// in the weakened object, the strong dep wins.
-// Resolve the `llvm-objcopy` binary by trying the bare name first
-// (Homebrew, manual installs, distros that ship a current llvm
-// metapackage), then falling back to versioned binaries
-// (`llvm-objcopy-18`, `…-17`, …) that distros like Ubuntu install
-// alongside `clang-18`. Returns "" when none of the candidates are
-// runnable; the caller must surface that as a hard failure rather
-// than letting the link step proceed against a non-weakened
-// `native.linked.o`. Mirrors the discovery pattern `scripts/build.sh`
-// uses for `llvm-link` / `llvm-as`.
-fn _resolve_llvm_objcopy_cmd() -> string ![io] {
-    let candidates: string[] = ["llvm-objcopy", "llvm-objcopy-30", "llvm-objcopy-29", "llvm-objcopy-28", "llvm-objcopy-27", "llvm-objcopy-26", "llvm-objcopy-25", "llvm-objcopy-24", "llvm-objcopy-23", "llvm-objcopy-22", "llvm-objcopy-21", "llvm-objcopy-20", "llvm-objcopy-19", "llvm-objcopy-18", "llvm-objcopy-17", "llvm-objcopy-16", "llvm-objcopy-15", "llvm-objcopy-14"];
-    let mut i: number = 0;
-    loop {
-        if i >= candidates.length { break; }
-        let cand = candidates[i];
-        // `--version` exits 0 on a working binary, non-zero / 127 if
-        // the command is missing. Probing once per test-runner
-        // invocation is cheap; the result isn't cached because the
-        // PATH could legitimately change between runs.
-        let rc = process.run([cand, "--version"]);
-        if rc == 0 { return cand; }
-        i += 1;
-    }
-    return "";
-}
-
+// Historical context: this function used to also link a weakened
+// copy of `build/selfhost/native/obj/native.linked.o` via
+// `llvm-objcopy --weaken` as a catch-all backstop. Empirical
+// investigation (2026-04-28) showed the weak object was masking a
+// trailing-slash bug in `_collect_test_files_cmd`: directory-mode
+// invocations like `sfn test compiler/tests/unit/` produced
+// `compiler/tests/unit//foo_test.sfn` paths, which
+// `_cr_resolve_and_dedupe`'s relative-import walker could not
+// navigate, so the resolver returned `deps=0` and the weakened
+// binary backstopped every "missing" symbol. With path
+// normalization in place (`_collect_test_files_cmd` now calls
+// `_strip_trailing_slashes_cmd`), the resolver produces every
+// symbol tests need, and the backstop became dead code. See
+// `docs/proposals/build-architecture.md` Stage B for the full
+// trail.
 fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_root: string, dep_ll_paths: string[]) -> number ![io] {
     let mut args: string[] = ["clang", "-O0", "-o", out_path, ll_path];
     let mut di: number = 0;
@@ -159,46 +142,6 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
             }
             pi += 1;
         }
-    }
-    let selfhost_linked = "build/selfhost/native/obj/native.linked.o";
-    if fs.exists(selfhost_linked) {
-        _ensure_dir_cmd("build/sailfin/test-o0");
-        let weak_path = "build/sailfin/test-o0/native.linked.weak.o";
-        // The test runner depends on `llvm-objcopy --weaken` to make
-        // every symbol in the self-hosted compiler's linked object
-        // weak so resolver-produced dependency `.ll` files (which
-        // define some of the same compiler-internal symbols, e.g.
-        // `_strict_capsule_version__version` when a test imports
-        // `../../src/version`) win at link time. If `llvm-objcopy` is
-        // missing or fails, the file's symbols stay strong and the
-        // link fails with a confusing "multiple definition" error
-        // from ld. Bail loudly with a clear hint rather than letting
-        // that happen. `cp` is POSIX-universal so we don't probe it,
-        // but its return code is still checked.
-        let objcopy_bin = _resolve_llvm_objcopy_cmd();
-        if objcopy_bin.length == 0 {
-            print.err("test runner: llvm-objcopy not found on PATH (tried llvm-objcopy and llvm-objcopy-{14..30}) — install LLVM tools (e.g. `apt-get install llvm-18` on Debian/Ubuntu, `brew install llvm` on macOS) so the test runner can weaken the self-hosted compiler's linked object before linking each test binary");
-            return 1;
-        }
-        let cp_rc = process.run(["cp", selfhost_linked, weak_path]);
-        if cp_rc != 0 {
-            print.err("test runner: cp " + selfhost_linked + " " + weak_path
-                + " failed (exit="
-                + number_to_string(cp_rc)
-                + ")");
-            return cp_rc;
-        }
-        let weaken_rc = process.run([objcopy_bin, "--weaken", weak_path]);
-        if weaken_rc != 0 {
-            print.err("test runner: " + objcopy_bin + " --weaken " + weak_path
-                + " failed (exit="
-                + number_to_string(weaken_rc)
-                + ")");
-            return weaken_rc;
-        }
-        args.push(weak_path);
-        let shim_path = "build/selfhost/native/obj/cross_module_shim.o";
-        if fs.exists(shim_path) { args.push(shim_path); }
     }
     args.push("-lm");
     args.push("-pthread");
