@@ -1,0 +1,354 @@
+// compiler/src/build_cache.sfn
+//
+// Content-addressed build artifact cache for the unified build
+// driver — Stage C of `docs/proposals/build-architecture.md`.
+//
+// This module is the foundation for incremental builds. PR1 ships
+// the pure cache surface (key derivation, layout, lookup, store)
+// with unit-test coverage; the wiring into `_compile_capsule_path`
+// and `sfn build -p` follows in PR1b.
+//
+// ----------------------------------------------------------------
+// Cache key contract (proposal §4.12)
+// ----------------------------------------------------------------
+//
+//   key = sha256(
+//       sha256(source_bytes)
+//       || sha256(sorted(sha256(dep.layout-manifest_bytes), …))
+//       || compiler_version
+//       || canonical(flags)
+//   )
+//
+// Each input separator is `\n` so that two distinct tuples cannot
+// collide via concatenation (e.g. `("ab","c")` vs `("a","bc")`).
+//
+// Sorting the dep-manifest hashes makes the key invariant under
+// dep enumeration order — important for parallel builds and for
+// resolver implementations that walk graphs in different orders.
+//
+// `canonical(flags)` is `canonicalize_flags(flags)` — a sorted JSON
+// array of strings.
+//
+// ----------------------------------------------------------------
+// On-disk layout
+// ----------------------------------------------------------------
+//
+//   <root>/<key[0..2]>/<key>/{ir.sfn-asm, layout.manifest, mod.ll, mod.o}
+//
+// `<root>` defaults to `build/cache/v1` (in-tree) and can be
+// overridden by `$SAILFIN_BUILD_CACHE_DIR` to support shared CI
+// caches without code changes. The `v1` suffix is `SCHEMA_VERSION`
+// — when the key shape or layout changes, bump it and let `v1` age
+// out so old entries can never poison new compilers.
+//
+// The 2-character prefix shard caps the directory fan-out at 256
+// children, preventing the one-directory-with-millions-of-entries
+// problem that biteshttps://stackoverflow.com/q/466521 large caches.
+//
+// ----------------------------------------------------------------
+// Test surface
+// ----------------------------------------------------------------
+//
+// All `![io]` operations are parameterized on `root` so tests can
+// pass an arbitrary tmp directory without setting environment
+// variables. The convenience reader `cache_root()` is the
+// production-side wrapper that resolves `$SAILFIN_BUILD_CACHE_DIR`.
+import {
+    _ensure_dir_recursive_cmd,
+    _get_env_cmd,
+    _sha256_of_file_cmd,
+    _write_text_cmd
+} from "./cli_commands_utils";
+import { substring } from "./string_utils";
+
+// ----------------------------------------------------------------
+// Schema version
+// ----------------------------------------------------------------
+//
+// Bumped when the cache key derivation, on-disk layout, or
+// artifact schema changes in a way that makes old entries
+// incompatible with the current compiler. Old `v<N>/` trees are
+// left in place; they age out via the user's normal cache-cleanup
+// or `--clean` flow once that ships in PR1b.
+fn build_cache_schema_version() -> string {
+    return "v1";
+}
+
+// ----------------------------------------------------------------
+// Public types
+// ----------------------------------------------------------------
+
+struct CacheKey {
+    digest: string;
+}
+
+struct CacheEntryPaths {
+    sfn_asm: string;
+    layout_manifest: string;
+    ll: string;
+    obj: string;
+}
+
+// ----------------------------------------------------------------
+// Cache root resolution
+// ----------------------------------------------------------------
+
+// Pure variant — used by tests and by the production reader below.
+// `override_path` empty → in-tree default `build/cache/<version>`;
+// non-empty → `<override>/<version>`.
+fn cache_root_with_override(override_path: string) -> string {
+    if override_path.length > 0 {
+        return override_path + "/" + build_cache_schema_version();
+    }
+    return "build/cache/" + build_cache_schema_version();
+}
+
+// Production reader. Resolves `$SAILFIN_BUILD_CACHE_DIR` at call
+// time; callers should invoke once at the top of a build and
+// thread the result through.
+fn cache_root() -> string ![io] {
+    return cache_root_with_override(_get_env_cmd("SAILFIN_BUILD_CACHE_DIR"));
+}
+
+// ----------------------------------------------------------------
+// Path layout
+// ----------------------------------------------------------------
+
+// Maps an artifact `kind` to its filename within an entry
+// directory. Returns "" for unknown kinds (caller responsibility
+// to validate inputs); this avoids panicking for forward-compat
+// when a new artifact kind is added.
+fn _filename_for_kind(kind: string) -> string {
+    if kind == "sfn-asm" { return "ir.sfn-asm"; }
+    if kind == "layout-manifest" { return "layout.manifest"; }
+    if kind == "ll" { return "mod.ll"; }
+    if kind == "obj" { return "mod.o"; }
+    return "";
+}
+
+// `<root>/<key[0..2]>/<key>/<filename>`. Pure.
+fn cache_artifact_path(root: string, key: CacheKey, kind: string) -> string {
+    let prefix = substring(key.digest, 0, 2);
+    let filename = _filename_for_kind(kind);
+    return root + "/" + prefix + "/" + key.digest + "/" + filename;
+}
+
+fn cache_paths_for(root: string, key: CacheKey) -> CacheEntryPaths {
+    return CacheEntryPaths {
+        sfn_asm: cache_artifact_path(root, key, "sfn-asm"),
+        layout_manifest: cache_artifact_path(root, key, "layout-manifest"),
+        ll: cache_artifact_path(root, key, "ll"),
+        obj: cache_artifact_path(root, key, "obj")
+    };
+}
+
+// `<root>/<key[0..2]>/<key>` — the per-entry directory.
+fn _cache_entry_dir(root: string, key: CacheKey) -> string {
+    let prefix = substring(key.digest, 0, 2);
+    return root + "/" + prefix + "/" + key.digest;
+}
+
+// ----------------------------------------------------------------
+// Lookup
+// ----------------------------------------------------------------
+
+// True iff every artifact for `key` is present on disk. Partial
+// entries (e.g. interrupted writes) are treated as misses; the
+// caller should overwrite with a fresh `cache_store` rather than
+// trust a half-populated directory.
+fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
+    let paths = cache_paths_for(root, key);
+    if !fs.exists(paths.sfn_asm) { return false; }
+    if !fs.exists(paths.layout_manifest) { return false; }
+    if !fs.exists(paths.ll) { return false; }
+    if !fs.exists(paths.obj) { return false; }
+    return true;
+}
+
+// ----------------------------------------------------------------
+// Store
+// ----------------------------------------------------------------
+
+// Copies the four source artifacts into the cache. Returns true
+// on success, false if any copy fails (caller should treat as a
+// non-fatal cache miss — the build itself still succeeded with
+// the in-tree artifacts).
+fn cache_store(root: string, key: CacheKey, sfn_asm_src: string, layout_manifest_src: string, ll_src: string, obj_src: string) -> boolean ![io] {
+    let entry_dir = _cache_entry_dir(root, key);
+    _ensure_dir_recursive_cmd(entry_dir);
+    let paths = cache_paths_for(root, key);
+    let cp1 = process.run(["cp", sfn_asm_src, paths.sfn_asm]);
+    if cp1 != 0 { return false; }
+    let cp2 = process.run(["cp", layout_manifest_src, paths.layout_manifest]);
+    if cp2 != 0 { return false; }
+    let cp3 = process.run(["cp", ll_src, paths.ll]);
+    if cp3 != 0 { return false; }
+    let cp4 = process.run(["cp", obj_src, paths.obj]);
+    if cp4 != 0 { return false; }
+    return true;
+}
+
+// ----------------------------------------------------------------
+// Hashing helpers
+// ----------------------------------------------------------------
+
+// Hash a string by writing it to a tmp file and sha256ing.
+// `unique_suffix` must be unique per concurrent caller; the
+// recommended value is the source path's `_sanitize_filename_cmd`
+// output suffixed with a phase tag (e.g. `..._deps`, `..._final`).
+fn _sha256_of_string(input: string, unique_suffix: string) -> string ![io] {
+    let tmp = "/tmp/.sfn_build_cache_hash_" + unique_suffix;
+    _write_text_cmd(tmp, input);
+    let digest = _sha256_of_file_cmd(tmp);
+    process.run(["rm", "-f", tmp]);
+    return digest;
+}
+
+// ----------------------------------------------------------------
+// String comparison + sort (for dep-hash canonicalization)
+// ----------------------------------------------------------------
+
+// Lexicographic less-than. Operates on raw character codes; used
+// for sorting hex digests (`[0-9a-f]+`) and JSON-string flag
+// values where this is a faithful byte-wise compare.
+fn _string_lt(a: string, b: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= a.length || i >= b.length { break; }
+        let ca = char_code(char_at(a, i));
+        let cb = char_code(char_at(b, i));
+        if ca < cb { return true; }
+        if ca > cb { return false; }
+        i += 1;
+    }
+    return a.length < b.length;
+}
+
+// Insertion sort — N is small (per-module dep counts are typically
+// <100, and the compiler itself has 132 modules total).
+fn _sort_strings(input: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut copy_i: number = 0;
+    loop {
+        if copy_i >= input.length { break; }
+        out.push(input[copy_i]);
+        copy_i += 1;
+    }
+    let mut k: number = 1;
+    loop {
+        if k >= out.length { break; }
+        let cur = out[k];
+        let mut j: number = k - 1;
+        loop {
+            if j < 0 { break; }
+            if !_string_lt(cur, out[j]) { break; }
+            out[j + 1] = out[j];
+            j -= 1;
+        }
+        out[j + 1] = cur;
+        k += 1;
+    }
+    return out;
+}
+
+// ----------------------------------------------------------------
+// Flag canonicalization
+// ----------------------------------------------------------------
+
+// Conservative JSON string escaper — handles the only two
+// characters that would otherwise break the array shape (`"` and
+// `\`). Flag values are not expected to contain control characters
+// or non-ASCII; if they ever do, expand this.
+fn _escape_json_string(input: string) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= input.length { break; }
+        let ch = char_at(input, i);
+        if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\"" {
+            out = out + "\\\"";
+        } else {
+            out = out + ch;
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Sort the flag list and JSON-encode as a string array. Order
+// invariance means `["-O0", "--release"]` and `["--release", "-O0"]`
+// produce the same canonical form, hence the same cache key.
+fn canonicalize_flags(flags: string[]) -> string {
+    let sorted = _sort_strings(flags);
+    let mut out: string = "[";
+    let mut i: number = 0;
+    loop {
+        if i >= sorted.length { break; }
+        if i > 0 { out = out + ","; }
+        out = out + "\"" + _escape_json_string(sorted[i]) + "\"";
+        i += 1;
+    }
+    return out + "]";
+}
+
+// ----------------------------------------------------------------
+// Cache key derivation
+// ----------------------------------------------------------------
+
+// Compute the content-addressed cache key for a single module
+// compile. See top-of-file contract for the formula.
+//
+// Preconditions (caller responsibility):
+//   - `source_path` exists and is readable.
+//   - Every entry in `dep_layout_manifest_paths` exists and is
+//     readable.
+//
+// Failures in `_sha256_of_file_cmd` (missing file, sha256sum not
+// on PATH) collapse to empty digests; the resulting key is still
+// stable but reflects "input was missing", which the caller can
+// surface as a build setup error.
+//
+// `hash_tmp_suffix` must be unique per concurrent worker; pass a
+// `_sanitize_filename_cmd(source_path)` result, which is what the
+// driver already computes for module slugs.
+fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compiler_version: string, flags_canonical: string, hash_tmp_suffix: string) -> CacheKey ![io] {
+    let s_hash = _sha256_of_file_cmd(source_path);
+
+    let mut dep_hashes: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= dep_layout_manifest_paths.length { break; }
+        dep_hashes.push(_sha256_of_file_cmd(dep_layout_manifest_paths[i]));
+        i += 1;
+    }
+    let sorted_dep_hashes = _sort_strings(dep_hashes);
+    let mut deps_concat: string = "";
+    let mut j: number = 0;
+    loop {
+        if j >= sorted_dep_hashes.length { break; }
+        if j > 0 { deps_concat = deps_concat + "|"; }
+        deps_concat = deps_concat + sorted_dep_hashes[j];
+        j += 1;
+    }
+    let deps_hash = _sha256_of_string(deps_concat, hash_tmp_suffix + "_deps");
+
+    let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_version + "\n" + flags_canonical;
+    let final_digest = _sha256_of_string(final_input, hash_tmp_suffix + "_final");
+    return CacheKey { digest: final_digest };
+}
+
+export {
+    CacheKey,
+    CacheEntryPaths,
+    build_cache_schema_version,
+    cache_root_with_override,
+    cache_root,
+    cache_artifact_path,
+    cache_paths_for,
+    cache_lookup_complete,
+    cache_store,
+    canonicalize_flags,
+    cache_key_for
+};

@@ -1,0 +1,278 @@
+// Unit tests for `compiler/src/build_cache.sfn`.
+//
+// The cache module is the foundation for incremental builds in
+// Stage C of `docs/proposals/build-architecture.md`. PR1 ships
+// the module parse-only / unwired; these tests gate the
+// invariants the wiring (PR1b) will rely on:
+//
+//   - Cache keys are deterministic — identical inputs (source
+//     bytes, dep manifest contents, compiler version, flags)
+//     always produce the same digest, regardless of how the
+//     dep list is ordered.
+//   - Cache keys are sensitive — any input change produces a
+//     different digest, so a stale cache can never satisfy a
+//     build that has actually drifted.
+//   - The on-disk layout is sharded (`<root>/<key[0..2]>/<key>/`)
+//     and versioned (`build/cache/v1/...`) so future schema
+//     changes can coexist with existing entries.
+//   - `cache_store` + `cache_lookup_complete` round-trip
+//     successfully against a fresh tmp directory.
+//
+// Tests parameterize the cache root explicitly (passing a tmp
+// directory rather than relying on `$SAILFIN_BUILD_CACHE_DIR`)
+// because Sailfin's runtime has no `setenv` primitive — the env
+// var contract is intentionally read-only. Each test cleans up
+// its tmp tree on exit.
+
+import {
+    CacheKey,
+    build_cache_schema_version,
+    cache_artifact_path,
+    cache_lookup_complete,
+    cache_paths_for,
+    cache_root_with_override,
+    cache_store,
+    canonicalize_flags,
+    cache_key_for
+} from "../../src/build_cache";
+
+// --------------------------------------------------------------
+// Fixture helpers
+// --------------------------------------------------------------
+
+// Each test block gets its own tmp namespace so parallel test
+// runs don't collide on `/tmp/sfn_build_cache_test_<X>`.
+fn _test_tmp_root(label: string) -> string ![io] {
+    let root = "/tmp/sfn_build_cache_test_" + label;
+    process.run(["rm", "-rf", root]);
+    process.run(["mkdir", "-p", root]);
+    return root;
+}
+
+fn _cleanup(path: string) ![io] {
+    process.run(["rm", "-rf", path]);
+}
+
+fn _write_file(path: string, content: string) ![io] {
+    process.run(["sh", "-c", "printf '%s' '" + content + "' > " + path]);
+}
+
+// --------------------------------------------------------------
+// Schema version
+// --------------------------------------------------------------
+
+test "build_cache: schema version is v1" {
+    assert build_cache_schema_version() == "v1";
+}
+
+test "build_cache: cache_root_with_override empty -> in-tree default" {
+    assert cache_root_with_override("") == "build/cache/v1";
+}
+
+test "build_cache: cache_root_with_override non-empty -> override + version" {
+    assert cache_root_with_override("/tmp/sfn-shared-cache") == "/tmp/sfn-shared-cache/v1";
+}
+
+// --------------------------------------------------------------
+// Path layout
+// --------------------------------------------------------------
+
+test "build_cache: artifact paths shard by 2-char prefix" {
+    let key = CacheKey { digest: "abcdef0123456789" };
+    let root = "build/cache/v1";
+    assert cache_artifact_path(root, key, "sfn-asm") == "build/cache/v1/ab/abcdef0123456789/ir.sfn-asm";
+    assert cache_artifact_path(root, key, "layout-manifest") == "build/cache/v1/ab/abcdef0123456789/layout.manifest";
+    assert cache_artifact_path(root, key, "ll") == "build/cache/v1/ab/abcdef0123456789/mod.ll";
+    assert cache_artifact_path(root, key, "obj") == "build/cache/v1/ab/abcdef0123456789/mod.o";
+}
+
+test "build_cache: unknown artifact kind returns empty filename" {
+    let key = CacheKey { digest: "abcdef0123456789" };
+    let path = cache_artifact_path("build/cache/v1", key, "this-kind-does-not-exist");
+    // Sentinel form: `…/abcdef0123456789/` (filename is "").
+    assert path == "build/cache/v1/ab/abcdef0123456789/";
+}
+
+test "build_cache: cache_paths_for returns all four artifact slots" {
+    let key = CacheKey { digest: "deadbeef" };
+    let paths = cache_paths_for("build/cache/v1", key);
+    assert paths.sfn_asm == "build/cache/v1/de/deadbeef/ir.sfn-asm";
+    assert paths.layout_manifest == "build/cache/v1/de/deadbeef/layout.manifest";
+    assert paths.ll == "build/cache/v1/de/deadbeef/mod.ll";
+    assert paths.obj == "build/cache/v1/de/deadbeef/mod.o";
+}
+
+// --------------------------------------------------------------
+// Flag canonicalization
+// --------------------------------------------------------------
+
+test "build_cache: canonicalize_flags empty list is empty JSON array" {
+    let empty: string[] = [];
+    assert canonicalize_flags(empty) == "[]";
+}
+
+test "build_cache: canonicalize_flags single flag" {
+    assert canonicalize_flags(["--release"]) == "[\"--release\"]";
+}
+
+test "build_cache: canonicalize_flags sorts entries" {
+    let a = canonicalize_flags(["-O2", "--release"]);
+    let b = canonicalize_flags(["--release", "-O2"]);
+    // Sort order means both inputs produce the same output.
+    assert a == b;
+    // And the entries are in lexicographic order regardless of
+    // input order.
+    assert a == "[\"--release\",\"-O2\"]";
+}
+
+test "build_cache: canonicalize_flags escapes embedded quotes and backslashes" {
+    let escaped = canonicalize_flags(["a\"b", "c\\d"]);
+    // Sorted: ["a\"b", "c\\d"] → ["a\\\"b","c\\\\d"]
+    assert escaped == "[\"a\\\"b\",\"c\\\\d\"]";
+}
+
+// --------------------------------------------------------------
+// Key derivation — determinism
+// --------------------------------------------------------------
+
+test "build_cache: cache_key_for same inputs -> same digest" ![io] {
+    let scratch = _test_tmp_root("key_determinism");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let key1 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "key_determinism");
+    let key2 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "key_determinism");
+    assert key1.digest == key2.digest;
+    assert key1.digest.length == 64;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for invariant under dep order" ![io] {
+    let scratch = _test_tmp_root("dep_order");
+    let src = scratch + "/source.sfn";
+    let dep_a = scratch + "/dep_a.layout-manifest";
+    let dep_b = scratch + "/dep_b.layout-manifest";
+    let dep_c = scratch + "/dep_c.layout-manifest";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    _write_file(dep_a, "module: alpha; layout: ...");
+    _write_file(dep_b, "module: beta; layout: ...");
+    _write_file(dep_c, "module: gamma; layout: ...");
+    let key_abc = cache_key_for(src, [dep_a, dep_b, dep_c], "0.5.10-alpha.2", "[]", "dep_order_abc");
+    let key_cba = cache_key_for(src, [dep_c, dep_b, dep_a], "0.5.10-alpha.2", "[]", "dep_order_cba");
+    let key_bac = cache_key_for(src, [dep_b, dep_a, dep_c], "0.5.10-alpha.2", "[]", "dep_order_bac");
+    assert key_abc.digest == key_cba.digest;
+    assert key_abc.digest == key_bac.digest;
+    _cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// Key derivation — sensitivity
+// --------------------------------------------------------------
+
+test "build_cache: cache_key_for changes when source changes" ![io] {
+    let scratch = _test_tmp_root("source_sensitive");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let key1 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "source_sens_1");
+    _write_file(src, "fn hello() -> string { return \"WORLD\"; }");
+    let key2 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "source_sens_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for changes when dep manifest changes" ![io] {
+    let scratch = _test_tmp_root("dep_sensitive");
+    let src = scratch + "/source.sfn";
+    let dep = scratch + "/dep.layout-manifest";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    _write_file(dep, "module: alpha; layout: original");
+    let key1 = cache_key_for(src, [dep], "0.5.10-alpha.2", "[]", "dep_sens_1");
+    _write_file(dep, "module: alpha; layout: changed");
+    let key2 = cache_key_for(src, [dep], "0.5.10-alpha.2", "[]", "dep_sens_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for changes when compiler version changes" ![io] {
+    let scratch = _test_tmp_root("version_sensitive");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let key1 = cache_key_for(src, no_deps, "0.5.10-alpha.1", "[]", "ver_sens_1");
+    let key2 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "ver_sens_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_key_for changes when flags change" ![io] {
+    let scratch = _test_tmp_root("flag_sensitive");
+    let src = scratch + "/source.sfn";
+    _write_file(src, "fn hello() -> string { return \"world\"; }");
+    let no_deps: string[] = [];
+    let key1 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[]", "flag_sens_1");
+    let key2 = cache_key_for(src, no_deps, "0.5.10-alpha.2", "[\"--release\"]", "flag_sens_2");
+    assert key1.digest != key2.digest;
+    _cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// Store + lookup round-trip
+// --------------------------------------------------------------
+
+test "build_cache: cache_store + cache_lookup_complete round-trips" ![io] {
+    let scratch = _test_tmp_root("store_roundtrip");
+    let cache_root = scratch + "/cache/v1";
+
+    // Source artifacts — the four files the driver would produce
+    // for one module's compile.
+    let src_dir = scratch + "/build";
+    process.run(["mkdir", "-p", src_dir]);
+    let sfn_asm = src_dir + "/ir.sfn-asm";
+    let layout = src_dir + "/layout.manifest";
+    let ll = src_dir + "/mod.ll";
+    let obj = src_dir + "/mod.o";
+    _write_file(sfn_asm, "; sfn-asm: native IR placeholder");
+    _write_file(layout, "module: foo; layout: ...");
+    _write_file(ll, "; ModuleID = 'foo'");
+    _write_file(obj, "OBJECT_BYTES_PLACEHOLDER");
+
+    let key = CacheKey { digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" };
+
+    // Pre-store: cache miss.
+    assert !cache_lookup_complete(cache_root, key);
+
+    let stored = cache_store(cache_root, key, sfn_asm, layout, ll, obj);
+    assert stored;
+
+    // Post-store: cache hit.
+    assert cache_lookup_complete(cache_root, key);
+
+    // The on-disk layout matches `cache_paths_for`.
+    let paths = cache_paths_for(cache_root, key);
+    assert fs.exists(paths.sfn_asm);
+    assert fs.exists(paths.layout_manifest);
+    assert fs.exists(paths.ll);
+    assert fs.exists(paths.obj);
+
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_lookup_complete returns false on partial entry" ![io] {
+    let scratch = _test_tmp_root("partial_entry");
+    let cache_root = scratch + "/cache/v1";
+
+    let key = CacheKey { digest: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" };
+    let entry_dir = cache_root + "/fe/" + key.digest;
+    process.run(["mkdir", "-p", entry_dir]);
+
+    // Populate only three of the four expected artifacts.
+    let paths = cache_paths_for(cache_root, key);
+    _write_file(paths.sfn_asm, "; partial");
+    _write_file(paths.layout_manifest, "partial");
+    _write_file(paths.ll, "; partial");
+    // Intentionally miss `paths.obj`.
+
+    assert !cache_lookup_complete(cache_root, key);
+    _cleanup(scratch);
+}
