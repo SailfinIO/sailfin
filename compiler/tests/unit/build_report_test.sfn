@@ -1,0 +1,191 @@
+// Stage C PR1f regression tests for `compiler/src/build_report.sfn`.
+//
+// `build_report_to_json` is the foundation surface for `sfn lsp`,
+// the MCP server's structured compile feedback, and CI cache-health
+// gates. The schema is documented inline in `build_report.sfn` and
+// gated by `compiler/tests/e2e/test_build_json_schema.sh`. These
+// unit tests lock the per-field serialization invariants — the e2e
+// test exercises the full pipeline.
+//
+// `BuildReport` wraps `CacheStats`, so importing from
+// `./build_report` pulls in `./build_cache` too. That's a small
+// surface; no inline-duplication needed (mirrors the
+// `cli_path_normalization_test.sfn` precedent).
+import { CacheStats } from "../../src/build_cache";
+import { BuildReport, build_report_to_json, empty_build_report } from "../../src/build_report";
+
+// --------------------------------------------------------------
+// empty_build_report defaults
+// --------------------------------------------------------------
+test "empty_build_report: command defaults to 'build'" {
+    assert empty_build_report().command == "build";
+}
+
+test "empty_build_report: kind defaults to 'binary'" {
+    assert empty_build_report().kind == "binary";
+}
+
+test "empty_build_report: exit_code defaults to 0" {
+    assert empty_build_report().exit_code == 0;
+}
+
+test "empty_build_report: cache stats are zero" {
+    let r = empty_build_report();
+    assert r.cache.hits == 0;
+    assert r.cache.misses == 0;
+    assert r.cache.stores == 0;
+    assert r.cache.invalid_keys == 0;
+    assert r.cache.copy_failures == 0;
+}
+
+test "empty_build_report: cache_enabled defaults to true" {
+    assert empty_build_report().cache_enabled;
+}
+
+test "empty_build_report: dep_ll_paths is empty" {
+    assert empty_build_report().dep_ll_paths.length == 0;
+}
+
+// --------------------------------------------------------------
+// build_report_to_json — schema invariants
+// --------------------------------------------------------------
+test "build_report_to_json: includes schema_version 1" {
+    let json = build_report_to_json(empty_build_report());
+    // Schema version is the contract for breaking changes;
+    // downstream consumers hard-fail on unknown values.
+    assert _contains(json, "\"schema_version\":\"1\"");
+}
+
+test "build_report_to_json: includes command default" {
+    let json = build_report_to_json(empty_build_report());
+    assert _contains(json, "\"command\":\"build\"");
+}
+
+test "build_report_to_json: includes kind override 'library'" {
+    let mut r = empty_build_report();
+    r.kind = "library";
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"kind\":\"library\"");
+}
+
+test "build_report_to_json: includes exit_code override" {
+    let mut r = empty_build_report();
+    r.exit_code = 7;
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"exit_code\":7");
+}
+
+test "build_report_to_json: includes input + out paths" {
+    let mut r = empty_build_report();
+    r.input = "src/main.sfn";
+    r.out = "build/program";
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"input\":\"src/main.sfn\"");
+    assert _contains(json, "\"out\":\"build/program\"");
+}
+
+test "build_report_to_json: cache fields present and counted" {
+    let mut r = empty_build_report();
+    r.cache = CacheStats {
+        hits: 3,
+        misses: 1,
+        stores: 1,
+        invalid_keys: 0,
+        copy_failures: 0
+    };
+    r.cache_root = "/tmp/sfn-cache/v1";
+    r.cache_enabled = true;
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"hits\":3");
+    assert _contains(json, "\"misses\":1");
+    assert _contains(json, "\"stores\":1");
+    assert _contains(json, "\"invalid_keys\":0");
+    assert _contains(json, "\"copy_failures\":0");
+    assert _contains(json, "\"root\":\"/tmp/sfn-cache/v1\"");
+    assert _contains(json, "\"enabled\":true");
+}
+
+test "build_report_to_json: cache_enabled false serializes literally" {
+    let mut r = empty_build_report();
+    r.cache_enabled = false;
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"enabled\":false");
+}
+
+test "build_report_to_json: deps.count matches array length" {
+    let mut r = empty_build_report();
+    r.dep_ll_paths = ["a.ll", "b.ll", "c.ll"];
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"count\":3");
+    assert _contains(json, "\"a.ll\"");
+    assert _contains(json, "\"b.ll\"");
+    assert _contains(json, "\"c.ll\"");
+}
+
+test "build_report_to_json: empty deps produce count=0 and []" {
+    let json = build_report_to_json(empty_build_report());
+    assert _contains(json, "\"count\":0");
+    assert _contains(json, "\"ll_paths\":[]");
+}
+
+test "build_report_to_json: diagnostics is empty array (reserved for §4.11)" {
+    let json = build_report_to_json(empty_build_report());
+    assert _contains(json, "\"diagnostics\":[]");
+}
+
+// --------------------------------------------------------------
+// build_report_to_json — escape correctness
+// --------------------------------------------------------------
+test "build_report_to_json: input path with backslash escapes correctly" {
+    let mut r = empty_build_report();
+    r.input = "src\\main.sfn";
+    let json = build_report_to_json(r);
+    // `\` → `\\` per RFC 8259.
+    assert _contains(json, "\"input\":\"src\\\\main.sfn\"");
+}
+
+test "build_report_to_json: input path with embedded quote escapes correctly" {
+    let mut r = empty_build_report();
+    r.input = "src/\"quoted\".sfn";
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"input\":\"src/\\\"quoted\\\".sfn\"");
+}
+
+test "build_report_to_json: input path with newline escapes correctly" {
+    let mut r = empty_build_report();
+    r.input = "src/with\nnewline";
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"input\":\"src/with\\nnewline\"");
+}
+
+test "build_report_to_json: negative exit_code serializes with sign" {
+    let mut r = empty_build_report();
+    r.exit_code = -1;
+    let json = build_report_to_json(r);
+    assert _contains(json, "\"exit_code\":-1");
+}
+
+// --------------------------------------------------------------
+// Helpers
+// --------------------------------------------------------------
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}

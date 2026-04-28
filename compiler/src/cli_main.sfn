@@ -4,9 +4,11 @@
 import {
     BuildCacheConfig,
     CacheStats,
+    cache_root,
     cache_stats_is_empty,
     resolve_build_cache_config
 } from "./build_cache";
+import { BuildReport, build_report_to_json, empty_build_report } from "./build_report";
 import { ProjectCapsuleResult, prepare_project_capsules } from "./capsule_resolver";
 import { handle_check_command } from "./cli_check";
 import {
@@ -38,7 +40,7 @@ fn _usage() -> string {
     out = out + "\n";
     out = out + "build & run:\n";
     out = out
-        + "  sfn build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] (<file.sfn> | -p <capsule-path>)\n";
+        + "  sfn build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] [--json] (<file.sfn> | -p <capsule-path>)\n";
     out = out
         + "  sfn run   [--no-cache] [--clean] [--cache-trace] (<file.sfn> | <exe>)\n";
     out = out
@@ -118,6 +120,25 @@ fn _print_cache_summary(stats: CacheStats) ![io] {
         + number_to_string(stats.invalid_keys)
         + " copy_failures="
         + number_to_string(stats.copy_failures));
+}
+
+// Compose a `BuildReport` for a successful build and print its
+// JSON encoding to stdout. Mirrors `_print_cache_summary`'s
+// placement (end of the success path); machine-readable consumers
+// (`sfn lsp`, MCP, CI gates) read this single line and parse it
+// rather than scraping `built: ...` + `[cache] ...` from stderr.
+fn _emit_build_report(input_path: string, out_path: string, kind: string, exit_code: number, capsule_result: ProjectCapsuleResult, cache_config: BuildCacheConfig) ![io] {
+    let mut report = empty_build_report();
+    report.input = input_path;
+    report.out = out_path;
+    report.kind = kind;
+    report.exit_code = exit_code;
+    report.compiler_version = resolve_compiler_version("");
+    report.cache = capsule_result.stats;
+    report.cache_root = cache_root();
+    report.cache_enabled = cache_config.enabled;
+    report.dep_ll_paths = capsule_result.ll_paths;
+    print(build_report_to_json(report));
 }
 
 fn _ensure_dir(path: string) ![io] {
@@ -537,7 +558,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
     }
 
     if is_build {
-        // build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace]
+        // build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] [--json]
         //       (file | -p <capsule-path>)
         let mut out_path: string = "";
         let mut input_path: string = "";
@@ -545,6 +566,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         let mut no_cache_flag: boolean = false;
         let mut clean_flag: boolean = false;
         let mut cache_trace_flag: boolean = false;
+        let mut json_flag: boolean = false;
 
         // Parse args: support -o OUTPUT and -p PATH in any combination.
         let mut bi: number = 1;
@@ -581,6 +603,11 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             }
             if strings_equal(a, "--cache-trace") {
                 cache_trace_flag = true;
+                bi += 1;
+                continue;
+            }
+            if strings_equal(a, "--json") {
+                json_flag = true;
                 bi += 1;
                 continue;
             }
@@ -663,12 +690,18 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         if no_link {
             let rc_obj = process.run(["clang", "-O2", "-Wno-override-module", "-c", ll_path, "-o", out_path,]);
             if rc_obj != 0 {
-                print("library build failed (clang exit=" + number_to_string(rc_obj)
-                    + ")");
+                if !json_flag {
+                    print("library build failed (clang exit=" + number_to_string(rc_obj)
+                        + ")");
+                }
                 return rc_obj;
             }
-            print("built: " + out_path);
-            _print_cache_summary(capsule_result.stats);
+            if json_flag {
+                _emit_build_report(input_path, out_path, "library", 0, capsule_result, cache_config);
+            } else {
+                print("built: " + out_path);
+                _print_cache_summary(capsule_result.stats);
+            }
             return 0;
         }
 
@@ -682,12 +715,17 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         }
         let rc = _clang_link_multi(all_lls, exe_path, runtime_root);
         if rc != 0 {
-            print("link failed (clang exit=" + number_to_string(rc) + ")");
-
+            if !json_flag {
+                print("link failed (clang exit=" + number_to_string(rc) + ")");
+            }
             return rc;
         }
-        print("built: " + exe_path);
-        _print_cache_summary(capsule_result.stats);
+        if json_flag {
+            _emit_build_report(input_path, exe_path, "binary", 0, capsule_result, cache_config);
+        } else {
+            print("built: " + exe_path);
+            _print_cache_summary(capsule_result.stats);
+        }
         return 0;
     }
 
