@@ -153,3 +153,52 @@ fn resolve_compiler_version(binary_dir: string) -> string ![io] {
 
     return __version_fallback__;
 }
+
+// Variant for cache-key derivation. Same lookup chain as
+// `resolve_compiler_version` EXCEPT it never falls through to a
+// project's CWD-relative `capsule.toml`. The build cache keys IR
+// against the compiler binary's identity; mixing in the project
+// version would let a `sfn` upgrade silently reuse cached `.ll`
+// produced by an older binary, which could surface as
+// hard-to-diagnose miscompiles when the IR contract has shifted.
+//
+// Strict resolution order:
+//   1. `binary_dir/.build-stamp` (when `binary_dir` is non-empty)
+//   2. `binary_dir/../../compiler/capsule.toml` (in-tree dev tree)
+//   3. `build/native/.build-stamp` (CWD-relative dev fallback)
+//   4. `compiler/capsule.toml` (CWD-relative dev fallback)
+//   5. `__version_fallback__` (compile-time constant — stable per
+//      binary, so cache keys stay coherent for any single binary)
+//
+// Step 4's CWD lookup can still match a foreign `compiler/capsule.toml`
+// in a contrived directory, but the moment a real compiler ships
+// `binary_dir` from its CLI entry the call short-circuits at step 1
+// or 2. Threading `binary_dir` through `compile_capsule_modules` is
+// the next refinement; documented in the proposal's open questions.
+fn resolve_compiler_version_for_cache(binary_dir: string) -> string ![io] {
+    if binary_dir.length > 0 {
+        let stamp = _read_stamp(binary_dir + "/.build-stamp");
+        if stamp.length > 0 { return stamp; }
+
+        let capsule_path = binary_dir + "/../../compiler/capsule.toml";
+        if fs.exists(capsule_path) {
+            let text = fs.readFile(capsule_path);
+            let ver = _strict_capsule_version(text);
+            if ver.length > 0 { return ver; }
+        }
+
+        return __version_fallback__;
+    }
+
+    let stamp = _read_stamp("build/native/.build-stamp");
+    if stamp.length > 0 { return stamp; }
+
+    // Note: only the in-tree compiler manifest, NOT the CWD-relative
+    // `capsule.toml` the non-strict variant accepts. End-user
+    // projects' manifests have nothing to do with the IR contract.
+    let capsule_paths: string[] = ["compiler/capsule.toml"];
+    let capsule_ver = _read_capsule_version(capsule_paths);
+    if capsule_ver.length > 0 { return capsule_ver; }
+
+    return __version_fallback__;
+}
