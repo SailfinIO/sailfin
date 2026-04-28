@@ -64,7 +64,7 @@ test "path-norm: no internal slashes touched" {
 // `_collect_sfn_files_cmd`), the slash-form invariant holds: the
 // returned file list contains no `//` substrings regardless of how
 // the user spells the root directory.
-test "collect-test-files: trailing slash on root produces clean paths" {
+test "collect-test-files: trailing slash on root produces clean paths" ![io] {
     let with_slash = _collect_test_files_cmd("compiler/tests/unit/", 25);
     assert with_slash.length > 0;
     let mut i: number = 0;
@@ -83,7 +83,7 @@ test "collect-test-files: trailing slash on root produces clean paths" {
     }
 }
 
-test "collect-test-files: trailing-slash and bare root produce identical lists" {
+test "collect-test-files: trailing-slash and bare root produce identical lists" ![io] {
     let bare = _collect_test_files_cmd("compiler/tests/unit", 25);
     let with_slash = _collect_test_files_cmd("compiler/tests/unit/", 25);
     assert bare.length == with_slash.length;
