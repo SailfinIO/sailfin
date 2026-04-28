@@ -115,18 +115,18 @@ test_entry_relative() {
 }
 run_test "entry is relative to capsule.toml's dir" test_entry_relative
 
-# ---- Test 6: out points at the produced object ----
-test_out_present() {
+# ---- Test 6: out points at the canonical per-capsule location ----
+test_out_canonical() {
+    # Stage C2b: `sfn build -p` (no explicit -o) writes to
+    # `build/capsules/<scope>/<name>/obj/mod.o` for libraries.
+    local expected="build/capsules/demo/widget/obj/mod.o"
     local out
     out=$(jq -r .out "$SIDECAR")
-    [ -n "$out" ] || return 1
-    # The library build produces a `.o` at the default path today.
-    case "$out" in
-        *.o) return 0 ;;
-        *) return 1 ;;
-    esac
+    [ "$out" = "$expected" ] || return 1
+    # And the file actually exists on disk.
+    [ -f "$SCRATCH/$expected" ]
 }
-run_test "out names a file ending in .o (library build)" test_out_present
+run_test "out points at build/capsules/<scope>/<name>/obj/mod.o (library)" test_out_canonical
 
 # ---- Test 7: compiler_version is non-empty ----
 test_compiler_version_present() {
@@ -143,7 +143,28 @@ test_deps_consistency() {
 }
 run_test "deps.count matches deps.ll_paths.length (>= 1)" test_deps_consistency
 
-# ---- Test 9: positional `sfn build` does NOT write a sidecar ----
+# ---- Test 9b: -o EXPLICIT overrides the canonical default ----
+test_explicit_o_wins() {
+    cd "$SCRATCH" || return 1
+    local explicit="$SCRATCH/build/explicit.o"
+    rm -f "$explicit"
+    "$BINARY" build -p . -o "$explicit" \
+        > "$SCRATCH/explicit.stdout" 2>&1
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        cat "$SCRATCH/explicit.stdout" >&2
+        return $rc
+    fi
+    # The user's explicit path wins for the actual artifact AND
+    # for the sidecar's `out` field.
+    [ -f "$explicit" ] || return 1
+    local sidecar_out
+    sidecar_out=$(jq -r .out "$SIDECAR")
+    [ "$sidecar_out" = "$explicit" ]
+}
+run_test "-o EXPLICIT overrides the canonical default" test_explicit_o_wins
+
+# ---- Test 10: positional `sfn build` does NOT write a sidecar ----
 # The sidecar is a `-p` opt-in (we don't know the capsule name for
 # positional builds). This guards against accidental drive-by sidecars.
 test_positional_no_sidecar() {
@@ -157,6 +178,72 @@ test_positional_no_sidecar() {
     [ ! -f "$SCRATCH/build/capsules/demo/widget/manifest.json" ]
 }
 run_test "positional sfn build writes no sidecar" test_positional_no_sidecar
+
+# ---- Test 11: kind = "binary" lands at <dir>/bin/<bin-name> ----
+# Stage C2b1 covers BOTH library and binary canonical paths; the
+# library coverage is in tests 6 + 9b above. This block exercises
+# the binary path: a `[build].kind = "binary"` capsule built via
+# `sfn build -p .` (no `-o`) must produce `<dir>/bin/<bin-name>`
+# AND the sidecar's `out` field must point at that same path.
+BIN_SCRATCH="$(mktemp -d -t sfn-capsule-artifact-bin-XXXXXX)"
+# Same-shell trap: unconditionally remove BIN_SCRATCH when this
+# script exits, in addition to the SCRATCH cleanup at the top.
+trap 'rm -rf "$SCRATCH" "$BIN_SCRATCH"' EXIT
+
+mkdir -p "$BIN_SCRATCH/src"
+ln -s "$REPO_ROOT/capsules" "$BIN_SCRATCH/capsules"
+
+cat > "$BIN_SCRATCH/capsule.toml" <<'EOF'
+[capsule]
+name = "demo/widgetcli"
+version = "0.5.1"
+description = "E2E fixture for the binary canonical path"
+
+[capabilities]
+required = ["io"]
+
+[build]
+kind = "binary"
+entry = "src/main.sfn"
+EOF
+
+cat > "$BIN_SCRATCH/src/main.sfn" <<'EOF'
+fn main() ![io] {
+    print("widgetcli ok");
+}
+EOF
+
+BIN_SIDECAR="$BIN_SCRATCH/build/capsules/demo/widgetcli/manifest.json"
+BIN_EXPECTED_OUT="build/capsules/demo/widgetcli/bin/widgetcli"
+
+test_binary_canonical_out() {
+    cd "$BIN_SCRATCH" || return 1
+    "$BINARY" build -p . > "$BIN_SCRATCH/build.stdout" 2>&1
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   sfn build -p (binary) exited with code $rc; output:" >&2
+        cat "$BIN_SCRATCH/build.stdout" >&2
+        return $rc
+    fi
+    [ -f "$BIN_SIDECAR" ] || return 1
+    [ -x "$BIN_SCRATCH/$BIN_EXPECTED_OUT" ] || return 1
+    [ "$(jq -r .out "$BIN_SIDECAR")" = "$BIN_EXPECTED_OUT" ] || return 1
+    [ "$(jq -r .kind "$BIN_SIDECAR")" = "binary" ]
+}
+run_test "kind=binary lands at build/capsules/<scope>/<name>/bin/<bin-name>" test_binary_canonical_out
+
+# ---- Test 12: produced binary actually runs ----
+# Confirms the binary path isn't just metadata — clang link
+# produced an executable that starts and prints the expected
+# marker. Catches a future regression where the canonical path
+# is reported but no real binary lands there.
+test_binary_runs() {
+    cd "$BIN_SCRATCH" || return 1
+    [ -x "$BIN_EXPECTED_OUT" ] || return 1
+    "$BIN_SCRATCH/$BIN_EXPECTED_OUT" > "$BIN_SCRATCH/run.stdout" 2>&1 || return 1
+    grep -q "^widgetcli ok$" "$BIN_SCRATCH/run.stdout"
+}
+run_test "binary at canonical path runs and prints expected marker" test_binary_runs
 
 echo ""
 echo "[test] $PASS passed, $FAIL failed"

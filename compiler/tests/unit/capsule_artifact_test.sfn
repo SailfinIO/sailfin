@@ -9,9 +9,12 @@
 // the full pipeline.
 import {
     CapsuleArtifactManifest,
+    capsule_artifact_bin_path,
     capsule_artifact_dir,
     capsule_artifact_manifest_path,
     capsule_artifact_manifest_to_json,
+    capsule_artifact_obj_path,
+    capsule_default_bin_name,
     empty_capsule_artifact_manifest,
     is_safe_scope_name,
     parse_scope_name,
@@ -120,6 +123,35 @@ test "is_safe_scope_name: scope with slash rejected" {
 // --------------------------------------------------------------
 test "capsule_artifact_dir: composes build/capsules/<scope>/<name>" {
     assert capsule_artifact_dir("sfn", "math") == "build/capsules/sfn/math";
+}
+
+test "capsule_artifact_obj_path: composes <dir>/obj/mod.o" {
+    assert capsule_artifact_obj_path("sfn", "math") == "build/capsules/sfn/math/obj/mod.o";
+}
+
+test "capsule_artifact_bin_path: composes <dir>/bin/<bin>" {
+    assert capsule_artifact_bin_path("sfn", "cli", "cli") == "build/capsules/sfn/cli/bin/cli";
+    // Bin name can differ from the capsule's `name` segment if
+    // `[build].bin-name` is set in capsule.toml (post-C2b refinement).
+    assert capsule_artifact_bin_path("acme", "server", "httpd") == "build/capsules/acme/server/bin/httpd";
+}
+
+test "capsule_default_bin_name: simple name returns it verbatim" {
+    assert capsule_default_bin_name("cli") == "cli";
+}
+
+test "capsule_default_bin_name: submodule keeps last segment" {
+    assert capsule_default_bin_name("router/middleware/auth") == "auth";
+}
+
+test "capsule_default_bin_name: empty input returns empty" {
+    assert capsule_default_bin_name("") == "";
+}
+
+test "capsule_default_bin_name: trailing slash returns empty" {
+    // Trailing slash means the last segment is empty; emitter must
+    // detect this before using the result as a filename.
+    assert capsule_default_bin_name("foo/") == "";
 }
 
 test "capsule_artifact_manifest_path: composes <dir>/manifest.json" {
