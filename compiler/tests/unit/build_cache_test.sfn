@@ -24,9 +24,12 @@
 // var contract is intentionally read-only. Each test cleans up
 // its tmp tree on exit.
 import {
+    BuildCacheConfig,
     CacheKey,
+    CacheStats,
     build_cache_schema_version,
     cache_artifact_path,
+    cache_clean,
     cache_copy_artifact_to,
     cache_lookup_artifact,
     cache_lookup_complete,
@@ -34,8 +37,12 @@ import {
     cache_root_with_override,
     cache_store,
     cache_store_artifact,
+    cache_stats_is_empty,
     canonicalize_flags,
-    cache_key_for
+    cache_key_for,
+    empty_build_cache_config,
+    empty_cache_stats,
+    is_valid_digest
 } from "../../src/build_cache";
 
 // --------------------------------------------------------------
@@ -459,4 +466,99 @@ test "build_cache: cache_lookup_artifact rejects invalid digest" ![io] {
     let key = CacheKey { digest: "" };
     assert ! cache_lookup_artifact(cache_root, key, "ll");
     _cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// Stats + config (Stage C PR1c)
+// --------------------------------------------------------------
+test "build_cache: empty_cache_stats has all zero counters" {
+    let s = empty_cache_stats();
+    assert s.hits == 0;
+    assert s.misses == 0;
+    assert s.stores == 0;
+    assert s.invalid_keys == 0;
+    assert s.copy_failures == 0;
+}
+
+test "build_cache: cache_stats_is_empty true on zero stats" {
+    assert cache_stats_is_empty(empty_cache_stats());
+}
+
+test "build_cache: cache_stats_is_empty false when any counter is non-zero" {
+    let mut s = empty_cache_stats();
+    s.hits = 1;
+    assert ! cache_stats_is_empty(s);
+    let mut t = empty_cache_stats();
+    t.copy_failures = 1;
+    assert ! cache_stats_is_empty(t);
+}
+
+test "build_cache: empty_build_cache_config defaults are enabled+quiet" {
+    let c = empty_build_cache_config();
+    assert c.enabled;
+    assert ! c.trace;
+    assert ! c.clean;
+}
+
+test "build_cache: cache_clean wipes the schema-versioned tree" ![io] {
+    let scratch = _test_tmp_root("clean_wipe");
+    let cache_root = scratch + "/cache/v1";
+    process.run(["mkdir", "-p", cache_root + "/ab/abcdef"]);
+    let f = cache_root + "/ab/abcdef/mod.ll";
+    _write_file(f, "; bytes");
+    assert fs.exists(f);
+
+    let cleaned = cache_clean(cache_root);
+    assert cleaned;
+    assert ! fs.exists(cache_root);
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_clean is no-op when root does not exist" ![io] {
+    let scratch = _test_tmp_root("clean_noop");
+    let nonexistent_root = scratch + "/never-created";
+    assert ! fs.exists(nonexistent_root);
+    let cleaned = cache_clean(nonexistent_root);
+    assert cleaned;
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_clean refuses to operate on root '/'" ![io] {
+    // Defensive check — without this guard, a misconfigured
+    // SAILFIN_BUILD_CACHE_DIR could end up nuking the entire fs
+    // when --clean is passed. The function must hard-reject "/"
+    // even though every legitimate cache root is at least
+    // `/tmp/.../v1` deep.
+    assert ! cache_clean("/");
+}
+
+test "build_cache: cache_clean refuses empty path" ![io] {
+    assert ! cache_clean("");
+}
+
+// --------------------------------------------------------------
+// is_valid_digest predicate (Copilot review on PR #256 — line 647)
+// --------------------------------------------------------------
+// The resolver previously checked `digest.length == 64` to decide
+// whether to attempt a cache store. That treats a 64-char non-hex
+// digest as valid, which contradicts `_is_valid_digest`'s
+// contract. Exporting `is_valid_digest` as the single source of
+// truth closes the gap. These tests lock the contract.
+test "is_valid_digest: 64 lowercase hex chars accepted" {
+    assert is_valid_digest("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+}
+
+test "is_valid_digest: empty rejected" { assert ! is_valid_digest(""); }
+
+test "is_valid_digest: too short rejected" {
+    assert ! is_valid_digest("abcdef");
+}
+
+test "is_valid_digest: 64 uppercase chars rejected" {
+    assert ! is_valid_digest("ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789");
+}
+
+test "is_valid_digest: 64 chars with non-hex letter rejected" {
+    // 'g' is outside [0-9a-f].
+    assert ! is_valid_digest("g123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
 }

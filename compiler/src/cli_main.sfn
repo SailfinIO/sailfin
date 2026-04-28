@@ -1,7 +1,13 @@
 // compiler/src/cli_main.sfn
 //
 // Sailfin-native CLI entrypoint invoked by the native C shim.
-import { prepare_project_capsules } from "./capsule_resolver";
+import {
+    BuildCacheConfig,
+    CacheStats,
+    cache_stats_is_empty,
+    resolve_build_cache_config
+} from "./build_cache";
+import { ProjectCapsuleResult, prepare_project_capsules } from "./capsule_resolver";
 import { handle_check_command } from "./cli_check";
 import {
     handle_add_command,
@@ -31,7 +37,8 @@ fn _usage() -> string {
     let mut out: string = "usage: sfn <command> [options]\n";
     out = out + "\n";
     out = out + "build & run:\n";
-    out = out + "  sfn build [-o OUTPUT] (<file.sfn> | -p <capsule-path>)\n";
+    out = out
+        + "  sfn build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] (<file.sfn> | -p <capsule-path>)\n";
     out = out + "  sfn run   <file.sfn | exe>\n";
     out = out
         + "  sfn emit  [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n";
@@ -92,6 +99,24 @@ fn _write_llvm_text(path: string, llvm: string) ![io] {
     // native runtime boundary via fs.writeLines, which can hang if array ABI
     // metadata is corrupted.
     fs.writeFile(path, llvm);
+}
+
+// Print the per-build cache stats summary in the
+// `[cache] hits=N misses=M stores=K invalid_keys=I copy_failures=F`
+// shape — quiet for builds with no cache activity (no manifest deps,
+// or `--no-cache`). The shape is the human-readable counterpart of
+// the eventual `--json` build report's `cache` field; keep them in
+// sync if either changes.
+fn _print_cache_summary(stats: CacheStats) ![io] {
+    if cache_stats_is_empty(stats) { return; }
+    print("[cache] hits=" + number_to_string(stats.hits) + " misses="
+        + number_to_string(stats.misses)
+        + " stores="
+        + number_to_string(stats.stores)
+        + " invalid_keys="
+        + number_to_string(stats.invalid_keys)
+        + " copy_failures="
+        + number_to_string(stats.copy_failures));
 }
 
 fn _ensure_dir(path: string) ![io] {
@@ -511,10 +536,14 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
     }
 
     if is_build {
-        // build [-o OUTPUT] (file | -p <capsule-path>)
+        // build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace]
+        //       (file | -p <capsule-path>)
         let mut out_path: string = "";
         let mut input_path: string = "";
         let mut capsule_path: string = "";
+        let mut no_cache_flag: boolean = false;
+        let mut clean_flag: boolean = false;
+        let mut cache_trace_flag: boolean = false;
 
         // Parse args: support -o OUTPUT and -p PATH in any combination.
         let mut bi: number = 1;
@@ -539,6 +568,21 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
                 bi += 2;
                 continue;
             }
+            if strings_equal(a, "--no-cache") {
+                no_cache_flag = true;
+                bi += 1;
+                continue;
+            }
+            if strings_equal(a, "--clean") {
+                clean_flag = true;
+                bi += 1;
+                continue;
+            }
+            if strings_equal(a, "--cache-trace") {
+                cache_trace_flag = true;
+                bi += 1;
+                continue;
+            }
             // Positional argument: the source file.
             if input_path.length > 0 {
                 print(_usage());
@@ -547,6 +591,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             input_path = a;
             bi += 1;
         }
+        let cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
 
         // -p resolves the entry path + build kind from the capsule's
         // manifest. The build then proceeds as for a positional source
@@ -595,7 +640,8 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // capsule.toml before compiling the main source. stage_capsule_imports
         // writes .sfn-asm + .layout-manifest into build/native/import-context/
         // where the main module's lowering will find them.
-        let capsule_lls = prepare_project_capsules(input_path);
+        let capsule_result = prepare_project_capsules(input_path, cache_config);
+        let capsule_lls = capsule_result.ll_paths;
 
         let ll_path = "build/sailfin/program.ll";
         let source = fs.readFile(input_path);
@@ -621,6 +667,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
                 return rc_obj;
             }
             print("built: " + out_path);
+            _print_cache_summary(capsule_result.stats);
             return 0;
         }
 
@@ -639,6 +686,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             return rc;
         }
         print("built: " + exe_path);
+        _print_cache_summary(capsule_result.stats);
         return 0;
     }
 
@@ -670,8 +718,13 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // Resolve and compile capsule deps before lowering the main file.
         // The unified resolver covers relative imports, manifest-declared
         // capsule deps, and workspace-implicit imports in one pass —
-        // text-level fallback retired with Stage B.
-        let capsule_lls = prepare_project_capsules(input_path);
+        // text-level fallback retired with Stage B. `sfn run` does not
+        // yet take CLI cache flags, so all overrides come from env
+        // (`SAILFIN_NO_CACHE` / `SAILFIN_CACHE_TRACE`); CLI flag plumbing
+        // is a follow-up that mirrors the build path's parser block.
+        let run_cache_config = resolve_build_cache_config(false, false, false);
+        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config);
+        let capsule_lls = run_capsule_result.ll_paths;
 
         let source = fs.readFile(input_path);
         let module_name = module_name_from_path(input_path);

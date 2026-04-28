@@ -35,15 +35,20 @@
 // capsule .ll paths, and clang produces a linked binary with all
 // capsule symbols resolved.
 import {
+    BuildCacheConfig,
     CacheKey,
+    CacheStats,
+    cache_clean,
     cache_copy_artifact_to,
     cache_key_for,
     cache_lookup_artifact,
     cache_root,
     cache_store_artifact,
-    canonicalize_flags
+    canonicalize_flags,
+    empty_build_cache_config,
+    empty_cache_stats,
+    is_valid_digest
 } from "./build_cache";
-import { _get_env_cmd } from "./cli_commands_utils";
 import {
     compile_to_llvm_file_with_module,
     module_name_from_path,
@@ -76,6 +81,8 @@ export {
     prepare_project_capsules,
     prepare_project_capsules_for_check,
     prepare_project_capsules_for_test,
+    ProjectCapsuleResult,
+    CompileCapsuleResult,
     resolve_relative_import,
     stage_capsule_imports,
     compile_capsule_modules,
@@ -88,6 +95,25 @@ struct CapsuleSource {
     source_path: string;  // absolute path to the .sfn file
     slug: string;  // e.g. "sfn/cli/mod" — used for staging + symbol mangling
     ll_path: string;  // e.g. "build/sailfin/capsules/sfn__cli__mod.ll"
+}
+
+// Result of `compile_capsule_modules`: per-build .ll paths plus the
+// cache stats accumulated across all per-module compiles. `success`
+// distinguishes "no deps" (empty `ll_paths`, success=true) from a
+// compile failure (empty `ll_paths`, success=false).
+struct CompileCapsuleResult {
+    ll_paths: string[];
+    stats: CacheStats;
+    success: boolean;
+}
+
+// Result of `prepare_project_capsules` (the build / run path).
+// `ll_paths` is the dep `.ll` list for the linker; `stats` is the
+// per-build cache summary the CLI prints at the end (and that
+// `--json` will eventually emit as a structured field).
+struct ProjectCapsuleResult {
+    ll_paths: string[];
+    stats: CacheStats;
 }
 
 // One entry from the workspace's [workspace].members list, with the
@@ -535,33 +561,48 @@ fn _cr_collect_dep_manifest_paths(sources: CapsuleSource[]) -> string[] {
     return out;
 }
 
-// `SAILFIN_NO_CACHE=1` disables both cache lookups and stores —
-// emergency rollback knob if a cache bug ever surfaces. Returns
-// true when caching is enabled (the default).
-fn _cr_cache_enabled() -> boolean ![io] {
-    let raw = _get_env_cmd("SAILFIN_NO_CACHE");
-    return !strings_equal(raw, "1");
+// One module's cache outcome. Returned from `_cr_compile_one` so
+// the caller (`compile_capsule_modules`) can fold per-module
+// outcomes into the per-build `CacheStats` struct without needing
+// mutable in/out parameters.
+//
+// `lookup_attempted` distinguishes "we tried the cache and missed"
+// from "we never asked the cache" — without it, every module
+// in a `--no-cache` build would count as a miss and trigger the
+// stats summary line, which is misleading for the user-facing
+// surface.
+struct ModuleCacheEvent {
+    success: boolean;  // false → caller bails this build
+    lookup_attempted: boolean;  // true iff we consulted the cache
+    hit: boolean;  // cache served the .ll; producer skipped
+    stored: boolean;  // miss path stored a fresh artifact
+    invalid_key: boolean;  // is_valid_digest rejected the digest
+    copy_failed: boolean;  // cache had it; cp to dst failed
 }
 
-// `SAILFIN_CACHE_TRACE=1` prints `[cache hit/miss/store] <slug>`
-// to stderr so a user (or an e2e test) can observe cache
-// behaviour without parsing an opaque build report. Quiet by
-// default.
-fn _cr_cache_trace_enabled() -> boolean ![io] {
-    let raw = _get_env_cmd("SAILFIN_CACHE_TRACE");
-    return strings_equal(raw, "1");
+fn _cr_module_cache_event_failure() -> ModuleCacheEvent {
+    return ModuleCacheEvent {
+        success: false,
+        lookup_attempted: false,
+        hit: false,
+        stored: false,
+        invalid_key: false,
+        copy_failed: false
+    };
 }
 
 // ---- Capsule module compilation ----
-// Lower a single capsule source to its own .ll so the final link can
-// resolve the main module's external declarations to the capsule's
-// definitions. With `cache_enabled = true`, looks up an existing
-// `.ll` artifact under the content-addressed cache before
-// compiling, and stores the result on a clean compile.
-fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, cache_enabled: boolean, compiler_version: string, flags_canonical: string, trace: boolean) -> boolean ![io] {
+// Lower a single capsule source to its own .ll so the final link
+// can resolve the main module's external declarations to the
+// capsule's definitions. With `config.enabled = true`, looks up an
+// existing `.ll` artifact under the content-addressed cache before
+// compiling, and stores the result on a clean compile. Returns a
+// `ModuleCacheEvent` describing the outcome so the caller can
+// accumulate stats across the build.
+fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string) -> ModuleCacheEvent ![io] {
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);
-        return false;
+        return _cr_module_cache_event_failure();
     }
     let ll_dir = _cr_dirname(src.ll_path);
     _cr_ensure_dir(ll_dir);
@@ -570,16 +611,33 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
     // `_sha256_of_string`'s tmp paths unique across the dep-list
     // and final-input hashes.
     let mut cache_key: CacheKey = CacheKey { digest: "" };
-    if cache_enabled {
+    let mut copy_failed: boolean = false;
+    let mut lookup_attempted: boolean = false;
+    if config.enabled {
+        lookup_attempted = true;
         cache_key = cache_key_for(src.source_path, dep_manifests, compiler_version, flags_canonical, src.slug);
         if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
             if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
-                if trace { print.err("[cache hit] " + src.slug); }
-                return true;
+                if config.trace { print.err("[cache hit] " + src.slug); }
+                return ModuleCacheEvent {
+                    success: true,
+                    lookup_attempted: true,
+                    hit: true,
+                    stored: false,
+                    invalid_key: false,
+                    copy_failed: false
+                };
             }
-            if trace { print.err("[cache copy-failed] " + src.slug); }
+            // Cache had the entry but materialisation failed (e.g.
+            // dst dir uncreatable on a read-only mount). Fall
+            // through to a fresh compile and record the outcome
+            // so CI can alarm on cache poisoning.
+            copy_failed = true;
+            if config.trace {
+                print.err("[cache copy-failed] " + src.slug);
+            }
         } else {
-            if trace { print.err("[cache miss] " + src.slug); }
+            if config.trace { print.err("[cache miss] " + src.slug); }
         }
     }
 
@@ -588,31 +646,69 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
     if !ok {
         print.err("capsule-resolver: failed to lower " + src.slug
             + " to LLVM IR");
-        return false;
+        return _cr_module_cache_event_failure();
     }
 
-    if cache_enabled {
-        let stored = cache_store_artifact(cache_root_path, cache_key, "ll", src.ll_path);
-        if trace {
-            if stored { print.err("[cache store] " + src.slug); } else {
-                print.err("[cache store-failed] " + src.slug);
+    let mut stored: boolean = false;
+    let mut invalid_key: boolean = false;
+    if config.enabled {
+        // `cache_store_artifact` returns false on invalid digest
+        // OR cp failure — we surface the former separately so CI
+        // can distinguish "hash failed" from "fs failed." Use the
+        // same predicate (`is_valid_digest`) the cache layer uses
+        // internally so a non-hex digest is classified the same
+        // way at both the lookup and store sites.
+        if is_valid_digest(cache_key.digest) {
+            stored = cache_store_artifact(cache_root_path, cache_key, "ll", src.ll_path);
+            if config.trace {
+                if stored { print.err("[cache store] " + src.slug); } else {
+                    print.err("[cache store-failed] " + src.slug);
+                }
+            }
+        } else {
+            invalid_key = true;
+            if config.trace {
+                print.err("[cache invalid-key] " + src.slug);
             }
         }
     }
-    return true;
+    return ModuleCacheEvent {
+        success: true,
+        lookup_attempted: lookup_attempted,
+        hit: false,
+        stored: stored,
+        invalid_key: invalid_key,
+        copy_failed: copy_failed
+    };
 }
 
-// Compile every capsule module to its own .ll and return the list of
-// .ll paths to feed the linker. Resolves cache context once at the
-// top — dep-manifest paths, cache root, env-driven enable/trace —
-// and threads it into each per-module call.
-fn compile_capsule_modules(sources: CapsuleSource[]) -> string[] ![io] {
+// Compile every capsule module to its own .ll and return the
+// `CompileCapsuleResult` for the build (paths + stats + success).
+// `config` carries the CLI flag overrides; pass
+// `empty_build_cache_config()` for callers that want the default
+// env-driven behaviour. Honours `config.clean` by wiping the cache
+// root before any per-module work — done once per build, not per
+// module, so a single `--clean` run can't double-wipe.
+fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig) -> CompileCapsuleResult ![io] {
     _cr_ensure_dir("build/sailfin");
     _cr_ensure_dir("build/sailfin/capsules");
     let dep_manifests = _cr_collect_dep_manifest_paths(sources);
     let cache_root_path = cache_root();
-    let cache_enabled = _cr_cache_enabled();
-    let trace = _cr_cache_trace_enabled();
+    if config.clean {
+        // `--clean` is a destructive opt-in. If the wipe fails
+        // (read-only fs, perms, etc.), surface a warning so the
+        // user knows the cache may still be partially populated
+        // — falling through silently would be surprising and
+        // hard to diagnose. The build itself proceeds: a stale
+        // cache with the same content keys still produces correct
+        // artifacts; only `--clean`'s "start fresh" guarantee is
+        // violated.
+        let cleaned = cache_clean(cache_root_path);
+        if !cleaned {
+            print.err("[cache] --clean: failed to wipe " + cache_root_path
+                + " (cache may be partially populated)");
+        }
+    }
     // Strict compiler-version lookup: NEVER falls through to a CWD
     // `capsule.toml` (the project's manifest), because the build
     // cache keys IR against the compiler binary's identity — letting
@@ -635,15 +731,41 @@ fn compile_capsule_modules(sources: CapsuleSource[]) -> string[] ![io] {
     let empty_flags: string[] = [];
     let flags_canonical = canonicalize_flags(empty_flags);
     let mut out: string[] = [];
+    let mut stats = empty_cache_stats();
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
-        let ok = _cr_compile_one(sources[i], dep_manifests, cache_root_path, cache_enabled, compiler_version, flags_canonical, trace);
-        if !ok { return []; }
+        let evt = _cr_compile_one(sources[i], dep_manifests, cache_root_path, config, compiler_version, flags_canonical);
+        if !evt.success {
+            return CompileCapsuleResult {
+                ll_paths: out,
+                stats: stats,
+                success: false
+            };
+        }
+        // Only count hits/misses when the cache was actually
+        // consulted. With `--no-cache` (or `SAILFIN_NO_CACHE=1`),
+        // every module is a fresh compile but the cache layer was
+        // never asked anything — counting them as misses would
+        // make the end-of-build summary misleading.
+        if evt.lookup_attempted {
+            if evt.hit { stats.hits = stats.hits + 1; } else {
+                stats.misses = stats.misses + 1;
+            }
+        }
+        if evt.stored { stats.stores = stats.stores + 1; }
+        if evt.invalid_key { stats.invalid_keys = stats.invalid_keys + 1; }
+        if evt.copy_failed {
+            stats.copy_failures = stats.copy_failures + 1;
+        }
         out.push(sources[i].ll_path);
         i += 1;
     }
-    return out;
+    return CompileCapsuleResult {
+        ll_paths: out,
+        stats: stats,
+        success: true
+    };
 }
 
 // ---- Workspace discovery ----
@@ -1792,24 +1914,50 @@ fn _cr_resolve_and_dedupe(entry_paths: string[]) -> ResolverDedupeResult ![io] {
 }
 
 // Resolve, stage, and compile every dependency reachable from
-// `input_path`. Returns the list of dependency .ll paths to feed the
-// linker (empty when no dependencies are needed). On slug collision
-// or stage failure, prints a structured error and returns `[]` —
-// `sfn build`'s call sites do not currently distinguish those cases
-// from "no deps", since clang link will surface any missing-symbol
-// follow-up downstream.
-fn prepare_project_capsules(input_path: string) -> string[] ![io] {
+// `input_path`. Returns a `ProjectCapsuleResult` carrying the dep
+// `.ll` paths and the per-build cache stats. `ll_paths` is empty
+// when no dependencies are needed AND on slug collision or stage
+// failure — `sfn build`'s call sites do not currently distinguish
+// those cases from "no deps", since clang link will surface any
+// missing-symbol follow-up downstream. Inspect `stats` (and any
+// `print.err` output the helpers emitted) for setup failures vs.
+// genuinely-empty dep graphs.
+fn prepare_project_capsules(input_path: string, config: BuildCacheConfig) -> ProjectCapsuleResult ![io] {
+    let empty_paths: string[] = [];
     let entry_paths: string[] = [input_path];
     let resolved = _cr_resolve_and_dedupe(entry_paths);
-    if resolved.has_collision { return []; }
-    if resolved.sources.length == 0 { return []; }
+    if resolved.has_collision {
+        return ProjectCapsuleResult {
+            ll_paths: empty_paths,
+            stats: empty_cache_stats()
+        };
+    }
+    if resolved.sources.length == 0 {
+        return ProjectCapsuleResult {
+            ll_paths: empty_paths,
+            stats: empty_cache_stats()
+        };
+    }
 
     let staged = stage_capsule_imports(resolved.sources);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
-        return [];
+        return ProjectCapsuleResult {
+            ll_paths: empty_paths,
+            stats: empty_cache_stats()
+        };
     }
-    return compile_capsule_modules(resolved.sources);
+    let result = compile_capsule_modules(resolved.sources, config);
+    if !result.success {
+        return ProjectCapsuleResult {
+            ll_paths: empty_paths,
+            stats: result.stats
+        };
+    }
+    return ProjectCapsuleResult {
+        ll_paths: result.ll_paths,
+        stats: result.stats
+    };
 }
 
 // Resolver pass tuned for `sfn check`: enumerate, dedupe, and stage
@@ -1962,13 +2110,17 @@ fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolu
         ai += 1;
     }
 
-    let ll_paths = compile_capsule_modules(resolved.sources);
-    // `compile_capsule_modules` returns `[]` on compile failure for any
-    // source; with `resolved.sources.length > 0` (guarded above) an
-    // empty list unambiguously means failure. Surface it as a setup
-    // error so the test runner exits 2 instead of trying to link
-    // against missing helper objects.
-    if ll_paths.length == 0 {
+    // `sfn test` doesn't yet take a CLI cache config; pass the
+    // env-driven default. When the test runner grows `--no-cache`
+    // / `--clean`, thread the resolved config in here.
+    let test_config = empty_build_cache_config();
+    let result = compile_capsule_modules(resolved.sources, test_config);
+    // Surface a compile failure as `staging_failed = true` so the
+    // test runner exits 2 instead of trying to link against
+    // missing helper objects. (The PR1c stats are dropped on this
+    // path — once the test runner needs them, the
+    // `TestCapsuleResolution` struct gets a `cache_stats` field.)
+    if !result.success {
         return TestCapsuleResolution {
             asm_paths: asm_paths,
             ll_paths: empty_paths,
@@ -1980,7 +2132,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[]) -> TestCapsuleResolu
 
     return TestCapsuleResolution {
         asm_paths: asm_paths,
-        ll_paths: ll_paths,
+        ll_paths: result.ll_paths,
         capsule_count: resolved.sources.length,
         staging_failed: false,
         capabilities_required: resolved.capabilities_required
