@@ -143,6 +143,47 @@ test_deps_consistency() {
 }
 run_test "deps.count matches deps.ll_paths.length (>= 1)" test_deps_consistency
 
+# ---- Test 8b: every deps.ll_paths entry exists on disk ----
+# Stage C2b2 — `dep_ll_paths` strings must point at real `.ll`
+# files. Hardens the schema contract without locking the prefix:
+# the path shape can drift across stages, but every named entry
+# must be a real, on-disk artifact with the `.ll` extension.
+test_deps_ll_paths_exist() {
+    local missing=0
+    while IFS= read -r path; do
+        [ -z "$path" ] && continue
+        if [ ! -f "$SCRATCH/$path" ]; then
+            echo "[test]   missing dep .ll: $path" >&2
+            missing=1
+        fi
+        case "$path" in
+            *.ll) ;;
+            *)
+                echo "[test]   dep_ll_paths entry doesn't end in .ll: $path" >&2
+                missing=1
+                ;;
+        esac
+    done < <(jq -r '.deps.ll_paths[]' "$SIDECAR")
+    [ "$missing" -eq 0 ]
+}
+run_test "every deps.ll_paths entry is a real .ll file" test_deps_ll_paths_exist
+
+# ---- Test 8c: dep .ll lives under the per-capsule tree ----
+# Stage C2b2: `sfn/math` is a manifest-declared dep, so its `.ll`
+# must land at `build/capsules/sfn/math/ir/mod.ll` rather than the
+# legacy `build/sailfin/capsules/sfn__math__mod.ll`. Locks the
+# per-capsule routing in the sidecar's view of the world.
+test_dep_ll_under_per_capsule_tree() {
+    local found=0
+    while IFS= read -r path; do
+        case "$path" in
+            build/capsules/sfn/math/ir/*.ll) found=1 ;;
+        esac
+    done < <(jq -r '.deps.ll_paths[]' "$SIDECAR")
+    [ "$found" -eq 1 ]
+}
+run_test "dep .ll routes under build/capsules/sfn/math/ir/ (Stage C2b2)" test_dep_ll_under_per_capsule_tree
+
 # ---- Test 9b: -o EXPLICIT overrides the canonical default ----
 test_explicit_o_wins() {
     cd "$SCRATCH" || return 1

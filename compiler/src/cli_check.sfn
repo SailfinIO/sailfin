@@ -21,6 +21,7 @@ import {
     CheckCapsuleResolution,
     discover_project_root,
     discover_workspace_root,
+    empty_resolver_consumer,
     prepare_project_capsules_for_check
 } from "./capsule_resolver";
 import { _collect_sfn_files_cmd, _dirname_cmd } from "./cli_commands_utils";
@@ -247,7 +248,12 @@ fn handle_check_command(args: string[]) -> number ![io] {
     let mut gi: number = 0;
     loop {
         if gi >= groups.length { break; }
-        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths);
+        // `sfn check` does not write `.ll` (it stops after staging),
+        // so the per-capsule layout has no observable effect on
+        // this path. Pass an empty consumer; when `sfn check -p`
+        // lands the consumer is computed from the project's manifest
+        // the same way `sfn build` does it.
+        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths, empty_resolver_consumer());
         if resolution.staging_failed {
             // The resolver already wrote a structured error to
             // stderr (slug collision or stage-write failure).

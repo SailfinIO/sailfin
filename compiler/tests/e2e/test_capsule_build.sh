@@ -114,11 +114,21 @@ test_import_context_staged() {
 }
 run_test "capsule import-context was staged" test_import_context_staged
 
-# ---- Test 4: capsule .ll was produced ----
+# ---- Test 4: capsule .ll was produced under the per-capsule tree ----
+# Stage C2b2 routes manifest-declared dep `.ll` outputs under
+# `build/capsules/<scope>/<name>/ir/<rel>.ll` regardless of whether
+# the build was invoked with `-p` or positionally — the dep's own
+# `(scope, name)` is what determines the routing.
 test_capsule_ll_produced() {
-    [ -f "$SCRATCH/build/sailfin/capsules/sfn__math__mod.ll" ]
+    [ -f "$SCRATCH/build/capsules/sfn/math/ir/mod.ll" ]
 }
-run_test "capsule .ll was produced" test_capsule_ll_produced
+run_test "capsule .ll was produced under per-capsule tree" test_capsule_ll_produced
+
+# ---- Test 5: legacy flat .ll path is no longer written for manifest deps ----
+test_legacy_path_absent() {
+    ! [ -f "$SCRATCH/build/sailfin/capsules/sfn__math__mod.ll" ]
+}
+run_test "legacy flat .ll path is no longer used for manifest deps" test_legacy_path_absent
 
 # ---- Summary ----
 echo ""

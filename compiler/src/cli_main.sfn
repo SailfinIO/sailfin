@@ -22,7 +22,12 @@ import {
     is_safe_scope_name,
     parse_scope_name
 } from "./capsule_artifact";
-import { ProjectCapsuleResult, prepare_project_capsules } from "./capsule_resolver";
+import {
+    ProjectCapsuleResult,
+    ResolverConsumer,
+    empty_resolver_consumer,
+    prepare_project_capsules
+} from "./capsule_resolver";
 import { handle_check_command } from "./cli_check";
 import {
     handle_add_command,
@@ -746,6 +751,26 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             return 2;
         }
 
+        // Resolve the consumer's safe scope/name once. Used by:
+        //   (a) the canonical-`out_path` defaulting block below
+        //       (Stage C2b1), and
+        //   (b) the resolver's `ResolverConsumer` so intra-capsule
+        //       relative-import `.ll`s land under the consumer's
+        //       per-capsule tree (Stage C2b2).
+        // Both `out_path` and dep `.ll` routing fall back to the
+        // legacy flat layout when the name isn't scope-form (e.g.
+        // the compiler's own `[capsule].name = "sailfin"`).
+        let mut consumer = empty_resolver_consumer();
+        if cap_capsule_name.length > 0 {
+            let parts0 = parse_scope_name(cap_capsule_name);
+            if is_safe_scope_name(parts0.scope, parts0.name) {
+                consumer = ResolverConsumer {
+                    scope: parts0.scope,
+                    name: parts0.name
+                };
+            }
+        }
+
         if out_path.length == 0 {
             // Stage C2b: when `-p` is used and `-o` was NOT given,
             // default to the canonical per-capsule layout
@@ -757,21 +782,18 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             // malformed `[capsule].name` can never escape the
             // build root.
             let mut canonical_set: boolean = false;
-            if cap_capsule_name.length > 0 {
-                let parts = parse_scope_name(cap_capsule_name);
-                if is_safe_scope_name(parts.scope, parts.name) {
-                    let cap_dir = capsule_artifact_dir(parts.scope, parts.name);
-                    if no_link {
-                        _ensure_dir(cap_dir + "/obj");
-                        out_path = capsule_artifact_obj_path(parts.scope, parts.name);
+            if consumer.scope.length > 0 {
+                let cap_dir = capsule_artifact_dir(consumer.scope, consumer.name);
+                if no_link {
+                    _ensure_dir(cap_dir + "/obj");
+                    out_path = capsule_artifact_obj_path(consumer.scope, consumer.name);
+                    canonical_set = true;
+                } else {
+                    let bin_name = capsule_default_bin_name(consumer.name);
+                    if bin_name.length > 0 {
+                        _ensure_dir(cap_dir + "/bin");
+                        out_path = capsule_artifact_bin_path(consumer.scope, consumer.name, bin_name);
                         canonical_set = true;
-                    } else {
-                        let bin_name = capsule_default_bin_name(parts.name);
-                        if bin_name.length > 0 {
-                            _ensure_dir(cap_dir + "/bin");
-                            out_path = capsule_artifact_bin_path(parts.scope, parts.name, bin_name);
-                            canonical_set = true;
-                        }
                     }
                 }
             }
@@ -795,7 +817,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // capsule.toml before compiling the main source. stage_capsule_imports
         // writes .sfn-asm + .layout-manifest into build/native/import-context/
         // where the main module's lowering will find them.
-        let capsule_result = prepare_project_capsules(input_path, cache_config);
+        let capsule_result = prepare_project_capsules(input_path, cache_config, consumer);
         let capsule_lls = capsule_result.ll_paths;
 
         let ll_path = "build/sailfin/program.ll";
@@ -926,7 +948,11 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // (`--no-cache` / `--clean` / `--cache-trace`) layer on top of
         // env-var defaults (`SAILFIN_NO_CACHE` / `SAILFIN_CACHE_TRACE`).
         let run_cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
-        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config);
+        // `sfn run` has no `-p` plumbing yet, so the consumer is
+        // always empty: relative-import `.ll`s take the legacy
+        // flat layout (Stage C2b2). When `sfn run -p` lands, this
+        // becomes a one-line update mirroring `sfn build`.
+        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer());
         let capsule_lls = run_capsule_result.ll_paths;
 
         let source = fs.readFile(input_path);

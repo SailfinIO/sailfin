@@ -45,9 +45,22 @@ import { substring } from "./string_utils";
 //                                        //   or <scope>/<name>/obj in C2b
 //   "deps": {
 //     "count": 1,
-//     "ll_paths": ["build/sailfin/capsules/sfn__runtime__mod.ll"]
+//     "ll_paths": ["build/capsules/sfn/runtime/ir/mod.ll"]
 //   }
 // }
+//
+// schema_version is intentionally still "1" after the C2b2 dep `.ll`
+// path migration. The `deps.ll_paths` JSON field (serialized from
+// the internal `CapsuleArtifactManifest.dep_ll_paths` struct field)
+// describes a list of paths to dep `.ll` files; the path strings
+// drifted from the legacy `build/sailfin/capsules/<mangled>.ll`
+// form to the per-capsule `build/capsules/<scope>/<name>/ir/<rel>.ll`
+// tree, but the field shape (string array of file paths) is
+// unchanged. Same precedent as C2b1, where `out_path` migrated from
+// `build/sailfin/program{,.o}` to
+// `build/capsules/<scope>/<name>/{obj/mod.o, bin/<name>}` without a
+// schema bump. A *shape* change (entries become objects, etc.)
+// would be a v2.
 struct ScopeName {
     scope: string;
     name: string;
@@ -170,6 +183,16 @@ fn capsule_artifact_manifest_path(scope: string, name: string) -> string {
     return capsule_artifact_dir(scope, name) + "/manifest.json";
 }
 
+// `<artifact_dir>/ir` — canonical per-capsule LLVM IR tree (Stage
+// C2b2). Each module's `.ll` lands at `<ir_dir>/<rel-slug>.ll`,
+// preserving the slug's `/`-separated subdirectories so a
+// `sfn/http/internal/buffer` slug becomes
+// `build/capsules/sfn/http/ir/internal/buffer.ll`. Pure; does not
+// create the directory.
+fn capsule_artifact_ir_dir(scope: string, name: string) -> string {
+    return capsule_artifact_dir(scope, name) + "/ir";
+}
+
 // `<artifact_dir>/obj/mod.o` — canonical library object location
 // (Stage C2b). Pure; does not create the directory.
 fn capsule_artifact_obj_path(scope: string, name: string) -> string {
@@ -202,6 +225,206 @@ fn capsule_default_bin_name(name: string) -> string {
     if last_slash < 0 { return name; }
     if last_slash == name.length - 1 { return ""; }
     return substring(name, last_slash + 1, name.length);
+}
+
+// -------------------------------------------------------------------
+// Stage C2b2 — per-capsule `.ll` layout
+// -------------------------------------------------------------------
+//
+// The resolver constructs `CapsuleSource.ll_path` strings that point
+// at where each module's lowered `.ll` will live on disk. Pre-C2b2
+// every dep `.ll` was written to a single flat directory
+// (`build/sailfin/capsules/<mangled-slug>.ll`); C2b2 routes them
+// into the per-capsule tree from §4.4 of the build-architecture
+// proposal.
+//
+// Routing rules, applied by `ir_path_for_slug`:
+//   1. If the slug starts with a known dep prefix `<scope>/<name>/`,
+//      the `.ll` lands under the **dep's** tree:
+//        `build/capsules/<scope>/<name>/ir/<rest>.ll`
+//   2. Otherwise, if the **consumer** capsule (the project being
+//      built via `-p`) has a safe scope/name, the `.ll` lands under
+//      the consumer's tree:
+//        `build/capsules/<consumer-scope>/<consumer-name>/ir/<slug>.ll`
+//   3. Otherwise — positional builds, single-segment names like
+//      `"sailfin"`, etc. — the function returns `""` and the
+//      resolver falls back to the legacy flat layout. The compiler
+//      self-host falls into this case by construction (its
+//      `capsule.toml` declares `name = "sailfin"`, single-segment).
+//
+// The struct + helpers below are pure: they take strings, return
+// strings, and never touch the filesystem. The resolver builds
+// `CapsuleArtifactLayout` from its dep source list once per build
+// (in `_cr_resolve_and_dedupe`) and consults it as it fills in
+// each `CapsuleSource.ll_path`.
+struct CapsuleArtifactLayout {
+    // Consumer's manifest scope/name, when `sfn build -p` was used
+    // and `[capsule].name` is in safe scope/name form. Empty means
+    // intra-capsule slugs fall through to the legacy flat layout.
+    consumer_scope: string;
+    consumer_name: string;
+    // Parallel arrays: `dep_scopes[i] / dep_names[i]` is one
+    // declared dep capsule. A slug starting with `<scope>/<name>/`
+    // is routed under that dep's tree. Built from
+    // `CapsuleSource.spec` values (filtered through
+    // `is_safe_scope_name`), deduped.
+    dep_scopes: string[];
+    dep_names: string[];
+}
+
+fn empty_capsule_artifact_layout() -> CapsuleArtifactLayout {
+    let empty_scopes: string[] = [];
+    let empty_names: string[] = [];
+    return CapsuleArtifactLayout {
+        consumer_scope: "",
+        consumer_name: "",
+        dep_scopes: empty_scopes,
+        dep_names: empty_names
+    };
+}
+
+// True iff `s` is a single safe path segment (no `/`, no `\`, not
+// `.`, not `..`, non-empty). Local copy of `_ca_is_safe_segment`'s
+// shape; kept private to this layout block so the validator can
+// evolve independently of the sidecar emit guard if needed.
+fn _ca_is_safe_relpath_segment(s: string) -> boolean {
+    if s.length == 0 { return false; }
+    if s == "." { return false; }
+    if s == ".." { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "/" { return false; }
+        if ch == "\\" { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+// True iff `s` is a safe slash-separated relative path: no leading
+// `/`, no `\` anywhere, every `/`-segment is safe per
+// `_ca_is_safe_relpath_segment`. Used to validate slug tails before
+// interpolating them into a filesystem path. The slug itself is
+// produced by `module_name_from_path` and is already structurally
+// safe in practice; this is a defense-in-depth guard.
+fn _ca_is_safe_relpath(s: string) -> boolean {
+    if s.length == 0 { return false; }
+    if substring(s, 0, 1) == "/" { return false; }
+    let mut start: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\\" { return false; }
+        if ch == "/" {
+            let segment = substring(s, start, i);
+            if !_ca_is_safe_relpath_segment(segment) { return false; }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    let last = substring(s, start, s.length);
+    return _ca_is_safe_relpath_segment(last);
+}
+
+// Returns the canonical per-capsule `.ll` path for `slug` under
+// `layout`, or `""` to signal "use the legacy fallback." See the
+// routing rules at the top of this section.
+//
+// The caller (`capsule_resolver.sfn`) treats `""` as "fall back to
+// `build/sailfin/capsules/<mangled>.ll`" — that's the pre-migration
+// layout, preserved for positional builds and the compiler
+// self-host. Callers do NOT need to interpret the returned path
+// further; it's already absolute-relative-to-cwd and uses `/`
+// separators throughout.
+fn ir_path_for_slug(layout: CapsuleArtifactLayout, slug: string) -> string {
+    if slug.length == 0 { return ""; }
+    // Defense-in-depth: a slug containing path-traversal segments
+    // would let a malformed source file land its `.ll` outside the
+    // build tree. `module_name_from_path` doesn't produce these in
+    // practice, but the validator is cheap.
+    if !_ca_is_safe_relpath(slug) { return ""; }
+
+    // Rule 1: dep-prefix match. Iterate in the order layout was
+    // built; specs are deduped at construction so each (scope,
+    // name) pair is checked at most once.
+    let mut i: number = 0;
+    loop {
+        if i >= layout.dep_scopes.length { break; }
+        let dep_scope = layout.dep_scopes[i];
+        let dep_name = layout.dep_names[i];
+        let prefix = dep_scope + "/" + dep_name + "/";
+        if slug.length > prefix.length {
+            if substring(slug, 0, prefix.length) == prefix {
+                let tail = substring(slug, prefix.length, slug.length);
+                if _ca_is_safe_relpath(tail) {
+                    return capsule_artifact_ir_dir(dep_scope, dep_name) + "/"
+                        + tail
+                        + ".ll";
+                }
+                return "";
+            }
+        }
+        i += 1;
+    }
+
+    // Rule 2: consumer fallback.
+    if layout.consumer_scope.length > 0 {
+        if layout.consumer_name.length > 0 {
+            if is_safe_scope_name(layout.consumer_scope, layout.consumer_name) {
+                return capsule_artifact_ir_dir(layout.consumer_scope, layout.consumer_name)
+                    + "/"
+                    + slug
+                    + ".ll";
+            }
+        }
+    }
+
+    // Rule 3: legacy fallback — caller composes the legacy path.
+    return "";
+}
+
+// Build a `CapsuleArtifactLayout` from a list of dep specs
+// (`CapsuleSource.spec` values from the resolver) plus the
+// consumer's scope/name. Dedupes (scope, name) pairs and filters
+// out any spec that fails `is_safe_scope_name`. Pure — testable
+// without filesystem setup.
+fn capsule_artifact_layout_from_specs(specs: string[], consumer_scope: string, consumer_name: string) -> CapsuleArtifactLayout {
+    let mut dep_scopes: string[] = [];
+    let mut dep_names: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= specs.length { break; }
+        let spec = specs[i];
+        i += 1;
+        if spec.length == 0 { continue; }
+        let p = parse_scope_name(spec);
+        if p.scope.length == 0 { continue; }
+        if !is_safe_scope_name(p.scope, p.name) { continue; }
+        let mut already: boolean = false;
+        let mut j: number = 0;
+        loop {
+            if j >= dep_scopes.length { break; }
+            if dep_scopes[j] == p.scope {
+                if dep_names[j] == p.name {
+                    already = true;
+                    break;
+                }
+            }
+            j += 1;
+        }
+        if !already {
+            dep_scopes.push(p.scope);
+            dep_names.push(p.name);
+        }
+    }
+    return CapsuleArtifactLayout {
+        consumer_scope: consumer_scope,
+        consumer_name: consumer_name,
+        dep_scopes: dep_scopes,
+        dep_names: dep_names
+    };
 }
 
 // -------------------------------------------------------------------
@@ -310,15 +533,20 @@ fn capsule_artifact_manifest_to_json(m: CapsuleArtifactManifest) -> string {
 }
 
 export {
+    CapsuleArtifactLayout,
     CapsuleArtifactManifest,
     ScopeName,
-    empty_capsule_artifact_manifest,
-    parse_scope_name,
-    is_safe_scope_name,
-    capsule_artifact_dir,
-    capsule_artifact_manifest_path,
-    capsule_artifact_obj_path,
     capsule_artifact_bin_path,
+    capsule_artifact_dir,
+    capsule_artifact_ir_dir,
+    capsule_artifact_layout_from_specs,
+    capsule_artifact_manifest_path,
+    capsule_artifact_manifest_to_json,
+    capsule_artifact_obj_path,
     capsule_default_bin_name,
-    capsule_artifact_manifest_to_json
+    empty_capsule_artifact_layout,
+    empty_capsule_artifact_manifest,
+    ir_path_for_slug,
+    is_safe_scope_name,
+    parse_scope_name
 };

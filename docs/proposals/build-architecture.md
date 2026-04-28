@@ -4,7 +4,7 @@ Status: Stages A and B fully shipped. **Stage C cache milestone shipped (PR1–1
 Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed) · 2026-04-26 (PR2 `sfn test` migration + A4 deletion landed) · 2026-04-28 (PR3 `llvm-objcopy --weaken` retired via path-norm fix; libextract decoupled) · 2026-04-28 (Stage C cache milestone PR1–1f shipped)
 Authors: Core Team
 
-## Implementation Status (as of 2026-04-28, Stage C cache milestone shipped)
+## Implementation Status (as of 2026-04-28, Stage C cache milestone shipped + per-capsule artifact layout shipped through C2b1; C2b2 in flight)
 
 **Stage A — shipped.** Manifest schema, `workspace.toml`,
 `capsules/sfn/prelude/capsule.toml`, and `[build].kind = "binary"` on the
@@ -1321,15 +1321,42 @@ The cache-aside Stage C exit criteria from the original plan (every
 stdlib capsule builds with `sfn build -p`, byte-for-byte parity
 with `build.sh`, CI cache-hit floor) still stand and break down as:
 
-- **C2 — Standard artifact layout** (next). Move `sfn build`'s
+- **C2 — Standard artifact layout** (in flight). Move `sfn build`'s
   outputs into the per-capsule tree from §4.4
   (`build/capsules/<scope>/<name>/{manifest.json, ir/, obj/, bin/}`).
-  The shipped cache already materializes much of the same artifact
-  set (IR / obj / etc.), but it is content-addressed under
-  `build/cache/v1/<shard>/<key>/...` rather than per-capsule; the
-  in-tree build tree does not yet follow the standardized
-  per-capsule layout. Unblocks C4 (`sfn package` knows what's in
-  a capsule).
+  Broken into four sub-PRs by risk:
+    - **C2a — sidecar schema** (shipped, #261). Per-capsule
+      `manifest.json` written after `sfn build -p`. Locks the
+      schema downstream consumers (`sfn package`, `sfn lsp`,
+      MCP) consume. Path-traversal hardening via
+      `is_safe_scope_name`.
+    - **C2b1 — binary / library out_path** (shipped, #262).
+      `sfn build -p` (no `-o`) defaults library outputs to
+      `<dir>/obj/mod.o` and binary outputs to
+      `<dir>/bin/<bin-name>`. User-provided `-o` still wins.
+      Unsafe-scope `[capsule].name` falls back to legacy
+      `build/sailfin/program{,.o}`.
+    - **C2b2 — dep `.ll` migration** (in flight). Manifest-
+      declared dep sources land at
+      `build/capsules/<dep-scope>/<dep-name>/ir/<rel>.ll`;
+      intra-capsule (relative-import) sources of a `-p`
+      consumer land under the consumer's own `ir/` tree.
+      Centralised in `capsule_artifact.sfn::ir_path_for_slug`
+      + `capsule_resolver.sfn::ResolverConsumer`. Two-pass
+      resolution: source collectors emit `ll_path = ""` and
+      `_cr_resolve_and_dedupe` fills in the resolved path
+      from the per-build layout. `BuildReport.dep_ll_paths`
+      and the sidecar's `deps.ll_paths` reflect the new
+      paths; `schema_version` stays at `"1"` (string-array-
+      of-paths shape unchanged — same precedent C2b1 set
+      for `out_path`).
+    - **C2c — per-module sidecar entries** (next). Add a
+      `modules: [{slug, ir_path, obj_path, cache_key}]`
+      array to the sidecar so `sfn package` can enumerate
+      per-source artifacts without re-walking the build
+      tree. Builds on C2b2 — slug → `ir_path` mapping is
+      already centralised.
+  Unblocks C4 (`sfn package` knows what's in a capsule).
 - **C3 — CI gate on stdlib.** Build every `capsules/sfn/*` with
   `sfn build -p` in CI and assert byte-for-byte parity vs `build.sh`
   + a cache-hit-rate floor on no-source-change reruns. Likely a

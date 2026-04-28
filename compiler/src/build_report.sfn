@@ -47,10 +47,23 @@ import { substring } from "./string_utils";
 //   },
 //   "deps": {
 //     "count": 1,
-//     "ll_paths": ["build/sailfin/capsules/sfn__math__mod.ll"]
+//     "ll_paths": ["build/capsules/sfn/math/ir/mod.ll"]
 //   },
 //   "diagnostics": []
 // }
+//
+// schema_version stays at "1" after the C2b2 dep `.ll` path
+// migration. The `deps.ll_paths` JSON field (serialized from
+// the internal `BuildReport.dep_ll_paths` struct field)
+// describes a list of `.ll` file paths; the strings drifted
+// from `build/sailfin/capsules/<mangled>.ll` to
+// `build/capsules/<scope>/<name>/ir/<rel>.ll` for manifest-
+// declared deps and intra-capsule sources of `-p` builds with
+// safe scope/name. Positional builds (and the compiler self-host,
+// whose `[capsule].name = "sailfin"` is single-segment) still
+// produce legacy paths in this field. Field shape is unchanged
+// (string array of file paths); a *shape* change (entries become
+// objects, etc.) would require a v2.
 //
 // `diagnostics` is reserved for future structured link errors
 // (proposal §4.11). Empty array today; consumers should treat
