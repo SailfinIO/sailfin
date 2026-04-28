@@ -12,9 +12,12 @@ import { BuildReport, build_report_to_json, empty_build_report } from "./build_r
 import {
     CapsuleArtifactManifest,
     ScopeName,
+    capsule_artifact_bin_path,
     capsule_artifact_dir,
     capsule_artifact_manifest_path,
     capsule_artifact_manifest_to_json,
+    capsule_artifact_obj_path,
+    capsule_default_bin_name,
     empty_capsule_artifact_manifest,
     is_safe_scope_name,
     parse_scope_name
@@ -744,8 +747,38 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         }
 
         if out_path.length == 0 {
-            if no_link { out_path = "build/sailfin/program.o"; } else {
-                out_path = "build/sailfin/program";
+            // Stage C2b: when `-p` is used and `-o` was NOT given,
+            // default to the canonical per-capsule layout
+            // (`build/capsules/<scope>/<name>/{obj/mod.o, bin/<name>}`)
+            // from proposal §4.4. Positional builds and explicit
+            // `-o` paths still use their pre-existing locations —
+            // user override is sacred. Unsafe / non-scope-form
+            // capsule names fall back to the legacy paths so a
+            // malformed `[capsule].name` can never escape the
+            // build root.
+            let mut canonical_set: boolean = false;
+            if cap_capsule_name.length > 0 {
+                let parts = parse_scope_name(cap_capsule_name);
+                if is_safe_scope_name(parts.scope, parts.name) {
+                    let cap_dir = capsule_artifact_dir(parts.scope, parts.name);
+                    if no_link {
+                        _ensure_dir(cap_dir + "/obj");
+                        out_path = capsule_artifact_obj_path(parts.scope, parts.name);
+                        canonical_set = true;
+                    } else {
+                        let bin_name = capsule_default_bin_name(parts.name);
+                        if bin_name.length > 0 {
+                            _ensure_dir(cap_dir + "/bin");
+                            out_path = capsule_artifact_bin_path(parts.scope, parts.name, bin_name);
+                            canonical_set = true;
+                        }
+                    }
+                }
+            }
+            if !canonical_set {
+                if no_link { out_path = "build/sailfin/program.o"; } else {
+                    out_path = "build/sailfin/program";
+                }
             }
         }
 

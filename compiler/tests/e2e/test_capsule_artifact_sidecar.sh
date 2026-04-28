@@ -115,18 +115,18 @@ test_entry_relative() {
 }
 run_test "entry is relative to capsule.toml's dir" test_entry_relative
 
-# ---- Test 6: out points at the produced object ----
-test_out_present() {
+# ---- Test 6: out points at the canonical per-capsule location ----
+test_out_canonical() {
+    # Stage C2b: `sfn build -p` (no explicit -o) writes to
+    # `build/capsules/<scope>/<name>/obj/mod.o` for libraries.
+    local expected="build/capsules/demo/widget/obj/mod.o"
     local out
     out=$(jq -r .out "$SIDECAR")
-    [ -n "$out" ] || return 1
-    # The library build produces a `.o` at the default path today.
-    case "$out" in
-        *.o) return 0 ;;
-        *) return 1 ;;
-    esac
+    [ "$out" = "$expected" ] || return 1
+    # And the file actually exists on disk.
+    [ -f "$SCRATCH/$expected" ]
 }
-run_test "out names a file ending in .o (library build)" test_out_present
+run_test "out points at build/capsules/<scope>/<name>/obj/mod.o (library)" test_out_canonical
 
 # ---- Test 7: compiler_version is non-empty ----
 test_compiler_version_present() {
@@ -143,7 +143,28 @@ test_deps_consistency() {
 }
 run_test "deps.count matches deps.ll_paths.length (>= 1)" test_deps_consistency
 
-# ---- Test 9: positional `sfn build` does NOT write a sidecar ----
+# ---- Test 9b: -o EXPLICIT overrides the canonical default ----
+test_explicit_o_wins() {
+    cd "$SCRATCH" || return 1
+    local explicit="$SCRATCH/build/explicit.o"
+    rm -f "$explicit"
+    "$BINARY" build -p . -o "$explicit" \
+        > "$SCRATCH/explicit.stdout" 2>&1
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        cat "$SCRATCH/explicit.stdout" >&2
+        return $rc
+    fi
+    # The user's explicit path wins for the actual artifact AND
+    # for the sidecar's `out` field.
+    [ -f "$explicit" ] || return 1
+    local sidecar_out
+    sidecar_out=$(jq -r .out "$SIDECAR")
+    [ "$sidecar_out" = "$explicit" ]
+}
+run_test "-o EXPLICIT overrides the canonical default" test_explicit_o_wins
+
+# ---- Test 10: positional `sfn build` does NOT write a sidecar ----
 # The sidecar is a `-p` opt-in (we don't know the capsule name for
 # positional builds). This guards against accidental drive-by sidecars.
 test_positional_no_sidecar() {

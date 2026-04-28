@@ -170,6 +170,40 @@ fn capsule_artifact_manifest_path(scope: string, name: string) -> string {
     return capsule_artifact_dir(scope, name) + "/manifest.json";
 }
 
+// `<artifact_dir>/obj/mod.o` — canonical library object location
+// (Stage C2b). Pure; does not create the directory.
+fn capsule_artifact_obj_path(scope: string, name: string) -> string {
+    return capsule_artifact_dir(scope, name) + "/obj/mod.o";
+}
+
+// `<artifact_dir>/bin/<bin>` — canonical binary executable
+// location (Stage C2b). `bin` defaults to the last `/`-separated
+// segment of the capsule name when the manifest doesn't override
+// it via `[build].bin-name` (post-C2b refinement).
+fn capsule_artifact_bin_path(scope: string, name: string, bin: string) -> string {
+    return capsule_artifact_dir(scope, name) + "/bin/" + bin;
+}
+
+// Last `/`-separated segment of a capsule name. For `"sfn/cli"`
+// returns `"cli"`; for a submodule capsule like
+// `"acme/router/middleware/auth"` returns `"auth"`. Used as the
+// default binary filename when `[build].bin-name` is unset.
+// Returns `""` for empty input or trailing-slash input — the
+// emitter must check the result before using it as a filename.
+fn capsule_default_bin_name(name: string) -> string {
+    if name.length == 0 { return ""; }
+    let mut last_slash: number = -1;
+    let mut i: number = 0;
+    loop {
+        if i >= name.length { break; }
+        if substring(name, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return name; }
+    if last_slash == name.length - 1 { return ""; }
+    return substring(name, last_slash + 1, name.length);
+}
+
 // -------------------------------------------------------------------
 // JSON primitive encoders (duplicated; see top-of-file rationale)
 // -------------------------------------------------------------------
@@ -283,5 +317,8 @@ export {
     is_safe_scope_name,
     capsule_artifact_dir,
     capsule_artifact_manifest_path,
+    capsule_artifact_obj_path,
+    capsule_artifact_bin_path,
+    capsule_default_bin_name,
     capsule_artifact_manifest_to_json
 };
