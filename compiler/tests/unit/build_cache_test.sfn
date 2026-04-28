@@ -23,7 +23,6 @@
 // because Sailfin's runtime has no `setenv` primitive — the env
 // var contract is intentionally read-only. Each test cleans up
 // its tmp tree on exit.
-
 import {
     CacheKey,
     build_cache_schema_version,
@@ -39,7 +38,6 @@ import {
 // --------------------------------------------------------------
 // Fixture helpers
 // --------------------------------------------------------------
-
 // Each test block gets its own tmp namespace so parallel test
 // runs don't collide on `/tmp/sfn_build_cache_test_<X>`.
 fn _test_tmp_root(label: string) -> string ![io] {
@@ -49,18 +47,15 @@ fn _test_tmp_root(label: string) -> string ![io] {
     return root;
 }
 
-fn _cleanup(path: string) ![io] {
-    process.run(["rm", "-rf", path]);
-}
+fn _cleanup(path: string) ![io] { process.run(["rm", "-rf", path]); }
 
 fn _write_file(path: string, content: string) ![io] {
-    process.run(["sh", "-c", "printf '%s' '" + content + "' > " + path]);
+    fs.writeFile(path, content);
 }
 
 // --------------------------------------------------------------
 // Schema version
 // --------------------------------------------------------------
-
 test "build_cache: schema version is v1" {
     assert build_cache_schema_version() == "v1";
 }
@@ -76,7 +71,6 @@ test "build_cache: cache_root_with_override non-empty -> override + version" {
 // --------------------------------------------------------------
 // Path layout
 // --------------------------------------------------------------
-
 test "build_cache: artifact paths shard by 2-char prefix" {
     let key = CacheKey { digest: "abcdef0123456789" };
     let root = "build/cache/v1";
@@ -105,7 +99,6 @@ test "build_cache: cache_paths_for returns all four artifact slots" {
 // --------------------------------------------------------------
 // Flag canonicalization
 // --------------------------------------------------------------
-
 test "build_cache: canonicalize_flags empty list is empty JSON array" {
     let empty: string[] = [];
     assert canonicalize_flags(empty) == "[]";
@@ -134,7 +127,6 @@ test "build_cache: canonicalize_flags escapes embedded quotes and backslashes" {
 // --------------------------------------------------------------
 // Key derivation — determinism
 // --------------------------------------------------------------
-
 test "build_cache: cache_key_for same inputs -> same digest" ![io] {
     let scratch = _test_tmp_root("key_determinism");
     let src = scratch + "/source.sfn";
@@ -168,7 +160,6 @@ test "build_cache: cache_key_for invariant under dep order" ![io] {
 // --------------------------------------------------------------
 // Key derivation — sensitivity
 // --------------------------------------------------------------
-
 test "build_cache: cache_key_for changes when source changes" ![io] {
     let scratch = _test_tmp_root("source_sensitive");
     let src = scratch + "/source.sfn";
@@ -219,7 +210,6 @@ test "build_cache: cache_key_for changes when flags change" ![io] {
 // --------------------------------------------------------------
 // Store + lookup round-trip
 // --------------------------------------------------------------
-
 test "build_cache: cache_store + cache_lookup_complete round-trips" ![io] {
     let scratch = _test_tmp_root("store_roundtrip");
     let cache_root = scratch + "/cache/v1";
@@ -237,10 +227,12 @@ test "build_cache: cache_store + cache_lookup_complete round-trips" ![io] {
     _write_file(ll, "; ModuleID = 'foo'");
     _write_file(obj, "OBJECT_BYTES_PLACEHOLDER");
 
-    let key = CacheKey { digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef" };
+    let key = CacheKey {
+        digest: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    };
 
     // Pre-store: cache miss.
-    assert !cache_lookup_complete(cache_root, key);
+    assert ! cache_lookup_complete(cache_root, key);
 
     let stored = cache_store(cache_root, key, sfn_asm, layout, ll, obj);
     assert stored;
@@ -258,11 +250,82 @@ test "build_cache: cache_store + cache_lookup_complete round-trips" ![io] {
     _cleanup(scratch);
 }
 
+// --------------------------------------------------------------
+// Digest validation guards (Copilot review #254 — line 149)
+// --------------------------------------------------------------
+test "build_cache: cache_lookup_complete returns false on empty digest" ![io] {
+    let scratch = _test_tmp_root("invalid_lookup_empty");
+    let key = CacheKey { digest: "" };
+    assert ! cache_lookup_complete(scratch, key);
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_lookup_complete returns false on short digest" ![io] {
+    let scratch = _test_tmp_root("invalid_lookup_short");
+    let key = CacheKey { digest: "abcdef" };
+    assert ! cache_lookup_complete(scratch, key);
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_lookup_complete returns false on non-hex digest" ![io] {
+    let scratch = _test_tmp_root("invalid_lookup_nonhex");
+    // Length is 64 but contains uppercase + non-hex chars.
+    let key = CacheKey {
+        digest: "ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+    };
+    assert ! cache_lookup_complete(scratch, key);
+    _cleanup(scratch);
+}
+
+test "build_cache: cache_store returns false on invalid digest without polluting root" ![io] {
+    let scratch = _test_tmp_root("invalid_store");
+    let cache_root = scratch + "/cache/v1";
+    let src_dir = scratch + "/build";
+    process.run(["mkdir", "-p", src_dir]);
+    let sfn_asm = src_dir + "/ir.sfn-asm";
+    let layout = src_dir + "/layout.manifest";
+    let ll = src_dir + "/mod.ll";
+    let obj = src_dir + "/mod.o";
+    _write_file(sfn_asm, "; placeholder");
+    _write_file(layout, "module: foo");
+    _write_file(ll, "; ll");
+    _write_file(obj, "OBJ");
+
+    let bad_key = CacheKey { digest: "" };
+    let stored = cache_store(cache_root, bad_key, sfn_asm, layout, ll, obj);
+    assert ! stored;
+    // The cache root must not have been created — otherwise an
+    // empty-digest hash failure would silently leak artifacts to
+    // bogus paths in production.
+    assert ! fs.exists(cache_root);
+    _cleanup(scratch);
+}
+
+// --------------------------------------------------------------
+// JSON escaping covers control chars (Copilot review #254 — line 277)
+// --------------------------------------------------------------
+test "build_cache: canonicalize_flags escapes JSON control characters" {
+    // Tab, newline, CR — the three control escapes Sailfin's
+    // string-literal decoder recognises (`compiler/src/parser/utils.sfn`).
+    // `\b` / `\f` are intentionally not covered: Sailfin source cannot
+    // produce them in a literal, so they cannot reach the encoder
+    // through any in-language path.
+    let escaped = canonicalize_flags(["a\tb", "c\nd", "e\rf"]);
+    // After sort: ["a\tb","c\nd","e\rf"]
+    // Escape: \t→\\t, \n→\\n, \r→\\r
+    assert escaped == "[\"a\\tb\",\"c\\nd\",\"e\\rf\"]";
+}
+
+// --------------------------------------------------------------
+// Original partial-entry test
+// --------------------------------------------------------------
 test "build_cache: cache_lookup_complete returns false on partial entry" ![io] {
     let scratch = _test_tmp_root("partial_entry");
     let cache_root = scratch + "/cache/v1";
 
-    let key = CacheKey { digest: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210" };
+    let key = CacheKey {
+        digest: "fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210"
+    };
     let entry_dir = cache_root + "/fe/" + key.digest;
     process.run(["mkdir", "-p", entry_dir]);
 
@@ -271,8 +334,8 @@ test "build_cache: cache_lookup_complete returns false on partial entry" ![io] {
     _write_file(paths.sfn_asm, "; partial");
     _write_file(paths.layout_manifest, "partial");
     _write_file(paths.ll, "; partial");
-    // Intentionally miss `paths.obj`.
 
-    assert !cache_lookup_complete(cache_root, key);
+    // Intentionally miss `paths.obj`.
+    assert ! cache_lookup_complete(cache_root, key);
     _cleanup(scratch);
 }

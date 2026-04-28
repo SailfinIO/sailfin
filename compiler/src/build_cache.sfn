@@ -43,7 +43,7 @@
 //
 // The 2-character prefix shard caps the directory fan-out at 256
 // children, preventing the one-directory-with-millions-of-entries
-// problem that biteshttps://stackoverflow.com/q/466521 large caches.
+// problem that bites https://stackoverflow.com/q/466521 large caches.
 //
 // ----------------------------------------------------------------
 // Test surface
@@ -56,6 +56,7 @@
 import {
     _ensure_dir_recursive_cmd,
     _get_env_cmd,
+    _sanitize_filename_cmd,
     _sha256_of_file_cmd,
     _write_text_cmd
 } from "./cli_commands_utils";
@@ -70,14 +71,11 @@ import { substring } from "./string_utils";
 // incompatible with the current compiler. Old `v<N>/` trees are
 // left in place; they age out via the user's normal cache-cleanup
 // or `--clean` flow once that ships in PR1b.
-fn build_cache_schema_version() -> string {
-    return "v1";
-}
+fn build_cache_schema_version() -> string { return "v1"; }
 
 // ----------------------------------------------------------------
 // Public types
 // ----------------------------------------------------------------
-
 struct CacheKey {
     digest: string;
 }
@@ -92,7 +90,6 @@ struct CacheEntryPaths {
 // ----------------------------------------------------------------
 // Cache root resolution
 // ----------------------------------------------------------------
-
 // Pure variant — used by tests and by the production reader below.
 // `override_path` empty → in-tree default `build/cache/<version>`;
 // non-empty → `<override>/<version>`.
@@ -113,7 +110,6 @@ fn cache_root() -> string ![io] {
 // ----------------------------------------------------------------
 // Path layout
 // ----------------------------------------------------------------
-
 // Maps an artifact `kind` to its filename within an entry
 // directory. Returns "" for unknown kinds (caller responsibility
 // to validate inputs); this avoids panicking for forward-compat
@@ -148,15 +144,38 @@ fn _cache_entry_dir(root: string, key: CacheKey) -> string {
     return root + "/" + prefix + "/" + key.digest;
 }
 
+// True iff `digest` is a 64-character lowercase hex string —
+// exactly the shape sha256 produces. Empty / short / non-hex
+// digests appear when `_sha256_of_file_cmd` fails (sha256sum
+// missing on PATH, source file missing, write to tmp failed).
+// Cache reads/writes against an invalid digest would land at
+// nonsense paths like `<root>///ir.sfn-asm` and pollute the
+// cache root with cross-module collisions; treating them as a
+// hard miss is the safe default.
+fn _is_valid_digest(digest: string) -> boolean {
+    if digest.length != 64 { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= digest.length { break; }
+        let code = char_code(char_at(digest, i));
+        let is_digit = code >= 48 && code <= 57;  // 0-9
+        let is_lower_hex = code >= 97 && code <= 102;  // a-f
+        if !is_digit && !is_lower_hex { return false; }
+        i += 1;
+    }
+    return true;
+}
+
 // ----------------------------------------------------------------
 // Lookup
 // ----------------------------------------------------------------
-
 // True iff every artifact for `key` is present on disk. Partial
 // entries (e.g. interrupted writes) are treated as misses; the
 // caller should overwrite with a fresh `cache_store` rather than
-// trust a half-populated directory.
+// trust a half-populated directory. Invalid digests are also
+// treated as a miss — see `_is_valid_digest` for rationale.
 fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
+    if !_is_valid_digest(key.digest) { return false; }
     let paths = cache_paths_for(root, key);
     if !fs.exists(paths.sfn_asm) { return false; }
     if !fs.exists(paths.layout_manifest) { return false; }
@@ -168,12 +187,14 @@ fn cache_lookup_complete(root: string, key: CacheKey) -> boolean ![io] {
 // ----------------------------------------------------------------
 // Store
 // ----------------------------------------------------------------
-
 // Copies the four source artifacts into the cache. Returns true
 // on success, false if any copy fails (caller should treat as a
 // non-fatal cache miss — the build itself still succeeded with
-// the in-tree artifacts).
+// the in-tree artifacts). Invalid digests short-circuit to false
+// before any filesystem mutation, so a hash failure cannot
+// pollute the cache root with bogus-path entries.
 fn cache_store(root: string, key: CacheKey, sfn_asm_src: string, layout_manifest_src: string, ll_src: string, obj_src: string) -> boolean ![io] {
+    if !_is_valid_digest(key.digest) { return false; }
     let entry_dir = _cache_entry_dir(root, key);
     _ensure_dir_recursive_cmd(entry_dir);
     let paths = cache_paths_for(root, key);
@@ -191,13 +212,21 @@ fn cache_store(root: string, key: CacheKey, sfn_asm_src: string, layout_manifest
 // ----------------------------------------------------------------
 // Hashing helpers
 // ----------------------------------------------------------------
-
 // Hash a string by writing it to a tmp file and sha256ing.
-// `unique_suffix` must be unique per concurrent caller; the
-// recommended value is the source path's `_sanitize_filename_cmd`
-// output suffixed with a phase tag (e.g. `..._deps`, `..._final`).
+// `unique_suffix` is sanitized through `_sanitize_filename_cmd`
+// before being concatenated into the tmp path so a stray slash
+// or shell metacharacter cannot escape `/tmp/.sfn_build_cache_*`
+// or break the downstream `sha256sum '<path>'` shell invocation.
+//
+// Cross-process race note: two parallel workers calling this with
+// the same sanitized suffix would collide on the same tmp path.
+// Today the cache module is single-process; Stage E's long-lived
+// driver will introduce parallel module compilation and at that
+// point this helper should switch to `mktemp` (or thread a
+// per-worker nonce) — flagged in the proposal's open questions.
 fn _sha256_of_string(input: string, unique_suffix: string) -> string ![io] {
-    let tmp = "/tmp/.sfn_build_cache_hash_" + unique_suffix;
+    let safe_suffix = _sanitize_filename_cmd(unique_suffix);
+    let tmp = "/tmp/.sfn_build_cache_hash_" + safe_suffix;
     _write_text_cmd(tmp, input);
     let digest = _sha256_of_file_cmd(tmp);
     process.run(["rm", "-f", tmp]);
@@ -207,7 +236,6 @@ fn _sha256_of_string(input: string, unique_suffix: string) -> string ![io] {
 // ----------------------------------------------------------------
 // String comparison + sort (for dep-hash canonicalization)
 // ----------------------------------------------------------------
-
 // Lexicographic less-than. Operates on raw character codes; used
 // for sorting hex digests (`[0-9a-f]+`) and JSON-string flag
 // values where this is a faithful byte-wise compare.
@@ -254,24 +282,33 @@ fn _sort_strings(input: string[]) -> string[] {
 // ----------------------------------------------------------------
 // Flag canonicalization
 // ----------------------------------------------------------------
-
-// Conservative JSON string escaper — handles the only two
-// characters that would otherwise break the array shape (`"` and
-// `\`). Flag values are not expected to contain control characters
-// or non-ASCII; if they ever do, expand this.
+// JSON string escaper. Handles the characters that would otherwise
+// break the array shape (`"`, `\`) plus the three control-character
+// escapes Sailfin's string-literal decoder recognises (`\n`, `\r`,
+// `\t`, see `compiler/src/parser/utils.sfn::decode_string_literal_escapes`).
+// Without this, a flag containing a newline would both produce
+// invalid JSON AND collide with the `\n` separator we use between
+// cache-key tuple fields, breaking the "separator prevents
+// concatenation collisions" invariant.
+//
+// `\b` and `\f` are intentionally excluded: Sailfin source cannot
+// produce them in a string literal, so they cannot reach this
+// encoder via any in-language path. If a future caller surfaces a
+// flag containing one (e.g. through OS-level argv with a raw control
+// byte), we'll extend this branch and add a unit test that builds
+// the character via `char_code` rather than a source literal.
 fn _escape_json_string(input: string) -> string {
     let mut out: string = "";
     let mut i: number = 0;
     loop {
         if i >= input.length { break; }
         let ch = char_at(input, i);
-        if ch == "\\" {
-            out = out + "\\\\";
-        } else if ch == "\"" {
+        let code = char_code(ch);
+        if ch == "\\" { out = out + "\\\\"; } else if ch == "\"" {
             out = out + "\\\"";
-        } else {
-            out = out + ch;
-        }
+        } else if code == 9 { out = out + "\\t"; } else if code == 10 {
+            out = out + "\\n";
+        } else if code == 13 { out = out + "\\r"; } else { out = out + ch; }
         i += 1;
     }
     return out;
@@ -296,7 +333,6 @@ fn canonicalize_flags(flags: string[]) -> string {
 // ----------------------------------------------------------------
 // Cache key derivation
 // ----------------------------------------------------------------
-
 // Compute the content-addressed cache key for a single module
 // compile. See top-of-file contract for the formula.
 //
@@ -334,7 +370,8 @@ fn cache_key_for(source_path: string, dep_layout_manifest_paths: string[], compi
     }
     let deps_hash = _sha256_of_string(deps_concat, hash_tmp_suffix + "_deps");
 
-    let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_version + "\n" + flags_canonical;
+    let final_input = s_hash + "\n" + deps_hash + "\n" + compiler_version + "\n"
+        + flags_canonical;
     let final_digest = _sha256_of_string(final_input, hash_tmp_suffix + "_final");
     return CacheKey { digest: final_digest };
 }
