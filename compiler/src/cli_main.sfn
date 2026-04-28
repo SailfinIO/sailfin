@@ -9,6 +9,16 @@ import {
     resolve_build_cache_config
 } from "./build_cache";
 import { BuildReport, build_report_to_json, empty_build_report } from "./build_report";
+import {
+    CapsuleArtifactManifest,
+    ScopeName,
+    capsule_artifact_dir,
+    capsule_artifact_manifest_path,
+    capsule_artifact_manifest_to_json,
+    empty_capsule_artifact_manifest,
+    is_safe_scope_name,
+    parse_scope_name
+} from "./capsule_artifact";
 import { ProjectCapsuleResult, prepare_project_capsules } from "./capsule_resolver";
 import { handle_check_command } from "./cli_check";
 import {
@@ -32,7 +42,12 @@ import {
     print_llvm_with_module,
     write_native_text_file_with_module
 } from "./main";
-import { toml_get_build_kind, toml_get_entry } from "./toml_parser";
+import {
+    toml_get_build_kind,
+    toml_get_entry,
+    toml_get_name,
+    toml_get_version
+} from "./toml_parser";
 import { resolve_compiler_version } from "./version";
 
 fn _usage() -> string {
@@ -120,6 +135,57 @@ fn _print_cache_summary(stats: CacheStats) ![io] {
         + number_to_string(stats.invalid_keys)
         + " copy_failures="
         + number_to_string(stats.copy_failures));
+}
+
+// Stage C2a — write `build/capsules/<scope>/<name>/manifest.json`
+// after a successful `sfn build -p`. Schema-versioned sidecar that
+// captures the resolved per-capsule build state for downstream
+// consumers (`sfn package` C4, `sfn lsp` capsule discovery, MCP
+// tooling) to read without re-running the build.
+//
+// Quiet on `--json` mode the same way `_print_cache_summary` is —
+// the sidecar lives on disk regardless, but no stdout chatter is
+// emitted.
+//
+// Best-effort: failure to write the sidecar is logged to stderr
+// but does NOT fail the build, since the binary/library was
+// already produced and the sidecar is metadata only.
+fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: string, spec_kind: string, spec_entry_relative: string, out_path: string, capsule_result: ProjectCapsuleResult) ![io] {
+    if spec_capsule_name.length == 0 {
+        // Manifest had no `[capsule].name` — can't compose a path.
+        // The build itself succeeded; just skip the sidecar.
+        return;
+    }
+    let parts = parse_scope_name(spec_capsule_name);
+    if parts.scope.length == 0 {
+        print.err("[capsule-artifact] capsule name \"" + spec_capsule_name
+            + "\" is not in scope/name form; skipping sidecar");
+        return;
+    }
+    // Path-traversal guard: `[capsule].name` is end-user-controlled,
+    // and the scope/name is interpolated into a filesystem path. A
+    // malicious manifest could set `name = "../../etc"` and escape
+    // `build/capsules/`. Reject any segment that is empty, `.`, `..`,
+    // or contains `/` (in scope) or `\` (in either). See
+    // `capsule_artifact.sfn::is_safe_scope_name`.
+    if !is_safe_scope_name(parts.scope, parts.name) {
+        print.err("[capsule-artifact] capsule name \"" + spec_capsule_name
+            + "\" contains unsafe path segments; skipping sidecar");
+        return;
+    }
+    let mut manifest = empty_capsule_artifact_manifest();
+    manifest.capsule_name = spec_capsule_name;
+    manifest.version = spec_version;
+    manifest.kind = spec_kind;
+    manifest.compiler_version = resolve_compiler_version("");
+    manifest.entry_relative = spec_entry_relative;
+    manifest.out_path = out_path;
+    manifest.dep_ll_paths = capsule_result.ll_paths;
+
+    let dir = capsule_artifact_dir(parts.scope, parts.name);
+    fs.createDirectory(dir, true);
+    let path = capsule_artifact_manifest_path(parts.scope, parts.name);
+    fs.writeFile(path, capsule_artifact_manifest_to_json(manifest));
 }
 
 // Compose a `BuildReport` for a successful build and print its
@@ -296,6 +362,9 @@ fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string)
 struct _CapsuleBuildSpec {
     entry_path: string;
     kind: string;
+    capsule_name: string;
+    version: string;
+    entry_relative: string;
 }
 
 // Resolve `-p <path>` for `sfn build`. The path is either a directory
@@ -304,8 +373,20 @@ struct _CapsuleBuildSpec {
 // manifest's directory) plus the build kind from `[build].kind` (defaults
 // to "binary" when unset, matching historical sfn build behaviour).
 // `entry_path` is "" with an error printed on failure.
+//
+// Also surfaces the manifest's `[capsule].name` + `[capsule].version`
+// + the manifest directory + the relative entry path so the
+// post-build sidecar emitter (Stage C2a) can compose
+// `build/capsules/<scope>/<name>/manifest.json` without re-reading
+// the capsule.toml.
 fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
-    let mut spec = _CapsuleBuildSpec { entry_path: "", kind: "binary" };
+    let mut spec = _CapsuleBuildSpec {
+        entry_path: "",
+        kind: "binary",
+        capsule_name: "",
+        version: "",
+        entry_relative: ""
+    };
     if p.length == 0 { return spec; }
     // Treat `p` as a manifest path only when its final segment is exactly
     // `capsule.toml`. Substring-only checks would also accept paths like
@@ -327,6 +408,9 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     }
     let manifest_dir = _dirname(manifest_path);
     spec.entry_path = _path_join(manifest_dir, entry_rel);
+    spec.entry_relative = entry_rel;
+    spec.capsule_name = toml_get_name(manifest_text);
+    spec.version = toml_get_version(manifest_text);
     let declared_kind = toml_get_build_kind(manifest_text);
     if declared_kind.length > 0 {
         // Validate against the supported set so a typo in capsule.toml
@@ -626,6 +710,13 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // file, with the kind controlling whether we link an executable
         // (binary) or just emit an object (library/runtime).
         let mut build_kind: string = "binary";
+        // Captured from `-p` resolution so the post-build sidecar
+        // emitter (Stage C2a) has the manifest's name + version
+        // + entry-relative path without re-reading capsule.toml.
+        // Empty when `-p` was not used (positional source only).
+        let mut cap_capsule_name: string = "";
+        let mut cap_version: string = "";
+        let mut cap_entry_relative: string = "";
         if capsule_path.length > 0 {
             if input_path.length > 0 {
                 print("sfn build: -p and positional source are mutually exclusive");
@@ -635,6 +726,9 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             if cap_spec.entry_path.length == 0 { return 1; }
             input_path = cap_spec.entry_path;
             build_kind = cap_spec.kind;
+            cap_capsule_name = cap_spec.capsule_name;
+            cap_version = cap_spec.version;
+            cap_entry_relative = cap_spec.entry_relative;
         }
         if input_path.length == 0 {
             print(_usage());
@@ -702,6 +796,9 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
                 print("built: " + out_path);
                 _print_cache_summary(capsule_result.stats);
             }
+            // Stage C2a: per-capsule artifact sidecar for `-p` builds.
+            // No-op for positional builds (cap_capsule_name == "").
+            _emit_capsule_artifact_sidecar(cap_capsule_name, cap_version, "library", cap_entry_relative, out_path, capsule_result);
             return 0;
         }
 
@@ -726,6 +823,9 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             print("built: " + exe_path);
             _print_cache_summary(capsule_result.stats);
         }
+        // Stage C2a: per-capsule artifact sidecar for `-p` builds.
+        // No-op for positional builds (cap_capsule_name == "").
+        _emit_capsule_artifact_sidecar(cap_capsule_name, cap_version, "binary", cap_entry_relative, exe_path, capsule_result);
         return 0;
     }
 
