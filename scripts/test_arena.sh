@@ -103,7 +103,12 @@ compile_once() {
     if [[ "$mode" == "with_arena" ]]; then
         (cd "$module_cwd" && SAILFIN_USE_ARENA=1 "$ABS_SEED" emit -o "$abs_out_ll" llvm "$abs_src") 2>"$abs_stderr"
     else
-        (cd "$module_cwd" && "$ABS_SEED" emit -o "$abs_out_ll" llvm "$abs_src") 2>"$abs_stderr"
+        # Explicit opt-out: arena is now default-on (flipped after
+        # Phase 5a shipped), so "no env var" gets the arena too.
+        # Use `SAILFIN_USE_ARENA=0` to actually exercise the
+        # malloc/owned-string-hash path the harness is supposed to
+        # cross-check against.
+        (cd "$module_cwd" && SAILFIN_USE_ARENA=0 "$ABS_SEED" emit -o "$abs_out_ll" llvm "$abs_src") 2>"$abs_stderr"
     fi
 }
 

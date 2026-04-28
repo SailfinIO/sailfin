@@ -88,7 +88,7 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help install fetch-seed test test-unit test-integration test-e2e compile check package clean bench test-arena
+.PHONY: help install fetch-seed test test-unit test-integration test-e2e compile check check-fast package clean bench test-arena
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-installer
 
@@ -101,6 +101,7 @@ help:
 	@echo "  make rebuild        # Force rebuild from seed (uses scripts/build.sh)"
 	@echo "  make install        # Install the built compiler binary into PREFIX/bin"
 	@echo "  make check          # Compile (if needed) then run the full test suite"
+	@echo "  make check-fast     # Run sfn check on compiler/src/ + runtime/ (no codegen, fast PR gate)"
 	@echo "  make test           # Run Sailfin-native unit + integration + e2e tests"
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
@@ -429,6 +430,30 @@ check:
 		cp -f "build/native/sailfin-seedcheck$(EXE_EXT)" "$(NATIVE_BIN)"; \
 		echo "[check] promoted seedcheck → $(NATIVE_BIN)"; \
 	fi
+
+# Fast PR-feedback gate: run `sfn check` against the compiler tree and
+# the runtime prelude. No codegen, no clang, just parse + typecheck +
+# effect-check. Phase 5a's arena mark/rewind keeps the in-process
+# multi-module loop from blowing up; the arena default-on flip means
+# this works without env-var setup.
+#
+# Targeted at CI as a pre-`make compile` filter so PRs that introduce
+# obvious type/effect regressions fail in seconds rather than ~3 min
+# into the full build. Local developers can run it as a sub-30s
+# sanity check between edits — much faster than `make compile` (~3
+# min serial / ~2 min parallel).
+#
+# Note: this is `sfn check` over the compiler tree, not `make check`
+# (the triple-pass selfhost validator). Naming mirrors what end users
+# of the language will eventually run on their own capsules.
+check-fast:
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[check-fast] missing $(NATIVE_BIN); run: make compile"; \
+		exit 1; \
+	fi
+	@echo "[check-fast] running sfn check on compiler/src/ runtime/"
+	@$(NATIVE_BIN) check compiler/src/ runtime/
+	@echo "[check-fast] OK"
 
 # Pre-release determinism gate. Runs the emit harness at parallel load to
 # detect intermittent IR corruption. Use before cutting a seed release.

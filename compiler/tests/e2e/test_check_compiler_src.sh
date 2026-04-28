@@ -51,11 +51,15 @@ run_test() {
     fi
 }
 
-# Phase 5a needs the arena enabled to actually reclaim memory. The
-# default-on flip is a separate workstream; until it lands, this
-# test exports the env var explicitly so the headline scenario
-# uses Phase 5a as designed.
-export SAILFIN_USE_ARENA=1
+# Phase 5a needs the arena enabled to actually reclaim memory.
+# Arena is now default-on at runtime (post Phase 5a default-on
+# flip), so this test runs in the canonical end-user configuration
+# without exporting `SAILFIN_USE_ARENA=1`. We explicitly UNSET the
+# env var to defend against a parent shell that might have set it
+# to "0" or empty (which would silently disable the arena and
+# either fail with SIGSEGV — `=0` — or succeed but fail the
+# regression check we're actually trying to do).
+unset SAILFIN_USE_ARENA
 
 # ---- Single canonical run per slash form ----
 # Capture stdout+stderr and the exit code; every assertion below

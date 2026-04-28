@@ -301,7 +301,7 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
     return spec;
 }
 
-fn sailfin_cli_main(argv: string[]) -> number ![io] {
+fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
     let trace_argv = fs.exists("build/sailfin/.trace_argv");
     if trace_argv {
         print.err("cli: argv.len=" + number_to_string(argv.length));

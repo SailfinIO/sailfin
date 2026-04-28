@@ -43,6 +43,23 @@ runs:
         echo "[ci] seed binary: build/seed/bin/sailfin"
         build/seed/bin/sailfin version
 
+    # Fast PR feedback: run `sfn check` on compiler/src/ + runtime/ using
+    # the released seed before spending ~7 min on the full selfhost build.
+    # The seed (≥ 0.5.10-alpha.1) ships the path-normalization fix and
+    # the arena reset primitives that make a multi-module check loop
+    # reclaimable, so this finishes in ~2 min on Linux x86_64. Surfaces
+    # parser, typecheck, and effect-system breakage immediately.
+    #
+    # Exit code 1 (diagnostics found) is fatal — the check is meant as
+    # a gate, not advisory. Exit 139 (SIGSEGV) would indicate a Phase 5a
+    # regression in the seed and must be investigated.
+    - name: Fast pre-build check (seed binary)
+      shell: bash {0}
+      run: |
+        set -euo pipefail
+        echo "[ci] sfn check compiler/src/ runtime/ (using seed)"
+        time build/seed/bin/sailfin check compiler/src/ runtime/
+
     - name: Build native compiler (selfhost from released seed)
       shell: bash {0}
       env:
