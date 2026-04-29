@@ -184,6 +184,76 @@ test_dep_ll_under_per_capsule_tree() {
 }
 run_test "dep .ll routes under build/capsules/sfn/math/ir/ (Stage C2b2)" test_dep_ll_under_per_capsule_tree
 
+# ---- Test 8d: modules array present + matches deps.count ----
+# Stage C2c: every dep `.ll` the build produced should appear as a
+# `{slug, ir_path, cache_key}` entry under `modules`. The array is
+# the per-source detail companion to the aggregate `deps.ll_paths`,
+# so `modules.length` must equal `deps.count` (`compile_capsule_modules`
+# accumulates events in lockstep with `ll_paths`).
+test_modules_array_present() {
+    local mods_count deps_count
+    mods_count=$(jq -r '.modules | length' "$SIDECAR")
+    deps_count=$(jq -r '.deps.count' "$SIDECAR")
+    [ "$mods_count" -ge 1 ] || return 1
+    [ "$mods_count" = "$deps_count" ] || {
+        echo "[test]   modules.length ($mods_count) != deps.count ($deps_count)" >&2
+        return 1
+    }
+    # Every entry must have the three locked fields as strings.
+    local malformed
+    malformed=$(jq -r '[.modules[] | select((.slug|type) != "string" or (.ir_path|type) != "string" or (.cache_key|type) != "string")] | length' "$SIDECAR")
+    [ "$malformed" = "0" ]
+}
+run_test "modules array length equals deps.count + locked {slug, ir_path, cache_key} fields" test_modules_array_present
+
+# ---- Test 8e: modules ir_path values exist on disk ----
+# Same hardening as `dep_ll_paths` but on the per-module list:
+# every `ir_path` must point at a real `.ll` file. Catches stale
+# entries that name a path the build never produced.
+test_modules_ir_paths_exist() {
+    local missing=0
+    while IFS= read -r path; do
+        [ -z "$path" ] && continue
+        if [ ! -f "$SCRATCH/$path" ]; then
+            echo "[test]   missing module ir_path: $path" >&2
+            missing=1
+        fi
+        case "$path" in
+            *.ll) ;;
+            *)
+                echo "[test]   module ir_path doesn't end in .ll: $path" >&2
+                missing=1
+                ;;
+        esac
+    done < <(jq -r '.modules[].ir_path' "$SIDECAR")
+    [ "$missing" -eq 0 ]
+}
+run_test "every modules[].ir_path is a real .ll file" test_modules_ir_paths_exist
+
+# ---- Test 8f: modules slug uniqueness ----
+# Slug collisions are detected at resolve time but a regression in
+# event accumulation could produce duplicate entries here. Lock
+# uniqueness so a future change can't silently double-emit.
+test_modules_slugs_unique() {
+    local total uniq
+    total=$(jq -r '.modules | length' "$SIDECAR")
+    uniq=$(jq -r '[.modules[].slug] | unique | length' "$SIDECAR")
+    [ "$total" = "$uniq" ]
+}
+run_test "modules[].slug values are unique" test_modules_slugs_unique
+
+# ---- Test 8g: cache_key is non-empty after a fresh cache build ----
+# The default fixture build runs without `--no-cache`, so each
+# module either hit or stored in the cache. Either way the digest
+# is a valid sha256 hex string (non-empty). `--no-cache` is
+# tested separately below.
+test_modules_cache_keys_populated() {
+    local empties
+    empties=$(jq -r '[.modules[].cache_key | select(. == "")] | length' "$SIDECAR")
+    [ "$empties" = "0" ]
+}
+run_test "modules[].cache_key is non-empty after a default (cached) build" test_modules_cache_keys_populated
+
 # ---- Test 9b: -o EXPLICIT overrides the canonical default ----
 test_explicit_o_wins() {
     cd "$SCRATCH" || return 1

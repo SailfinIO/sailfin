@@ -184,6 +184,88 @@ test_sidecar_paths_canonical() {
 }
 run_test "sidecar dep_ll_paths covers both dep + relative tree" test_sidecar_paths_canonical
 
+# ---- Test 8: modules[] entries cover both routing categories ----
+# Stage C2c: every routed `.ll` should also appear as a per-module
+# entry with matching `slug` and `ir_path`. Locks the `modules`
+# array against the same {dep, relative} routing rules
+# `deps.ll_paths` already exercises, so future changes to one
+# array can't desync the other. Iterates `deps.ll_paths` and
+# asserts each path has exactly one matching modules[] entry
+# whose slug aligns with the routing category.
+test_modules_routing_coverage() {
+    [ -f "$SIDECAR" ] || return 1
+    local found_dep=0 found_rel=0 missing=0
+    local ir_path match_count slug
+    while IFS= read -r ir_path; do
+        [ -z "$ir_path" ] && continue
+        match_count=$(jq -r --arg ir_path "$ir_path" '[.modules[] | select(.ir_path == $ir_path)] | length' "$SIDECAR")
+        if [ "$match_count" -ne 1 ]; then
+            echo "[test]   expected exactly one modules[] entry for ll path: $ir_path (found $match_count)" >&2
+            missing=1
+            continue
+        fi
+        slug=$(jq -r --arg ir_path "$ir_path" '.modules[] | select(.ir_path == $ir_path) | .slug' "$SIDECAR")
+        case "$ir_path" in
+            build/capsules/sfn/math/ir/*.ll)
+                found_dep=1
+                case "$slug" in
+                    sfn/math|sfn/math/*) ;;
+                    *)
+                        echo "[test]   dep module slug does not align with ir_path: slug=$slug ir_path=$ir_path" >&2
+                        missing=1
+                        ;;
+                esac
+                ;;
+            build/capsules/demo/widget/ir/*.ll)
+                found_rel=1
+                # Relative-import slugs from `module_name_from_path`
+                # don't carry the `<consumer>/` prefix — they're
+                # the project-relative path-shaped slug (e.g.
+                # `src/util` for `./src/util.sfn`). The C2b2
+                # routing pass strips the project_root from the
+                # slug only at ll_path-derivation time; the
+                # `slug` field preserves the original.
+                #
+                # Locking: slug must be non-empty AND must
+                # equal the suffix of `ir_path` after
+                # `build/capsules/demo/widget/ir/` minus the
+                # `.ll` extension, since that's how the C2b2
+                # routing builds the path.
+                local expected
+                expected="${ir_path#build/capsules/demo/widget/ir/}"
+                expected="${expected%.ll}"
+                if [ "$slug" != "$expected" ]; then
+                    echo "[test]   relative module slug != ir_path tail: slug=$slug expected=$expected ir_path=$ir_path" >&2
+                    missing=1
+                fi
+                ;;
+        esac
+    done < <(jq -r '.deps.ll_paths[]' "$SIDECAR")
+    [ "$missing" -eq 0 ] && [ "$found_dep" -eq 1 ] && [ "$found_rel" -eq 1 ]
+}
+run_test "modules[] entries align slug + ir_path for dep + relative routing" test_modules_routing_coverage
+
+# ---- Test 9: relative-import modules[] entry has slug + ir_path locked ----
+# The relative `./util` source must produce a `{slug, ir_path}`
+# pair where:
+#   - `ir_path` lives under the consumer's tree (C2b2 routing).
+#   - `slug` matches the project-relative form
+#     `src/util` (the resolver passes the original
+#     pre-prefix-strip slug to the cache and the sidecar; the
+#     consumer prefix is applied only at ll_path-derivation
+#     time). Locks both halves of the C2b2 ↔ C2c split into
+#     the per-module record.
+test_relative_module_slug_under_consumer() {
+    [ -f "$SIDECAR" ] || return 1
+    local pair rel_ir rel_slug
+    pair=$(jq -r '.modules[] | select(.ir_path | startswith("build/capsules/demo/widget/ir/")) | [.ir_path, .slug] | @tsv' "$SIDECAR" | head -n 1)
+    [ -n "$pair" ] || return 1
+    IFS=$'\t' read -r rel_ir rel_slug <<< "$pair"
+    [ -n "$rel_ir" ] || return 1
+    [ "$rel_slug" = "src/util" ]
+}
+run_test "modules[] surfaces relative-import entry with slug=src/util + consumer-tree ir_path" test_relative_module_slug_under_consumer
+
 # ---- Summary ----
 echo ""
 echo "[test] $PASS passed, $FAIL failed"

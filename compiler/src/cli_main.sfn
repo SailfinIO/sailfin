@@ -11,6 +11,7 @@ import {
 import { BuildReport, build_report_to_json, empty_build_report } from "./build_report";
 import {
     CapsuleArtifactManifest,
+    CapsuleArtifactModule,
     ScopeName,
     capsule_artifact_bin_path,
     capsule_artifact_dir,
@@ -20,9 +21,11 @@ import {
     capsule_default_bin_name,
     empty_capsule_artifact_manifest,
     is_safe_scope_name,
+    make_capsule_artifact_module,
     parse_scope_name
 } from "./capsule_artifact";
 import {
+    ModuleCacheEvent,
     ProjectCapsuleResult,
     ResolverConsumer,
     empty_resolver_consumer,
@@ -189,6 +192,27 @@ fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: strin
     manifest.entry_relative = spec_entry_relative;
     manifest.out_path = out_path;
     manifest.dep_ll_paths = capsule_result.ll_paths;
+
+    // Stage C2c: per-module entries. `module_events` is a
+    // parallel array to `ll_paths` (lockstep emission in
+    // `compile_capsule_modules`), so index alignment is safe;
+    // we still defend against mismatch by using the shorter
+    // length. `cache_key_digest` is `""` when caching was
+    // disabled or the digest was rejected — surfaced verbatim
+    // as the JSON `cache_key` field.
+    let mut modules: CapsuleArtifactModule[] = [];
+    let event_count = capsule_result.module_events.length;
+    let path_count = capsule_result.ll_paths.length;
+    let mut limit = event_count;
+    if path_count < limit { limit = path_count; }
+    let mut mi: number = 0;
+    loop {
+        if mi >= limit { break; }
+        let evt = capsule_result.module_events[mi];
+        modules.push(make_capsule_artifact_module(evt.slug, capsule_result.ll_paths[mi], evt.cache_key_digest));
+        mi += 1;
+    }
+    manifest.modules = modules;
 
     let dir = capsule_artifact_dir(parts.scope, parts.name);
     fs.createDirectory(dir, true);

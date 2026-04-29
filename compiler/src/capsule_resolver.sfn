@@ -73,6 +73,7 @@ export {
     CapsuleSource,
     CheckCapsuleResolution,
     CompileCapsuleResult,
+    ModuleCacheEvent,
     ProjectCapsuleResult,
     ResolverConsumer,
     TestCapsuleResolution,
@@ -140,19 +141,41 @@ fn empty_resolver_consumer() -> ResolverConsumer {
 // cache stats accumulated across all per-module compiles. `success`
 // distinguishes "no deps" (empty `ll_paths`, success=true) from a
 // compile failure (empty `ll_paths`, success=false).
+//
+// Stage C2c: when `success=true`, `module_events` is a parallel
+// array to `ll_paths` (same length, matching indices) holding
+// the per-module `ModuleCacheEvent` returned by
+// `_cr_compile_one`. When `success=false`, the bail path
+// preserves whichever events were already accumulated AND
+// pushes the failing event, so `module_events.length` may be
+// `ll_paths.length + 1` while `ll_paths` reflects only the
+// modules that finished cleanly. Sidecar emission is gated on
+// `success=true` upstream, so the sidecar never sees the
+// extra entry; the divergence is purely diagnostic. The
+// sidecar emitter consumes `slug` + `cache_key_digest` from
+// each event to enumerate per-source artifacts in
+// `manifest.json`. `stats` remains the totals summary;
+// `module_events` is the per-source detail.
 struct CompileCapsuleResult {
     ll_paths: string[];
     stats: CacheStats;
     success: boolean;
+    module_events: ModuleCacheEvent[];
 }
 
 // Result of `prepare_project_capsules` (the build / run path).
 // `ll_paths` is the dep `.ll` list for the linker; `stats` is the
 // per-build cache summary the CLI prints at the end (and that
 // `--json` will eventually emit as a structured field).
+//
+// Stage C2c: `module_events` is forwarded from
+// `CompileCapsuleResult` so the CLI's sidecar emitter has the
+// per-module slug + cache_key_digest without re-running the
+// compile loop.
 struct ProjectCapsuleResult {
     ll_paths: string[];
     stats: CacheStats;
+    module_events: ModuleCacheEvent[];
 }
 
 // One entry from the workspace's [workspace].members list, with the
@@ -811,16 +834,27 @@ struct ModuleCacheEvent {
     stored: boolean;  // miss path stored a fresh artifact
     invalid_key: boolean;  // is_valid_digest rejected the digest
     copy_failed: boolean;  // cache had it; cp to dst failed
+    // Stage C2c: per-module identity threaded back to the
+    // sidecar emitter so `manifest.json` can list every module
+    // the build produced. `slug` matches `CapsuleSource.slug`
+    // (stable, used for symbol mangling). `cache_key_digest` is
+    // the sha256 hex string from `CacheKey.digest`, or `""`
+    // when caching was disabled (`config.enabled = false`) or
+    // the digest was rejected by `is_valid_digest`.
+    slug: string;
+    cache_key_digest: string;
 }
 
-fn _cr_module_cache_event_failure() -> ModuleCacheEvent {
+fn _cr_module_cache_event_failure(slug: string) -> ModuleCacheEvent {
     return ModuleCacheEvent {
         success: false,
         lookup_attempted: false,
         hit: false,
         stored: false,
         invalid_key: false,
-        copy_failed: false
+        copy_failed: false,
+        slug: slug,
+        cache_key_digest: ""
     };
 }
 
@@ -835,7 +869,7 @@ fn _cr_module_cache_event_failure() -> ModuleCacheEvent {
 fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string) -> ModuleCacheEvent ![io] {
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);
-        return _cr_module_cache_event_failure();
+        return _cr_module_cache_event_failure(src.slug);
     }
     let ll_dir = _cr_dirname(src.ll_path);
     _cr_ensure_dir(ll_dir);
@@ -858,7 +892,9 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
                     hit: true,
                     stored: false,
                     invalid_key: false,
-                    copy_failed: false
+                    copy_failed: false,
+                    slug: src.slug,
+                    cache_key_digest: cache_key.digest
                 };
             }
             // Cache had the entry but materialisation failed (e.g.
@@ -879,7 +915,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
     if !ok {
         print.err("capsule-resolver: failed to lower " + src.slug
             + " to LLVM IR");
-        return _cr_module_cache_event_failure();
+        return _cr_module_cache_event_failure(src.slug);
     }
 
     let mut stored: boolean = false;
@@ -911,7 +947,9 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
         hit: false,
         stored: stored,
         invalid_key: invalid_key,
-        copy_failed: copy_failed
+        copy_failed: copy_failed,
+        slug: src.slug,
+        cache_key_digest: cache_key.digest
     };
 }
 
@@ -973,15 +1011,23 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig) -
     let flags_canonical = canonicalize_flags(empty_flags);
     let mut out: string[] = [];
     let mut stats = empty_cache_stats();
+    let mut events: ModuleCacheEvent[] = [];
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
         let evt = _cr_compile_one(sources[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical);
         if !evt.success {
+            // Stage C2c: even on the bail path we surface the
+            // events accumulated so far. Sidecar emission is
+            // gated upstream by `success = true`, so this is
+            // primarily for diagnostic introspection — but the
+            // shape stays consistent across exit paths.
+            events.push(evt);
             return CompileCapsuleResult {
                 ll_paths: out,
                 stats: stats,
-                success: false
+                success: false,
+                module_events: events
             };
         }
         // Only count hits/misses when the cache was actually
@@ -1000,12 +1046,14 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig) -
             stats.copy_failures = stats.copy_failures + 1;
         }
         out.push(sources[i].ll_path);
+        events.push(evt);
         i += 1;
     }
     return CompileCapsuleResult {
         ll_paths: out,
         stats: stats,
-        success: true
+        success: true,
+        module_events: events
     };
 }
 
@@ -2218,18 +2266,21 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 // genuinely-empty dep graphs.
 fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
+    let empty_events: ModuleCacheEvent[] = [];
     let entry_paths: string[] = [input_path];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
     if resolved.has_collision {
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
-            stats: empty_cache_stats()
+            stats: empty_cache_stats(),
+            module_events: empty_events
         };
     }
     if resolved.sources.length == 0 {
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
-            stats: empty_cache_stats()
+            stats: empty_cache_stats(),
+            module_events: empty_events
         };
     }
 
@@ -2238,19 +2289,22 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
-            stats: empty_cache_stats()
+            stats: empty_cache_stats(),
+            module_events: empty_events
         };
     }
     let result = compile_capsule_modules(resolved.sources, config);
     if !result.success {
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
-            stats: result.stats
+            stats: result.stats,
+            module_events: result.module_events
         };
     }
     return ProjectCapsuleResult {
         ll_paths: result.ll_paths,
-        stats: result.stats
+        stats: result.stats,
+        module_events: result.module_events
     };
 }
 

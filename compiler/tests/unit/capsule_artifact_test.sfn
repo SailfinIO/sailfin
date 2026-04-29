@@ -10,6 +10,7 @@
 import {
     CapsuleArtifactLayout,
     CapsuleArtifactManifest,
+    CapsuleArtifactModule,
     capsule_artifact_bin_path,
     capsule_artifact_dir,
     capsule_artifact_ir_dir,
@@ -22,6 +23,7 @@ import {
     empty_capsule_artifact_manifest,
     ir_path_for_slug,
     is_safe_scope_name,
+    make_capsule_artifact_module,
     parse_scope_name,
     ScopeName
 } from "../../src/capsule_artifact";
@@ -367,6 +369,58 @@ test "manifest_to_json: backslash + quote in paths escaped per RFC 8259" {
     m.entry_relative = "src\\with\"quote.sfn";
     let json = capsule_artifact_manifest_to_json(m);
     assert _contains(json, "\"entry\":\"src\\\\with\\\"quote.sfn\"");
+}
+
+// --------------------------------------------------------------
+// Stage C2c: per-module entries
+// --------------------------------------------------------------
+test "empty_capsule_artifact_manifest: modules is empty" {
+    assert empty_capsule_artifact_manifest().modules.length == 0;
+}
+
+test "make_capsule_artifact_module: round-trips slug + ir_path + cache_key" {
+    let m = make_capsule_artifact_module("sfn/math/mod", "build/capsules/sfn/math/ir/mod.ll", "abc123");
+    assert m.slug == "sfn/math/mod";
+    assert m.ir_path == "build/capsules/sfn/math/ir/mod.ll";
+    assert m.cache_key == "abc123";
+}
+
+test "manifest_to_json: empty modules produce []" {
+    // Sidecars from builds with no manifest deps still emit the
+    // `modules` key — locks the field's presence so consumers
+    // can rely on it without conditional checks.
+    let json = capsule_artifact_manifest_to_json(empty_capsule_artifact_manifest());
+    assert _contains(json, "\"modules\":[]");
+}
+
+test "manifest_to_json: single module entry serialises slug + ir_path + cache_key" {
+    let mut m = empty_capsule_artifact_manifest();
+    m.modules = [make_capsule_artifact_module("sfn/math/mod", "build/capsules/sfn/math/ir/mod.ll", "deadbeef")];
+    let json = capsule_artifact_manifest_to_json(m);
+    assert _contains(json, "\"slug\":\"sfn/math/mod\"");
+    assert _contains(json, "\"ir_path\":\"build/capsules/sfn/math/ir/mod.ll\"");
+    assert _contains(json, "\"cache_key\":\"deadbeef\"");
+}
+
+test "manifest_to_json: multiple modules emit each entry" {
+    let mut m = empty_capsule_artifact_manifest();
+    m.modules = [make_capsule_artifact_module("sfn/math/mod", "build/capsules/sfn/math/ir/mod.ll", "k1"), make_capsule_artifact_module("demo/widget/util", "build/capsules/demo/widget/ir/util.ll", "k2")];
+    let json = capsule_artifact_manifest_to_json(m);
+    assert _contains(json, "\"slug\":\"sfn/math/mod\"");
+    assert _contains(json, "\"slug\":\"demo/widget/util\"");
+    assert _contains(json, "\"cache_key\":\"k1\"");
+    assert _contains(json, "\"cache_key\":\"k2\"");
+}
+
+test "manifest_to_json: empty cache_key (no-cache build) round-trips as empty string" {
+    // `--no-cache` builds emit `cache_key: ""` rather than
+    // omitting the field — consumers can rely on the field
+    // always being present and distinguish "cache was off"
+    // from "cache hit" via the value.
+    let mut m = empty_capsule_artifact_manifest();
+    m.modules = [make_capsule_artifact_module("sfn/math/mod", "build/capsules/sfn/math/ir/mod.ll", "")];
+    let json = capsule_artifact_manifest_to_json(m);
+    assert _contains(json, "\"cache_key\":\"\"");
 }
 
 // --------------------------------------------------------------

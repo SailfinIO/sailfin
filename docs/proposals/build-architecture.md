@@ -1350,12 +1350,23 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
       paths; `schema_version` stays at `"1"` (string-array-
       of-paths shape unchanged — same precedent C2b1 set
       for `out_path`).
-    - **C2c — per-module sidecar entries** (next). Add a
-      `modules: [{slug, ir_path, obj_path, cache_key}]`
-      array to the sidecar so `sfn package` can enumerate
-      per-source artifacts without re-walking the build
-      tree. Builds on C2b2 — slug → `ir_path` mapping is
-      already centralised.
+    - **C2c — per-module sidecar entries** (in flight). Adds
+      `modules: [{slug, ir_path, cache_key}]` to the sidecar.
+      `slug` matches `CapsuleSource.slug`; `ir_path` is the
+      same string as the corresponding `deps.ll_paths` entry
+      (locked per-module so consumers can iterate `modules`
+      without a parallel-array lookup); `cache_key` is the
+      sha256 hex (`""` when caching is disabled or the digest
+      was rejected). `obj_path` is deferred until per-module
+      compile-then-link lands — today the build only
+      produces a single `mod.o` per library capsule (already
+      surfaced via `out`) or no per-capsule object (binaries
+      link the .ll set directly). Threaded through
+      `ModuleCacheEvent` + `CompileCapsuleResult.module_events`
+      → `ProjectCapsuleResult.module_events` →
+      `_emit_capsule_artifact_sidecar`. Schema stays at
+      "1" — the field is additive, existing v1 consumers
+      that only read previously-defined fields keep working.
   Unblocks C4 (`sfn package` knows what's in a capsule).
 - **C3 — CI gate on stdlib.** Build every `capsules/sfn/*` with
   `sfn build -p` in CI and assert byte-for-byte parity vs `build.sh`
