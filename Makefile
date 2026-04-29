@@ -472,9 +472,10 @@ check-determinism:
 # Packaging (release artifacts)
 # =============================================================================
 
-package:
+package: compile
 	@echo "[package] building + packaging native artifacts into dist/"
-	COMPILER_BIN="$(NATIVE_BIN)" OUT_DIR=dist bash tools/package.sh
+	@$(NATIVE_BIN) package --out dist --compiler-bin $(NATIVE_BIN)
+	@$(NATIVE_BIN) package --installer --out dist --compiler-bin $(NATIVE_BIN)
 
 # =============================================================================
 # CI helpers (used by .github/workflows/ci.yml)
@@ -504,40 +505,35 @@ ci-prepare-test-artifacts:
 	true
 
 # Package native compiler + installer artifacts for a given target label.
-# Uses tools/package.sh (pure bash, no Python dependency).
+# Stage C4 migration: this target now delegates to `sfn package`
+# (Sailfin-native; replaces the retired `tools/package.sh`).
 # Produces: dist/sailfin-native-<target>-<version>.tar.gz (+.sha256, +.manifest.json)
-#           dist/installer-<target>.tar.gz
+#           dist/installer-<target>.tar.gz (+.sha256, +.manifest.json)
 ci-package:
 	@if [ -z "$(TARGET)" ]; then \
 		echo "[ci-package][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
 		exit 1; \
 	fi
-	TARGET="$(TARGET)" COMPILER_BIN="$(NATIVE_BIN)" OUT_DIR=dist \
-		bash tools/package.sh --skip-build
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[ci-package][error] missing native compiler '$(NATIVE_BIN)'; run 'make rebuild' or 'make compile' first" >&2; \
+		exit 1; \
+	fi
+	@$(NATIVE_BIN) package --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
+	@$(NATIVE_BIN) package --installer --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
 
 # Create an installer payload (compiler + runtime bits) for a given target label.
-# Produces: dist/installer-$(TARGET).tar.gz
+# Stage C4 migration: now delegates to `sfn package --installer`.
+# Produces: dist/installer-$(TARGET).tar.gz (+.sha256, +.manifest.json)
 ci-package-installer:
 	@if [ -z "$(TARGET)" ]; then \
 		echo "[ci-package-installer][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
 		exit 1; \
 	fi
-	@set -eu; \
-	INSTALLER_DIR="dist/installer-$(TARGET)"; \
-	rm -rf "$$INSTALLER_DIR"; \
-	mkdir -p "$$INSTALLER_DIR/bin"; \
-	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sailfin$(EXE_EXT)"; \
-	cp -f "$(NATIVE_BIN)" "$$INSTALLER_DIR/bin/sfn$(EXE_EXT)"; \
-	mkdir -p "$$INSTALLER_DIR/runtime"; \
-	cp -R runtime/native "$$INSTALLER_DIR/runtime/native"; \
-	mkdir -p "$$INSTALLER_DIR/runtime/native/obj"; \
-	: "prelude.o comes from selfhost build outputs; ensure ci-prepare-test-artifacts ran."; \
-	if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then \
-		echo "[ci-package-installer][error] missing build/selfhost/native/obj/runtime/prelude.o" >&2; \
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[ci-package-installer][error] missing native compiler '$(NATIVE_BIN)'; run 'make rebuild' or 'make compile' first" >&2; \
 		exit 1; \
-	fi; \
-	cp -f build/selfhost/native/obj/runtime/prelude.o "$$INSTALLER_DIR/runtime/native/obj/prelude.o"; \
-	tar -czf "dist/installer-$(TARGET).tar.gz" -C "$$INSTALLER_DIR" .
+	fi
+	@$(NATIVE_BIN) package --installer --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
 
 # Usage:
 #   make rebuild

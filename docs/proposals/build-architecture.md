@@ -1380,21 +1380,25 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
       `tools/package.sh`'s first output, plus user-capsule
       packaging (`-p <capsule-path>`) driven off the C2c
       sidecar.
-    - **C4b (in flight).** `--installer` mode bundles the
+    - **C4b (#266, shipped).** `--installer` mode bundles the
       compiler + `runtime/native/` + (if available) the prelude
       `.o` + (if available) the staged `import-context/` into
       `installer-<target>.tar.gz`, replacing the second half of
       `tools/package.sh`. Tarball name omits the version
-      (matching the historical convention release-tag.yml +
-      ci.yml expect); manifest reuses
-      `DistManifest.kind = "installer"`. After C4b lands,
-      every output of `tools/package.sh` has a Sailfin-native
-      replacement, and the migration PR (Makefile +
-      `.github/workflows/release-tag.yml` +
-      `.github/workflows/ci.yml` → `sfn package` /
-      `sfn package --installer`) becomes a tight mechanical
-      change followed by deleting the shell script after one
-      release cycle.
+      (matching the historical convention `release-tag.yml` +
+      `ci.yml` expect); manifest reuses
+      `DistManifest.kind = "installer"`.
+    - **C4 migration (landed).** `Makefile`'s `package` /
+      `ci-package` / `ci-package-installer` targets now call
+      `sfn package` / `sfn package --installer` directly;
+      `tools/package.sh` is **deleted**. The composite action
+      `.github/actions/sailfin-build/action.yml` (which CI's
+      `release-tag.yml` + `ci.yml` go through) still calls
+      `make ci-package`, so the workflow surface is unchanged.
+      The cross-Windows installer (`make ci-cross-windows`)
+      keeps its own inline cross-compile + installer logic —
+      adding Windows-target support to `sfn package` is a
+      separate follow-up.
   Manifest schema is `DistManifest.schema_version = "1"` — adds
   `kind` (compiler / installer / binary / library), `capsule`,
   and `tarball` fields beyond what `tools/package.sh` emitted.

@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout + sfn package shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265; C4b installer mode in flight)
+Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout + sfn package shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266; C4 migration retiring `tools/package.sh` landed)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -195,11 +195,17 @@ feature availability.
     — adds `kind` (compiler / installer / binary / library),
     `capsule`, and `tarball` fields beyond
     `tools/package.sh`'s output.
-  - **Migration**: `tools/package.sh` and the Makefile's
-    `package` / `ci-package` targets stay untouched until C4b
-    lands; the next PR flips them to call `sfn package` /
-    `sfn package --installer`, then deletes the shell script
-    after one release cycle confirms output shape parity.
+  - **Migration (landed)**: `Makefile`'s `package` /
+    `ci-package` / `ci-package-installer` targets now invoke
+    `sfn package` / `sfn package --installer` directly.
+    `tools/package.sh` is **deleted**. The composite action
+    `.github/actions/sailfin-build/action.yml` (which CI's
+    `release-tag.yml` + `ci.yml` go through) keeps calling
+    `make ci-package`, so the workflow surface is unchanged.
+    `make ci-cross-windows` still has its own inline cross-
+    compile + installer logic — Windows-target support in
+    `sfn package` is a follow-up (Stage D / late-C territory,
+    requires `--target` validation against host).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
