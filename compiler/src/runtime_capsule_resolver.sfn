@@ -1,0 +1,249 @@
+// compiler/src/runtime_capsule_resolver.sfn
+//
+// Stage D PR1 — discover `kind = "runtime"` workspace members and
+// surface their declarative C / LL / include / link-libs metadata
+// for downstream consumers.
+//
+// `kind = "runtime"` capsules don't ship `.sfn` modules. They ship
+// C source (`c-sources`), pre-written LLVM IR (`ll-sources`),
+// header roots (`include-dirs`), and link flags (`link-libs`)
+// declared in `capsule.toml`. The driver compiles each `.c` with
+// clang, assembles each `.ll` with clang, propagates `-I` flags
+// from the include roots, and appends the link flags to the final
+// link.
+//
+// This module is the surface every downstream consumer (the link
+// phase, the cache key digester, future cross-compile target
+// resolution) reads from. PR1 introduces the surface as
+// dead-code: no production call site invokes
+// `enumerate_runtime_capsule_artifacts` yet — that wires up in
+// Stage D PR2 when `_clang_compile_runtime_objects` stops using
+// hardcoded `runtime/native/...` paths and starts iterating
+// resolved artifacts. The unit test in
+// `compiler/tests/unit/runtime_capsule_resolver_test.sfn` is the
+// only consumer in this PR.
+//
+// Path resolution rule: every path returned in
+// `RuntimeCapsuleArtifacts` is workspace-rooted (i.e.
+// `workspace_root + "/" + manifest_member_path + "/" + relative`),
+// so consumers don't have to redo the join. The manifest stores
+// paths relative to its own directory (Cargo-style); the
+// resolver does the workspace-rooted resolution once.
+import { contains_string, strip_prefix, substring } from "./string_utils";
+import {
+    toml_get_build_kind,
+    toml_get_c_sources,
+    toml_get_include_dirs,
+    toml_get_link_libs,
+    toml_get_ll_sources,
+    toml_get_name,
+    toml_get_prelude_entry,
+    toml_get_workspace_members
+} from "./toml_parser";
+
+// Resolved per-runtime-capsule build inputs. All paths are
+// workspace-rooted; consumers feed them straight into
+// `process.run([...])` argv arrays for clang.
+//
+// `link_libs` is intentionally not path-resolved — these are
+// linker flags (e.g. `-lm`, `-lpthread`), not files. They flow
+// through verbatim.
+struct RuntimeCapsuleArtifacts {
+    capsule_name: string;
+    manifest_dir: string;
+    c_sources: string[];
+    ll_sources: string[];
+    include_dirs: string[];
+    link_libs: string[];
+    prelude_entry: string;
+}
+
+fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
+    let empty: string[] = [];
+    let empty2: string[] = [];
+    let empty3: string[] = [];
+    let empty4: string[] = [];
+    return RuntimeCapsuleArtifacts {
+        capsule_name: "",
+        manifest_dir: "",
+        c_sources: empty,
+        ll_sources: empty2,
+        include_dirs: empty3,
+        link_libs: empty4,
+        prelude_entry: ""
+    };
+}
+
+// ---- Path helpers ----
+// `path_join("a", "b")` → `"a/b"`. Idempotent on trailing slashes.
+fn _rcr_path_join(base: string, name: string) -> string {
+    if base.length == 0 { return name; }
+    if name.length == 0 { return base; }
+    if substring(base, base.length - 1, base.length) == "/" {
+        return base + name;
+    }
+    return base + "/" + name;
+}
+
+// Resolve `manifest_dir + "/" + relative`. The manifest is
+// Cargo-style: paths are relative to the manifest dir, but
+// humans sometimes write `./src/foo.c` instead of `src/foo.c`.
+// `strip_prefix` (shared from `string_utils.sfn`) collapses
+// both forms to the canonical "no leading `./`" shape before
+// the join.
+fn _rcr_resolve_path(manifest_dir: string, relative: string) -> string {
+    let cleaned = strip_prefix(relative, "./");
+    return _rcr_path_join(manifest_dir, cleaned);
+}
+
+// Apply `_rcr_resolve_path` to every entry in `relatives`.
+fn _rcr_resolve_paths(manifest_dir: string, relatives: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= relatives.length { break; }
+        out.push(_rcr_resolve_path(manifest_dir, relatives[i]));
+        i += 1;
+    }
+    return out;
+}
+
+// Newline-split helper for `toml_get_workspace_members` output.
+fn _rcr_split_newlines(text: string) -> string[] {
+    let mut out: string[] = [];
+    if text.length == 0 { return out; }
+    let mut start: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= text.length { break; }
+        if substring(text, i, i + 1) == "\n" {
+            if i > start { out.push(substring(text, start, i)); }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if start < text.length {
+        out.push(substring(text, start, text.length));
+    }
+    return out;
+}
+
+// Path-traversal guard for workspace member paths. Mirrors
+// `_cr_is_safe_member_path` in `capsule_resolver.sfn`: rejects
+// absolute paths, backslashes, and any `.` / `..` segment.
+// Inline-duplicated rather than imported because the original is
+// `_cr_`-prefixed (file-private convention) and pulling it in
+// would require restructuring the resolver's exports. Same
+// behavioural contract — keep them in sync if either changes.
+fn _rcr_is_safe_member_path(path: string) -> boolean {
+    if path.length == 0 { return false; }
+    if substring(path, 0, 1) == "/" { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= path.length { break; }
+        if substring(path, i, i + 1) == "\\" { return false; }
+        i += 1;
+    }
+    let mut start: number = 0;
+    loop {
+        if start >= path.length { break; }
+        let mut end: number = start;
+        loop {
+            if end >= path.length { break; }
+            if substring(path, end, end + 1) == "/" { break; }
+            end += 1;
+        }
+        let segment = substring(path, start, end);
+        if segment == ".." { return false; }
+        if segment == "." { return false; }
+        start = end + 1;
+    }
+    return true;
+}
+
+// Build a `RuntimeCapsuleArtifacts` from a manifest's text plus
+// its on-disk member path (relative to workspace root). Returns
+// the empty artifact if the manifest doesn't declare
+// `kind = "runtime"` — caller filters those out.
+fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, manifest_text: string) -> RuntimeCapsuleArtifacts {
+    let kind = toml_get_build_kind(manifest_text);
+    if kind != "runtime" { return empty_runtime_capsule_artifacts(); }
+    let name = toml_get_name(manifest_text);
+    if name.length == 0 { return empty_runtime_capsule_artifacts(); }
+    let manifest_dir = _rcr_path_join(workspace_root, member_path);
+    let c_sources_rel = toml_get_c_sources(manifest_text);
+    let ll_sources_rel = toml_get_ll_sources(manifest_text);
+    let include_dirs_rel = toml_get_include_dirs(manifest_text);
+    let link_libs = toml_get_link_libs(manifest_text);
+    let prelude_entry_rel = toml_get_prelude_entry(manifest_text);
+    let mut prelude_entry: string = "";
+    if prelude_entry_rel.length > 0 {
+        prelude_entry = _rcr_resolve_path(manifest_dir, prelude_entry_rel);
+    }
+    return RuntimeCapsuleArtifacts {
+        capsule_name: name,
+        manifest_dir: manifest_dir,
+        c_sources: _rcr_resolve_paths(manifest_dir, c_sources_rel),
+        ll_sources: _rcr_resolve_paths(manifest_dir, ll_sources_rel),
+        include_dirs: _rcr_resolve_paths(manifest_dir, include_dirs_rel),
+        link_libs: link_libs,
+        prelude_entry: prelude_entry
+    };
+}
+
+// Walk the workspace's [workspace].members; for every member
+// whose capsule.toml declares `kind = "runtime"`, return a
+// `RuntimeCapsuleArtifacts` with workspace-rooted paths.
+//
+// `dep_specs` filters by canonical capsule name (e.g.
+// `["sfn/runtime-native"]`). Empty `dep_specs` returns ALL
+// runtime capsules in the workspace — useful for code paths
+// that haven't yet migrated to declare their runtime deps
+// explicitly (the bootstrap fallback under Stage D PR2/PR3).
+//
+// Members that fail to read (missing capsule.toml, parse
+// errors, missing name) are skipped silently rather than
+// erroring — same shape as `load_workspace_members`. Callers
+// that need to detect "no runtime capsule found" inspect the
+// returned array's length.
+fn enumerate_runtime_capsule_artifacts(workspace_root: string, dep_specs: string[]) -> RuntimeCapsuleArtifacts[] ![io] {
+    let mut out: RuntimeCapsuleArtifacts[] = [];
+    if workspace_root.length == 0 { return out; }
+    let workspace_manifest = _rcr_path_join(workspace_root, "workspace.toml");
+    if !fs.exists(workspace_manifest) { return out; }
+    let workspace_text = fs.readFile(workspace_manifest);
+    let members_text = toml_get_workspace_members(workspace_text);
+    let members = _rcr_split_newlines(members_text);
+    let mut i: number = 0;
+    loop {
+        if i >= members.length { break; }
+        let member_path = members[i];
+        i += 1;
+        if member_path.length == 0 { continue; }
+        // Path-traversal guard: a hostile workspace.toml could
+        // declare members like `"../etc"` or `"/abs/path"`; reject
+        // those before any fs.exists() touches them.
+        if !_rcr_is_safe_member_path(member_path) {
+            print.err("runtime-capsule-resolver: skipping unsafe member path \""
+                + member_path
+                + "\" (must be relative, no `..`, no backslashes)");
+            continue;
+        }
+        let member_manifest = _rcr_path_join(_rcr_path_join(workspace_root, member_path), "capsule.toml");
+        if !fs.exists(member_manifest) { continue; }
+        let manifest_text = fs.readFile(member_manifest);
+        let artifacts = _rcr_artifacts_from_manifest(workspace_root, member_path, manifest_text);
+        if artifacts.capsule_name.length == 0 { continue; }
+        if dep_specs.length > 0 {
+            if !contains_string(dep_specs, artifacts.capsule_name) { continue; }
+        }
+        out.push(artifacts);
+    }
+    return out;
+}
+
+export {
+    RuntimeCapsuleArtifacts,
+    empty_runtime_capsule_artifacts,
+    enumerate_runtime_capsule_artifacts
+};

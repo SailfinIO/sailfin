@@ -774,8 +774,19 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         let is_library_build = strings_equal(build_kind, "library");
         let is_runtime_build = strings_equal(build_kind, "runtime");
         let no_link = is_library_build;
+        // Stage D PR1: `kind = "runtime"` capsules are now a recognised
+        // schema variant — they ship declarative C / LL / include-dirs
+        // / link-libs source lists rather than `.sfn` modules. The
+        // driver doesn't yet COMPILE them as a top-level `-p` target
+        // (Stage D PR2 wires the link phase up); building one
+        // directly surfaces a hint and exits with the same usage-error
+        // code as other `-p` misuse so scripts/CI don't treat the
+        // unsupported invocation as success and proceed with missing
+        // artifacts.
         if is_runtime_build {
-            print("sfn build: kind = \"runtime\" not yet supported (Stage F).");
+            print("sfn build: kind = \"runtime\" capsules are not buildable directly;");
+            print("           declare \"" + cap_capsule_name
+                + "\" as a dependency of a kind=\"binary\" capsule instead.");
             return 2;
         }
 

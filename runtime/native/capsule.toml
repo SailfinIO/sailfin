@@ -1,0 +1,46 @@
+[capsule]
+name = "sfn/runtime-native"
+version = "0.5.10-alpha.3"
+description = "Native (C) runtime + supporting LLVM IR linked into every Sailfin compiler binary"
+
+[capabilities]
+# C source has no Sailfin-effect surface to declare. Effects are a
+# language feature; they don't gate clang invocations.
+required = []
+
+[build]
+kind = "runtime"
+
+# Stage D PR1 schema (docs/proposals/build-architecture.md §Part 5):
+# `kind = "runtime"` capsules ship declarative source lists rather
+# than walking `src/**/*.sfn` like a `kind = "library"` capsule. The
+# driver compiles each `c-sources` entry with clang, assembles each
+# `ll-sources` entry with clang, propagates `include-dirs` to
+# downstream C compiles, and appends `link-libs` to the final link.
+#
+# All paths below are relative to this manifest's directory
+# (`runtime/native/`). Stage F retires `c-sources`/`ll-sources` when
+# the runtime is rewritten in Sailfin; until then this is the
+# load-bearing surface for `make compile`'s eventual cutover to
+# `sfn build -p compiler` (Stage D PR4).
+# All array values below are SINGLE-LINE intentionally — the
+# current TOML parser (`compiler/src/toml_parser.sfn`) only
+# recognises arrays whose `[...]` is on one line. Multi-line
+# array support is a future parser extension; until that lands,
+# reformatting here would silently make every getter return `[]`
+# and the resolver would surface zero artifacts. A regression test
+# against this exact manifest text guards the format.
+c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c", "src/native_driver.c"]
+ll-sources = ["ir/runtime_globals.ll"]
+include-dirs = ["include"]
+link-libs = ["-lm"]
+
+# Transitional bridge for Stage D: the prelude (`runtime/prelude.sfn`)
+# is currently outside this capsule's tree but every compiler build
+# needs it linked in. PR1 declares it here so the driver has a
+# single source of truth for "what `.sfn` does the runtime capsule
+# pull in alongside its C sources." Once Stage F moves
+# `runtime/prelude.sfn` into `capsules/sfn/prelude/src/mod.sfn`
+# (and the prelude reaches every build via the workspace-implicit
+# resolver path), this field retires.
+prelude-entry = "../prelude.sfn"

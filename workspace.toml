@@ -8,4 +8,4 @@
 # parser surfaces the literal entries via toml_get_workspace_members().
 
 [workspace]
-members = ["compiler", "capsules/sfn/cli", "capsules/sfn/crypto", "capsules/sfn/fmt", "capsules/sfn/fs", "capsules/sfn/http", "capsules/sfn/json", "capsules/sfn/layers", "capsules/sfn/log", "capsules/sfn/losses", "capsules/sfn/math", "capsules/sfn/net", "capsules/sfn/nn", "capsules/sfn/os", "capsules/sfn/path", "capsules/sfn/prelude", "capsules/sfn/sync", "capsules/sfn/tensor", "capsules/sfn/test", "capsules/sfn/time", "capsules/sfn/toml"]
+members = ["compiler", "runtime/native", "capsules/sfn/cli", "capsules/sfn/crypto", "capsules/sfn/fmt", "capsules/sfn/fs", "capsules/sfn/http", "capsules/sfn/json", "capsules/sfn/layers", "capsules/sfn/log", "capsules/sfn/losses", "capsules/sfn/math", "capsules/sfn/net", "capsules/sfn/nn", "capsules/sfn/os", "capsules/sfn/path", "capsules/sfn/prelude", "capsules/sfn/sync", "capsules/sfn/tensor", "capsules/sfn/test", "capsules/sfn/time", "capsules/sfn/toml"]

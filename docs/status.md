@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout + sfn package shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266; C4 migration retiring `tools/package.sh` landed)
+Updated: April 29, 2026 (Stage C complete through C4 migration — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267 retired `tools/package.sh`; Stage D PR1 `kind = "runtime"` capsule schema in flight)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -206,6 +206,23 @@ feature availability.
     compile + installer logic — Windows-target support in
     `sfn package` is a follow-up (Stage D / late-C territory,
     requires `--target` validation against host).
+- **Stage D PR1 (in flight, this PR).** `kind = "runtime"`
+  capsule schema becomes a real, parsed manifest variant.
+  `runtime/native/capsule.toml` is the first such capsule
+  (`name = "sfn/runtime-native"`); declares `c-sources`,
+  `ll-sources`, `include-dirs`, `link-libs`, and a transitional
+  `prelude-entry = "../prelude.sfn"`. New
+  `compiler/src/runtime_capsule_resolver.sfn` exposes
+  `enumerate_runtime_capsule_artifacts(workspace_root,
+  dep_specs)` returning `RuntimeCapsuleArtifacts[]` with
+  workspace-rooted paths. **Pure foundation** — no production
+  call site invokes it yet (Stage D PR2 wires
+  `_clang_compile_runtime_objects` to consume the resolver
+  output). `cli_main.sfn`'s old "kind = runtime not yet
+  supported" rejection becomes a no-op + hint pointing the
+  user at the supported usage (declare it as a dep of a
+  `kind = "binary"` capsule). `make compile` is unchanged
+  (still uses `scripts/build.sh`).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
