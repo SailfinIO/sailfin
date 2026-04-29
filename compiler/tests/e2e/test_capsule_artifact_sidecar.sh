@@ -187,17 +187,24 @@ run_test "dep .ll routes under build/capsules/sfn/math/ir/ (Stage C2b2)" test_de
 # ---- Test 8d: modules array present + matches deps.count ----
 # Stage C2c: every dep `.ll` the build produced should appear as a
 # `{slug, ir_path, cache_key}` entry under `modules`. The array is
-# the per-source detail companion to the aggregate `deps.ll_paths`.
+# the per-source detail companion to the aggregate `deps.ll_paths`,
+# so `modules.length` must equal `deps.count` (`compile_capsule_modules`
+# accumulates events in lockstep with `ll_paths`).
 test_modules_array_present() {
-    local mods_count
+    local mods_count deps_count
     mods_count=$(jq -r '.modules | length' "$SIDECAR")
+    deps_count=$(jq -r '.deps.count' "$SIDECAR")
     [ "$mods_count" -ge 1 ] || return 1
+    [ "$mods_count" = "$deps_count" ] || {
+        echo "[test]   modules.length ($mods_count) != deps.count ($deps_count)" >&2
+        return 1
+    }
     # Every entry must have the three locked fields as strings.
     local malformed
     malformed=$(jq -r '[.modules[] | select((.slug|type) != "string" or (.ir_path|type) != "string" or (.cache_key|type) != "string")] | length' "$SIDECAR")
     [ "$malformed" = "0" ]
 }
-run_test "modules array present with locked {slug, ir_path, cache_key} fields" test_modules_array_present
+run_test "modules array length equals deps.count + locked {slug, ir_path, cache_key} fields" test_modules_array_present
 
 # ---- Test 8e: modules ir_path values exist on disk ----
 # Same hardening as `dep_ll_paths` but on the per-module list:

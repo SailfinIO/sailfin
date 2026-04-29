@@ -142,12 +142,20 @@ fn empty_resolver_consumer() -> ResolverConsumer {
 // distinguishes "no deps" (empty `ll_paths`, success=true) from a
 // compile failure (empty `ll_paths`, success=false).
 //
-// Stage C2c: `module_events` is a parallel array (length matches
-// `ll_paths`) holding the per-module `ModuleCacheEvent` returned
-// by `_cr_compile_one`. The sidecar emitter consumes `slug` +
-// `cache_key_digest` from each event to enumerate per-source
-// artifacts in `manifest.json`. `stats` remains the totals
-// summary; `module_events` is the per-source detail.
+// Stage C2c: when `success=true`, `module_events` is a parallel
+// array to `ll_paths` (same length, matching indices) holding
+// the per-module `ModuleCacheEvent` returned by
+// `_cr_compile_one`. When `success=false`, the bail path
+// preserves whichever events were already accumulated AND
+// pushes the failing event, so `module_events.length` may be
+// `ll_paths.length + 1` while `ll_paths` reflects only the
+// modules that finished cleanly. Sidecar emission is gated on
+// `success=true` upstream, so the sidecar never sees the
+// extra entry; the divergence is purely diagnostic. The
+// sidecar emitter consumes `slug` + `cache_key_digest` from
+// each event to enumerate per-source artifacts in
+// `manifest.json`. `stats` remains the totals summary;
+// `module_events` is the per-source detail.
 struct CompileCapsuleResult {
     ll_paths: string[];
     stats: CacheStats;
