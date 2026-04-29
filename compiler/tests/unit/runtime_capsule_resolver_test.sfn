@@ -1,0 +1,209 @@
+// Stage D PR1 regression tests for
+// `compiler/src/runtime_capsule_resolver.sfn`.
+//
+// `enumerate_runtime_capsule_artifacts` is the surface every
+// downstream consumer (link phase, cache key digester, future
+// cross-target resolver) reads from to find `kind = "runtime"`
+// capsules in the workspace and surface their declarative C /
+// LL / include / link-libs metadata. These tests construct
+// real workspace.toml + capsule.toml files in a scratch dir
+// (under build/sailfin/.runtime-resolver-test/) and assert the
+// resolver returns the right shape.
+//
+// Pure-resolver unit testing — no compile, no link. Stage D PR2
+// is when the e2e shape gets exercised through `sfn build`.
+import {
+    RuntimeCapsuleArtifacts,
+    empty_runtime_capsule_artifacts,
+    enumerate_runtime_capsule_artifacts
+} from "../../src/runtime_capsule_resolver";
+
+// --------------------------------------------------------------
+// empty_runtime_capsule_artifacts defaults
+// --------------------------------------------------------------
+test "empty_runtime_capsule_artifacts: every list is empty" {
+    let a = empty_runtime_capsule_artifacts();
+    assert a.capsule_name == "";
+    assert a.manifest_dir == "";
+    assert a.c_sources.length == 0;
+    assert a.ll_sources.length == 0;
+    assert a.include_dirs.length == 0;
+    assert a.link_libs.length == 0;
+    assert a.prelude_entry == "";
+}
+
+// --------------------------------------------------------------
+// enumerate_runtime_capsule_artifacts: scratch workspace
+// --------------------------------------------------------------
+// Build a minimal scratch workspace under build/sailfin/<scratch>/
+// so each test gets a deterministic on-disk layout the resolver
+// can walk. The repo's actual workspace.toml + runtime/native/
+// would also work, but we want hermetic asserts on the exact
+// path resolution rules — not "happens to match what's in main."
+fn _setup_scratch_workspace(scratch: string) ![io] {
+    process.run(["rm", "-rf", scratch]);
+    process.run(["mkdir", "-p", scratch + "/runtime/native/src"]);
+    process.run(["mkdir", "-p", scratch + "/runtime/native/include"]);
+    process.run(["mkdir", "-p", scratch + "/runtime/native/ir"]);
+    process.run(["mkdir", "-p", scratch + "/capsules/sfn/library-cap"]);
+
+    fs.writeFile(scratch + "/workspace.toml", "[workspace]\nmembers = [\"runtime/native\", \"capsules/sfn/library-cap\"]\n");
+
+    let runtime_manifest = "[capsule]\n" + "name = \"sfn/runtime-native\"\n"
+        + "version = \"0.1.0\"\n"
+        + "\n"
+        + "[capabilities]\n"
+        + "required = []\n"
+        + "\n"
+        + "[build]\n"
+        + "kind = \"runtime\"\n"
+        + "c-sources = [\"src/sailfin_arena.c\", \"src/sailfin_runtime.c\"]\n"
+        + "ll-sources = [\"ir/runtime_globals.ll\"]\n"
+        + "include-dirs = [\"include\"]\n"
+        + "link-libs = [\"-lm\", \"-lpthread\"]\n"
+        + "prelude-entry = \"../prelude.sfn\"\n";
+    fs.writeFile(scratch + "/runtime/native/capsule.toml", runtime_manifest);
+
+    // A `kind = "library"` capsule alongside the runtime capsule —
+    // the resolver must NOT include this in its results because
+    // its kind isn't "runtime".
+    let library_manifest = "[capsule]\n" + "name = \"sfn/library-cap\"\n"
+        + "version = \"0.1.0\"\n"
+        + "\n"
+        + "[build]\n"
+        + "kind = \"library\"\n"
+        + "entry = \"src/mod.sfn\"\n";
+    fs.writeFile(scratch + "/capsules/sfn/library-cap/capsule.toml", library_manifest);
+}
+
+test "enumerate: returns runtime capsule from workspace" {
+    let scratch = "build/sailfin/.runtime-resolver-test-1";
+    _setup_scratch_workspace(scratch);
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts(scratch, empty);
+    assert result.length == 1;
+    assert result[0].capsule_name == "sfn/runtime-native";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: skips kind != runtime members" {
+    let scratch = "build/sailfin/.runtime-resolver-test-2";
+    _setup_scratch_workspace(scratch);
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts(scratch, empty);
+    // The library-cap member exists in workspace.toml but has
+    // kind="library"; it MUST be filtered out.
+    let mut i: number = 0;
+    loop {
+        if i >= result.length { break; }
+        assert result[i].capsule_name != "sfn/library-cap";
+        i += 1;
+    }
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: c_sources resolved to workspace-rooted paths" {
+    let scratch = "build/sailfin/.runtime-resolver-test-3";
+    _setup_scratch_workspace(scratch);
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts(scratch, empty);
+    assert result.length == 1;
+    let a = result[0];
+    assert a.c_sources.length == 2;
+    // Path is relative-to-manifest-dir resolved against
+    // workspace_root + member_path. Manifest declared
+    // `c-sources = ["src/sailfin_arena.c", ...]`; manifest dir
+    // is `runtime/native/`; so the resolved path is
+    // `<scratch>/runtime/native/src/sailfin_arena.c`.
+    assert a.c_sources[0] == scratch + "/runtime/native/src/sailfin_arena.c";
+    assert a.c_sources[1] == scratch + "/runtime/native/src/sailfin_runtime.c";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: ll_sources resolved with same join rule as c_sources" {
+    let scratch = "build/sailfin/.runtime-resolver-test-4";
+    _setup_scratch_workspace(scratch);
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts(scratch, empty);
+    assert result.length == 1;
+    let a = result[0];
+    assert a.ll_sources.length == 1;
+    assert a.ll_sources[0] == scratch + "/runtime/native/ir/runtime_globals.ll";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: include_dirs resolved to manifest-relative dirs" {
+    let scratch = "build/sailfin/.runtime-resolver-test-5";
+    _setup_scratch_workspace(scratch);
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts(scratch, empty);
+    assert result.length == 1;
+    assert result[0].include_dirs.length == 1;
+    assert result[0].include_dirs[0] == scratch + "/runtime/native/include";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: link_libs flow through verbatim (not path-resolved)" {
+    let scratch = "build/sailfin/.runtime-resolver-test-6";
+    _setup_scratch_workspace(scratch);
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts(scratch, empty);
+    assert result.length == 1;
+    assert result[0].link_libs.length == 2;
+    // `-lm` and `-lpthread` are linker flags, not paths — they
+    // must NOT be prepended with the manifest dir.
+    assert result[0].link_libs[0] == "-lm";
+    assert result[0].link_libs[1] == "-lpthread";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: prelude_entry resolved relative to manifest dir" {
+    let scratch = "build/sailfin/.runtime-resolver-test-7";
+    _setup_scratch_workspace(scratch);
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts(scratch, empty);
+    assert result.length == 1;
+    // `prelude-entry = "../prelude.sfn"` from
+    // `<scratch>/runtime/native/capsule.toml` resolves to
+    // `<scratch>/runtime/native/../prelude.sfn` — kept as the
+    // literal join, no `..` collapsing (that's the caller's
+    // responsibility, same as every other path in the resolver).
+    assert result[0].prelude_entry == scratch + "/runtime/native/../prelude.sfn";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: dep_specs filter narrows the result set" {
+    let scratch = "build/sailfin/.runtime-resolver-test-8";
+    _setup_scratch_workspace(scratch);
+    // Only ask for sfn/runtime-native — the library capsule was
+    // already filtered out by kind, but this test locks the
+    // dep_specs path even when multiple runtime capsules
+    // hypothetically exist.
+    let specs = ["sfn/runtime-native"];
+    let result = enumerate_runtime_capsule_artifacts(scratch, specs);
+    assert result.length == 1;
+    assert result[0].capsule_name == "sfn/runtime-native";
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: dep_specs with unknown name returns empty" {
+    let scratch = "build/sailfin/.runtime-resolver-test-9";
+    _setup_scratch_workspace(scratch);
+    let specs = ["sfn/does-not-exist"];
+    let result = enumerate_runtime_capsule_artifacts(scratch, specs);
+    assert result.length == 0;
+    process.run(["rm", "-rf", scratch]);
+}
+
+test "enumerate: missing workspace.toml returns empty" {
+    // No setup — pass a non-existent workspace root.
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts("/tmp/sfn-no-such-workspace-xyz", empty);
+    assert result.length == 0;
+}
+
+test "enumerate: empty workspace_root returns empty" {
+    let empty: string[] = [];
+    let result = enumerate_runtime_capsule_artifacts("", empty);
+    assert result.length == 0;
+}

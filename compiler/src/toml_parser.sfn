@@ -281,6 +281,61 @@ fn toml_get_build_implicit(text: string) -> boolean {
     return t.build_implicit;
 }
 
+// ---- Stage D PR1 getters: kind = "runtime" capsule schema ----
+//
+// `kind = "runtime"` capsules ship declarative C / LL source lists
+// rather than walking `src/**/*.sfn` like a `kind = "library"`
+// capsule. The driver compiles each `c-sources` entry with clang,
+// assembles each `ll-sources` entry with clang, propagates
+// `include-dirs` to downstream C compiles, and appends `link-libs`
+// to the final link.
+//
+// All getters return `string[]` (or `""` for the prelude-entry
+// scalar) so callers can plumb them straight into
+// `process.run([...])` argv arrays. An absent field returns the
+// empty array, which is also the correct default for any
+// `kind != "runtime"` capsule (where these fields don't apply).
+//
+// Same shape as `toml_get_capabilities_required`: delegate to the
+// section/key string-array helper, then split lines.
+fn _toml_split_lines_into_array(joined: string) -> string[] {
+    if joined.length == 0 { return []; }
+    let lines = _toml_split_lines(joined);
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= lines.length { break; }
+        let trimmed = _toml_trim(lines[i]);
+        if trimmed.length > 0 { out.push(trimmed); }
+        i += 1;
+    }
+    return out;
+}
+
+fn toml_get_c_sources(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "build", "c-sources"));
+}
+
+fn toml_get_ll_sources(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "build", "ll-sources"));
+}
+
+fn toml_get_include_dirs(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "build", "include-dirs"));
+}
+
+fn toml_get_link_libs(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "build", "link-libs"));
+}
+
+// Transitional Stage D field — the entry path for the Sailfin
+// prelude lowered alongside the runtime capsule's C sources.
+// Returns `""` when unset. Stage F retires this field once
+// `runtime/prelude.sfn` moves under `capsules/sfn/prelude/src/`.
+fn toml_get_prelude_entry(text: string) -> string {
+    return toml_get_string(text, "build", "prelude-entry");
+}
+
 // Returns workspace members as a newline-separated string. Matches the
 // shape of toml_get_dependencies so callers split on "\n" without a
 // SailToml struct crossing module boundaries.
