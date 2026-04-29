@@ -184,6 +184,37 @@ test_sidecar_paths_canonical() {
 }
 run_test "sidecar dep_ll_paths covers both dep + relative tree" test_sidecar_paths_canonical
 
+# ---- Test 8: modules[] entries cover both routing categories ----
+# Stage C2c: every routed `.ll` should also appear as a per-module
+# entry with matching `slug` and `ir_path`. Locks the
+# `modules` array against the same {dep, relative} routing rules
+# `deps.ll_paths` already exercises, so future changes to one
+# array can't desync the other.
+test_modules_routing_coverage() {
+    [ -f "$SIDECAR" ] || return 1
+    local found_dep=0 found_rel=0
+    while IFS= read -r ir_path; do
+        case "$ir_path" in
+            build/capsules/sfn/math/ir/*.ll) found_dep=1 ;;
+            build/capsules/demo/widget/ir/*.ll) found_rel=1 ;;
+        esac
+    done < <(jq -r '.modules[].ir_path' "$SIDECAR")
+    [ "$found_dep" -eq 1 ] && [ "$found_rel" -eq 1 ]
+}
+run_test "modules[] entries cover dep + relative routing" test_modules_routing_coverage
+
+# ---- Test 9: modules[] slug for the relative-import points at the consumer ----
+# The relative `./util` source must produce a slug that resolves
+# under the consumer's tree (not the dep's), confirming the C2b2
+# routing decision propagates into the C2c per-module record.
+test_relative_module_slug_under_consumer() {
+    [ -f "$SIDECAR" ] || return 1
+    local rel_ir
+    rel_ir=$(jq -r '.modules[] | select(.ir_path | startswith("build/capsules/demo/widget/ir/")) | .ir_path' "$SIDECAR")
+    [ -n "$rel_ir" ]
+}
+run_test "modules[] surfaces the consumer-tree relative-import entry" test_relative_module_slug_under_consumer
+
 # ---- Summary ----
 echo ""
 echo "[test] $PASS passed, $FAIL failed"

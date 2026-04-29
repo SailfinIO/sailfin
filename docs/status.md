@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 28, 2026 (Stage C cache milestone + per-capsule layout milestones shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 in flight)
+Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout shipped through C2b2 — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263; C2c per-module sidecar entries in flight)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -129,7 +129,7 @@ feature availability.
     `build/capsules/<scope>/<name>/obj/mod.o`, binary at
     `build/capsules/<scope>/<name>/bin/<bin-name>`. Positional
     builds and explicit `-o` keep their existing locations.
-  - **C2b2 (this PR)** — dep `.ll` files migrate from the flat
+  - **C2b2 (#263)** — dep `.ll` files migrated from the flat
     `build/sailfin/capsules/<mangled>.ll` layout into the
     per-capsule tree. Manifest-declared dep sources land at
     `build/capsules/<dep-scope>/<dep-name>/ir/<rel>.ll`;
@@ -148,6 +148,20 @@ feature availability.
     `test_build_json_schema.sh` /
     `test_capsule_artifact_sidecar.sh` `dep_ll_paths`
     file-exists assertions.
+  - **C2c (this PR)** — per-module sidecar entries.
+    `CapsuleArtifactManifest.modules: [{slug, ir_path,
+    cache_key}]` enumerates every dep `.ll` the build
+    produced, so consumers (`sfn package` C4, `sfn lsp`,
+    MCP) can iterate per-source artifacts without
+    re-walking the build tree. Threaded through
+    `ModuleCacheEvent.{slug, cache_key_digest}` →
+    `CompileCapsuleResult.module_events` →
+    `ProjectCapsuleResult.module_events` → the sidecar
+    emitter. Schema stays at "1" (additive field;
+    pre-C2c v1 consumers ignore it and continue
+    working). `obj_path` deferred — per-module `.o`s
+    aren't materialised in the per-capsule tree today
+    (only the cache has them, content-addressed).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
