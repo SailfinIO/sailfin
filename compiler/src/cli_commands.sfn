@@ -3,6 +3,7 @@
 // CLI command handlers extracted from cli_main.sfn to keep
 // sailfin_cli_main under ~500 .sfn-asm instructions (avoids seed OOM).
 import { Statement } from "./ast";
+import { is_safe_scope_name, parse_scope_name } from "./capsule_artifact";
 import {
     TestCapsuleResolution,
     discover_project_root,
@@ -34,6 +35,7 @@ import {
     _write_text_cmd,
     find_char
 } from "./cli_commands_utils";
+import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "./dist_manifest";
 import { ImportSymbolTable, empty_import_symbols } from "./effect_imports";
 import { lock_add_entry, lock_get_version } from "./lock";
 import {
@@ -811,6 +813,475 @@ fn handle_publish_command(args: string[]) -> number ![io] {
     return 0;
 }
 
+// ---- sfn package (Stage C4) ----
+//
+// Produce a distributable tarball + sha256 sidecar + JSON manifest
+// describing a built artifact.  Replaces `tools/package.sh`.
+//
+// Usage:
+//   sfn package [--target T] [--out DIR] [--compiler-bin PATH] [-p <capsule-path>]
+//
+// Without `-p`: packages the compiler. Reads `compiler/capsule.toml`
+// for version (the compiler's `[capsule].name` is single-segment so
+// no per-capsule sidecar exists for it). Default `--compiler-bin =
+// build/native/sailfin`. Tarball stem `sailfin-native-<target>-<version>`.
+//
+// With `-p <path>`: packages a user capsule. Reads the C2c sidecar at
+// `<path>/build/capsules/<scope>/<name>/manifest.json` (must exist —
+// run `sfn build -p <path>` first). Tarball stem
+// `<sanitized-name>-<target>-<version>`.
+//
+// Output: `<out>/<stem>.tar.gz`, `<stem>.tar.gz.sha256`,
+// `<stem>.manifest.json`. Outputs match `tools/package.sh`'s shape
+// except the manifest is now schema-versioned (see `dist_manifest.sfn`).
+//
+// Staging path is deterministic (`build/sailfin/.package-staging`)
+// rather than mktemp — easier to inspect failed runs and to clean
+// idempotently. Concurrent invocations would clobber each other;
+// acceptable for a release-time tool.
+//
+// Does NOT auto-rebuild — run `make compile` (or `sfn build -p
+// <path>`) first. Auto-rebuilding from inside a Sailfin-native
+// command shelling out to `make` is a bootstrapping smell (the
+// compiler would be rebuilding itself before packaging itself).
+fn handle_package_command(args: string[]) -> number ![io] {
+    // Parse args.
+    let mut target_arg: string = "";
+    let mut out_dir: string = "dist";
+    let mut compiler_bin: string = "build/native/sailfin";
+    let mut capsule_path: string = "";
+    let mut argi: number = 1;
+    loop {
+        if argi >= args.length { break; }
+        let a = args[argi];
+        if strings_equal(a, "--target") {
+            if argi + 1 >= args.length {
+                print("sfn package: --target requires a value");
+                return 2;
+            }
+            target_arg = args[argi + 1];
+            argi += 2;
+            continue;
+        }
+        if strings_equal(a, "--out") {
+            if argi + 1 >= args.length {
+                print("sfn package: --out requires a directory");
+                return 2;
+            }
+            out_dir = args[argi + 1];
+            argi += 2;
+            continue;
+        }
+        if strings_equal(a, "--compiler-bin") {
+            if argi + 1 >= args.length {
+                print("sfn package: --compiler-bin requires a path");
+                return 2;
+            }
+            compiler_bin = args[argi + 1];
+            argi += 2;
+            continue;
+        }
+        if strings_equal(a, "-p") {
+            if argi + 1 >= args.length {
+                print("sfn package: -p requires a capsule path");
+                return 2;
+            }
+            capsule_path = args[argi + 1];
+            argi += 2;
+            continue;
+        }
+        print("sfn package: unknown argument \"" + a + "\"");
+        print("usage: sfn package [--target T] [--out DIR] [--compiler-bin PATH] [-p <capsule-path>]");
+        return 2;
+    }
+
+    // Detect platform target if not overridden.
+    let mut target: string = target_arg;
+    if target.length == 0 { target = _package_detect_target(); }
+    if target.length == 0 {
+        print("sfn package: failed to detect platform target");
+        return 1;
+    }
+
+    // Routing: compiler vs user capsule.
+    if capsule_path.length == 0 {
+        return _package_compiler(target, out_dir, compiler_bin);
+    }
+    return _package_user_capsule(target, out_dir, capsule_path);
+}
+
+// Map `uname -s` + `uname -m` → canonical target string.
+// Falls back to `unknown-<s>-<m>` for unrecognised pairs.
+fn _package_detect_target() -> string ![io] {
+    let os = _shell_read_cmd("uname -s");
+    let arch = _shell_read_cmd("uname -m");
+    if os.length == 0 { return ""; }
+    if arch.length == 0 { return ""; }
+    if strings_equal(os, "Linux") {
+        if strings_equal(arch, "x86_64") { return "linux-x86_64"; }
+        if strings_equal(arch, "aarch64") { return "linux-arm64"; }
+    }
+    if strings_equal(os, "Darwin") {
+        if strings_equal(arch, "arm64") { return "macos-arm64"; }
+        if strings_equal(arch, "x86_64") { return "macos-x86_64"; }
+    }
+    return "unknown-" + os + "-" + arch;
+}
+
+// Package the compiler. Reads `compiler/capsule.toml` for version,
+// stages `<bin>/sailfin` + `<bin>/sfn`, tars + sha256s + manifest.
+fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> number ![io] {
+    if !fs.exists(compiler_bin) {
+        print("sfn package: compiler binary not found: " + compiler_bin);
+        print("hint: run `make compile` first");
+        return 1;
+    }
+    let manifest_path = "compiler/capsule.toml";
+    if !fs.exists(manifest_path) {
+        print("sfn package: missing " + manifest_path);
+        return 1;
+    }
+    let manifest_text = fs.readFile(manifest_path);
+    let version = toml_get_version(manifest_text);
+    let capsule_name = toml_get_name(manifest_text);
+    if version.length == 0 {
+        print("sfn package: missing version in compiler/capsule.toml");
+        return 1;
+    }
+
+    let stem = "sailfin-native-" + target + "-" + version;
+    let staging = "build/sailfin/.package-staging";
+    let staging_root = staging + "/sailfin-native-" + target;
+    let staging_bin = staging_root + "/bin";
+
+    // Staging is wiped on entry AND exit so a prior failed run
+    // can't bleed contents into this run.
+    process.run(["rm", "-rf", staging]);
+    process.run(["mkdir", "-p", staging_bin]);
+    let cp1 = process.run(["cp", "-f", compiler_bin, staging_bin + "/sailfin"]);
+    let cp2 = process.run(["cp", "-f", compiler_bin, staging_bin + "/sfn"]);
+    if cp1 != 0 {
+        print("sfn package: failed to stage sailfin binary");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+    if cp2 != 0 {
+        print("sfn package: failed to stage sfn binary");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+
+    process.run(["mkdir", "-p", out_dir]);
+    let tarball = out_dir + "/" + stem + ".tar.gz";
+    let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, "sailfin-native-"
+        + target,]);
+    if tar_rc != 0 {
+        print("sfn package: tar failed (exit=" + number_to_string(tar_rc) + ")");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+
+    let digest = _sha256_of_file_cmd(tarball);
+    if digest.length == 0 {
+        print("sfn package: failed to compute sha256 for " + tarball);
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+    fs.writeFile(tarball + ".sha256", digest + "\n");
+
+    let binary_size = _package_size_of_file(compiler_bin);
+    let tarball_size = _package_size_of_file(tarball);
+    let build_date = _shell_read_cmd("date -u +%Y-%m-%dT%H:%M:%SZ");
+
+    let mut manifest = empty_dist_manifest();
+    manifest.name = "sailfin-native";
+    manifest.kind = "compiler";
+    manifest.capsule_name = capsule_name;
+    manifest.version = version;
+    manifest.target = target;
+    manifest.tarball = stem + ".tar.gz";
+    manifest.sha256 = digest;
+    manifest.binary_size = binary_size;
+    manifest.tarball_size = tarball_size;
+    manifest.build_date = build_date;
+
+    let manifest_out = out_dir + "/" + stem + ".manifest.json";
+    fs.writeFile(manifest_out, dist_manifest_to_json(manifest));
+
+    process.run(["rm", "-rf", staging]);
+
+    print("[package] created " + tarball);
+    print("[package] created " + tarball + ".sha256");
+    print("[package] created " + manifest_out);
+    return 0;
+}
+
+// Package a user capsule. Reads the C2c sidecar to determine the
+// artifact path and kind. Stages binary/object + sidecar +
+// capsule.toml into the tarball — minimal contents until a
+// post-1.0 `--include-ir` flag adds the per-module IR.
+fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) -> number ![io] {
+    // Normalise trailing slash on the path.
+    let mut path = capsule_path;
+    if path.length > 0 {
+        if substring(path, path.length - 1, path.length) == "/" {
+            path = substring(path, 0, path.length - 1);
+        }
+    }
+    let manifest_path = path + "/capsule.toml";
+    if !fs.exists(manifest_path) {
+        print("sfn package: " + manifest_path + " not found");
+        return 1;
+    }
+    let manifest_text = fs.readFile(manifest_path);
+    let capsule_name = toml_get_name(manifest_text);
+    let version = toml_get_version(manifest_text);
+    if capsule_name.length == 0 {
+        print("sfn package: missing [capsule].name in " + manifest_path);
+        return 1;
+    }
+    if version.length == 0 {
+        print("sfn package: missing version in " + manifest_path);
+        return 1;
+    }
+
+    // The sidecar lives under the capsule's per-capsule tree
+    // (Stage C2a). `[capsule].name` must be in scope/name form
+    // for the sidecar to have been written.
+    let parts = parse_scope_name(capsule_name);
+    if parts.scope.length == 0 {
+        print("sfn package: capsule name \"" + capsule_name
+            + "\" is not in scope/name form; cannot locate sidecar");
+        return 1;
+    }
+    if !is_safe_scope_name(parts.scope, parts.name) {
+        print("sfn package: capsule name \"" + capsule_name + "\" is unsafe");
+        return 1;
+    }
+    let sidecar_path = path + "/build/capsules/" + parts.scope + "/" + parts.name
+        + "/manifest.json";
+    if !fs.exists(sidecar_path) {
+        print("sfn package: no sidecar at " + sidecar_path);
+        print("hint: run `sfn build -p " + capsule_path + "` first");
+        return 1;
+    }
+    let sidecar_text = fs.readFile(sidecar_path);
+    let kind = _package_extract_top_level(sidecar_text, "kind");
+    let out_field = _package_extract_top_level(sidecar_text, "out");
+    if kind.length == 0 {
+        print("sfn package: sidecar at " + sidecar_path
+            + " has no \"kind\" field");
+        return 1;
+    }
+    if out_field.length == 0 {
+        print("sfn package: sidecar at " + sidecar_path
+            + " has no \"out\" field");
+        return 1;
+    }
+    // out field is relative to the capsule path's CWD. Resolve.
+    let artifact_path = path + "/" + out_field;
+    if !fs.exists(artifact_path) {
+        print("sfn package: artifact not found: " + artifact_path);
+        print("hint: run `sfn build -p " + capsule_path + "` to (re)produce it");
+        return 1;
+    }
+
+    // Sanitised tarball stem: replace `/` in capsule names with `-`.
+    let safe_name = _package_sanitise_name(capsule_name);
+    let stem = safe_name + "-" + target + "-" + version;
+    let staging = "build/sailfin/.package-staging";
+    let staging_root = staging + "/" + safe_name + "-" + target;
+
+    process.run(["rm", "-rf", staging]);
+    process.run(["mkdir", "-p", staging_root]);
+
+    // Stage the artifact under bin/ or obj/ depending on kind.
+    let mut artifact_dest: string = "";
+    if strings_equal(kind, "binary") {
+        process.run(["mkdir", "-p", staging_root + "/bin"]);
+        // Use the artifact's basename for the tarball's bin entry.
+        let bn = _package_basename(artifact_path);
+        if bn.length == 0 {
+            print("sfn package: could not derive binary basename from "
+                + artifact_path);
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+        artifact_dest = staging_root + "/bin/" + bn;
+    } else if strings_equal(kind, "library") {
+        process.run(["mkdir", "-p", staging_root + "/obj"]);
+        artifact_dest = staging_root + "/obj/mod.o";
+    } else {
+        print("sfn package: unsupported kind \"" + kind
+            + "\" (expected binary | library)");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+    let cp_artifact = process.run(["cp", "-f", artifact_path, artifact_dest]);
+    if cp_artifact != 0 {
+        print("sfn package: failed to stage artifact " + artifact_path);
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+    // Self-describing: copy the sidecar AND capsule.toml so a
+    // consumer of the tarball can see what they got without
+    // re-running the build.
+    process.run(["cp", "-f", sidecar_path, staging_root + "/manifest.json"]);
+    process.run(["cp", "-f", manifest_path, staging_root + "/capsule.toml"]);
+
+    process.run(["mkdir", "-p", out_dir]);
+    let tarball = out_dir + "/" + stem + ".tar.gz";
+    let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, safe_name
+        + "-"
+        + target,]);
+    if tar_rc != 0 {
+        print("sfn package: tar failed (exit=" + number_to_string(tar_rc) + ")");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+
+    let digest = _sha256_of_file_cmd(tarball);
+    if digest.length == 0 {
+        print("sfn package: failed to compute sha256 for " + tarball);
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+    fs.writeFile(tarball + ".sha256", digest + "\n");
+
+    let artifact_size = _package_size_of_file(artifact_path);
+    let tarball_size = _package_size_of_file(tarball);
+    let build_date = _shell_read_cmd("date -u +%Y-%m-%dT%H:%M:%SZ");
+
+    let mut manifest = empty_dist_manifest();
+    manifest.name = safe_name;
+    manifest.kind = kind;
+    manifest.capsule_name = capsule_name;
+    manifest.version = version;
+    manifest.target = target;
+    manifest.tarball = stem + ".tar.gz";
+    manifest.sha256 = digest;
+    manifest.binary_size = artifact_size;
+    manifest.tarball_size = tarball_size;
+    manifest.build_date = build_date;
+
+    let manifest_out = out_dir + "/" + stem + ".manifest.json";
+    fs.writeFile(manifest_out, dist_manifest_to_json(manifest));
+
+    process.run(["rm", "-rf", staging]);
+
+    print("[package] created " + tarball);
+    print("[package] created " + tarball + ".sha256");
+    print("[package] created " + manifest_out);
+    return 0;
+}
+
+// `wc -c < path` returns a base-10 size. Returns 0 on read failure.
+fn _package_size_of_file(path: string) -> number ![io] {
+    let raw = _shell_read_cmd("wc -c < '" + path + "'");
+    if raw.length == 0 { return 0; }
+    let mut value: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= raw.length { break; }
+        let ch = substring(raw, i, i + 1);
+        if ch == "0" { value = value * 10; } else if ch == "1" {
+            value = value * 10 + 1;
+        } else if ch == "2" { value = value * 10 + 2; } else if ch == "3" {
+            value = value * 10 + 3;
+        } else if ch == "4" { value = value * 10 + 4; } else if ch == "5" {
+            value = value * 10 + 5;
+        } else if ch == "6" { value = value * 10 + 6; } else if ch == "7" {
+            value = value * 10 + 7;
+        } else if ch == "8" { value = value * 10 + 8; } else if ch == "9" {
+            value = value * 10 + 9;
+        } else { break; }
+        i += 1;
+    }
+    return value;
+}
+
+// Replace `/` and `\` in a capsule name with `-` so it's safe to
+// interpolate into a filename. Other characters pass through; the
+// caller should already have validated via `is_safe_scope_name`.
+fn _package_sanitise_name(name: string) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= name.length { break; }
+        let ch = substring(name, i, i + 1);
+        if ch == "/" { out = out + "-"; } else if ch == "\\" {
+            out = out + "-";
+        } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+// Last `/`-separated segment of `path`. Returns `""` if the path
+// has no segments or ends with `/`.
+fn _package_basename(path: string) -> string {
+    if path.length == 0 { return ""; }
+    let mut last_slash: number = -1;
+    let mut i: number = 0;
+    loop {
+        if i >= path.length { break; }
+        if substring(path, i, i + 1) == "/" { last_slash = i; }
+        i += 1;
+    }
+    if last_slash < 0 { return path; }
+    if last_slash == path.length - 1 { return ""; }
+    return substring(path, last_slash + 1, path.length);
+}
+
+// Extract the value of a top-level string field from the per-capsule
+// sidecar JSON (Stage C2a/C2c). Anchored on the prefix `"<field>":"`
+// at the **outermost** object level — e.g. for `kind = "binary"` the
+// match is `,"kind":"binary"` (or `{"kind":"binary"`).
+//
+// Hand-rolled because we don't have a JSON parser yet; only the few
+// top-level fields `sfn package` cares about (`kind`, `out`) are
+// read this way. The sidecar's `modules[]` may also contain a
+// `"slug"` field, but the loop terminates at the FIRST match
+// against the outer-prefix anchor — and the outer fields appear
+// before `"modules":[...]` in
+// `capsule_artifact_manifest_to_json`'s field order.  If that
+// ordering ever changes, the unit test on this helper catches it.
+fn _package_extract_top_level(json: string, field: string) -> string {
+    if json.length == 0 { return ""; }
+    if field.length == 0 { return ""; }
+    let needle = "\"" + field + "\":\"";
+    let start = _package_find_substring(json, needle, 0);
+    if start < 0 { return ""; }
+    let value_start = start + needle.length;
+    // Find the closing quote, honouring backslash escapes.
+    let mut end: number = value_start;
+    loop {
+        if end >= json.length { return ""; }
+        let ch = substring(json, end, end + 1);
+        if ch == "\\" {
+            // skip the next character (escape)
+            end += 2;
+            continue;
+        }
+        if ch == "\"" { break; }
+        end += 1;
+    }
+    return substring(json, value_start, end);
+}
+
+fn _package_find_substring(haystack: string, needle: string, start: number) -> number {
+    if needle.length == 0 { return start; }
+    if haystack.length < needle.length { return -1; }
+    let limit = haystack.length - needle.length;
+    let mut i: number = start;
+    loop {
+        if i > limit { break; }
+        if substring(haystack, i, i + needle.length) == needle { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
 fn handle_add_command(args: string[]) -> number ![io] {
     let mut is_dev: boolean = false;
     let mut is_update: boolean = false;
@@ -1211,6 +1682,7 @@ fn handle_fmt_command(args: string[]) -> number ![io] {
 export {
     handle_test_command,
     handle_publish_command,
+    handle_package_command,
     handle_add_command,
     handle_config_command,
     handle_init_command,

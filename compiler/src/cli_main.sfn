@@ -39,6 +39,7 @@ import {
     handle_guillermo_command,
     handle_init_command,
     handle_login_command,
+    handle_package_command,
     handle_publish_command,
     handle_test_command
 } from "./cli_commands";
@@ -81,6 +82,8 @@ fn _usage() -> string {
     out = out + "packages:\n";
     out = out + "  sfn add     [--dev] [--update] <capsule>\n";
     out = out + "  sfn publish [path]\n";
+    out = out
+        + "  sfn package [--target T] [--out DIR] [--compiler-bin PATH] [-p <capsule-path>]\n";
     out = out + "  sfn login   [token]\n";
     out = out + "  sfn config  <get|set|unset|list> [key] [value]\n";
     out = out + "\n";
@@ -567,6 +570,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
     let is_help = _let10;
     let is_init = strings_equal(cmd, "init");
     let is_publish = strings_equal(cmd, "publish");
+    let is_package = strings_equal(cmd, "package");
     let is_add = strings_equal(cmd, "add");
     let is_login = strings_equal(cmd, "login");
     let is_config = strings_equal(cmd, "config");
@@ -1025,6 +1029,8 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
     if is_init { return handle_init_command(args); }
 
     if is_publish { return handle_publish_command(args); }
+
+    if is_package { return handle_package_command(args); }
 
     if is_add { return handle_add_command(args); }
 
