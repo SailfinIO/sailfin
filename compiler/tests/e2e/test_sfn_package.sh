@@ -69,9 +69,11 @@ test_compiler_package_succeeds() {
 run_test "sfn package (compiler mode) succeeds" test_compiler_package_succeeds
 
 # Discover the produced tarball — target is platform-dependent so
-# we glob by stem.
-TARBALL="$(ls "$DIST_DIR"/sailfin-native-*-"$COMPILER_VERSION".tar.gz 2>/dev/null | head -n 1)"
-TARBALL_STEM="$(basename "${TARBALL%.tar.gz}")"
+# we glob by stem. Use `|| true` so an empty glob doesn't trip
+# `set -e` (which would skip every later assertion + the summary);
+# `test_artifacts_exist` reports the missing-tarball case cleanly.
+TARBALL="$(ls "$DIST_DIR"/sailfin-native-*-"$COMPILER_VERSION".tar.gz 2>/dev/null | head -n 1 || true)"
+TARBALL_STEM="$(basename "${TARBALL%.tar.gz}" 2>/dev/null || echo "")"
 SHA_FILE="${TARBALL}.sha256"
 MANIFEST="$DIST_DIR/${TARBALL_STEM}.manifest.json"
 
@@ -215,8 +217,8 @@ test_user_capsule_package_succeeds() {
 }
 run_test "sfn package -p (user capsule) succeeds" test_user_capsule_package_succeeds
 
-USER_TARBALL="$(ls "$USER_DIST"/demo-widget-*.tar.gz 2>/dev/null | head -n 1)"
-USER_TARBALL_STEM="$(basename "${USER_TARBALL%.tar.gz}")"
+USER_TARBALL="$(ls "$USER_DIST"/demo-widget-*.tar.gz 2>/dev/null | head -n 1 || true)"
+USER_TARBALL_STEM="$(basename "${USER_TARBALL%.tar.gz}" 2>/dev/null || echo "")"
 USER_MANIFEST="$USER_DIST/${USER_TARBALL_STEM}.manifest.json"
 
 test_user_capsule_artifacts_exist() {

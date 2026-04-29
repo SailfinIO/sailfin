@@ -30,6 +30,7 @@ import {
     _sanitize_filename_cmd,
     _sha256_of_file_cmd,
     _shell_read_cmd,
+    _shell_single_quote_arg,
     _string_contains_cmd,
     _toml_trim_cmd,
     _write_text_cmd,
@@ -948,6 +949,15 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> n
         print("sfn package: missing version in compiler/capsule.toml");
         return 1;
     }
+    // Defence-in-depth: `version` is interpolated into the tarball
+    // stem (used as a filename and as a `wc -c < <path>` argument).
+    // A malformed manifest with `version = "x'$(rm)"` would otherwise
+    // produce a path-traversal or shell-metachar surface. The
+    // sanitiser blocks `/`, `\`, `..` traversal components.
+    if !_is_safe_capsule_version_cmd(version) {
+        print("sfn package: rejecting unsafe version string \"" + version + "\"");
+        return 1;
+    }
 
     let stem = "sailfin-native-" + target + "-" + version;
     let staging = "build/sailfin/.package-staging";
@@ -1042,6 +1052,13 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
     }
     if version.length == 0 {
         print("sfn package: missing version in " + manifest_path);
+        return 1;
+    }
+    // See compiler-mode rationale: `version` flows into the tarball
+    // stem and into shell commands; reject anything that could
+    // escape filename or shell quoting.
+    if !_is_safe_capsule_version_cmd(version) {
+        print("sfn package: rejecting unsafe version string \"" + version + "\"");
         return 1;
     }
 
@@ -1176,8 +1193,11 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
 }
 
 // `wc -c < path` returns a base-10 size. Returns 0 on read failure.
+// `path` is shell-quoted via `_shell_single_quote_arg` so paths
+// containing `'` (or other shell metacharacters) can't break out
+// of the `sh -c` interpolation in `_shell_read_cmd`.
 fn _package_size_of_file(path: string) -> number ![io] {
-    let raw = _shell_read_cmd("wc -c < '" + path + "'");
+    let raw = _shell_read_cmd("wc -c < " + _shell_single_quote_arg(path));
     if raw.length == 0 { return 0; }
     let mut value: number = 0;
     let mut i: number = 0;
