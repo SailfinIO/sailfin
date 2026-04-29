@@ -1,0 +1,141 @@
+// Stage C4 regression tests for `compiler/src/dist_manifest.sfn`.
+//
+// `dist_manifest_to_json` is the schema-versioned serializer for
+// the `<stem>.manifest.json` artifact `sfn package` writes next to
+// the tarball it produces. Schema is documented inline in
+// `dist_manifest.sfn` and gated end-to-end by
+// `compiler/tests/e2e/test_sfn_package.sh`. These unit tests lock
+// the per-field invariants — the e2e exercises the full pipeline.
+import { DistManifest, dist_manifest_to_json, empty_dist_manifest } from "../../src/dist_manifest";
+
+// --------------------------------------------------------------
+// empty_dist_manifest defaults
+// --------------------------------------------------------------
+test "empty_dist_manifest: kind defaults to 'compiler'" {
+    // Compiler tarballs are the historical default for
+    // `tools/package.sh`; the new handler keeps that.
+    assert empty_dist_manifest().kind == "compiler";
+}
+
+test "empty_dist_manifest: numeric sizes default to 0" {
+    let m = empty_dist_manifest();
+    assert m.binary_size == 0;
+    assert m.tarball_size == 0;
+}
+
+// --------------------------------------------------------------
+// dist_manifest_to_json — schema invariants
+// --------------------------------------------------------------
+test "manifest_to_json: includes schema_version 1" {
+    let json = dist_manifest_to_json(empty_dist_manifest());
+    // schema_version is the contract for breaking changes.
+    assert _contains(json, "\"schema_version\":\"1\"");
+}
+
+test "manifest_to_json: round-trips name + kind + capsule" {
+    let mut m = empty_dist_manifest();
+    m.name = "sailfin-native";
+    m.kind = "compiler";
+    m.capsule_name = "sailfin";
+    let json = dist_manifest_to_json(m);
+    assert _contains(json, "\"name\":\"sailfin-native\"");
+    assert _contains(json, "\"kind\":\"compiler\"");
+    assert _contains(json, "\"capsule\":\"sailfin\"");
+}
+
+test "manifest_to_json: round-trips version + target + tarball" {
+    let mut m = empty_dist_manifest();
+    m.version = "0.5.10-alpha.2";
+    m.target = "linux-x86_64";
+    m.tarball = "sailfin-native-linux-x86_64-0.5.10-alpha.2.tar.gz";
+    let json = dist_manifest_to_json(m);
+    assert _contains(json, "\"version\":\"0.5.10-alpha.2\"");
+    assert _contains(json, "\"target\":\"linux-x86_64\"");
+    assert _contains(json, "\"tarball\":\"sailfin-native-linux-x86_64-0.5.10-alpha.2.tar.gz\"");
+}
+
+test "manifest_to_json: round-trips sha256 + sizes" {
+    let mut m = empty_dist_manifest();
+    m.sha256 = "abc123";
+    m.binary_size = 1895760;
+    m.tarball_size = 567890;
+    let json = dist_manifest_to_json(m);
+    assert _contains(json, "\"sha256\":\"abc123\"");
+    assert _contains(json, "\"binary_size\":1895760");
+    assert _contains(json, "\"tarball_size\":567890");
+}
+
+test "manifest_to_json: round-trips build_date" {
+    let mut m = empty_dist_manifest();
+    m.build_date = "2026-04-29T12:34:56Z";
+    let json = dist_manifest_to_json(m);
+    assert _contains(json, "\"build_date\":\"2026-04-29T12:34:56Z\"");
+}
+
+test "manifest_to_json: backslash + quote in fields escaped per RFC 8259" {
+    // Defends against a future regression that drops the JSON
+    // escape pass for these fields.
+    let mut m = empty_dist_manifest();
+    m.name = "weird\\name\"with-quotes";
+    let json = dist_manifest_to_json(m);
+    assert _contains(json, "\"name\":\"weird\\\\name\\\"with-quotes\"");
+}
+
+test "manifest_to_json: zero sizes serialise as 0 (not empty)" {
+    // Default-empty manifests round-trip with size: 0; consumers
+    // can rely on the field always being a number.
+    let json = dist_manifest_to_json(empty_dist_manifest());
+    assert _contains(json, "\"binary_size\":0");
+    assert _contains(json, "\"tarball_size\":0");
+}
+
+test "manifest_to_json: large sizes serialise as decimal integers" {
+    // Repeat-subtraction encoder handles multi-digit numbers.
+    let mut m = empty_dist_manifest();
+    m.binary_size = 12345678;
+    m.tarball_size = 987654321;
+    let json = dist_manifest_to_json(m);
+    assert _contains(json, "\"binary_size\":12345678");
+    assert _contains(json, "\"tarball_size\":987654321");
+}
+
+test "manifest_to_json: kind switches to 'binary' when set" {
+    // User-capsule binary mode uses kind="binary"; ensure the
+    // setter round-trips.
+    let mut m = empty_dist_manifest();
+    m.kind = "binary";
+    let json = dist_manifest_to_json(m);
+    assert _contains(json, "\"kind\":\"binary\"");
+}
+
+test "manifest_to_json: kind switches to 'library' when set" {
+    let mut m = empty_dist_manifest();
+    m.kind = "library";
+    let json = dist_manifest_to_json(m);
+    assert _contains(json, "\"kind\":\"library\"");
+}
+
+// --------------------------------------------------------------
+// Helpers
+// --------------------------------------------------------------
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if haystack.length < needle.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i + needle.length > haystack.length { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return true; }
+        i += 1;
+    }
+    return false;
+}

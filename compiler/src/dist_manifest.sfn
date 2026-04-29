@@ -1,0 +1,174 @@
+// compiler/src/dist_manifest.sfn
+//
+// Stage C4 — distribution manifest for `sfn package`.
+//
+// Sibling to `capsule_artifact.sfn` (the per-capsule build sidecar at
+// `build/capsules/<scope>/<name>/manifest.json`). Where the C2a/C2b/C2c
+// sidecar describes a build's *resolved state*, this manifest describes
+// a *distributable artifact*: a compiler tarball or user-capsule
+// tarball produced by `sfn package` and uploaded to a registry / GitHub
+// release.
+//
+// Produced as `<dist_dir>/<stem>.manifest.json` next to the tarball
+// itself and its `.sha256` sidecar. Replaces the manifest emitted by
+// `tools/package.sh` (which has no schema_version and no `kind` /
+// `capsule` fields).
+//
+// Schema is `schema_version: "1"`. Bumping the version is the contract
+// for breaking changes — downstream consumers (the release workflow,
+// future `sfn install` / `sfn package verify`, MCP tooling) hard-fail
+// on unknown values rather than silently misinterpret. Same pattern
+// as `capsule_artifact.sfn`, `build_report.sfn`, `diagnostics_json.sfn`.
+//
+// Self-contained module: duplicates JSON primitive encoders from
+// `capsule_artifact.sfn` rather than importing them — same precedent
+// (seed compiler doesn't handle the import cycle cleanly), and the
+// duplication keeps each emitter independently unit-testable.
+import { substring } from "./string_utils";
+
+// -------------------------------------------------------------------
+// Schema
+// -------------------------------------------------------------------
+//
+// {
+//   "schema_version": "1",
+//   "name": "sailfin-native",                        // dist artifact name (human-facing)
+//   "kind": "compiler",                              // "compiler" | "binary" | "library"
+//   "capsule": "sailfin",                            // canonical capsule name from capsule.toml
+//   "version": "0.5.10-alpha.2",
+//   "target": "linux-x86_64",                        // <os>-<arch>
+//   "tarball": "sailfin-native-linux-x86_64-0.5.10-alpha.2.tar.gz",
+//   "sha256": "ab12...e7",                           // sha256 hex of the tarball
+//   "binary_size": 1895760,                          // bytes of the bundled binary
+//   "tarball_size": 567890,                          // bytes of the .tar.gz
+//   "build_date": "2026-04-29T12:34:56Z"             // UTC ISO-8601
+// }
+//
+// `name` differs from `capsule`: `name` is the dist artifact's
+// label (matches `tools/package.sh`'s historical "sailfin-native"
+// for compiler tarballs), while `capsule` is the canonical capsule
+// the artifact was built from. `kind` distinguishes compiler builds
+// from user-capsule binary/library packages so consumers can route
+// correctly.
+struct DistManifest {
+    name: string;
+    kind: string;
+    capsule_name: string;
+    version: string;
+    target: string;
+    tarball: string;
+    sha256: string;
+    binary_size: number;
+    tarball_size: number;
+    build_date: string;
+}
+
+fn empty_dist_manifest() -> DistManifest {
+    return DistManifest {
+        name: "",
+        kind: "compiler",
+        capsule_name: "",
+        version: "",
+        target: "",
+        tarball: "",
+        sha256: "",
+        binary_size: 0,
+        tarball_size: 0,
+        build_date: ""
+    };
+}
+
+// -------------------------------------------------------------------
+// JSON primitive encoders (duplicated; see top-of-file rationale)
+// -------------------------------------------------------------------
+fn _dm_json_escape(s: string) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _dm_json_quote(s: string) -> string {
+    return "\"" + _dm_json_escape(s) + "\"";
+}
+
+fn _dm_json_field(name: string, value: string) -> string {
+    return _dm_json_quote(name) + ":" + value;
+}
+
+fn _dm_json_string_field(name: string, value: string) -> string {
+    return _dm_json_field(name, _dm_json_quote(value));
+}
+
+fn _dm_json_number_field(name: string, value: number) -> string {
+    return _dm_json_field(name, _dm_number_to_string(value));
+}
+
+// Same repeated-subtraction algorithm as `capsule_artifact.sfn` and
+// `compiler/src/main.sfn::number_to_string` — Sailfin's `number` is
+// a float, so `working / 10` doesn't truncate.
+fn _dm_number_to_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let mut working: number = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut remaining: number = working;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}
+
+// -------------------------------------------------------------------
+// Public encoder
+// -------------------------------------------------------------------
+fn dist_manifest_to_json(m: DistManifest) -> string {
+    return "{" + _dm_json_string_field("schema_version", "1") + ","
+        + _dm_json_string_field("name", m.name)
+        + ","
+        + _dm_json_string_field("kind", m.kind)
+        + ","
+        + _dm_json_string_field("capsule", m.capsule_name)
+        + ","
+        + _dm_json_string_field("version", m.version)
+        + ","
+        + _dm_json_string_field("target", m.target)
+        + ","
+        + _dm_json_string_field("tarball", m.tarball)
+        + ","
+        + _dm_json_string_field("sha256", m.sha256)
+        + ","
+        + _dm_json_number_field("binary_size", m.binary_size)
+        + ","
+        + _dm_json_number_field("tarball_size", m.tarball_size)
+        + ","
+        + _dm_json_string_field("build_date", m.build_date)
+        + "}";
+}
+
+export { DistManifest, dist_manifest_to_json, empty_dist_manifest };

@@ -1372,9 +1372,20 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
   `sfn build -p` in CI and assert byte-for-byte parity vs `build.sh`
   + a cache-hit-rate floor on no-source-change reruns. Likely a
   nightly cron rather than per-PR to keep CI fast.
-- **C4 — `sfn package`.** Replaces `tools/package.sh` with a
-  Sailfin-native command that consumes a per-capsule manifest from
-  C2 and produces a tarball.
+- **C4 — `sfn package`** (v1 in flight). New Sailfin-native
+  `handle_package_command` in `cli_commands.sfn` produces the
+  same standalone-compiler tarball + sha256 + manifest shape
+  `tools/package.sh` does, plus a parallel codepath for user
+  capsules (`-p <capsule-path>`) driven off the C2c sidecar.
+  Manifest is now schema-versioned via `dist_manifest.sfn`
+  (`DistManifest.schema_version = "1"`) — adds `kind` (compiler /
+  binary / library), `capsule`, and `tarball` fields beyond
+  what `tools/package.sh` emitted. Installer-tarball mode
+  (compiler + runtime + import-context) is deferred to **C4b**.
+  Migration is staged: this PR ships the command alongside the
+  shell script; subsequent PRs flip `Makefile`'s `package` /
+  `ci-package` targets and `release.yml` over to `sfn package`,
+  then delete `tools/package.sh` after one release cycle.
 - **C5 — `sfn bench` + `sfn bootstrap`.** Replace
   `scripts/bench_compile.sh` and (for upgrade users) `install.sh`.
   After this, `scripts/build.sh` is the only build-related shell

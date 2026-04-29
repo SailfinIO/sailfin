@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout shipped through C2b2 — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263; C2c per-module sidecar entries in flight)
+Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout shipped through C2c — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264; C4 `sfn package` v1 in flight)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -148,7 +148,7 @@ feature availability.
     `test_build_json_schema.sh` /
     `test_capsule_artifact_sidecar.sh` `dep_ll_paths`
     file-exists assertions.
-  - **C2c (this PR)** — per-module sidecar entries.
+  - **C2c (#264)** — per-module sidecar entries.
     `CapsuleArtifactManifest.modules: [{slug, ir_path,
     cache_key}]` enumerates every dep `.ll` the build
     produced, so consumers (`sfn package` C4, `sfn lsp`,
@@ -162,6 +162,35 @@ feature availability.
     working). `obj_path` deferred — per-module `.o`s
     aren't materialised in the per-capsule tree today
     (only the cache has them, content-addressed).
+- **Stage C4 `sfn package` v1 (in flight, this PR).**
+  Sailfin-native command that produces a distributable tarball
+  + sha256 sidecar + JSON manifest. Two modes:
+  - **Compiler mode (no `-p`):** reads `compiler/capsule.toml`
+    for version, stages `bin/sailfin` + `bin/sfn` from
+    `--compiler-bin` (default `build/native/sailfin`), tars
+    them to `<out>/sailfin-native-<target>-<version>.tar.gz`.
+    Replaces the standalone-compiler half of
+    `tools/package.sh`.
+  - **User-capsule mode (`-p <path>`):** reads the C2c sidecar
+    at `<path>/build/capsules/<scope>/<name>/manifest.json`,
+    extracts `kind` + `out` to locate the artifact, stages
+    the binary or `obj/mod.o` plus the sidecar +
+    `capsule.toml` into a self-describing tarball at
+    `<out>/<sanitised-name>-<target>-<version>.tar.gz`. Falls
+    over with a clear error when the sidecar is missing
+    (hint: `sfn build -p <path>` first).
+  - **Manifest** is now schema-versioned via
+    `dist_manifest.sfn::DistManifest` (`schema_version: "1"`)
+    — adds `kind` (compiler / binary / library), `capsule`,
+    and `tarball` fields beyond `tools/package.sh`'s output.
+  - **Defers** to C4b: installer tarball (compiler + runtime
+    + import-context), cross-compile validation, auto-rebuild
+    on stale `--compiler-bin`. Run `make compile` (or `sfn
+    build -p <path>`) before `sfn package`.
+  - `tools/package.sh` and the Makefile's `package` /
+    `ci-package` targets are untouched in this PR; subsequent
+    PRs will flip them to call `sfn package`, then delete the
+    shell script after one release cycle.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
