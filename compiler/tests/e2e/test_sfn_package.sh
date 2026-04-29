@@ -300,12 +300,15 @@ test_installer_tarball_contents() {
     # Installer contents must include bin/{sailfin,sfn} and
     # runtime/native/. Tar layout uses `-C <staging> .` so contents
     # appear at the tarball top level (no wrapping root dir).
+    # Some tar implementations (notably BSD `tar` on macOS) omit
+    # the leading `./` from `tar -tzf` output even when the
+    # archive was created with `-C <dir> .`; accept both forms.
     local listing
     listing="$(tar -tzf "$INSTALLER_TARBALL")"
-    echo "$listing" | grep -qE "^\\./bin/sailfin\$" || return 1
-    echo "$listing" | grep -qE "^\\./bin/sfn\$" || return 1
+    echo "$listing" | grep -qE "^(\\./)?bin/sailfin\$" || return 1
+    echo "$listing" | grep -qE "^(\\./)?bin/sfn\$" || return 1
     # Runtime tree present (any file under runtime/native/).
-    echo "$listing" | grep -qE "^\\./runtime/native/" || return 1
+    echo "$listing" | grep -qE "^(\\./)?runtime/native/" || return 1
 }
 run_test "installer tarball contains bin/sailfin + bin/sfn + runtime/native/" test_installer_tarball_contents
 

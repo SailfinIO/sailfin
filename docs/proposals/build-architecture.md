@@ -1389,10 +1389,12 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
       ci.yml expect); manifest reuses
       `DistManifest.kind = "installer"`. After C4b lands,
       every output of `tools/package.sh` has a Sailfin-native
-      replacement, and the migration PR (Makefile + release.yml
-      → `sfn package` / `sfn package --installer`) becomes a
-      tight mechanical change followed by deleting the shell
-      script after one release cycle.
+      replacement, and the migration PR (Makefile +
+      `.github/workflows/release-tag.yml` +
+      `.github/workflows/ci.yml` → `sfn package` /
+      `sfn package --installer`) becomes a tight mechanical
+      change followed by deleting the shell script after one
+      release cycle.
   Manifest schema is `DistManifest.schema_version = "1"` — adds
   `kind` (compiler / installer / binary / library), `capsule`,
   and `tarball` fields beyond what `tools/package.sh` emitted.

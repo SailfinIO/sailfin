@@ -1140,17 +1140,43 @@ fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> 
         if fs.exists(prelude_b) { prelude_src = prelude_b; }
     }
     if prelude_src.length > 0 {
-        process.run(["mkdir", "-p", staging_runtime_obj]);
-        process.run(["cp", "-f", prelude_src, staging_runtime_obj + "/prelude.o"]);
+        // The prelude object's INCLUSION is conditional (it
+        // doesn't exist on a fresh checkout), but once we've
+        // committed to including it, a `mkdir`/`cp` failure is
+        // a bug — fail loudly rather than silently shipping
+        // an installer missing the expected `prelude.o`.
+        let mk_obj_dir = process.run(["mkdir", "-p", staging_runtime_obj]);
+        if mk_obj_dir != 0 {
+            print("sfn package: failed to create runtime obj staging dir");
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
+        let cp_prelude = process.run(["cp", "-f", prelude_src, staging_runtime_obj
+            + "/prelude.o"]);
+        if cp_prelude != 0 {
+            print("sfn package: failed to stage prelude object from "
+                + prelude_src);
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
     }
 
     // Staged import-context — only present after a self-host
     // build has run. Tools consuming the installer can survive
     // without it (they regenerate from the seed) but bundling
-    // saves a rebuild on first use.
+    // saves a rebuild on first use. Same logic as the prelude
+    // copy: presence is conditional, but once present a
+    // failed `cp -R` is a bug, not a soft skip.
     if fs.exists("build/native/import-context") {
-        process.run(["cp", "-R", "build/native/import-context", staging
+        let cp_import_ctx = process.run(["cp", "-R", "build/native/import-context", staging
             + "/import-context"]);
+        if cp_import_ctx != 0 {
+            print("sfn package: failed to stage import-context (cp exit="
+                + number_to_string(cp_import_ctx)
+                + ")");
+            process.run(["rm", "-rf", staging]);
+            return 1;
+        }
     }
 
     process.run(["mkdir", "-p", out_dir]);
