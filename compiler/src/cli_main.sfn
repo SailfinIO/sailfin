@@ -779,14 +779,15 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // / link-libs source lists rather than `.sfn` modules. The
         // driver doesn't yet COMPILE them as a top-level `-p` target
         // (Stage D PR2 wires the link phase up); building one
-        // directly is a no-op that surfaces a hint pointing the user
-        // at the supported usage (declare it as a dep of a
-        // `kind = "binary"` capsule, not as the build target itself).
+        // directly surfaces a hint and exits with the same usage-error
+        // code as other `-p` misuse so scripts/CI don't treat the
+        // unsupported invocation as success and proceed with missing
+        // artifacts.
         if is_runtime_build {
             print("sfn build: kind = \"runtime\" capsules are not buildable directly;");
             print("           declare \"" + cap_capsule_name
                 + "\" as a dependency of a kind=\"binary\" capsule instead.");
-            return 0;
+            return 2;
         }
 
         // Resolve the consumer's safe scope/name once. Used by:

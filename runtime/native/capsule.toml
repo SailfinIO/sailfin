@@ -23,22 +23,17 @@ kind = "runtime"
 # the runtime is rewritten in Sailfin; until then this is the
 # load-bearing surface for `make compile`'s eventual cutover to
 # `sfn build -p compiler` (Stage D PR4).
-c-sources = [
-    "src/sailfin_arena.c",
-    "src/sailfin_runtime.c",
-    "src/sailfin_sha256.c",
-    "src/sailfin_base64.c",
-    "src/native_driver.c",
-]
-ll-sources = [
-    "ir/runtime_globals.ll",
-]
-include-dirs = [
-    "include",
-]
-link-libs = [
-    "-lm",
-]
+# All array values below are SINGLE-LINE intentionally — the
+# current TOML parser (`compiler/src/toml_parser.sfn`) only
+# recognises arrays whose `[...]` is on one line. Multi-line
+# array support is a future parser extension; until that lands,
+# reformatting here would silently make every getter return `[]`
+# and the resolver would surface zero artifacts. A regression test
+# against this exact manifest text guards the format.
+c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c", "src/native_driver.c"]
+ll-sources = ["ir/runtime_globals.ll"]
+include-dirs = ["include"]
+link-libs = ["-lm"]
 
 # Transitional bridge for Stage D: the prelude (`runtime/prelude.sfn`)
 # is currently outside this capsule's tree but every compiler build

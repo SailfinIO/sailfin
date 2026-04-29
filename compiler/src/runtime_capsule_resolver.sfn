@@ -29,7 +29,7 @@
 // so consumers don't have to redo the join. The manifest stores
 // paths relative to its own directory (Cargo-style); the
 // resolver does the workspace-rooted resolution once.
-import { substring } from "./string_utils";
+import { contains_string, strip_prefix, substring } from "./string_utils";
 import {
     toml_get_build_kind,
     toml_get_c_sources,
@@ -85,20 +85,14 @@ fn _rcr_path_join(base: string, name: string) -> string {
     return base + "/" + name;
 }
 
-// Strip leading `./` from a path. The manifest is Cargo-style:
-// paths are relative to the manifest dir, but humans sometimes
-// write `./src/foo.c` instead of `src/foo.c`. Both should work.
-fn _rcr_strip_leading_dot(path: string) -> string {
-    if path.length < 2 { return path; }
-    if substring(path, 0, 2) == "./" {
-        return substring(path, 2, path.length);
-    }
-    return path;
-}
-
-// Resolve `manifest_dir + "/" + relative` with `./` stripping.
+// Resolve `manifest_dir + "/" + relative`. The manifest is
+// Cargo-style: paths are relative to the manifest dir, but
+// humans sometimes write `./src/foo.c` instead of `src/foo.c`.
+// `strip_prefix` (shared from `string_utils.sfn`) collapses
+// both forms to the canonical "no leading `./`" shape before
+// the join.
 fn _rcr_resolve_path(manifest_dir: string, relative: string) -> string {
-    let cleaned = _rcr_strip_leading_dot(relative);
+    let cleaned = strip_prefix(relative, "./");
     return _rcr_path_join(manifest_dir, cleaned);
 }
 
@@ -134,14 +128,37 @@ fn _rcr_split_newlines(text: string) -> string[] {
     return out;
 }
 
-fn _rcr_string_array_contains(items: string[], needle: string) -> boolean {
+// Path-traversal guard for workspace member paths. Mirrors
+// `_cr_is_safe_member_path` in `capsule_resolver.sfn`: rejects
+// absolute paths, backslashes, and any `.` / `..` segment.
+// Inline-duplicated rather than imported because the original is
+// `_cr_`-prefixed (file-private convention) and pulling it in
+// would require restructuring the resolver's exports. Same
+// behavioural contract — keep them in sync if either changes.
+fn _rcr_is_safe_member_path(path: string) -> boolean {
+    if path.length == 0 { return false; }
+    if substring(path, 0, 1) == "/" { return false; }
     let mut i: number = 0;
     loop {
-        if i >= items.length { break; }
-        if items[i] == needle { return true; }
+        if i >= path.length { break; }
+        if substring(path, i, i + 1) == "\\" { return false; }
         i += 1;
     }
-    return false;
+    let mut start: number = 0;
+    loop {
+        if start >= path.length { break; }
+        let mut end: number = start;
+        loop {
+            if end >= path.length { break; }
+            if substring(path, end, end + 1) == "/" { break; }
+            end += 1;
+        }
+        let segment = substring(path, start, end);
+        if segment == ".." { return false; }
+        if segment == "." { return false; }
+        start = end + 1;
+    }
+    return true;
 }
 
 // Build a `RuntimeCapsuleArtifacts` from a manifest's text plus
@@ -203,15 +220,22 @@ fn enumerate_runtime_capsule_artifacts(workspace_root: string, dep_specs: string
         let member_path = members[i];
         i += 1;
         if member_path.length == 0 { continue; }
+        // Path-traversal guard: a hostile workspace.toml could
+        // declare members like `"../etc"` or `"/abs/path"`; reject
+        // those before any fs.exists() touches them.
+        if !_rcr_is_safe_member_path(member_path) {
+            print.err("runtime-capsule-resolver: skipping unsafe member path \""
+                + member_path
+                + "\" (must be relative, no `..`, no backslashes)");
+            continue;
+        }
         let member_manifest = _rcr_path_join(_rcr_path_join(workspace_root, member_path), "capsule.toml");
         if !fs.exists(member_manifest) { continue; }
         let manifest_text = fs.readFile(member_manifest);
         let artifacts = _rcr_artifacts_from_manifest(workspace_root, member_path, manifest_text);
         if artifacts.capsule_name.length == 0 { continue; }
         if dep_specs.length > 0 {
-            if !_rcr_string_array_contains(dep_specs, artifacts.capsule_name) {
-                continue;
-            }
+            if !contains_string(dep_specs, artifacts.capsule_name) { continue; }
         }
         out.push(artifacts);
     }
