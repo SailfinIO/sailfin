@@ -83,7 +83,7 @@ fn _usage() -> string {
     out = out + "  sfn add     [--dev] [--update] <capsule>\n";
     out = out + "  sfn publish [path]\n";
     out = out
-        + "  sfn package [--target T] [--out DIR] [--compiler-bin PATH] [-p <capsule-path>]\n";
+        + "  sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]\n";
     out = out + "  sfn login   [token]\n";
     out = out + "  sfn config  <get|set|unset|list> [key] [value]\n";
     out = out + "\n";

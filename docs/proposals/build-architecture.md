@@ -1372,20 +1372,30 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
   `sfn build -p` in CI and assert byte-for-byte parity vs `build.sh`
   + a cache-hit-rate floor on no-source-change reruns. Likely a
   nightly cron rather than per-PR to keep CI fast.
-- **C4 — `sfn package`** (v1 in flight). New Sailfin-native
-  `handle_package_command` in `cli_commands.sfn` produces the
-  same standalone-compiler tarball + sha256 + manifest shape
-  `tools/package.sh` does, plus a parallel codepath for user
-  capsules (`-p <capsule-path>`) driven off the C2c sidecar.
-  Manifest is now schema-versioned via `dist_manifest.sfn`
-  (`DistManifest.schema_version = "1"`) — adds `kind` (compiler /
-  binary / library), `capsule`, and `tarball` fields beyond
-  what `tools/package.sh` emitted. Installer-tarball mode
-  (compiler + runtime + import-context) is deferred to **C4b**.
-  Migration is staged: this PR ships the command alongside the
-  shell script; subsequent PRs flip `Makefile`'s `package` /
-  `ci-package` targets and `release.yml` over to `sfn package`,
-  then delete `tools/package.sh` after one release cycle.
+- **C4 — `sfn package`.** Sailfin-native `handle_package_command`
+  in `cli_commands.sfn` produces tarballs + sha256 sidecars +
+  schema-versioned JSON manifests for three artifact shapes:
+    - **C4 v1 (#265, shipped).** Standalone compiler tarball
+      (`sailfin-native-<target>-<version>.tar.gz`) replacing
+      `tools/package.sh`'s first output, plus user-capsule
+      packaging (`-p <capsule-path>`) driven off the C2c
+      sidecar.
+    - **C4b (in flight).** `--installer` mode bundles the
+      compiler + `runtime/native/` + (if available) the prelude
+      `.o` + (if available) the staged `import-context/` into
+      `installer-<target>.tar.gz`, replacing the second half of
+      `tools/package.sh`. Tarball name omits the version
+      (matching the historical convention release-tag.yml +
+      ci.yml expect); manifest reuses
+      `DistManifest.kind = "installer"`. After C4b lands,
+      every output of `tools/package.sh` has a Sailfin-native
+      replacement, and the migration PR (Makefile + release.yml
+      → `sfn package` / `sfn package --installer`) becomes a
+      tight mechanical change followed by deleting the shell
+      script after one release cycle.
+  Manifest schema is `DistManifest.schema_version = "1"` — adds
+  `kind` (compiler / installer / binary / library), `capsule`,
+  and `tarball` fields beyond what `tools/package.sh` emitted.
 - **C5 — `sfn bench` + `sfn bootstrap`.** Replace
   `scripts/bench_compile.sh` and (for upgrade users) `install.sh`.
   After this, `scripts/build.sh` is the only build-related shell

@@ -247,6 +247,112 @@ test_user_capsule_manifest_kind() {
 }
 run_test "user-capsule manifest kind=library, capsule=demo/widget, name=demo-widget" test_user_capsule_manifest_kind
 
+# ---- Installer mode (Stage C4b) ----
+# Bundles the compiler with runtime sources, prelude (if available),
+# and import-context (if available). Replaces the second half of
+# `tools/package.sh` which produced `dist/installer-<target>.tar.gz`.
+INSTALLER_DIR="$SCRATCH/dist-installer"
+
+test_installer_package_succeeds() {
+    cd "$REPO_ROOT" || return 1
+    "$BINARY" package --installer --out "$INSTALLER_DIR" --compiler-bin "$BINARY" \
+        > "$SCRATCH/installer.stdout" 2> "$SCRATCH/installer.err"
+    local rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo "[test]   sfn package --installer exited with code $rc; stderr:" >&2
+        cat "$SCRATCH/installer.err" >&2
+        return $rc
+    fi
+}
+run_test "sfn package --installer succeeds" test_installer_package_succeeds
+
+# Discover installer artifacts. Use `|| true` so an empty glob can't
+# trip `set -e` and skip subsequent assertions.
+INSTALLER_TARBALL="$(ls "$INSTALLER_DIR"/installer-*.tar.gz 2>/dev/null | head -n 1 || true)"
+INSTALLER_TARBALL_STEM="$(basename "${INSTALLER_TARBALL%.tar.gz}" 2>/dev/null || echo "")"
+INSTALLER_MANIFEST="$INSTALLER_DIR/${INSTALLER_TARBALL_STEM}.manifest.json"
+
+test_installer_artifacts_exist() {
+    [ -f "$INSTALLER_TARBALL" ] || return 1
+    [ -f "${INSTALLER_TARBALL}.sha256" ] || return 1
+    [ -f "$INSTALLER_MANIFEST" ] || return 1
+}
+run_test "installer tarball + sha256 + manifest exist" test_installer_artifacts_exist
+
+test_installer_tarball_no_version_in_name() {
+    # `tools/package.sh` historically named the installer tarball
+    # `installer-<target>.tar.gz` with NO version. Locks that
+    # convention so the release workflow's path expectations
+    # (.github/workflows/ci.yml + release-tag.yml) keep working.
+    case "$INSTALLER_TARBALL_STEM" in
+        installer-*) ;;
+        *) return 1 ;;
+    esac
+    # The version should not appear in the stem.
+    if echo "$INSTALLER_TARBALL_STEM" | grep -q "$COMPILER_VERSION"; then
+        echo "[test]   installer stem unexpectedly contains version: $INSTALLER_TARBALL_STEM" >&2
+        return 1
+    fi
+}
+run_test "installer tarball name omits version (matches tools/package.sh)" test_installer_tarball_no_version_in_name
+
+test_installer_tarball_contents() {
+    # Installer contents must include bin/{sailfin,sfn} and
+    # runtime/native/. Tar layout uses `-C <staging> .` so contents
+    # appear at the tarball top level (no wrapping root dir).
+    local listing
+    listing="$(tar -tzf "$INSTALLER_TARBALL")"
+    echo "$listing" | grep -qE "^\\./bin/sailfin\$" || return 1
+    echo "$listing" | grep -qE "^\\./bin/sfn\$" || return 1
+    # Runtime tree present (any file under runtime/native/).
+    echo "$listing" | grep -qE "^\\./runtime/native/" || return 1
+}
+run_test "installer tarball contains bin/sailfin + bin/sfn + runtime/native/" test_installer_tarball_contents
+
+test_installer_manifest_kind() {
+    [ "$(jq -r .kind "$INSTALLER_MANIFEST")" = "installer" ] || return 1
+    [ "$(jq -r .capsule "$INSTALLER_MANIFEST")" = "sailfin" ] || return 1
+    [ "$(jq -r .version "$INSTALLER_MANIFEST")" = "$COMPILER_VERSION" ] || return 1
+    # `name` follows the tarball stem (no version), differentiating
+    # from the standalone-compiler manifest which has the version.
+    case "$(jq -r .name "$INSTALLER_MANIFEST")" in
+        installer-*) ;;
+        *) return 1 ;;
+    esac
+}
+run_test "installer manifest kind=installer, capsule=sailfin, name=installer-<target>" test_installer_manifest_kind
+
+test_installer_manifest_schema_v1() {
+    [ "$(jq -r .schema_version "$INSTALLER_MANIFEST")" = "1" ]
+}
+run_test "installer manifest schema_version is '1'" test_installer_manifest_schema_v1
+
+test_installer_sha256_matches() {
+    local manifest_hex sidecar_hex actual_hex
+    manifest_hex="$(jq -r .sha256 "$INSTALLER_MANIFEST")"
+    sidecar_hex="$(head -c 64 "${INSTALLER_TARBALL}.sha256")"
+    if command -v sha256sum >/dev/null 2>&1; then
+        actual_hex="$(sha256sum "$INSTALLER_TARBALL" | awk '{print $1}')"
+    else
+        actual_hex="$(shasum -a 256 "$INSTALLER_TARBALL" | awk '{print $1}')"
+    fi
+    [ "$manifest_hex" = "$sidecar_hex" ] && [ "$manifest_hex" = "$actual_hex" ]
+}
+run_test "installer sha256 matches across manifest, sidecar, and actual digest" test_installer_sha256_matches
+
+test_installer_with_p_errors() {
+    # `--installer` and `-p` are mutually exclusive. Lock that.
+    cd "$REPO_ROOT" || return 1
+    set +e
+    "$BINARY" package --installer -p . --out "$SCRATCH/dist-bad" \
+        > "$SCRATCH/bad.stdout" 2>&1
+    local rc=$?
+    set -e
+    [ "$rc" -ne 0 ] || return 1
+    grep -q "incompatible" "$SCRATCH/bad.stdout"
+}
+run_test "sfn package --installer -p errors out (mutual exclusion)" test_installer_with_p_errors
+
 # ---- Error cases ----
 
 test_missing_compiler_bin_errors() {

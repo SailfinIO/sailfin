@@ -851,6 +851,7 @@ fn handle_package_command(args: string[]) -> number ![io] {
     let mut out_dir: string = "dist";
     let mut compiler_bin: string = "build/native/sailfin";
     let mut capsule_path: string = "";
+    let mut installer_mode: boolean = false;
     let mut argi: number = 1;
     loop {
         if argi >= args.length { break; }
@@ -882,6 +883,11 @@ fn handle_package_command(args: string[]) -> number ![io] {
             argi += 2;
             continue;
         }
+        if strings_equal(a, "--installer") {
+            installer_mode = true;
+            argi += 1;
+            continue;
+        }
         if strings_equal(a, "-p") {
             if argi + 1 >= args.length {
                 print("sfn package: -p requires a capsule path");
@@ -892,8 +898,18 @@ fn handle_package_command(args: string[]) -> number ![io] {
             continue;
         }
         print("sfn package: unknown argument \"" + a + "\"");
-        print("usage: sfn package [--target T] [--out DIR] [--compiler-bin PATH] [-p <capsule-path>]");
+        print("usage: sfn package [--target T] [--out DIR] [--compiler-bin PATH] [--installer] [-p <capsule-path>]");
         return 2;
+    }
+
+    // `--installer` and `-p` are mutually exclusive: the installer
+    // tarball bundles compiler + runtime + import-context, which
+    // are all compiler-specific. A user capsule has no analogue.
+    if installer_mode {
+        if capsule_path.length > 0 {
+            print("sfn package: --installer is incompatible with -p");
+            return 2;
+        }
     }
 
     // Detect platform target if not overridden.
@@ -904,7 +920,10 @@ fn handle_package_command(args: string[]) -> number ![io] {
         return 1;
     }
 
-    // Routing: compiler vs user capsule.
+    // Routing: installer vs compiler vs user capsule.
+    if installer_mode {
+        return _package_installer(target, out_dir, compiler_bin);
+    }
     if capsule_path.length == 0 {
         return _package_compiler(target, out_dir, compiler_bin);
     }
@@ -1017,6 +1036,163 @@ fn _package_compiler(target: string, out_dir: string, compiler_bin: string) -> n
 
     let manifest_out = out_dir + "/" + stem + ".manifest.json";
     fs.writeFile(manifest_out, dist_manifest_to_json(manifest));
+
+    process.run(["rm", "-rf", staging]);
+
+    print("[package] created " + tarball);
+    print("[package] created " + tarball + ".sha256");
+    print("[package] created " + manifest_out);
+    return 0;
+}
+
+// Package the installer (Stage C4b) — replaces the second half of
+// `tools/package.sh`. Bundles the compiler binary together with
+// the C runtime sources, the prelude object, and the staged
+// import-context so a fresh-clone consumer can invoke
+// `install.sh` (or eventually `sfn bootstrap`) and get a
+// working compiler without rebuilding from a seed.
+//
+// Tarball name: `installer-<target>.tar.gz` (no version, matching
+// the historical `tools/package.sh` shape — the version is on
+// the bundled binary, not the dist artifact). Manifest is named
+// `installer-<target>.manifest.json` and reuses
+// `DistManifest.kind = "installer"` for downstream tooling that
+// needs to disambiguate tarball flavours.
+//
+// Tarball contents (under top-level `<root>/`, no wrapping dir
+// — `tar -czf <out> -C <staging> .` mirrors the original):
+//   - bin/sailfin, bin/sfn               — the compiler
+//   - runtime/native/                    — the full C runtime tree
+//   - runtime/native/obj/prelude.o       — pre-built prelude (if available)
+//   - import-context/                    — staged .sfn-asm tree (if available)
+//
+// Prelude + import-context are conditionally included: the
+// installer is producible from a freshly built compiler that
+// hasn't run a self-host pass yet, and downstream consumers can
+// regenerate both. `tools/package.sh` had the same conditional
+// inclusion.
+fn _package_installer(target: string, out_dir: string, compiler_bin: string) -> number ![io] {
+    if !fs.exists(compiler_bin) {
+        print("sfn package: compiler binary not found: " + compiler_bin);
+        print("hint: run `make compile` first");
+        return 1;
+    }
+    let manifest_path = "compiler/capsule.toml";
+    if !fs.exists(manifest_path) {
+        print("sfn package: missing " + manifest_path);
+        return 1;
+    }
+    let manifest_text = fs.readFile(manifest_path);
+    let version = toml_get_version(manifest_text);
+    let capsule_name = toml_get_name(manifest_text);
+    if version.length == 0 {
+        print("sfn package: missing version in compiler/capsule.toml");
+        return 1;
+    }
+    if !_is_safe_capsule_version_cmd(version) {
+        print("sfn package: rejecting unsafe version string \"" + version + "\"");
+        return 1;
+    }
+
+    let stem = "installer-" + target;
+    let staging = "build/sailfin/.installer-staging";
+    let staging_bin = staging + "/bin";
+    let staging_runtime = staging + "/runtime";
+    let staging_runtime_obj = staging + "/runtime/native/obj";
+    process.run(["rm", "-rf", staging]);
+    process.run(["mkdir", "-p", staging_bin]);
+    process.run(["mkdir", "-p", staging_runtime]);
+    let cp1 = process.run(["cp", "-f", compiler_bin, staging_bin + "/sailfin"]);
+    let cp2 = process.run(["cp", "-f", compiler_bin, staging_bin + "/sfn"]);
+    if cp1 != 0 {
+        print("sfn package: failed to stage sailfin binary");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+    if cp2 != 0 {
+        print("sfn package: failed to stage sfn binary");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+
+    // Full runtime tree. `cp -R src dest` copies the directory
+    // ITSELF into dest — so this lands at staging/runtime/native/.
+    if !fs.exists("runtime/native") {
+        print("sfn package: missing runtime/native (was the build run from the repo root?)");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+    let cp_runtime = process.run(["cp", "-R", "runtime/native", staging_runtime]);
+    if cp_runtime != 0 {
+        print("sfn package: failed to copy runtime/native");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+
+    // Pre-built prelude object — preferred from the selfhost
+    // tree (which the active build wrote), falling back to a
+    // legacy build/native/obj path. Optional: a clean checkout
+    // without a prior `make compile` won't have either.
+    let prelude_a = "build/selfhost/native/obj/runtime/prelude.o";
+    let prelude_b = "build/native/obj/runtime/prelude.o";
+    let mut prelude_src: string = "";
+    if fs.exists(prelude_a) { prelude_src = prelude_a; } else {
+        if fs.exists(prelude_b) { prelude_src = prelude_b; }
+    }
+    if prelude_src.length > 0 {
+        process.run(["mkdir", "-p", staging_runtime_obj]);
+        process.run(["cp", "-f", prelude_src, staging_runtime_obj + "/prelude.o"]);
+    }
+
+    // Staged import-context — only present after a self-host
+    // build has run. Tools consuming the installer can survive
+    // without it (they regenerate from the seed) but bundling
+    // saves a rebuild on first use.
+    if fs.exists("build/native/import-context") {
+        process.run(["cp", "-R", "build/native/import-context", staging
+            + "/import-context"]);
+    }
+
+    process.run(["mkdir", "-p", out_dir]);
+    let tarball = out_dir + "/" + stem + ".tar.gz";
+    let tar_rc = process.run(["tar", "-czf", tarball, "-C", staging, ".",]);
+    if tar_rc != 0 {
+        print("sfn package: tar failed (exit=" + number_to_string(tar_rc) + ")");
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+
+    let digest = _sha256_of_file_cmd(tarball);
+    if digest.length == 0 {
+        print("sfn package: failed to compute sha256 for " + tarball);
+        process.run(["rm", "-rf", staging]);
+        return 1;
+    }
+    fs.writeFile(tarball + ".sha256", digest + "\n");
+
+    // `binary_size` reports the bundled compiler binary's size.
+    // For an installer tarball this is the most useful "primary
+    // payload" measurement; the rest of the tarball (runtime
+    // sources, optional prelude/import-context) is supporting
+    // material with size already encoded in `tarball_size`.
+    let binary_size = _package_size_of_file(compiler_bin);
+    let tarball_size = _package_size_of_file(tarball);
+    let build_date = _shell_read_cmd("date -u +%Y-%m-%dT%H:%M:%SZ");
+
+    let mut dm = empty_dist_manifest();
+    dm.name = stem;
+    dm.kind = "installer";
+    dm.capsule_name = capsule_name;
+    dm.version = version;
+    dm.target = target;
+    dm.tarball = stem + ".tar.gz";
+    dm.sha256 = digest;
+    dm.binary_size = binary_size;
+    dm.tarball_size = tarball_size;
+    dm.build_date = build_date;
+
+    let manifest_out = out_dir + "/" + stem + ".manifest.json";
+    fs.writeFile(manifest_out, dist_manifest_to_json(dm));
 
     process.run(["rm", "-rf", staging]);
 
