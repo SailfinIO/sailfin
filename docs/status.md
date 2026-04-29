@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout shipped through C2c — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264; C4 `sfn package` v1 in flight)
+Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout + sfn package shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265; C4b installer mode in flight)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -162,15 +162,16 @@ feature availability.
     working). `obj_path` deferred — per-module `.o`s
     aren't materialised in the per-capsule tree today
     (only the cache has them, content-addressed).
-- **Stage C4 `sfn package` v1 (in flight, this PR).**
+- **Stage C4 `sfn package` (#265 + this PR).**
   Sailfin-native command that produces a distributable tarball
-  + sha256 sidecar + JSON manifest. Two modes:
-  - **Compiler mode (no `-p`):** reads `compiler/capsule.toml`
-    for version, stages `bin/sailfin` + `bin/sfn` from
-    `--compiler-bin` (default `build/native/sailfin`), tars
-    them to `<out>/sailfin-native-<target>-<version>.tar.gz`.
-    Replaces the standalone-compiler half of
-    `tools/package.sh`.
+  + sha256 sidecar + JSON manifest. Three modes:
+  - **Compiler mode (no `-p`, no `--installer`):** reads
+    `compiler/capsule.toml` for version, stages `bin/sailfin` +
+    `bin/sfn` from `--compiler-bin` (default
+    `build/native/sailfin`), tars them to
+    `<out>/sailfin-native-<target>-<version>.tar.gz`. Replaces
+    the standalone-compiler half of `tools/package.sh`. **C4 v1
+    (#265).**
   - **User-capsule mode (`-p <path>`):** reads the C2c sidecar
     at `<path>/build/capsules/<scope>/<name>/manifest.json`,
     extracts `kind` + `out` to locate the artifact, stages
@@ -178,19 +179,27 @@ feature availability.
     `capsule.toml` into a self-describing tarball at
     `<out>/<sanitised-name>-<target>-<version>.tar.gz`. Falls
     over with a clear error when the sidecar is missing
-    (hint: `sfn build -p <path>` first).
-  - **Manifest** is now schema-versioned via
+    (hint: `sfn build -p <path>` first). **C4 v1 (#265).**
+  - **Installer mode (`--installer`, this PR):** bundles the
+    compiler + `runtime/native/` + (when available) the
+    pre-built prelude `.o` + (when available) the staged
+    `import-context/` into `<out>/installer-<target>.tar.gz`.
+    No version in the tarball name (matches the historical
+    `tools/package.sh` shape consumed by `release-tag.yml` +
+    `ci.yml`); manifest carries `kind = "installer"`. Mutually
+    exclusive with `-p`. Replaces the second half of
+    `tools/package.sh` — after this lands, every output of the
+    shell script has a Sailfin-native equivalent.
+  - **Manifest** is schema-versioned via
     `dist_manifest.sfn::DistManifest` (`schema_version: "1"`)
-    — adds `kind` (compiler / binary / library), `capsule`,
-    and `tarball` fields beyond `tools/package.sh`'s output.
-  - **Defers** to C4b: installer tarball (compiler + runtime
-    + import-context), cross-compile validation, auto-rebuild
-    on stale `--compiler-bin`. Run `make compile` (or `sfn
-    build -p <path>`) before `sfn package`.
-  - `tools/package.sh` and the Makefile's `package` /
-    `ci-package` targets are untouched in this PR; subsequent
-    PRs will flip them to call `sfn package`, then delete the
-    shell script after one release cycle.
+    — adds `kind` (compiler / installer / binary / library),
+    `capsule`, and `tarball` fields beyond
+    `tools/package.sh`'s output.
+  - **Migration**: `tools/package.sh` and the Makefile's
+    `package` / `ci-package` targets stay untouched until C4b
+    lands; the next PR flips them to call `sfn package` /
+    `sfn package --installer`, then deletes the shell script
+    after one release cycle confirms output shape parity.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
