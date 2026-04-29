@@ -1388,7 +1388,7 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
       (matching the historical convention `release-tag.yml` +
       `ci.yml` expect); manifest reuses
       `DistManifest.kind = "installer"`.
-    - **C4 migration (in flight).** `Makefile`'s `package` /
+    - **C4 migration (landed).** `Makefile`'s `package` /
       `ci-package` / `ci-package-installer` targets now call
       `sfn package` / `sfn package --installer` directly;
       `tools/package.sh` is **deleted**. The composite action

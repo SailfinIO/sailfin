@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout + sfn package shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266; C4 migration retiring `tools/package.sh` in flight)
+Updated: April 29, 2026 (Stage C cache milestone + per-capsule layout + sfn package shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266; C4 migration retiring `tools/package.sh` landed)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -195,7 +195,7 @@ feature availability.
     — adds `kind` (compiler / installer / binary / library),
     `capsule`, and `tarball` fields beyond
     `tools/package.sh`'s output.
-  - **Migration (this PR)**: `Makefile`'s `package` /
+  - **Migration (landed)**: `Makefile`'s `package` /
     `ci-package` / `ci-package-installer` targets now invoke
     `sfn package` / `sfn package --installer` directly.
     `tools/package.sh` is **deleted**. The composite action

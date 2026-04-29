@@ -514,6 +514,10 @@ ci-package:
 		echo "[ci-package][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
 		exit 1; \
 	fi
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[ci-package][error] missing native compiler '$(NATIVE_BIN)'; run 'make rebuild' or 'make compile' first" >&2; \
+		exit 1; \
+	fi
 	@$(NATIVE_BIN) package --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
 	@$(NATIVE_BIN) package --installer --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
 
@@ -523,6 +527,10 @@ ci-package:
 ci-package-installer:
 	@if [ -z "$(TARGET)" ]; then \
 		echo "[ci-package-installer][error] missing TARGET (e.g. linux-x86_64, macos-arm64)" >&2; \
+		exit 1; \
+	fi
+	@if [ ! -x "$(NATIVE_BIN)" ]; then \
+		echo "[ci-package-installer][error] missing native compiler '$(NATIVE_BIN)'; run 'make rebuild' or 'make compile' first" >&2; \
 		exit 1; \
 	fi
 	@$(NATIVE_BIN) package --installer --target "$(TARGET)" --out dist --compiler-bin "$(NATIVE_BIN)"
