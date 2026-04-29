@@ -327,7 +327,7 @@ struct RuntimeLinkInputs {
     success: boolean;
 }
 
-fn _empty_runtime_link_inputs() -> RuntimeLinkInputs {
+fn _failed_runtime_link_inputs() -> RuntimeLinkInputs {
     let empty: string[] = [];
     let empty2: string[] = [];
     return RuntimeLinkInputs {
@@ -337,14 +337,23 @@ fn _empty_runtime_link_inputs() -> RuntimeLinkInputs {
     };
 }
 
-fn _failed_runtime_link_inputs() -> RuntimeLinkInputs {
-    let empty: string[] = [];
-    let empty2: string[] = [];
-    return RuntimeLinkInputs {
-        object_paths: empty,
-        link_libs: empty2,
-        success: false
-    };
+// Compose a per-capsule cache-key prefix for the runtime-capsule
+// `.o` outputs. `"sfn/runtime-native"` → `"sfn__runtime-native__"`;
+// the trailing `__` separates the prefix from the source basename
+// in the cached object's filename. Empty input returns `""` so
+// the legacy hardcoded `_clang_compile_runtime_objects` path
+// stays bit-identical when no capsule artifacts are present.
+fn _runtime_obj_prefix(capsule_name: string) -> string {
+    if capsule_name.length == 0 { return ""; }
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= capsule_name.length { break; }
+        let ch = substring(capsule_name, i, i + 1);
+        if ch == "/" { out = out + "__"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out + "__";
 }
 
 // Compile every `c-sources` / `ll-sources` entry from a list of
@@ -375,13 +384,23 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             include_flags.push("-I" + cap.include_dirs[idi]);
             idi += 1;
         }
-        // c-sources: clang -c each, cached by basename.
+        // Per-capsule prefix for cached `.o` filenames. Replaces
+        // `/` with `__` so the capsule name maps cleanly to a
+        // filesystem segment. With this prefix two capsules can
+        // declare same-basename sources without colliding (e.g.
+        // both shipping a `util.c`).
+        let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+        // c-sources: clang -c each, cached by capsule-prefix +
+        // full basename (extension included so `foo.c` and
+        // `foo.ll` from the same capsule don't collide on the
+        // same `.o` output).
         let mut ci: number = 0;
         loop {
             if ci >= cap.c_sources.length { break; }
             let src = cap.c_sources[ci];
-            let stem = _path_strip_ext(_path_basename(src));
-            let obj = _path_join(out_dir, stem + opt_flag + ".o");
+            let obj = _path_join(out_dir, cap_prefix + _path_basename(src)
+                + opt_flag
+                + ".o");
             if !fs.exists(obj) {
                 let mut args: string[] = ["clang", opt_flag, "-Wno-override-module"];
                 let mut fi: number = 0;
@@ -403,13 +422,16 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             objects.push(obj);
             ci += 1;
         }
-        // ll-sources: assemble each via clang, also cached.
+        // ll-sources: assemble each via clang, also cached with
+        // the capsule prefix + full basename. `foo.ll` ≠
+        // `foo.c` because the basename includes the extension.
         let mut li: number = 0;
         loop {
             if li >= cap.ll_sources.length { break; }
             let src = cap.ll_sources[li];
-            let stem = _path_strip_ext(_path_basename(src));
-            let obj = _path_join(out_dir, stem + opt_flag + ".o");
+            let obj = _path_join(out_dir, cap_prefix + _path_basename(src)
+                + opt_flag
+                + ".o");
             if !fs.exists(obj) {
                 let rc = process.run(["clang", opt_flag, "-Wno-override-module", "-c", src, "-o", obj]);
                 if rc != 0 {
@@ -522,8 +544,28 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         // the prelude continues to ship as a pre-built `.o`
         // located via `_runtime_prelude_path`. Stage D PR3+ or
         // Stage F retires that fallback.
+        //
+        // When the resolver returned runtime capsule artifacts
+        // (i.e. the project actually depends on a `kind =
+        // "runtime"` capsule), the prelude `.o` is REQUIRED for
+        // the link to succeed — the capsule's compiled C
+        // sources reference prelude-emitted symbols. Failing
+        // early with a targeted diagnostic is much easier to
+        // act on than letting clang complain about ~20
+        // undefined references later.
         let prelude_obj = _runtime_prelude_path(runtime_root);
-        if prelude_obj.length > 0 { runtime_objs.push(prelude_obj); }
+        if prelude_obj.length == 0 {
+            print("sfn build: prelude object not found under runtime_root=\""
+                + runtime_root
+                + "\"");
+            print("           expected one of: <root>/native/obj/prelude.o,");
+            print("                            <root>/native/obj/runtime/prelude.o,");
+            print("                            <parent>/build/native/obj/prelude.o,");
+            print("                            <parent>/build/selfhost/native/obj/prelude.o");
+            print("           hint: run `make compile` first so the selfhost build stages prelude.o");
+            return 1;
+        }
+        runtime_objs.push(prelude_obj);
     } else {
         if runtime_root.length == 0 {
             print("runtime bundle not found; set SAILFIN_RUNTIME_ROOT or install runtime alongside the binary");
