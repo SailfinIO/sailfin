@@ -460,6 +460,18 @@ if [[ "$IS_WORKER" -eq 0 ]]; then
     #     them up here once the compiler actually takes a third-party dep.
     while IFS= read -r dep; do
         [[ -n "$dep" ]] || continue
+        # Stage D PR2 transitional bridge: `sfn/runtime-native`
+        # lives at `runtime/native/`, not under `capsules/`, and
+        # ships C source — not `.sfn` modules — so it's already
+        # handled later by the dedicated C-runtime compile step.
+        # The `sfn build` driver discovers it via workspace.toml +
+        # `runtime_capsule_resolver.sfn`; this script keeps using
+        # its hardcoded `runtime/native/...` paths until Stage D
+        # PR4 retires it. Skipping here matches the runtime
+        # capsule's contract: no `.sfn` sources to enumerate.
+        if [[ "$dep" == "sfn/runtime-native" ]]; then
+            continue
+        fi
         cap_dir="$CAPSULES_DIR/$dep/src"
         if [[ ! -d "$cap_dir" ]]; then
             if [[ "$dep" == sfn/* ]]; then

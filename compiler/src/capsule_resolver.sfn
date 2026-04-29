@@ -60,7 +60,8 @@ import {
     number_to_string,
     write_native_text_file_with_module
 } from "./main";
-import { substring } from "./string_utils";
+import { RuntimeCapsuleArtifacts, enumerate_runtime_capsule_artifacts } from "./runtime_capsule_resolver";
+import { contains_string, substring } from "./string_utils";
 import {
     toml_get_capabilities_required,
     toml_get_dependencies,
@@ -176,6 +177,16 @@ struct ProjectCapsuleResult {
     ll_paths: string[];
     stats: CacheStats;
     module_events: ModuleCacheEvent[];
+    // Stage D PR2: every `kind = "runtime"` capsule the project's
+    // `[dependencies]` declares (transitively, via the workspace
+    // member graph). Empty when the project doesn't declare any
+    // runtime dep — `cli_main.sfn::_clang_link_multi_with_opt`
+    // falls back to the legacy hardcoded `runtime_root/native/...`
+    // path that user-program builds rely on. Populated for the
+    // compiler when its `compiler/capsule.toml` declares
+    // `[dependencies] "sfn/runtime-native" = "*"`, which is what
+    // unblocks `sfn build -p compiler` as a real bootstrap path.
+    runtime_capsules: RuntimeCapsuleArtifacts[];
 }
 
 // One entry from the workspace's [workspace].members list, with the
@@ -551,6 +562,16 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[]
 
 // Enumerate every .sfn source file for every dep declared in the project's
 // capsule.toml. Returns an empty list if no manifest or no deps.
+//
+// Stage D PR2: `kind = "runtime"` capsule deps (e.g.
+// `sfn/runtime-native` for the compiler) ship C / LL source — not
+// `.sfn` modules — so they contribute zero entries here. The
+// runtime capsule resolver picks them up separately via
+// `enumerate_runtime_capsule_artifacts`. We discover them
+// up-front via workspace.toml so the legacy
+// `_cr_locate_capsule_src` lookup below doesn't false-positive
+// on a runtime capsule name and emit a "could not locate source"
+// diagnostic.
 fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
     let mut sources: CapsuleSource[] = [];
     if project_root.length == 0 { return sources; }
@@ -559,10 +580,33 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
     let text = fs.readFile(manifest);
     let deps = toml_get_dependencies(text);
     let entries = _cr_parse_deps(deps);
+
+    // Discover every `kind = "runtime"` capsule the workspace
+    // exposes, so we can skip those names below. Empty when
+    // the project sits outside any workspace, which is the
+    // common case for end-user `sfn build` invocations and
+    // matches the pre-Stage-D behaviour exactly.
+    let workspace_root = discover_workspace_root(project_root);
+    let empty_specs: string[] = [];
+    let mut runtime_cap_names: string[] = [];
+    if workspace_root.length > 0 {
+        let runtime_caps = enumerate_runtime_capsule_artifacts(workspace_root, empty_specs);
+        let mut rci: number = 0;
+        loop {
+            if rci >= runtime_caps.length { break; }
+            runtime_cap_names.push(runtime_caps[rci].capsule_name);
+            rci += 1;
+        }
+    }
+
     let mut i: number = 0;
     loop {
         if i >= entries.length { break; }
         let entry = entries[i];
+        i += 1;
+        // Stage D PR2: skip runtime capsule deps — handled
+        // separately by `enumerate_runtime_capsule_artifacts`.
+        if contains_string(runtime_cap_names, entry.spec) { continue; }
         let src_dir = _cr_locate_capsule_src(project_root, entry.spec, entry.version);
         if src_dir.length > 0 {
             let found = _cr_collect_capsule_sources(src_dir, entry.spec);
@@ -578,7 +622,6 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
                 + entry.spec
                 + "` to populate the cache");
         }
-        i += 1;
     }
     return sources;
 }
@@ -2034,6 +2077,19 @@ struct ResolverDedupeResult {
     // "no capability surface to compare against" and skips the
     // E0403 cross-check.
     capabilities_required: string[];
+    // Stage D PR2: every declared `[dependencies]` key from the
+    // project's `capsule.toml`. `prepare_project_capsules` passes
+    // this through `enumerate_runtime_capsule_artifacts` so the
+    // returned `ProjectCapsuleResult.runtime_capsules` only
+    // contains workspace runtime capsules the project actually
+    // depends on. Empty for standalone files / projects without
+    // a manifest, which short-circuits the runtime-capsule lookup.
+    manifest_dep_specs: string[];
+    // Stage D PR2: workspace root discovered while walking the
+    // dep graph (or `""` if the project sits outside any
+    // workspace). Required for `enumerate_runtime_capsule_artifacts`,
+    // which reads `<workspace_root>/workspace.toml`.
+    workspace_root: string;
 }
 
 // Shared resolution + dedupe used by both `prepare_project_capsules`
@@ -2071,13 +2127,16 @@ struct ResolverDedupeResult {
 fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> ResolverDedupeResult ![io] {
     let mut sources: CapsuleSource[] = [];
     let empty_sources: CapsuleSource[] = [];
+    let empty_specs: string[] = [];
 
     let mut empty_caps: string[] = [];
     if entry_paths.length == 0 {
         return ResolverDedupeResult {
             sources: empty_sources,
             has_collision: false,
-            capabilities_required: empty_caps
+            capabilities_required: empty_caps,
+            manifest_dep_specs: empty_specs,
+            workspace_root: ""
         };
     }
 
@@ -2155,7 +2214,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
         return ResolverDedupeResult {
             sources: empty_sources,
             has_collision: false,
-            capabilities_required: capabilities_required
+            capabilities_required: capabilities_required,
+            manifest_dep_specs: covered_specs,
+            workspace_root: workspace_root
         };
     }
 
@@ -2187,7 +2248,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
                     return ResolverDedupeResult {
                         sources: empty_sources,
                         has_collision: true,
-                        capabilities_required: capabilities_required
+                        capabilities_required: capabilities_required,
+                        manifest_dep_specs: covered_specs,
+                        workspace_root: workspace_root
                     };
                 }
                 // Same slug AND same path → exact duplicate, drop silently.
@@ -2251,7 +2314,9 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     return ResolverDedupeResult {
         sources: resolved,
         has_collision: false,
-        capabilities_required: capabilities_required
+        capabilities_required: capabilities_required,
+        manifest_dep_specs: covered_specs,
+        workspace_root: workspace_root
     };
 }
 
@@ -2267,20 +2332,37 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
+    let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
     let entry_paths: string[] = [input_path];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
     if resolved.has_collision {
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             stats: empty_cache_stats(),
-            module_events: empty_events
+            module_events: empty_events,
+            runtime_capsules: empty_runtime_capsules
         };
+    }
+    // Stage D PR2: surface every `kind = "runtime"` workspace
+    // member the project's `[dependencies]` declares. Filtered by
+    // `manifest_dep_specs` so end-user builds (no runtime dep
+    // declared) get an empty list and the link path falls through
+    // to the legacy `_clang_compile_runtime_objects` helper.
+    // Resolver-side discovery is the source of truth: the workspace
+    // root + the manifest's declared deps both come from
+    // `_cr_resolve_and_dedupe` already.
+    let mut runtime_capsules: RuntimeCapsuleArtifacts[] = [];
+    if resolved.workspace_root.length > 0 {
+        if resolved.manifest_dep_specs.length > 0 {
+            runtime_capsules = enumerate_runtime_capsule_artifacts(resolved.workspace_root, resolved.manifest_dep_specs);
+        }
     }
     if resolved.sources.length == 0 {
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             stats: empty_cache_stats(),
-            module_events: empty_events
+            module_events: empty_events,
+            runtime_capsules: runtime_capsules
         };
     }
 
@@ -2290,7 +2372,8 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             stats: empty_cache_stats(),
-            module_events: empty_events
+            module_events: empty_events,
+            runtime_capsules: runtime_capsules
         };
     }
     let result = compile_capsule_modules(resolved.sources, config);
@@ -2298,13 +2381,15 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
             stats: result.stats,
-            module_events: result.module_events
+            module_events: result.module_events,
+            runtime_capsules: runtime_capsules
         };
     }
     return ProjectCapsuleResult {
         ll_paths: result.ll_paths,
         stats: result.stats,
-        module_events: result.module_events
+        module_events: result.module_events,
+        runtime_capsules: runtime_capsules
     };
 }
 
