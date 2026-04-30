@@ -492,26 +492,47 @@ package: compile
 # =============================================================================
 
 # Prepare build artifacts in the locations expected by the Sailfin-native test
-# runner (import context + runtime prelude object). CI builds via
-# scripts/build.sh, which stages outputs under build/selfhost/native/.
+# runner (import context + runtime prelude object).
+#
+# Stage D PR4: `make rebuild` now routes through `sfn build -p compiler`,
+# which writes import-context to `build/native/import-context/` and prelude.o
+# to `build/native/obj/runtime/prelude.o` directly — both already at the
+# canonical paths the test runner expects. The legacy build.sh staging
+# layout (`build/selfhost/native/...`) is only present when the consumer
+# explicitly invokes `bash scripts/build.sh` (e.g. `make check` for the
+# stage2/stage3 fixed-point comparison). Detect which layout produced the
+# build and copy only when the legacy paths are present AND the canonical
+# paths are missing.
 ci-prepare-test-artifacts:
 	@set -eu; \
 	SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
-	if [ ! -d "$$SRC" ]; then \
-		echo "[ci-prepare-test-artifacts][error] missing $$SRC (selfhost did not stage import artifacts?)" >&2; \
-		find build/selfhost -maxdepth 5 -type d -name import-context -print || true; \
+	if [ -d build/native/import-context ] && [ -n "$$(find build/native/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then \
+		echo "[ci-prepare-test-artifacts] build/native/import-context already populated (sfn build path); skipping copy"; \
+	elif [ -d "$$SRC" ]; then \
+		rm -rf build/native/import-context; \
+		mkdir -p build/native/import-context; \
+		cp -a "$$SRC/." build/native/import-context/; \
+		echo "[ci-prepare-test-artifacts] staged import-context from $$SRC"; \
+	else \
+		echo "[ci-prepare-test-artifacts][error] no import-context source found" >&2; \
+		echo "[ci-prepare-test-artifacts][error] expected either build/native/import-context (sfn build)" >&2; \
+		echo "[ci-prepare-test-artifacts][error] or $$SRC (build.sh)" >&2; \
+		find build/selfhost -maxdepth 5 -type d -name import-context -print 2>/dev/null || true; \
 		exit 1; \
 	fi; \
-	rm -rf build/native/import-context; \
-	mkdir -p build/native/import-context; \
-	cp -a "$$SRC/." build/native/import-context/; \
-	if [ ! -f build/selfhost/native/obj/runtime/prelude.o ]; then \
-		echo "[ci-prepare-test-artifacts][error] missing build/selfhost/native/obj/runtime/prelude.o" >&2; \
-		find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print || true; \
+	if [ -f build/native/obj/runtime/prelude.o ]; then \
+		echo "[ci-prepare-test-artifacts] build/native/obj/runtime/prelude.o already present"; \
+	elif [ -f build/selfhost/native/obj/runtime/prelude.o ]; then \
+		mkdir -p build/native/obj/runtime; \
+		cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
+		echo "[ci-prepare-test-artifacts] staged prelude.o from build/selfhost/"; \
+	else \
+		echo "[ci-prepare-test-artifacts][error] missing prelude.o" >&2; \
+		echo "[ci-prepare-test-artifacts][error] expected either build/native/obj/runtime/prelude.o (sfn build path)" >&2; \
+		echo "[ci-prepare-test-artifacts][error] or build/selfhost/native/obj/runtime/prelude.o (build.sh)" >&2; \
+		find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print 2>/dev/null || true; \
 		exit 1; \
 	fi; \
-	mkdir -p build/native/obj/runtime; \
-	cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
 	true
 
 # Package native compiler + installer artifacts for a given target label.
