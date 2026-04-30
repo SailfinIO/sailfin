@@ -12,8 +12,13 @@
 # never be compiled by `sfn build -p compiler`.
 #
 # This test verifies the property in miniature on a synthetic
-# fixture, then runs the real `sfn build -p compiler` self-host as
-# the integration smoke check.
+# `kind = "binary"` fixture: a `main.sfn` plus an unimported
+# sibling under `src/util/`. The full `sfn build -p compiler`
+# self-host is NOT exercised here — it costs ~6 minutes cold and
+# is verified manually before each Stage D PR; running it from a
+# unit-suite-tier e2e test would dominate CI wall time. The
+# fixture-level coverage is the bug-shape the walker has to
+# close; the compiler self-build is just a larger instance of it.
 #
 # Usage:
 #   compiler/tests/e2e/test_binary_capsule_walker.sh <compiler-binary>
@@ -28,8 +33,6 @@ FAIL=0
 # Scratch dir for the test project. Cleaned on exit.
 SCRATCH="$(mktemp -d -t sfn-binary-walker-XXXXXX)"
 trap 'rm -rf "$SCRATCH"' EXIT
-
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 
 run_test() {
     local name="$1"
@@ -134,7 +137,7 @@ test_orphan_compiled() {
     count=$(find "$SCRATCH/build/sailfin/capsules" -maxdepth 1 -name "*src__util__orphan.ll" 2>/dev/null | wc -l | tr -d ' ')
     if [ "$count" != "1" ]; then
         echo "[test]   expected exactly 1 orphan .ll under build/sailfin/capsules; found $count" >&2
-        ls "$SCRATCH/build/sailfin/capsules" 2>&1 >&2 || true
+        ls "$SCRATCH/build/sailfin/capsules" >&2 2>/dev/null || true
         return 1
     fi
     return 0

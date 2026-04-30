@@ -147,7 +147,11 @@ struct ResolverConsumer {
 }
 
 fn empty_resolver_consumer() -> ResolverConsumer {
-    return ResolverConsumer { scope: "", name: "", walk_project_src: false };
+    return ResolverConsumer {
+        scope: "",
+        name: "",
+        walk_project_src: false
+    };
 }
 
 // Result of `compile_capsule_modules`: per-build .ll paths plus the
@@ -1784,10 +1788,30 @@ fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) ->
     // pattern uniform across the file.
     let mut dir_queue: string[] = [src_dir];
     let mut head: number = 0;
-    let max_depth: number = 32;
+    // Belt-and-suspenders cap on the BFS — guards against a
+    // pathological symlink loop or a runaway listDirectory binding.
+    // Sized for `compiler/src/` (137 files, 7 directories at the
+    // time of writing) plus generous headroom; mirrors
+    // `enumerate_relative_sources`'s diagnostic shape so a hit
+    // surfaces a clear bug-report hook instead of silently
+    // dropping reachable modules. The previous implementation used
+    // `head >= max_depth` with `max_depth = 32`, which capped on
+    // QUEUE INDEX (not tree depth) and would silently truncate any
+    // project with more than 32 directories under `src/`.
+    let max_iterations: number = 4096;
+    let mut iterations: number = 0;
     loop {
         if head >= dir_queue.length { break; }
-        if head >= max_depth { break; }
+        if iterations >= max_iterations {
+            print.err("capsule-resolver: enumerate_binary_capsule_sources hit "
+                + "iteration cap ("
+                + number_to_string(max_iterations)
+                + ") under "
+                + src_dir
+                + " — some sources may be missing; please file a bug");
+            break;
+        }
+        iterations += 1;
         let dir = dir_queue[head];
         head += 1;
         if !fs.exists(dir) { continue; }
@@ -1814,9 +1838,7 @@ fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) ->
                 // non-directory returns an empty list, which we
                 // skip naturally.
                 let child_entries = fs.listDirectory(full);
-                if child_entries.length > 0 {
-                    dir_queue.push(full);
-                }
+                if child_entries.length > 0 { dir_queue.push(full); }
             }
             i += 1;
         }

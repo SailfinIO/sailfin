@@ -1072,7 +1072,11 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // produce a single unlinked `.o` whose multi-file story
         // shakes out the same way intra-project imports do today.
         let walk_src = capsule_path.length > 0 && !is_runtime_build && !is_library_build;
-        let mut consumer = ResolverConsumer { scope: "", name: "", walk_project_src: walk_src };
+        let mut consumer = ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: walk_src
+        };
         if cap_capsule_name.length > 0 {
             let parts0 = parse_scope_name(cap_capsule_name);
             if is_safe_scope_name(parts0.scope, parts0.name) {
