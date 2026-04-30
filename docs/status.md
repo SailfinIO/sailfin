@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 29, 2026 (Stage C complete through C4 migration; Stage D PR1 `kind = "runtime"` schema landed; Stage D PR2 driver-side runtime-capsule plumbing in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268)
+Updated: April 30, 2026 (Stage C complete through C4 migration; Stage D PR1 `kind = "runtime"` schema landed; Stage D PR2 driver-side runtime-capsule plumbing landed; Stage D PR3 binary-capsule `src/` walker + subprocess-per-module compile in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -217,7 +217,7 @@ feature availability.
   dep_specs)` returning `RuntimeCapsuleArtifacts[]` with
   workspace-rooted paths. Pure foundation — no production call
   site invoked it yet.
-- **Stage D PR2 (in flight, this PR).** Driver-side wiring for
+- **Stage D PR2 (#269, shipped).** Driver-side wiring for
   `kind = "runtime"` capsule deps:
   - `compiler/capsule.toml` declares `[dependencies]
     "sfn/runtime-native" = "*"` so the resolver picks the
@@ -259,6 +259,45 @@ feature availability.
     `src/` walker for `kind = "binary"` projects) is the
     Stage D PR3 scope. `make compile` (build.sh path) is
     unchanged and remains the active bootstrap.
+- **Stage D PR3 (in flight, this PR).** `sfn build -p compiler`
+  produces a working compiler binary. Two changes work together:
+  - **Binary-capsule `src/` walker.** `ResolverConsumer` gains
+    a `walk_project_src` field (false by default). When
+    `cli_main.sfn` resolves `-p` to a `kind = "binary"`
+    capsule, it sets the field true and the resolver runs
+    `enumerate_binary_capsule_sources(project_root, entry)` —
+    a BFS over `<project_root>/src/**/*.sfn` mirroring
+    `_cr_collect_capsule_sources` — to surface every module the
+    `[build] entry` doesn't transitively import. Slugs come
+    from `_cr_relative_slug` so any module the entry DOES reach
+    dedupe-collapses cleanly with the relative-import walker.
+  - **Subprocess-per-module compile (mirrors `scripts/build.sh`).**
+    Without isolation the resolver's in-process compile loop
+    (138 modules in one arena) OOMed around the 135th module on
+    8 GB. `_cr_compile_one` now shells out to `<sailfin_exe>
+    emit --module-name <slug> -o <ll> llvm <src>` when
+    `cli_main.sfn` threads `binary_dir + "/sailfin"` through.
+    A new `--module-name` flag on `sfn emit` carries the slug
+    so cross-capsule deps (slug `<scope>/<name>/<sub>`, NOT
+    what `module_name_from_path` derives) mangle their symbols
+    identically to the in-process path. Empty `sailfin_exe`
+    falls back to in-process compile so `sfn check` and
+    `sfn test` (which don't yet plumb `binary_dir`) keep their
+    existing behavior.
+  - **Result.** Cold-start `sfn build --clean -p compiler`
+    succeeds in ~6.5 minutes (sequential subprocess; build.sh
+    parallelizes with `--jobs 4` so the ~2-minute target lands
+    once Stage D PR4 flips `make compile` over and the resolver
+    grows job parallelism). The produced binary runs
+    `examples/basics/hello-world.sfn` and self-builds again
+    (cache hits = 135/136 on the second pass).
+  - **Test coverage.** New `test_binary_capsule_walker.sh`
+    builds a `kind = "binary"` fixture with an unimported
+    sibling module and asserts the walker enumerates it,
+    while a positional `sfn build src/main.sfn` does NOT.
+    Full suite stays at 80 unit / 17 integration passing;
+    the pre-existing `test_check_compiler_src.sh` flake is
+    independent (reproduces on the PR2 baseline too).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
