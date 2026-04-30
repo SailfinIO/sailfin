@@ -1135,14 +1135,20 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // writes .sfn-asm + .layout-manifest into build/native/import-context/
         // where the main module's lowering will find them.
         //
-        // Stage D PR3: when `binary_dir` is set (i.e. invoked via the
-        // C driver, which always passes `--binary-dir`), pass the
-        // sailfin executable path through so the resolver can shell
-        // out per-module instead of compiling them in-process. That
-        // is what makes `sfn build -p compiler` viable in 8 GB —
-        // see `_cr_compile_one`'s function-level comment.
+        // Stage D PR3: subprocess-per-module compile is gated on
+        // `walk_src` (true only for `-p` builds of `kind = "binary"`
+        // capsules), not just `binary_dir`. The 138-module
+        // self-host needs each compile in a fresh arena to fit in
+        // 8 GB, but a typical end-user positional build (a handful
+        // of capsule deps) fits in-process and shouldn't pay the
+        // subprocess spawn cost — and shouldn't have its arena
+        // state perturbed by `process.run`'s argv allocations
+        // either, which has been observed to surface seed-corruption
+        // flakes in the entry's in-process compile downstream.
         let mut sailfin_exe: string = "";
-        if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sailfin"; }
+        if walk_src {
+            if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sailfin"; }
+        }
         let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe);
         let capsule_lls = capsule_result.ll_paths;
 
@@ -1278,13 +1284,12 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // always empty: relative-import `.ll`s take the legacy
         // flat layout (Stage C2b2). When `sfn run -p` lands, this
         // becomes a one-line update mirroring `sfn build`.
-        // Stage D PR3: thread the sailfin executable path so per-
-        // module compiles get fresh arenas. `sfn run` calls
-        // through the same resolver and benefits from the same
-        // isolation when a project has many capsule deps.
-        let mut run_sailfin_exe: string = "";
-        if binary_dir.length > 0 { run_sailfin_exe = binary_dir + "/sailfin"; }
-        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), run_sailfin_exe);
+        // Stage D PR3: `sfn run` keeps the in-process compile
+        // path. Subprocess-per-module is gated to `-p` binary
+        // builds only (see the `walk_src` branch above for the
+        // rationale) — `sfn run` doesn't take `-p` yet, and its
+        // typical use case is small fixtures that fit in-process.
+        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), "");
         let capsule_lls = run_capsule_result.ll_paths;
 
         let source = fs.readFile(input_path);

@@ -984,25 +984,90 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
 
     let mut ok: boolean = false;
     if sailfin_exe.length > 0 {
-        // Stage D PR3: subprocess-per-module compile. The fresh
-        // arena per child process is what makes a 138-module
-        // self-build viable in 8 GB — see the function-level
-        // comment for the OOM rationale. `--module-name` carries
-        // `src.slug` through so cross-capsule deps (whose slug is
-        // `<scope>/<name>/<sub>`, NOT `module_name_from_path`)
-        // mangle their symbols identically to the in-process path.
-        let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", src.ll_path, "llvm", src.source_path]);
-        if rc == 0 {
-            // Subprocess success ≠ valid output: an empty file
-            // means the lowering bailed without exit code (matches
-            // build.sh's stricter post-emit check). Treat empty as
-            // a compile failure so the caller sees a coherent
-            // bail event rather than letting clang surface the
-            // problem 30 modules later as a missing-symbol error.
-            if fs.exists(src.ll_path) {
-                let probe = fs.readFile(src.ll_path);
-                if probe.length > 0 { ok = true; }
+        // Stage D PR3: subprocess-per-module compile with retry.
+        // The fresh arena per child process is what makes a
+        // 138-module self-build viable in 8 GB — see the
+        // function-level comment for the OOM rationale.
+        // `--module-name` carries `src.slug` through so cross-
+        // capsule deps (whose slug is `<scope>/<name>/<sub>`, NOT
+        // `module_name_from_path`) mangle their symbols
+        // identically to the in-process path.
+        //
+        // Retry covers a known seed flake: the seed compiler
+        // intermittently emits IR with stray non-ASCII bytes
+        // mid-body (e.g. `define void 嘆name()`), which clang
+        // rejects at link time as "expected function name". The
+        // failure is non-deterministic and a simple re-emit
+        // typically produces clean output. `scripts/build.sh`
+        // applies the same retry shape (`EMIT_RETRIES=3`) for
+        // exactly this reason. Validation runs `llvm-as` on the
+        // emitted file as a cheap mid-file IR check; the empty-
+        // file probe survives as a fast pre-`llvm-as` filter so
+        // we don't pay parser cost on an obviously-broken output.
+        let max_attempts: number = 3;
+        let mut attempt: number = 0;
+        loop {
+            if ok { break; }
+            if attempt >= max_attempts { break; }
+            attempt += 1;
+            let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", src.ll_path, "llvm", src.source_path]);
+            if rc != 0 {
+                if config.trace {
+                    print.err("[emit retry] " + src.slug + " attempt "
+                        + number_to_string(attempt)
+                        + "/"
+                        + number_to_string(max_attempts)
+                        + " — exit="
+                        + number_to_string(rc));
+                }
+                continue;
             }
+            if !fs.exists(src.ll_path) {
+                if config.trace {
+                    print.err("[emit retry] " + src.slug + " attempt "
+                        + number_to_string(attempt)
+                        + "/"
+                        + number_to_string(max_attempts)
+                        + " — missing output");
+                }
+                continue;
+            }
+            let probe = fs.readFile(src.ll_path);
+            if probe.length == 0 {
+                if config.trace {
+                    print.err("[emit retry] " + src.slug + " attempt "
+                        + number_to_string(attempt)
+                        + "/"
+                        + number_to_string(max_attempts)
+                        + " — empty output");
+                }
+                continue;
+            }
+            // Mid-file validation via llvm-as (cheap parse, no
+            // codegen). Non-zero exit means clang would reject
+            // this IR at link time — a re-emit typically lands
+            // clean. Best-effort: if `llvm-as` isn't available
+            // (return code 127 from the shell), skip validation
+            // and trust the empty-file probe above.
+            let validate_rc = process.run(["sh", "-c", "llvm-as < " + src.ll_path
+                + " > /dev/null 2>&1"]);
+            if validate_rc != 0 {
+                if validate_rc == 127 {
+                    // llvm-as not on PATH — accept the output and
+                    // let downstream clang surface any IR issues.
+                    ok = true;
+                    break;
+                }
+                if config.trace {
+                    print.err("[emit retry] " + src.slug + " attempt "
+                        + number_to_string(attempt)
+                        + "/"
+                        + number_to_string(max_attempts)
+                        + " — llvm-as rejected output");
+                }
+                continue;
+            }
+            ok = true;
         }
     } else {
         let source = fs.readFile(src.source_path);
