@@ -1043,27 +1043,43 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
                 }
                 continue;
             }
-            // Mid-file validation via llvm-as (cheap parse, no
-            // codegen). Non-zero exit means clang would reject
-            // this IR at link time — a re-emit typically lands
-            // clean. Best-effort: if `llvm-as` isn't available
-            // (return code 127 from the shell), skip validation
-            // and trust the empty-file probe above.
-            let validate_rc = process.run(["sh", "-c", "llvm-as < " + src.ll_path
-                + " > /dev/null 2>&1"]);
+            // Mid-file validation: parse the .ll to catch the
+            // seed-corruption flake (stray non-ASCII bytes
+            // mid-IR). Try `llvm-as` first (cheapest — no
+            // codegen), then fall back to `clang -c -emit-llvm
+            // -x ir` (always available on builds that have
+            // already required clang). The shell `command -v`
+            // probe distinguishes "tool missing" (try the next)
+            // from "tool ran and rejected the IR" (retry the
+            // emit).
+            //
+            // CI on Linux installs `llvm-18` which provides
+            // `/usr/bin/llvm-as-18` but no unversioned symlink,
+            // so the shell tries `llvm-as`, `llvm-as-18`, etc.
+            // in order. macOS Homebrew installs `llvm-as` as the
+            // unversioned name. The clang fallback covers the
+            // case where neither version-suffixed nor
+            // unversioned `llvm-as` is on PATH.
+            let validate_cmd = "( command -v llvm-as >/dev/null 2>&1 && llvm-as < "
+                + src.ll_path
+                + " > /dev/null 2>&1 ) "
+                + "|| ( command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < "
+                + src.ll_path
+                + " > /dev/null 2>&1 ) "
+                + "|| ( command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir "
+                + src.ll_path
+                + " -o /dev/null > /dev/null 2>&1 ) "
+                + "|| ( command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir "
+                + src.ll_path
+                + " -o /dev/null > /dev/null 2>&1 )";
+            let validate_rc = process.run(["sh", "-c", validate_cmd]);
             if validate_rc != 0 {
-                if validate_rc == 127 {
-                    // llvm-as not on PATH — accept the output and
-                    // let downstream clang surface any IR issues.
-                    ok = true;
-                    break;
-                }
                 if config.trace {
                     print.err("[emit retry] " + src.slug + " attempt "
                         + number_to_string(attempt)
                         + "/"
                         + number_to_string(max_attempts)
-                        + " — llvm-as rejected output");
+                        + " — IR validation rejected output");
                 }
                 continue;
             }

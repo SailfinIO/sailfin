@@ -618,12 +618,41 @@ rebuild:
 		exit 1; \
 	fi; \
 	echo "$$seed" > build/.seed-resolved
+	@# Stage D PR4 transitional workaround: the 0.5.10-alpha.4 seed
+	@# validates per-module IR via `llvm-as` (no version suffix
+	@# fallback). Ubuntu's `llvm-18` package ships
+	@# `/usr/bin/llvm-as-18` but no unversioned `llvm-as` symlink,
+	@# so the seed's validation falls through to "validator missing,
+	@# accept the IR" and seed-corruption flakes (`define void
+	@# 缃name() {`) escape into the link, which clang then rejects.
+	@# Install a per-build PATH shim that exposes `llvm-as` →
+	@# `llvm-as-18` / `llvm-as-17` / etc. The shim sticks for the
+	@# current `make` invocation and is harmless on systems where
+	@# `llvm-as` is already on PATH. PR5's seed cut (post-PR4) makes
+	@# this redundant — the source-side fix in `_cr_compile_one`
+	@# tries `llvm-as` then `llvm-as-18` then `clang -c -emit-llvm`
+	@# directly, no shim needed.
+	@if ! command -v llvm-as >/dev/null 2>&1; then \
+		mkdir -p build/.shim; \
+		shim_target=""; \
+		for cand in llvm-as-18 llvm-as-17 llvm-as-16 llvm-as-15; do \
+			if command -v "$$cand" >/dev/null 2>&1; then \
+				shim_target="$$(command -v "$$cand")"; \
+				break; \
+			fi; \
+		done; \
+		if [ -n "$$shim_target" ]; then \
+			ln -sf "$$shim_target" build/.shim/llvm-as; \
+			echo "[rebuild] llvm-as shim: build/.shim/llvm-as -> $$shim_target"; \
+		fi; \
+	fi
 	@seed=$$(cat build/.seed-resolved); \
 	mkdir -p build/native/import-context; \
 	if [ -d build/native/import-context ]; then \
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi; \
 	echo "[rebuild] pre-staging entry import-context (workaround for seed bug)..."; \
+	export PATH="$(CURDIR)/build/.shim:$$PATH"; \
 	"$$seed" emit -o build/native/import-context/main.sfn-asm native compiler/src/main.sfn >/dev/null; \
 	if [ ! -s build/native/import-context/main.sfn-asm ]; then \
 		echo "[rebuild][error] failed to emit main.sfn-asm" >&2; \
@@ -645,12 +674,36 @@ rebuild:
 	@# A consequence: `cat` masks the seed's exit code, so the
 	@# failure check below depends on `build/sailfin/program`
 	@# existing as a positive indicator instead of `$?`.
+	@# Stage D PR4 default path: `<seed> build -p compiler`. The
+	@# 0.5.10-alpha.4 seed has known cold-build instability (random
+	@# segfaults during fresh 138-module compiles, plus IR
+	@# corruption flakes that escape its `llvm-as`-only validator
+	@# when the unversioned `llvm-as` isn't on PATH). My
+	@# `_cr_compile_one` source fix in this PR adds a clang-based
+	@# validator fallback, but it only takes effect once a future
+	@# seed cut includes it.
+	@#
+	@# Until then: try sfn build first, fall back to
+	@# `scripts/build.sh` on failure so a flaky seed never blocks
+	@# the cutover. PR5 removes the fallback when build.sh
+	@# retires.
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
-	cd $(CURDIR) && "$$seed" build $(BUILD_ARGS) -p compiler 2>&1 | cat
+	export PATH="$(CURDIR)/build/.shim:$$PATH"; \
+	cd $(CURDIR) && "$$seed" build $(BUILD_ARGS) -p compiler 2>&1 | cat || true
 	@if [ ! -f build/sailfin/program ]; then \
-		echo "[rebuild][error] sfn build did not produce build/sailfin/program (seed exit was non-zero or output missing)" >&2; \
-		exit 1; \
+		echo "[rebuild] sfn build did not produce build/sailfin/program — falling back to scripts/build.sh"; \
+		seed=$$(cat build/.seed-resolved); \
+		SEED="$$seed" OUT="$(NATIVE_OUT)" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" SEED_TIMEOUT=600 MAX_TOTAL=7200 \
+			bash scripts/build.sh; \
+		BUILDSH_RC=$$?; \
+		if [ "$$BUILDSH_RC" -ne 0 ]; then \
+			echo "[rebuild][error] both sfn build and scripts/build.sh failed" >&2; \
+			exit "$$BUILDSH_RC"; \
+		fi; \
+		mkdir -p build/sailfin; \
+		cp -f "$(NATIVE_OUT)" build/sailfin/program; \
+		echo "[rebuild] build.sh fallback succeeded"; \
 	fi
 	@mkdir -p build/native
 	@cp -f build/sailfin/program $(NATIVE_OUT)
