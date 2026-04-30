@@ -655,6 +655,19 @@ rebuild:
 	@mkdir -p build/native
 	@cp -f build/sailfin/program $(NATIVE_OUT)
 	@chmod +x $(NATIVE_OUT)
+	@# Stage D PR4: save .ll files to a location `make test` won't
+	@# clobber. Each integration / e2e test's own `sfn build`
+	@# overwrites `build/sailfin/capsules/*.ll` and
+	@# `build/sailfin/program.ll` — by the time `make
+	@# ci-cross-windows` runs (after the test suite), the
+	@# rebuild's IR set is gone. Mirror to `build/native/raw/`
+	@# which the test suite never touches; cross-windows reads
+	@# from there. Cheap (`cp -a`, ~140 small files), survives
+	@# `make test` cleanly. PR5 retires both this copy and
+	@# `ci-cross-windows` once `sfn build --target=...` lands.
+	@mkdir -p build/native/raw
+	@cp -a build/sailfin/capsules/. build/native/raw/ 2>/dev/null || true
+	@cp -f build/sailfin/program.ll build/native/raw/program.ll 2>/dev/null || true
 	@# Stage prelude.o for the freshly-built compiler. End-user `sfn
 	@# build` / `sfn run` invocations from this binary check
 	@# `_runtime_bundle_exists("runtime")` which requires a prebuilt
@@ -727,24 +740,33 @@ MINGW_TARGET := windows-x86_64
 ci-cross-windows:
 	@set -eu; \
 	echo "[cross-windows] cross-compiling for Windows from Linux LLVM IR..."; \
+	SAVED_DIR="build/native/raw"; \
 	CAPSULE_DIR="build/sailfin/capsules"; \
-	PROGRAM_LL="build/sailfin/program.ll"; \
+	PROGRAM_LL=""; \
 	PRELUDE_LL="build/native/obj/runtime/prelude.ll"; \
 	LEGACY_RAW_DIR="build/selfhost/native/raw"; \
 	USE_SFN_BUILD=0; \
-	if [ -d "$$CAPSULE_DIR" ] && [ -f "$$PROGRAM_LL" ]; then \
+	if [ -d "$$SAVED_DIR" ] && [ -f "$$SAVED_DIR/program.ll" ]; then \
 		USE_SFN_BUILD=1; \
+		CAPSULE_DIR="$$SAVED_DIR"; \
+		PROGRAM_LL="$$SAVED_DIR/program.ll"; \
+		echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
+	elif [ -d "$$CAPSULE_DIR" ] && [ -f "build/sailfin/program.ll" ]; then \
+		USE_SFN_BUILD=1; \
+		PROGRAM_LL="build/sailfin/program.ll"; \
 		echo "[cross-windows] using sfn build IR layout (build/sailfin/capsules + program.ll)"; \
-		if [ ! -f "$$PRELUDE_LL" ]; then \
-			echo "[cross-windows][error] missing $$PRELUDE_LL — `make rebuild` should have emitted it" >&2; \
-			exit 1; \
-		fi; \
 	elif [ -d "$$LEGACY_RAW_DIR" ]; then \
 		echo "[cross-windows] using legacy build.sh IR layout ($$LEGACY_RAW_DIR)"; \
 	else \
 		echo "[cross-windows][error] no IR source found" >&2; \
-		echo "[cross-windows][error] expected either $$CAPSULE_DIR + $$PROGRAM_LL (sfn build)" >&2; \
-		echo "[cross-windows][error] or $$LEGACY_RAW_DIR (build.sh) — run 'make rebuild' first" >&2; \
+		echo "[cross-windows][error] expected one of:" >&2; \
+		echo "[cross-windows][error]   $$SAVED_DIR/*.ll + program.ll (sfn build, persisted)" >&2; \
+		echo "[cross-windows][error]   $$CAPSULE_DIR + build/sailfin/program.ll (sfn build, fresh)" >&2; \
+		echo "[cross-windows][error]   $$LEGACY_RAW_DIR (build.sh) — run 'make rebuild' first" >&2; \
+		exit 1; \
+	fi; \
+	if [ "$$USE_SFN_BUILD" = "1" ] && [ ! -f "$$PRELUDE_LL" ]; then \
+		echo "[cross-windows][error] missing $$PRELUDE_LL — \`make rebuild\` should have emitted it" >&2; \
 		exit 1; \
 	fi; \
 	WIN_OBJ="build/windows/obj"; \
@@ -769,8 +791,12 @@ ci-cross-windows:
 	echo "[cross-windows] collecting .ll modules..."; \
 	LL_FILES=""; \
 	if [ "$$USE_SFN_BUILD" = "1" ]; then \
+		PROGRAM_BASENAME="$$(basename "$$PROGRAM_LL")"; \
+		PROGRAM_REAL="$$(readlink -f "$$PROGRAM_LL" 2>/dev/null || echo "$$PROGRAM_LL")"; \
 		for f in "$$CAPSULE_DIR"/*.ll; do \
 			[ -f "$$f" ] || continue; \
+			f_real="$$(readlink -f "$$f" 2>/dev/null || echo "$$f")"; \
+			if [ "$$f_real" = "$$PROGRAM_REAL" ]; then continue; fi; \
 			LL_FILES="$$LL_FILES $$f"; \
 		done; \
 		LL_FILES="$$LL_FILES $$PROGRAM_LL"; \
