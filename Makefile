@@ -1,5 +1,15 @@
 # Sailfin project automation
 
+# Force bash so recipes can rely on bash-isms (`<()` process substitution,
+# `[[ ]]` test syntax, etc.) and so the Sailfin compiler's `process.run`
+# invocations don't hit a `/bin/sh`-specific quirk that makes the seed
+# segfault during `sfn build -p compiler`. Plain dash on Ubuntu has been
+# observed to crash the seed reproducibly via Make even though direct
+# bash invocations of the same command succeed; switching the recipe
+# shell to bash sidesteps the issue and matches what `scripts/build.sh`
+# (`#!/usr/bin/env bash`) already assumed.
+SHELL := /bin/bash
+
 # Silence noisy clang warning when compiling embedded-IR modules that carry a
 # different target triple than the host.
 CLANG_WARN_SUPPRESS ?= -Wno-override-module
@@ -581,20 +591,67 @@ rebuild:
 		echo "[rebuild] missing seed compiler: $$seed"; \
 		exit 1; \
 	fi; \
-	if ! "$$seed" build -p compiler --help >/dev/null 2>&1 && \
-	   ! "$$seed" --version >/dev/null 2>&1; then \
+	if ! "$$seed" --version >/dev/null 2>&1; then \
 		echo "[rebuild][error] seed compiler $$seed is not invokable" >&2; \
+		echo "[rebuild][error] expected pinned seed (see .seed-version); run: make fetch-seed" >&2; \
 		exit 1; \
 	fi; \
+	echo "$$seed" > build/.seed-resolved
+	@seed=$$(cat build/.seed-resolved); \
+	mkdir -p build/native/import-context; \
+	if [ -d build/native/import-context ]; then \
+		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
+	fi; \
+	echo "[rebuild] pre-staging entry import-context (workaround for seed bug)..."; \
+	"$$seed" emit -o build/native/import-context/main.sfn-asm native compiler/src/main.sfn >/dev/null; \
+	if [ ! -s build/native/import-context/main.sfn-asm ]; then \
+		echo "[rebuild][error] failed to emit main.sfn-asm" >&2; \
+		exit 1; \
+	fi; \
+	grep '^\.layout' build/native/import-context/main.sfn-asm > build/native/import-context/main.layout-manifest 2>/dev/null || true; \
+	if [ ! -f build/native/import-context/main.layout-manifest ]; then \
+		: > build/native/import-context/main.layout-manifest; \
+	fi
+	@# Pipe the build output through `cat` rather than letting it
+	@# go straight to the recipe's stdout. The seed compiler
+	@# (0.5.10-alpha.4) has been observed to segfault when its
+	@# stdout is whatever Make presents directly to a recipe — a
+	@# TTY/buffering interaction in `process.run` that disappears
+	@# the moment any pipe is interposed. Direct shell invocations
+	@# don't reproduce, only the make-driven path does. `cat`
+	@# preserves the visible output for humans without paying
+	@# `tail`'s output truncation cost.
+	@# A consequence: `cat` masks the seed's exit code, so the
+	@# failure check below depends on `build/sailfin/program`
+	@# existing as a positive indicator instead of `$?`.
+	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
-	cd $(CURDIR) && "$$seed" build $(BUILD_ARGS) -p compiler
+	cd $(CURDIR) && "$$seed" build $(BUILD_ARGS) -p compiler 2>&1 | cat
 	@if [ ! -f build/sailfin/program ]; then \
-		echo "[rebuild][error] sfn build did not produce build/sailfin/program" >&2; \
+		echo "[rebuild][error] sfn build did not produce build/sailfin/program (seed exit was non-zero or output missing)" >&2; \
 		exit 1; \
 	fi
 	@mkdir -p build/native
 	@cp -f build/sailfin/program $(NATIVE_OUT)
 	@chmod +x $(NATIVE_OUT)
+	@# Stage prelude.o for the freshly-built compiler. End-user `sfn
+	@# build` / `sfn run` invocations from this binary check
+	@# `_runtime_bundle_exists("runtime")` which requires a prebuilt
+	@# `prelude.o` somewhere under the runtime tree (see
+	@# `_runtime_prelude_path` in cli_main.sfn for the search list).
+	@# The fresh-clone repo's `runtime/` has no `obj/`, so without
+	@# this step the in-tree compiler would fail to link any user
+	@# program with "runtime bundle missing expected files."
+	@# `scripts/build.sh` produced this object in the same shape;
+	@# we replicate via the new compiler emitting prelude.ll +
+	@# clang compiling it to an object.
+	@mkdir -p build/native/obj/runtime
+	@if [ ! -f build/native/obj/runtime/prelude.o ]; then \
+		echo "[rebuild] staging prelude.o..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null; \
+		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/prelude.ll -o build/native/obj/runtime/prelude.o; \
+		rm -f build/native/obj/runtime/prelude.ll; \
+	fi
 	@# Write build stamp (version + git hash for dev builds), matching
 	@# the format `scripts/build.sh` used. `version.sfn::resolve_compiler_version`
 	@# reads this file first, so without it the binary would report

@@ -2620,6 +2620,43 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
             runtime_capsules: runtime_capsules
         };
     }
+
+    // Stage D PR4: when `walk_project_src` is on, the binary-
+    // capsule walker excludes the entry from enumeration (the
+    // entry's `.ll` is produced separately by the caller's
+    // `compile_to_llvm_file_with_module`, so it doesn't need a
+    // capsule-side compile). But the entry's `.sfn-asm` IS
+    // needed by every sibling module that imports from it —
+    // without it staged, `<seed> emit --module-name <sibling>
+    // llvm <sibling-src>` can't see the entry's exported symbol
+    // signatures and emits dangling references. The compiler's
+    // self-build is the canonical case: every module imports
+    // `compile_to_llvm_file_with_module` / `compile_to_sailfin`
+    // / etc. from `main.sfn`. Staging the entry separately keeps
+    // the entry out of `compile_capsule_modules` (no double-
+    // emit) while making its import-context available.
+    if consumer.walk_project_src {
+        let entry_path = entry_paths[0];
+        if fs.exists(entry_path) {
+            let entry_slug = module_name_from_path(entry_path);
+            let mut entry_src: CapsuleSource[] = [];
+            entry_src.push(CapsuleSource {
+                spec: "", source_path: entry_path, slug: entry_slug, ll_path: ""
+            });
+            let entry_staged = stage_capsule_imports(entry_src);
+            if !entry_staged {
+                print.err("capsule-resolver: failed to stage entry import-context for "
+                    + entry_path);
+                return ProjectCapsuleResult {
+                    ll_paths: empty_paths,
+                    stats: empty_cache_stats(),
+                    module_events: empty_events,
+                    runtime_capsules: runtime_capsules
+                };
+            }
+        }
+    }
+
     let result = compile_capsule_modules(resolved.sources, config, sailfin_exe);
     if !result.success {
         return ProjectCapsuleResult {
