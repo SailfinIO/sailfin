@@ -4,6 +4,19 @@ version = "0.5.10-alpha.3"
 description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm IR"
 
 [dependencies]
+# Stage D PR2: declare the C runtime as an explicit dependency so
+# `sfn build -p compiler` finds it through the workspace's
+# `kind = "runtime"` capsule discovery
+# (`compiler/src/runtime_capsule_resolver.sfn`). The driver
+# iterates every declared runtime capsule's `c-sources` /
+# `ll-sources` / `include-dirs` / `link-libs` and feeds them into
+# the link phase. `make compile` (which routes through
+# `scripts/build.sh`) is unaffected — that script walks
+# `runtime/native/src/*.c` directly. Stage D PR4 is when
+# `make compile` flips to `sfn build -p compiler` and this line
+# becomes the load-bearing pointer to the bootstrap's runtime
+# sources.
+"sfn/runtime-native" = "*"
 
 [capabilities]
 # `io` covers fs.*, print.*, console.*, and process.* surface used

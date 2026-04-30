@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 29, 2026 (Stage C complete through C4 migration — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267 retired `tools/package.sh`; Stage D PR1 `kind = "runtime"` capsule schema in flight)
+Updated: April 29, 2026 (Stage C complete through C4 migration; Stage D PR1 `kind = "runtime"` schema landed; Stage D PR2 driver-side runtime-capsule plumbing in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -206,23 +206,59 @@ feature availability.
     compile + installer logic — Windows-target support in
     `sfn package` is a follow-up (Stage D / late-C territory,
     requires `--target` validation against host).
-- **Stage D PR1 (in flight, this PR).** `kind = "runtime"`
-  capsule schema becomes a real, parsed manifest variant.
+- **Stage D PR1 (#268, shipped).** `kind = "runtime"` capsule
+  schema landed as a real, parsed manifest variant.
   `runtime/native/capsule.toml` is the first such capsule
-  (`name = "sfn/runtime-native"`); declares `c-sources`,
+  (`name = "sfn/runtime-native"`) declaring `c-sources`,
   `ll-sources`, `include-dirs`, `link-libs`, and a transitional
   `prelude-entry = "../prelude.sfn"`. New
   `compiler/src/runtime_capsule_resolver.sfn` exposes
   `enumerate_runtime_capsule_artifacts(workspace_root,
   dep_specs)` returning `RuntimeCapsuleArtifacts[]` with
-  workspace-rooted paths. **Pure foundation** — no production
-  call site invokes it yet (Stage D PR2 wires
-  `_clang_compile_runtime_objects` to consume the resolver
-  output). `cli_main.sfn`'s old "kind = runtime not yet
-  supported" rejection becomes a no-op + hint pointing the
-  user at the supported usage (declare it as a dep of a
-  `kind = "binary"` capsule). `make compile` is unchanged
-  (still uses `scripts/build.sh`).
+  workspace-rooted paths. Pure foundation — no production call
+  site invoked it yet.
+- **Stage D PR2 (in flight, this PR).** Driver-side wiring for
+  `kind = "runtime"` capsule deps:
+  - `compiler/capsule.toml` declares `[dependencies]
+    "sfn/runtime-native" = "*"` so the resolver picks the
+    runtime capsule up via the workspace's member list.
+  - `ProjectCapsuleResult` gains a `runtime_capsules:
+    RuntimeCapsuleArtifacts[]` field; `prepare_project_capsules`
+    populates it via `enumerate_runtime_capsule_artifacts`
+    filtered by the project's manifest deps.
+    `ResolverDedupeResult` carries the new `manifest_dep_specs`
+    + `workspace_root` so the lookup happens once per
+    resolution pass.
+  - New `_clang_compile_runtime_capsule_objects` helper
+    iterates declarative `c-sources` / `ll-sources` /
+    `include-dirs` / `link-libs` from each artifact, compiles
+    cached `.o` outputs, and threads `link-libs` into the
+    final clang invocation. `_clang_link_multi_with_opt` (and
+    its public wrappers) gain a `runtime_capsules` parameter:
+    when non-empty, the new path runs; when empty, the legacy
+    hardcoded `runtime_root/native/...` lookup stays
+    load-bearing for end-user `sfn build` (which doesn't
+    declare a runtime dep).
+  - `enumerate_capsule_sources` skips `kind = "runtime"`
+    workspace members so the legacy `_cr_locate_capsule_src`
+    lookup doesn't false-positive on runtime capsule names
+    and emit "could not locate source" diagnostics.
+  - `scripts/build.sh` gets a transitional one-line bridge to
+    skip the `sfn/runtime-native` dep when iterating
+    `[dependencies]` (it lives at `runtime/native/`, not
+    `capsules/sfn/runtime-native/`). The script retires in
+    Stage D PR4.
+  - **Verification gap intentional.** `sfn build -p compiler`
+    runs through every new code path and produces a partial
+    binary, but the link line is missing the compiler's CLI
+    modules (cli_main.sfn, capsule_resolver.sfn, etc.) because
+    `compiler/src/main.sfn`'s transitive import graph doesn't
+    cover them — `scripts/build.sh` walks
+    `compiler/src/**/*.sfn` directly, while the resolver only
+    walks reachable imports. Closing this gap (a binary-capsule
+    `src/` walker for `kind = "binary"` projects) is the
+    Stage D PR3 scope. `make compile` (build.sh path) is
+    unchanged and remains the active bootstrap.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
