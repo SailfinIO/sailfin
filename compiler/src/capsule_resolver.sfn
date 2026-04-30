@@ -85,6 +85,7 @@ export {
     discover_project_root,
     discover_workspace_root,
     empty_resolver_consumer,
+    enumerate_binary_capsule_sources,
     enumerate_capsule_sources,
     enumerate_relative_sources,
     enumerate_workspace_implicit_sources,
@@ -129,13 +130,28 @@ struct CapsuleSource {
 // `cli_main.sfn::is_build` populates this from the resolved
 // `[capsule].name`; `sfn run`, `sfn check`, and `sfn test` pass the
 // empty consumer until they grow `-p` plumbing of their own.
+//
+// Stage D PR3: `walk_project_src` opts the resolver into a
+// recursive walk of `<project_root>/src/**/*.sfn` for `kind =
+// "binary"` `-p` builds where the entry module doesn't transitively
+// import every source in the capsule (the compiler's `main.sfn` is
+// the canonical example — it imports `cli_main`, which is the real
+// entry, but the relative-import walker can't reach the `~138 .sfn`
+// files the link needs). Empty consumer / `walk_project_src=false`
+// preserves the legacy entry-driven enumeration, so end-user
+// builds and the existing self-host paths are unaffected.
 struct ResolverConsumer {
     scope: string;
     name: string;
+    walk_project_src: boolean;
 }
 
 fn empty_resolver_consumer() -> ResolverConsumer {
-    return ResolverConsumer { scope: "", name: "" };
+    return ResolverConsumer {
+        scope: "",
+        name: "",
+        walk_project_src: false
+    };
 }
 
 // Result of `compile_capsule_modules`: per-build .ll paths plus the
@@ -909,7 +925,20 @@ fn _cr_module_cache_event_failure(slug: string) -> ModuleCacheEvent {
 // compiling, and stores the result on a clean compile. Returns a
 // `ModuleCacheEvent` describing the outcome so the caller can
 // accumulate stats across the build.
-fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string) -> ModuleCacheEvent ![io] {
+//
+// Stage D PR3: when `sailfin_exe.length > 0`, every fresh compile
+// shells out to `<sailfin_exe> emit --module-name <slug> -o <ll>
+// llvm <src>` instead of calling `compile_to_llvm_file_with_module`
+// in-process. That mirrors `scripts/build.sh`'s subprocess-per-
+// module pattern (line 650) and gives each compile a fresh arena —
+// without it, a 138-module self-build accumulates ~7+ GB of
+// arena state in a single process and OOMs around the 135th
+// module. Empty `sailfin_exe` falls back to in-process compile so
+// `handle_check_command` / `handle_test_command` callers (which
+// don't yet have `binary_dir` plumbed) keep their existing path;
+// their typical capsule dep counts are well under the in-process
+// budget.
+fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string) -> ModuleCacheEvent ![io] {
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);
         return _cr_module_cache_event_failure(src.slug);
@@ -953,8 +982,97 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
         }
     }
 
-    let source = fs.readFile(src.source_path);
-    let ok = compile_to_llvm_file_with_module(source, src.slug, src.ll_path);
+    let mut ok: boolean = false;
+    if sailfin_exe.length > 0 {
+        // Stage D PR3: subprocess-per-module compile with retry.
+        // The fresh arena per child process is what makes a
+        // 138-module self-build viable in 8 GB — see the
+        // function-level comment for the OOM rationale.
+        // `--module-name` carries `src.slug` through so cross-
+        // capsule deps (whose slug is `<scope>/<name>/<sub>`, NOT
+        // `module_name_from_path`) mangle their symbols
+        // identically to the in-process path.
+        //
+        // Retry covers a known seed flake: the seed compiler
+        // intermittently emits IR with stray non-ASCII bytes
+        // mid-body (e.g. `define void 嘆name()`), which clang
+        // rejects at link time as "expected function name". The
+        // failure is non-deterministic and a simple re-emit
+        // typically produces clean output. `scripts/build.sh`
+        // applies the same retry shape (`EMIT_RETRIES=3`) for
+        // exactly this reason. Validation runs `llvm-as` on the
+        // emitted file as a cheap mid-file IR check; the empty-
+        // file probe survives as a fast pre-`llvm-as` filter so
+        // we don't pay parser cost on an obviously-broken output.
+        let max_attempts: number = 3;
+        let mut attempt: number = 0;
+        loop {
+            if ok { break; }
+            if attempt >= max_attempts { break; }
+            attempt += 1;
+            let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", src.ll_path, "llvm", src.source_path]);
+            if rc != 0 {
+                if config.trace {
+                    print.err("[emit retry] " + src.slug + " attempt "
+                        + number_to_string(attempt)
+                        + "/"
+                        + number_to_string(max_attempts)
+                        + " — exit="
+                        + number_to_string(rc));
+                }
+                continue;
+            }
+            if !fs.exists(src.ll_path) {
+                if config.trace {
+                    print.err("[emit retry] " + src.slug + " attempt "
+                        + number_to_string(attempt)
+                        + "/"
+                        + number_to_string(max_attempts)
+                        + " — missing output");
+                }
+                continue;
+            }
+            let probe = fs.readFile(src.ll_path);
+            if probe.length == 0 {
+                if config.trace {
+                    print.err("[emit retry] " + src.slug + " attempt "
+                        + number_to_string(attempt)
+                        + "/"
+                        + number_to_string(max_attempts)
+                        + " — empty output");
+                }
+                continue;
+            }
+            // Mid-file validation via llvm-as (cheap parse, no
+            // codegen). Non-zero exit means clang would reject
+            // this IR at link time — a re-emit typically lands
+            // clean. Best-effort: if `llvm-as` isn't available
+            // (return code 127 from the shell), skip validation
+            // and trust the empty-file probe above.
+            let validate_rc = process.run(["sh", "-c", "llvm-as < " + src.ll_path
+                + " > /dev/null 2>&1"]);
+            if validate_rc != 0 {
+                if validate_rc == 127 {
+                    // llvm-as not on PATH — accept the output and
+                    // let downstream clang surface any IR issues.
+                    ok = true;
+                    break;
+                }
+                if config.trace {
+                    print.err("[emit retry] " + src.slug + " attempt "
+                        + number_to_string(attempt)
+                        + "/"
+                        + number_to_string(max_attempts)
+                        + " — llvm-as rejected output");
+                }
+                continue;
+            }
+            ok = true;
+        }
+    } else {
+        let source = fs.readFile(src.source_path);
+        ok = compile_to_llvm_file_with_module(source, src.slug, src.ll_path);
+    }
     if !ok {
         print.err("capsule-resolver: failed to lower " + src.slug
             + " to LLVM IR");
@@ -1003,7 +1121,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
 // env-driven behaviour. Honours `config.clean` by wiping the cache
 // root before any per-module work — done once per build, not per
 // module, so a single `--clean` run can't double-wipe.
-fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig) -> CompileCapsuleResult ![io] {
+fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string) -> CompileCapsuleResult ![io] {
     _cr_ensure_dir("build/sailfin");
     _cr_ensure_dir("build/sailfin/capsules");
     // Per-source dep manifests (PR1e): each `_cr_compile_one` call
@@ -1058,7 +1176,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig) -
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
-        let evt = _cr_compile_one(sources[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical);
+        let evt = _cr_compile_one(sources[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe);
         if !evt.success {
             // Stage C2c: even on the bail path we surface the
             // events accumulated so far. Sidecar emission is
@@ -1694,6 +1812,105 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
     return out;
 }
 
+// Stage D PR3: walk every `.sfn` under `<project_root>/src/` for
+// `kind = "binary"` `-p` builds (opt-in via
+// `ResolverConsumer.walk_project_src`). The relative-import walker
+// above can only see modules transitively reachable from the
+// `[build] entry`; the compiler's `compiler/src/main.sfn` reaches
+// `compile_to_llvm_*` but never imports `cli_main` (the actual
+// driver) or any of the CLI subcommand modules, so an entry-driven
+// build leaves ~100 source files out of the link and clang
+// surfaces the gap as a wall of undefined references. Directory-
+// level enumeration mirrors what `scripts/build.sh` already does
+// — every `.sfn` under `compiler/src/` is fed into the build,
+// regardless of whether anything imports it.
+//
+// Slugs come from the same `_cr_relative_slug` helper the
+// relative-import walker uses, which delegates to
+// `module_name_from_path`. That gives a slug rooted at
+// `compiler/src/` (e.g. `cli_main`, `llvm/lowering/entrypoints`)
+// — so when a file IS reachable from the entry, the
+// relative-import walk and this walker emit the same slug for it
+// and `_cr_resolve_and_dedupe`'s slug-collision check sees them
+// as exact duplicates (same path + same slug → silent dedupe).
+//
+// `entry_path` is forwarded to `_cr_relative_slug` for parameter
+// stability with the existing call shape; the helper ignores its
+// `entry_dir` argument and slugs purely off `module_name_from_path`,
+// so this walker stays in lockstep regardless of which entry the
+// `-p` resolution picked.
+fn enumerate_binary_capsule_sources(project_root: string, entry_path: string) -> CapsuleSource[] ![io] {
+    let mut out: CapsuleSource[] = [];
+    if project_root.length == 0 { return out; }
+    let src_dir = _cr_path_join(project_root, "src");
+    if !fs.exists(src_dir) { return out; }
+    let entry_dir = _cr_dirname(entry_path);
+
+    // Iterative BFS, mirroring `_cr_collect_capsule_sources`. The
+    // seed compiler has historically been brittle around recursive
+    // accumulators, and the parallel queue layout (dir + nothing
+    // else here, since slugs come from the file path) keeps the
+    // pattern uniform across the file.
+    let mut dir_queue: string[] = [src_dir];
+    let mut head: number = 0;
+    // Belt-and-suspenders cap on the BFS — guards against a
+    // pathological symlink loop or a runaway listDirectory binding.
+    // Sized for `compiler/src/` (137 files, 7 directories at the
+    // time of writing) plus generous headroom; mirrors
+    // `enumerate_relative_sources`'s diagnostic shape so a hit
+    // surfaces a clear bug-report hook instead of silently
+    // dropping reachable modules. The previous implementation used
+    // `head >= max_depth` with `max_depth = 32`, which capped on
+    // QUEUE INDEX (not tree depth) and would silently truncate any
+    // project with more than 32 directories under `src/`.
+    let max_iterations: number = 4096;
+    let mut iterations: number = 0;
+    loop {
+        if head >= dir_queue.length { break; }
+        if iterations >= max_iterations {
+            print.err("capsule-resolver: enumerate_binary_capsule_sources hit "
+                + "iteration cap ("
+                + number_to_string(max_iterations)
+                + ") under "
+                + src_dir
+                + " — some sources may be missing; please file a bug");
+            break;
+        }
+        iterations += 1;
+        let dir = dir_queue[head];
+        head += 1;
+        if !fs.exists(dir) { continue; }
+        let entries = fs.listDirectory(dir);
+        let mut i: number = 0;
+        loop {
+            if i >= entries.length { break; }
+            let entry = entries[i];
+            let full = _cr_path_join(dir, entry);
+            if _cr_ends_with(entry, ".sfn") {
+                // Skip the entry path itself — the caller compiles
+                // it via the standard single-file path. Matches the
+                // contract in `enumerate_relative_sources` so the
+                // dedupe loop never sees the entry twice.
+                if !strings_equal(full, entry_path) {
+                    let slug = _cr_relative_slug(entry_dir, full);
+                    out.push(CapsuleSource {
+                        spec: "", source_path: full, slug: slug, ll_path: ""
+                    });
+                }
+            } else {
+                // Treat anything without a .sfn suffix as a
+                // potential subdirectory. listDirectory on a
+                // non-directory returns an empty list, which we
+                // skip naturally.
+                let child_entries = fs.listDirectory(full);
+                if child_entries.length > 0 { dir_queue.push(full); }
+            }
+            i += 1;
+        }
+    }
+    return out;
+}
+
 // ---- Scoped (capsule) import scanning ----
 // Sibling of `collect_relative_import_specs` that returns specs containing
 // `/` and not starting with `./`, `../`, or `runtime/`. These are the
@@ -2165,6 +2382,33 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
     let anchor_dir = _cr_dirname(entry_paths[0]);
 
     let project_root = discover_project_root(anchor_dir);
+
+    // (1b) Stage D PR3: opt-in `<project_root>/src/**/*.sfn` walk
+    // for `kind = "binary"` `-p` builds. The relative-import
+    // walker only follows modules transitively imported from the
+    // entry, but the compiler's `main.sfn` doesn't import every
+    // CLI / lowering module the link needs. Walking `src/`
+    // directly closes that gap — and emits the same slugs the
+    // relative-import walker would, so any module the entry DOES
+    // reach gets dedupe-collapsed cleanly below. Off by default;
+    // `cli_main.sfn` sets `walk_project_src` only when `-p` is
+    // used and the resolved kind is binary.
+    if consumer.walk_project_src {
+        if project_root.length > 0 {
+            let mut bei: number = 0;
+            loop {
+                if bei >= entry_paths.length { break; }
+                let bin_sources = enumerate_binary_capsule_sources(project_root, entry_paths[bei]);
+                let mut bsi: number = 0;
+                loop {
+                    if bsi >= bin_sources.length { break; }
+                    sources.push(bin_sources[bsi]);
+                    bsi += 1;
+                }
+                bei += 1;
+            }
+        }
+    }
     let mut covered_specs: string[] = [];
     let mut capabilities_required: string[] = [];
     if project_root.length > 0 {
@@ -2329,7 +2573,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 // missing-symbol follow-up downstream. Inspect `stats` (and any
 // `print.err` output the helpers emitted) for setup failures vs.
 // genuinely-empty dep graphs.
-fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer) -> ProjectCapsuleResult ![io] {
+fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
     let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
@@ -2376,7 +2620,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
             runtime_capsules: runtime_capsules
         };
     }
-    let result = compile_capsule_modules(resolved.sources, config);
+    let result = compile_capsule_modules(resolved.sources, config, sailfin_exe);
     if !result.success {
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
@@ -2495,7 +2739,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
 //     own compile path still runs, and any relative-import walking
 //     happens inside the per-entry `enumerate_relative_sources`
 //     branch of `_cr_resolve_and_dedupe`.
-fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer) -> TestCapsuleResolution ![io] {
+fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string) -> TestCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
     // Phase F: thread `capabilities_required` through every exit
@@ -2547,7 +2791,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // env-driven default. When the test runner grows `--no-cache`
     // / `--clean`, thread the resolved config in here.
     let test_config = empty_build_cache_config();
-    let result = compile_capsule_modules(resolved.sources, test_config);
+    let result = compile_capsule_modules(resolved.sources, test_config, sailfin_exe);
     // Surface a compile failure as `staging_failed = true` so the
     // test runner exits 2 instead of trying to link against
     // missing helper objects. (The PR1c stats are dropped on this

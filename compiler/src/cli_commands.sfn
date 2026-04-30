@@ -358,7 +358,13 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         // legacy flat layout (Stage C2b2). Test-time link continues
         // to consume `build/sailfin/capsules/<mangled>.ll` until
         // `sfn test -p` ships.
-        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, empty_resolver_consumer());
+        // Stage D PR3: `sfn test` runs from the legacy `make test`
+        // path that does not thread `binary_dir` through, so pass
+        // an empty `sailfin_exe`. The resolver falls back to the
+        // in-process compile path that has worked for tests since
+        // Stage C2c — test fixtures stay well below the per-module
+        // count where arena pressure becomes an issue.
+        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, empty_resolver_consumer(), "");
         if resolution.staging_failed {
             // Resolver already emitted a structured error to stderr
             // (slug collision, stage-write, or compile failure).

@@ -72,7 +72,7 @@ fn _usage() -> string {
     out = out
         + "  sfn run   [--no-cache] [--clean] [--cache-trace] (<file.sfn> | <exe>)\n";
     out = out
-        + "  sfn emit  [--timing] [-o OUTPUT] llvm|sailfin|native <file.sfn>\n";
+        + "  sfn emit  [--timing] [-o OUTPUT] [--module-name SLUG] llvm|sailfin|native <file.sfn>\n";
     out = out + "\n";
     out = out + "project:\n";
     out = out + "  sfn init\n";
@@ -831,15 +831,30 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
     if is_emit {
         let mut timing = false;
         let mut out_path = "";
+        // Stage D PR3: explicit module name override. Lets the
+        // resolver's per-module compile (`_cr_compile_one`) shell
+        // out to a fresh subprocess for arena isolation while
+        // preserving the slug-based module name needed for symbol
+        // mangling of cross-capsule deps (where the slug is
+        // `<scope>/<name>/<rest>`, not what `module_name_from_path`
+        // would derive). Empty / not provided → fall back to
+        // `module_name_from_path(path)` so all existing call sites
+        // (humans + tests + build.sh) keep their current shape.
+        let mut module_name_override: string = "";
         let mut base_index = 1;
-        // Parse optional flags: --timing and -o <path> (either order)
-        if base_index < args.length {
+        // Parse optional flags: --timing, --module-name <slug>, and
+        // -o <path> in any order.
+        let mut consumed_flag: boolean = true;
+        loop {
+            if !consumed_flag { break; }
+            if base_index >= args.length { break; }
+            consumed_flag = false;
             if strings_equal(args[base_index], "--timing") {
                 timing = true;
                 base_index += 1;
+                consumed_flag = true;
+                continue;
             }
-        }
-        if base_index < args.length {
             if strings_equal(args[base_index], "-o") {
                 base_index += 1;
                 if base_index >= args.length {
@@ -848,13 +863,19 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
                 }
                 out_path = args[base_index];
                 base_index += 1;
+                consumed_flag = true;
+                continue;
             }
-        }
-        // Allow --timing after -o as well
-        if base_index < args.length {
-            if strings_equal(args[base_index], "--timing") {
-                timing = true;
+            if strings_equal(args[base_index], "--module-name") {
                 base_index += 1;
+                if base_index >= args.length {
+                    print(_usage());
+                    return 2;
+                }
+                module_name_override = args[base_index];
+                base_index += 1;
+                consumed_flag = true;
+                continue;
             }
         }
         let _expected_args = base_index + 2;
@@ -872,7 +893,10 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             return 1;
         }
         let source = fs.readFile(path);
-        let module_name = module_name_from_path(path);
+        let mut module_name = module_name_from_path(path);
+        if module_name_override.length > 0 {
+            module_name = module_name_override;
+        }
         let has_out = out_path.length > 0;
         if strings_equal(mode, "llvm") {
             if has_out {
@@ -1036,13 +1060,30 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // Both `out_path` and dep `.ll` routing fall back to the
         // legacy flat layout when the name isn't scope-form (e.g.
         // the compiler's own `[capsule].name = "sailfin"`).
-        let mut consumer = empty_resolver_consumer();
+        // Stage D PR3: opt the resolver into walking
+        // `<project_root>/src/**/*.sfn` for any `-p` build of a
+        // `kind = "binary"` capsule. The compiler is the canonical
+        // case — `compiler/src/main.sfn` doesn't transitively
+        // import every `.sfn` under `compiler/src/` (notably
+        // `cli_main.sfn` and the CLI subcommand modules), so the
+        // entry-driven relative-import walker would miss them and
+        // the link would surface 100+ undefined references. Library
+        // builds keep the entry-driven enumeration for now — they
+        // produce a single unlinked `.o` whose multi-file story
+        // shakes out the same way intra-project imports do today.
+        let walk_src = capsule_path.length > 0 && !is_runtime_build && !is_library_build;
+        let mut consumer = ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: walk_src
+        };
         if cap_capsule_name.length > 0 {
             let parts0 = parse_scope_name(cap_capsule_name);
             if is_safe_scope_name(parts0.scope, parts0.name) {
                 consumer = ResolverConsumer {
                     scope: parts0.scope,
-                    name: parts0.name
+                    name: parts0.name,
+                    walk_project_src: walk_src
                 };
             }
         }
@@ -1093,7 +1134,22 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // capsule.toml before compiling the main source. stage_capsule_imports
         // writes .sfn-asm + .layout-manifest into build/native/import-context/
         // where the main module's lowering will find them.
-        let capsule_result = prepare_project_capsules(input_path, cache_config, consumer);
+        //
+        // Stage D PR3: subprocess-per-module compile is gated on
+        // `walk_src` (true only for `-p` builds of `kind = "binary"`
+        // capsules), not just `binary_dir`. The 138-module
+        // self-host needs each compile in a fresh arena to fit in
+        // 8 GB, but a typical end-user positional build (a handful
+        // of capsule deps) fits in-process and shouldn't pay the
+        // subprocess spawn cost — and shouldn't have its arena
+        // state perturbed by `process.run`'s argv allocations
+        // either, which has been observed to surface seed-corruption
+        // flakes in the entry's in-process compile downstream.
+        let mut sailfin_exe: string = "";
+        if walk_src {
+            if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sailfin"; }
+        }
+        let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe);
         let capsule_lls = capsule_result.ll_paths;
 
         let ll_path = "build/sailfin/program.ll";
@@ -1228,7 +1284,12 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // always empty: relative-import `.ll`s take the legacy
         // flat layout (Stage C2b2). When `sfn run -p` lands, this
         // becomes a one-line update mirroring `sfn build`.
-        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer());
+        // Stage D PR3: `sfn run` keeps the in-process compile
+        // path. Subprocess-per-module is gated to `-p` binary
+        // builds only (see the `walk_src` branch above for the
+        // rationale) — `sfn run` doesn't take `-p` yet, and its
+        // typical use case is small fixtures that fit in-process.
+        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), "");
         let capsule_lls = run_capsule_result.ll_paths;
 
         let source = fs.readFile(input_path);
