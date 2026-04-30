@@ -98,7 +98,7 @@ help:
 	@echo "Common Sailfin tasks"
 	@echo ""
 	@echo "  make compile        # Build the compiler from a released seed"
-	@echo "  make rebuild        # Force rebuild from seed (uses scripts/build.sh)"
+	@echo "  make rebuild        # Force rebuild from seed via 'sfn build -p compiler'"
 	@echo "  make install        # Install the built compiler binary into PREFIX/bin"
 	@echo "  make check          # Compile (if needed) then run the full test suite"
 	@echo "  make check-fast     # Run sfn check on compiler/src/ + runtime/ (no codegen, fast PR gate)"
@@ -541,9 +541,29 @@ ci-package-installer:
 # Output:
 #   build/native/sailfin
 #
+# Stage D PR4: routes through `<seed> build -p compiler` instead of
+# `bash scripts/build.sh`. The 0.5.10-alpha.4+ seed ships the
+# binary-capsule walker (compiler/src/capsule_resolver.sfn) and
+# subprocess-per-module compile path, so the driver knows how to
+# enumerate every `compiler/src/**/*.sfn` and compile each one in
+# its own subprocess (fresh arena per module — what makes a
+# 138-module self-build viable in 8 GB).
+#
+# `scripts/build.sh` is preserved as the fallback for `make check`'s
+# stage2/stage3 fixed-point comparison (which needs WORK_DIR
+# control the driver doesn't expose yet) and for emergency seed
+# stabilization. PR5 retires `scripts/build.sh` entirely once
+# `make check` migrates.
+#
 # Notes:
-# - Pass extra flags via BUILD_ARGS (e.g. BUILD_ARGS="--seed-timeout 300").
-# - Parallelize module building via BUILD_JOBS (e.g. BUILD_JOBS=2).
+# - Pass extra flags via BUILD_ARGS (driver-level, e.g.
+#   BUILD_ARGS="--no-cache --cache-trace").
+# - The driver parallelises subprocess emits internally; BUILD_JOBS
+#   no longer plumbs through.
+# - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
+#   driver hardcodes `-O2` for the link step. Use
+#   `bash scripts/build.sh` directly if a different opt level is
+#   required (check's stage2/stage3 still does this).
 rebuild:
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
@@ -561,28 +581,46 @@ rebuild:
 		echo "[rebuild] missing seed compiler: $$seed"; \
 		exit 1; \
 	fi; \
-	if ! "$$seed" emit native compiler/src/version.sfn >/dev/null 2>&1; then \
-		echo "[rebuild][error] seed compiler does not support 'emit native'" >&2; \
-		echo "[rebuild][error] install a newer seed (>= 0.1.1-alpha.115) or run: make fetch-seed" >&2; \
+	if ! "$$seed" build -p compiler --help >/dev/null 2>&1 && \
+	   ! "$$seed" --version >/dev/null 2>&1; then \
+		echo "[rebuild][error] seed compiler $$seed is not invokable" >&2; \
 		exit 1; \
 	fi; \
-	if [ -d build/native/import-context ]; then \
-		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
-	fi; \
-	echo "[rebuild] running build (seed=$$seed)..."; \
-	SEED="$$seed" OUT="$(NATIVE_OUT)" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" SEED_TIMEOUT=600 MAX_TOTAL=7200 \
-		bash scripts/build.sh
-	@SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
-	if [ -d "$$SRC" ]; then \
-		rm -rf build/native/import-context; \
-		mkdir -p build/native/import-context; \
-		cp -a "$$SRC/." build/native/import-context/; \
-	fi
-	@if [ -f build/selfhost/native/obj/runtime/prelude.o ]; then \
-		mkdir -p build/native/obj/runtime; \
-		cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
+	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
+	cd $(CURDIR) && "$$seed" build $(BUILD_ARGS) -p compiler
+	@if [ ! -f build/sailfin/program ]; then \
+		echo "[rebuild][error] sfn build did not produce build/sailfin/program" >&2; \
+		exit 1; \
 	fi
 	@mkdir -p build/native
+	@cp -f build/sailfin/program $(NATIVE_OUT)
+	@chmod +x $(NATIVE_OUT)
+	@# Write build stamp (version + git hash for dev builds), matching
+	@# the format `scripts/build.sh` used. `version.sfn::resolve_compiler_version`
+	@# reads this file first, so without it the binary would report
+	@# whatever stale stamp the previous build left on disk.
+	@cap_version=$$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml); \
+	if [ -z "$$cap_version" ]; then \
+		echo "[rebuild][warn] could not extract version from compiler/capsule.toml; skipping build stamp" >&2; \
+	else \
+		git_tag=$$(git describe --exact-match --tags HEAD 2>/dev/null || true); \
+		if [ -n "$$git_tag" ]; then \
+			build_version="$$cap_version"; \
+		else \
+			git_hash=$$(git rev-parse --short HEAD 2>/dev/null || true); \
+			git_dirty=""; \
+			if [ -n "$$git_hash" ]; then \
+				if ! git diff --quiet HEAD -- 2>/dev/null; then \
+					git_dirty=".dirty"; \
+				fi; \
+				build_version="$${cap_version}+dev.$${git_hash}$${git_dirty}"; \
+			else \
+				build_version="$${cap_version}+dev"; \
+			fi; \
+		fi; \
+		echo "$$build_version" > build/native/.build-stamp; \
+		echo "[rebuild] build stamp: $$build_version"; \
+	fi
 	@echo "[rebuild] built $(NATIVE_OUT)"
 
 # =============================================================================
