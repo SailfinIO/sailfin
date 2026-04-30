@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 30, 2026 (Stage C complete through C4 migration; Stage D PR1 `kind = "runtime"` schema landed; Stage D PR2 driver-side runtime-capsule plumbing landed; Stage D PR3 binary-capsule `src/` walker + subprocess-per-module compile in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269)
+Updated: April 30, 2026 (Stage C complete through C4 migration; Stage D PR1–PR3 shipped; Stage D PR4 `make compile` cutover in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271; seed pinned to v0.5.10-alpha.4 — first release including PR1–PR3)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -259,7 +259,7 @@ feature availability.
     `src/` walker for `kind = "binary"` projects) is the
     Stage D PR3 scope. `make compile` (build.sh path) is
     unchanged and remains the active bootstrap.
-- **Stage D PR3 (in flight, this PR).** `sfn build -p compiler`
+- **Stage D PR3 (#271, shipped).** `sfn build -p compiler`
   produces a working compiler binary. Two changes work together:
   - **Binary-capsule `src/` walker.** `ResolverConsumer` gains
     a `walk_project_src` field (false by default). When
@@ -298,6 +298,27 @@ feature availability.
     Full suite stays at 80 unit / 17 integration passing;
     the pre-existing `test_check_compiler_src.sh` flake is
     independent (reproduces on the PR2 baseline too).
+- **Stage D PR4 (in flight, this PR).** `make compile` /
+  `make rebuild` cutover. `.seed-version` bumps to
+  `0.5.10-alpha.4` (the first release shipping PR1–PR3, so the
+  fetched seed is itself capable of building the compiler via
+  `sfn build -p compiler`). The Makefile's `rebuild` target
+  drops `bash scripts/build.sh` in favour of `<seed> build -p
+  compiler`, then copies `build/sailfin/program` to
+  `build/native/sailfin` and writes `build/native/.build-stamp`
+  with the same `<version>+dev.<hash>[.dirty]` shape build.sh
+  produced (so `version.sfn::resolve_compiler_version` keeps
+  reporting dev-build identity for in-tree builds).
+  `scripts/build.sh` survives this PR — `make check`'s
+  stage2/stage3 fixed-point comparison still uses it for
+  `WORK_DIR` control the driver doesn't expose. PR5 retires
+  the script entirely once `make check` migrates.
+  Behaviour notes: (a) `BUILD_JOBS` no longer plumbs through —
+  the driver parallelises subprocess emits internally; (b)
+  `NATIVE_OPT` / `SELFHOST1_OPT` no longer affect `make
+  rebuild` — the driver hardcodes `-O2`. `make check`'s
+  stage2/stage3 invocations still use build.sh and still honour
+  `OPT`, so the fixed-point comparison stays apples-to-apples.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —

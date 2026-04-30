@@ -1043,27 +1043,43 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
                 }
                 continue;
             }
-            // Mid-file validation via llvm-as (cheap parse, no
-            // codegen). Non-zero exit means clang would reject
-            // this IR at link time — a re-emit typically lands
-            // clean. Best-effort: if `llvm-as` isn't available
-            // (return code 127 from the shell), skip validation
-            // and trust the empty-file probe above.
-            let validate_rc = process.run(["sh", "-c", "llvm-as < " + src.ll_path
-                + " > /dev/null 2>&1"]);
+            // Mid-file validation: parse the .ll to catch the
+            // seed-corruption flake (stray non-ASCII bytes
+            // mid-IR). Try `llvm-as` first (cheapest — no
+            // codegen), then fall back to `clang -c -emit-llvm
+            // -x ir` (always available on builds that have
+            // already required clang). The shell `command -v`
+            // probe distinguishes "tool missing" (try the next)
+            // from "tool ran and rejected the IR" (retry the
+            // emit).
+            //
+            // CI on Linux installs `llvm-18` which provides
+            // `/usr/bin/llvm-as-18` but no unversioned symlink,
+            // so the shell tries `llvm-as`, `llvm-as-18`, etc.
+            // in order. macOS Homebrew installs `llvm-as` as the
+            // unversioned name. The clang fallback covers the
+            // case where neither version-suffixed nor
+            // unversioned `llvm-as` is on PATH.
+            let validate_cmd = "( command -v llvm-as >/dev/null 2>&1 && llvm-as < "
+                + src.ll_path
+                + " > /dev/null 2>&1 ) "
+                + "|| ( command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < "
+                + src.ll_path
+                + " > /dev/null 2>&1 ) "
+                + "|| ( command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir "
+                + src.ll_path
+                + " -o /dev/null > /dev/null 2>&1 ) "
+                + "|| ( command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir "
+                + src.ll_path
+                + " -o /dev/null > /dev/null 2>&1 )";
+            let validate_rc = process.run(["sh", "-c", validate_cmd]);
             if validate_rc != 0 {
-                if validate_rc == 127 {
-                    // llvm-as not on PATH — accept the output and
-                    // let downstream clang surface any IR issues.
-                    ok = true;
-                    break;
-                }
                 if config.trace {
                     print.err("[emit retry] " + src.slug + " attempt "
                         + number_to_string(attempt)
                         + "/"
                         + number_to_string(max_attempts)
-                        + " — llvm-as rejected output");
+                        + " — IR validation rejected output");
                 }
                 continue;
             }
@@ -2620,6 +2636,43 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
             runtime_capsules: runtime_capsules
         };
     }
+
+    // Stage D PR4: when `walk_project_src` is on, the binary-
+    // capsule walker excludes the entry from enumeration (the
+    // entry's `.ll` is produced separately by the caller's
+    // `compile_to_llvm_file_with_module`, so it doesn't need a
+    // capsule-side compile). But the entry's `.sfn-asm` IS
+    // needed by every sibling module that imports from it —
+    // without it staged, `<seed> emit --module-name <sibling>
+    // llvm <sibling-src>` can't see the entry's exported symbol
+    // signatures and emits dangling references. The compiler's
+    // self-build is the canonical case: every module imports
+    // `compile_to_llvm_file_with_module` / `compile_to_sailfin`
+    // / etc. from `main.sfn`. Staging the entry separately keeps
+    // the entry out of `compile_capsule_modules` (no double-
+    // emit) while making its import-context available.
+    if consumer.walk_project_src {
+        let entry_path = entry_paths[0];
+        if fs.exists(entry_path) {
+            let entry_slug = module_name_from_path(entry_path);
+            let mut entry_src: CapsuleSource[] = [];
+            entry_src.push(CapsuleSource {
+                spec: "", source_path: entry_path, slug: entry_slug, ll_path: ""
+            });
+            let entry_staged = stage_capsule_imports(entry_src);
+            if !entry_staged {
+                print.err("capsule-resolver: failed to stage entry import-context for "
+                    + entry_path);
+                return ProjectCapsuleResult {
+                    ll_paths: empty_paths,
+                    stats: empty_cache_stats(),
+                    module_events: empty_events,
+                    runtime_capsules: runtime_capsules
+                };
+            }
+        }
+    }
+
     let result = compile_capsule_modules(resolved.sources, config, sailfin_exe);
     if !result.success {
         return ProjectCapsuleResult {
