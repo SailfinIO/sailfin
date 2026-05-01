@@ -467,7 +467,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     current_temp += 1;
 
     let raw_array_ptr = format_temp_name(current_temp);
-    current_lines.push("  " + raw_array_ptr + " = call i8* @sailfin_runtime_alloc_struct(i64 "
+    current_lines.push("  " + raw_array_ptr
+        + " = call i8* @sailfin_runtime_alloc_struct(i64 "
         + adjusted_array_bytes
         + ")");
     current_temp += 1;
@@ -521,7 +522,8 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     current_temp += 1;
 
     let raw_struct_ptr = format_temp_name(current_temp);
-    current_lines.push("  " + raw_struct_ptr + " = call i8* @sailfin_runtime_alloc_struct(i64 "
+    current_lines.push("  " + raw_struct_ptr
+        + " = call i8* @sailfin_runtime_alloc_struct(i64 "
         + struct_bytes
         + ")");
     current_temp += 1;

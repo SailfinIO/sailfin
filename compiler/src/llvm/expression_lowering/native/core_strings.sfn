@@ -33,7 +33,8 @@ fn lower_string_literal(literal: string, temp_index: number, lines: string[]) ->
 
     let mut current_lines: string[] = lines;
     let malloc_temp = format_temp_name(temp_index);
-    current_lines.push("  " + malloc_temp + " = call i8* @sailfin_runtime_alloc_struct(i64 "
+    current_lines.push("  " + malloc_temp
+        + " = call i8* @sailfin_runtime_alloc_struct(i64 "
         + number_to_string(array_length)
         + ")");
     let cast_temp = format_temp_name(temp_index + 1);
