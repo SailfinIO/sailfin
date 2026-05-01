@@ -13,16 +13,19 @@ fn lower_string_literal(literal: string, temp_index: number, lines: string[]) ->
     // The original lowering model used global string constants (@.str.len...).
     // Stage2's struct-return plumbing can drop the collected constant table,
     // yielding link-time failures (undefined @.str.*). To keep emitted LLVM
-    // self-contained and clang-linkable, we materialize literals directly
-    // into heap memory via store of an inline constant array. The buffer
-    // is allocated through the arena-aware runtime helper so that
-    // multi-module in-process drivers (`sfn check <dir>`, `sfn test`,
-    // future `sfn lsp`) can reclaim per-iteration literal storage via
-    // `runtime.arena_rewind`. Falling back to libc `calloc` here was
-    // the original Phase 5a leak: every `is_trivia_token` /
-    // `strings_equal` call re-allocated its comparison strings and the
-    // mark/rewind primitive could not reach them, blowing peak RSS
-    // past the 2 GB Phase 5a target on `sfn check compiler/src/`.
+    // self-contained and clang-linkable, we materialize literals into a
+    // runtime-allocated buffer via store of an inline constant array. The
+    // buffer is allocated through `sailfin_runtime_alloc_struct`, which
+    // routes through the bump-allocator arena when enabled (default-on
+    // for selfhost / installed binaries) and falls through to libc calloc
+    // otherwise. Arena routing lets multi-module in-process drivers
+    // (`sfn check <dir>`, `sfn test`, future `sfn lsp`) reclaim per-
+    // iteration literal storage via `runtime.arena_rewind`. The previous
+    // raw `@calloc` was the original Phase 5a leak: every
+    // `is_trivia_token` / `strings_equal` call re-allocated its
+    // comparison strings and the mark/rewind primitive could not reach
+    // them, blowing peak RSS past the 2 GB Phase 5a target on
+    // `sfn check compiler/src/`.
     let content = unescape_string_literal(literal);
     let escaped = escape_string_for_llvm(content);
     let array_length = content.length + 1;
