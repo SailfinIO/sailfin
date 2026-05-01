@@ -657,7 +657,16 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
 // staging is a no-op when `make compile` has already produced the
 // artifacts. Refresh by `rm -rf build/native/import-context/` (or
 // `make rebuild`), the same invalidation contract `make` itself uses.
-fn _cr_stage_one(src: CapsuleSource) -> boolean ![io] {
+// Stage E PR1: stage one capsule source's import-context
+// (`.sfn-asm` + `.layout-manifest`). When `sailfin_exe.length >
+// 0`, the heavy native-text emit happens in a subprocess so the
+// parent's arena doesn't accumulate ~138 modules' worth of AST +
+// IR text — the same memory-bounding rationale that drove PR3's
+// subprocess-per-module compile path. Empty `sailfin_exe` falls
+// back to the in-process path that's worked since Stage B; the
+// fallback is what `sfn check` and tests with small dep sets
+// continue to use.
+fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string) -> boolean ![io] {
     let asm_path = "build/native/import-context/" + src.slug + ".sfn-asm";
     let manifest_path = "build/native/import-context/" + src.slug
         + ".layout-manifest";
@@ -675,8 +684,32 @@ fn _cr_stage_one(src: CapsuleSource) -> boolean ![io] {
         print.err("capsule-resolver: missing source file: " + src.source_path);
         return false;
     }
-    let source = fs.readFile(src.source_path);
-    let ok = write_native_text_file_with_module(source, src.slug, asm_path);
+    let mut ok: boolean = false;
+    if sailfin_exe.length > 0 {
+        // Subprocess path — fresh arena per child, parent stays
+        // bounded. Mirror PR3's `_cr_compile_one` shape: pass the
+        // slug via `--module-name` so the child's
+        // `module_name_from_path` doesn't disagree with the slug
+        // the resolver already computed (matters for cross-
+        // capsule deps whose slug is `<scope>/<name>/<sub>`,
+        // which `module_name_from_path` would NOT derive).
+        //
+        // Validation is `rc == 0 && file exists` only — no probe
+        // read here. The block below already reads the asm to
+        // extract `.layout` lines; doubling the read would
+        // re-allocate the same string in the parent's arena and
+        // undermine the memory bounds this whole subprocess path
+        // is for. An empty asm produces an empty manifest, which
+        // downstream callers tolerate (the import-context loader
+        // just sees no layout lines for that slug).
+        let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", asm_path, "native", src.source_path]);
+        if rc == 0 {
+            if fs.exists(asm_path) { ok = true; }
+        }
+    } else {
+        let source = fs.readFile(src.source_path);
+        ok = write_native_text_file_with_module(source, src.slug, asm_path);
+    }
     if !ok {
         print.err("capsule-resolver: failed to emit native text for " + src.slug);
         return false;
@@ -715,14 +748,19 @@ fn _cr_stage_one(src: CapsuleSource) -> boolean ![io] {
 // Stage import-context for every capsule source. Sequential by design —
 // the seed-emit path is not thread-safe for our in-process use and
 // capsule dep sets are small (tens of modules, not hundreds).
-fn stage_capsule_imports(sources: CapsuleSource[]) -> boolean ![io] {
+//
+// Stage E PR1: `sailfin_exe` threads through to `_cr_stage_one`'s
+// subprocess emit. Empty `sailfin_exe` keeps the legacy in-process
+// path for callers (sfn check, sfn test) that don't yet plumb
+// `binary_dir` through.
+fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string) -> boolean ![io] {
     _cr_ensure_dir("build");
     _cr_ensure_dir("build/native");
     _cr_ensure_dir("build/native/import-context");
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
-        let ok = _cr_stage_one(sources[i]);
+        let ok = _cr_stage_one(sources[i], sailfin_exe);
         if !ok { return false; }
         i += 1;
     }
@@ -2626,7 +2664,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         };
     }
 
-    let staged = stage_capsule_imports(resolved.sources);
+    let staged = stage_capsule_imports(resolved.sources, sailfin_exe);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return ProjectCapsuleResult {
@@ -2659,7 +2697,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
             entry_src.push(CapsuleSource {
                 spec: "", source_path: entry_path, slug: entry_slug, ll_path: ""
             });
-            let entry_staged = stage_capsule_imports(entry_src);
+            let entry_staged = stage_capsule_imports(entry_src, sailfin_exe);
             if !entry_staged {
                 print.err("capsule-resolver: failed to stage entry import-context for "
                     + entry_path);
@@ -2739,7 +2777,12 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         };
     }
 
-    let staged = stage_capsule_imports(resolved.sources);
+    // Stage E PR1: sfn check stays on the in-process stage path
+    // (empty `sailfin_exe`). Check's typical input — single
+    // files or small dirs — fits in-process; subprocess overhead
+    // would dominate. When `sfn check -p` lands, this becomes a
+    // one-line update mirroring `sfn build`.
+    let staged = stage_capsule_imports(resolved.sources, "");
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return CheckCapsuleResolution {
@@ -2819,7 +2862,11 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
         };
     }
 
-    let staged = stage_capsule_imports(resolved.sources);
+    // Stage E PR1: thread `sailfin_exe` to subprocess-stage
+    // imports too. `handle_test_command` currently passes "",
+    // so this falls back to the in-process path — matches the
+    // PR3 baseline behavior for tests.
+    let staged = stage_capsule_imports(resolved.sources, sailfin_exe);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return TestCapsuleResolution {
