@@ -200,7 +200,7 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
     if statement.variant == "ExternFunctionDeclaration" {
         let registration = register_local_symbol(bindings, statement.signature.name, "extern function", statement.signature.name_span);
         let mut diagnostics = registration.diagnostics;
-        let _sig_diags = check_extern_signature(statement.signature, statement.unsafe);
+        let _sig_diags = check_extern_signature(statement.signature);
         let mut _ci: number = 0;
         loop {
             if _ci >= _sig_diags.length { break; }

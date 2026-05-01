@@ -12,7 +12,12 @@ import {
     TypeAnnotation,
     TypeParameter
 } from "./ast";
-import { contains_string, starts_with, strings_equal, strip_prefix } from "./string_utils";
+import {
+    contains_string,
+    starts_with,
+    strings_equal,
+    strip_prefix
+} from "./string_utils";
 import { Token, TokenKind } from "./token";
 
 // One concrete edit to apply to a source file. `start_*` and `end_*`
@@ -393,10 +398,24 @@ fn check_function_signature(signature: FunctionSignature) -> Diagnostic[] {
 //     `examples/advanced/unsafe-extern-interop.sfn` already
 //     demonstrates this pattern: `![unsafe, io]` lives on
 //     `allocate_and_free`, not on `malloc`/`free`.
+//   - Each parameter must carry a non-empty type annotation
+//     (E0805). The extern boundary has no body for inference;
+//     missing annotations would silently default to `i8*` in
+//     LLVM lowering and produce an ABI-mismatched `declare`.
+//   - `void` is permitted only as a return type, never as a
+//     parameter type (E0805) — `void` parameters are invalid C
+//     and produce ill-formed LLVM IR.
 //   - Each parameter and return type must satisfy `is_c_abi_type`
 //     (E0801 string, E0802 array, E0805 catch-all for unknown
 //     names including `number`).
-fn check_extern_signature(signature: FunctionSignature, unsafe_flag: boolean) -> Diagnostic[] {
+//
+// The `unsafe` keyword on the declaration is intentionally not
+// inspected here: `unsafe extern fn` and bare `extern fn` produce
+// identical LLVM `declare` directives. `unsafe` is currently a
+// documentation marker that may grow into an enforced
+// "unsafe-required-to-call" gate in a future PR; this validator
+// will care about it at that point.
+fn check_extern_signature(signature: FunctionSignature) -> Diagnostic[] {
     let mut diagnostics: Diagnostic[] = [];
 
     if signature.type_parameters.length > 0 {
@@ -411,12 +430,18 @@ fn check_extern_signature(signature: FunctionSignature, unsafe_flag: boolean) ->
     loop {
         if _pi >= signature.parameters.length { break; }
         let parameter = signature.parameters[_pi];
-        if parameter.type_annotation != null {
+        if parameter.type_annotation == null {
+            diagnostics.push(make_extern_parameter_missing_type_diagnostic(signature.name, parameter.name));
+        } else {
             let annotation = parameter.type_annotation;
             let type_text = trim_text(annotation.text);
-            let kind = classify_extern_type(type_text);
-            if !strings_equal(kind, "ok") {
-                diagnostics.push(make_extern_parameter_type_diagnostic(signature.name, parameter.name, type_text, kind));
+            if type_text.length == 0 {
+                diagnostics.push(make_extern_parameter_missing_type_diagnostic(signature.name, parameter.name));
+            } else {
+                let kind = classify_extern_parameter_type(type_text);
+                if !strings_equal(kind, "ok") {
+                    diagnostics.push(make_extern_parameter_type_diagnostic(signature.name, parameter.name, type_text, kind));
+                }
             }
         }
         _pi += 1;
@@ -426,7 +451,7 @@ fn check_extern_signature(signature: FunctionSignature, unsafe_flag: boolean) ->
         let return_annotation = signature.return_type;
         let return_text = trim_text(return_annotation.text);
         if return_text.length > 0 {
-            let return_kind = classify_extern_type(return_text);
+            let return_kind = classify_extern_return_type(return_text);
             if !strings_equal(return_kind, "ok") {
                 diagnostics.push(make_extern_return_type_diagnostic(signature.name, return_text, return_kind));
             }
@@ -436,55 +461,101 @@ fn check_extern_signature(signature: FunctionSignature, unsafe_flag: boolean) ->
     return diagnostics;
 }
 
-// Classify an extern type-annotation string. Returns one of:
+// Classify an extern type-annotation string used for a function
+// *parameter*. Returns one of:
 //   "ok"          — accepted by the v0 C-ABI rule set.
 //   "string"      — rejected: Sailfin `string` is not C-ABI-compatible (E0801).
 //   "array"       — rejected: `T[]` is not C-ABI-compatible (E0802).
+//   "void"        — rejected: bare `void` is invalid for C parameters (E0805).
 //   "unknown"     — rejected: unrecognized type name (E0805). Covers `number`.
 //
 // The matcher walks textual forms today; when integer types and
 // generic constraints land it can be tightened. The accept-list is
 // intentionally explicit so adding a new permitted type is one
 // edit, never a regex change.
-fn classify_extern_type(text: string) -> string {
+fn classify_extern_parameter_type(text: string) -> string {
     if text.length == 0 { return "ok"; }
     if extern_type_contains_array_brackets(text) { return "array"; }
     if extern_type_uses_string(text) { return "string"; }
-    if !is_c_abi_type(text) { return "unknown"; }
+    if strings_equal(text, "void") { return "void"; }
+    if !is_c_abi_parameter_type(text) { return "unknown"; }
     return "ok";
 }
 
-// Whether `text` is one of the v0 accepted C-ABI extern types.
+// Classify an extern type-annotation string used for a function
+// *return type*. Same shape as `classify_extern_parameter_type` but
+// `void` is permitted (no "void" reject case).
+fn classify_extern_return_type(text: string) -> string {
+    if text.length == 0 { return "ok"; }
+    if extern_type_contains_array_brackets(text) { return "array"; }
+    if extern_type_uses_string(text) { return "string"; }
+    if !is_c_abi_return_type(text) { return "unknown"; }
+    return "ok";
+}
+
+// Whether `text` is one of the v0 accepted C-ABI extern types when
+// used as a *parameter*. Distinct from `is_c_abi_return_type` only
+// in that bare `void` is rejected here (`void` is valid only as a
+// return type — see `check_extern_signature`).
 //
 // Accepted forms:
-//   - Primitive integers: i8, i16, i32, i64, u8, u16, u32, u64, usize, isize
-//   - Primitive floats:   f32, f64
-//   - Boolean:            bool
-//   - Void:               void
+//   - Primitive scalars accepted by `compiler/src/llvm/type_mapping.sfn:
+//     map_primitive_type` today: i8, i32, i64, u8, usize, bool.
 //   - Raw pointers:       *T, *const T, *mut T, **T (recursive — pointee
-//                         must itself be c-abi or an opaque struct name)
-//   - Function pointers:  fn(A, B) -> C where each of A, B, C is c-abi
+//                         must itself be c-abi or an opaque struct name).
+//                         `*void` is permitted as the canonical
+//                         "untyped pointer" alias for `*opaque`.
+//   - Function pointers:  fn(A, B) -> C where each of A, B is a
+//                         c-abi *parameter* type and C is a c-abi
+//                         *return* type.
+//
+// Intentionally NOT yet on the accept-list (the LLVM type mapper
+// has no entries for them today; accepting them would silently
+// produce broken IR):
+//   - i16, u16, u32, u64, isize, f32, f64 — extend
+//     `map_primitive_type` first, then add here.
 //
 // Notably rejected:
-//   - `number` (legacy f64 alias) — externs must commit to i64 or f64.
+//   - `number` (legacy f64 alias) — externs must commit to i64 today.
 //   - `string` — see `extern_type_uses_string`; produces E0801, not E0805.
 //   - `T[]`     — see `extern_type_contains_array_brackets`; E0802.
 //   - User-defined struct/enum names other than as opaque pointer
 //     pointees (e.g. `*PthreadMutex` is fine, `PthreadMutex` is not).
-fn is_c_abi_type(text: string) -> boolean {
+fn is_c_abi_parameter_type(text: string) -> boolean {
     let normalized = trim_text(text);
     if normalized.length == 0 { return true; }
+    if strings_equal(normalized, "void") { return false; }
+    return _is_c_abi_type_inner(normalized, false);
+}
+
+// Same as `is_c_abi_parameter_type` but `void` is permitted (the
+// canonical "no return value" form).
+fn is_c_abi_return_type(text: string) -> boolean {
+    let normalized = trim_text(text);
+    if normalized.length == 0 { return true; }
+    return _is_c_abi_type_inner(normalized, true);
+}
+
+// Shared core. `allow_bare_void` controls whether a top-level
+// `void` token is accepted (return position only). `void` as a
+// *pointee* (`*void` ≡ `*opaque`) is always allowed; the rule is
+// only about bare `void`.
+fn _is_c_abi_type_inner(normalized: string, allow_bare_void: boolean) -> boolean {
+    if normalized.length == 0 { return true; }
+    if strings_equal(normalized, "void") { return allow_bare_void; }
     if is_extern_primitive_type(normalized) { return true; }
     if starts_with(normalized, "*") {
         let pointee = trim_text(strip_prefix(normalized, "*"));
         if starts_with(pointee, "const ") {
-            return is_c_abi_type(strip_prefix(pointee, "const "));
+            return _is_c_abi_type_inner(strip_prefix(pointee, "const "), true);
         }
         if starts_with(pointee, "mut ") {
-            return is_c_abi_type(strip_prefix(pointee, "mut "));
+            return _is_c_abi_type_inner(strip_prefix(pointee, "mut "), true);
         }
         if pointee.length == 0 { return false; }
-        if is_c_abi_type(pointee) { return true; }
+        // Inside a pointer, `void` is the canonical "untyped"
+        // pointer form (`*void` ≡ `*opaque`). Always allowed.
+        if _is_c_abi_type_inner(pointee, true) { return true; }
         // Opaque-struct pointees: an UpperCamelCase identifier is
         // accepted as an opaque platform handle (`*File`,
         // `*PthreadMutex`). We cannot fully validate it here without
@@ -499,22 +570,25 @@ fn is_c_abi_type(text: string) -> boolean {
 }
 
 // Pure: primitives that v0 externs may use directly (no leading `*`).
+//
+// The accept-list is deliberately the intersection of "what C calls
+// produce sensible LLVM IR" and "what `compiler/src/llvm/type_mapping.sfn:
+// map_primitive_type` actually maps today." Adding a primitive here
+// without a corresponding `map_primitive_type` entry would let it
+// pass typecheck and then silently lower to `i8*` (or fall through
+// to the user-type branch and produce broken IR).
+//
+// `void` is intentionally excluded; the parameter/return distinction
+// is enforced by the callers (`is_c_abi_parameter_type` rejects bare
+// `void`, `_is_c_abi_type_inner` accepts it when `allow_bare_void`).
 fn is_extern_primitive_type(text: string) -> boolean {
     let mut _ret: boolean = false;
     if strings_equal(text, "i8") { _ret = true; }
-    if strings_equal(text, "i16") { _ret = true; }
     if strings_equal(text, "i32") { _ret = true; }
     if strings_equal(text, "i64") { _ret = true; }
     if strings_equal(text, "u8") { _ret = true; }
-    if strings_equal(text, "u16") { _ret = true; }
-    if strings_equal(text, "u32") { _ret = true; }
-    if strings_equal(text, "u64") { _ret = true; }
     if strings_equal(text, "usize") { _ret = true; }
-    if strings_equal(text, "isize") { _ret = true; }
-    if strings_equal(text, "f32") { _ret = true; }
-    if strings_equal(text, "f64") { _ret = true; }
     if strings_equal(text, "bool") { _ret = true; }
-    if strings_equal(text, "void") { _ret = true; }
     return _ret;
 }
 
@@ -614,7 +688,10 @@ fn is_identifier_char(ch: string) -> boolean {
 }
 
 // Validate `fn(A, B) -> C` style function-pointer types. Each
-// argument and the return type must itself be c-abi.
+// argument must be a valid c-abi *parameter* type (so bare `void`
+// is rejected); the return type must be a valid c-abi *return*
+// type (so `void` is allowed). Implicit `void` return when the
+// `-> T` clause is omitted matches C convention.
 fn is_c_abi_function_pointer(text: string) -> boolean {
     if !starts_with(text, "fn(") { return false; }
     let after_open = strip_prefix(text, "fn(");
@@ -627,14 +704,14 @@ fn is_c_abi_function_pointer(text: string) -> boolean {
         if !starts_with(tail, "->") { return false; }
         return_text = trim_text(strip_prefix(tail, "->"));
     }
-    if !is_c_abi_type(return_text) { return false; }
+    if !is_c_abi_return_type(return_text) { return false; }
     let args = split_top_level_commas(args_block);
     let mut _i: number = 0;
     loop {
         if _i >= args.length { break; }
         let arg_text = trim_text(args[_i]);
         if arg_text.length > 0 {
-            if !is_c_abi_type(arg_text) { return false; }
+            if !is_c_abi_parameter_type(arg_text) { return false; }
         }
         _i += 1;
     }
@@ -685,9 +762,7 @@ fn split_top_level_commas(text: string) -> string[] {
                 continue;
             }
             current = current + ch;
-        } else {
-            current = current + ch;
-        }
+        } else { current = current + ch; }
         index += 1;
     }
     if current.length > 0 { out.push(current); }
@@ -702,11 +777,9 @@ fn extern_type_contains_array_brackets(text: string) -> boolean {
     loop {
         if index >= text.length { break; }
         let ch = text[index];
-        if ch == "<" { depth += 1; }
-        else if ch == ">" {
+        if ch == "<" { depth += 1; } else if ch == ">" {
             if depth > 0 { depth -= 1; }
-        }
-        else if ch == "[" {
+        } else if ch == "[" {
             if depth == 0 { return true; }
         }
         index += 1;
@@ -765,6 +838,20 @@ fn make_extern_effects_diagnostic(name: string, effects: string[]) -> Diagnostic
     };
 }
 
+fn make_extern_parameter_missing_type_diagnostic(fn_name: string, parameter_name: string) -> Diagnostic {
+    return Diagnostic {
+        code: "E0805",
+        severity: "error",
+        message: "extern fn `" + fn_name + "` parameter `" + parameter_name
+            + "` is missing a type annotation. Extern declarations have"
+            + " no body for inference; every parameter must commit to a"
+            + " concrete C-ABI type (e.g. `i64`, `*u8`, `bool`).",
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
 fn make_extern_parameter_type_diagnostic(fn_name: string, parameter_name: string, type_text: string, kind: string) -> Diagnostic {
     let code = extern_diagnostic_code_for(kind);
     let hint = extern_type_hint_for(kind, type_text);
@@ -805,21 +892,33 @@ fn extern_diagnostic_code_for(kind: string) -> string {
 
 fn extern_type_hint_for(kind: string, type_text: string) -> string {
     if strings_equal(kind, "string") {
-        return "Use `*u8` for raw byte buffers and marshal Sailfin `string`"
-            + " values in an adapter (NUL-terminate via `sfn_str_to_cstr`).";
+        return "Use `*u8` for raw byte buffers. Adapters that need to"
+            + " hand a Sailfin `string` to a C function must allocate a"
+            + " NUL-terminated copy (typically arena-backed) and pass"
+            + " its `*u8` pointer across the boundary.";
     }
     if strings_equal(kind, "array") {
         return "Use `*T` (raw pointer) plus a separate length parameter."
             + " Sailfin arrays carry runtime metadata that does not cross"
             + " the C-ABI boundary.";
     }
+    if strings_equal(kind, "void") {
+        return "`void` is valid only as a return type (or as a pointee:"
+            + " `*void`). For a parameter that ignores its value, use"
+            + " a concrete primitive (`i64`, `bool`) or a pointer.";
+    }
     if strings_equal(type_text, "number") {
         return "The legacy `number` alias is rejected on extern signatures."
-            + " Pick `i64` for integer values or `f64` for floating-point.";
+            + " Use `i64` for integer values; floating-point primitives"
+            + " (`f32`/`f64`) are not yet wired through the LLVM backend"
+            + " and will be added once the backend supports them.";
     }
-    return "Externs accept primitive integers (i8..i64, u8..u64, usize/isize),"
-        + " floats (f32, f64), `bool`, raw pointers (`*T`, `**T`),"
-        + " and function pointers (`fn(A) -> B`).";
+    return "Externs accept the LLVM-mapped primitives (i8, i32, i64,"
+        + " u8, usize, bool), `void` (return only), raw pointers"
+        + " (`*T`, `**T`, `*OpaqueStruct`), and function pointers"
+        + " (`fn(A) -> B`). Wider integer/float types (i16, u32, f64,"
+        + " etc.) require backend support before they can cross the"
+        + " extern boundary.";
 }
 
 fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {

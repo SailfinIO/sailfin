@@ -974,10 +974,20 @@ table (see "Open follow-up" below).
    | `E0804` | extern declares effects (effects belong on the wrapping adapter) |
    | `E0805` | unrecognized type name (catch-all; rejects legacy `number`) |
 
-   Accept-list: `i8..i64`, `u8..u64`, `usize`, `isize`, `f32`, `f64`,
-   `bool`, `void`, `*T` (recursively, with `const` / `mut` permitted),
-   `*<UpperCamelStruct>` opaque pointers, `fn(A, B) -> C` function
-   pointers whose argument and return types are themselves C-ABI.
+   Accept-list (intersection of "valid C-ABI" and "what
+   `compiler/src/llvm/type_mapping.sfn:map_primitive_type` lowers
+   today"): `i8`, `i32`, `i64`, `u8`, `usize`, `bool`, `void` (return
+   only), `*T` (recursively, with `const` / `mut` permitted, including
+   `*void` ≡ `*opaque`), `*<UpperCamelStruct>` opaque pointers, and
+   `fn(A, B) -> C` function pointers whose argument types are c-abi
+   parameter types and whose return type is a c-abi return type.
+
+   Wider integer/float types (`i16`, `u16`, `u32`, `u64`, `isize`,
+   `f32`, `f64`) are intentionally **not** on the accept-list yet.
+   They are valid C-ABI but the LLVM lowering has no mapping for
+   them today; admitting them at typecheck would let an extern lower
+   silently to `i8*` and produce ABI-mismatched IR. Extend
+   `map_primitive_type` first, then add them here.
 
 3. **Native-IR emitter:** `compiler/src/emit_native.sfn:317` emits
    `.fn <name>` + `.meta extern` (and `.meta unsafe` when applicable),

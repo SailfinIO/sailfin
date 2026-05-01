@@ -10,9 +10,9 @@
 // regressions in either the registration logic (extern symbol added
 // to the symbol table, duplicate detection wired up) or the C-ABI
 // signature validator (E0801–E0805).
-import { Diagnostic } from "../../src/typecheck_types";
 import { parse_program } from "../../src/parser/mod";
 import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
 
 fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
     let mut i: number = 0;
@@ -114,6 +114,48 @@ test "extern: rejects effects on the extern itself (E0804)" {
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
     assert _has_code(diagnostics, "E0804");
+}
+
+// -------------------------------------------------------------------
+// Reject path — bare `void` parameter, missing type annotations,
+// and primitives that the LLVM backend does not yet map (i16, u32,
+// f64, etc.). All produce E0805 today; the wider integer/float
+// types come back to the accept-list once `map_primitive_type` in
+// `compiler/src/llvm/type_mapping.sfn` learns to lower them.
+// -------------------------------------------------------------------
+test "extern: rejects bare void parameter (E0805)" {
+    let source = "extern fn evil(x: void) -> i64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+test "extern: accepts void return type" {
+    let source = "extern fn close_all() -> void;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "extern: rejects parameter with no type annotation (E0805)" {
+    let source = "extern fn untyped(x) -> i64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+test "extern: rejects i16 parameter until backend support lands (E0805)" {
+    let source = "extern fn narrow(x: i16) -> i64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+test "extern: rejects f64 return until backend support lands (E0805)" {
+    let source = "extern fn now() -> f64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
 }
 
 // -------------------------------------------------------------------
