@@ -1,6 +1,6 @@
 # Status
 
-Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR2 shipped; Stage E PR3 parallel-emit fan-out in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277; seed pinned to v0.5.10-alpha.6)
+Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR3 shipped; Stage E PR4 ci-cross-windows modernization in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278; seed pinned to v0.5.10-alpha.7)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -376,7 +376,7 @@ feature availability.
   stage2/stage3 fixed-point comparison (which still needs
   `WORK_DIR` control the driver doesn't expose) and as an
   emergency seed-bootstrap escape hatch.
-- **Stage E PR3 (in flight, this PR).** Parallel-emit fan-out.
+- **Stage E PR3 (#278, shipped).** Parallel-emit fan-out.
   `_cr_run_parallel_emit` writes three newline-delimited lines
   per task (`slug`, `output`, `source`) to a `mktemp`-allocated
   file, then pipes the file through `tr '\n' '\0'` into
@@ -420,6 +420,22 @@ feature availability.
   in-process emit path; parallelism only engages when the
   caller threads `binary_dir` through. Single-source builds
   also stay sequential — the xargs overhead would dominate.
+- **Stage E PR4 (in flight, this PR).** `ci-cross-windows`
+  modernization. With the build.sh fallback retired in PR2 +
+  the alpha.7 seed pinned with the parallel resolver, the
+  legacy `build/selfhost/native/raw/` and
+  `build/selfhost/native/seed_cwd/` paths in
+  `ci-prepare-test-artifacts` and `ci-cross-windows` are dead
+  on the rebuild flow. Both targets collapse to the single
+  sfn-build layout: `ci-prepare-test-artifacts` reduces to a
+  presence check on `build/native/import-context/` +
+  `build/native/obj/runtime/prelude.o`, and
+  `ci-cross-windows` reads exclusively from
+  `build/native/raw/` (mirrored by `make rebuild` so the test
+  suite can't clobber it). `.seed-version` bumps to
+  `0.5.10-alpha.7`. `scripts/build.sh` itself stays in-tree
+  for `make check`'s stage2/stage3 fixed-point comparison
+  until the driver grows multi-output WORK_DIR control.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
