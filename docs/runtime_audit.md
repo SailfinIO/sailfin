@@ -1,9 +1,22 @@
 # Runtime Audit: Sailfin-Native Runtime Plan
 
-**Date:** 2026-04-15
+**Date:** 2026-04-15 (last reviewed 2026-05-01 — see "Status delta" below)
 **Previous revision:** pre-April 2026 (dated, superseded)
 **Companion docs:** `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI), `docs/build-performance.md`
 (self-hosting perf analysis that surfaced the memory-management crisis)
+
+> **Status delta since 2026-04-15** (keep this list short; once an item is
+> fully shipped fold it into the body and remove the bullet here):
+>
+> - **M0.5 arena-in-C — shipped, default-on** (`runtime/native/src/sailfin_arena.c`,
+>   PR #252 + Phase 5a mark/rewind PR #251).
+> - **Effect enforcement gate — shipped** (Phases A–F, PRs #241–#245). Effect
+>   violations now block compilation by default.
+> - **`extern fn` — shipped** (parser + native-IR emitter + LLVM `declare`
+>   emission + typecheck registration as of 2026-05-01). Hard prerequisite #7
+>   below is satisfied. Cross-module *call-site* resolution against the
+>   typecheck symbol table is the open follow-up; today the symbol table is
+>   duplicate-detection-only, so externs round-trip without a resolver.
 
 ## Purpose
 
@@ -325,22 +338,33 @@ compiler features that do not exist in the current toolchain.
    actually enforce move/consume so the runtime can trust drop signals, or
    remove the syntax. "Parsed but unenforced" is worse than absent because
    it implies a guarantee the runtime can't rely on.
-7. **`extern fn` with typed linker-resolved symbols.** The Sailfin runtime
-   must reach platform syscalls (`pthread_create`, `fopen`, `posix_spawnp`,
-   `malloc`, `write`, `clock_gettime`, `socket`, etc.) from Sailfin source.
-   This means:
-   - `extern fn` declarations in `.sfn` modules with full Sailfin type
-     signatures (including `SfnString`, `SfnSlice<u8>`, `i64`, raw pointers).
-   - The compiler emits LLVM `declare` directives for extern symbols and the
-     linker resolves them against platform libraries (libc, libpthread) at
-     link time.
-   - **No C source files authored in the toolchain.** Today's `unsafe`/`extern`
-     is parse-only. Without typed linker-resolved externs, the runtime either
-     cannot call syscalls at all, or it requires a permanent C shim —
-     neither of which matches the "no C runtime" 1.0 goal.
-   - The M0.5 arena-in-C is the *only* exception, and it is explicitly
-     disposable. Once the Sailfin runtime lands, no `.c` or `.h` file remains
-     in the shipped toolchain.
+7. **`extern fn` with typed linker-resolved symbols.** ✅ **Shipped 2026-05-01.**
+   The Sailfin runtime must reach platform syscalls (`pthread_create`,
+   `fopen`, `posix_spawnp`, `malloc`, `write`, `clock_gettime`, `socket`,
+   etc.) from Sailfin source.
+   - Parser: `extern fn` parses with optional `unsafe` prefix; emits
+     `Statement.ExternFunctionDeclaration` in the AST.
+   - Typechecker: registers extern functions in the same symbol table as
+     regular fns (`kind: "extern function"`), validates C-ABI compatibility
+     of every parameter and return type with diagnostics E0801 (`string`),
+     E0802 (`T[]`), E0803 (type parameters), E0804 (effects on the extern),
+     E0805 (other non-C-ABI types including `number`). See
+     `compiler/src/typecheck_types.sfn:check_extern_signature`.
+   - Native-IR emitter: emits `.fn <name>` + `.meta extern` (and `.meta
+     unsafe` when applicable) in `.sfn-asm`.
+   - LLVM lowering: emits `declare <ret> @<name>(<args>)` directives at
+     the module level (`compiler/src/llvm/lowering/emission.sfn:332`).
+   - **Open follow-up:** the typecheck symbol table is duplicate-
+     detection-only; cross-module call-site resolution is not yet wired.
+     When call-site resolution lands, `typecheck_import_loader.sfn`
+     gains a parallel `imported_externs` channel keyed off
+     `kind == "extern function"` so externs declared in
+     `runtime/sfn/platform/*.sfn` resolve in importing modules.
+   - **No C source files authored in the toolchain.** With `extern fn`
+     shipped end-to-end, the runtime can reach platform syscalls without
+     a permanent C shim. The M0.5 arena-in-C is the *only* exception,
+     and it is explicitly disposable. Once the Sailfin runtime lands,
+     no `.c` or `.h` file remains in the shipped toolchain.
 
 ### Soft prerequisites (runtime rewrite can start but each gap becomes a scar)
 

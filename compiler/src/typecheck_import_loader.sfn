@@ -86,13 +86,26 @@ fn interfaces_from_native_artifact(text: string) -> ArtifactInterfaceParse {
     loop {
         if i >= parsed.functions.length { break; }
         let function = parsed.functions[i];
-        // Skip extern declarations — the effect-checker's `E0402`
+        // Skip extern declarations from the cross-module
+        // *function-effect* table — the effect-checker's `E0402`
         // contract is "imported Sailfin function carries effects
-        // the caller must propagate". `extern fn` has no
-        // declared-effects metadata in the round-tripped artifact
-        // today; the C-runtime FFI surface is gated by the
-        // hardcoded helper roots (`fs.`, `print.`, etc.) that the
-        // in-module checker already handles.
+        // the caller must propagate", and `extern fn` declarations
+        // never carry effects per typecheck rule E0804. The
+        // C-runtime FFI surface is gated by the hardcoded helper
+        // roots (`fs.`, `print.`, etc.) that the in-module checker
+        // already handles.
+        //
+        // Note: this also means imported extern *symbols* are not
+        // currently registered in the importing module's typecheck
+        // symbol table. That is acceptable today because the
+        // typechecker performs no call-site name resolution against
+        // the symbol table — the table is duplicate-detection-only.
+        // When call-site resolution lands (see runtime architecture
+        // M1+), this loader needs a parallel `imported_externs`
+        // channel keyed by `kind == "extern function"` (the value
+        // chosen in `register_top_level_symbol`) so extern callers
+        // imported from `runtime/sfn/platform/*.sfn` resolve
+        // cross-module.
         if !function.is_extern {
             function_effects = append_import_function(function_effects, function.name, function.effects);
         }
