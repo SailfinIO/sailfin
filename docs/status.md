@@ -1,6 +1,6 @@
 # Status
 
-Updated: April 30, 2026 (Stage C complete through C4 migration; Stage D PR1–PR3 shipped; Stage D PR4 `make compile` cutover in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271; seed pinned to v0.5.10-alpha.4 — first release including PR1–PR3)
+Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR4 shipped; Stage D PR5 cleanup in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272; seed pinned to v0.5.10-alpha.5 — first release including PR3's binary-capsule walker, PR4's IR validator cascade, and PR4's entry-staging fix)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -298,27 +298,54 @@ feature availability.
     Full suite stays at 80 unit / 17 integration passing;
     the pre-existing `test_check_compiler_src.sh` flake is
     independent (reproduces on the PR2 baseline too).
-- **Stage D PR4 (in flight, this PR).** `make compile` /
-  `make rebuild` cutover. `.seed-version` bumps to
+- **Stage D PR4 (#272, shipped).** `make compile` /
+  `make rebuild` cutover. `.seed-version` bumped to
   `0.5.10-alpha.4` (the first release shipping PR1–PR3, so the
   fetched seed is itself capable of building the compiler via
   `sfn build -p compiler`). The Makefile's `rebuild` target
-  drops `bash scripts/build.sh` in favour of `<seed> build -p
-  compiler`, then copies `build/sailfin/program` to
-  `build/native/sailfin` and writes `build/native/.build-stamp`
-  with the same `<version>+dev.<hash>[.dirty]` shape build.sh
-  produced (so `version.sfn::resolve_compiler_version` keeps
-  reporting dev-build identity for in-tree builds).
-  `scripts/build.sh` survives this PR — `make check`'s
-  stage2/stage3 fixed-point comparison still uses it for
-  `WORK_DIR` control the driver doesn't expose. PR5 retires
-  the script entirely once `make check` migrates.
-  Behaviour notes: (a) `BUILD_JOBS` no longer plumbs through —
-  the driver parallelises subprocess emits internally; (b)
-  `NATIVE_OPT` / `SELFHOST1_OPT` no longer affect `make
-  rebuild` — the driver hardcodes `-O2`. `make check`'s
-  stage2/stage3 invocations still use build.sh and still honour
-  `OPT`, so the fixed-point comparison stays apples-to-apples.
+  drops `bash scripts/build.sh` from the default path in favour
+  of `<seed> build -p compiler`, then copies
+  `build/sailfin/program` to `build/native/sailfin` and writes
+  `build/native/.build-stamp` with the same
+  `<version>+dev.<hash>[.dirty]` shape build.sh produced.
+  Behaviour notes: (a) `BUILD_JOBS` no longer plumbs through
+  the driver — the driver parallelises subprocess emits
+  internally; (b) `NATIVE_OPT` / `SELFHOST1_OPT` no longer
+  affect `make rebuild` — the driver hardcodes `-O2`.
+  `make check`'s stage2/stage3 invocations still use build.sh
+  and still honour `OPT`, so the fixed-point comparison stays
+  apples-to-apples. Two transitional workarounds shipped
+  alongside the cutover (kept until alpha.5 makes them
+  redundant): pre-staging `main.sfn-asm` outside the resolver
+  because alpha.4's binary-capsule walker excluded the entry,
+  and a `build/.shim/llvm-as → llvm-as-18` symlink so the
+  alpha.4 seed's IR validator could find a parser on Ubuntu's
+  versioned-only llvm-18 install.
+- **Stage D PR5 (in flight, this PR).** Cleanup. `.seed-version`
+  bumps to `0.5.10-alpha.5` — the first release including PR4's
+  source-side fixes:
+  - The validator cascade in `_cr_compile_one` (`llvm-as` →
+    `llvm-as-18` → `clang -c -emit-llvm` → `clang-18`) replaces
+    the alpha.4 seed's `llvm-as`-only validator that fell
+    through to "validator missing, accept the IR" on systems
+    without the unversioned llvm-as symlink.
+  - `prepare_project_capsules` now stages the entry's
+    `.sfn-asm` separately when `walk_project_src` is on, so
+    sibling modules importing from the entry can find its
+    interface declarations. Was missing in alpha.4.
+  With both fixes in the seed itself, the Makefile's PR4
+  workarounds (the llvm-as shim + the entry pre-stage step)
+  retire. The `bash scripts/build.sh` fallback survives — cold
+  builds of the 138-module compiler still peak above 8 GB
+  virtual-memory at the resolver level (the parent process's
+  in-process state plus per-module subprocess overhead exceed
+  budget on the 8 GB ulimit CI uses), so when the seed bails
+  silently before producing `build/sailfin/program`, the
+  fallback runs `bash scripts/build.sh` to keep CI green.
+  build.sh retires on its own once the resolver pass becomes
+  memory-bounded enough for cold builds to fit in 8 GB —
+  tracked alongside Stage E (long-lived process, arena reset
+  between modules) in `docs/proposals/build-architecture.md`.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —

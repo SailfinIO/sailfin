@@ -572,19 +572,24 @@ ci-package-installer:
 # Output:
 #   build/native/sailfin
 #
-# Stage D PR4: routes through `<seed> build -p compiler` instead of
-# `bash scripts/build.sh`. The 0.5.10-alpha.4+ seed ships the
-# binary-capsule walker (compiler/src/capsule_resolver.sfn) and
-# subprocess-per-module compile path, so the driver knows how to
-# enumerate every `compiler/src/**/*.sfn` and compile each one in
-# its own subprocess (fresh arena per module — what makes a
-# 138-module self-build viable in 8 GB).
-#
-# `scripts/build.sh` is preserved as the fallback for `make check`'s
-# stage2/stage3 fixed-point comparison (which needs WORK_DIR
-# control the driver doesn't expose yet) and for emergency seed
-# stabilization. PR5 retires `scripts/build.sh` entirely once
-# `make check` migrates.
+# Stage D PR4 (cutover) → PR5 (cleanup): routes through `<seed>
+# build -p compiler` as the default path. The 0.5.10-alpha.5 seed
+# includes the source-side fixes that retired PR4's transitional
+# Makefile workarounds:
+#   - stages the entry's `.sfn-asm` so dependents can find
+#     `compile_to_sailfin` etc. (was never staged in alpha.4 — the
+#     binary-capsule walker excludes the entry from enumeration);
+#   - validates per-module IR via a cascade (`llvm-as` →
+#     `llvm-as-18` → `clang -c -emit-llvm` → `clang-18`) so
+#     seed-corruption flakes get caught even on systems where the
+#     unversioned `llvm-as` symlink isn't on PATH.
+# A `bash scripts/build.sh` fallback survives below for cold-build
+# scenarios where the resolver's in-process state pushes the seed
+# above the 8 GB virtual-memory cap that CI and the local
+# `compiler-safety.md` rule enforce — see the comment on the
+# fallback block. PR5 (this PR) is the cleanup of the transitional
+# shims; PR6+ retires build.sh outright once Stage E memory work
+# bounds the resolver.
 #
 # Notes:
 # - Pass extra flags via BUILD_ARGS (driver-level, e.g.
@@ -592,10 +597,12 @@ ci-package-installer:
 # - The driver parallelises subprocess emits internally; BUILD_JOBS
 #   no longer plumbs through.
 # - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
-#   driver hardcodes `-O2` for the link step. Use
-#   `bash scripts/build.sh` directly if a different opt level is
-#   required (check's stage2/stage3 still does this).
+#   driver hardcodes `-O2` for the link step. `make check`'s
+#   stage2/stage3 invocations still go through `bash scripts/build.sh`
+#   directly until the fixed-point comparison machinery moves into
+#   the driver.
 rebuild:
+	@mkdir -p build
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -618,79 +625,43 @@ rebuild:
 		exit 1; \
 	fi; \
 	echo "$$seed" > build/.seed-resolved
-	@# Stage D PR4 transitional workaround: the 0.5.10-alpha.4 seed
-	@# validates per-module IR via `llvm-as` (no version suffix
-	@# fallback). Ubuntu's `llvm-18` package ships
-	@# `/usr/bin/llvm-as-18` but no unversioned `llvm-as` symlink,
-	@# so the seed's validation falls through to "validator missing,
-	@# accept the IR" and seed-corruption flakes (`define void
-	@# 缃name() {`) escape into the link, which clang then rejects.
-	@# Install a per-build PATH shim that exposes `llvm-as` →
-	@# `llvm-as-18` / `llvm-as-17` / etc. The shim sticks for the
-	@# current `make` invocation and is harmless on systems where
-	@# `llvm-as` is already on PATH. PR5's seed cut (post-PR4) makes
-	@# this redundant — the source-side fix in `_cr_compile_one`
-	@# tries `llvm-as` then `llvm-as-18` then `clang -c -emit-llvm`
-	@# directly, no shim needed.
-	@if ! command -v llvm-as >/dev/null 2>&1; then \
-		mkdir -p build/.shim; \
-		shim_target=""; \
-		for cand in llvm-as-18 llvm-as-17 llvm-as-16 llvm-as-15; do \
-			if command -v "$$cand" >/dev/null 2>&1; then \
-				shim_target="$$(command -v "$$cand")"; \
-				break; \
-			fi; \
-		done; \
-		if [ -n "$$shim_target" ]; then \
-			ln -sf "$$shim_target" build/.shim/llvm-as; \
-			echo "[rebuild] llvm-as shim: build/.shim/llvm-as -> $$shim_target"; \
-		fi; \
-	fi
-	@seed=$$(cat build/.seed-resolved); \
-	mkdir -p build/native/import-context; \
-	if [ -d build/native/import-context ]; then \
+	@# Wipe stale import-context so a "force rebuild" actually
+	@# re-stages every module instead of reusing whatever the
+	@# previous build left on disk. `stage_capsule_imports`
+	@# treats existing `.sfn-asm` + `.layout-manifest` pairs as
+	@# authoritative cache hits with no mtime/content check.
+	@mkdir -p build/native/import-context
+	@if [ -d build/native/import-context ]; then \
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
-	fi; \
-	echo "[rebuild] pre-staging entry import-context (workaround for seed bug)..."; \
-	export PATH="$(CURDIR)/build/.shim:$$PATH"; \
-	"$$seed" emit -o build/native/import-context/main.sfn-asm native compiler/src/main.sfn >/dev/null; \
-	if [ ! -s build/native/import-context/main.sfn-asm ]; then \
-		echo "[rebuild][error] failed to emit main.sfn-asm" >&2; \
-		exit 1; \
-	fi; \
-	grep '^\.layout' build/native/import-context/main.sfn-asm > build/native/import-context/main.layout-manifest 2>/dev/null || true; \
-	if [ ! -f build/native/import-context/main.layout-manifest ]; then \
-		: > build/native/import-context/main.layout-manifest; \
 	fi
-	@# Pipe the build output through `cat` rather than letting it
-	@# go straight to the recipe's stdout. The seed compiler
-	@# (0.5.10-alpha.4) has been observed to segfault when its
-	@# stdout is whatever Make presents directly to a recipe — a
-	@# TTY/buffering interaction in `process.run` that disappears
-	@# the moment any pipe is interposed. Direct shell invocations
-	@# don't reproduce, only the make-driven path does. `cat`
-	@# preserves the visible output for humans without paying
-	@# `tail`'s output truncation cost.
-	@# A consequence: `cat` masks the seed's exit code, so the
-	@# failure check below depends on `build/sailfin/program`
-	@# existing as a positive indicator instead of `$?`.
-	@# Stage D PR4 default path: `<seed> build -p compiler`. The
-	@# 0.5.10-alpha.4 seed has known cold-build instability (random
-	@# segfaults during fresh 138-module compiles, plus IR
-	@# corruption flakes that escape its `llvm-as`-only validator
-	@# when the unversioned `llvm-as` isn't on PATH). My
-	@# `_cr_compile_one` source fix in this PR adds a clang-based
-	@# validator fallback, but it only takes effect once a future
-	@# seed cut includes it.
-	@#
-	@# Until then: try sfn build first, fall back to
-	@# `scripts/build.sh` on failure so a flaky seed never blocks
-	@# the cutover. PR5 removes the fallback when build.sh
-	@# retires.
+	@# Wipe stale `build/sailfin/program` so the fallback's
+	@# existence-based success check below can't be fooled by an
+	@# old binary surviving a failed seed run. The `set -o
+	@# pipefail` + bash wrapper captures the seed's real exit
+	@# status (otherwise `| cat` always returns 0) and lets us
+	@# log it for diagnostics. The `|| true` after the wrapper
+	@# tolerates the seed bailing — the fallback then takes
+	@# over.
+	@rm -f build/sailfin/program build/sailfin/program.ll
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
-	export PATH="$(CURDIR)/build/.shim:$$PATH"; \
-	cd $(CURDIR) && "$$seed" build $(BUILD_ARGS) -p compiler 2>&1 | cat || true
+	cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat" || \
+		echo "[rebuild] sfn build exit was non-zero; checking for fallback path"
+	@# build.sh fallback. Cold builds of the 138-module compiler
+	@# routinely peak above the 8 GB virtual-memory cap that
+	@# `.claude/rules/compiler-safety.md` and CI runners enforce
+	@# (the parent resolver's in-process state + per-module
+	@# subprocess overhead exceed budget). When the seed bails or
+	@# segfaults silently before producing `build/sailfin/program`,
+	@# fall back to `bash scripts/build.sh`'s subprocess-per-module
+	@# pipeline which keeps each compile in its own process AND
+	@# bounds the parent's memory usage.
+	@#
+	@# build.sh retires once the compiler's resolver pass is
+	@# memory-bounded enough for cold builds to fit in 8 GB —
+	@# tracked alongside the rest of Stage E (long-lived process,
+	@# arena reset between modules) in
+	@# `docs/proposals/build-architecture.md`.
 	@if [ ! -f build/sailfin/program ]; then \
 		echo "[rebuild] sfn build did not produce build/sailfin/program — falling back to scripts/build.sh"; \
 		seed=$$(cat build/.seed-resolved); \
@@ -708,45 +679,39 @@ rebuild:
 	@mkdir -p build/native
 	@cp -f build/sailfin/program $(NATIVE_OUT)
 	@chmod +x $(NATIVE_OUT)
-	@# Stage D PR4: save .ll files to a location `make test` won't
-	@# clobber. Each integration / e2e test's own `sfn build`
-	@# overwrites `build/sailfin/capsules/*.ll` and
-	@# `build/sailfin/program.ll` — by the time `make
-	@# ci-cross-windows` runs (after the test suite), the
-	@# rebuild's IR set is gone. Mirror to `build/native/raw/`
-	@# which the test suite never touches; cross-windows reads
-	@# from there. Cheap (`cp -a`, ~140 small files), survives
-	@# `make test` cleanly. PR5 retires both this copy and
-	@# `ci-cross-windows` once `sfn build --target=...` lands.
+	@# Save .ll files to a location `make test` won't clobber. Each
+	@# integration / e2e test's own `sfn build` overwrites
+	@# `build/sailfin/capsules/*.ll` and `build/sailfin/program.ll`
+	@# — by the time `make ci-cross-windows` runs (after the test
+	@# suite), the rebuild's IR set is gone. Mirror to
+	@# `build/native/raw/` which the test suite never touches;
+	@# cross-windows reads from there. Cheap (`cp -a`, ~140 small
+	@# files), survives `make test` cleanly.
 	@mkdir -p build/native/raw
 	@cp -a build/sailfin/capsules/. build/native/raw/ 2>/dev/null || true
 	@cp -f build/sailfin/program.ll build/native/raw/program.ll 2>/dev/null || true
-	@# Stage prelude.o for the freshly-built compiler. End-user `sfn
-	@# build` / `sfn run` invocations from this binary check
-	@# `_runtime_bundle_exists("runtime")` which requires a prebuilt
-	@# `prelude.o` somewhere under the runtime tree (see
-	@# `_runtime_prelude_path` in cli_main.sfn for the search list).
-	@# The fresh-clone repo's `runtime/` has no `obj/`, so without
-	@# this step the in-tree compiler would fail to link any user
-	@# program with "runtime bundle missing expected files."
-	@# `scripts/build.sh` produced this object in the same shape;
-	@# we replicate via the new compiler emitting prelude.ll +
-	@# clang compiling it to an object.
+	@# Stage prelude.o for the freshly-built compiler. End-user
+	@# `sfn build` / `sfn run` invocations from this binary check
+	@# `_runtime_bundle_exists("runtime")` which requires a
+	@# prebuilt `prelude.o` somewhere under the runtime tree (see
+	@# `_runtime_prelude_path` in cli_main.sfn for the search
+	@# list). The fresh-clone repo's `runtime/` has no `obj/`, so
+	@# without this step the in-tree compiler would fail to link
+	@# any user program with "runtime bundle missing expected
+	@# files." Replicate via the new compiler emitting prelude.ll
+	@# + clang compiling it to an object. The .ll stays on disk
+	@# so `ci-cross-windows` can reuse it as the Windows-target
+	@# prelude IR.
 	@mkdir -p build/native/obj/runtime
 	@if [ ! -f build/native/obj/runtime/prelude.o ]; then \
 		echo "[rebuild] staging prelude.o..."; \
 		$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/prelude.ll -o build/native/obj/runtime/prelude.o; \
 	fi
-	@# Stage D PR4: keep prelude.ll on disk (don't delete after .o
-	@# compile). `ci-cross-windows` reuses it as the Windows-target
-	@# prelude IR alongside the sfn-build-emitted capsule .ll set.
-	@# When PR5 retires `ci-cross-windows` in favour of `sfn build
-	@# --target=...`, this side artifact retires with it.
-	@# Write build stamp (version + git hash for dev builds), matching
-	@# the format `scripts/build.sh` used. `version.sfn::resolve_compiler_version`
-	@# reads this file first, so without it the binary would report
-	@# whatever stale stamp the previous build left on disk.
+	@# Write build stamp (version + git hash for dev builds).
+	@# `version.sfn::resolve_compiler_version` reads this file
+	@# first, so without it the binary would report whatever stale
+	@# stamp the previous build left on disk.
 	@cap_version=$$(sed -n 's/^version *= *"\([^"]*\)"/\1/p' compiler/capsule.toml); \
 	if [ -z "$$cap_version" ]; then \
 		echo "[rebuild][warn] could not extract version from compiler/capsule.toml; skipping build stamp" >&2; \
