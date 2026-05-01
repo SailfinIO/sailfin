@@ -670,9 +670,35 @@ rebuild:
 	@# prelude.ll but kept prelude.o (or vice-versa), regenerate
 	@# the missing one on its own rather than re-doing both.
 	@mkdir -p build/native/obj/runtime
+	@# Emit + validate prelude.ll with retry. The single-shot
+	@# `$(NATIVE_OUT) emit` here doesn't go through the resolver's
+	@# retry+validator cascade (that path is gated behind multi-
+	@# source builds), so a seed-corruption flake on the prelude
+	@# emit (`翶* %t5` and friends) would escape into the .o
+	@# compile and fail the rebuild. Up to 3 attempts; each
+	@# attempt validates via the same `llvm-as` / `llvm-as-18` /
+	@# `clang -c -emit-llvm` / `clang-18` cascade the resolver
+	@# uses.
 	@if [ ! -f build/native/obj/runtime/prelude.ll ]; then \
 		echo "[rebuild] staging prelude.ll..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null; \
+		attempt=0; ok=0; \
+		while [ $$attempt -lt 3 ]; do \
+			attempt=$$((attempt + 1)); \
+			rm -f build/native/obj/runtime/prelude.ll; \
+			$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null || continue; \
+			[ -s build/native/obj/runtime/prelude.ll ] || continue; \
+			if (command -v llvm-as >/dev/null 2>&1 && llvm-as < build/native/obj/runtime/prelude.ll >/dev/null 2>&1) \
+				|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < build/native/obj/runtime/prelude.ll >/dev/null 2>&1) \
+				|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir build/native/obj/runtime/prelude.ll -o /dev/null >/dev/null 2>&1) \
+				|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir build/native/obj/runtime/prelude.ll -o /dev/null >/dev/null 2>&1); then \
+				ok=1; break; \
+			fi; \
+			echo "[rebuild][warn] prelude.ll IR validation rejected output (attempt $$attempt/3)" >&2; \
+		done; \
+		if [ "$$ok" -ne 1 ]; then \
+			echo "[rebuild][error] failed to emit valid prelude.ll after 3 attempts" >&2; \
+			exit 1; \
+		fi; \
 	fi
 	@if [ ! -f build/native/obj/runtime/prelude.o ]; then \
 		echo "[rebuild] staging prelude.o..."; \
