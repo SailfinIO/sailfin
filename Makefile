@@ -491,49 +491,29 @@ package: compile
 # CI helpers (used by .github/workflows/ci.yml)
 # =============================================================================
 
-# Prepare build artifacts in the locations expected by the Sailfin-native test
-# runner (import context + runtime prelude object).
+# Verify the build artifacts the Sailfin-native test runner expects
+# (import-context + runtime prelude object) are present at their
+# canonical locations.
 #
-# Stage D PR4: `make rebuild` now routes through `sfn build -p compiler`,
-# which writes import-context to `build/native/import-context/` and prelude.o
-# to `build/native/obj/runtime/prelude.o` directly — both already at the
-# canonical paths the test runner expects. The legacy build.sh staging
-# layout (`build/selfhost/native/...`) is only present when the consumer
-# explicitly invokes `bash scripts/build.sh` (e.g. `make check` for the
-# stage2/stage3 fixed-point comparison). Detect which layout produced the
-# build and copy only when the legacy paths are present AND the canonical
-# paths are missing.
+# Stage E PR4: now that `make rebuild` is the only path to producing
+# `build/native/sailfin` (the build.sh fallback retired in PR2 and
+# build.sh itself only survives for `make check`'s stage2/stage3
+# fixed-point comparison), the artifacts are guaranteed to land at
+# `build/native/import-context/` and `build/native/obj/runtime/prelude.o`
+# directly. The legacy `build/selfhost/native/...` fallback paths
+# this target used to copy from are dead in the rebuild flow — so
+# the target collapses to a presence check.
 ci-prepare-test-artifacts:
 	@set -eu; \
-	SRC="build/selfhost/native/seed_cwd/build/native/import-context"; \
-	if [ -d build/native/import-context ] && [ -n "$$(find build/native/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then \
-		echo "[ci-prepare-test-artifacts] build/native/import-context already populated (sfn build path); skipping copy"; \
-	elif [ -d "$$SRC" ]; then \
-		rm -rf build/native/import-context; \
-		mkdir -p build/native/import-context; \
-		cp -a "$$SRC/." build/native/import-context/; \
-		echo "[ci-prepare-test-artifacts] staged import-context from $$SRC"; \
-	else \
-		echo "[ci-prepare-test-artifacts][error] no import-context source found" >&2; \
-		echo "[ci-prepare-test-artifacts][error] expected either build/native/import-context (sfn build)" >&2; \
-		echo "[ci-prepare-test-artifacts][error] or $$SRC (build.sh)" >&2; \
-		find build/selfhost -maxdepth 5 -type d -name import-context -print 2>/dev/null || true; \
+	if [ ! -d build/native/import-context ] || [ -z "$$(find build/native/import-context -name '*.sfn-asm' -print -quit 2>/dev/null)" ]; then \
+		echo "[ci-prepare-test-artifacts][error] missing build/native/import-context — run 'make rebuild' first" >&2; \
 		exit 1; \
 	fi; \
-	if [ -f build/native/obj/runtime/prelude.o ]; then \
-		echo "[ci-prepare-test-artifacts] build/native/obj/runtime/prelude.o already present"; \
-	elif [ -f build/selfhost/native/obj/runtime/prelude.o ]; then \
-		mkdir -p build/native/obj/runtime; \
-		cp -f build/selfhost/native/obj/runtime/prelude.o build/native/obj/runtime/prelude.o; \
-		echo "[ci-prepare-test-artifacts] staged prelude.o from build/selfhost/"; \
-	else \
-		echo "[ci-prepare-test-artifacts][error] missing prelude.o" >&2; \
-		echo "[ci-prepare-test-artifacts][error] expected either build/native/obj/runtime/prelude.o (sfn build path)" >&2; \
-		echo "[ci-prepare-test-artifacts][error] or build/selfhost/native/obj/runtime/prelude.o (build.sh)" >&2; \
-		find build/selfhost -maxdepth 4 -type f -name 'prelude.o' -print 2>/dev/null || true; \
+	if [ ! -f build/native/obj/runtime/prelude.o ]; then \
+		echo "[ci-prepare-test-artifacts][error] missing build/native/obj/runtime/prelude.o — run 'make rebuild' first" >&2; \
 		exit 1; \
 	fi; \
-	true
+	echo "[ci-prepare-test-artifacts] build/native/import-context + build/native/obj/runtime/prelude.o present"
 
 # Package native compiler + installer artifacts for a given target label.
 # Stage C4 migration: this target now delegates to `sfn package`
@@ -673,22 +653,55 @@ rebuild:
 	@mkdir -p build/native/raw
 	@cp -a build/sailfin/capsules/. build/native/raw/ 2>/dev/null || true
 	@cp -f build/sailfin/program.ll build/native/raw/program.ll 2>/dev/null || true
-	@# Stage prelude.o for the freshly-built compiler. End-user
-	@# `sfn build` / `sfn run` invocations from this binary check
-	@# `_runtime_bundle_exists("runtime")` which requires a
-	@# prebuilt `prelude.o` somewhere under the runtime tree (see
-	@# `_runtime_prelude_path` in cli_main.sfn for the search
-	@# list). The fresh-clone repo's `runtime/` has no `obj/`, so
-	@# without this step the in-tree compiler would fail to link
-	@# any user program with "runtime bundle missing expected
-	@# files." Replicate via the new compiler emitting prelude.ll
-	@# + clang compiling it to an object. The .ll stays on disk
-	@# so `ci-cross-windows` can reuse it as the Windows-target
-	@# prelude IR.
+	@# Stage prelude.o + prelude.ll for the freshly-built compiler.
+	@# End-user `sfn build` / `sfn run` invocations from this
+	@# binary check `_runtime_bundle_exists("runtime")` which
+	@# requires a prebuilt `prelude.o` somewhere under the runtime
+	@# tree (see `_runtime_prelude_path` in cli_main.sfn for the
+	@# search list). The fresh-clone repo's `runtime/` has no
+	@# `obj/`, so without this step the in-tree compiler would
+	@# fail to link any user program with "runtime bundle missing
+	@# expected files." Replicate via the new compiler emitting
+	@# prelude.ll + clang compiling it to an object.
+	@#
+	@# The .ll is also load-bearing for `ci-cross-windows`, which
+	@# reads it as the Windows-target prelude IR. Each artifact
+	@# is generated independently — if a prior build dropped
+	@# prelude.ll but kept prelude.o (or vice-versa), regenerate
+	@# the missing one on its own rather than re-doing both.
 	@mkdir -p build/native/obj/runtime
+	@# Emit + validate prelude.ll with retry. The single-shot
+	@# `$(NATIVE_OUT) emit` here doesn't go through the resolver's
+	@# retry+validator cascade (that path is gated behind multi-
+	@# source builds), so a seed-corruption flake on the prelude
+	@# emit (`翶* %t5` and friends) would escape into the .o
+	@# compile and fail the rebuild. Up to 3 attempts; each
+	@# attempt validates via the same `llvm-as` / `llvm-as-18` /
+	@# `clang -c -emit-llvm` / `clang-18` cascade the resolver
+	@# uses.
+	@if [ ! -f build/native/obj/runtime/prelude.ll ]; then \
+		echo "[rebuild] staging prelude.ll..."; \
+		attempt=0; ok=0; \
+		while [ $$attempt -lt 3 ]; do \
+			attempt=$$((attempt + 1)); \
+			rm -f build/native/obj/runtime/prelude.ll; \
+			$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null || continue; \
+			[ -s build/native/obj/runtime/prelude.ll ] || continue; \
+			if (command -v llvm-as >/dev/null 2>&1 && llvm-as < build/native/obj/runtime/prelude.ll >/dev/null 2>&1) \
+				|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < build/native/obj/runtime/prelude.ll >/dev/null 2>&1) \
+				|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir build/native/obj/runtime/prelude.ll -o /dev/null >/dev/null 2>&1) \
+				|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir build/native/obj/runtime/prelude.ll -o /dev/null >/dev/null 2>&1); then \
+				ok=1; break; \
+			fi; \
+			echo "[rebuild][warn] prelude.ll IR validation rejected output (attempt $$attempt/3)" >&2; \
+		done; \
+		if [ "$$ok" -ne 1 ]; then \
+			echo "[rebuild][error] failed to emit valid prelude.ll after 3 attempts" >&2; \
+			exit 1; \
+		fi; \
+	fi
 	@if [ ! -f build/native/obj/runtime/prelude.o ]; then \
 		echo "[rebuild] staging prelude.o..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/prelude.ll -o build/native/obj/runtime/prelude.o; \
 	fi
 	@# Write build stamp (version + git hash for dev builds).
@@ -726,13 +739,15 @@ rebuild:
 # Reuses the LLVM IR (.ll files) from the Linux selfhost build.
 # Produces: build/windows/sailfin.exe + dist/ packaging artifacts.
 #
-# Stage D PR4: now reads from `build/sailfin/capsules/*.ll` +
-# `build/sailfin/program.ll` (sfn build layout) instead of
-# `build/selfhost/native/raw/*.ll` (build.sh layout). The legacy
-# path is preserved as a fallback for as long as `make check`'s
-# stage2/stage3 invocations still produce it. PR5 retires this
-# target entirely once `sfn build --target=x86_64-w64-mingw32`
-# ships.
+# Stage E PR4: reads exclusively from the saved sfn-build IR
+# layout at `build/native/raw/*.ll` (mirrored by `make rebuild`
+# so the test suite can't clobber the originals at
+# `build/sailfin/capsules/`). The legacy `build/selfhost/native/raw`
+# fallback that survived through PR3 retired here — `make
+# rebuild` is the only path producing IR for cross-compile, and
+# it always populates `build/native/raw/`. The future
+# `sfn build --target=x86_64-w64-mingw32` retires this target
+# wholesale.
 
 MINGW_CC ?= x86_64-w64-mingw32-gcc
 MINGW_TARGET := windows-x86_64
@@ -742,34 +757,17 @@ ci-cross-windows:
 	@set -eu; \
 	echo "[cross-windows] cross-compiling for Windows from Linux LLVM IR..."; \
 	SAVED_DIR="build/native/raw"; \
-	CAPSULE_DIR="build/sailfin/capsules"; \
-	PROGRAM_LL=""; \
 	PRELUDE_LL="build/native/obj/runtime/prelude.ll"; \
-	LEGACY_RAW_DIR="build/selfhost/native/raw"; \
-	USE_SFN_BUILD=0; \
-	if [ -d "$$SAVED_DIR" ] && [ -f "$$SAVED_DIR/program.ll" ]; then \
-		USE_SFN_BUILD=1; \
-		CAPSULE_DIR="$$SAVED_DIR"; \
-		PROGRAM_LL="$$SAVED_DIR/program.ll"; \
-		echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
-	elif [ -d "$$CAPSULE_DIR" ] && [ -f "build/sailfin/program.ll" ]; then \
-		USE_SFN_BUILD=1; \
-		PROGRAM_LL="build/sailfin/program.ll"; \
-		echo "[cross-windows] using sfn build IR layout (build/sailfin/capsules + program.ll)"; \
-	elif [ -d "$$LEGACY_RAW_DIR" ]; then \
-		echo "[cross-windows] using legacy build.sh IR layout ($$LEGACY_RAW_DIR)"; \
-	else \
-		echo "[cross-windows][error] no IR source found" >&2; \
-		echo "[cross-windows][error] expected one of:" >&2; \
-		echo "[cross-windows][error]   $$SAVED_DIR/*.ll + program.ll (sfn build, persisted)" >&2; \
-		echo "[cross-windows][error]   $$CAPSULE_DIR + build/sailfin/program.ll (sfn build, fresh)" >&2; \
-		echo "[cross-windows][error]   $$LEGACY_RAW_DIR (build.sh) — run 'make rebuild' first" >&2; \
+	if [ ! -d "$$SAVED_DIR" ] || [ ! -f "$$SAVED_DIR/program.ll" ]; then \
+		echo "[cross-windows][error] missing $$SAVED_DIR/*.ll + program.ll — run 'make rebuild' first" >&2; \
 		exit 1; \
 	fi; \
-	if [ "$$USE_SFN_BUILD" = "1" ] && [ ! -f "$$PRELUDE_LL" ]; then \
-		echo "[cross-windows][error] missing $$PRELUDE_LL — \`make rebuild\` should have emitted it" >&2; \
+	if [ ! -f "$$PRELUDE_LL" ]; then \
+		echo "[cross-windows][error] missing $$PRELUDE_LL — 'make rebuild' should have emitted it" >&2; \
 		exit 1; \
 	fi; \
+	echo "[cross-windows] using saved sfn build IR layout ($$SAVED_DIR)"; \
+	PROGRAM_LL="$$SAVED_DIR/program.ll"; \
 	WIN_OBJ="build/windows/obj"; \
 	WIN_OUT="build/windows/sailfin.exe"; \
 	rm -rf build/windows; \
@@ -791,26 +789,14 @@ ci-cross-windows:
 	\
 	echo "[cross-windows] collecting .ll modules..."; \
 	LL_FILES=""; \
-	if [ "$$USE_SFN_BUILD" = "1" ]; then \
-		PROGRAM_BASENAME="$$(basename "$$PROGRAM_LL")"; \
-		PROGRAM_REAL="$$(readlink -f "$$PROGRAM_LL" 2>/dev/null || echo "$$PROGRAM_LL")"; \
-		for f in "$$CAPSULE_DIR"/*.ll; do \
-			[ -f "$$f" ] || continue; \
-			f_real="$$(readlink -f "$$f" 2>/dev/null || echo "$$f")"; \
-			if [ "$$f_real" = "$$PROGRAM_REAL" ]; then continue; fi; \
-			LL_FILES="$$LL_FILES $$f"; \
-		done; \
-		LL_FILES="$$LL_FILES $$PROGRAM_LL"; \
-	else \
-		for f in "$$LEGACY_RAW_DIR"/*.ll; do \
-			base="$$(basename "$$f")"; \
-			case "$$base" in \
-				*.attempt*|*.clean*) continue ;; \
-				runtime__prelude.ll) PRELUDE_LL="$$f"; continue ;; \
-			esac; \
-			LL_FILES="$$LL_FILES $$f"; \
-		done; \
-	fi; \
+	PROGRAM_REAL="$$(readlink -f "$$PROGRAM_LL" 2>/dev/null || echo "$$PROGRAM_LL")"; \
+	for f in "$$SAVED_DIR"/*.ll; do \
+		[ -f "$$f" ] || continue; \
+		f_real="$$(readlink -f "$$f" 2>/dev/null || echo "$$f")"; \
+		if [ "$$f_real" = "$$PROGRAM_REAL" ]; then continue; fi; \
+		LL_FILES="$$LL_FILES $$f"; \
+	done; \
+	LL_FILES="$$LL_FILES $$PROGRAM_LL"; \
 	\
 	echo "[cross-windows] linking IR modules..."; \
 	$$LLVM_LINK -o "$$WIN_OBJ/sailfin.linked.bc" $$LL_FILES 2>&1 || \
