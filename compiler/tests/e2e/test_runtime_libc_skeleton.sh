@@ -36,6 +36,13 @@ FAIL=0
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 SKELETON="$REPO_ROOT/runtime/sfn/platform/libc.sfn"
 
+# Use a single per-invocation scratch dir + named files inside it.
+# `mktemp --suffix=.ll` is a GNU-only flag (BSD mktemp on macOS does
+# not implement it); the `mktemp -d -t prefix-XXXXXX` form below is
+# the portable pattern used elsewhere in `compiler/tests/e2e/`.
+SCRATCH="$(mktemp -d -t sfn-libc-skeleton-XXXXXX)"
+trap 'rm -rf "$SCRATCH"' EXIT
+
 run_test() {
     local name="$1"
     shift
@@ -50,21 +57,17 @@ run_test() {
 
 # ---- Test: sfn check passes cleanly ----
 test_check_clean() {
-    local log
-    log="$(mktemp)"
+    local log="$SCRATCH/check.log"
     if ! "$BINARY" check "$SKELETON" > "$log" 2>&1; then
         echo "[test]   sfn check exited non-zero on libc.sfn:"
         cat "$log"
-        rm -f "$log"
         return 1
     fi
     if ! grep -q "checked .* ok" "$log"; then
         echo "[test]   sfn check did not report 'ok':"
         cat "$log"
-        rm -f "$log"
         return 1
     fi
-    rm -f "$log"
     return 0
 }
 
@@ -79,11 +82,9 @@ test_fmt_clean() {
 
 # ---- Test: every extern lowers to an LLVM declare directive ----
 test_emit_declares() {
-    local ll
-    ll="$(mktemp --suffix=.ll)"
+    local ll="$SCRATCH/libc.ll"
     if ! "$BINARY" emit -o "$ll" llvm "$SKELETON" > /dev/null 2>&1; then
         echo "[test]   sfn emit llvm failed on libc.sfn"
-        rm -f "$ll"
         return 1
     fi
     # The 12 declarations expected today. When the skeleton grows,
@@ -97,7 +98,6 @@ test_emit_declares() {
             missing=$((missing + 1))
         fi
     done
-    rm -f "$ll"
     return "$missing"
 }
 
