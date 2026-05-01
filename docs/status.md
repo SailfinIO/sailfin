@@ -1,6 +1,6 @@
 # Status
 
-Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR4 shipped; Stage D PR5 cleanup in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272; seed pinned to v0.5.10-alpha.5 — first release including PR3's binary-capsule walker, PR4's IR validator cascade, and PR4's entry-staging fix)
+Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1 subprocess-stage import-context in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273; seed pinned to v0.5.10-alpha.5)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -346,6 +346,22 @@ feature availability.
   memory-bounded enough for cold builds to fit in 8 GB —
   tracked alongside Stage E (long-lived process, arena reset
   between modules) in `docs/proposals/build-architecture.md`.
+- **Stage E PR1 (in flight, this PR).** Subprocess-stage import-
+  context. `_cr_stage_one` and `stage_capsule_imports` gain a
+  `sailfin_exe` parameter that, when non-empty, shells the heavy
+  `write_native_text_file_with_module` work out to a fresh
+  subprocess (`<sailfin> emit native --module-name <slug> -o
+  <asm> <src>`). Mirrors the PR3 subprocess-per-module compile
+  shape. The parent's arena no longer accumulates 138 modules'
+  worth of AST + IR text — verified by self-hosting the new
+  compiler under the 8 GB ulimit, which previously needed to
+  fall back to `bash scripts/build.sh`. Empty `sailfin_exe`
+  preserves the in-process path that `sfn check` and `sfn test`
+  callers use; `prepare_project_capsules` (the build/run path)
+  threads the resolved binary path through. The Makefile's
+  `bash scripts/build.sh` fallback survives until the next seed
+  cut (which will pin alpha.6 with this fix and remove the
+  fallback).
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
