@@ -1,6 +1,6 @@
 # Status
 
-Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1 shipped; Stage E PR2 build.sh fallback retirement in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274; seed pinned to v0.5.10-alpha.6)
+Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR2 shipped; Stage E PR3 parallel-emit fan-out in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277; seed pinned to v0.5.10-alpha.6)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -362,26 +362,47 @@ feature availability.
   threads the resolved binary path through. The Makefile's
   `bash scripts/build.sh` fallback survived alongside this PR
   until alpha.6 cut.
-- **Stage E PR2 (in flight, this PR).** Pin alpha.6 + retire the
-  build.sh fallback. `.seed-version` bumps to `0.5.10-alpha.6`,
-  the first release including PR1's subprocess-stage import-
-  context. With that fix in the seed itself, cold builds of the
-  138-module compiler fit in the 8 GB virtual-memory cap that
-  CI runners and `compiler-safety.md` enforce. The fallback
-  block in `make rebuild` (which dropped to `bash
-  scripts/build.sh` when `<seed> build -p compiler` bailed
-  silently) is gone — `<seed> build -p compiler` is the only
-  path now. `scripts/build.sh` itself stays in-tree for `make
-  check`'s stage2/stage3 fixed-point comparison (which still
-  needs `WORK_DIR` control the driver doesn't expose) and as
-  an emergency seed-bootstrap escape hatch; PR3+ retires the
-  script outright when `make check` migrates.
-  Performance note: cold `sfn build -p compiler` runs ~6 min;
-  build.sh historically ran ~2 min. The 3× gap is parallelism
-  — build.sh defaults to `--jobs 4`, the resolver currently
-  runs `stage_capsule_imports` and `compile_capsule_modules`
-  sequentially. Stage E PR3 will fan the per-module subprocess
-  emits across `nproc` workers and close the gap.
+- **Stage E PR2 (#277, shipped).** Pin alpha.6 + retire the
+  build.sh fallback. `.seed-version` bumped to
+  `0.5.10-alpha.6`, the first release including PR1's
+  subprocess-stage import-context. With that fix in the seed
+  itself, cold builds of the 138-module compiler fit in the
+  8 GB virtual-memory cap that CI runners and
+  `compiler-safety.md` enforce. The fallback block in `make
+  rebuild` (which dropped to `bash scripts/build.sh` when
+  `<seed> build -p compiler` bailed silently) is gone —
+  `<seed> build -p compiler` is the only path now.
+  `scripts/build.sh` itself stays in-tree for `make check`'s
+  stage2/stage3 fixed-point comparison (which still needs
+  `WORK_DIR` control the driver doesn't expose) and as an
+  emergency seed-bootstrap escape hatch.
+- **Stage E PR3 (in flight, this PR).** Parallel-emit fan-out.
+  `_cr_run_parallel_emit` writes one TSV-style task per line
+  to a temp file, then pipes through `xargs -d '\\n' -P N -n 3
+  sh -c '...'` so `N = _cr_resolve_jobs()` workers run
+  concurrently. `_cr_resolve_jobs` reads `SAILFIN_BUILD_JOBS`
+  first, falls back to `nproc` (clamped to `[1, 8]` for
+  per-worker memory safety). `stage_capsule_imports` and
+  `compile_capsule_modules` partition into cache-hit and
+  needs-emit subsets in a sequential pass, batch the
+  needs-emit set into one xargs run, then sequentially extract
+  layout manifests / store cache entries. Mirrors
+  `scripts/build.sh`'s `xargs -P "$JOBS"` pattern (build.sh:819,
+  build.sh:853) so end users see the same parallelism shape
+  build.sh historically gave them.
+  Performance: cold `sfn build -p compiler` measured at
+  **2m27s** with the new parallel resolver on a 4-core box,
+  down from **6m07s** sequential. That's a 2.5× speedup,
+  matching `scripts/build.sh --jobs 4`'s historical wall time.
+  The 8 GB ulimit still holds — each subprocess gets its own
+  arena, so the parent's peak memory doesn't scale with
+  parallelism level. `SAILFIN_BUILD_JOBS=1` keeps the
+  pre-PR3 sequential path available as a regression-bisect
+  escape hatch.
+  Empty `sailfin_exe` (sfn check, sfn test) keeps the
+  in-process emit path; parallelism only engages when the
+  caller threads `binary_dir` through. Single-source builds
+  also stay sequential — the xargs overhead would dominate.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —

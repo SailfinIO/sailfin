@@ -323,6 +323,184 @@ fn _cr_ensure_dir(path: string) -> void ![io] {
     if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
 }
 
+// Shell single-quote a string so it can be embedded safely in a
+// `sh -c '...'` invocation. Escapes embedded single-quotes via the
+// classic `'\''` dance. Inlined here rather than imported from
+// `cli_commands_utils` to keep the resolver's dep diamond shallow.
+fn _cr_shell_quote(value: string) -> string {
+    let mut out: string = "'";
+    let mut i: number = 0;
+    loop {
+        if i >= value.length { break; }
+        let ch = substring(value, i, i + 1);
+        if ch == "'" { out = out + "'\\''"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out + "'";
+}
+
+// Resolve the per-build job count for parallel subprocess emits.
+// Reads `SAILFIN_BUILD_JOBS` first; falls back to `nproc` (clamped
+// to [1, 8] for memory safety — each worker holds its own arena
+// + parser state, so 8 workers × ~500 MB ≈ 4 GB peak parent
+// memory). Returns 1 on any read failure or when nproc isn't on
+// PATH, which keeps the legacy serial behavior as the safe
+// default.
+//
+// Stage E PR3: `_cr_run_parallel_emit` honours this. The architect's
+// plan is to default to `nproc`, with `SAILFIN_BUILD_JOBS=1`
+// available as a regression-bisect escape hatch (mirrors the
+// `BUILD_JOBS=1` knob `scripts/build.sh` exposed).
+fn _cr_resolve_jobs() -> number ![io] {
+    let env_jobs = _cr_shell_read("printf '%s' \"$SAILFIN_BUILD_JOBS\"");
+    if env_jobs.length > 0 {
+        let parsed = _cr_parse_positive_int(env_jobs);
+        if parsed > 0 {
+            if parsed > 8 { return 8; }
+            return parsed;
+        }
+    }
+    // Wrap in `{ ...; }` so the `> tmp` redirect that
+    // `_cr_shell_read` appends applies to the WHOLE
+    // `||`-chain, not just the trailing `echo 1`. Without the
+    // braces, `nproc` prints to the terminal (every build run)
+    // and only the fallback's output gets captured — observed
+    // as stray "4" lines leaking into `make rebuild` output.
+    let nproc = _cr_shell_read("{ nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1; }");
+    let parsed_nproc = _cr_parse_positive_int(nproc);
+    if parsed_nproc <= 0 { return 1; }
+    if parsed_nproc > 8 { return 8; }
+    return parsed_nproc;
+}
+
+// Parse a non-negative integer from a string. Returns 0 on any
+// non-digit or empty input. Local to the resolver so we don't
+// pull in a richer parser for a single-use helper.
+fn _cr_parse_positive_int(value: string) -> number {
+    if value.length == 0 { return 0; }
+    let mut n: number = 0;
+    let mut i: number = 0;
+    let mut any_digit: boolean = false;
+    loop {
+        if i >= value.length { break; }
+        let ch = substring(value, i, i + 1);
+        let mut digit: number = -1;
+        if ch == "0" { digit = 0; }
+        if ch == "1" { digit = 1; }
+        if ch == "2" { digit = 2; }
+        if ch == "3" { digit = 3; }
+        if ch == "4" { digit = 4; }
+        if ch == "5" { digit = 5; }
+        if ch == "6" { digit = 6; }
+        if ch == "7" { digit = 7; }
+        if ch == "8" { digit = 8; }
+        if ch == "9" { digit = 9; }
+        if digit < 0 {
+            // Allow trailing whitespace (e.g. nproc's trailing newline
+            // already stripped, but be defensive against printf "%s"
+            // wrappers).
+            if ch == " " {
+                i += 1;
+                continue;
+            }
+            if ch == "\t" {
+                i += 1;
+                continue;
+            }
+            if ch == "\n" {
+                i += 1;
+                continue;
+            }
+            return 0;
+        }
+        any_digit = true;
+        n = n * 10 + digit;
+        i += 1;
+    }
+    if !any_digit { return 0; }
+    return n;
+}
+
+// One emit task for `_cr_run_parallel_emit`. The helper invokes
+// `<sailfin_exe> emit --module-name <slug> -o <output_path> <mode>
+// <source_path>` for each task, fanning across `jobs` workers.
+struct ParallelEmitTask {
+    slug: string;
+    output_path: string;
+    source_path: string;
+}
+
+// Run a list of `<sailfin> emit` invocations in parallel via
+// `xargs -d '\n' -P N -n 3`. Each worker subprocess is independent
+// (fresh arena, no shared state), so memory stays per-worker
+// rather than scaling with `tasks.length`.
+//
+// The implementation writes 3 lines per task (slug, output, source)
+// to a temp file, then pipes the file through xargs. Each xargs
+// invocation pulls 3 lines and runs `bash -c '<seed> emit
+// --module-name "$1" -o "$2" "$MODE" "$3"' _` with those args.
+// Seed binary path and mode are passed via env vars rather than
+// inlined in the format string — that sidesteps shell-escaping
+// pitfalls when the seed path contains spaces or quotes (which
+// it shouldn't, but defensive).
+//
+// Returns true iff every task exited zero. xargs's default
+// behavior is to terminate the rest of the queue on a non-zero
+// exit; we keep that semantics so a single bad emit fails the
+// whole build fast (matches the serial loop's `return false` on
+// the first failure).
+//
+// Stage E PR3: this is the helper that closes the parallelism
+// gap with `scripts/build.sh`'s `xargs -P "$JOBS"` pattern
+// (build.sh:819, 853). With `jobs == 1`, the helper sequentialises
+// to keep the regression-bisect path simple.
+fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: number) -> boolean ![io] {
+    if tasks.length == 0 { return true; }
+    let mut effective_jobs = jobs;
+    if effective_jobs <= 0 { effective_jobs = 1; }
+
+    // Sequential fallback: keeps regression bisects (and any
+    // SAILFIN_BUILD_JOBS=1 invocations) on the simple
+    // process.run-per-task path. No xargs overhead, no temp file.
+    if effective_jobs == 1 {
+        let mut i: number = 0;
+        loop {
+            if i >= tasks.length { break; }
+            let t = tasks[i];
+            let rc = process.run([sailfin_exe, "emit", "--module-name", t.slug, "-o", t.output_path, mode, t.source_path]);
+            if rc != 0 { return false; }
+            i += 1;
+        }
+        return true;
+    }
+
+    // Parallel: build the task TSV, hand it to xargs.
+    let nonce = _cr_shell_read("printf '%s_%s' \"$$\" \"$(date +%s%N 2>/dev/null || date +%s)\"");
+    let tmp = "/tmp/.sfn_parallel_emit_" + nonce + ".tsv";
+    let mut content: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= tasks.length { break; }
+        let t = tasks[i];
+        content = content + t.slug + "\n" + t.output_path + "\n" + t.source_path
+            + "\n";
+        i += 1;
+    }
+    fs.writeFile(tmp, content);
+
+    let xargs_cmd = "SAILFIN_PE_SEED=" + _cr_shell_quote(sailfin_exe)
+        + " SAILFIN_PE_MODE="
+        + _cr_shell_quote(mode)
+        + " xargs -d '\\n' -P "
+        + number_to_string(effective_jobs)
+        + " -n 3 sh -c '\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" -o \"$2\" \"$SAILFIN_PE_MODE\" \"$3\"' _ < "
+        + _cr_shell_quote(tmp);
+    let rc = process.run(["sh", "-c", xargs_cmd]);
+
+    process.run(["rm", "-f", tmp]);
+    return rc == 0;
+}
+
 // Validate a capsule.toml path segment is safe (no traversal).
 fn _cr_is_safe_segment(value: string) -> boolean {
     if value.length == 0 { return false; }
@@ -715,54 +893,147 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string) -> boolean ![io] {
         return false;
     }
 
-    // Extract .layout lines to build the sibling manifest that
-    // _resolve_layout_manifest_path_for_slug probes for existence.
-    if fs.exists(asm_path) {
-        let asm_text = fs.readFile(asm_path);
-        let mut manifest: string = "";
-        let mut line_start: number = 0;
-        let len = asm_text.length;
-        loop {
-            if line_start >= len { break; }
-            let mut line_end: number = line_start;
-            loop {
-                if line_end >= len { break; }
-                if substring(asm_text, line_end, line_end + 1) == "\n" {
-                    break;
-                }
-                line_end += 1;
-            }
-            if line_end >= line_start + 7 {
-                if substring(asm_text, line_start, line_start + 7) == ".layout" {
-                    manifest = manifest + substring(asm_text, line_start, line_end)
-                        + "\n";
-                }
-            }
-            line_start = line_end + 1;
-        }
-        fs.writeFile(manifest_path, manifest);
-    }
+    // Extract `.layout` lines into the sibling manifest. Shared
+    // helper with the parallel-stage path so both routes produce
+    // byte-identical manifests.
+    _cr_extract_layout_manifest(asm_path, manifest_path);
     return true;
 }
 
-// Stage import-context for every capsule source. Sequential by design —
-// the seed-emit path is not thread-safe for our in-process use and
-// capsule dep sets are small (tens of modules, not hundreds).
+// Extract `.layout` lines from a freshly-emitted `.sfn-asm` and
+// write the sibling `.layout-manifest`. Split out of `_cr_stage_one`
+// so the parallel-emit path can call it after xargs returns.
+fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
+    if !fs.exists(asm_path) { return; }
+    let asm_text = fs.readFile(asm_path);
+    let mut manifest: string = "";
+    let mut line_start: number = 0;
+    let len = asm_text.length;
+    loop {
+        if line_start >= len { break; }
+        let mut line_end: number = line_start;
+        loop {
+            if line_end >= len { break; }
+            if substring(asm_text, line_end, line_end + 1) == "\n" { break; }
+            line_end += 1;
+        }
+        if line_end >= line_start + 7 {
+            if substring(asm_text, line_start, line_start + 7) == ".layout" {
+                manifest = manifest + substring(asm_text, line_start, line_end)
+                    + "\n";
+            }
+        }
+        line_start = line_end + 1;
+    }
+    fs.writeFile(manifest_path, manifest);
+}
+
+// Stage import-context for every capsule source.
 //
-// Stage E PR1: `sailfin_exe` threads through to `_cr_stage_one`'s
-// subprocess emit. Empty `sailfin_exe` keeps the legacy in-process
-// path for callers (sfn check, sfn test) that don't yet plumb
+// Stage E PR1 (subprocess) → PR3 (parallel): when `sailfin_exe` is
+// non-empty AND there's more than one source to emit AND
+// `SAILFIN_BUILD_JOBS != 1`, the cache-miss subset is fanned across
+// `_cr_resolve_jobs()` workers via `_cr_run_parallel_emit`.
+// Single-process and `SAILFIN_BUILD_JOBS=1` paths fall through to
+// the legacy serial loop (one `_cr_stage_one` call per source) so
+// regression bisects keep the simple shape they had pre-PR3.
+//
+// Empty `sailfin_exe` (`sfn check`, `sfn test`) keeps the in-process
+// stage path that's load-bearing for callers that don't yet plumb
 // `binary_dir` through.
 fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string) -> boolean ![io] {
     _cr_ensure_dir("build");
     _cr_ensure_dir("build/native");
     _cr_ensure_dir("build/native/import-context");
-    let mut i: number = 0;
+
+    if sources.length == 0 { return true; }
+
+    // Serial path — when no `sailfin_exe` (in-process emit) or the
+    // task list is small enough that subprocess overhead would
+    // dominate. Single-source builds never benefit from
+    // parallelism.
+    if sailfin_exe.length == 0 || sources.length == 1 {
+        let mut si: number = 0;
+        loop {
+            if si >= sources.length { break; }
+            let ok = _cr_stage_one(sources[si], sailfin_exe);
+            if !ok { return false; }
+            si += 1;
+        }
+        return true;
+    }
+
+    let jobs = _cr_resolve_jobs();
+    if jobs <= 1 {
+        // SAILFIN_BUILD_JOBS=1 (or unresolved nproc): keep the
+        // legacy serial path. No xargs overhead, no temp file.
+        let mut si: number = 0;
+        loop {
+            if si >= sources.length { break; }
+            let ok = _cr_stage_one(sources[si], sailfin_exe);
+            if !ok { return false; }
+            si += 1;
+        }
+        return true;
+    }
+
+    // Parallel path: partition sources into already-staged
+    // (cache hit) and needs-emit. Cache hit checks are O(2N)
+    // file existence probes and run faster sequentially than
+    // dispatching subprocesses for them. The needs-emit set
+    // goes to `_cr_run_parallel_emit`, then a sequential pass
+    // extracts each `.layout-manifest` (also fast — just file
+    // read + grep, no subprocess).
+    let mut needs_emit: ParallelEmitTask[] = [];
+    let mut emit_indices: number[] = [];
+    let mut si: number = 0;
     loop {
-        if i >= sources.length { break; }
-        let ok = _cr_stage_one(sources[i], sailfin_exe);
-        if !ok { return false; }
-        i += 1;
+        if si >= sources.length { break; }
+        let src = sources[si];
+        let asm_path = "build/native/import-context/" + src.slug + ".sfn-asm";
+        let manifest_path = "build/native/import-context/" + src.slug
+            + ".layout-manifest";
+        let asm_dir = _cr_dirname(asm_path);
+        _cr_ensure_dir(asm_dir);
+        let mut cache_hit: boolean = false;
+        if fs.exists(asm_path) {
+            if fs.exists(manifest_path) { cache_hit = true; }
+        }
+        if !cache_hit {
+            if !fs.exists(src.source_path) {
+                print.err("capsule-resolver: missing source file: " + src.source_path);
+                return false;
+            }
+            needs_emit.push(ParallelEmitTask {
+                slug: src.slug, output_path: asm_path, source_path: src.source_path
+            });
+            emit_indices.push(si);
+        }
+        si += 1;
+    }
+
+    if needs_emit.length > 0 {
+        let emit_ok = _cr_run_parallel_emit(needs_emit, "native", sailfin_exe, jobs);
+        if !emit_ok {
+            print.err("capsule-resolver: one or more parallel stage emits failed");
+            return false;
+        }
+        // Sequential post-pass: extract `.layout-manifest` for
+        // each freshly-emitted `.sfn-asm`. Cheap (read + line
+        // scan) so parallelizing this step would be pure
+        // overhead.
+        let mut ei: number = 0;
+        loop {
+            if ei >= emit_indices.length { break; }
+            let src_idx = emit_indices[ei];
+            let src = sources[src_idx];
+            let asm_path = "build/native/import-context/" + src.slug
+                + ".sfn-asm";
+            let manifest_path = "build/native/import-context/" + src.slug
+                + ".layout-manifest";
+            _cr_extract_layout_manifest(asm_path, manifest_path);
+            ei += 1;
+        }
     }
     return true;
 }
@@ -1227,6 +1498,180 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
     let mut out: string[] = [];
     let mut stats = empty_cache_stats();
     let mut events: ModuleCacheEvent[] = [];
+
+    // Stage E PR3: parallel-fan when (a) `sailfin_exe` is set
+    // (subprocess emit available), (b) more than one source, and
+    // (c) `_cr_resolve_jobs()` returns >1. The parallel fast path
+    // partitions sources into cache hits (handled inline) and
+    // misses (batched into one xargs run). For hits, the event +
+    // ll_path stay in source order. For misses, parallel emit
+    // runs first, then a sequential validate+store pass produces
+    // the events. Empty `sailfin_exe` keeps the single-process
+    // legacy path that hasn't grown subprocess plumbing yet.
+    let mut go_parallel: boolean = false;
+    let mut jobs: number = 1;
+    if sailfin_exe.length > 0 {
+        if sources.length > 1 {
+            jobs = _cr_resolve_jobs();
+            if jobs > 1 { go_parallel = true; }
+        }
+    }
+
+    if go_parallel {
+        // Pass 1: cache lookup per source. Hits get their event
+        // accumulated immediately. Misses get queued for parallel
+        // emit. Order is preserved.
+        let mut ll_paths_ordered: string[] = [];
+        let mut events_ordered: ModuleCacheEvent[] = [];
+        let mut needs_emit: ParallelEmitTask[] = [];
+        let mut emit_indices: number[] = [];
+        let mut emit_keys: CacheKey[] = [];
+        let mut emit_lookup_attempted: boolean[] = [];
+        let mut emit_copy_failed: boolean[] = [];
+        let mut pi: number = 0;
+        loop {
+            if pi >= sources.length { break; }
+            let src = sources[pi];
+            ll_paths_ordered.push(src.ll_path);
+            // Mirror `_cr_compile_one`'s preconditions so the
+            // parallel path bails the same way the serial one
+            // does on missing source.
+            if !fs.exists(src.source_path) {
+                print.err("capsule-resolver: missing source file: " + src.source_path);
+                events_ordered.push(_cr_module_cache_event_failure(src.slug));
+                return CompileCapsuleResult {
+                    ll_paths: ll_paths_ordered,
+                    stats: stats,
+                    success: false,
+                    module_events: events_ordered
+                };
+            }
+            let ll_dir = _cr_dirname(src.ll_path);
+            _cr_ensure_dir(ll_dir);
+
+            let mut cache_key: CacheKey = CacheKey { digest: "" };
+            let mut hit_event_added: boolean = false;
+            let mut copy_failed: boolean = false;
+            let mut lookup_attempted: boolean = false;
+            if config.enabled {
+                lookup_attempted = true;
+                cache_key = cache_key_for(src.source_path, per_source_dep_manifests[pi], compiler_version, flags_canonical, src.slug);
+                if cache_lookup_artifact(cache_root_path, cache_key, "ll") {
+                    if cache_copy_artifact_to(cache_root_path, cache_key, "ll", src.ll_path) {
+                        if config.trace {
+                            print.err("[cache hit] " + src.slug);
+                        }
+                        events_ordered.push(ModuleCacheEvent {
+                            success: true, lookup_attempted: true, hit: true, stored: false, invalid_key: false, copy_failed: false, slug: src.slug, cache_key_digest: cache_key.digest
+                        });
+                        stats.hits = stats.hits + 1;
+                        hit_event_added = true;
+                    } else {
+                        copy_failed = true;
+                        if config.trace {
+                            print.err("[cache copy-failed] " + src.slug);
+                        }
+                    }
+                } else {
+                    if config.trace {
+                        print.err("[cache miss] " + src.slug);
+                    }
+                }
+            }
+            if !hit_event_added {
+                // Queue for parallel emit. The matching event +
+                // cache-store happens in pass 3.
+                needs_emit.push(ParallelEmitTask {
+                    slug: src.slug, output_path: src.ll_path, source_path: src.source_path
+                });
+                emit_indices.push(pi);
+                emit_keys.push(cache_key);
+                emit_lookup_attempted.push(lookup_attempted);
+                emit_copy_failed.push(copy_failed);
+                // Reserve the event slot so events_ordered keeps
+                // source order. Filled in by pass 3.
+                events_ordered.push(_cr_module_cache_event_failure(src.slug));
+                if lookup_attempted { stats.misses = stats.misses + 1; }
+            }
+            pi += 1;
+        }
+
+        // Pass 2: parallel emit for misses.
+        if needs_emit.length > 0 {
+            let emit_ok = _cr_run_parallel_emit(needs_emit, "llvm", sailfin_exe, jobs);
+            if !emit_ok {
+                print.err("capsule-resolver: one or more parallel module emits failed");
+                return CompileCapsuleResult {
+                    ll_paths: ll_paths_ordered,
+                    stats: stats,
+                    success: false,
+                    module_events: events_ordered
+                };
+            }
+        }
+
+        // Pass 3: post-emit cache store + event fixup. Sequential
+        // because cache_store_artifact writes through the
+        // content-addressed store and there's no benefit to
+        // parallelizing the cp-and-rename.
+        let mut ei: number = 0;
+        loop {
+            if ei >= emit_indices.length { break; }
+            let src_idx = emit_indices[ei];
+            let src = sources[src_idx];
+            let cache_key = emit_keys[ei];
+            let lookup_attempted = emit_lookup_attempted[ei];
+            let copy_failed = emit_copy_failed[ei];
+            let mut stored: boolean = false;
+            let mut invalid_key: boolean = false;
+            if config.enabled {
+                if is_valid_digest(cache_key.digest) {
+                    stored = cache_store_artifact(cache_root_path, cache_key, "ll", src.ll_path);
+                    if config.trace {
+                        if stored {
+                            print.err("[cache store] " + src.slug);
+                        } else {
+                            print.err("[cache store-failed] " + src.slug);
+                        }
+                    }
+                } else {
+                    invalid_key = true;
+                    if config.trace {
+                        print.err("[cache invalid-key] " + src.slug);
+                    }
+                }
+            }
+            events_ordered[src_idx] = ModuleCacheEvent {
+                success: true,
+                lookup_attempted: lookup_attempted,
+                hit: false,
+                stored: stored,
+                invalid_key: invalid_key,
+                copy_failed: copy_failed,
+                slug: src.slug,
+                cache_key_digest: cache_key.digest
+            };
+            if stored { stats.stores = stats.stores + 1; }
+            if invalid_key { stats.invalid_keys = stats.invalid_keys + 1; }
+            if copy_failed {
+                stats.copy_failures = stats.copy_failures + 1;
+            }
+            ei += 1;
+        }
+
+        return CompileCapsuleResult {
+            ll_paths: ll_paths_ordered,
+            stats: stats,
+            success: true,
+            module_events: events_ordered
+        };
+    }
+
+    // Serial path — `sailfin_exe == ""`, single source, or
+    // `SAILFIN_BUILD_JOBS=1`. Drives `_cr_compile_one` per source
+    // exactly as the pre-PR3 code did, with the same retry +
+    // validator cascade per task. Slower for cold builds but
+    // simpler to reason about during regression bisects.
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
