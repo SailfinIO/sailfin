@@ -1,6 +1,6 @@
 # Status
 
-Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1 subprocess-stage import-context in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273; seed pinned to v0.5.10-alpha.5)
+Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1 shipped; Stage E PR2 build.sh fallback retirement in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274; seed pinned to v0.5.10-alpha.6)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -346,7 +346,7 @@ feature availability.
   memory-bounded enough for cold builds to fit in 8 GB —
   tracked alongside Stage E (long-lived process, arena reset
   between modules) in `docs/proposals/build-architecture.md`.
-- **Stage E PR1 (in flight, this PR).** Subprocess-stage import-
+- **Stage E PR1 (#274, shipped).** Subprocess-stage import-
   context. `_cr_stage_one` and `stage_capsule_imports` gain a
   `sailfin_exe` parameter that, when non-empty, shells the heavy
   `write_native_text_file_with_module` work out to a fresh
@@ -360,9 +360,28 @@ feature availability.
   preserves the in-process path that `sfn check` and `sfn test`
   callers use; `prepare_project_capsules` (the build/run path)
   threads the resolved binary path through. The Makefile's
-  `bash scripts/build.sh` fallback survives until the next seed
-  cut (which will pin alpha.6 with this fix and remove the
-  fallback).
+  `bash scripts/build.sh` fallback survived alongside this PR
+  until alpha.6 cut.
+- **Stage E PR2 (in flight, this PR).** Pin alpha.6 + retire the
+  build.sh fallback. `.seed-version` bumps to `0.5.10-alpha.6`,
+  the first release including PR1's subprocess-stage import-
+  context. With that fix in the seed itself, cold builds of the
+  138-module compiler fit in the 8 GB virtual-memory cap that
+  CI runners and `compiler-safety.md` enforce. The fallback
+  block in `make rebuild` (which dropped to `bash
+  scripts/build.sh` when `<seed> build -p compiler` bailed
+  silently) is gone — `<seed> build -p compiler` is the only
+  path now. `scripts/build.sh` itself stays in-tree for `make
+  check`'s stage2/stage3 fixed-point comparison (which still
+  needs `WORK_DIR` control the driver doesn't expose) and as
+  an emergency seed-bootstrap escape hatch; PR3+ retires the
+  script outright when `make check` migrates.
+  Performance note: cold `sfn build -p compiler` runs ~6 min;
+  build.sh historically ran ~2 min. The 3× gap is parallelism
+  — build.sh defaults to `--jobs 4`, the resolver currently
+  runs `stage_capsule_imports` and `compile_capsule_modules`
+  sequentially. Stage E PR3 will fan the per-module subprocess
+  emits across `nproc` workers and close the gap.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
