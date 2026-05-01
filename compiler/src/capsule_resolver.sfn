@@ -341,11 +341,13 @@ fn _cr_shell_quote(value: string) -> string {
 
 // Resolve the per-build job count for parallel subprocess emits.
 // Reads `SAILFIN_BUILD_JOBS` first; falls back to `nproc` (clamped
-// to [1, 8] for memory safety — each worker holds its own arena
-// + parser state, so 8 workers × ~500 MB ≈ 4 GB peak parent
-// memory). Returns 1 on any read failure or when nproc isn't on
-// PATH, which keeps the legacy serial behavior as the safe
-// default.
+// to [1, 8] for system-memory safety — each worker subprocess
+// holds its own arena + parser state, so 8 workers × ~500 MB ≈
+// 4 GB peak total memory across the parent + worker processes,
+// keeping us under the 8 GB ulimit even when the parent's own
+// resolver state is at peak). Returns 1 on any read failure or
+// when nproc isn't on PATH, which keeps the legacy serial
+// behavior as the safe default.
 //
 // Stage E PR3: `_cr_run_parallel_emit` honours this. The architect's
 // plan is to default to `nproc`, with `SAILFIN_BUILD_JOBS=1`
@@ -431,29 +433,45 @@ struct ParallelEmitTask {
 }
 
 // Run a list of `<sailfin> emit` invocations in parallel via
-// `xargs -d '\n' -P N -n 3`. Each worker subprocess is independent
-// (fresh arena, no shared state), so memory stays per-worker
-// rather than scaling with `tasks.length`.
+// `tr '\n' '\0' | xargs -0 -P N -n 3`. Each worker subprocess
+// is independent (fresh arena, no shared state), so memory
+// stays per-worker rather than scaling with `tasks.length`.
 //
-// The implementation writes 3 lines per task (slug, output, source)
-// to a temp file, then pipes the file through xargs. Each xargs
-// invocation pulls 3 lines and runs `bash -c '<seed> emit
-// --module-name "$1" -o "$2" "$MODE" "$3"' _` with those args.
-// Seed binary path and mode are passed via env vars rather than
-// inlined in the format string — that sidesteps shell-escaping
-// pitfalls when the seed path contains spaces or quotes (which
-// it shouldn't, but defensive).
+// The implementation writes 3 newline-delimited lines per task
+// (slug, output, source) to a `mktemp`-allocated file, then
+// pipes through `tr` to convert the newlines into NULs that
+// POSIX xargs accepts via `-0`. (`-d '\n'` is a GNU xargs
+// extension; macOS / BSD xargs only supports `-0`, so the `tr`
+// translation is what keeps us portable.)
+//
+// Each xargs invocation pulls 3 NUL-separated args and runs
+// the per-worker shell script with them as $1, $2, $3. The
+// script emits via `<seed> emit --module-name "$1" -o "$2"
+// "$mode" "$3"`, then (for `llvm` mode only) runs the
+// validator cascade — `llvm-as` → `llvm-as-18` →
+// `clang -c -emit-llvm` → `clang-18` — and retries the emit
+// up to 3 times if validation rejects the IR. Same shape as
+// the serial `_cr_compile_one` retry loop, just inlined into
+// shell so each parallel worker is self-contained. Cache
+// stores happen AFTER xargs returns (in
+// `compile_capsule_modules`), so a worker that retries to
+// success won't poison the cache with a transient bad emit.
+//
+// Seed binary path and mode are passed via env vars rather
+// than inlined in the worker script — that sidesteps shell-
+// escaping pitfalls when the seed path contains spaces or
+// quotes (which it shouldn't, but defensive).
 //
 // Returns true iff every task exited zero. xargs's default
 // behavior is to terminate the rest of the queue on a non-zero
 // exit; we keep that semantics so a single bad emit fails the
-// whole build fast (matches the serial loop's `return false` on
-// the first failure).
+// whole build fast (matches the serial loop's `return false`
+// on the first failure).
 //
 // Stage E PR3: this is the helper that closes the parallelism
 // gap with `scripts/build.sh`'s `xargs -P "$JOBS"` pattern
-// (build.sh:819, 853). With `jobs == 1`, the helper sequentialises
-// to keep the regression-bisect path simple.
+// (build.sh:819, 853). With `jobs == 1`, the helper
+// sequentialises to keep the regression-bisect path simple.
 fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: number) -> boolean ![io] {
     if tasks.length == 0 { return true; }
     let mut effective_jobs = jobs;
@@ -474,9 +492,20 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
         return true;
     }
 
-    // Parallel: build the task TSV, hand it to xargs.
-    let nonce = _cr_shell_read("printf '%s_%s' \"$$\" \"$(date +%s%N 2>/dev/null || date +%s)\"");
-    let tmp = "/tmp/.sfn_parallel_emit_" + nonce + ".tsv";
+    // Parallel: write 3 lines per task (slug / output / source)
+    // to a `mktemp`-allocated file, then pipe through `tr` →
+    // `xargs -0`. `tr '\n' '\0'` translates the newline-separated
+    // file into NUL-separated input that POSIX xargs accepts via
+    // `-0` (the `-d '\n'` flag is GNU-only and breaks on macOS /
+    // BSD). `mktemp PATTERN` with at least 6 X's is portable
+    // across Linux GNU coreutils and macOS BSD; failure yields an
+    // empty path which we surface as a build error rather than
+    // writing to a predictable location.
+    let tmp = _cr_shell_read("mktemp /tmp/sfn_parallel_emit.XXXXXX 2>/dev/null");
+    if tmp.length == 0 {
+        print.err("capsule-resolver: mktemp failed; cannot run parallel emit");
+        return false;
+    }
     let mut content: string = "";
     let mut i: number = 0;
     loop {
@@ -488,14 +517,64 @@ fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: s
     }
     fs.writeFile(tmp, content);
 
-    let xargs_cmd = "SAILFIN_PE_SEED=" + _cr_shell_quote(sailfin_exe)
-        + " SAILFIN_PE_MODE="
-        + _cr_shell_quote(mode)
-        + " xargs -d '\\n' -P "
+    // Per-worker shell script: emit + (for `llvm` mode) validator
+    // cascade + up to 3 retries, mirroring the serial
+    // `_cr_compile_one` loop so the parallel path doesn't
+    // regress robustness vs the alpha.6 seed's known IR-
+    // corruption flake. `native` mode (used by
+    // `stage_capsule_imports`) skips validation — the staged
+    // `.sfn-asm` doesn't need to round-trip through llvm-as.
+    let worker_script = "attempt=0; while [ $attempt -lt 3 ]; do "
+        + "attempt=$((attempt + 1)); "
+        + "\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" -o \"$2\" \"$SAILFIN_PE_MODE\" \"$3\" || continue; "
+        + "[ -s \"$2\" ] || continue; "
+        + "if [ \"$SAILFIN_PE_MODE\" != llvm ]; then exit 0; fi; "
+        + "if (command -v llvm-as >/dev/null 2>&1 && llvm-as < \"$2\" >/dev/null 2>&1) "
+        + "|| (command -v llvm-as-18 >/dev/null 2>&1 && llvm-as-18 < \"$2\" >/dev/null 2>&1) "
+        + "|| (command -v clang >/dev/null 2>&1 && clang -c -emit-llvm -x ir \"$2\" -o /dev/null >/dev/null 2>&1) "
+        + "|| (command -v clang-18 >/dev/null 2>&1 && clang-18 -c -emit-llvm -x ir \"$2\" -o /dev/null >/dev/null 2>&1); "
+        + "then exit 0; fi; "
+        + "done; exit 1";
+
+    // Write the worker script + the pipeline driver to two temp
+    // files. Splitting them sidesteps two layers of shell
+    // escaping — the worker script body (multi-statement) and
+    // the outer pipeline (`tr | xargs sh worker`). Both are
+    // sourced as files; `process.run` passes the env vars
+    // directly via the `env` command without going through
+    // shell parsing.
+    let worker_path = _cr_shell_read("mktemp /tmp/sfn_parallel_worker.XXXXXX 2>/dev/null");
+    if worker_path.length == 0 {
+        print.err("capsule-resolver: mktemp failed; cannot run parallel emit");
+        process.run(["rm", "-f", tmp]);
+        return false;
+    }
+    fs.writeFile(worker_path, "#!/bin/sh\n" + worker_script + "\n");
+
+    let driver_path = _cr_shell_read("mktemp /tmp/sfn_parallel_driver.XXXXXX 2>/dev/null");
+    if driver_path.length == 0 {
+        print.err("capsule-resolver: mktemp failed; cannot run parallel emit");
+        process.run(["rm", "-f", tmp]);
+        process.run(["rm", "-f", worker_path]);
+        return false;
+    }
+    let driver_script = "#!/bin/sh\n" + "tr '\\n' '\\0' < " + _cr_shell_quote(tmp)
+        + " | xargs -0 -P "
         + number_to_string(effective_jobs)
-        + " -n 3 sh -c '\"$SAILFIN_PE_SEED\" emit --module-name \"$1\" -o \"$2\" \"$SAILFIN_PE_MODE\" \"$3\"' _ < "
-        + _cr_shell_quote(tmp);
-    let rc = process.run(["sh", "-c", xargs_cmd]);
+        + " -n 3 sh "
+        + _cr_shell_quote(worker_path)
+        + "\n";
+    fs.writeFile(driver_path, driver_script);
+
+    // `env VAR=value cmd` exports the env vars into the entire
+    // process tree (including xargs-spawned worker shells).
+    // `process.run` doesn't take an env map; routing through
+    // `env` keeps the env propagation explicit + visible.
+    let rc = process.run(["env", "SAILFIN_PE_SEED=" + sailfin_exe, "SAILFIN_PE_MODE="
+        + mode, "sh", driver_path]);
+
+    process.run(["rm", "-f", driver_path]);
+    process.run(["rm", "-f", worker_path]);
 
     process.run(["rm", "-f", tmp]);
     return rc == 0;

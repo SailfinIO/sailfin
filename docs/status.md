@@ -377,28 +377,45 @@ feature availability.
   `WORK_DIR` control the driver doesn't expose) and as an
   emergency seed-bootstrap escape hatch.
 - **Stage E PR3 (in flight, this PR).** Parallel-emit fan-out.
-  `_cr_run_parallel_emit` writes one TSV-style task per line
-  to a temp file, then pipes through `xargs -d '\\n' -P N -n 3
-  sh -c '...'` so `N = _cr_resolve_jobs()` workers run
-  concurrently. `_cr_resolve_jobs` reads `SAILFIN_BUILD_JOBS`
-  first, falls back to `nproc` (clamped to `[1, 8]` for
-  per-worker memory safety). `stage_capsule_imports` and
-  `compile_capsule_modules` partition into cache-hit and
-  needs-emit subsets in a sequential pass, batch the
-  needs-emit set into one xargs run, then sequentially extract
-  layout manifests / store cache entries. Mirrors
-  `scripts/build.sh`'s `xargs -P "$JOBS"` pattern (build.sh:819,
-  build.sh:853) so end users see the same parallelism shape
-  build.sh historically gave them.
+  `_cr_run_parallel_emit` writes three newline-delimited lines
+  per task (`slug`, `output`, `source`) to a `mktemp`-allocated
+  file, then pipes the file through `tr '\n' '\0'` into
+  `xargs -0 -P N -n 3 sh -c '...'` so `N = _cr_resolve_jobs()`
+  workers run concurrently. The `tr` step converts the
+  newline-delimited file into NUL-delimited input that POSIX
+  xargs consumes via `-0`; the GNU-only `-d '\n'` flag isn't
+  used because BSD xargs (macOS CI) doesn't support it.
+  `_cr_resolve_jobs` reads `SAILFIN_BUILD_JOBS` first, falls
+  back to `nproc` (clamped to `[1, 8]` for system-memory
+  safety: 8 workers × ~500 MB arena each ≈ 4 GB peak total
+  across parent + workers, well under the 8 GB ulimit).
+  Each parallel worker runs the same retry + IR-validation
+  cascade the serial `_cr_compile_one` does (up to 3 attempts;
+  `llvm-as` → `llvm-as-18` → `clang -c -emit-llvm` →
+  `clang-18` for `llvm` mode; native mode skips validation),
+  inlined into the per-task shell script. Cache stores happen
+  AFTER the worker exits 0, so a corrupted-IR retry can't
+  poison the cache.
+  `stage_capsule_imports` and `compile_capsule_modules`
+  partition into cache-hit and needs-emit subsets in a
+  sequential pass, batch the needs-emit set into one xargs
+  run, then sequentially extract layout manifests / store
+  cache entries. Mirrors `scripts/build.sh`'s
+  `xargs -P "$JOBS"` pattern (`build.sh:819` for staging,
+  `build.sh:853` for compile) so end users see the same
+  parallelism shape build.sh historically gave them.
   Performance: cold `sfn build -p compiler` measured at
   **2m27s** with the new parallel resolver on a 4-core box,
   down from **6m07s** sequential. That's a 2.5× speedup,
   matching `scripts/build.sh --jobs 4`'s historical wall time.
-  The 8 GB ulimit still holds — each subprocess gets its own
-  arena, so the parent's peak memory doesn't scale with
-  parallelism level. `SAILFIN_BUILD_JOBS=1` keeps the
-  pre-PR3 sequential path available as a regression-bisect
-  escape hatch.
+  The 8 GB ulimit still holds *per worker process* — each
+  subprocess gets its own arena, so any one worker stays
+  bounded and the parent's own peak memory doesn't materially
+  scale with parallelism. Total system memory does rise with
+  the worker count, so higher `SAILFIN_BUILD_JOBS` values
+  trade memory for wall time. `SAILFIN_BUILD_JOBS=1` keeps
+  the pre-PR3 sequential path available as a
+  regression-bisect escape hatch.
   Empty `sailfin_exe` (sfn check, sfn test) keeps the
   in-process emit path; parallelism only engages when the
   caller threads `binary_dir` through. Single-source builds
