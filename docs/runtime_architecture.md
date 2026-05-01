@@ -12,6 +12,11 @@
 > - M0 hard prerequisite #7 (`extern fn` typed linker-resolved symbols):
 >   **shipped 2026-05-01** (parser + typecheck + native-IR + LLVM `declare`).
 >   Cross-module call-site resolution is the remaining sub-step; see §3.6.
+> - First `runtime/sfn/platform/libc.sfn` skeleton: **shipped 2026-05-01**
+>   (12 extern declarations, typecheck + fmt + LLVM `declare` emission
+>   verified by `compiler/tests/e2e/test_runtime_libc_skeleton.sh`). The
+>   file is not yet imported anywhere — the runtime continues to reach
+>   libc through the C runtime until M2.
 > - All other M0 items (`int`/`float`, `Result<T, E>` + `?`, closures with
 >   capture, atomic intrinsics) remain planned.
 
@@ -728,25 +733,30 @@ declarations — pure Sailfin source, no C. The compiler emits LLVM `declare`
 directives for each extern; the linker resolves them against libc/libpthread at
 link time.
 
-**`runtime/sfn/platform/libc.sfn`** (selected entries):
+**`runtime/sfn/platform/libc.sfn`** — the first 12 declarations
+shipped 2026-05-01 use `usize` for `size_t`-shaped parameters and
+omit `setjmp`/`longjmp`/`memchr` until follow-up PRs land their
+dependencies (opaque `JmpBuf` size, exception subsystem). The
+shape below is the design target across all milestones; selected
+entries:
 
 ```sailfin
 // Memory
-extern fn malloc(size: i64) -> *u8;
+extern fn malloc(size: usize) -> *u8;
 extern fn free(ptr: *u8) -> void;
-extern fn realloc(ptr: *u8, new_size: i64) -> *u8;
-extern fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8;
-extern fn memcmp(a: *u8, b: *u8, n: i64) -> i32;
-extern fn memchr(haystack: *u8, byte: i32, n: i64) -> *u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
+extern fn memchr(haystack: *u8, byte: i32, n: usize) -> *u8;
 
 // I/O (fd-based)
-extern fn write(fd: i32, buf: *u8, count: i64) -> i64;
-extern fn read(fd: i32, buf: *u8, count: i64) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
 
 // Stdio filesystem
 extern fn fopen(path: *u8, mode: *u8) -> *File;
-extern fn fread(buf: *u8, size: i64, nmemb: i64, f: *File) -> i64;
-extern fn fwrite(buf: *u8, size: i64, nmemb: i64, f: *File) -> i64;
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 extern fn fclose(f: *File) -> i32;
 
 // Environment + exception support

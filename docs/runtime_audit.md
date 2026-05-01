@@ -17,6 +17,12 @@
 >   below is satisfied. Cross-module *call-site* resolution against the
 >   typecheck symbol table is the open follow-up; today the symbol table is
 >   duplicate-detection-only, so externs round-trip without a resolver.
+> - **First `runtime/sfn/platform/libc.sfn` skeleton — shipped 2026-05-01**
+>   (12 declarations covering libc memory, fd-based I/O, stdio filesystem,
+>   environment). Not imported anywhere yet; the C runtime continues to
+>   serve libc calls until M2. Pinned by
+>   `compiler/tests/e2e/test_runtime_libc_skeleton.sh` (typecheck + fmt +
+>   LLVM `declare` emission for every symbol).
 
 ## Purpose
 

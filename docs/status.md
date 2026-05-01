@@ -699,6 +699,7 @@ The runtime rewrite depends on compiler features that must ship first. The
 | Compiler Feature | Status | Runtime Subsystems It Unblocks |
 |---|---|---|
 | `extern fn` (parser + type-checker + LLVM `declare` emission) | **Shipped** (parser + emitter + typecheck registration with E0801–E0805 C-ABI validation; cross-module call-site resolution deferred until typecheck grows a call resolver) | All — `runtime/sfn/platform/*.sfn` modules can now type-check end-to-end |
+| First `runtime/sfn/platform/libc.sfn` skeleton (12 declarations: malloc/free/realloc/memcpy/memcmp, write/read, fopen/fclose/fread/fwrite, getenv) | **Shipped 2026-05-01** (typecheck + fmt + LLVM `declare` emission verified by `compiler/tests/e2e/test_runtime_libc_skeleton.sh`); not yet imported by any module | Confirms the extern pipeline works on a realistic file; seed for `runtime/sfn/memory.sfn`, `runtime/sfn/io.sfn`, and `runtime/sfn/adapters/filesystem.sfn` at M2 |
 | `int` / `float` numeric types | Planned | Sizes, indices, bitwise ops; fixes f64 precision hazard |
 | Raw pointer types (`*T`) enforced | Planned | OS handles (`*FILE`, `*DIR`, `*pthread_t`), buffer pointers |
 | `Result<T, E>` + `?` operator | Planned | Every fallible operation (file I/O, allocation, network) |
