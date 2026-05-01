@@ -321,7 +321,7 @@ feature availability.
   and a `build/.shim/llvm-as → llvm-as-18` symlink so the
   alpha.4 seed's IR validator could find a parser on Ubuntu's
   versioned-only llvm-18 install.
-- **Stage D PR5 (in flight, this PR).** Cleanup. `.seed-version`
+- **Stage D PR5 (#273, shipped).** Cleanup. `.seed-version`
   bumps to `0.5.10-alpha.5` — the first release including PR4's
   source-side fixes:
   - The validator cascade in `_cr_compile_one` (`llvm-as` →
@@ -350,8 +350,9 @@ feature availability.
   context. `_cr_stage_one` and `stage_capsule_imports` gain a
   `sailfin_exe` parameter that, when non-empty, shells the heavy
   `write_native_text_file_with_module` work out to a fresh
-  subprocess (`<sailfin> emit native --module-name <slug> -o
-  <asm> <src>`). Mirrors the PR3 subprocess-per-module compile
+  subprocess (`<sailfin> emit --module-name <slug> -o <asm>
+  native <src>` — flags before mode, matching `cli_main.sfn`'s
+  emit parser). Mirrors the PR3 subprocess-per-module compile
   shape. The parent's arena no longer accumulates 138 modules'
   worth of AST + IR text — verified by self-hosting the new
   compiler under the 8 GB ulimit, which previously needed to

@@ -693,12 +693,18 @@ fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string) -> boolean ![io] {
         // the resolver already computed (matters for cross-
         // capsule deps whose slug is `<scope>/<name>/<sub>`,
         // which `module_name_from_path` would NOT derive).
+        //
+        // Validation is `rc == 0 && file exists` only — no probe
+        // read here. The block below already reads the asm to
+        // extract `.layout` lines; doubling the read would
+        // re-allocate the same string in the parent's arena and
+        // undermine the memory bounds this whole subprocess path
+        // is for. An empty asm produces an empty manifest, which
+        // downstream callers tolerate (the import-context loader
+        // just sees no layout lines for that slug).
         let rc = process.run([sailfin_exe, "emit", "--module-name", src.slug, "-o", asm_path, "native", src.source_path]);
         if rc == 0 {
-            if fs.exists(asm_path) {
-                let probe = fs.readFile(asm_path);
-                if probe.length > 0 { ok = true; }
-            }
+            if fs.exists(asm_path) { ok = true; }
         }
     } else {
         let source = fs.readFile(src.source_path);
