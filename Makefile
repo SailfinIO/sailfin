@@ -572,24 +572,28 @@ ci-package-installer:
 # Output:
 #   build/native/sailfin
 #
-# Stage D PR4 (cutover) → PR5 (cleanup): routes through `<seed>
-# build -p compiler` as the default path. The 0.5.10-alpha.5 seed
-# includes the source-side fixes that retired PR4's transitional
-# Makefile workarounds:
-#   - stages the entry's `.sfn-asm` so dependents can find
-#     `compile_to_sailfin` etc. (was never staged in alpha.4 — the
-#     binary-capsule walker excludes the entry from enumeration);
-#   - validates per-module IR via a cascade (`llvm-as` →
-#     `llvm-as-18` → `clang -c -emit-llvm` → `clang-18`) so
-#     seed-corruption flakes get caught even on systems where the
-#     unversioned `llvm-as` symlink isn't on PATH.
-# A `bash scripts/build.sh` fallback survives below for cold-build
-# scenarios where the resolver's in-process state pushes the seed
-# above the 8 GB virtual-memory cap that CI and the local
-# `compiler-safety.md` rule enforce — see the comment on the
-# fallback block. PR5 (this PR) is the cleanup of the transitional
-# shims; PR6+ retires build.sh outright once Stage E memory work
-# bounds the resolver.
+# Stage D PR4 (cutover) → PR5 (cleanup) → Stage E PR2 (this PR,
+# fallback retirement): routes through `<seed> build -p compiler`
+# as the only path. The 0.5.10-alpha.6 seed pinned in
+# `.seed-version` ships the cumulative source-side fixes:
+#   - PR3: binary-capsule `src/` walker + subprocess-per-module
+#     compile (each compile gets a fresh arena);
+#   - PR4: entry `.sfn-asm` staging + `llvm-as`/`clang -c
+#     -emit-llvm` validator cascade;
+#   - PR1 of Stage E: subprocess-stage import-context (each
+#     `write_native_text_file_with_module` runs in a fresh
+#     subprocess too).
+# The cumulative effect: cold builds of the 138-module compiler
+# fit in the 8 GB virtual-memory cap that CI runners and
+# `compiler-safety.md` enforce, no `bash scripts/build.sh`
+# fallback needed. The fallback that survived through PR5
+# retires here.
+#
+# `scripts/build.sh` itself stays in-tree for `make check`'s
+# stage2/stage3 fixed-point comparison (which still needs
+# `WORK_DIR` control the driver doesn't expose) and for emergency
+# manual seed bootstrapping. Stage E PR3+ retires the script
+# outright once `make check` migrates.
 #
 # Notes:
 # - Pass extra flags via BUILD_ARGS (driver-level, e.g.
@@ -645,36 +649,12 @@ rebuild:
 	@rm -f build/sailfin/program build/sailfin/program.ll
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
-	cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat" || \
-		echo "[rebuild] sfn build exit was non-zero; checking for fallback path"
-	@# build.sh fallback. Cold builds of the 138-module compiler
-	@# routinely peak above the 8 GB virtual-memory cap that
-	@# `.claude/rules/compiler-safety.md` and CI runners enforce
-	@# (the parent resolver's in-process state + per-module
-	@# subprocess overhead exceed budget). When the seed bails or
-	@# segfaults silently before producing `build/sailfin/program`,
-	@# fall back to `bash scripts/build.sh`'s subprocess-per-module
-	@# pipeline which keeps each compile in its own process AND
-	@# bounds the parent's memory usage.
-	@#
-	@# build.sh retires once the compiler's resolver pass is
-	@# memory-bounded enough for cold builds to fit in 8 GB —
-	@# tracked alongside the rest of Stage E (long-lived process,
-	@# arena reset between modules) in
-	@# `docs/proposals/build-architecture.md`.
+	cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat"
 	@if [ ! -f build/sailfin/program ]; then \
-		echo "[rebuild] sfn build did not produce build/sailfin/program — falling back to scripts/build.sh"; \
-		seed=$$(cat build/.seed-resolved); \
-		SEED="$$seed" OUT="$(NATIVE_OUT)" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" SEED_TIMEOUT=600 MAX_TOTAL=7200 \
-			bash scripts/build.sh; \
-		BUILDSH_RC=$$?; \
-		if [ "$$BUILDSH_RC" -ne 0 ]; then \
-			echo "[rebuild][error] both sfn build and scripts/build.sh failed" >&2; \
-			exit "$$BUILDSH_RC"; \
-		fi; \
-		mkdir -p build/sailfin; \
-		cp -f "$(NATIVE_OUT)" build/sailfin/program; \
-		echo "[rebuild] build.sh fallback succeeded"; \
+		echo "[rebuild][error] sfn build did not produce build/sailfin/program" >&2; \
+		echo "[rebuild][error] expected the alpha.6+ seed's subprocess-stage path to keep the cold build under the 8 GB ulimit" >&2; \
+		echo "[rebuild][error] if this is a regression, run 'bash scripts/build.sh' manually to bisect" >&2; \
+		exit 1; \
 	fi
 	@mkdir -p build/native
 	@cp -f build/sailfin/program $(NATIVE_OUT)
