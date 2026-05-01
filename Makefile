@@ -653,22 +653,29 @@ rebuild:
 	@mkdir -p build/native/raw
 	@cp -a build/sailfin/capsules/. build/native/raw/ 2>/dev/null || true
 	@cp -f build/sailfin/program.ll build/native/raw/program.ll 2>/dev/null || true
-	@# Stage prelude.o for the freshly-built compiler. End-user
-	@# `sfn build` / `sfn run` invocations from this binary check
-	@# `_runtime_bundle_exists("runtime")` which requires a
-	@# prebuilt `prelude.o` somewhere under the runtime tree (see
-	@# `_runtime_prelude_path` in cli_main.sfn for the search
-	@# list). The fresh-clone repo's `runtime/` has no `obj/`, so
-	@# without this step the in-tree compiler would fail to link
-	@# any user program with "runtime bundle missing expected
-	@# files." Replicate via the new compiler emitting prelude.ll
-	@# + clang compiling it to an object. The .ll stays on disk
-	@# so `ci-cross-windows` can reuse it as the Windows-target
-	@# prelude IR.
+	@# Stage prelude.o + prelude.ll for the freshly-built compiler.
+	@# End-user `sfn build` / `sfn run` invocations from this
+	@# binary check `_runtime_bundle_exists("runtime")` which
+	@# requires a prebuilt `prelude.o` somewhere under the runtime
+	@# tree (see `_runtime_prelude_path` in cli_main.sfn for the
+	@# search list). The fresh-clone repo's `runtime/` has no
+	@# `obj/`, so without this step the in-tree compiler would
+	@# fail to link any user program with "runtime bundle missing
+	@# expected files." Replicate via the new compiler emitting
+	@# prelude.ll + clang compiling it to an object.
+	@#
+	@# The .ll is also load-bearing for `ci-cross-windows`, which
+	@# reads it as the Windows-target prelude IR. Each artifact
+	@# is generated independently — if a prior build dropped
+	@# prelude.ll but kept prelude.o (or vice-versa), regenerate
+	@# the missing one on its own rather than re-doing both.
 	@mkdir -p build/native/obj/runtime
+	@if [ ! -f build/native/obj/runtime/prelude.ll ]; then \
+		echo "[rebuild] staging prelude.ll..."; \
+		$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null; \
+	fi
 	@if [ ! -f build/native/obj/runtime/prelude.o ]; then \
 		echo "[rebuild] staging prelude.o..."; \
-		$(NATIVE_OUT) emit -o build/native/obj/runtime/prelude.ll llvm runtime/prelude.sfn >/dev/null; \
 		$(CLANG) -O2 -Wno-override-module -c build/native/obj/runtime/prelude.ll -o build/native/obj/runtime/prelude.o; \
 	fi
 	@# Write build stamp (version + git hash for dev builds).
