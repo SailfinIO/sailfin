@@ -573,8 +573,9 @@ ci-package-installer:
 #   build/native/sailfin
 #
 # Stage D PR4 (cutover) → PR5 (cleanup): routes through `<seed>
-# build -p compiler` exclusively. The 0.5.10-alpha.5 seed includes
-# the source-side fix that:
+# build -p compiler` as the default path. The 0.5.10-alpha.5 seed
+# includes the source-side fixes that retired PR4's transitional
+# Makefile workarounds:
 #   - stages the entry's `.sfn-asm` so dependents can find
 #     `compile_to_sailfin` etc. (was never staged in alpha.4 — the
 #     binary-capsule walker excludes the entry from enumeration);
@@ -582,9 +583,13 @@ ci-package-installer:
 #     `llvm-as-18` → `clang -c -emit-llvm` → `clang-18`) so
 #     seed-corruption flakes get caught even on systems where the
 #     unversioned `llvm-as` symlink isn't on PATH.
-# That makes the PR4 transitional shim + entry-pre-stage + build.sh
-# fallback redundant. Kept here is just the canonical sequence:
-# clean stale import-context, run sfn build, copy artifacts.
+# A `bash scripts/build.sh` fallback survives below for cold-build
+# scenarios where the resolver's in-process state pushes the seed
+# above the 8 GB virtual-memory cap that CI and the local
+# `compiler-safety.md` rule enforce — see the comment on the
+# fallback block. PR5 (this PR) is the cleanup of the transitional
+# shims; PR6+ retires build.sh outright once Stage E memory work
+# bounds the resolver.
 #
 # Notes:
 # - Pass extra flags via BUILD_ARGS (driver-level, e.g.
@@ -597,6 +602,7 @@ ci-package-installer:
 #   directly until the fixed-point comparison machinery moves into
 #   the driver.
 rebuild:
+	@mkdir -p build
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
 	resolved_seed="$$seed"; \
 	if command -v "$$seed" >/dev/null 2>&1; then \
@@ -628,9 +634,19 @@ rebuild:
 	@if [ -d build/native/import-context ]; then \
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi
+	@# Wipe stale `build/sailfin/program` so the fallback's
+	@# existence-based success check below can't be fooled by an
+	@# old binary surviving a failed seed run. The `set -o
+	@# pipefail` + bash wrapper captures the seed's real exit
+	@# status (otherwise `| cat` always returns 0) and lets us
+	@# log it for diagnostics. The `|| true` after the wrapper
+	@# tolerates the seed bailing — the fallback then takes
+	@# over.
+	@rm -f build/sailfin/program build/sailfin/program.ll
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
-	cd $(CURDIR) && "$$seed" build $(BUILD_ARGS) -p compiler 2>&1 | cat || true
+	cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat" || \
+		echo "[rebuild] sfn build exit was non-zero; checking for fallback path"
 	@# build.sh fallback. Cold builds of the 138-module compiler
 	@# routinely peak above the 8 GB virtual-memory cap that
 	@# `.claude/rules/compiler-safety.md` and CI runners enforce
