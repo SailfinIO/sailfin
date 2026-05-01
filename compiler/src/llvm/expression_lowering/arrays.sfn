@@ -130,7 +130,7 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
     let new_raw_buffer = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + new_raw_buffer
-        + " = call noalias i8* @calloc(i64 1, i64 "
+        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
         + total_bytes
         + ")");
     let new_data_ptr = format_temp_name(current_temp);
@@ -215,7 +215,7 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
 
     let new_struct_raw = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + new_struct_raw + " = call i8* @calloc(i64 1, i64 "
+    current_lines.push("  " + new_struct_raw + " = call i8* @sailfin_runtime_alloc_struct(i64 "
         + struct_size_value
         + ")");
     let new_struct_ptr = format_temp_name(current_temp);

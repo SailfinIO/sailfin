@@ -14,7 +14,15 @@ fn lower_string_literal(literal: string, temp_index: number, lines: string[]) ->
     // Stage2's struct-return plumbing can drop the collected constant table,
     // yielding link-time failures (undefined @.str.*). To keep emitted LLVM
     // self-contained and clang-linkable, we materialize literals directly
-    // into heap memory via malloc + store of an inline constant array.
+    // into heap memory via store of an inline constant array. The buffer
+    // is allocated through the arena-aware runtime helper so that
+    // multi-module in-process drivers (`sfn check <dir>`, `sfn test`,
+    // future `sfn lsp`) can reclaim per-iteration literal storage via
+    // `runtime.arena_rewind`. Falling back to libc `calloc` here was
+    // the original Phase 5a leak: every `is_trivia_token` /
+    // `strings_equal` call re-allocated its comparison strings and the
+    // mark/rewind primitive could not reach them, blowing peak RSS
+    // past the 2 GB Phase 5a target on `sfn check compiler/src/`.
     let content = unescape_string_literal(literal);
     let escaped = escape_string_for_llvm(content);
     let array_length = content.length + 1;
@@ -22,7 +30,7 @@ fn lower_string_literal(literal: string, temp_index: number, lines: string[]) ->
 
     let mut current_lines: string[] = lines;
     let malloc_temp = format_temp_name(temp_index);
-    current_lines.push("  " + malloc_temp + " = call i8* @calloc(i64 1, i64 "
+    current_lines.push("  " + malloc_temp + " = call i8* @sailfin_runtime_alloc_struct(i64 "
         + number_to_string(array_length)
         + ")");
     let cast_temp = format_temp_name(temp_index + 1);
