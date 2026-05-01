@@ -65,6 +65,17 @@ extern "C"
     // non-deterministic truncation under seed 0.5.7 on Apple Silicon.
     void *sailfin_runtime_alloc_struct(int64_t size_bytes);
 
+    // Arena-aware free counterpart for `sailfin_runtime_alloc_struct`. When the
+    // arena is enabled (default-on for selfhost / installed binaries) this is a
+    // no-op; the arena reclaims the allocation on `runtime.arena_rewind` or
+    // process exit. When the arena is disabled it falls through to libc free,
+    // matching the lifetime contract that the boxed-struct ABI inherited from
+    // the previous raw `@calloc` / `@free` pairing in the await unboxing path.
+    // Callers must pair this with `sailfin_runtime_alloc_struct` (or any other
+    // `_rt_calloc`-routed allocation) — calling it on a libc-allocated pointer
+    // while the arena is on would leak that pointer.
+    void sailfin_runtime_free(void *ptr);
+
     // ---- Array helpers ----
 
     // For `{ i8**, i64 }*` concatenation, native IR uses `@sailfin_runtime_concat({i8**,i64}*,{i8**,i64}*)`.

@@ -112,6 +112,20 @@ fi
 
 if [ $RC_INNER -ne 0 ]; then
     echo "[test] FAIL: $BASENAME (exit code $RC_INNER, timeout=$TIMEOUT)"
+    # When a test fails, the error of interest is rarely in the last 10 lines
+    # — link errors land 100+ lines back, behind a wall of clang's
+    # `-Woverride-module` warnings. Surface every line that smells like an
+    # error or signal-shaped cause (clang/ld diagnostics, resolver retries,
+    # missing files, OOM/abort), bounded to keep the CI log readable. The
+    # tail of the output still prints last so failure summaries that rely
+    # on the final lines (e.g. assertion messages) are not lost.
+    diag="$(grep -nE '^(clang(-[0-9]+)?|sh|/usr/bin/ld|ld)\.?: |error:|undefined reference| no such file|Killed|Aborted|abort\(\)|munmap_chunk|capsule-resolver:|\[emit retry\]|\[cache (copy-failed|store-failed|invalid-key)\]|test runner: compile failed|link failed|test failed:' <<< "$output" | head -40)"
+    if [ -n "$diag" ]; then
+        echo "[test] -- diagnostic excerpt --"
+        echo "$diag"
+        echo "[test] -- /diagnostic excerpt --"
+    fi
+    echo "[test] -- last 10 lines of output --"
     echo "$output" | tail -10
     exit 1
 fi

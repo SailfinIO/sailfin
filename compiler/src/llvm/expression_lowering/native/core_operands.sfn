@@ -627,7 +627,7 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
         if operand_type == "i8" {
             let malloc_temp = format_temp_name(temp_index);
             current_lines.push("  " + malloc_temp
-                + " = call noalias i8* @calloc(i64 1, i64 2)");
+                + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 2)");
             let char_ptr = format_temp_name(temp_index + 1);
             current_lines.push("  " + char_ptr + " = getelementptr i8, i8* "
                 + malloc_temp
@@ -751,7 +751,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                         + size_ptr_temp
                         + " to i64");
                     current_lines.push("  " + malloc_temp
-                        + " = call noalias i8* @calloc(i64 1, i64 "
+                        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
                         + size_temp
                         + ")");
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
@@ -832,7 +832,7 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             + size_ptr_temp
             + " to i64");
         current_lines.push("  " + malloc_temp
-            + " = call noalias i8* @calloc(i64 1, i64 "
+            + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
             + size_temp
             + ")");
         current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
@@ -914,7 +914,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                         + size_ptr_temp
                         + " to i64");
                     current_lines.push("  " + malloc_temp
-                        + " = call noalias i8* @calloc(i64 1, i64 "
+                        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
                         + size_temp
                         + ")");
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
@@ -983,7 +983,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                             + size_ptr_temp
                             + " to i64");
                         local_lines.push("  " + malloc_temp
-                            + " = call noalias i8* @calloc(i64 1, i64 "
+                            + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
                             + size_temp
                             + ")");
                         local_lines.push("  " + typed_ptr_temp
@@ -1033,7 +1033,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                                 + size_ptr_temp
                                 + " to i64");
                             local_lines.push("  " + malloc_temp
-                                + " = call noalias i8* @calloc(i64 1, i64 "
+                                + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
                                 + size_temp
                                 + ")");
                             local_lines.push("  " + typed_ptr_temp
@@ -1191,7 +1191,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     + size_ptr_temp
                     + " to i64");
                 current_lines.push("  " + malloc_temp
-                    + " = call noalias i8* @calloc(i64 1, i64 "
+                    + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
                     + size_temp
                     + ")");
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
@@ -1254,7 +1254,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     + size_ptr_temp
                     + " to i64");
                 current_lines.push("  " + malloc_temp
-                    + " = call noalias i8* @calloc(i64 1, i64 "
+                    + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
                     + size_temp
                     + ")");
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "

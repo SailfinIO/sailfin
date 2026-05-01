@@ -148,6 +148,23 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     if find_function_by_name(context_functions, "free") == null {
         lines.push("declare void @free(i8*)");
     }
+    // Arena-aware allocation primitive. The expression-lowering pass
+    // emits `@sailfin_runtime_alloc_struct` instead of raw `@calloc`
+    // for string-literal materialization, struct/array literal boxes,
+    // and scalar→i8* coercions so that in-process multi-module drivers
+    // (`sfn check <dir>`, `sfn test`, future `sfn lsp`) can reclaim
+    // per-iteration scratch via Phase 5a's `runtime.arena_rewind`.
+    // Without this routing the rewind primitive cannot reach libc-
+    // owned literal storage and peak RSS climbs unbounded across the
+    // per-file loop. The runtime helper falls back to libc calloc when
+    // the arena is disabled, so behaviour for `SAILFIN_USE_ARENA=0`
+    // is unchanged.
+    if find_function_by_name(context_functions, "sailfin_runtime_alloc_struct") == null {
+        lines.push("declare noalias i8* @sailfin_runtime_alloc_struct(i64)");
+    }
+    if find_function_by_name(context_functions, "sailfin_runtime_free") == null {
+        lines.push("declare void @sailfin_runtime_free(i8*)");
+    }
     lines.push("");
 
     // Runtime global

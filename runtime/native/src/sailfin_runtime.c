@@ -3202,6 +3202,22 @@ void *sailfin_runtime_alloc_struct(int64_t size_bytes)
     return _rt_calloc(1, (size_t)size_bytes);
 }
 
+/* Arena-aware free for `sailfin_runtime_alloc_struct` allocations. The async
+ * await unboxing path in `compiler/src/llvm/expression_lowering/native/core.sfn`
+ * frees the boxed struct returned by an `async fn -> %T` after copying the
+ * value onto the awaiter's stack. Pre-Phase-5a-followup that path used raw
+ * `@free`, which assumed the box lived in libc heap. With the boxed-struct
+ * literal lowering routed through the arena, libc `free` on an arena pointer
+ * corrupts glibc's chunk metadata (`munmap_chunk(): invalid pointer`). This
+ * wrapper preserves the no-leak contract under the malloc fallback while
+ * letting the arena reclaim the allocation in bulk. */
+void sailfin_runtime_free(void *ptr)
+{
+    if (!ptr)
+        return;
+    _rt_free(ptr);
+}
+
 SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b)
 {
     _invalidate_concat_reuse();

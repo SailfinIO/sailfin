@@ -675,7 +675,12 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                                 + trimmed_expected
                                 + "* "
                                 + typed_ptr_temp);
-                            awaited_lines2.push("  call void @free(i8* "
+                            // Arena-aware free: the impl function's return
+                            // box is allocated via `@sailfin_runtime_alloc_struct`
+                            // (Phase 5a follow-up), so this must route through
+                            // the matching arena-aware free. Plain `@free` on
+                            // an arena pointer corrupts glibc chunk metadata.
+                            awaited_lines2.push("  call void @sailfin_runtime_free(i8* "
                                 + result_temp
                                 + ")");
                             let out_operand_unboxed = LLVMOperand {
