@@ -638,20 +638,23 @@ rebuild:
 	@if [ -d build/native/import-context ]; then \
 		find build/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
 	fi
-	@# Wipe stale `build/sailfin/program` so the fallback's
-	@# existence-based success check below can't be fooled by an
-	@# old binary surviving a failed seed run. The `set -o
-	@# pipefail` + bash wrapper captures the seed's real exit
-	@# status (otherwise `| cat` always returns 0) and lets us
-	@# log it for diagnostics. The `|| true` after the wrapper
-	@# tolerates the seed bailing — the fallback then takes
-	@# over.
+	@# Wipe stale `build/sailfin/program` so the existence check
+	@# below can't be fooled by an old binary surviving a failed
+	@# seed run. The `set -o pipefail` + bash wrapper captures
+	@# the seed's real exit status (otherwise `| cat` always
+	@# returns 0); the `|| build_rc=$$?` pattern tolerates the
+	@# bail so we can surface targeted diagnostics from the
+	@# error block instead of failing fast on the unguarded
+	@# recipe line. The `&&` chain ensures every diagnostic
+	@# message reaches the user before we exit.
 	@rm -f build/sailfin/program build/sailfin/program.ll
 	@seed=$$(cat build/.seed-resolved); \
 	echo "[rebuild] running sfn build -p compiler (seed=$$seed)..."; \
-	cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat"
-	@if [ ! -f build/sailfin/program ]; then \
-		echo "[rebuild][error] sfn build did not produce build/sailfin/program" >&2; \
+	build_rc=0; \
+	{ cd $(CURDIR) && bash -c "set -o pipefail; \"$$seed\" build $(BUILD_ARGS) -p compiler 2>&1 | cat"; } \
+		|| build_rc=$$?; \
+	if [ "$$build_rc" -ne 0 ] || [ ! -f build/sailfin/program ]; then \
+		echo "[rebuild][error] sfn build failed (exit=$$build_rc) or did not produce build/sailfin/program" >&2; \
 		echo "[rebuild][error] expected the alpha.6+ seed's subprocess-stage path to keep the cold build under the 8 GB ulimit" >&2; \
 		echo "[rebuild][error] if this is a regression, run 'bash scripts/build.sh' manually to bisect" >&2; \
 		exit 1; \
