@@ -1,0 +1,180 @@
+// Unit tests for `extern fn` typechecker registration.
+//
+// Covers the contract added in `compiler/src/typecheck.sfn` and
+// `compiler/src/typecheck_types.sfn` for the runtime-rewrite Phase 1
+// prerequisite (see docs/runtime_architecture.md §3.6).
+//
+// These tests parse a small `.sfn` source through `parse_program` and
+// run `typecheck_diagnostics` end-to-end. They assert on the
+// `Diagnostic.code` field of the returned diagnostics so we catch
+// regressions in either the registration logic (extern symbol added
+// to the symbol table, duplicate detection wired up) or the C-ABI
+// signature validator (E0801–E0805).
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> number {
+    let mut count: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+// -------------------------------------------------------------------
+// Accept path — every form on the v0 accept-list must produce zero
+// diagnostics.
+// -------------------------------------------------------------------
+test "extern: accepts unsafe extern fn malloc(size: usize) -> *u8" {
+    let source = "unsafe extern fn malloc(size: usize) -> *u8;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "extern: accepts integer-sized write signature" {
+    let source = "extern fn write(fd: i32, buf: *u8, count: i64) -> i64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "extern: accepts opaque pointer pointee (*File)" {
+    let source = "extern fn fclose(f: *File) -> i32;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "extern: accepts void return" {
+    let source = "extern fn free(ptr: *u8) -> void;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Reject path — non-C-ABI parameter / return types.
+// -------------------------------------------------------------------
+test "extern: rejects string parameter (E0801)" {
+    let source = "extern fn write_msg(buf: string) -> i64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0801");
+}
+
+test "extern: rejects array parameter (E0802)" {
+    let source = "extern fn process(items: i32[]) -> void;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0802");
+}
+
+test "extern: rejects legacy `number` (E0805)" {
+    let source = "extern fn legacy(x: number) -> number;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    // Both parameter and return type are rejected.
+    assert _count_code(diagnostics, "E0805") >= 2;
+}
+
+test "extern: rejects string return type (E0801)" {
+    let source = "extern fn read_line() -> string;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0801");
+}
+
+// -------------------------------------------------------------------
+// Reject path — declarations that conflict with extern semantics.
+// -------------------------------------------------------------------
+test "extern: rejects type parameters (E0803)" {
+    let source = "extern fn identity<T>(x: T) -> T;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0803");
+}
+
+test "extern: rejects effects on the extern itself (E0804)" {
+    let source = "extern fn malloc(size: i64) ![io] -> *u8;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0804");
+}
+
+// -------------------------------------------------------------------
+// Reject path — bare `void` parameter, missing type annotations,
+// and primitives that the LLVM backend does not yet map (i16, u32,
+// f64, etc.). All produce E0805 today; the wider integer/float
+// types come back to the accept-list once `map_primitive_type` in
+// `compiler/src/llvm/type_mapping.sfn` learns to lower them.
+// -------------------------------------------------------------------
+test "extern: rejects bare void parameter (E0805)" {
+    let source = "extern fn evil(x: void) -> i64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+test "extern: accepts void return type" {
+    let source = "extern fn close_all() -> void;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert diagnostics.length == 0;
+}
+
+test "extern: rejects parameter with no type annotation (E0805)" {
+    let source = "extern fn untyped(x) -> i64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+test "extern: rejects i16 parameter until backend support lands (E0805)" {
+    let source = "extern fn narrow(x: i16) -> i64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+test "extern: rejects f64 return until backend support lands (E0805)" {
+    let source = "extern fn now() -> f64;";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0805");
+}
+
+// -------------------------------------------------------------------
+// Symbol-table registration — duplicate-detection should fire when
+// an extern collides with a regular fn (proves both go in the same
+// table).
+// -------------------------------------------------------------------
+test "extern: collides with same-named regular fn (E0001)" {
+    let source = "extern fn malloc(size: i64) -> *u8;\n"
+        + "fn malloc(x: i64) -> i64 { return x; }\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0001");
+}
+
+test "extern: duplicate extern declarations collide (E0001)" {
+    let source = "extern fn write(fd: i32, buf: *u8, count: i64) -> i64;\n"
+        + "extern fn write(fd: i32, buf: *u8, count: i64) -> i64;\n";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _has_code(diagnostics, "E0001");
+}

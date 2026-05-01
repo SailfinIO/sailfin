@@ -22,6 +22,7 @@ import {
     SymbolCollectionResult,
     SymbolEntry,
     check_enum_variants,
+    check_extern_signature,
     check_function_signature,
     check_interface_members,
     check_struct_fields,
@@ -128,6 +129,9 @@ fn register_top_level_symbol(statement: Statement, existing: SymbolEntry[]) -> S
     if statement.variant == "FunctionDeclaration" {
         return register_symbol(statement.signature.name, "function", statement.signature.name_span, existing);
     }
+    if statement.variant == "ExternFunctionDeclaration" {
+        return register_symbol(statement.signature.name, "extern function", statement.signature.name_span, existing);
+    }
     if statement.variant == "StructDeclaration" {
         return register_symbol(statement.name, "struct", statement.name_span, existing);
     }
@@ -187,6 +191,21 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             if _ci2 >= function_diagnostics.length { break; }
             diagnostics.push(function_diagnostics[_ci2]);
             _ci2 += 1;
+        }
+        return ScopeResult {
+            bindings: registration.bindings,
+            diagnostics: diagnostics
+        };
+    }
+    if statement.variant == "ExternFunctionDeclaration" {
+        let registration = register_local_symbol(bindings, statement.signature.name, "extern function", statement.signature.name_span);
+        let mut diagnostics = registration.diagnostics;
+        let _sig_diags = check_extern_signature(statement.signature);
+        let mut _ci: number = 0;
+        loop {
+            if _ci >= _sig_diags.length { break; }
+            diagnostics.push(_sig_diags[_ci]);
+            _ci += 1;
         }
         return ScopeResult {
             bindings: registration.bindings,

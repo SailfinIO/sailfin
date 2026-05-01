@@ -189,14 +189,21 @@ type MaybeError<T> = T | ParseError;
 
 ### `extern`
 
-**Status: Parsed**
+**Status: Implemented** (parser, typechecker, native-IR emitter, LLVM `declare` lowering)
 
-Declare an external symbol provided by the native runtime or a linked library. `extern fn` declarations must be combined with `unsafe` and terminate with `;` instead of a block body.
+Declare an external symbol provided by a linked platform library (libc, libpthread, etc.). The compiler emits an LLVM `declare` directive for each `extern fn`; the linker resolves the symbol against platform shared libraries at link time.
 
 ```sfn
+extern fn write(fd: i32, buf: *u8, count: i64) -> i64;
 unsafe extern fn malloc(size: usize) -> *u8;
 unsafe extern fn free(ptr: *u8) -> void;
 ```
+
+`extern fn` signatures must use only C-ABI-compatible types that the LLVM backend can lower today: `i8`, `i32`, `i64`, `u8`, `usize`, `bool`, `void` (return only), raw pointers (`*T`, `**T`, `*const T`, `*mut T`, `*OpaqueStruct`, `*void`), or function pointers (`fn(A) -> B`). Wider integer/float types (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`, `f64`) are reserved — they will join the accept-list once the backend's `map_primitive_type` learns to lower them. Sailfin aggregates (`string`, `T[]`, structs) cannot cross the extern boundary directly — adapters must decompose them into pointer + length pairs first. Externs must not declare effects (`![io]`, `![net]`, …); effects belong on the wrapping adapter, not the raw extern.
+
+Diagnostic codes: `E0801` (`string` parameter/return), `E0802` (array), `E0803` (type parameters), `E0804` (effects on the extern), `E0805` (other non-C-ABI types — including the legacy `number` alias).
+
+`unsafe` is optional on extern declarations and primarily documents the call site as opting out of Sailfin's safety story.
 
 ---
 

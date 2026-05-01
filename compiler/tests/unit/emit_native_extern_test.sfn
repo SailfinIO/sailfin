@@ -1,0 +1,49 @@
+// End-to-end test for `extern fn` emission through the native IR.
+//
+// Confirms the architect's M1 fast-fail criterion (see
+// docs/runtime_architecture.md §3.6 "Fast-fail criterion"): an
+// `extern fn` declaration in `.sfn` source produces a properly-shaped
+// `.fn` block with `.meta extern` in the emitted `.sfn-asm`. The LLVM
+// `declare` lowering downstream of this point is already in place
+// (`compiler/src/llvm/lowering/emission.sfn:332`); this test pins
+// the contract from the parser through the native-IR emitter so a
+// regression in either layer breaks here.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return index_of(haystack, needle) >= 0;
+}
+
+test "emit_native: extern fn produces .meta extern with signature" {
+    let source = "extern fn write(fd: i32, buf: *u8, count: i64) -> i64;";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_libc");
+    assert _contains(asm, ".fn write");
+    assert _contains(asm, ".meta extern");
+}
+
+test "emit_native: unsafe extern fn carries .meta unsafe" {
+    let source = "unsafe extern fn malloc(size: usize) -> *u8;";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "test_libc");
+    assert _contains(asm, ".fn malloc");
+    assert _contains(asm, ".meta unsafe");
+    assert _contains(asm, ".meta extern");
+}
+
+test "emit_native: libc skeleton round-trips multiple externs" {
+    let source = "extern fn write(fd: i32, buf: *u8, count: i64) -> i64;\n"
+        + "extern fn read(fd: i32, buf: *u8, count: i64) -> i64;\n"
+        + "extern fn malloc(size: i64) -> *u8;\n"
+        + "extern fn free(ptr: *u8) -> void;\n"
+        + "extern fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8;\n";
+    let program = parse_program(source);
+    let asm = emit_native_text_with_module_name(program, "platform_libc");
+    assert _contains(asm, ".fn write");
+    assert _contains(asm, ".fn read");
+    assert _contains(asm, ".fn malloc");
+    assert _contains(asm, ".fn free");
+    assert _contains(asm, ".fn memcpy");
+}

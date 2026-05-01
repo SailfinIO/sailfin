@@ -698,7 +698,7 @@ The runtime rewrite depends on compiler features that must ship first. The
 
 | Compiler Feature | Status | Runtime Subsystems It Unblocks |
 |---|---|---|
-| `extern fn` (LLVM `declare` emission) | In progress (type-checker registration needed) | All — nothing can call `malloc`/`fopen`/`write` without it |
+| `extern fn` (parser + type-checker + LLVM `declare` emission) | **Shipped** (parser + emitter + typecheck registration with E0801–E0805 C-ABI validation; cross-module call-site resolution deferred until typecheck grows a call resolver) | All — `runtime/sfn/platform/*.sfn` modules can now type-check end-to-end |
 | `int` / `float` numeric types | Planned | Sizes, indices, bitwise ops; fixes f64 precision hazard |
 | Raw pointer types (`*T`) enforced | Planned | OS handles (`*FILE`, `*DIR`, `*pthread_t`), buffer pointers |
 | `Result<T, E>` + `?` operator | Planned | Every fallible operation (file I/O, allocation, network) |

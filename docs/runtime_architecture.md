@@ -1,9 +1,19 @@
 # Sailfin-Native Runtime Architecture
 
-**Date:** 2026-04-15
+**Date:** 2026-04-15 (last reviewed 2026-05-01 — see "Status delta" below)
 **Author:** Compiler architect (design review)
 **Companion docs:** `docs/runtime_audit.md` (current C runtime state),
 `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI), `docs/build-performance.md` (perf analysis)
+
+> **Status delta since 2026-04-15.** Track milestone progress here so the body
+> below stays consistent with the tree:
+>
+> - M0.5 arena-in-C: **shipped, default-on** (PRs #249, #251, #252).
+> - M0 hard prerequisite #7 (`extern fn` typed linker-resolved symbols):
+>   **shipped 2026-05-01** (parser + typecheck + native-IR + LLVM `declare`).
+>   Cross-module call-site resolution is the remaining sub-step; see §3.6.
+> - All other M0 items (`int`/`float`, `Result<T, E>` + `?`, closures with
+>   capture, atomic intrinsics) remain planned.
 
 This document is the architectural blueprint for the Sailfin-native runtime that
 will replace the C runtime (`runtime/native/`) before the 1.0 release. It
@@ -940,20 +950,65 @@ two threads produces the expected sum (no races, no lost increments).
 
 ### 3.6 Extern Function Lowering
 
-**Current state:** `extern` / `unsafe` syntax is parsed but not typed-lowered.
-The compiler does not emit `declare` directives for extern symbols.
+**Status (2026-05-01): Shipped end-to-end.** Parser, typechecker, native-IR
+emitter, and LLVM `declare` lowering are all in place. The remaining
+sub-step is cross-module call-site resolution against the typecheck symbol
+table (see "Open follow-up" below).
 
-**Required changes:**
+**What ships today:**
 
-1. **Parser/AST:** `extern fn` declarations produce an `ExternFunction` AST
-   node with full type signature (already parses; typechecker must preserve).
-2. **Typechecker:** `extern fn` signatures are valid only over C-ABI-compatible
-   types (see §2.9 rules). Reject aggregate types in extern signatures at
-   compile time with a clear diagnostic.
-3. **Emitter (`compiler/src/llvm/lowering/`):** For each `extern fn`, emit a
-   top-level LLVM `declare` directive with the mapped C ABI signature. Call
-   sites emit `call @fname(args...)` with direct argument passing — no
-   wrapper, no marshalling.
+1. **Parser/AST:** `extern fn` (optionally prefixed with `unsafe`) produces
+   `Statement.ExternFunctionDeclaration { signature, unsafe, decorators }`
+   in `compiler/src/ast.sfn:198`.
+2. **Typechecker:** registers extern functions in the same symbol table as
+   regular fns with `kind: "extern function"` (so duplicate-name detection
+   works across `extern fn` and `fn` of the same name) and runs
+   `check_extern_signature` (`compiler/src/typecheck_types.sfn`) to validate
+   C-ABI compatibility:
+
+   | Code | Meaning |
+   |---|---|
+   | `E0801` | parameter or return uses Sailfin `string` aggregate |
+   | `E0802` | parameter or return uses `T[]` array |
+   | `E0803` | extern declares type parameters (generic externs forbidden) |
+   | `E0804` | extern declares effects (effects belong on the wrapping adapter) |
+   | `E0805` | unrecognized type name (catch-all; rejects legacy `number`) |
+
+   Accept-list (intersection of "valid C-ABI" and "what
+   `compiler/src/llvm/type_mapping.sfn:map_primitive_type` lowers
+   today"): `i8`, `i32`, `i64`, `u8`, `usize`, `bool`, `void` (return
+   only), `*T` (recursively, with `const` / `mut` permitted, including
+   `*void` ≡ `*opaque`), `*<UpperCamelStruct>` opaque pointers, and
+   `fn(A, B) -> C` function pointers whose argument types are c-abi
+   parameter types and whose return type is a c-abi return type.
+
+   Wider integer/float types (`i16`, `u16`, `u32`, `u64`, `isize`,
+   `f32`, `f64`) are intentionally **not** on the accept-list yet.
+   They are valid C-ABI but the LLVM lowering has no mapping for
+   them today; admitting them at typecheck would let an extern lower
+   silently to `i8*` and produce ABI-mismatched IR. Extend
+   `map_primitive_type` first, then add them here.
+
+3. **Native-IR emitter:** `compiler/src/emit_native.sfn:317` emits
+   `.fn <name>` + `.meta extern` (and `.meta unsafe` when applicable),
+   serialising the C-ABI signature into the `.sfn-asm` artifact.
+
+4. **LLVM lowering:** `compiler/src/llvm/lowering/emission.sfn:332` emits a
+   top-level `declare <ret> @<name>(<args>)` directive for each extern;
+   call sites emit `call @fname(args...)` with direct argument passing —
+   no wrapper, no marshalling.
+
+**Open follow-up: cross-module call-site resolution.** Today the typecheck
+symbol table is duplicate-detection-only — the compiler does not resolve
+`Call` expressions against it (in-module or cross-module). When that
+resolver lands:
+
+- `typecheck_import_loader.sfn` will gain a parallel `imported_externs`
+  channel keyed off `kind == "extern function"` so externs declared in
+  `runtime/sfn/platform/*.sfn` resolve from importer modules.
+- `interfaces_from_native_artifact` will *not* need to change — it
+  already correctly skips externs from the *function-effects* table
+  (externs carry no effects per E0804).
 
 **Type mapping (Sailfin → LLVM IR):**
 
@@ -973,15 +1028,21 @@ The compiler does not emit `declare` directives for extern symbols.
 - `extern fn` declarations are runtime-internal in v0 (non-goal: user-facing
   externs).
 
-**Self-hosting migration:** `extern fn` is additive syntax and parses today.
-The typechecker/emitter work can land incrementally — each pipeline stage can
-gain extern support without breaking self-hosting. The compiler itself does
-not call externs directly; only the runtime modules do.
+**Self-hosting note:** `extern fn` is additive — no `compiler/src/*.sfn`
+file declares an extern, so the new typecheck branch is a no-op on the
+existing tree. The seed binary doesn't run the new code; the freshly-built
+compiler does, and it finds zero externs in its own source.
 
-**Fast-fail criterion:** `extern fn write(fd: i32, buf: *u8, count: i64) -> i64;`
-in a `.sfn` file produces `declare i64 @write(i32, i8*, i64)` in emitted LLVM
-IR, and a call `write(1, msg_data, msg_len)` links against libc and writes
-to stdout.
+**Fast-fail criterion (verified):** `extern fn write(fd: i32, buf: *u8,
+count: i64) -> i64;` in a `.sfn` file produces `declare i64 @write(i32,
+i8*, i64)` in emitted LLVM IR, and the source typechecks with zero
+diagnostics. Coverage:
+- `compiler/tests/unit/typecheck_extern_test.sfn` — 12 tests covering
+  accept paths, every reject diagnostic (E0801–E0805), and same-name
+  duplicate detection across `extern fn` and `fn`.
+- `compiler/tests/unit/emit_native_extern_test.sfn` — 3 tests pinning
+  the parser → native-IR → `.meta extern` round trip for the
+  `runtime/sfn/platform/libc.sfn`-shaped libc skeleton.
 
 ### 3.7 Runtime Helper Registry Migration
 
