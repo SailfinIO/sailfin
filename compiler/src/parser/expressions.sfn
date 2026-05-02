@@ -504,11 +504,19 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
         // as the import-alias precedent at parser/declarations.sfn:625).
         // Postfix-binding so `x + y as int` parses as `x + (y as int)`,
         // matching Rust. Chains naturally left-associate via the loop.
-        // Slice D accepts a single primitive type-name identifier as
-        // the cast target (`int`, `float`, `i64`, `double`, `i32`,
-        // `i16`, `i8`, `u64`, `u32`, `u16`, `u8`, `f32`); pointer /
-        // generic / function-pointer cast targets are out of scope and
-        // get rejected at lowering with E0806 (`unsupported cast`).
+        // The parser accepts any single `Identifier` token as the cast
+        // target (the type-name string is preserved verbatim into
+        // `TypeAnnotation.text`); non-Identifier targets fall through
+        // to a parse failure here, NOT a downstream lowering
+        // diagnostic. Pointer / generic / function-pointer cast forms
+        // (`*u8`, `Result<T, E>`, `fn(A) -> B`) therefore require
+        // future parser work to lift into structured target types.
+        // Numeric pair lowering (sitofp / fptosi / sext / trunc /
+        // fpext / fptrunc) is the deferred follow-up — today the
+        // existing `lower_cast_expression` handles only pointer↔
+        // pointer / int↔pointer; numeric pairs hit the generic
+        // `llvm lowering: unsupported cast from \`X\` to \`Y\``
+        // diagnostic (no E-code yet — diagnostic is a plain string).
         if identifier_matches(token, "as") {
             let after_as = expression_tokens_advance(current_state);
             if expression_tokens_is_at_end(after_as) {

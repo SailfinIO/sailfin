@@ -58,8 +58,13 @@
 >   Parser/AST/native-IR rendering for `expr as Type` is in place
 >   — `Expression.Cast { operand, target_type }` is recognized in
 >   `parse_postfix_chain` (`as` is a soft keyword reusing the import-
->   alias precedent), and both `format_expression` sites render it
->   as `(operand) as <type>`. The numeric-pair LLVM lowering matrix
+>   alias precedent). The native `.sfn-asm` emitter renders casts as
+>   `(operand) as <type>` (operand parens contain embedded operators
+>   so the existing LLVM-lowering cast recognizer can recover the
+>   operand via `strip_enclosing_parentheses`); the Sailfin-source
+>   emitter (`emitter_sailfin_expr`) renders the human-friendly
+>   `expr as Type` form (no operand parens — no re-parse step
+>   consumes its output). The numeric-pair LLVM lowering matrix
 >   (sitofp / fptosi / sext / trunc / fpext / fptrunc) is deferred:
 >   the alpha.8 seed exhibits a string-aliasing self-host bug
 >   (struct-field reads of type `string` mis-evaluate when bound

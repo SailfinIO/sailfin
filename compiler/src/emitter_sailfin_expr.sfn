@@ -123,10 +123,14 @@ fn format_expression(expression: Expression) -> string {
     }
     if expression.variant == "Cast" {
         // Sailfin-source rendering uses the human-friendly `expr as Type`
-        // (no `.` anchor). This emitter feeds the Sailfin-to-Sailfin code
-        // path, not the .sfn-asm round-trip — the LLVM-lowering recognizer
-        // operates on `emit_native_format::format_expression` output, which
-        // uses `as.<type>` instead.
+        // (no operand parens). This emitter feeds the Sailfin-to-Sailfin
+        // code path, not the .sfn-asm round-trip — the LLVM-lowering
+        // recognizer operates on `emit_native_format::format_expression`
+        // output, which renders `(operand) as <type>` (parens around the
+        // operand contain any embedded operators so the recognizer's
+        // `strip_enclosing_parentheses` recovers the operand cleanly).
+        // Source-level rendering doesn't need the parens because no
+        // re-parse step consumes this output.
         let operand_text = format_expression(expression.operand);
         return operand_text + " as " + expression.target_type.text;
     }
