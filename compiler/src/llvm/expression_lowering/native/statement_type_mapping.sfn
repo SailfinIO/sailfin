@@ -83,10 +83,9 @@ fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     if annotation == "boolean" { _if149 = true; }
     if annotation == "bool" { _if149 = true; }
     if _if149 { return "i1"; }
-    // Pointer-sized aliases: usize and isize lower to i64 on every
-    // platform Sailfin currently targets (linux-x86_64, macos-arm64
-    // — both 64-bit). When a 32-bit target lands, a target-aware
-    // entry replaces these.
+    // Pointer-sized aliases: usize and isize lower to i64 because
+    // every Sailfin target today is 64-bit. When a 32-bit target
+    // lands, a target-aware entry replaces these.
     if annotation == "usize" { return "i64"; }
     if annotation == "isize" { return "i64"; }
     let mut _if150: boolean = false;

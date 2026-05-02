@@ -941,9 +941,10 @@ fn extern_type_hint_for(kind: string, type_text: string) -> string {
             + " floating-point.";
     }
     return "Externs accept the LLVM-mapped Sailfin primitives (`int`"
-        + " — lowers to i64, `float` — lowers to double, `i8`/`i16`/"
+        + " — lowers to i64, `float` / `f64` — lower to double,"
+        + " `f32` — lowers to single-precision float, `i8`/`i16`/"
         + "`i32`/`i64`, `u8`/`u16`/`u32`/`u64`, `usize`/`isize` —"
-        + " both pointer-sized, `f32`, `bool`), `void` (return only),"
+        + " both pointer-sized, `bool`), `void` (return only),"
         + " raw pointers (`*T`, `**T`, `*OpaqueStruct`), and function"
         + " pointers (`fn(A) -> B`).";
 }

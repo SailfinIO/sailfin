@@ -338,7 +338,10 @@ fn map_type_annotation(annotation: string) -> string {
     if normalized == "i16" { _if314c = true; }
     if normalized == "u16" { _if314c = true; }
     if _if314c { return "i16"; }
-    if normalized == "u8" { return "i8"; }
+    let mut _if314d: boolean = false;
+    if normalized == "i8" { _if314d = true; }
+    if normalized == "u8" { _if314d = true; }
+    if _if314d { return "i8"; }
     if normalized == "string" { return "i8*"; }
     if normalized == "void" { return "void"; }
     if normalized.length > 2 {
@@ -622,10 +625,9 @@ fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     if trimmed == "string" { return "i8*"; }
     if trimmed == "void" { return "void"; }
     if trimmed == "any" { return "i8*"; }
-    // Pointer-sized aliases: usize/isize lower to i64 on every
-    // platform Sailfin currently targets (linux-x86_64, macos-arm64
-    // — both 64-bit). When a 32-bit target lands, swap in a
-    // target-aware entry.
+    // Pointer-sized aliases: usize/isize lower to i64 because
+    // every Sailfin target today is 64-bit. When a 32-bit target
+    // lands, swap in a target-aware entry.
     if trimmed == "usize" { return "i64"; }
     if trimmed == "isize" { return "i64"; }
     let mut _if322: boolean = false;
