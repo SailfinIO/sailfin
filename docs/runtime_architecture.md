@@ -12,6 +12,11 @@
 > - M0 hard prerequisite #7 (`extern fn` typed linker-resolved symbols):
 >   **shipped 2026-05-01** (parser + typecheck + native-IR + LLVM `declare`).
 >   Cross-module call-site resolution is the remaining sub-step; see §3.6.
+> - First `runtime/sfn/platform/libc.sfn` skeleton: **shipped 2026-05-01**
+>   (12 extern declarations, typecheck + fmt + LLVM `declare` emission
+>   verified by `compiler/tests/e2e/test_runtime_libc_skeleton.sh`). The
+>   file is not yet imported anywhere — the runtime continues to reach
+>   libc through the C runtime until M2.
 > - All other M0 items (`int`/`float`, `Result<T, E>` + `?`, closures with
 >   capture, atomic intrinsics) remain planned.
 
@@ -728,31 +733,42 @@ declarations — pure Sailfin source, no C. The compiler emits LLVM `declare`
 directives for each extern; the linker resolves them against libc/libpthread at
 link time.
 
-**`runtime/sfn/platform/libc.sfn`** (selected entries):
+**`runtime/sfn/platform/libc.sfn`** — selected entries from the
+*design target* are listed below. The actually-shipped 2026-05-01
+skeleton is a subset of this list: the 12 declarations covering
+`malloc`/`free`/`realloc`/`memcpy`/`memcmp`, `write`/`read`,
+`fopen`/`fclose`/`fread`/`fwrite`, and `getenv`. `memchr`,
+`setjmp`, and `longjmp` (commented `// (deferred)` below) are part
+of the long-term shape but wait on follow-up PRs that land their
+dependencies — `memchr` needs the LLVM mapper to learn `i32`-byte
+parameters cleanly through opaque pointers, and `setjmp`/`longjmp`
+need the exception subsystem plus opaque `JmpBuf` size constants.
+Once those land, drop the `// (deferred)` markers and the
+declarations move into the live skeleton.
 
 ```sailfin
 // Memory
-extern fn malloc(size: i64) -> *u8;
+extern fn malloc(size: usize) -> *u8;
 extern fn free(ptr: *u8) -> void;
-extern fn realloc(ptr: *u8, new_size: i64) -> *u8;
-extern fn memcpy(dst: *u8, src: *u8, n: i64) -> *u8;
-extern fn memcmp(a: *u8, b: *u8, n: i64) -> i32;
-extern fn memchr(haystack: *u8, byte: i32, n: i64) -> *u8;
+extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
+extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
+extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
+extern fn memchr(haystack: *u8, byte: i32, n: usize) -> *u8; // (deferred)
 
 // I/O (fd-based)
-extern fn write(fd: i32, buf: *u8, count: i64) -> i64;
-extern fn read(fd: i32, buf: *u8, count: i64) -> i64;
+extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
+extern fn read(fd: i32, buf: *u8, count: usize) -> i64;
 
 // Stdio filesystem
 extern fn fopen(path: *u8, mode: *u8) -> *File;
-extern fn fread(buf: *u8, size: i64, nmemb: i64, f: *File) -> i64;
-extern fn fwrite(buf: *u8, size: i64, nmemb: i64, f: *File) -> i64;
+extern fn fread(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
+extern fn fwrite(buf: *u8, size: usize, nmemb: usize, f: *File) -> usize;
 extern fn fclose(f: *File) -> i32;
 
 // Environment + exception support
 extern fn getenv(name: *u8) -> *u8;
-extern fn setjmp(env: *JmpBuf) -> i32;
-extern fn longjmp(env: *JmpBuf, val: i32) -> void;
+extern fn setjmp(env: *JmpBuf) -> i32;                       // (deferred)
+extern fn longjmp(env: *JmpBuf, val: i32) -> void;           // (deferred)
 
 // String conversion (variadic — see open question Q6)
 extern fn strtod(nptr: *u8, endptr: **u8) -> f64;
