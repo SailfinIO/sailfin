@@ -390,6 +390,8 @@ fn is_two_char_symbol(value: string) -> boolean {
     if value == ">=" { return true; }
     if value == "&&" { return true; }
     if value == "||" { return true; }
+    if value == "<<" { return true; }
+    if value == ">>" { return true; }
     if value == ".." { return true; }
     return false;
 }

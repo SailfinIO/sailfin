@@ -40,12 +40,34 @@ fn operation_name_for_symbol(symbol: string, llvm_type: string) -> string {
         if symbol == "*" { return "fmul"; }
         if symbol == "/" { return "fdiv"; }
         if symbol == "%" { return "frem"; }
+        // Bitwise + shift operators are not valid on floating-
+        // point in LLVM IR. Returning empty triggers the
+        // binary-op caller's diagnostic path; Slice D's `as`
+        // casts plus the planned typecheck rejection will
+        // surface a clean error before lowering reaches here
+        // (L2/L3/L4 in `docs/runtime_architecture.md` §3.7).
+        if symbol == "&" { return ""; }
+        if symbol == "|" { return ""; }
+        if symbol == "^" { return ""; }
+        if symbol == "<<" { return ""; }
+        if symbol == ">>" { return ""; }
     }
     if symbol == "+" { return "add"; }
     if symbol == "-" { return "sub"; }
     if symbol == "*" { return "mul"; }
     if symbol == "/" { return "sdiv"; }
     if symbol == "%" { return "srem"; }
+    // Slice B (2026-05-02): bitwise + shift on integer operands.
+    // `>>` lowers to `ashr` (arithmetic right shift) by default —
+    // preserves the sign of the value, matching what `signed`
+    // numeric types want. Logical right shift (`lshr`, zero-fill)
+    // waits on Slice D's `as` casts so unsigned-typed values get
+    // an explicit type the lowering can branch on.
+    if symbol == "&" { return "and"; }
+    if symbol == "|" { return "or"; }
+    if symbol == "^" { return "xor"; }
+    if symbol == "<<" { return "shl"; }
+    if symbol == ">>" { return "ashr"; }
     return "add";
 }
 

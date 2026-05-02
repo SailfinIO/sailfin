@@ -230,7 +230,13 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
 
 fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let left_text = trim_text(substring(expression, 0, match.index));
-    let right_text = trim_text(substring(expression, match.index + 1, expression.length));
+    // Slice B (2026-05-02): use `match.symbol.length` instead of
+    // a hardcoded `+ 1` so two-char operators (`<<`, `>>`) slice
+    // the right-hand side correctly. Pre-fix, `x << 2` produced
+    // `right_text = "< 2"` which silently failed to lower.
+    let _operator_length = match.symbol.length;
+    let right_text = trim_text(substring(expression, match.index
+        + _operator_length, expression.length));
     let mut diagnostics: string[] = [];
     let mut _if95: boolean = false;
     if left_text.length == 0 { _if95 = true; }
@@ -262,7 +268,22 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         };
     }
 
-    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, "");
+    // Slice B (2026-05-02): propagate the LHS's LLVM type to the
+    // RHS so a bare integer literal (e.g. `2` in `x << 2`) takes
+    // the integer-literal short-circuit at `core.sfn:460-491`
+    // rather than defaulting to `double`. Without this hint the
+    // RHS literal would be typed `double`, then `dominant_type`
+    // would coerce both sides to `double`, and bitwise/shift
+    // would silently produce broken IR. Pre-existing arithmetic
+    // (`+`, `-`, `*`, etc.) on `int + double` mixes still
+    // funnels through `dominant_type`'s silent widening (L2 in
+    // `docs/runtime_architecture.md` §3.7) — Slice D's `as`
+    // casts close that hole properly.
+    let mut _right_expected: string = "";
+    if left_result.operand != null {
+        _right_expected = left_result.operand.llvm_type;
+    }
+    let right_result = lower_expression(right_text, bindings, locals, left_result.temp_index, left_result.lines, functions, context, _right_expected);
     diagnostics = extend_string_array(diagnostics, right_result.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_result.operand == null {
@@ -679,6 +700,32 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         }
     }
     let operation = operation_name_for_symbol(match.symbol, result_type);
+    if operation.length == 0 {
+        // Slice B (2026-05-02): `operation_name_for_symbol` returns
+        // empty when a bitwise/shift operator is applied to a
+        // `double` operand — those LLVM ops aren't valid on
+        // floating-point. Without this guard the binary lowering
+        // would emit malformed IR (`%t0 =  double <a>, <b>`); now
+        // we surface a diagnostic and return a null operand so
+        // callers see the expression failed to lower. The cleaner
+        // fix lives in Slice D (`as` casts + dominant_type
+        // tightening) which will reject this at typecheck before
+        // we reach lowering.
+        diagnostics.push("llvm lowering: operator `" + match.symbol
+            + "` is not supported on `"
+            + result_type
+            + "` operands; bitwise and shift operators require"
+            + " integer operands. Annotate the operands as `int`"
+            + " or `i64` (or use an `as` cast once Slice D ships).");
+        let empty_constants = empty_string_constant_set();
+        return ExpressionResult {
+            lines: harmonised.lines,
+            temp_index: harmonised.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
     let temp_name = format_temp_name(harmonised.temp_index);
     let line = "  " + temp_name + " = " + operation + " " + result_type + " "
         + left_aligned.value

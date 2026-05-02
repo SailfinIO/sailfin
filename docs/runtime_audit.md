@@ -35,10 +35,16 @@
 >   `is_extern_primitive_type`. The extern accept-list now covers the
 >   practical libc surface (errno_t, mode_t, dev_t, ssize_t, short,
 >   single-precision floats). User-level arithmetic on these widths
->   still rides L5 (silent widening). Slices B (bitwise ops), D (`as`
->   casts), and E (bare-literal defaulting + `number` retirement) remain
->   — see `docs/runtime_architecture.md` §3.7 for the full slice
->   taxonomy and the L1–L6 limitations table.
+>   still rides L5 (silent widening).
+> - **Numeric Slice B — bitwise + shift operators shipped 2026-05-02.**
+>   `&`, `|`, `^`, `<<`, `>>` lex, parse, and lower to LLVM
+>   `and`/`or`/`xor`/`shl`/`ashr` on integer operands. L4 in the
+>   architecture limitations table is now closed for integer operands;
+>   the M3 crypto port (SHA-256, Base64 in pure Sailfin) is no longer
+>   blocked at the language level. Slices D (`as` casts) and E
+>   (bare-literal defaulting + `number` retirement) remain — see
+>   `docs/runtime_architecture.md` §3.7 for the full slice taxonomy
+>   and the L1–L6 limitations table.
 
 ## Purpose
 

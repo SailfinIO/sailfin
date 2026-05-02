@@ -1161,33 +1161,54 @@ fn parse_lambda_parameter_list(state: ExpressionTokens) -> LambdaParameterListPa
 // ============================================================================
 // Operator Precedence
 // ============================================================================
+// Operator precedence ladder (low to high) following C/Rust
+// convention. Lower number = lower precedence (binds looser).
+//   0   ..        (range)
+//   1   ||        (logical OR)
+//   2   &&        (logical AND)
+//   3   |         (bitwise OR)              [Slice B 2026-05-02]
+//   4   ^         (bitwise XOR)             [Slice B]
+//   5   &         (bitwise AND)             [Slice B]
+//   6   == !=
+//   7   < <= > >=
+//   8   << >>     (bitwise shift)           [Slice B]
+//   9   + -
+//  10   * / %
+//  11   unary !   (logical NOT)
 fn binary_precedence(op: string) -> number {
     if op == ".." { return 0; }
     if op == "||" { return 1; }
     if op == "&&" { return 2; }
+    if op == "|" { return 3; }
+    if op == "^" { return 4; }
+    if op == "&" { return 5; }
     let mut _if405: boolean = false;
     if op == "==" { _if405 = true; }
     if op == "!=" { _if405 = true; }
-    if _if405 { return 3; }
+    if _if405 { return 6; }
     let mut _if406: boolean = false;
     if op == "<" { _if406 = true; }
     if op == "<=" { _if406 = true; }
     if op == ">" { _if406 = true; }
     if op == ">=" { _if406 = true; }
-    if _if406 { return 4; }
+    if _if406 { return 7; }
+    let mut _if409: boolean = false;
+    if op == "<<" { _if409 = true; }
+    if op == ">>" { _if409 = true; }
+    if _if409 { return 8; }
     let mut _if407: boolean = false;
     if op == "+" { _if407 = true; }
     if op == "-" { _if407 = true; }
-    if _if407 { return 5; }
+    if _if407 { return 9; }
     let mut _if408: boolean = false;
     if op == "*" { _if408 = true; }
     if op == "/" { _if408 = true; }
     if op == "%" { _if408 = true; }
-    if _if408 { return 6; }
+    if _if408 { return 10; }
     return -1;
 }
 
-fn unary_precedence() -> number { return 7; }
+fn unary_precedence() -> number { return 11; }
 
 // ============================================================================
 // Expression Normalization

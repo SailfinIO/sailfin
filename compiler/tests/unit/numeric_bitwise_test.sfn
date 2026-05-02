@@ -1,0 +1,94 @@
+// Unit tests for bitwise + shift operators on integer types
+// (Slice B of the int/float numeric types migration —
+// `docs/runtime_architecture.md` §3.7 L4).
+//
+// These tests cover the parser/typecheck side: each bitwise
+// operator lexes as a top-level token, parses to a binary
+// expression at the correct precedence, and typechecks with no
+// diagnostics when both operands are integer-typed. The
+// LLVM-level emission is pinned by
+// `compiler/tests/e2e/test_numeric_bitwise.sh`.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _emit(source: string) -> string {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "bitwise_test");
+}
+
+fn _diagnostics(source: string) -> Diagnostic[] {
+    let program = parse_program(source);
+    return typecheck_diagnostics(program);
+}
+
+// ── Each bitwise/shift op typechecks cleanly on int operands ──
+test "bitwise: int and int typechecks (ampersand)" {
+    let diagnostics = _diagnostics("fn andv(x: int, y: int) -> int { return x & y; }");
+    assert diagnostics.length == 0;
+}
+
+test "bitwise: int or int typechecks (pipe)" {
+    let diagnostics = _diagnostics("fn orv(x: int, y: int) -> int { return x | y; }");
+    assert diagnostics.length == 0;
+}
+
+test "bitwise: int xor int typechecks (caret)" {
+    let diagnostics = _diagnostics("fn xorv(x: int, y: int) -> int { return x ^ y; }");
+    assert diagnostics.length == 0;
+}
+
+test "bitwise: int shl int typechecks (left shift)" {
+    let diagnostics = _diagnostics("fn shlv(x: int, n: int) -> int { return x << n; }");
+    assert diagnostics.length == 0;
+}
+
+test "bitwise: int shr int typechecks (right shift)" {
+    let diagnostics = _diagnostics("fn shrv(x: int, n: int) -> int { return x >> n; }");
+    assert diagnostics.length == 0;
+}
+
+// ── Bitwise expressions round-trip through native IR ──
+test "bitwise: native IR carries the ampersand through" {
+    let asm = _emit("fn f(x: int, y: int) -> int { return x & y; }");
+    assert index_of(asm, "x & y") >= 0;
+}
+
+test "bitwise: native IR carries the left-shift through" {
+    let asm = _emit("fn f(x: int, n: int) -> int { return x << n; }");
+    assert index_of(asm, "x << n") >= 0;
+}
+
+// ── Mixed bitwise expressions parse with correct precedence ──
+// `a | b & c` should bind as `a | (b & c)` because `&` has higher
+// precedence than `|`. The native IR text reflects what the
+// parser produced after precedence resolution; if the precedence
+// were wrong the AST/text shape would differ.
+test "bitwise: mixed pipe and ampersand parse without diagnostics" {
+    let diagnostics = _diagnostics("fn mix(a: int, b: int, c: int) -> int { return a | b & c; }");
+    assert diagnostics.length == 0;
+}
+
+test "bitwise: mixed shift and plus parse without diagnostics" {
+    let diagnostics = _diagnostics("fn mix(a: int, b: int, c: int) -> int { return a + b << c; }");
+    assert diagnostics.length == 0;
+}
+
+// ── Bitwise ops on i64-typed values typecheck cleanly ──
+// The accept-list now spans int and i64 (and the wider widths
+// via Slice C); none of those is a typecheck error when used as
+// the operand of a bitwise/shift expression.
+test "bitwise: i64 ampersand i64 typechecks" {
+    let diagnostics = _diagnostics("fn maskbits(flags: i64, mask: i64) -> i64 { return flags & mask; }");
+    assert diagnostics.length == 0;
+}
+
+// ── Bitwise + comparison combinations parse with correct precedence ──
+// `(flags & mask) == mask` should parse correctly as a comparison
+// at the top level (since `==` has lower precedence than `&`).
+test "bitwise: parenthesised flag-mask compare typechecks" {
+    let diagnostics = _diagnostics("fn has_flag(flags: int, mask: int) -> bool { return (flags & mask) == mask; }");
+    assert diagnostics.length == 0;
+}

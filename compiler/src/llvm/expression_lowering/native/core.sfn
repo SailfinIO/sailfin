@@ -331,6 +331,10 @@ import {
     find_top_level_operator,
     find_comparison_operator,
     find_logical_operator,
+    find_bitwise_or_operator,
+    find_bitwise_xor_operator,
+    find_bitwise_and_operator,
+    find_shift_operator,
     lines_end_with_terminator
 } from "./core_operators";
 
@@ -768,9 +772,35 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         }
     }
 
+    // Slice B (2026-05-02): bitwise + shift operator dispatch.
+    // C/Rust precedence: |  <  ^  <  &  <  ==/!=  <  </<=/>/>=  <
+    // <</>>  <  +/-. Lowest-precedence first wins the top-level
+    // split, so we call the bitwise-OR/XOR/AND finders BEFORE
+    // comparison and the shift finder AFTER comparison.
+    // `lower_binary_operation` handles all of these because
+    // `operation_name_for_symbol` maps them to LLVM
+    // and/or/xor/shl/ashr.
+    let bitwise_or = find_bitwise_or_operator(stripped);
+    if bitwise_or.success {
+        return lower_binary_operation(stripped, bitwise_or, bindings, locals, temp_index, lines, functions, context);
+    }
+    let bitwise_xor = find_bitwise_xor_operator(stripped);
+    if bitwise_xor.success {
+        return lower_binary_operation(stripped, bitwise_xor, bindings, locals, temp_index, lines, functions, context);
+    }
+    let bitwise_and = find_bitwise_and_operator(stripped);
+    if bitwise_and.success {
+        return lower_binary_operation(stripped, bitwise_and, bindings, locals, temp_index, lines, functions, context);
+    }
+
     let comparison = find_comparison_operator(stripped);
     if comparison.success {
         return lower_comparison_operation(stripped, comparison, bindings, locals, temp_index, lines, functions, context);
+    }
+
+    let shift = find_shift_operator(stripped);
+    if shift.success {
+        return lower_binary_operation(stripped, shift, bindings, locals, temp_index, lines, functions, context);
     }
 
     let additive = find_top_level_operator(stripped, "+-");
