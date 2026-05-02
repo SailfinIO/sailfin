@@ -1098,15 +1098,25 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
     }
 
     current = skip_trivia(current);
+    // Accept `;` (spec form), `,` (Rust/TS convention), or `}` (last field
+    // omits the terminator). Pre-fix this function only accepted `;`, which
+    // caused the outer parser loop to silently swallow the field via
+    // `skip_struct_member` — emitting an empty struct (`%T = type {}`) and
+    // breaking every downstream pass. See `parse_enum_variant_field` for
+    // the precedent. Closes the regression that surfaced on PR #289 as
+    // "struct-string-field reads misfire" (#289 follow-up).
     let terminator = parser_peek_raw(current);
-    if !symbol_matches(terminator, ";") {
+    if symbol_matches(terminator, ";") {
+        current = parser_advance_raw(current);
+    } else if symbol_matches(terminator, ",") {
+        current = parser_advance_raw(current);
+    } else if !symbol_matches(terminator, "}") {
         return StructFieldParseResult {
             parser: parser,
             field: null,
             success: false
         };
     }
-    current = parser_advance_raw(current);
 
     let field = FieldDeclaration {
         name: name,
