@@ -229,6 +229,7 @@ fn layout_annotation_represents_user_value(annotation: string) -> boolean {
     let base = layout_annotation_base_type(annotation);
     if base.length == 0 { return false; }
     if base == "number" { return false; }
+    if base == "float" { return false; }
     let mut _if309: boolean = false;
     if base == "boolean" { _if309 = true; }
     if base == "bool" { _if309 = true; }
@@ -242,6 +243,7 @@ fn layout_annotation_represents_user_value(annotation: string) -> boolean {
     if base == "i1" { _if310 = true; }
     if base == "i8" { _if310 = true; }
     if base == "usize" { _if310 = true; }
+    if base == "int" { _if310 = true; }
     if _if310 { return false; }
     if looks_like_user_type(base) { return true; }
     return false;
@@ -307,6 +309,7 @@ fn map_type_annotation(annotation: string) -> string {
         }
     }
     if normalized == "number" { return "double"; }
+    if normalized == "float" { return "double"; }
     let mut _if313: boolean = false;
     if normalized == "boolean" { _if313 = true; }
     if normalized == "bool" { _if313 = true; }
@@ -591,6 +594,7 @@ fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
 fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed == "number" { return "double"; }
+    if trimmed == "float" { return "double"; }
     let mut _if321: boolean = false;
     if trimmed == "boolean" { _if321 = true; }
     if trimmed == "bool" { _if321 = true; }

@@ -578,6 +578,12 @@ fn _is_c_abi_type_inner(normalized: string, allow_bare_void: boolean) -> boolean
 // pass typecheck and then silently lower to `i8*` (or fall through
 // to the user-type branch and produce broken IR).
 //
+// `int` and `float` are accepted as the canonical Sailfin spelling
+// for sized integer (i64) and floating-point (double) values
+// respectively — see `docs/runtime_architecture.md` Phase 1 #2.
+// They lower through `map_primitive_type` to `i64` / `double` so a
+// `declare` directive emitted from this surface is well-formed.
+//
 // `void` is intentionally excluded; the parameter/return distinction
 // is enforced by the callers (`is_c_abi_parameter_type` rejects bare
 // `void`, `_is_c_abi_type_inner` accepts it when `allow_bare_void`).
@@ -589,6 +595,8 @@ fn is_extern_primitive_type(text: string) -> boolean {
     if strings_equal(text, "u8") { _ret = true; }
     if strings_equal(text, "usize") { _ret = true; }
     if strings_equal(text, "bool") { _ret = true; }
+    if strings_equal(text, "int") { _ret = true; }
+    if strings_equal(text, "float") { _ret = true; }
     return _ret;
 }
 
@@ -909,14 +917,17 @@ fn extern_type_hint_for(kind: string, type_text: string) -> string {
     }
     if strings_equal(type_text, "number") {
         return "The legacy `number` alias is rejected on extern signatures."
-            + " Use `i64` for integer values; floating-point primitives"
-            + " (`f32`/`f64`) are not yet wired through the LLVM backend"
-            + " and will be added once the backend supports them.";
+            + " Use `int` (or `i64`) for integer values, or `float` for"
+            + " 64-bit floating-point. Other widths (`f32`, `i16`,"
+            + " `u32`, `u64`, `isize`, etc.) are not yet wired through"
+            + " the LLVM backend and will be added once the backend"
+            + " supports them.";
     }
-    return "Externs accept the LLVM-mapped primitives (i8, i32, i64,"
-        + " u8, usize, bool), `void` (return only), raw pointers"
+    return "Externs accept the LLVM-mapped Sailfin primitives (`int`"
+        + " — lowers to i64, `float` — lowers to double, `i8`, `i32`,"
+        + " `u8`, `usize`, `bool`), `void` (return only), raw pointers"
         + " (`*T`, `**T`, `*OpaqueStruct`), and function pointers"
-        + " (`fn(A) -> B`). Wider integer/float types (i16, u32, f64,"
+        + " (`fn(A) -> B`). Other widths (i16, u32, u64, isize, f32,"
         + " etc.) require backend support before they can cross the"
         + " extern boundary.";
 }

@@ -23,6 +23,16 @@
 >   serve libc calls until M2. Pinned by
 >   `compiler/tests/e2e/test_runtime_libc_skeleton.sh` (typecheck + fmt +
 >   LLVM `declare` emission for every symbol).
+> - **`int` / `float` numeric type annotations — shipped 2026-05-02**
+>   (Phase 1 #2, Slice A). Hard prereq #1 below is partially satisfied:
+>   `let x: int = 42` and `let x: float = 3.14` now lower to `i64` and
+>   `double` respectively; integer arithmetic dispatch (`add i64` vs
+>   `fadd double`) and comparison dispatch (`icmp` vs `fcmp`) are wired.
+>   The extern accept-list now admits `int` / `float` so
+>   `runtime/sfn/platform/*.sfn` modules can name them. Slices B–E
+>   (bitwise ops, additional widths, `as` casts, bare-literal defaulting +
+>   `number` retirement) remain — see `docs/runtime_architecture.md`
+>   §3.7 for the full slice taxonomy and known limitations table.
 
 ## Purpose
 
@@ -323,10 +333,16 @@ compiler features that do not exist in the current toolchain.
 
 ### Hard prerequisites (runtime cannot be written without these)
 
-1. **Integer types (`int` / `float`)** — roadmap §0. The current "everything
-   is a double" ABI is the reason pointers are encoded as doubles in ~12 of
-   the legacy fixup categories. A runtime cannot express `len`/`cap`/`index`
-   in f64 without precision hazards above 2^53 and without bit-pattern punning.
+1. **Integer types (`int` / `float`)** — roadmap §0. **Slice A shipped
+   2026-05-02.** Annotated locals/parameters/returns of `int` and `float`
+   now lower to `i64` / `double` respectively; integer arithmetic dispatch
+   and comparison dispatch are wired. The extern accept-list admits both.
+   Slices B–E (bitwise ops, additional widths, `as` casts, bare-literal
+   defaulting + `number` retirement) remain — see
+   `docs/runtime_architecture.md` §3.7 for the slice taxonomy and the
+   limitations table (L1–L6). The pre-Slice-A "everything is a double"
+   ABI rationale below still applies to bare literals (L1) until Slice E
+   migrates the compiler source off `number`.
 2. **`Result<T, E>` and the `?` operator** — roadmap §0. The runtime must be
    able to return structured errors (file open failures, HTTP errors, OOM,
    unicode decode errors) without abusing `try`/`catch` or union-sentinels.
