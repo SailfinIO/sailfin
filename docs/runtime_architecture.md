@@ -17,6 +17,18 @@
 >   verified by `compiler/tests/e2e/test_runtime_libc_skeleton.sh`). The
 >   file is not yet imported anywhere — the runtime continues to reach
 >   libc through the C runtime until M2.
+> - Three further `runtime/sfn/platform/*.sfn` skeletons: **shipped
+>   2026-05-02.** `pthread.sfn` (11 decls), `posix.sfn` (4 decls),
+>   `net.sfn` (9 decls) — together they validate the extern pipeline
+>   on pointer-to-pointer (`* * u8`), primitive-pointer out-parameters
+>   (`* i32`), and multi-family opaque-struct pointers
+>   (`* Pthread`, `* Timespec`, `* SockAddr`, …). Pinned by
+>   `compiler/tests/e2e/test_runtime_{pthread,posix,net}_skeleton.sh`.
+>   Function-pointer parameters degrade to `* u8` due to a `sfn fmt` /
+>   `is_c_abi_function_pointer` interaction documented in the
+>   `pthread.sfn` header. Not yet imported; the C runtime continues
+>   to serve these calls until M2 (process / clock / sleep adapters)
+>   and M3 / M4 (HTTP / serve / scheduler).
 > - **`int` (i64) / `float` (f64) numeric type annotations: shipped 2026-05-02**
 >   (Phase 1 #2, Slice A — see §3.7). Annotated locals/parameters/return
 >   types lower correctly to `i64` / `double` and feed the existing
@@ -769,6 +781,39 @@ need the exception subsystem plus opaque `JmpBuf` size constants.
 Once those land, drop the `// (deferred)` markers and the
 declarations move into the live skeleton.
 
+**`runtime/sfn/platform/pthread.sfn`**, **`posix.sfn`**, and
+**`net.sfn`** — **shipped 2026-05-02.** Together with
+`libc.sfn` these are the four platform skeletons in the tree
+today. The shipped declarations match the design lists below
+with two deviations:
+
+1. **Function-pointer parameters degraded to `* u8`.** The design
+   target spells `pthread_create`'s `start` as `fn(* u8) -> * u8`,
+   and the typechecker accepts that form via
+   `is_c_abi_function_pointer`. However, `sfn fmt` rewrites
+   `fn(...)` to `fn (...)` (space inserted), and the typechecker
+   requires the literal `fn(` prefix — so the canonical-formatted
+   form is rejected. The `start` parameter therefore ships as
+   `* u8` (lowers identically to `i8*` at the LLVM level — only
+   the type-discipline signal weakens). When either the formatter
+   stops inserting the space or
+   `compiler/src/typecheck_types.sfn:is_c_abi_function_pointer`
+   accepts a leading space, the declaration tightens.
+2. **`* PosixSpawnFileActions` / `* PosixSpawnAttr`** are spelled
+   as named opaque pointees in the live `posix.sfn` skeleton (see
+   the shipped block further down) even though the original design
+   target used bare `* u8`. Tightening to named opaques costs
+   nothing and matches the discipline goal; adapters can pass null
+   until the lifecycle helpers land.
+
+The libc block immediately below is the **design target excerpt**
+(no-space pointer spelling, includes deferred symbols). It is *not*
+the shipped form — the live `runtime/sfn/platform/libc.sfn` uses
+`sfn fmt` canonical spacing (space after every `*`) and contains
+only the 12 non-deferred declarations. Read the live file for the
+copy-paste source of truth; the block here is preserved for the
+historical design-target shape and for the deferred-symbol notes.
+
 ```sailfin
 // Memory
 extern fn malloc(size: usize) -> *u8;
@@ -797,38 +842,59 @@ extern fn longjmp(env: *JmpBuf, val: i32) -> void;           // (deferred)
 extern fn strtod(nptr: *u8, endptr: **u8) -> f64;
 ```
 
-**`runtime/sfn/platform/pthread.sfn`** (selected):
+**`runtime/sfn/platform/pthread.sfn`** — full shipped surface
+(11 declarations). Pointer spacing matches `sfn fmt` canonical
+output (space after every `*`); copying these forms verbatim
+lands a file that round-trips through `sfn fmt --check` cleanly.
+The `start` parameter degrades from the design-target
+`fn(* u8) -> * u8` to `* u8` per the deviations note above.
+`pthread_t` is modelled as `usize` (not as a `* Pthread` opaque
+pointer) because libpthread passes it by value in `pthread_join`
+— Linux defines `pthread_t` as `unsigned long` and macOS as
+`__pthread_t *`, both pointer-sized but neither is a struct
+pointer. See the `pthread.sfn` file header for the full ABI
+note; the short form is "out-param uses `* usize`, by-value uses
+bare `usize`."
 
 ```sailfin
-extern fn pthread_create(thread: *Pthread, attr: *PthreadAttr, start: fn(*u8) -> *u8, arg: *u8) -> i32;
-extern fn pthread_join(thread: *Pthread, result: **u8) -> i32;
-extern fn pthread_mutex_init(m: *PthreadMutex, attr: *PthreadMutexAttr) -> i32;
-extern fn pthread_mutex_lock(m: *PthreadMutex) -> i32;
-extern fn pthread_mutex_unlock(m: *PthreadMutex) -> i32;
-extern fn pthread_cond_wait(c: *PthreadCond, m: *PthreadMutex) -> i32;
-extern fn pthread_cond_signal(c: *PthreadCond) -> i32;
+extern fn pthread_create(thread: * usize, attr: * PthreadAttr, start: * u8, arg: * u8) -> i32;
+extern fn pthread_join(thread: usize, result: * * u8) -> i32;
+extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
+extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
+extern fn pthread_mutex_destroy(m: * PthreadMutex) -> i32;
+extern fn pthread_cond_init(c: * PthreadCond, attr: * PthreadCondAttr) -> i32;
+extern fn pthread_cond_wait(c: * PthreadCond, m: * PthreadMutex) -> i32;
+extern fn pthread_cond_signal(c: * PthreadCond) -> i32;
+extern fn pthread_cond_broadcast(c: * PthreadCond) -> i32;
+extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;
 ```
 
-**`runtime/sfn/platform/posix.sfn`** (selected):
+**`runtime/sfn/platform/posix.sfn`** — full shipped surface
+(4 declarations). `file_actions` / `attrp` use named opaque
+pointees (deviation #2 above); the design-target bare `* u8`
+spelling is no longer authoritative.
 
 ```sailfin
-extern fn posix_spawnp(pid: *i32, path: *u8, file_actions: *u8, attrp: *u8, argv: **u8, envp: **u8) -> i32;
-extern fn waitpid(pid: i32, status: *i32, options: i32) -> i32;
-extern fn clock_gettime(clk_id: i32, ts: *Timespec) -> i32;
-extern fn nanosleep(req: *Timespec, rem: *Timespec) -> i32;
+extern fn posix_spawnp(pid: * i32, path: * u8, file_actions: * PosixSpawnFileActions, attrp: * PosixSpawnAttr, argv: * * u8, envp: * * u8) -> i32;
+extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
+extern fn clock_gettime(clk_id: i32, ts: * Timespec) -> i32;
+extern fn nanosleep(req: * Timespec, rem: * Timespec) -> i32;
 ```
 
-**`runtime/sfn/platform/net.sfn`** (selected):
+**`runtime/sfn/platform/net.sfn`** — full shipped surface
+(9 declarations).
 
 ```sailfin
 extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
-extern fn connect(sockfd: i32, addr: *SockAddr, addrlen: i32) -> i32;
-extern fn send(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
-extern fn recv(sockfd: i32, buf: *u8, len: i64, flags: i32) -> i64;
-extern fn bind(sockfd: i32, addr: *SockAddr, addrlen: i32) -> i32;
-extern fn listen(sockfd: i32, backlog: i32) -> i32;
-extern fn accept(sockfd: i32, addr: *SockAddr, addrlen: *i32) -> i32;
 extern fn close(fd: i32) -> i32;
+extern fn connect(sockfd: i32, addr: * SockAddr, addrlen: i32) -> i32;
+extern fn bind(sockfd: i32, addr: * SockAddr, addrlen: i32) -> i32;
+extern fn listen(sockfd: i32, backlog: i32) -> i32;
+extern fn accept(sockfd: i32, addr: * SockAddr, addrlen: * i32) -> i32;
+extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
 ```
 
 **Rules for `extern fn` signatures:**

@@ -23,6 +23,25 @@
 >   serve libc calls until M2. Pinned by
 >   `compiler/tests/e2e/test_runtime_libc_skeleton.sh` (typecheck + fmt +
 >   LLVM `declare` emission for every symbol).
+> - **Three further `runtime/sfn/platform/*.sfn` skeletons — shipped
+>   2026-05-02.** `pthread.sfn` (11 declarations: pthread_create / join,
+>   mutex lifecycle, condition-variable lifecycle), `posix.sfn` (4
+>   declarations: posix_spawnp, waitpid, clock_gettime, nanosleep), and
+>   `net.sfn` (9 declarations: socket/close, connect/bind/listen/accept,
+>   send/recv, setsockopt). Together they validate the extern pipeline
+>   on richer C-ABI shapes than libc — pointer-to-pointer (`* * u8` for
+>   `pthread_join`'s result and `posix_spawnp`'s argv/envp), primitive-
+>   pointer out-parameters (`* i32` for `waitpid`'s status and
+>   `accept`'s addrlen), and multiple opaque-struct families
+>   (`* PthreadMutex`, `* Timespec`, `* SockAddr`). Function-pointer
+>   parameters intentionally degrade to `* u8` until either `sfn fmt`
+>   stops inserting a space inside `fn(...)` or
+>   `is_c_abi_function_pointer` accepts the `fn (...)` form (see the
+>   header of `runtime/sfn/platform/pthread.sfn`). Pinned by
+>   `compiler/tests/e2e/test_runtime_{pthread,posix,net}_skeleton.sh`.
+>   Not imported anywhere yet; the C runtime continues to serve these
+>   calls until M2 (process / clock / sleep adapters) and M3 / M4
+>   (HTTP / serve / scheduler).
 > - **`int` / `float` numeric type annotations — shipped 2026-05-02**
 >   (Phase 1 #2, Slice A). Hard prereq #1 below is partially satisfied:
 >   `let x: int = 42` and `let x: float = 3.14` now lower to `i64` and
