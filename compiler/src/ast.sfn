@@ -62,6 +62,7 @@ enum Expression {
         return_type: TypeAnnotation?
     },
     Range { start: Expression, end: Expression },
+    Cast { operand: Expression, target_type: TypeAnnotation },
     Raw { text: string }
 }
 

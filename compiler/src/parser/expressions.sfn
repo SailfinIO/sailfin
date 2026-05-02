@@ -498,6 +498,34 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
     loop {
         if expression_tokens_is_at_end(current_state) { break; }
         let token = expression_tokens_peek(current_state);
+
+        // `as` casts (Slice D, docs/runtime_architecture.md §3.7).
+        // `as` is a soft keyword (lexes as Identifier; same convention
+        // as the import-alias precedent at parser/declarations.sfn:625).
+        // Postfix-binding so `x + y as int` parses as `x + (y as int)`,
+        // matching Rust. Chains naturally left-associate via the loop.
+        // Slice D accepts a single primitive type-name identifier as
+        // the cast target (`int`, `float`, `i64`, `double`, `i32`,
+        // `i16`, `i8`, `u64`, `u32`, `u16`, `u8`, `f32`); pointer /
+        // generic / function-pointer cast targets are out of scope and
+        // get rejected at lowering with E0806 (`unsupported cast`).
+        if identifier_matches(token, "as") {
+            let after_as = expression_tokens_advance(current_state);
+            if expression_tokens_is_at_end(after_as) {
+                return expression_parse_failure(state);
+            }
+            let type_token = expression_tokens_peek(after_as);
+            if type_token.kind.variant != "Identifier" {
+                return expression_parse_failure(state);
+            }
+            current_state = expression_tokens_advance(after_as);
+            current_expression = Expression.Cast {
+                operand: current_expression,
+                target_type: TypeAnnotation { text: identifier_text(type_token) }
+            };
+            continue;
+        }
+
         if token.kind.variant != "Symbol" { break; }
 
         let sym = token.lexeme;
