@@ -848,10 +848,17 @@ output (space after every `*`); copying these forms verbatim
 lands a file that round-trips through `sfn fmt --check` cleanly.
 The `start` parameter degrades from the design-target
 `fn(* u8) -> * u8` to `* u8` per the deviations note above.
+`pthread_t` is modelled as `usize` (not as a `* Pthread` opaque
+pointer) because libpthread passes it by value in `pthread_join`
+— Linux defines `pthread_t` as `unsigned long` and macOS as
+`__pthread_t *`, both pointer-sized but neither is a struct
+pointer. See the `pthread.sfn` file header for the full ABI
+note; the short form is "out-param uses `* usize`, by-value uses
+bare `usize`."
 
 ```sailfin
-extern fn pthread_create(thread: * Pthread, attr: * PthreadAttr, start: * u8, arg: * u8) -> i32;
-extern fn pthread_join(thread: * Pthread, result: * * u8) -> i32;
+extern fn pthread_create(thread: * usize, attr: * PthreadAttr, start: * u8, arg: * u8) -> i32;
+extern fn pthread_join(thread: usize, result: * * u8) -> i32;
 extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
 extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
 extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
