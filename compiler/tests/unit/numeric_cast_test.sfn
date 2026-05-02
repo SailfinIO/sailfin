@@ -1,0 +1,93 @@
+// Unit tests pinning the parser + emitter behaviour for `expr as Type`
+// casts (Slice D, docs/runtime_architecture.md §3.7).
+//
+// Slice D ships parser + AST + native-IR rendering for `as` casts:
+// `parse_postfix_chain` recognizes the soft keyword `as` (already
+// used for import aliases at parser/declarations.sfn:625) and
+// builds an `Expression.Cast { operand, target_type }`. Both
+// `format_expression` sites render the node as `(operand) as <type>`
+// — the wrapping parens contain any embedded operators so the
+// existing LLVM lowering recognizer (`parse_cast_expression` in
+// llvm/expression_lowering/native/core_parsing.sfn) recovers the
+// operand cleanly via `strip_enclosing_parentheses`.
+//
+// The numeric-pair LLVM lowering matrix (sitofp / fptosi / sext /
+// trunc / fpext / fptrunc) is a follow-up — see the Slice D PR
+// thread for the diagnosed alpha.8 seed self-host bug that blocks
+// the inline predicate dispatch. Today numeric `as` casts hit the
+// existing "unsupported cast" diagnostic in lower_cast_expression;
+// pointer↔pointer / int↔pointer casts (already handled by the
+// existing recognizer + lowering) are unaffected.
+//
+// These tests pin the front-end shape so a future regression in
+// the parser/emitter is caught here independently of the deferred
+// lowering work. They use return statements rather than in-body
+// `let` initializers because the function-body parser preserves
+// `let` lines as `Expression.Raw` text wholesale (an unrelated
+// limitation predating Slice D); return-position expressions go
+// through `parse_expression_bp` → `parse_postfix_chain` and exercise
+// the new Cast node.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _emit(source: string) -> string {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "numeric_cast_test");
+}
+
+fn _diagnostics(source: string) -> Diagnostic[] {
+    let program = parse_program(source);
+    return typecheck_diagnostics(program);
+}
+
+// ── Parser produces a structured Cast node for `expr as Type` ─────
+test "cast: int as float renders parens-wrapped operand" {
+    let asm = _emit("fn convert(x: int) -> float { return x as float; }");
+    assert index_of(asm, "ret (x) as float") >= 0;
+}
+
+test "cast: float as int renders parens-wrapped operand" {
+    let asm = _emit("fn convert(x: float) -> int { return x as int; }");
+    assert index_of(asm, "ret (x) as int") >= 0;
+}
+
+test "cast: chained casts left-associate" {
+    // `x as i32 as i64` parses as `((x as i32) as i64)` — each `as`
+    // is consumed by the postfix loop iteration, naturally left-
+    // associative. The format renders the chain with nested parens.
+    let asm = _emit("fn widen(x: i32) -> i64 { return x as i32 as i64; }");
+    assert index_of(asm, "((x) as i32) as i64") >= 0;
+}
+
+test "cast: cast binds tighter than `+`" {
+    // `x + y as int` parses as `x + (y as int)` because `as` is
+    // consumed inside parse_postfix_chain — postfix-position binds
+    // tighter than the binary operator ladder. Matches Rust.
+    let asm = _emit("fn add_cast(x: int, y: float) -> int { return x + y as int; }");
+    assert index_of(asm, "ret x + (y) as int") >= 0;
+}
+
+// ── Typecheck accepts `as` casts cleanly ──────────────────────────
+//
+// The cast operator lives at the parser/AST level — the typechecker
+// sees an `Expression.Cast` and emits no diagnostics on its own.
+// The downstream LLVM lowering may emit "unsupported cast"
+// diagnostics for numeric pairs (deferred to follow-up), but the
+// front-end typecheck surface stays clean.
+test "cast: int as float typechecks with no diagnostics" {
+    let diagnostics = _diagnostics("fn convert(x: int) -> float { return x as float; }");
+    assert diagnostics.length == 0;
+}
+
+test "cast: float as int typechecks with no diagnostics" {
+    let diagnostics = _diagnostics("fn convert(x: float) -> int { return x as int; }");
+    assert diagnostics.length == 0;
+}
+
+test "cast: chained casts typecheck" {
+    let diagnostics = _diagnostics("fn widen(x: i32) -> i64 { return x as i32 as i64; }");
+    assert diagnostics.length == 0;
+}

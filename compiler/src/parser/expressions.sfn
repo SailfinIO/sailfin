@@ -498,6 +498,44 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
     loop {
         if expression_tokens_is_at_end(current_state) { break; }
         let token = expression_tokens_peek(current_state);
+
+        // `as` casts (Slice D, docs/runtime_architecture.md §3.7).
+        // `as` is a soft keyword (lexes as Identifier; same convention
+        // as the import-alias precedent at parser/declarations.sfn:625).
+        // Postfix-binding so `x + y as int` parses as `x + (y as int)`,
+        // matching Rust. Chains naturally left-associate via the loop.
+        // The parser accepts any single `Identifier` token as the cast
+        // target (the type-name string is preserved verbatim into
+        // `TypeAnnotation.text`); non-Identifier targets fall through
+        // to a parse failure here, NOT a downstream lowering
+        // diagnostic. Pointer / generic / function-pointer cast forms
+        // (`*u8`, `Result<T, E>`, `fn(A) -> B`) therefore require
+        // future parser work to lift into structured target types.
+        // Numeric pair lowering (sitofp / fptosi / sext / trunc /
+        // fpext / fptrunc) is the deferred follow-up — today the
+        // existing `lower_cast_expression` handles only pointer↔
+        // pointer / int↔pointer; numeric pairs hit the generic
+        // `llvm lowering: unsupported cast from \`X\` to \`Y\``
+        // diagnostic (no E-code yet — diagnostic is a plain string).
+        if identifier_matches(token, "as") {
+            let after_as = expression_tokens_advance(current_state);
+            if expression_tokens_is_at_end(after_as) {
+                return expression_parse_failure(state);
+            }
+            let type_token = expression_tokens_peek(after_as);
+            if type_token.kind.variant != "Identifier" {
+                return expression_parse_failure(state);
+            }
+            current_state = expression_tokens_advance(after_as);
+            current_expression = Expression.Cast {
+                operand: current_expression,
+                target_type: TypeAnnotation {
+                    text: identifier_text(type_token)
+                }
+            };
+            continue;
+        }
+
         if token.kind.variant != "Symbol" { break; }
 
         let sym = token.lexeme;

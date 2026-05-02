@@ -54,6 +54,30 @@
 >   + `number` retirement) remain sequenced follow-ups.
 > - Other M0 items (`Result<T, E>` + `?`, closures with capture, atomic
 >   intrinsics) remain planned.
+> - **Slice D — `as` casts (parser-only): partially shipped 2026-05-02.**
+>   Parser/AST/native-IR rendering for `expr as Type` is in place
+>   — `Expression.Cast { operand, target_type }` is recognized in
+>   `parse_postfix_chain` (`as` is a soft keyword reusing the import-
+>   alias precedent). The native `.sfn-asm` emitter renders casts as
+>   `(operand) as <type>` (operand parens contain embedded operators
+>   so the existing LLVM-lowering cast recognizer can recover the
+>   operand via `strip_enclosing_parentheses`); the Sailfin-source
+>   emitter (`emitter_sailfin_expr`) renders the human-friendly
+>   `expr as Type` form (no operand parens — no re-parse step
+>   consumes its output). The numeric-pair LLVM lowering matrix
+>   (sitofp / fptosi / sext / trunc / fpext / fptrunc) is deferred:
+>   the alpha.8 seed exhibits a string-aliasing self-host bug
+>   (struct-field reads of type `string` mis-evaluate when bound
+>   into let-locals or passed as function arguments inside a new
+>   branch chain — they read back as the literal "0"). The bug
+>   blocks the inline predicate dispatch the architect's plan
+>   relies on; diagnosing it is the follow-up that lands the
+>   numeric matrix. Today numeric `as` casts hit the existing
+>   "unsupported cast" diagnostic in `lower_cast_expression`;
+>   pointer↔pointer / int↔pointer casts (already handled by the
+>   pre-Slice-D lowering) are unaffected. Pinned by
+>   `compiler/tests/unit/numeric_cast_test.sfn` (7 tests covering
+>   parser shape, chain associativity, precedence, and typecheck).
 
 This document is the architectural blueprint for the Sailfin-native runtime that
 will replace the C runtime (`runtime/native/`) before the 1.0 release. It

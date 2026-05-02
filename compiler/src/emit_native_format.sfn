@@ -92,6 +92,17 @@ fn format_expression(expression: Expression) -> string {
     if expression.variant == "Range" {
         return format_expression(expression.start) + ".." + format_expression(expression.end);
     }
+    if expression.variant == "Cast" {
+        // Render as `(operand) as <type>` — matches the existing
+        // `parse_cast_expression` recognizer in
+        // `compiler/src/llvm/expression_lowering/native/core_parsing.sfn`,
+        // which scans for the literal ` as ` substring at top level
+        // (outside parens/brackets/strings). Wrapping the operand in
+        // parens contains any embedded operators so the recognizer's
+        // `strip_enclosing_parentheses` recovers the operand text.
+        return "(" + format_expression(expression.operand) + ") as "
+            + expression.target_type.text;
+    }
     if expression.variant == "Lambda" { return "<lambda>"; }
     if expression.variant == "Raw" {
         let raw_text = trim_text(expression.text);
