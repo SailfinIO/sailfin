@@ -1,11 +1,11 @@
 # Sailfin-Native Runtime Architecture
 
-**Date:** 2026-04-15 (last reviewed 2026-05-01 — see "Status delta" below)
+**Date:** 2026-04-15 (last reviewed 2026-05-02 — see "Status delta" below)
 **Author:** Compiler architect (design review)
 **Companion docs:** `docs/runtime_audit.md` (current C runtime state),
 `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI), `docs/build-performance.md` (perf analysis)
 
-> **Status delta since 2026-04-15.** Track milestone progress here so the body
+> **Status delta.** Track milestone progress here so the body
 > below stays consistent with the tree:
 >
 > - M0.5 arena-in-C: **shipped, default-on** (PRs #249, #251, #252).
@@ -17,8 +17,15 @@
 >   verified by `compiler/tests/e2e/test_runtime_libc_skeleton.sh`). The
 >   file is not yet imported anywhere — the runtime continues to reach
 >   libc through the C runtime until M2.
-> - All other M0 items (`int`/`float`, `Result<T, E>` + `?`, closures with
->   capture, atomic intrinsics) remain planned.
+> - **`int` (i64) / `float` (f64) numeric type annotations: shipped 2026-05-02**
+>   (Phase 1 #2, Slice A — see §3.7). Annotated locals/parameters/return
+>   types lower correctly to `i64` / `double` and feed the existing
+>   integer-vs-float arithmetic dispatch. `extern fn` accept-list extended
+>   to admit `int` / `float`. Slices B–E (bitwise ops, wider widths,
+>   `as` casts, bare-literal defaulting + `number` retirement) are
+>   sequenced follow-ups.
+> - Other M0 items (`Result<T, E>` + `?`, closures with capture, atomic
+>   intrinsics) remain planned.
 
 This document is the architectural blueprint for the Sailfin-native runtime that
 will replace the C runtime (`runtime/native/`) before the 1.0 release. It
@@ -1060,7 +1067,112 @@ diagnostics. Coverage:
   the parser → native-IR → `.meta extern` round trip for the
   `runtime/sfn/platform/libc.sfn`-shaped libc skeleton.
 
-### 3.7 Runtime Helper Registry Migration
+### 3.7 Numeric Types (`int` / `float`)
+
+**Status (2026-05-02): Slice A shipped.** Annotated locals,
+parameters, and return types of type `int` and `float` lower
+correctly through the LLVM backend. Slices B–E (sequenced below)
+remain.
+
+**What ships in Slice A:**
+
+1. **Type mapping.** `int` → `i64`, `float` → `double` in both
+   `compiler/src/llvm/type_mapping.sfn:map_primitive_type` and
+   `compiler/src/llvm/expression_lowering/native/statement_type_mapping.sfn:map_primitive_type`
+   (the latter is the path the let-instruction lowering takes via
+   `_map_type_core`). Pre-fix, `let x: float = 3.14` silently
+   lowered as `i8*` (string pointer) and `+` became
+   `sailfin_runtime_string_concat` — a catastrophic, undiagnosed
+   misbehaviour. The fix adds three lines (one each in
+   `map_primitive_type` × 2 and `layout_annotation_represents_user_value`).
+
+2. **Extern accept-list.** `is_extern_primitive_type` in
+   `compiler/src/typecheck_types.sfn` now admits `int` and `float`
+   alongside `i8/i32/i64/u8/usize/bool`. The accept-list remains
+   the intersection of "valid C-ABI" and "what the LLVM backend
+   actually maps today" — `int`/`float` are aliases for
+   already-mapped primitives, so admitting them is purely
+   additive.
+
+3. **Existing dispatch was already correct.** The LLVM lowering
+   already had:
+   - `operation_name_for_symbol` (`core_helpers.sfn:36`) branching
+     on `llvm_type == "double"` to emit `fadd`/`fsub`/... vs
+     `add`/`sub`/`sdiv`/...
+   - `comparison_predicate_for_symbol` (`core_operands.sfn:147`)
+     branching between `fcmp` and `icmp slt/sgt/...`.
+   - `dominant_type` (`core_operands.sfn:1487`) ranking `double`
+     over `i64` over `i8` over `i1`.
+   - The integer-literal short-circuit at `core.sfn:460-491` —
+     when `expected_type == "i64"` or `"i32"` and the literal is
+     integer-shaped, the operand is emitted as that exact type.
+
+   So `let x: int = 42; let y: int = 1; let z = x + y;` already
+   emitted `alloca i64`, `store i64 42`, `add i64` end-to-end. The
+   slice mostly closes the gap for `float` and the extern surface;
+   tests in `compiler/tests/unit/numeric_int_float_test.sfn` and
+   `compiler/tests/e2e/test_numeric_int_float.sh` pin all the
+   newly-working paths so a regression surfaces here.
+
+**Known limitations (deferred to follow-up slices):**
+
+| # | Limitation | Consequence | Slice |
+|---|---|---|---|
+| L1 | Bare numeric literals default to `number` (i.e. `double`) | `let x = 42` produces `alloca double`, not `alloca i64` | E |
+| L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. | D |
+| L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. Workaround: annotate the literal (`x > 0 as int` once `as` casts ship) or compare against an annotated local. | D + E |
+| L4 | Bitwise operators (`&`, `|`, `^`, `>>`, `<<`) on `int` | Required for SHA-256 / Base64 / flag manipulation in the pure-Sailfin runtime (M3 crypto port). Not yet parsed. | B |
+| L5 | Wider widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) rejected at extern | Restricts what libc surface the skeleton (`runtime/sfn/platform/libc.sfn`) can name. Today `usize` aliases `i64`; `isize` and the smaller widths are blocked. | C |
+| L6 | `number` keyword still exists | Pre-1.0 alias for `double`; the compiler source still uses it everywhere. Migrating compiler source from `number` → `int`/`float` and retiring `number` entirely is the prerequisite for L1. | E |
+
+**Follow-up slices in dependency order:**
+
+- **Slice B — Bitwise operators on `int`.** Needs lexer additions
+  (some operators may already lex as their text form) plus parser
+  recognition (precedence tables for `<<`/`>>`/`&`/`|`/`^`) plus
+  lowering branches in `core_ops_lowering.sfn` to emit `and`/`or`/
+  `xor`/`shl`/`ashr` against `i64` operands. Required before the
+  M3 crypto port (SHA-256, Base64) can leave the C runtime.
+
+- **Slice C — Wider integer / float widths.** Add `i16`/`u16`/`u32`/
+  `u64`/`isize`/`f32` entries to `map_primitive_type` (both copies)
+  and to `is_extern_primitive_type`. Mostly mechanical once the
+  pattern is set; admit each width only after verifying clang
+  emits clean IR for the test fixture. Unblocks more of the libc
+  surface (`memchr`'s `int` byte parameter, `clock_gettime`'s
+  `i32` clk_id, etc.).
+
+- **Slice D — `as` casts + reject silent int↔float coercion.**
+  Parser/lexer addition for `expr as Type`. Lowering: emit `fpext`
+  / `fptosi` / `sitofp` / `trunc` / `zext` per the source/target
+  pair. Tighten `dominant_type` to refuse coercion between integer
+  and float without an explicit `as`. This closes L2 and L3 cleanly
+  — but only after Slice E (or in lockstep with it) so the compiler
+  source can be migrated off `number` first.
+
+- **Slice E — Bare-literal defaulting + `number` retirement.**
+  Per `CLAUDE.md` Pre-1.0 Syntax Reform §3, `number` becomes an
+  alias for `float` and bare integer literals default to `int`.
+  Pre-1.0 we don't need user backwards-compat — once a release
+  cycle passes after this slice ships, the `number` keyword and
+  every supporting branch in `map_primitive_type` /
+  `dominant_type` / etc. can be deleted. Migration order:
+    1. Add `int` as the bare-literal default.
+    2. Audit-and-migrate every `: number` annotation in
+       `compiler/src/*.sfn` and `runtime/prelude.sfn` to
+       `: int` or `: float` based on actual usage.
+    3. Cut a release.
+    4. Delete `number` everywhere.
+
+**Self-hosting safety (Slice A):** The compiler source uses
+`number` throughout; nothing in `compiler/src/*.sfn` uses `: float`
+or `: int` for control-flow loop counters. Adding `float` →
+`double` to `map_primitive_type` and admitting `int`/`float` in
+the extern accept-list is purely additive — no existing code path
+changes behaviour. Verified via `make compile && make test-unit
+&& make test-integration && make test-e2e` (all green).
+
+### 3.8 Runtime Helper Registry Migration
 
 `compiler/src/llvm/runtime_helpers.sfn` must be updated in lockstep with the
 runtime migration. The migration path:

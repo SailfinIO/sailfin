@@ -1484,6 +1484,19 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     };
 }
 
+// LIMITATION (numeric types Slice A — see docs/runtime_architecture.md
+// §3.7 limitations table L2/L3): when one operand is integer (i64)
+// and the other is float (double), the rule below silently widens
+// the integer side to double. That can truncate above 2^53 and is
+// fundamentally a footgun for runtime authors handling indices
+// alongside model arithmetic. Slice D (`as` casts + reject silent
+// int↔float coercion) tightens this — once that ships, cross-type
+// pairings here become a hard error and authors must spell the
+// intent explicitly. Pre-Slice-D the silent widening is preserved
+// because the compiler's own self-host depends on `number`-typed
+// loop counters meeting integer literals (`i += 1`) without
+// erroring; that compatibility goes away when Slice E retires
+// `number`.
 fn dominant_type(first: string, second: string) -> string {
     if first.length == 0 { return second; }
     if second.length == 0 { return first; }

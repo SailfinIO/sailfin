@@ -1,0 +1,104 @@
+// Unit tests pinning the parser + emitter behaviour for `int` (i64)
+// and `float` (double) annotations.
+//
+// Phase 1 #2 of the runtime-rewrite roadmap. Most of the integer
+// arithmetic dispatch was already wired (operation_name_for_symbol,
+// dominant_type, the integer-literal short-circuit in
+// `core.sfn:lower_expression`); these tests pin that down so a
+// future regression is caught here. The previously-broken case was
+// `let x: float = 3.14`: `map_primitive_type` had no entry for
+// `float`, so the local was lowered as `i8*` (string pointer) and
+// `+` became `string_concat`. The LLVM-level assertions for that
+// fix live in `compiler/tests/e2e/test_numeric_int_float.sh`; this
+// file pins the front-end shape (parse → typecheck → native IR).
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _emit(source: string) -> string {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "numeric_test");
+}
+
+fn _diagnostics(source: string) -> Diagnostic[] {
+    let program = parse_program(source);
+    return typecheck_diagnostics(program);
+}
+
+// ── Native-IR carries int/float types through ─────────────────
+test "numeric: let x: int = 42 carries int through native IR" {
+    let asm = _emit("fn main() { let x: int = 42; }");
+    assert index_of(asm, "let x: int") >= 0;
+}
+
+test "numeric: let x: float = 3.14 carries float through native IR" {
+    let asm = _emit("fn main() { let x: float = 3.14; }");
+    assert index_of(asm, "let x: float") >= 0;
+}
+
+test "numeric: function signature with int and float types" {
+    let asm = _emit("fn add_int(x: int) -> int { return x + 1; }\n"
+        + "fn double_float(x: float) -> float { return x + x; }\n");
+    assert index_of(asm, ".fn add_int") >= 0;
+    assert index_of(asm, ".fn double_float") >= 0;
+}
+
+// ── Typecheck accepts int/float annotations cleanly ───────────
+test "numeric: int annotation typechecks with no diagnostics" {
+    let diagnostics = _diagnostics("fn main() { let x: int = 42; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: float annotation typechecks with no diagnostics" {
+    let diagnostics = _diagnostics("fn main() { let x: float = 3.14; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: int + int typechecks with no diagnostics" {
+    let diagnostics = _diagnostics("fn add(x: int, y: int) -> int { return x + y; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: float + float typechecks with no diagnostics" {
+    let diagnostics = _diagnostics("fn mul(x: float, y: float) -> float { return x * y; }");
+    assert diagnostics.length == 0;
+}
+
+// ── extern fn now accepts int and float in its accept-list ────
+// Pre-#281 these were rejected with E0805. Adding them to the
+// accept-list closes the gap between the language's canonical
+// numeric type names and the C-ABI extern surface.
+test "numeric: extern fn with int parameter and return typechecks" {
+    let diagnostics = _diagnostics("extern fn add_one(x: int) -> int;");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn with float parameter and return typechecks" {
+    let diagnostics = _diagnostics("extern fn double_it(x: float) -> float;");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn mixing int and float typechecks" {
+    let diagnostics = _diagnostics("extern fn scale(value: int, factor: float) -> float;");
+    assert diagnostics.length == 0;
+}
+
+// ── extern fn still rejects narrower widths until backend lands ──
+// `i16`/`u32`/`f64` (and friends) remain on the deferred list — the
+// LLVM type mapper has no entries for them today, so accepting them
+// at typecheck would let an extern lower silently to `i8*` and
+// produce ABI-mismatched IR. This is intentional; widen the accept-
+// list when `map_primitive_type` learns the wider widths.
+test "numeric: extern fn with i16 parameter still rejected (E0805)" {
+    let diagnostics = _diagnostics("extern fn narrow(x: i16) -> i64;");
+    let mut has_e0805: boolean = false;
+    let mut i: number = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, "E0805") { has_e0805 = true; }
+        i += 1;
+    }
+    assert has_e0805;
+}
