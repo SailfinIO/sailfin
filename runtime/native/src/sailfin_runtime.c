@@ -5160,19 +5160,32 @@ void sailfin_runtime_process_exit(double code)
  */
 static char *_popen_read_all(const char *cmd);
 
+/*
+ * Static empty-string fallback for `sailfin_runtime_shell_capture`'s
+ * OOM paths. The Sailfin caller treats the return value as a
+ * `string` (i8*) and immediately reads `.length` / iterates over it;
+ * returning NULL would crash the trim loop in
+ * `_shell_read_cmd` / `_cr_shell_read`. A static `""` is safe under
+ * either allocator mode — the caller never frees it (string_drop is
+ * a no-op for `mark_persistent`-style pointers, and arena mode skips
+ * free entirely), and even if a future caller did free it, the C
+ * heap-validator catches that as a clear "tried to free a static"
+ * abort, not a silent corruption. The address is unique and stable,
+ * so equality checks against this sentinel keep working.
+ */
+static char _sailfin_runtime_shell_capture_empty[1] = { '\0' };
+
 char *sailfin_runtime_shell_capture(char *cmd)
 {
     _runtime_enter();
     if (!cmd)
     {
-        char *empty = (char *)_rt_calloc(1, 1);
-        return empty;
+        return _sailfin_runtime_shell_capture_empty;
     }
     char *captured = _popen_read_all(cmd);
     if (!captured)
     {
-        char *empty = (char *)_rt_calloc(1, 1);
-        return empty;
+        return _sailfin_runtime_shell_capture_empty;
     }
     /* `_popen_read_all` returns malloc-allocated memory for legacy
      * compatibility with `sailfin_runtime_http_*`. Copy into the
@@ -5183,8 +5196,10 @@ char *sailfin_runtime_shell_capture(char *cmd)
     char *out = (char *)_rt_calloc(1, len + 1);
     if (!out)
     {
+        /* OOM during the rt-side copy — fall through to the static
+         * empty string so the Sailfin caller never sees NULL. */
         free(captured);
-        return NULL;
+        return _sailfin_runtime_shell_capture_empty;
     }
     memcpy(out, captured, len);
     free(captured);

@@ -299,20 +299,49 @@ fn _cr_ends_with(text: string, suffix: string) -> boolean {
     return strings_equal(substring(text, start, text.length), suffix);
 }
 
+// Forward-declare the arena-aware popen-based capture helper so the
+// resolver's env reads (`_cr_scratch_root`, `_cr_get_home`,
+// `SAILFIN_BUILD_JOBS` lookup, `mktemp` calls) don't go through the
+// fixed `/tmp/.sfn_capsule_resolver_tmp` path that previously raced
+// across xargs-spawned emit workers and parallel `sfn test`
+// invocations. The helper is the same one
+// `cli_commands_utils.sfn:_shell_read_cmd` calls; declaring it here
+// keeps the resolver self-contained (no new cross-module import).
+extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+
 fn _cr_shell_read(cmd: string) -> string ![io] {
-    let tmp = "/tmp/.sfn_capsule_resolver_tmp";
-    let rc = process.run(["sh", "-c", cmd + " > " + tmp + " 2>/dev/null"]);
-    if rc != 0 { return ""; }
-    if !fs.exists(tmp) { return ""; }
-    let raw = fs.readFile(tmp);
-    process.run(["rm", "-f", tmp]);
-    // Trim trailing newline
-    if raw.length > 0 {
-        if substring(raw, raw.length - 1, raw.length) == "\n" {
-            return substring(raw, 0, raw.length - 1);
-        }
+    let captured = sailfin_runtime_shell_capture(cmd);
+    // Match the trimming semantics of `cli_commands_utils.sfn:_shell_read_cmd`
+    // (which routes through `_toml_trim_cmd` for symmetric whitespace
+    // stripping). Without this, an env value with trailing whitespace
+    // could make `_cr_scratch_root` and `_test_scratch_root` disagree
+    // on the path and route artifacts to different directories.
+    if captured.length == 0 { return ""; }
+    let mut start: number = 0;
+    let mut end: number = captured.length;
+    loop {
+        if start >= end { break; }
+        let c = substring(captured, start, start + 1);
+        let mut ws: boolean = false;
+        if c == " " { ws = true; }
+        if c == "\n" { ws = true; }
+        if c == "\r" { ws = true; }
+        if c == "\t" { ws = true; }
+        if !ws { break; }
+        start += 1;
     }
-    return raw;
+    loop {
+        if end <= start { break; }
+        let c = substring(captured, end - 1, end);
+        let mut ws: boolean = false;
+        if c == " " { ws = true; }
+        if c == "\n" { ws = true; }
+        if c == "\r" { ws = true; }
+        if c == "\t" { ws = true; }
+        if !ws { break; }
+        end -= 1;
+    }
+    return substring(captured, start, end);
 }
 
 fn _cr_get_home() -> string ![io] {

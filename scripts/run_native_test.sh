@@ -26,10 +26,15 @@ BASENAME="$(basename "$TEST_FILE")"
 #      other's resolver output mid-flight.
 #   2. Sequential test runs no longer need a destructive `rm -rf`
 #      to guarantee isolation — each test owns its own tree, and
-#      the cleanup trap below removes it on exit. That keeps the
-#      previous test's artifacts available for post-mortem if the
-#      *current* test fails (the compiler still writes its
-#      diagnostics into the now-isolated scratch).
+#      the cleanup trap below removes it on success. The trap
+#      preserves the scratch tree on FAILURE so post-mortem tooling
+#      can inspect the partial `.ll` outputs, the `test.ll` source,
+#      and any resolver dot-files that recorded what went wrong;
+#      without that, the only debugging signal would be the
+#      truncated `tail -10` of the test runner's combined output.
+#      Set `SAILFIN_TEST_KEEP_SCRATCH=1` to preserve the tree even
+#      on success (useful when bisecting a green-but-suspicious
+#      test that's masking a partial flake).
 #
 # We still ensure `build/sailfin/` exists for persistent control
 # flags (`.trace_test_runner`, `.dump_test_sources`,
@@ -39,7 +44,19 @@ BASENAME="$(basename "$TEST_FILE")"
 mkdir -p build/sailfin
 SAILFIN_TEST_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/sfn-test-XXXXXX")"
 export SAILFIN_TEST_SCRATCH
-trap 'rm -rf "$SAILFIN_TEST_SCRATCH"' EXIT
+_sfn_test_cleanup() {
+    rc=$?
+    if [ "${SAILFIN_TEST_KEEP_SCRATCH:-0}" = "1" ]; then
+        echo "[run_native_test] preserving scratch: $SAILFIN_TEST_SCRATCH (SAILFIN_TEST_KEEP_SCRATCH=1)" >&2
+        return
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "[run_native_test] preserving scratch on failure: $SAILFIN_TEST_SCRATCH" >&2
+        return
+    fi
+    rm -rf "$SAILFIN_TEST_SCRATCH"
+}
+trap _sfn_test_cleanup EXIT
 
 # Per-test wall-clock budget. Tight enough that hung binaries fail fast,
 # loose enough that legitimate compiles don't get clipped on CI under
