@@ -148,9 +148,46 @@ EOF
     return 0
 }
 
+# ---- Test: bitwise on float emits no malformed IR ----
+# Pre-fix, `operation_name_for_symbol` returned empty for
+# bitwise/shift on `double`, but `lower_binary_operation`
+# concatenated that empty string into the LLVM line, producing
+# malformed IR like `%t0 =  double <a>, <b>`. Now the lowering
+# detects the empty op-name, registers a diagnostic, and returns
+# a null operand so the function body falls through cleanly.
+test_bitwise_on_float_emits_no_malformed_ir() {
+    local src="$SCRATCH/bitwise_float.sfn"
+    local ll="$SCRATCH/bitwise_float.ll"
+    cat > "$src" <<'EOF'
+fn bad(x: float, y: float) -> float {
+    return x & y;
+}
+EOF
+    if ! "$BINARY" emit -o "$ll" llvm "$src" > /dev/null 2>&1; then
+        echo "[test]   sfn emit llvm crashed on bitwise-on-float"
+        return 1
+    fi
+    # The malformed-IR shape: `=  ` (equals + double space + non-
+    # opcode token) immediately followed by a type. If this
+    # pattern shows up the diagnostic guard regressed.
+    if grep -qE "^[[:space:]]+%[a-zA-Z0-9_]+ =[[:space:]]+(double|i64|i32|i8) " "$ll"; then
+        # Make sure each ` = double` line is preceded by an op-name (alloca, load, etc.)
+        # Filter out `alloca double` / `load double` / `fadd double` etc.
+        local malformed
+        malformed="$(grep -E "^[[:space:]]+%[a-zA-Z0-9_]+ = (double|i64|i32|i8) " "$ll" || true)"
+        if [ -n "$malformed" ]; then
+            echo "[test]   regression: malformed IR with empty opcode found:"
+            echo "$malformed" | head -3
+            return 1
+        fi
+    fi
+    return 0
+}
+
 run_test "bitwise & | ^ << >> emit and/or/xor/shl/ashr i64" test_bitwise_ops_lower_correctly
 run_test "shift with int literal RHS keeps i64 typing" test_shift_literal_stays_i64
 run_test "(flags & mask) == mask precedence: bitwise-AND inside, comparison outside" test_flag_mask_precedence
+run_test "bitwise on float emits no malformed LLVM IR" test_bitwise_on_float_emits_no_malformed_ir
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

@@ -700,6 +700,32 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         }
     }
     let operation = operation_name_for_symbol(match.symbol, result_type);
+    if operation.length == 0 {
+        // Slice B (2026-05-02): `operation_name_for_symbol` returns
+        // empty when a bitwise/shift operator is applied to a
+        // `double` operand — those LLVM ops aren't valid on
+        // floating-point. Without this guard the binary lowering
+        // would emit malformed IR (`%t0 =  double <a>, <b>`); now
+        // we surface a diagnostic and return a null operand so
+        // callers see the expression failed to lower. The cleaner
+        // fix lives in Slice D (`as` casts + dominant_type
+        // tightening) which will reject this at typecheck before
+        // we reach lowering.
+        diagnostics.push("llvm lowering: operator `" + match.symbol
+            + "` is not supported on `"
+            + result_type
+            + "` operands; bitwise and shift operators require"
+            + " integer operands. Annotate the operands as `int`"
+            + " or `i64` (or use an `as` cast once Slice D ships).");
+        let empty_constants = empty_string_constant_set();
+        return ExpressionResult {
+            lines: harmonised.lines,
+            temp_index: harmonised.temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: empty_constants
+        };
+    }
     let temp_name = format_temp_name(harmonised.temp_index);
     let line = "  " + temp_name + " = " + operation + " " + result_type + " "
         + left_aligned.value
