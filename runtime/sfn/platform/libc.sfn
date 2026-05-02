@@ -14,14 +14,15 @@
 // `runtime/sfn/io.sfn`, and `runtime/sfn/adapters/filesystem.sfn`.
 //
 // Type discipline: every declaration here uses only types from the
-// v0 C-ABI accept-list enforced by `compiler/src/typecheck_types.
-// sfn:check_extern_signature` (E0801–E0805) — i8 / i32 / i64 / u8 /
-// usize / bool, raw pointers (`*T`, `*const T`, `*OpaqueStruct`),
-// `void` (return only). Wider integer/float types (i16, u32, f64,
-// isize, …) are intentionally absent until the LLVM type mapper
-// learns to lower them. Adding declarations here that step outside
-// the accept-list would surface as E0805 the moment this file is
-// imported.
+// v0 C-ABI accept-list. The validator is `check_extern_signature`
+// in `compiler/src/typecheck_types.sfn` and rejects non-conforming
+// signatures with diagnostics E0801–E0805. Accepted forms are i8 /
+// i32 / i64 / u8 / usize / bool, raw pointers (`* u8`, `* const T`,
+// `* OpaqueStruct`), and `void` (return only). Wider integer/float
+// types (i16, u32, f64, isize, …) are intentionally absent until
+// the LLVM type mapper learns to lower them. Adding declarations
+// here that step outside the accept-list would surface as E0805
+// the moment this file is imported.
 //
 // `unsafe` keyword: omitted on every declaration. The architect's
 // design doc (§3.6) calls out `unsafe` as a documentation marker
@@ -30,9 +31,12 @@
 // `![io]`/`![net]`/etc. effects per the wrapping-adapter rule.
 // ── Memory management ─────────────────────────────────────────
 // libc memory primitives. Sizes flow as `usize` (lowered to i64
-// today). Untyped result pointers are `*u8` per the Sailfin
+// today). Untyped result pointers are `* u8` per the Sailfin
 // convention — adapters cast onto typed pointers as soon as the
-// memory crosses back into Sailfin.
+// memory crosses back into Sailfin. (The formatter writes raw
+// pointer types with a space after `*`; the comments throughout
+// this file match that spelling so anything copy-pasted lands in
+// canonical-formatted form.)
 extern fn malloc(size: usize) -> * u8;
 
 extern fn free(ptr: * u8) -> void;
@@ -53,10 +57,10 @@ extern fn write(fd: i32, buf: * u8, count: usize) -> i64;
 extern fn read(fd: i32, buf: * u8, count: usize) -> i64;
 
 // ── Stdio filesystem ──────────────────────────────────────────
-// `*File` is an opaque platform handle. The opaque-pointee rule
+// `* File` is an opaque platform handle. The opaque-pointee rule
 // in the typechecker (`is_extern_opaque_pointee`) accepts any
 // uppercase identifier as a valid pointee without requiring a
-// struct definition — `*File` lowers to `i8*` in LLVM IR. The
+// struct definition — `* File` lowers to `i8*` in LLVM IR. The
 // Sailfin-native filesystem adapter (M3) wraps these into
 // `runtime/sfn/adapters/filesystem.sfn` calls.
 extern fn fopen(path: * u8, mode: * u8) -> * File;

@@ -91,10 +91,19 @@ test_emit_declares() {
     # extend this list — the goal is to catch a regression where an
     # extern silently stops emitting a `declare` directive (e.g. a
     # signature accidentally falls into a path that emits nothing).
+    #
+    # We anchor each match on the literal `(` that always follows
+    # the symbol in an LLVM `declare` line (`declare i64 @write(`).
+    # `\b` word-boundaries are GNU-only in ERE — BSD/macOS `grep -E`
+    # treats `\b` as a backspace and would silently skip every
+    # match — so anchoring on `(` keeps the regex portable without
+    # giving up the false-positive guard (a partial-name match like
+    # `@write_log(` cannot collide because the symbol-followed-by-`(`
+    # form is unambiguous in LLVM IR).
     local missing=0
     for sym in malloc free realloc memcpy memcmp write read fopen fclose fread fwrite getenv; do
-        if ! grep -qE "^declare .* @${sym}\b" "$ll"; then
-            echo "[test]   missing 'declare ... @${sym}' in emitted IR"
+        if ! grep -qE "^declare .* @${sym}\(" "$ll"; then
+            echo "[test]   missing 'declare ... @${sym}(' in emitted IR"
             missing=$((missing + 1))
         fi
     done

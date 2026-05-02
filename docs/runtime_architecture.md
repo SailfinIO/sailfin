@@ -733,12 +733,18 @@ declarations — pure Sailfin source, no C. The compiler emits LLVM `declare`
 directives for each extern; the linker resolves them against libc/libpthread at
 link time.
 
-**`runtime/sfn/platform/libc.sfn`** — the first 12 declarations
-shipped 2026-05-01 use `usize` for `size_t`-shaped parameters and
-omit `setjmp`/`longjmp`/`memchr` until follow-up PRs land their
-dependencies (opaque `JmpBuf` size, exception subsystem). The
-shape below is the design target across all milestones; selected
-entries:
+**`runtime/sfn/platform/libc.sfn`** — selected entries from the
+*design target* are listed below. The actually-shipped 2026-05-01
+skeleton is a subset of this list: the 12 declarations covering
+`malloc`/`free`/`realloc`/`memcpy`/`memcmp`, `write`/`read`,
+`fopen`/`fclose`/`fread`/`fwrite`, and `getenv`. `memchr`,
+`setjmp`, and `longjmp` (commented `// (deferred)` below) are part
+of the long-term shape but wait on follow-up PRs that land their
+dependencies — `memchr` needs the LLVM mapper to learn `i32`-byte
+parameters cleanly through opaque pointers, and `setjmp`/`longjmp`
+need the exception subsystem plus opaque `JmpBuf` size constants.
+Once those land, drop the `// (deferred)` markers and the
+declarations move into the live skeleton.
 
 ```sailfin
 // Memory
@@ -747,7 +753,7 @@ extern fn free(ptr: *u8) -> void;
 extern fn realloc(ptr: *u8, new_size: usize) -> *u8;
 extern fn memcpy(dst: *u8, src: *u8, n: usize) -> *u8;
 extern fn memcmp(a: *u8, b: *u8, n: usize) -> i32;
-extern fn memchr(haystack: *u8, byte: i32, n: usize) -> *u8;
+extern fn memchr(haystack: *u8, byte: i32, n: usize) -> *u8; // (deferred)
 
 // I/O (fd-based)
 extern fn write(fd: i32, buf: *u8, count: usize) -> i64;
@@ -761,8 +767,8 @@ extern fn fclose(f: *File) -> i32;
 
 // Environment + exception support
 extern fn getenv(name: *u8) -> *u8;
-extern fn setjmp(env: *JmpBuf) -> i32;
-extern fn longjmp(env: *JmpBuf, val: i32) -> void;
+extern fn setjmp(env: *JmpBuf) -> i32;                       // (deferred)
+extern fn longjmp(env: *JmpBuf, val: i32) -> void;           // (deferred)
 
 // String conversion (variadic — see open question Q6)
 extern fn strtod(nptr: *u8, endptr: **u8) -> f64;
