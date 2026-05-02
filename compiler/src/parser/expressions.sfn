@@ -521,7 +521,9 @@ fn parse_postfix_chain(state: ExpressionTokens, expression: Expression) -> Expre
             current_state = expression_tokens_advance(after_as);
             current_expression = Expression.Cast {
                 operand: current_expression,
-                target_type: TypeAnnotation { text: identifier_text(type_token) }
+                target_type: TypeAnnotation {
+                    text: identifier_text(type_token)
+                }
             };
             continue;
         }

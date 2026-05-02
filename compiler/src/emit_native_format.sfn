@@ -100,7 +100,8 @@ fn format_expression(expression: Expression) -> string {
         // (outside parens/brackets/strings). Wrapping the operand in
         // parens contains any embedded operators so the recognizer's
         // `strip_enclosing_parentheses` recovers the operand text.
-        return "(" + format_expression(expression.operand) + ") as " + expression.target_type.text;
+        return "(" + format_expression(expression.operand) + ") as "
+            + expression.target_type.text;
     }
     if expression.variant == "Lambda" { return "<lambda>"; }
     if expression.variant == "Raw" {
