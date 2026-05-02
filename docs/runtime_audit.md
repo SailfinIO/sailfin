@@ -29,10 +29,16 @@
 >   `double` respectively; integer arithmetic dispatch (`add i64` vs
 >   `fadd double`) and comparison dispatch (`icmp` vs `fcmp`) are wired.
 >   The extern accept-list now admits `int` / `float` so
->   `runtime/sfn/platform/*.sfn` modules can name them. Slices B–E
->   (bitwise ops, additional widths, `as` casts, bare-literal defaulting +
->   `number` retirement) remain — see `docs/runtime_architecture.md`
->   §3.7 for the full slice taxonomy and known limitations table.
+>   `runtime/sfn/platform/*.sfn` modules can name them.
+> - **Numeric Slice C — additional widths shipped 2026-05-02.** `i16`,
+>   `u16`, `u32`, `u64`, `isize`, `f32` joined `map_primitive_type` and
+>   `is_extern_primitive_type`. The extern accept-list now covers the
+>   practical libc surface (errno_t, mode_t, dev_t, ssize_t, short,
+>   single-precision floats). User-level arithmetic on these widths
+>   still rides L5 (silent widening). Slices B (bitwise ops), D (`as`
+>   casts), and E (bare-literal defaulting + `number` retirement) remain
+>   — see `docs/runtime_architecture.md` §3.7 for the full slice
+>   taxonomy and the L1–L6 limitations table.
 
 ## Purpose
 

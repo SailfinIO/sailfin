@@ -144,18 +144,22 @@ test "extern: rejects parameter with no type annotation (E0805)" {
     assert _has_code(diagnostics, "E0805");
 }
 
-test "extern: rejects i16 parameter until backend support lands (E0805)" {
+// Slice C (2026-05-02) admitted i16/u16/u32/u64/isize/f32 (and
+// added f64 as the longer alias for `float`/`double`) into the
+// extern accept-list. Pre-Slice-C these were rejected with E0805;
+// the tests below are the regression pin for the new behaviour.
+test "extern: accepts i16 parameter (Slice C)" {
     let source = "extern fn narrow(x: i16) -> i64;";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0805");
+    assert diagnostics.length == 0;
 }
 
-test "extern: rejects f64 return until backend support lands (E0805)" {
+test "extern: accepts f64 return type (Slice C — alias for float/double)" {
     let source = "extern fn now() -> f64;";
     let program = parse_program(source);
     let diagnostics = typecheck_diagnostics(program);
-    assert _has_code(diagnostics, "E0805");
+    assert diagnostics.length == 0;
 }
 
 // -------------------------------------------------------------------

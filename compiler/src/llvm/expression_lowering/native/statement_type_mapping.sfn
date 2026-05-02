@@ -77,17 +77,35 @@ fn map_interface_type_annotation(context: TypeContext, annotation: string) -> st
 fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     if annotation == "number" { return "double"; }
     if annotation == "float" { return "double"; }
+    if annotation == "f64" { return "double"; }
+    if annotation == "f32" { return "float"; }
     let mut _if149: boolean = false;
     if annotation == "boolean" { _if149 = true; }
     if annotation == "bool" { _if149 = true; }
     if _if149 { return "i1"; }
+    // Pointer-sized aliases: usize and isize lower to i64 on every
+    // platform Sailfin currently targets (linux-x86_64, macos-arm64
+    // — both 64-bit). When a 32-bit target lands, a target-aware
+    // entry replaces these.
     if annotation == "usize" { return "i64"; }
+    if annotation == "isize" { return "i64"; }
     let mut _if150: boolean = false;
     if annotation == "int" { _if150 = true; }
     if annotation == "i64" { _if150 = true; }
+    if annotation == "u64" { _if150 = true; }
     if _if150 { return "i64"; }
-    if annotation == "i32" { return "i32"; }
-    if annotation == "u8" { return "i8"; }
+    let mut _if151: boolean = false;
+    if annotation == "i32" { _if151 = true; }
+    if annotation == "u32" { _if151 = true; }
+    if _if151 { return "i32"; }
+    let mut _if152: boolean = false;
+    if annotation == "i16" { _if152 = true; }
+    if annotation == "u16" { _if152 = true; }
+    if _if152 { return "i16"; }
+    let mut _if153: boolean = false;
+    if annotation == "u8" { _if153 = true; }
+    if annotation == "i8" { _if153 = true; }
+    if _if153 { return "i8"; }
     let struct_type = map_struct_type_annotation(context, annotation);
     if struct_type.length > 0 { return struct_type; }
     let enum_type = map_enum_type_annotation(context, annotation);

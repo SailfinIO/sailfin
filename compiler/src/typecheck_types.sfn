@@ -584,16 +584,35 @@ fn _is_c_abi_type_inner(normalized: string, allow_bare_void: boolean) -> boolean
 // They lower through `map_primitive_type` to `i64` / `double` so a
 // `declare` directive emitted from this surface is well-formed.
 //
+// Slice C (2026-05-02) admitted `i16`, `u16`, `u32`, `u64`, `isize`,
+// and `f32` after teaching `map_primitive_type` to lower them. The
+// accept-list now spans the practical libc surface (e.g. `i32` for
+// `int` / `errno_t`, `u32` for `uid_t`/`mode_t`, `u64` for `dev_t`,
+// `isize` for `ssize_t`, `i16` for `short`). Comparison operators
+// and `dominant_type` only have explicit branches for i8/i32/i64
+// today; mixing wider widths in user-level Sailfin code can still
+// fall through to the silent-coercion footgun (L2/L3 in §3.7).
+// For extern *signatures* (the v0 use case), the boundary is
+// declarative — no comparisons happen at the boundary itself —
+// so the existing gap doesn't bite the libc skeleton.
+//
 // `void` is intentionally excluded; the parameter/return distinction
 // is enforced by the callers (`is_c_abi_parameter_type` rejects bare
 // `void`, `_is_c_abi_type_inner` accepts it when `allow_bare_void`).
 fn is_extern_primitive_type(text: string) -> boolean {
     let mut _ret: boolean = false;
     if strings_equal(text, "i8") { _ret = true; }
+    if strings_equal(text, "i16") { _ret = true; }
     if strings_equal(text, "i32") { _ret = true; }
     if strings_equal(text, "i64") { _ret = true; }
     if strings_equal(text, "u8") { _ret = true; }
+    if strings_equal(text, "u16") { _ret = true; }
+    if strings_equal(text, "u32") { _ret = true; }
+    if strings_equal(text, "u64") { _ret = true; }
     if strings_equal(text, "usize") { _ret = true; }
+    if strings_equal(text, "isize") { _ret = true; }
+    if strings_equal(text, "f32") { _ret = true; }
+    if strings_equal(text, "f64") { _ret = true; }
     if strings_equal(text, "bool") { _ret = true; }
     if strings_equal(text, "int") { _ret = true; }
     if strings_equal(text, "float") { _ret = true; }
@@ -917,19 +936,16 @@ fn extern_type_hint_for(kind: string, type_text: string) -> string {
     }
     if strings_equal(type_text, "number") {
         return "The legacy `number` alias is rejected on extern signatures."
-            + " Use `int` (or `i64`) for integer values, or `float` for"
-            + " 64-bit floating-point. Other widths (`f32`, `i16`,"
-            + " `u32`, `u64`, `isize`, etc.) are not yet wired through"
-            + " the LLVM backend and will be added once the backend"
-            + " supports them.";
+            + " Use `int` (or `i64`) for integer values, or `float`"
+            + " (or the lower-level `f32` for single-precision) for"
+            + " floating-point.";
     }
     return "Externs accept the LLVM-mapped Sailfin primitives (`int`"
-        + " — lowers to i64, `float` — lowers to double, `i8`, `i32`,"
-        + " `u8`, `usize`, `bool`), `void` (return only), raw pointers"
-        + " (`*T`, `**T`, `*OpaqueStruct`), and function pointers"
-        + " (`fn(A) -> B`). Other widths (i16, u32, u64, isize, f32,"
-        + " etc.) require backend support before they can cross the"
-        + " extern boundary.";
+        + " — lowers to i64, `float` — lowers to double, `i8`/`i16`/"
+        + "`i32`/`i64`, `u8`/`u16`/`u32`/`u64`, `usize`/`isize` —"
+        + " both pointer-sized, `f32`, `bool`), `void` (return only),"
+        + " raw pointers (`*T`, `**T`, `*OpaqueStruct`), and function"
+        + " pointers (`fn(A) -> B`).";
 }
 
 fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {

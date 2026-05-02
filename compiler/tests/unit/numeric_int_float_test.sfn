@@ -85,20 +85,40 @@ test "numeric: extern fn mixing int and float typechecks" {
     assert diagnostics.length == 0;
 }
 
-// ── extern fn still rejects other widths until backend lands ──
-// `i16`/`u32`/`f64` (and friends) remain on the deferred list — the
-// LLVM type mapper has no entries for them today, so accepting them
-// at typecheck would let an extern lower silently to `i8*` and
-// produce ABI-mismatched IR. This is intentional; widen the accept-
-// list when `map_primitive_type` learns the wider widths.
-test "numeric: extern fn with i16 parameter still rejected (E0805)" {
+// ── Slice C: additional widths now accepted ──────────────────
+// Slice C (2026-05-02) admitted `i16`, `u16`, `u32`, `u64`, `isize`,
+// and `f32` after teaching `map_primitive_type` to lower them. The
+// accept-list now spans the practical libc surface — see L5 in
+// `docs/runtime_architecture.md` §3.7 for the deferred bits
+// (comparison/dominant_type for the wider widths in user-level
+// arithmetic; extern *signatures* don't compare on the boundary
+// itself, so this PR is sufficient for the libc skeleton's needs).
+test "numeric: extern fn with i16 parameter typechecks (Slice C)" {
     let diagnostics = _diagnostics("extern fn narrow(x: i16) -> i64;");
-    let mut has_e0805: boolean = false;
-    let mut i: number = 0;
-    loop {
-        if i >= diagnostics.length { break; }
-        if strings_equal(diagnostics[i].code, "E0805") { has_e0805 = true; }
-        i += 1;
-    }
-    assert has_e0805;
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn with u16 parameter typechecks (Slice C)" {
+    let diagnostics = _diagnostics("extern fn read_u16(buf: *u8) -> u16;");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn with u32 parameter typechecks (Slice C)" {
+    let diagnostics = _diagnostics("extern fn fchmod(fd: i32, mode: u32) -> i32;");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn with u64 parameter typechecks (Slice C)" {
+    let diagnostics = _diagnostics("extern fn ioctl(fd: i32, request: u64) -> i32;");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn with isize return typechecks (Slice C)" {
+    let diagnostics = _diagnostics("extern fn read_bytes(fd: i32, buf: *u8, count: usize) -> isize;");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: extern fn with f32 typechecks (Slice C)" {
+    let diagnostics = _diagnostics("extern fn fast_sin(x: f32) -> f32;");
+    assert diagnostics.length == 0;
 }
