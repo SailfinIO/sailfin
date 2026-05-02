@@ -1,0 +1,80 @@
+// runtime/sfn/platform/pthread.sfn
+//
+// Pure-Sailfin extern declarations for the pthreads surface used by
+// the v0 scheduler design (`docs/runtime_architecture.md` §2.6.1
+// "Fixed Thread Pool, Not Work-Stealing"). Companion to
+// `runtime/sfn/platform/libc.sfn`; see that file for the long-form
+// rationale (type discipline, `unsafe` policy, formatter pointer
+// spelling, opaque-pointee rule). All declarations here obey the
+// same v0 C-ABI accept-list enforced by `check_extern_signature`
+// in `compiler/src/typecheck_types.sfn` (E0801–E0805).
+//
+// Status: typecheck smoke test. Not imported anywhere yet; the
+// scheduler/channel implementation that consumes these lands at
+// M4 (`docs/runtime_architecture.md` §4.8). Today this file
+// proves the extern pipeline handles pointer-to-pointer parameters
+// (`* * u8` for `pthread_join`'s result out-param) — a shape the
+// libc skeleton does not exercise.
+//
+// Function-pointer parameters intentionally degraded to `* u8`.
+// The architect's design target spells `pthread_create`'s `start`
+// as `fn(* u8) -> * u8` (architecture doc §2.9), and the v0
+// extern accept-list admits that shape via
+// `is_c_abi_function_pointer` (`compiler/src/typecheck_types.sfn`).
+// However, `sfn fmt` rewrites `fn(...)` to `fn (...)` (space
+// inserted), and the typechecker requires the literal `fn(`
+// prefix — so the canonical-formatted form is rejected. Until
+// either the formatter learns to keep `fn(` tight or
+// `is_c_abi_function_pointer` accepts a leading space, the
+// declaration uses `* u8` (lowers identically to `i8*` at the
+// LLVM level — only the type-discipline signal weakens). Adapters
+// cast the pointer back to a Sailfin function-pointer type at
+// the call site.
+//
+// Opaque-handle policy: every pthread handle and attribute object
+// is declared as a UpperCamelCase opaque pointee
+// (`* Pthread`, `* PthreadMutex`, `* PthreadCond`, …). Their
+// platform-specific sizes (Linux x86_64: 40 bytes for
+// `pthread_mutex_t`, etc.) will be encoded as opaque byte arrays
+// in a separate platform-conditional `.sfn` file when the M4
+// scheduler lands — see `docs/runtime_architecture.md` §2.9 open
+// question Q7. The extern surface itself does not need the size
+// constants because adapters allocate the handles via `malloc`
+// and pass the pointers through.
+// ── Threads ───────────────────────────────────────────────────
+// `start` is the worker entry point. It receives the captured
+// argument as a raw `* u8` and returns its result the same way;
+// the adapter layer wraps Sailfin closures into this shape and
+// casts the `* u8` back to a function-pointer type at the call
+// site (see the file header for the function-pointer fmt
+// constraint). The `pthread_join` `result` parameter is `* * u8`
+// — libc writes the worker's return value through that pointer.
+extern fn pthread_create(thread: * Pthread, attr: * PthreadAttr, start: * u8, arg: * u8) -> i32;
+
+extern fn pthread_join(thread: * Pthread, result: * * u8) -> i32;
+
+// ── Mutex lifecycle ───────────────────────────────────────────
+// `attr` is `* PthreadMutexAttr`; adapters that want default
+// attributes pass null. v0 does not declare
+// `pthread_mutexattr_*` lifecycle helpers because the scheduler
+// design (§2.6.1) only needs default mutexes.
+extern fn pthread_mutex_init(m: * PthreadMutex, attr: * PthreadMutexAttr) -> i32;
+
+extern fn pthread_mutex_lock(m: * PthreadMutex) -> i32;
+
+extern fn pthread_mutex_unlock(m: * PthreadMutex) -> i32;
+
+extern fn pthread_mutex_destroy(m: * PthreadMutex) -> i32;
+
+// ── Condition variables ───────────────────────────────────────
+// Used by `Channel<T>` for not-empty / not-full signalling
+// (§2.6.4) and by `SfnFuture` for await blocking (§2.6.3).
+extern fn pthread_cond_init(c: * PthreadCond, attr: * PthreadCondAttr) -> i32;
+
+extern fn pthread_cond_wait(c: * PthreadCond, m: * PthreadMutex) -> i32;
+
+extern fn pthread_cond_signal(c: * PthreadCond) -> i32;
+
+extern fn pthread_cond_broadcast(c: * PthreadCond) -> i32;
+
+extern fn pthread_cond_destroy(c: * PthreadCond) -> i32;

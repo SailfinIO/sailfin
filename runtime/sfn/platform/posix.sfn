@@ -1,0 +1,47 @@
+// runtime/sfn/platform/posix.sfn
+//
+// Pure-Sailfin extern declarations for the POSIX surface used by
+// the runtime's process-spawn (`docs/runtime_architecture.md` §2.7
+// process adapter), clock adapter (§2.7.4), and sleep primitive
+// (§2.8). Companion to `runtime/sfn/platform/libc.sfn`; see that
+// file for the long-form rationale (type discipline, `unsafe`
+// policy, formatter pointer spelling, opaque-pointee rule). All
+// declarations here obey the v0 C-ABI accept-list enforced by
+// `check_extern_signature` in `compiler/src/typecheck_types.sfn`
+// (E0801–E0805).
+//
+// Status: typecheck smoke test. Not imported anywhere yet; the
+// process / clock / sleep adapters that consume these land at M2
+// (`docs/runtime_architecture.md` §4.6). Today this file proves
+// the extern pipeline handles primitive-pointer out-parameters
+// (`* i32` for `posix_spawnp`'s `pid` and `waitpid`'s `status`)
+// alongside opaque-struct pointers and `* * u8` argv/envp arrays
+// — a richer C-ABI surface than the libc skeleton exercises.
+//
+// Opaque-handle policy: `* Timespec`, `* PosixSpawnFileActions`,
+// and `* PosixSpawnAttr` are declared as UpperCamelCase opaque
+// pointees. Their platform-specific sizes will be encoded as
+// opaque byte arrays in a separate platform-conditional `.sfn`
+// file when the M2 adapter consumers land — see
+// `docs/runtime_architecture.md` §2.9 open question Q7. Adapters
+// allocate the handles via `malloc` and pass the pointers through.
+// ── Process spawn / wait ──────────────────────────────────────
+// `pid` is an `int *` out-parameter (POSIX writes the child PID
+// through it). `argv` / `envp` are NULL-terminated arrays of
+// NUL-terminated C strings — the adapter constructs them in the
+// arena before the call. Adapters that don't customize the spawn
+// pass null `* PosixSpawnFileActions` / `* PosixSpawnAttr`.
+extern fn posix_spawnp(pid: * i32, path: * u8, file_actions: * PosixSpawnFileActions, attrp: * PosixSpawnAttr, argv: * * u8, envp: * * u8) -> i32;
+
+extern fn waitpid(pid: i32, status: * i32, options: i32) -> i32;
+
+// ── Clock / sleep ─────────────────────────────────────────────
+// `clk_id` is one of POSIX's `CLOCK_*` constants (e.g.
+// `CLOCK_MONOTONIC = 1` on Linux). Adapters expose the constants
+// as Sailfin `int` values once `int` literals reach the constant
+// path. `nanosleep` writes the unconsumed remainder into `rem`
+// when the call is interrupted by a signal; adapters that don't
+// care can pass null `* Timespec`.
+extern fn clock_gettime(clk_id: i32, ts: * Timespec) -> i32;
+
+extern fn nanosleep(req: * Timespec, rem: * Timespec) -> i32;

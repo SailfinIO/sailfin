@@ -1,0 +1,71 @@
+// runtime/sfn/platform/net.sfn
+//
+// Pure-Sailfin extern declarations for the BSD-sockets surface
+// used by the runtime's HTTP adapter (`docs/runtime_architecture.md`
+// §2.7.2) and the `serve` accept loop (§2.6.6). Companion to
+// `runtime/sfn/platform/libc.sfn`; see that file for the long-form
+// rationale (type discipline, `unsafe` policy, formatter pointer
+// spelling, opaque-pointee rule). All declarations here obey the
+// v0 C-ABI accept-list enforced by `check_extern_signature` in
+// `compiler/src/typecheck_types.sfn` (E0801–E0805).
+//
+// Status: typecheck smoke test. Not imported anywhere yet; the
+// HTTP / serve adapters that consume these land at M3
+// (`docs/runtime_architecture.md` §4.7) and M4 (§4.8). Today
+// this file proves the extern pipeline handles a primitive-pointer
+// out-parameter (`* i32` for `accept`'s `addrlen`) and validates
+// that opaque-struct pointers compose with the broader BSD socket
+// API.
+//
+// Symbol-collision note: `close(fd: i32) -> i32` is also declared
+// in libc.sfn's family of fd helpers (it isn't there today, but
+// the runtime's libc skeleton will eventually add it for the
+// stdio cleanup path). Until cross-module call-site resolution
+// lands (typecheck open follow-up — see `runtime_audit.md`
+// §"`extern fn` shipped" status delta), declaring the same C
+// symbol in two files is fine: each file emits its own LLVM
+// `declare` and the linker resolves both to the single libc
+// `close`. When the resolver lands, one site becomes canonical
+// and the other re-imports — adapter authors should pick the
+// libc.sfn declaration as the source of truth.
+//
+// Opaque-handle policy: `* SockAddr` is the catch-all opaque
+// handle. The actual layout (`sockaddr_in`, `sockaddr_in6`,
+// `sockaddr_un`) varies by socket family and is not part of the
+// extern surface — adapters allocate the family-specific struct
+// in the arena and cast through `* u8` at the call site.
+// ── Socket lifecycle ──────────────────────────────────────────
+// `domain` is `AF_INET` / `AF_INET6` / `AF_UNIX`; `ty` is
+// `SOCK_STREAM` / `SOCK_DGRAM`; `protocol` is normally 0.
+// Adapters expose those constants as `int` values when the
+// const-folding path matures.
+extern fn socket(domain: i32, ty: i32, protocol: i32) -> i32;
+
+extern fn close(fd: i32) -> i32;
+
+// ── Connection management ─────────────────────────────────────
+// `addrlen` for `accept` is a `socklen_t *` in/out parameter:
+// callers write the buffer size in, kernel writes the actual
+// returned address length out. The other call sites pass
+// `addrlen` by value because no length-out is needed.
+extern fn connect(sockfd: i32, addr: * SockAddr, addrlen: i32) -> i32;
+
+extern fn bind(sockfd: i32, addr: * SockAddr, addrlen: i32) -> i32;
+
+extern fn listen(sockfd: i32, backlog: i32) -> i32;
+
+extern fn accept(sockfd: i32, addr: * SockAddr, addrlen: * i32) -> i32;
+
+// ── Data transfer ─────────────────────────────────────────────
+// Returns are `ssize_t` (signed `i64` on every platform Sailfin
+// targets); negative values signal `errno`. Adapters translate
+// to `Result<T, IoError>` once the type ships.
+extern fn send(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+extern fn recv(sockfd: i32, buf: * u8, len: i64, flags: i32) -> i64;
+
+// ── Socket options ────────────────────────────────────────────
+// `optval` is a typed buffer whose layout depends on `optname`
+// (e.g. `SO_REUSEADDR` takes an `int *`); adapters cast through
+// `* u8` at the call site.
+extern fn setsockopt(sockfd: i32, level: i32, optname: i32, optval: * u8, optlen: i32) -> i32;
