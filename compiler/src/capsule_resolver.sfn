@@ -620,14 +620,31 @@ fn mangle_slug(slug: string) -> string {
 }
 
 // ---- LL path resolution (Stage C2b2) ----
+// Resolve the scratch root used for `_cr_legacy_ll_path` and the
+// `compile_capsule_modules` ensure-dir calls. Defaults to
+// `"build/sailfin"`; honours `SAILFIN_TEST_SCRATCH` when set so that
+// callers wanting per-invocation isolation (e.g.
+// `scripts/run_native_test.sh` running tests under a fresh
+// `mktemp -d`) can keep concurrent `sfn test` runs from racing on
+// `build/sailfin/capsules/<slug>.ll`. The env var is read once via
+// the shell printf trick the resolver already uses for
+// `SAILFIN_BUILD_JOBS`; an empty value falls through to the default
+// so that `unset SAILFIN_TEST_SCRATCH` and `SAILFIN_TEST_SCRATCH=`
+// behave identically (no surprise paths on a stripped env).
+fn _cr_scratch_root() -> string ![io] {
+    let env = _cr_shell_read("printf '%s' \"$SAILFIN_TEST_SCRATCH\"");
+    if env.length > 0 { return env; }
+    return "build/sailfin";
+}
+
 // Legacy flat layout for the `.ll` of a slug. Used by the C2b2
 // fallback path: positional builds, single-segment `[capsule].name`
 // (the compiler self-host falls in this bucket — its name is
 // `"sailfin"`), and any source whose slug doesn't match a known
 // dep prefix. One source of truth so the fallback never drifts
 // across the two CapsuleSource construction sites.
-fn _cr_legacy_ll_path(slug: string) -> string {
-    return "build/sailfin/capsules/" + mangle_slug(slug) + ".ll";
+fn _cr_legacy_ll_path(slug: string) -> string ![io] {
+    return _cr_scratch_root() + "/capsules/" + mangle_slug(slug) + ".ll";
 }
 
 // Resolve the per-module `.ll` path under the given layout, falling
@@ -635,7 +652,7 @@ fn _cr_legacy_ll_path(slug: string) -> string {
 // the slug. Pure delegate to `ir_path_for_slug` from
 // `capsule_artifact.sfn`; kept here so the resolver has a single
 // site that owns the fallback policy.
-fn _cr_resolve_ll_path(slug: string, layout: CapsuleArtifactLayout) -> string {
+fn _cr_resolve_ll_path(slug: string, layout: CapsuleArtifactLayout) -> string ![io] {
     let candidate = ir_path_for_slug(layout, slug);
     if candidate.length > 0 { return candidate; }
     return _cr_legacy_ll_path(slug);
@@ -1526,8 +1543,9 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
 // root before any per-module work — done once per build, not per
 // module, so a single `--clean` run can't double-wipe.
 fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string) -> CompileCapsuleResult ![io] {
-    _cr_ensure_dir("build/sailfin");
-    _cr_ensure_dir("build/sailfin/capsules");
+    let scratch_root = _cr_scratch_root();
+    _cr_ensure_dir(scratch_root);
+    _cr_ensure_dir(scratch_root + "/capsules");
     // Per-source dep manifests (PR1e): each `_cr_compile_one` call
     // sees only the manifests of modules it directly imports, so an
     // unrelated capsule changing busts only the modules that

@@ -13,11 +13,33 @@ COMPILER="$1"
 TEST_FILE="$2"
 BASENAME="$(basename "$TEST_FILE")"
 
-# Clean build/sailfin/ scratch directory to prevent cross-test contamination.
-# The compiler writes intermediate files (test.ll, IPC dot-files) into this
-# directory; leftovers from a prior test can alter subsequent runs.
-rm -rf build/sailfin 2>/dev/null || true
+# Per-invocation scratch dir, exported via `SAILFIN_TEST_SCRATCH` so
+# the test command + capsule resolver write `test.ll`, the linked
+# test exe, and per-module `capsules/<slug>.ll` under a path nobody
+# else can touch. Two motivations:
+#   1. Concurrent invocations no longer race on
+#      `build/sailfin/capsules/<slug>.ll`. Pre-fix, two parallel
+#      `sfn test` runs of the same test produced
+#      `clang: error: no such file or directory: build/sailfin/capsules/parser__mod.ll`
+#      ~50% of the time because each invocation's `rm -rf
+#      build/sailfin` at the head of this script clobbered the
+#      other's resolver output mid-flight.
+#   2. Sequential test runs no longer need a destructive `rm -rf`
+#      to guarantee isolation — each test owns its own tree, and
+#      the cleanup trap below removes it on exit. That keeps the
+#      previous test's artifacts available for post-mortem if the
+#      *current* test fails (the compiler still writes its
+#      diagnostics into the now-isolated scratch).
+#
+# We still ensure `build/sailfin/` exists for persistent control
+# flags (`.trace_test_runner`, `.dump_test_sources`,
+# `.test_runner_active`) that callers create against the canonical
+# path; `sfn test` reads those from `build/sailfin/` regardless of
+# `SAILFIN_TEST_SCRATCH`.
 mkdir -p build/sailfin
+SAILFIN_TEST_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/sfn-test-XXXXXX")"
+export SAILFIN_TEST_SCRATCH
+trap 'rm -rf "$SAILFIN_TEST_SCRATCH"' EXIT
 
 # Per-test wall-clock budget. Tight enough that hung binaries fail fast,
 # loose enough that legitimate compiles don't get clipped on CI under

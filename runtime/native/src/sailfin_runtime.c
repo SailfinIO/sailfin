@@ -5129,6 +5129,68 @@ void sailfin_runtime_process_exit(double code)
     exit(exit_code);
 }
 
+/*
+ * sailfin_runtime_shell_capture
+ *
+ * Run `cmd` through popen and return its stdout as a freshly-
+ * allocated runtime string. Replaces the cross-process-racey pattern
+ * `_shell_read_cmd` previously implemented in Sailfin source —
+ *
+ *   process.run(["sh","-c", cmd + " > /tmp/.sfn_shell_read_cmd_tmp"])
+ *   fs.readFile("/tmp/.sfn_shell_read_cmd_tmp")
+ *
+ * — where every concurrent invocation across a process boundary
+ * (xargs-spawned compile workers, parallel `sfn test` invocations,
+ * `make compile`'s subprocess-stage import-context) collided on the
+ * single fixed tmp path. One process's redirect-truncate would
+ * empty another's just-written output mid-flight, producing
+ * silently-corrupt env reads, broken cache hashes, and ultimately
+ * `clang: error: no such file or directory: build/sailfin/capsules/<slug>.ll`
+ * at link time when the cache key drifted away from the real input.
+ *
+ * Allocation lifetime matches the existing `_popen_read_all`-using
+ * helpers (`sailfin_runtime_http_get`, etc.): the buffer is
+ * `_rt_calloc`-routed via `_runtime_enter` so arena mode reclaims it
+ * in bulk, and malloc mode owns it through the runtime's standard
+ * lifecycle. Callers must not free.
+ *
+ * Empty output is returned as a freshly-allocated empty string (not
+ * NULL) so Sailfin-side `.length == 0` checks behave identically
+ * to the pre-existing `_shell_read_cmd` contract.
+ */
+static char *_popen_read_all(const char *cmd);
+
+char *sailfin_runtime_shell_capture(char *cmd)
+{
+    _runtime_enter();
+    if (!cmd)
+    {
+        char *empty = (char *)_rt_calloc(1, 1);
+        return empty;
+    }
+    char *captured = _popen_read_all(cmd);
+    if (!captured)
+    {
+        char *empty = (char *)_rt_calloc(1, 1);
+        return empty;
+    }
+    /* `_popen_read_all` returns malloc-allocated memory for legacy
+     * compatibility with `sailfin_runtime_http_*`. Copy into the
+     * runtime allocator so arena mode can reclaim it; malloc mode's
+     * `_rt_calloc` is just a `calloc`, so the copy is the only
+     * change in cost. */
+    size_t len = strlen(captured);
+    char *out = (char *)_rt_calloc(1, len + 1);
+    if (!out)
+    {
+        free(captured);
+        return NULL;
+    }
+    memcpy(out, captured, len);
+    free(captured);
+    return out;
+}
+
 bool sailfin_runtime_is_callable(char *value)
 {
     (void)value;
