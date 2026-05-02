@@ -5129,6 +5129,83 @@ void sailfin_runtime_process_exit(double code)
     exit(exit_code);
 }
 
+/*
+ * sailfin_runtime_shell_capture
+ *
+ * Run `cmd` through popen and return its stdout as a freshly-
+ * allocated runtime string. Replaces the cross-process-racey pattern
+ * `_shell_read_cmd` previously implemented in Sailfin source —
+ *
+ *   process.run(["sh","-c", cmd + " > /tmp/.sfn_shell_read_cmd_tmp"])
+ *   fs.readFile("/tmp/.sfn_shell_read_cmd_tmp")
+ *
+ * — where every concurrent invocation across a process boundary
+ * (xargs-spawned compile workers, parallel `sfn test` invocations,
+ * `make compile`'s subprocess-stage import-context) collided on the
+ * single fixed tmp path. One process's redirect-truncate would
+ * empty another's just-written output mid-flight, producing
+ * silently-corrupt env reads, broken cache hashes, and ultimately
+ * `clang: error: no such file or directory: build/sailfin/capsules/<slug>.ll`
+ * at link time when the cache key drifted away from the real input.
+ *
+ * Allocation lifetime matches the existing `_popen_read_all`-using
+ * helpers (`sailfin_runtime_http_get`, etc.): the buffer is
+ * `_rt_calloc`-routed via `_runtime_enter` so arena mode reclaims it
+ * in bulk, and malloc mode owns it through the runtime's standard
+ * lifecycle. Callers must not free.
+ *
+ * Empty output is returned as a freshly-allocated empty string (not
+ * NULL) so Sailfin-side `.length == 0` checks behave identically
+ * to the pre-existing `_shell_read_cmd` contract.
+ */
+static char *_popen_read_all(const char *cmd);
+
+/*
+ * Static empty-string fallback for `sailfin_runtime_shell_capture`'s
+ * OOM paths. The Sailfin caller treats the return value as a
+ * `string` (i8*) and immediately reads `.length` / iterates over it;
+ * returning NULL would crash the trim loop in
+ * `_shell_read_cmd` / `_cr_shell_read`. A static `""` is safe under
+ * either allocator mode — the caller never frees it (string_drop is
+ * a no-op for `mark_persistent`-style pointers, and arena mode skips
+ * free entirely), and even if a future caller did free it, the C
+ * heap-validator catches that as a clear "tried to free a static"
+ * abort, not a silent corruption. The address is unique and stable,
+ * so equality checks against this sentinel keep working.
+ */
+static char _sailfin_runtime_shell_capture_empty[1] = { '\0' };
+
+char *sailfin_runtime_shell_capture(char *cmd)
+{
+    _runtime_enter();
+    if (!cmd)
+    {
+        return _sailfin_runtime_shell_capture_empty;
+    }
+    char *captured = _popen_read_all(cmd);
+    if (!captured)
+    {
+        return _sailfin_runtime_shell_capture_empty;
+    }
+    /* `_popen_read_all` returns malloc-allocated memory for legacy
+     * compatibility with `sailfin_runtime_http_*`. Copy into the
+     * runtime allocator so arena mode can reclaim it; malloc mode's
+     * `_rt_calloc` is just a `calloc`, so the copy is the only
+     * change in cost. */
+    size_t len = strlen(captured);
+    char *out = (char *)_rt_calloc(1, len + 1);
+    if (!out)
+    {
+        /* OOM during the rt-side copy — fall through to the static
+         * empty string so the Sailfin caller never sees NULL. */
+        free(captured);
+        return _sailfin_runtime_shell_capture_empty;
+    }
+    memcpy(out, captured, len);
+    free(captured);
+    return out;
+}
+
 bool sailfin_runtime_is_callable(char *value)
 {
     (void)value;

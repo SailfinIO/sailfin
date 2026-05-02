@@ -102,6 +102,16 @@ extern "C"
     // Terminate the process with the given exit code. Never returns.
     void sailfin_runtime_process_exit(double code);
 
+    // Execute `cmd` via popen("r") and return its stdout as a
+    // freshly-allocated runtime string. Used by `_shell_read_cmd`
+    // and friends to capture command output without the shared-tmp-
+    // file dance that previously raced across concurrent processes
+    // (every caller writing to `/tmp/.sfn_shell_read_cmd_tmp`).
+    // Returns "" on popen failure or non-zero exit; callers cannot
+    // distinguish those from a legitimately empty output, matching
+    // the pre-existing `_shell_read_cmd` contract.
+    char *sailfin_runtime_shell_capture(char *cmd);
+
     // Additional prelude/runtime helpers (currently minimal implementations).
     void sailfin_runtime_copy_bytes(char *dest, char *src, int64_t length);
     char *sailfin_runtime_log_execution(char *value);

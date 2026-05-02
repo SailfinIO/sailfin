@@ -96,14 +96,24 @@ fn _toml_trim_cmd(text: string) -> string {
     return substring(text, s, e);
 }
 
+// Forward declare the arena-aware popen-based capture helper added
+// in `runtime/native/src/sailfin_runtime.c`. The pre-existing
+// implementation of `_shell_read_cmd` redirected the shell's stdout
+// through `/tmp/.sfn_shell_read_cmd_tmp` — a single fixed path that
+// raced under any cross-process concurrency (xargs-spawned emit
+// workers, parallel `sfn test` invocations, `make compile`'s
+// subprocess-stage import-context). One process truncating the file
+// while another was mid-write produced silently-corrupt env reads,
+// broken build-cache key hashes, and the
+// `clang: error: no such file or directory: build/sailfin/capsules/<slug>.ll`
+// flake that surfaced as "transient I/O-pressure" in
+// `scripts/run_native_test.sh`'s retry table. Reading via popen
+// avoids the tmp file entirely.
+extern fn sailfin_runtime_shell_capture(cmd: * u8) -> * u8;
+
 fn _shell_read_cmd(cmd: string) -> string ![io] {
-    let tmp = "/tmp/.sfn_shell_read_cmd_tmp";
-    let rc = process.run(["sh", "-c", cmd + " > " + tmp + " 2>/dev/null"]);
-    if rc != 0 { return ""; }
-    if !fs.exists(tmp) { return ""; }
-    let raw = fs.readFile(tmp);
-    process.run(["rm", "-f", tmp]);
-    return _toml_trim_cmd(raw);
+    let captured = sailfin_runtime_shell_capture(cmd);
+    return _toml_trim_cmd(captured);
 }
 
 fn _get_env_cmd(name: string) -> string ![io] {

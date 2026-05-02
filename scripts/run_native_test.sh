@@ -13,11 +13,50 @@ COMPILER="$1"
 TEST_FILE="$2"
 BASENAME="$(basename "$TEST_FILE")"
 
-# Clean build/sailfin/ scratch directory to prevent cross-test contamination.
-# The compiler writes intermediate files (test.ll, IPC dot-files) into this
-# directory; leftovers from a prior test can alter subsequent runs.
-rm -rf build/sailfin 2>/dev/null || true
+# Per-invocation scratch dir, exported via `SAILFIN_TEST_SCRATCH` so
+# the test command + capsule resolver write `test.ll`, the linked
+# test exe, and per-module `capsules/<slug>.ll` under a path nobody
+# else can touch. Two motivations:
+#   1. Concurrent invocations no longer race on
+#      `build/sailfin/capsules/<slug>.ll`. Pre-fix, two parallel
+#      `sfn test` runs of the same test produced
+#      `clang: error: no such file or directory: build/sailfin/capsules/parser__mod.ll`
+#      ~50% of the time because each invocation's `rm -rf
+#      build/sailfin` at the head of this script clobbered the
+#      other's resolver output mid-flight.
+#   2. Sequential test runs no longer need a destructive `rm -rf`
+#      to guarantee isolation — each test owns its own tree, and
+#      the cleanup trap below removes it on success. The trap
+#      preserves the scratch tree on FAILURE so post-mortem tooling
+#      can inspect the partial `.ll` outputs, the `test.ll` source,
+#      and any resolver dot-files that recorded what went wrong;
+#      without that, the only debugging signal would be the
+#      truncated `tail -10` of the test runner's combined output.
+#      Set `SAILFIN_TEST_KEEP_SCRATCH=1` to preserve the tree even
+#      on success (useful when bisecting a green-but-suspicious
+#      test that's masking a partial flake).
+#
+# We still ensure `build/sailfin/` exists for persistent control
+# flags (`.trace_test_runner`, `.dump_test_sources`,
+# `.test_runner_active`) that callers create against the canonical
+# path; `sfn test` reads those from `build/sailfin/` regardless of
+# `SAILFIN_TEST_SCRATCH`.
 mkdir -p build/sailfin
+SAILFIN_TEST_SCRATCH="$(mktemp -d "${TMPDIR:-/tmp}/sfn-test-XXXXXX")"
+export SAILFIN_TEST_SCRATCH
+_sfn_test_cleanup() {
+    rc=$?
+    if [ "${SAILFIN_TEST_KEEP_SCRATCH:-0}" = "1" ]; then
+        echo "[run_native_test] preserving scratch: $SAILFIN_TEST_SCRATCH (SAILFIN_TEST_KEEP_SCRATCH=1)" >&2
+        return
+    fi
+    if [ "$rc" -ne 0 ]; then
+        echo "[run_native_test] preserving scratch on failure: $SAILFIN_TEST_SCRATCH" >&2
+        return
+    fi
+    rm -rf "$SAILFIN_TEST_SCRATCH"
+}
+trap _sfn_test_cleanup EXIT
 
 # Per-test wall-clock budget. Tight enough that hung binaries fail fast,
 # loose enough that legitimate compiles don't get clipped on CI under

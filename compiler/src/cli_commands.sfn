@@ -152,6 +152,31 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
     return process.run(args);
 }
 
+// Resolve the per-test scratch root used for the test runner's
+// ephemeral artifacts (`test.ll`, the linked test executable,
+// `test-o0/`, dump-sources output, and the resolver's per-module
+// `.ll` cache via `_cr_scratch_root`). Defaults to
+// `"build/sailfin"`; honours `SAILFIN_TEST_SCRATCH` when set so
+// that callers wanting per-invocation isolation (e.g.
+// `scripts/run_native_test.sh` running tests under a fresh
+// `mktemp -d`) can keep concurrent `sfn test` runs from racing on
+// the same `test.ll` / `capsules/<slug>.ll` paths. The capsule
+// resolver reads the same env var (`_cr_scratch_root`), so both
+// halves of a `sfn test` run agree on the scratch root without
+// any in-process plumbing.
+//
+// Persistent control flags (`.trace_test_runner`,
+// `.dump_test_sources`) and the run-marker (`.test_runner_active`)
+// stay rooted at `build/sailfin/` so an `unset SAILFIN_TEST_SCRATCH`
+// run still observes user-toggled debug switches and so the
+// marker file remains discoverable across processes for the
+// existing diagnostic tooling that grep's for it.
+fn _test_scratch_root() -> string ![io] {
+    let env = _get_env_cmd("SAILFIN_TEST_SCRATCH");
+    if env.length > 0 { return env; }
+    return "build/sailfin";
+}
+
 // ---- Exported command handlers ----
 // Remove stale LLVM lowering scratchpad files from build/sailfin/ so that
 // inter-phase data from a previous compilation doesn't corrupt the next one.
@@ -288,8 +313,15 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
 
     _ensure_dir_cmd("build");
     _ensure_dir_cmd("build/sailfin");
-    _ensure_dir_cmd("build/sailfin/test-o0");
+    let scratch_root = _test_scratch_root();
+    _ensure_dir_cmd(scratch_root);
+    _ensure_dir_cmd(scratch_root + "/test-o0");
 
+    // Persistent control flags + run-marker stay at the fixed
+    // `build/sailfin/` root; see `_test_scratch_root` for the
+    // rationale. Per-test ephemera (`test.ll`, the linked test
+    // exe, `test-source-*` dumps) live under `scratch_root` so
+    // concurrent invocations don't clobber each other.
     let test_runner_active_path = "build/sailfin/.test_runner_active";
     _write_text_cmd(test_runner_active_path, "");
 
@@ -300,8 +332,8 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         return 1;
     }
 
-    let ll_path = "build/sailfin/test.ll";
-    let exe_path = "build/sailfin/test";
+    let ll_path = scratch_root + "/test.ll";
+    let exe_path = scratch_root + "/test";
     let dump_sources = fs.exists("build/sailfin/.dump_test_sources");
     let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
 
@@ -427,11 +459,11 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
 
         if dump_sources {
             let safe = _sanitize_filename_cmd(path);
-            _write_text_cmd("build/sailfin/test-source-" + safe + ".sfn", source);
+            _write_text_cmd(scratch_root + "/test-source-" + safe + ".sfn", source);
         }
 
         if trace_runner { print.err("test runner: compile start"); }
-        _clean_lowering_state("build/sailfin");
+        _clean_lowering_state(scratch_root);
         let empty_manifests: LayoutManifest[] = [];
         let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
         if !_compiled {
