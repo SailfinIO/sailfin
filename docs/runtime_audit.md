@@ -30,7 +30,7 @@
 >   `fadd double`) and comparison dispatch (`icmp` vs `fcmp`) are wired.
 >   The extern accept-list now admits `int` / `float` so
 >   `runtime/sfn/platform/*.sfn` modules can name them. Slices B–E
->   (bitwise ops, wider widths, `as` casts, bare-literal defaulting +
+>   (bitwise ops, additional widths, `as` casts, bare-literal defaulting +
 >   `number` retirement) remain — see `docs/runtime_architecture.md`
 >   §3.7 for the full slice taxonomy and known limitations table.
 
@@ -337,7 +337,7 @@ compiler features that do not exist in the current toolchain.
    2026-05-02.** Annotated locals/parameters/returns of `int` and `float`
    now lower to `i64` / `double` respectively; integer arithmetic dispatch
    and comparison dispatch are wired. The extern accept-list admits both.
-   Slices B–E (bitwise ops, wider widths, `as` casts, bare-literal
+   Slices B–E (bitwise ops, additional widths, `as` casts, bare-literal
    defaulting + `number` retirement) remain — see
    `docs/runtime_architecture.md` §3.7 for the slice taxonomy and the
    limitations table (L1–L6). The pre-Slice-A "everything is a double"

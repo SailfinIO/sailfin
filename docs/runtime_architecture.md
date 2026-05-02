@@ -21,7 +21,7 @@
 >   (Phase 1 #2, Slice A — see §3.7). Annotated locals/parameters/return
 >   types lower correctly to `i64` / `double` and feed the existing
 >   integer-vs-float arithmetic dispatch. `extern fn` accept-list extended
->   to admit `int` / `float`. Slices B–E (bitwise ops, wider widths,
+>   to admit `int` / `float`. Slices B–E (bitwise ops, additional widths,
 >   `as` casts, bare-literal defaulting + `number` retirement) are
 >   sequenced follow-ups.
 > - Other M0 items (`Result<T, E>` + `?`, closures with capture, atomic
@@ -1122,7 +1122,7 @@ remain.
 | L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. | D |
 | L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. Workaround: annotate the literal (`x > 0 as int` once `as` casts ship) or compare against an annotated local. | D + E |
 | L4 | Bitwise operators (`&`, `|`, `^`, `>>`, `<<`) on `int` | Required for SHA-256 / Base64 / flag manipulation in the pure-Sailfin runtime (M3 crypto port). Not yet parsed. | B |
-| L5 | Wider widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) rejected at extern | Restricts what libc surface the skeleton (`runtime/sfn/platform/libc.sfn`) can name. Today `usize` aliases `i64`; `isize` and the smaller widths are blocked. | C |
+| L5 | Additional widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) rejected at extern | Restricts what libc surface the skeleton (`runtime/sfn/platform/libc.sfn`) can name. The smaller widths (`i16`, `u16`, `u32`, `f32`) and the platform-sized ones (`u64`, `isize`) all need their own `map_primitive_type` entries; `isize` in particular is pointer-sized and matches `i64` on every platform Sailfin targets today, but the typecheck-vs-lowering contract requires an explicit entry before it can be admitted. | C |
 | L6 | `number` keyword still exists | Pre-1.0 alias for `double`; the compiler source still uses it everywhere. Migrating compiler source from `number` → `int`/`float` and retiring `number` entirely is the prerequisite for L1. | E |
 
 **Follow-up slices in dependency order:**

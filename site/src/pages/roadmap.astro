@@ -20,7 +20,7 @@ const v1Categories: RoadmapCategory[] = [
     description: "Language features that unblock the pure Sailfin runtime rewrite. Nothing in the runtime can be ported without these.",
     items: [
       { label: "extern fn with typed linker-resolved symbols (parser ✓, type-checker registration ✓ with E0801–E0805 C-ABI validation, native-IR emitter ✓, LLVM declare lowering ✓; cross-module call-site resolution deferred to the follow-up call-resolver workstream)", status: "done" },
-      { label: "int (i64) and float (f64) numeric types — Slice A shipped: annotated locals/params/returns lower correctly, extern accept-list admits both, arithmetic/comparison dispatch verified. Slices B–E (bitwise ops, wider widths, as casts, bare-literal defaulting + number retirement) tracked in docs/runtime_architecture.md §3.7", status: "in-progress" },
+      { label: "int (i64) and float (f64) numeric types — Slice A shipped: annotated locals/params/returns lower correctly, extern accept-list admits both, arithmetic/comparison dispatch verified. Slices B–E (bitwise ops, additional widths, as casts, bare-literal defaulting + number retirement) tracked in docs/runtime_architecture.md §3.7", status: "in-progress" },
       { label: "Raw pointer types (*T, *const T, *mut T) — enforced, not just parsed", status: "planned" },
       { label: "Result<T, E> type and ? error propagation operator", status: "planned" },
       { label: "Bitwise operators on integer types (&, |, ^, >>, <<)", status: "planned" },

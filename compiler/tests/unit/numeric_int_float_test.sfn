@@ -85,7 +85,7 @@ test "numeric: extern fn mixing int and float typechecks" {
     assert diagnostics.length == 0;
 }
 
-// ── extern fn still rejects narrower widths until backend lands ──
+// ── extern fn still rejects other widths until backend lands ──
 // `i16`/`u32`/`f64` (and friends) remain on the deferred list — the
 // LLVM type mapper has no entries for them today, so accepting them
 // at typecheck would let an extern lower silently to `i8*` and

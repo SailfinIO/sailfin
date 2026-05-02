@@ -918,16 +918,18 @@ fn extern_type_hint_for(kind: string, type_text: string) -> string {
     if strings_equal(type_text, "number") {
         return "The legacy `number` alias is rejected on extern signatures."
             + " Use `int` (or `i64`) for integer values, or `float` for"
-            + " 64-bit floating-point. Narrower widths (`f32`, `i16`,"
-            + " `u32`, etc.) are not yet wired through the LLVM backend"
-            + " and will be added once the backend supports them.";
+            + " 64-bit floating-point. Other widths (`f32`, `i16`,"
+            + " `u32`, `u64`, `isize`, etc.) are not yet wired through"
+            + " the LLVM backend and will be added once the backend"
+            + " supports them.";
     }
-    return "Externs accept the LLVM-mapped primitives (`int`/`i64`,"
-        + " `float`/`double`, i8, i32, u8, usize, bool), `void`"
-        + " (return only), raw pointers (`*T`, `**T`, `*OpaqueStruct`),"
-        + " and function pointers (`fn(A) -> B`). Narrower widths (i16,"
-        + " u32, f32, etc.) require backend support before they can"
-        + " cross the extern boundary.";
+    return "Externs accept the LLVM-mapped Sailfin primitives (`int`"
+        + " — lowers to i64, `float` — lowers to double, `i8`, `i32`,"
+        + " `u8`, `usize`, `bool`), `void` (return only), raw pointers"
+        + " (`*T`, `**T`, `*OpaqueStruct`), and function pointers"
+        + " (`fn(A) -> B`). Other widths (i16, u32, u64, isize, f32,"
+        + " etc.) require backend support before they can cross the"
+        + " extern boundary.";
 }
 
 fn check_type_parameters(type_parameters: TypeParameter[]) -> Diagnostic[] {
