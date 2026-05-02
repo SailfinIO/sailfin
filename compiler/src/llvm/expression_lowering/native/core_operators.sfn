@@ -293,6 +293,21 @@ fn find_comparison_operator(expression: string) -> OperatorMatch {
                     success: true
                 };
             }
+            // Slice B (2026-05-02): skip `<<` and `>>`. They are
+            // shift operators at higher precedence; the comparison
+            // matcher must not split the `<` or `>` half off as a
+            // bare comparison or `a << b` lowers as `(a) < (< b)`.
+            // The shift dispatch (find_shift_operator) runs after
+            // comparison in lower_expression's chain, so handing
+            // these tokens through unmatched is correct.
+            if two_char == "<<" {
+                index += 2;
+                continue;
+            }
+            if two_char == ">>" {
+                index += 2;
+                continue;
+            }
         }
         if ch == "<" {
             return OperatorMatch {
@@ -463,6 +478,222 @@ fn find_logical_operator(expression: string) -> OperatorMatch {
                         return OperatorMatch {
                             index: index,
                             symbol: "&&",
+                            success: true
+                        };
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return OperatorMatch { index: -1, symbol: "", success: false };
+}
+
+// Slice B (2026-05-02): bitwise + shift operator matchers.
+// Each function scans left-to-right at top level (skipping
+// strings, parens, braces, brackets) and returns the FIRST match
+// for its specific operator family. Dispatch order in
+// `lower_expression` runs from lowest to highest precedence so
+// the lowest-precedence top-level operator wins, which is the
+// correct split for left-to-right evaluation.
+//
+// Precedence (matches C and Rust):
+//   bitwise OR `|`     — between `&&` and `==`
+//   bitwise XOR `^`    — between `|` and `&`
+//   bitwise AND `&`    — between `^` and `==`
+//   shift `<<` / `>>`  — between comparison and `+`/`-`
+//
+// Each function explicitly skips its higher-bound siblings:
+// `find_bitwise_or` skips `||`, `find_bitwise_and` skips `&&`,
+// and the comparison matcher (above) was extended to skip
+// `<<`/`>>` so they reach `find_shift_operator`.
+fn find_bitwise_or_operator(expression: string) -> OperatorMatch {
+    return _find_single_char_op_skipping_double(expression, "|");
+}
+
+fn find_bitwise_xor_operator(expression: string) -> OperatorMatch {
+    return _find_single_char_op_skipping_double(expression, "^");
+}
+
+fn find_bitwise_and_operator(expression: string) -> OperatorMatch {
+    return _find_single_char_op_skipping_double(expression, "&");
+}
+
+// Find the first occurrence of `target` (a single-char operator)
+// at top level, skipping the doubled form (e.g. `||` for `|`,
+// `&&` for `&`). `^^` is not a Sailfin operator so `^` only
+// reuses the helper for symmetry — the doubled-form skip is a
+// no-op there.
+fn _find_single_char_op_skipping_double(expression: string, target: string) -> OperatorMatch {
+    let mut paren_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut in_string: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut index: number = 0;
+    loop {
+        if index >= expression.length { break; }
+        let ch = substring(expression, index, index + 1);
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" { in_string = false; }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 { paren_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 { brace_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if paren_depth == 0 {
+            if brace_depth == 0 {
+                if bracket_depth == 0 {
+                    if ch == target {
+                        // Skip the doubled form: `||` for `|`,
+                        // `&&` for `&`. Both chars get consumed
+                        // so the second one doesn't produce a
+                        // spurious single-char match.
+                        let _next_idx = index + 1;
+                        if _next_idx < expression.length {
+                            let next_ch = substring(expression, _next_idx, index
+                                + 2);
+                            if next_ch == target {
+                                index += 2;
+                                continue;
+                            }
+                        }
+                        return OperatorMatch {
+                            index: index,
+                            symbol: target,
+                            success: true
+                        };
+                    }
+                }
+            }
+        }
+        index += 1;
+    }
+    return OperatorMatch { index: -1, symbol: "", success: false };
+}
+
+// Find the first `<<` or `>>` at top level. The comparison
+// matcher (above) was extended to skip these doubled forms so
+// they reach this finder.
+fn find_shift_operator(expression: string) -> OperatorMatch {
+    let mut paren_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut in_string: boolean = false;
+    let mut escape_next: boolean = false;
+    let mut index: number = 0;
+    let _so_limit = expression.length - 1;
+    loop {
+        if index >= _so_limit { break; }
+        let ch = substring(expression, index, index + 1);
+        if in_string {
+            if escape_next {
+                escape_next = false;
+                index += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escape_next = true;
+                index += 1;
+                continue;
+            }
+            if ch == "\"" { in_string = false; }
+            index += 1;
+            continue;
+        }
+        if ch == "\"" {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if ch == "(" {
+            paren_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == ")" {
+            if paren_depth > 0 { paren_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "{" {
+            brace_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "}" {
+            if brace_depth > 0 { brace_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if ch == "[" {
+            bracket_depth += 1;
+            index += 1;
+            continue;
+        }
+        if ch == "]" {
+            if bracket_depth > 0 { bracket_depth -= 1; }
+            index += 1;
+            continue;
+        }
+        if paren_depth == 0 {
+            if brace_depth == 0 {
+                if bracket_depth == 0 {
+                    let two = substring(expression, index, index + 2);
+                    if two == "<<" {
+                        return OperatorMatch {
+                            index: index,
+                            symbol: "<<",
+                            success: true
+                        };
+                    }
+                    if two == ">>" {
+                        return OperatorMatch {
+                            index: index,
+                            symbol: ">>",
                             success: true
                         };
                     }

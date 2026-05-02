@@ -27,11 +27,19 @@
 >   and `is_extern_primitive_type`. The extern accept-list now spans the
 >   practical libc surface (errno_t, mode_t, dev_t, ssize_t, short, single-
 >   precision sin/cos). Comparison/`dominant_type` for these widths in
->   user-level arithmetic is still the L5 deferral — extern *signatures*
->   are declarative and don't compare on the boundary, so the libc
->   skeleton can grow today. Slices B (bitwise ops), D (`as` casts), and
->   E (bare-literal defaulting + `number` retirement) remain sequenced
->   follow-ups.
+>   user-level arithmetic is still the L5 deferral.
+> - **Numeric Slice B — bitwise + shift operators: shipped 2026-05-02.**
+>   `&`, `|`, `^`, `<<`, `>>` now lex, parse, and lower to LLVM
+>   `and`/`or`/`xor`/`shl`/`ashr i64`. Lexer recognizes `<<`/`>>` as
+>   two-char symbols; parser binary-precedence ladder renumbered to insert
+>   them at the C/Rust positions; LLVM lowering grew
+>   `find_bitwise_or`/`xor`/`and` and `find_shift_operator` finders;
+>   `lower_binary_operation` was fixed to use `match.symbol.length` (a
+>   pre-existing single-char assumption that broke `<<` and `>>`) and to
+>   propagate the LHS type into the RHS literal so `x << 2` keeps the
+>   operands as `i64`. L4 in the limitations table is now closed for the
+>   integer side. Slices D (`as` casts) and E (bare-literal defaulting
+>   + `number` retirement) remain sequenced follow-ups.
 > - Other M0 items (`Result<T, E>` + `?`, closures with capture, atomic
 >   intrinsics) remain planned.
 
@@ -1129,18 +1137,33 @@ remain.
 | L1 | Bare numeric literals default to `number` (i.e. `double`) | `let x = 42` produces `alloca double`, not `alloca i64` | E |
 | L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. | D |
 | L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. Workaround: annotate the literal (`x > 0 as int` once `as` casts ship) or compare against an annotated local. | D + E |
-| L4 | Bitwise operators (`&`, `|`, `^`, `>>`, `<<`) on `int` | Required for SHA-256 / Base64 / flag manipulation in the pure-Sailfin runtime (M3 crypto port). Not yet parsed. | B |
+| L4 | ✅ **Closed by Slice B (2026-05-02).** Bitwise operators (`&`, `|`, `^`, `<<`, `>>`) on integer-annotated operands lower to LLVM `and`/`or`/`xor`/`shl`/`ashr i64`. The pure-Sailfin SHA-256/Base64/flag manipulation paths can leave the C runtime in a follow-up M3 PR. Bitwise on `float`/`number` operands is still a footgun — `operation_name_for_symbol` returns empty when `llvm_type == "double"`, but the typecheck does not yet pre-reject it. Closing that gap rides on Slice D's `as` casts. | B (closed) |
 | L5 | Additional widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) in **user-level arithmetic** still funnel through `dominant_type` / `comparison_predicate_for_symbol`, neither of which knows about them — silent widening to `double` (or returning empty predicate strings) is the current behaviour. The **extern boundary** is no longer affected: Slice C (2026-05-02) admitted these widths into `map_primitive_type` and `is_extern_primitive_type`, so `extern fn ioctl(fd: i32, request: u64) -> i32;` lowers to `declare i32 @ioctl(i32, i64)` cleanly. The remaining work is teaching `dominant_type` and `comparison_predicate_for_symbol` about the wider widths so user code can compute on them safely. | D (riding on `as` casts) |
 | L6 | `number` keyword still exists | Pre-1.0 alias for `double`; the compiler source still uses it everywhere. Migrating compiler source from `number` → `int`/`float` and retiring `number` entirely is the prerequisite for L1. | E |
 
 **Follow-up slices in dependency order:**
 
-- **Slice B — Bitwise operators on `int`.** Needs lexer additions
-  (some operators may already lex as their text form) plus parser
-  recognition (precedence tables for `<<`/`>>`/`&`/`|`/`^`) plus
-  lowering branches in `core_ops_lowering.sfn` to emit `and`/`or`/
-  `xor`/`shl`/`ashr` against `i64` operands. Required before the
-  M3 crypto port (SHA-256, Base64) can leave the C runtime.
+- **Slice B — Bitwise operators on `int`.** ✅ **Shipped
+  2026-05-02.** Lexer recognizes `<<`/`>>` as two-char symbols
+  (`is_two_char_symbol` in `compiler/src/lexer.sfn`). Parser
+  binary-precedence ladder renumbered to insert the bitwise ops
+  at the C/Rust positions:
+  `||` (1) → `&&` (2) → `|` (3) → `^` (4) → `&` (5) → `==/!=` (6)
+  → `</<=/>/>=` (7) → `<</>>` (8) → `+/-` (9) → `*//%` (10).
+  LLVM lowering grew four new operator finders
+  (`find_bitwise_or_operator`, `find_bitwise_xor_operator`,
+  `find_bitwise_and_operator`, `find_shift_operator`) plus a fix
+  to `find_comparison_operator` that skips `<<`/`>>` so they
+  reach the shift dispatch. `operation_name_for_symbol` maps
+  `&|^<<>>` to `and`/`or`/`xor`/`shl`/`ashr`. Two pre-existing
+  bugs in `lower_binary_operation` were fixed in the same PR:
+  the right-hand-side text slice hardcoded `+ 1` (broke any
+  two-char operator), and the RHS lowered with `expected_type=""`
+  (caused integer-literal RHS like `2` in `x << 2` to default
+  to `double`, which then triggered silent fpext widening).
+  Verified by `compiler/tests/unit/numeric_bitwise_test.sfn`
+  (12 tests) and `compiler/tests/e2e/test_numeric_bitwise.sh`
+  (3 tests). Unblocks the M3 crypto port (SHA-256, Base64).
 
 - **Slice C — Additional integer / float widths.** ✅ **Shipped
   2026-05-02.** Added `i16`/`u16`/`u32`/`u64`/`isize`/`f32` entries
