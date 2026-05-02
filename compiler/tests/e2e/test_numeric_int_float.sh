@@ -194,11 +194,99 @@ EOF
     return 0
 }
 
+# ---- Test (Slice C): wider integer/float widths in extern signatures ----
+# Slice C admitted i16, u16, u32, u64, isize, and f32 to the extern
+# accept-list after teaching map_primitive_type to lower them. This
+# test pins the LLVM emission for each width — a regression where
+# any of these silently fall back to i8* (the pre-Slice-A bug shape)
+# would surface here.
+test_extern_wider_widths_declare() {
+    local src="$SCRATCH/extern_wider.sfn"
+    local ll="$SCRATCH/extern_wider.ll"
+    cat > "$src" <<'EOF'
+extern fn read_u16(buf: *u8) -> u16;
+extern fn ioctl(fd: i32, request: u64) -> i32;
+extern fn read_bytes(fd: i32, buf: *u8, count: usize) -> isize;
+extern fn pad(x: i16) -> i32;
+extern fn fchmod(fd: i32, mode: u32) -> i32;
+extern fn fast_sin(x: f32) -> f32;
+EOF
+    if ! "$BINARY" check "$src" > /dev/null 2>&1; then
+        echo "[test]   sfn check rejected wider-width extern signatures"
+        "$BINARY" check "$src" 2>&1 | tail -20
+        return 1
+    fi
+    if ! "$BINARY" emit -o "$ll" llvm "$src" > /dev/null 2>&1; then
+        echo "[test]   sfn emit llvm failed on wider-width externs"
+        return 1
+    fi
+    local missing=0
+    # Each declaration's expected LLVM signature.
+    if ! grep -qE "^declare i16 @read_u16\(i8\*( |%)" "$ll"; then
+        echo "[test]   missing 'declare i16 @read_u16(i8*)' in emitted IR"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^declare i32 @ioctl\(i32 [^,]*, i64( |%)" "$ll"; then
+        echo "[test]   missing 'declare i32 @ioctl(i32, i64)' in emitted IR"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^declare i64 @read_bytes\(i32 [^,]*, i8\* [^,]*, i64( |%)" "$ll"; then
+        echo "[test]   missing 'declare i64 @read_bytes(i32, i8*, i64)' (isize → i64) in emitted IR"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^declare i32 @pad\(i16( |%)" "$ll"; then
+        echo "[test]   missing 'declare i32 @pad(i16)' in emitted IR"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^declare i32 @fchmod\(i32 [^,]*, i32( |%)" "$ll"; then
+        echo "[test]   missing 'declare i32 @fchmod(i32, i32)' (u32 → i32) in emitted IR"
+        missing=$((missing + 1))
+    fi
+    if ! grep -qE "^declare float @fast_sin\(float( |%)" "$ll"; then
+        echo "[test]   missing 'declare float @fast_sin(float)' (f32 → float) in emitted IR"
+        missing=$((missing + 1))
+    fi
+    return "$missing"
+}
+
+# ---- Test: i8 struct fields lower as i8, not i8* (regression for Copilot review #3 on PR #286) ----
+# `map_type_annotation` historically had a `u8 → i8` branch but no
+# matching branch for `i8`. An `i8` field would fall through to the
+# user-type branch and lower as `i8*` — totally different layout
+# from the i8 byte the source code requested.
+test_i8_struct_field_lowers_as_i8() {
+    local src="$SCRATCH/i8_struct.sfn"
+    local ll="$SCRATCH/i8_struct.ll"
+    cat > "$src" <<'EOF'
+struct Pixel {
+    r: i8;
+    g: i8;
+    b: i8;
+}
+
+fn make() -> Pixel {
+    return Pixel { r: 0, g: 0, b: 0 };
+}
+EOF
+    if ! "$BINARY" emit -o "$ll" llvm "$src" > /dev/null 2>&1; then
+        echo "[test]   sfn emit llvm failed for i8 struct field"
+        return 1
+    fi
+    if ! grep -qE "%Pixel = type \{ i8, i8, i8 \}" "$ll"; then
+        echo "[test]   missing '%Pixel = type { i8, i8, i8 }' — i8 fields may have fallen through to i8*"
+        grep -E "%Pixel = type" "$ll" || true
+        return 1
+    fi
+    return 0
+}
+
 run_test "int + int emits add i64 (no fadd double)" test_int_add_i64
 run_test "float + float emits fadd double (no string_concat)" test_float_fadd_double
 run_test "extern fn with int/float emits clean declare directives" test_extern_int_float_declare
 run_test "float comparison emits fcmp ogt double" test_float_fcmp
 run_test "int comparison emits icmp sgt i64" test_int_icmp
+run_test "extern fn with i16/u16/u32/u64/isize/f32 lowers correctly (Slice C)" test_extern_wider_widths_declare
+run_test "i8 struct field lowers as i8 (not i8*)" test_i8_struct_field_lowers_as_i8
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

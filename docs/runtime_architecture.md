@@ -21,9 +21,17 @@
 >   (Phase 1 #2, Slice A — see §3.7). Annotated locals/parameters/return
 >   types lower correctly to `i64` / `double` and feed the existing
 >   integer-vs-float arithmetic dispatch. `extern fn` accept-list extended
->   to admit `int` / `float`. Slices B–E (bitwise ops, additional widths,
->   `as` casts, bare-literal defaulting + `number` retirement) are
->   sequenced follow-ups.
+>   to admit `int` / `float`.
+> - **Numeric Slice C — additional widths: shipped 2026-05-02.**
+>   `i16`, `u16`, `u32`, `u64`, `isize`, and `f32` join `map_primitive_type`
+>   and `is_extern_primitive_type`. The extern accept-list now spans the
+>   practical libc surface (errno_t, mode_t, dev_t, ssize_t, short, single-
+>   precision sin/cos). Comparison/`dominant_type` for these widths in
+>   user-level arithmetic is still the L5 deferral — extern *signatures*
+>   are declarative and don't compare on the boundary, so the libc
+>   skeleton can grow today. Slices B (bitwise ops), D (`as` casts), and
+>   E (bare-literal defaulting + `number` retirement) remain sequenced
+>   follow-ups.
 > - Other M0 items (`Result<T, E>` + `?`, closures with capture, atomic
 >   intrinsics) remain planned.
 
@@ -1122,7 +1130,7 @@ remain.
 | L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. | D |
 | L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. Workaround: annotate the literal (`x > 0 as int` once `as` casts ship) or compare against an annotated local. | D + E |
 | L4 | Bitwise operators (`&`, `|`, `^`, `>>`, `<<`) on `int` | Required for SHA-256 / Base64 / flag manipulation in the pure-Sailfin runtime (M3 crypto port). Not yet parsed. | B |
-| L5 | Additional widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) rejected at extern | Restricts what libc surface the skeleton (`runtime/sfn/platform/libc.sfn`) can name. The smaller widths (`i16`, `u16`, `u32`, `f32`) and the platform-sized ones (`u64`, `isize`) all need their own `map_primitive_type` entries; `isize` in particular is pointer-sized and matches `i64` on every platform Sailfin targets today, but the typecheck-vs-lowering contract requires an explicit entry before it can be admitted. | C |
+| L5 | Additional widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) in **user-level arithmetic** still funnel through `dominant_type` / `comparison_predicate_for_symbol`, neither of which knows about them — silent widening to `double` (or returning empty predicate strings) is the current behaviour. The **extern boundary** is no longer affected: Slice C (2026-05-02) admitted these widths into `map_primitive_type` and `is_extern_primitive_type`, so `extern fn ioctl(fd: i32, request: u64) -> i32;` lowers to `declare i32 @ioctl(i32, i64)` cleanly. The remaining work is teaching `dominant_type` and `comparison_predicate_for_symbol` about the wider widths so user code can compute on them safely. | D (riding on `as` casts) |
 | L6 | `number` keyword still exists | Pre-1.0 alias for `double`; the compiler source still uses it everywhere. Migrating compiler source from `number` → `int`/`float` and retiring `number` entirely is the prerequisite for L1. | E |
 
 **Follow-up slices in dependency order:**
@@ -1134,13 +1142,19 @@ remain.
   `xor`/`shl`/`ashr` against `i64` operands. Required before the
   M3 crypto port (SHA-256, Base64) can leave the C runtime.
 
-- **Slice C — Wider integer / float widths.** Add `i16`/`u16`/`u32`/
-  `u64`/`isize`/`f32` entries to `map_primitive_type` (both copies)
-  and to `is_extern_primitive_type`. Mostly mechanical once the
-  pattern is set; admit each width only after verifying clang
-  emits clean IR for the test fixture. Unblocks more of the libc
-  surface (`memchr`'s `int` byte parameter, `clock_gettime`'s
-  `i32` clk_id, etc.).
+- **Slice C — Additional integer / float widths.** ✅ **Shipped
+  2026-05-02.** Added `i16`/`u16`/`u32`/`u64`/`isize`/`f32` entries
+  to `map_primitive_type` (both copies in `type_mapping.sfn` and
+  `statement_type_mapping.sfn`) and admitted them in
+  `is_extern_primitive_type`. The extern accept-list now spans the
+  practical libc surface (`errno_t`, `mode_t`, `dev_t`, `ssize_t`,
+  `short`, single-precision sin/cos). User-level arithmetic on these
+  widths still rides L5 (silent widening through `dominant_type` /
+  `comparison_predicate_for_symbol` — neither knows about the new
+  widths yet); Slice D's `dominant_type` tightening picks that up.
+  Verified by `compiler/tests/e2e/test_numeric_int_float.sh`'s
+  `test_extern_wider_widths_declare` and four new unit tests in
+  `compiler/tests/unit/numeric_int_float_test.sfn`.
 
 - **Slice D — `as` casts + reject silent int↔float coercion.**
   Parser/lexer addition for `expr as Type`. Lowering: emit `fpext`

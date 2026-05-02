@@ -240,10 +240,17 @@ fn layout_annotation_represents_user_value(annotation: string) -> boolean {
     let mut _if310: boolean = false;
     if base == "i64" { _if310 = true; }
     if base == "i32" { _if310 = true; }
+    if base == "i16" { _if310 = true; }
     if base == "i1" { _if310 = true; }
     if base == "i8" { _if310 = true; }
+    if base == "u64" { _if310 = true; }
+    if base == "u32" { _if310 = true; }
+    if base == "u16" { _if310 = true; }
     if base == "usize" { _if310 = true; }
+    if base == "isize" { _if310 = true; }
     if base == "int" { _if310 = true; }
+    if base == "f32" { _if310 = true; }
+    if base == "f64" { _if310 = true; }
     if _if310 { return false; }
     if looks_like_user_type(base) { return true; }
     return false;
@@ -310,17 +317,31 @@ fn map_type_annotation(annotation: string) -> string {
     }
     if normalized == "number" { return "double"; }
     if normalized == "float" { return "double"; }
+    if normalized == "f64" { return "double"; }
+    if normalized == "f32" { return "float"; }
     let mut _if313: boolean = false;
     if normalized == "boolean" { _if313 = true; }
     if normalized == "bool" { _if313 = true; }
     if _if313 { return "i1"; }
     if normalized == "usize" { return "i64"; }
+    if normalized == "isize" { return "i64"; }
     let mut _if314: boolean = false;
     if normalized == "int" { _if314 = true; }
     if normalized == "i64" { _if314 = true; }
+    if normalized == "u64" { _if314 = true; }
     if _if314 { return "i64"; }
-    if normalized == "i32" { return "i32"; }
-    if normalized == "u8" { return "i8"; }
+    let mut _if314b: boolean = false;
+    if normalized == "i32" { _if314b = true; }
+    if normalized == "u32" { _if314b = true; }
+    if _if314b { return "i32"; }
+    let mut _if314c: boolean = false;
+    if normalized == "i16" { _if314c = true; }
+    if normalized == "u16" { _if314c = true; }
+    if _if314c { return "i16"; }
+    let mut _if314d: boolean = false;
+    if normalized == "i8" { _if314d = true; }
+    if normalized == "u8" { _if314d = true; }
+    if _if314d { return "i8"; }
     if normalized == "string" { return "i8*"; }
     if normalized == "void" { return "void"; }
     if normalized.length > 2 {
@@ -595,6 +616,8 @@ fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     let trimmed = trim_text(annotation);
     if trimmed == "number" { return "double"; }
     if trimmed == "float" { return "double"; }
+    if trimmed == "f64" { return "double"; }
+    if trimmed == "f32" { return "float"; }
     let mut _if321: boolean = false;
     if trimmed == "boolean" { _if321 = true; }
     if trimmed == "bool" { _if321 = true; }
@@ -602,12 +625,24 @@ fn map_primitive_type(context: TypeContext, annotation: string) -> string {
     if trimmed == "string" { return "i8*"; }
     if trimmed == "void" { return "void"; }
     if trimmed == "any" { return "i8*"; }
+    // Pointer-sized aliases: usize/isize lower to i64 because
+    // every Sailfin target today is 64-bit. When a 32-bit target
+    // lands, swap in a target-aware entry.
+    if trimmed == "usize" { return "i64"; }
+    if trimmed == "isize" { return "i64"; }
     let mut _if322: boolean = false;
     if trimmed == "int" { _if322 = true; }
     if trimmed == "i64" { _if322 = true; }
+    if trimmed == "u64" { _if322 = true; }
     if _if322 { return "i64"; }
-    if trimmed == "i32" { return "i32"; }
-    if trimmed == "usize" { return "i64"; }
+    let mut _if324: boolean = false;
+    if trimmed == "i32" { _if324 = true; }
+    if trimmed == "u32" { _if324 = true; }
+    if _if324 { return "i32"; }
+    let mut _if325: boolean = false;
+    if trimmed == "i16" { _if325 = true; }
+    if trimmed == "u16" { _if325 = true; }
+    if _if325 { return "i16"; }
     let mut _if323: boolean = false;
     if trimmed == "u8" { _if323 = true; }
     if trimmed == "i8" { _if323 = true; }
