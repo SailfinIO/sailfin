@@ -54,23 +54,38 @@
 >   + `number` retirement) remain sequenced follow-ups.
 > - Other M0 items (`Result<T, E>` + `?`, closures with capture, atomic
 >   intrinsics) remain planned.
-> - **Slice D — `as` casts (parser-only): partially shipped 2026-05-02.**
->   Parser/AST/native-IR rendering for `expr as Type` is in place
->   — `Expression.Cast { operand, target_type }` is recognized in
->   `parse_postfix_chain` (`as` is a soft keyword reusing the import-
->   alias precedent). The native `.sfn-asm` emitter renders casts as
->   `(operand) as <type>` (operand parens contain embedded operators
->   so the existing LLVM-lowering cast recognizer can recover the
->   operand via `strip_enclosing_parentheses`); the Sailfin-source
->   emitter (`emitter_sailfin_expr`) renders the human-friendly
->   `expr as Type` form (no operand parens — no re-parse step
->   consumes its output). The numeric-pair LLVM lowering matrix
->   (sitofp / fptosi / sext / trunc / fpext / fptrunc) is deferred
->   as a follow-up, but the previously-cited "alpha.8 seed exhibits
->   a string-aliasing self-host bug" was not what it appeared.
->   Pinned by `compiler/tests/unit/numeric_cast_test.sfn` (7 tests
->   covering parser shape, chain associativity, precedence, and
->   typecheck).
+> - **Slice D — `as` cast lowering: shipped 2026-05-03.** Parser/AST/
+>   native-IR rendering for `expr as Type` (PR #289) is now backed
+>   by the LLVM lowering matrix in `lower_cast_expression`
+>   (`compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`):
+>   `int → float` lowers to `sitofp`, `float → int` to `fptosi`,
+>   widening integer casts to `sext` (or `zext` when the source is
+>   `i1`), narrowing to `trunc`, `f32 → double` to `fpext`,
+>   `double → f32` to `fptrunc`, and `as bool` is rejected with a
+>   fix-it suggesting `x != 0`. Pinned by
+>   `compiler/tests/unit/numeric_cast_test.sfn` (extended) and
+>   `compiler/tests/e2e/test_numeric_cast.sh` (8 LLVM-shape
+>   pinning cases). The matrix opens with a no-op
+>   `coerce_operand_to_type(lowered.operand, lowered.operand.llvm_type, …)`
+>   keepalive call — without it, the alpha.8 seed's dead-code pass
+>   elides the `let operand = lowered.operand` binding and the
+>   matrix never matches; passing `lowered.operand` to a function
+>   first materialises the struct in the seed's SSA form
+>   (`lower_return_instruction` works around the same DCE quirk by
+>   passing `operand` to `coerce_operand_to_type` immediately after
+>   binding). Self-host stays green.
+>   **L2/L3 silent-widening rejection deferred to Slice E.**
+>   The architect's plan called for `dominant_type` to refuse
+>   silent int↔float coercion at the same time, but the lowered
+>   compiler source mixes i64 (from runtime helpers like
+>   `string.length` returning i64) and double (`number` alias)
+>   pervasively — every `for i in 0..arr.length` triggers the
+>   tightened path with no semantically meaningful fix-it.
+>   Closing L2/L3 properly requires Slice E (retire `number`,
+>   default integer literals to `int`) so the language
+>   semantics line up with the tightened lowering rule. Slice D
+>   ships the `as` cast escape valve so authors can spell the
+>   conversion explicitly today.
 > - **Diagnosed and fixed 2026-05-02 (PR #289 follow-up).** The
 >   reported "string-aliasing seed bug" was a parser silent-skip in
 >   `parse_struct_field` (`compiler/src/parser/declarations.sfn`).
@@ -1198,10 +1213,23 @@ diagnostics. Coverage:
 
 ### 3.7 Numeric Types (`int` / `float`)
 
-**Status (2026-05-02): Slice A shipped.** Annotated locals,
+**Status (2026-05-03): Slices A–D shipped.** Annotated locals,
 parameters, and return types of type `int` and `float` lower
-correctly through the LLVM backend. Slices B–E (sequenced below)
-remain.
+correctly through the LLVM backend (Slice A). Bitwise / shift
+operators on integer-annotated operands lower to `and`/`or`/`xor`/
+`shl`/`ashr i64` (Slice B). Additional integer/float widths
+(`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) lower at the extern
+boundary (Slice C). `expr as Type` parses, type-checks, renders
+through native IR, and lowers to LLVM `sitofp`/`fptosi`/`sext`/
+`zext`/`trunc`/`fpext`/`fptrunc`; `as bool` is rejected with a
+fix-it suggesting `x != 0` (Slice D). The L2/L3 silent-widening
+rejection ride on Slice E (retire `number`); the lowered
+compiler/runtime code legitimately mixes i64 and double
+everywhere via the `number = double` alias, so tightening
+`dominant_type` before Slice E breaks user code (canonical
+case: `for i in 0..arr.length` mixes a `: number` counter with
+the i64 length helper). Slice E remains the next sequenced
+follow-up.
 
 **What ships in Slice A:**
 
@@ -1248,10 +1276,10 @@ remain.
 | # | Limitation | Consequence | Slice |
 |---|---|---|---|
 | L1 | Bare numeric literals default to `number` (i.e. `double`) | `let x = 42` produces `alloca double`, not `alloca i64` | E |
-| L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. | D |
-| L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. Workaround: annotate the literal (`x > 0 as int` once `as` casts ship) or compare against an annotated local. | D + E |
-| L4 | ✅ **Closed by Slice B (2026-05-02).** Bitwise operators (`&`, `|`, `^`, `<<`, `>>`) on integer-annotated operands lower to LLVM `and`/`or`/`xor`/`shl`/`ashr i64`. The pure-Sailfin SHA-256/Base64/flag manipulation paths can leave the C runtime in a follow-up M3 PR. Bitwise on `float`/`number` operands is still a footgun — `operation_name_for_symbol` returns empty when `llvm_type == "double"`, but the typecheck does not yet pre-reject it. Closing that gap rides on Slice D's `as` casts. | B (closed) |
-| L5 | Additional widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) in **user-level arithmetic** still funnel through `dominant_type` / `comparison_predicate_for_symbol`, neither of which knows about them — silent widening to `double` (or returning empty predicate strings) is the current behaviour. The **extern boundary** is no longer affected: Slice C (2026-05-02) admitted these widths into `map_primitive_type` and `is_extern_primitive_type`, so `extern fn ioctl(fd: i32, request: u64) -> i32;` lowers to `declare i32 @ioctl(i32, i64)` cleanly. The remaining work is teaching `dominant_type` and `comparison_predicate_for_symbol` about the wider widths so user code can compute on them safely. | D (riding on `as` casts) |
+| L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. **Slice D ships the `as` cast escape valve so authors can spell the conversion explicitly today**; the silent-widening rejection itself rides on Slice E (without it, the lowered code mixes i64↔double everywhere — every `string.length` returns i64, every `: number` local is double — and the tightened `dominant_type` would break user code like `for i in 0..arr.length`). | E |
+| L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. **Slice D mitigation: spell the literal explicitly with `x > (0 as int)`**; the tightening that closes this implicitly rides on Slice E. | E |
+| L4 | ✅ **Closed by Slice B (2026-05-02).** Bitwise operators (`&`, `|`, `^`, `<<`, `>>`) on integer-annotated operands lower to LLVM `and`/`or`/`xor`/`shl`/`ashr i64`. The pure-Sailfin SHA-256/Base64/flag manipulation paths can leave the C runtime in a follow-up M3 PR. Bitwise on `float`/`number` operands is still a footgun — `operation_name_for_symbol` returns empty when `llvm_type == "double"`, but the typecheck does not yet pre-reject it. Closing that gap rides on Slice E's broader int↔float disambiguation. | B (closed) |
+| L5 | Additional widths (`i16`, `u16`, `u32`, `u64`, `isize`, `f32`) in **user-level arithmetic** still funnel through `dominant_type` / `comparison_predicate_for_symbol`, neither of which knows about them — silent widening to `double` (or returning empty predicate strings) is the current behaviour. The **extern boundary** is no longer affected: Slice C (2026-05-02) admitted these widths into `map_primitive_type` and `is_extern_primitive_type`, so `extern fn ioctl(fd: i32, request: u64) -> i32;` lowers to `declare i32 @ioctl(i32, i64)` cleanly. Slice D's `as` casts give authors the escape valve (`x as i64` to align widths before arithmetic), so the remaining work — teaching `dominant_type`/`comparison_predicate_for_symbol` about the wider widths so they don't need explicit casts every time — is now optional polish, not a blocker. | E (polish, riding on `as` casts) |
 | L6 | `number` keyword still exists | Pre-1.0 alias for `double`; the compiler source still uses it everywhere. Migrating compiler source from `number` → `int`/`float` and retiring `number` entirely is the prerequisite for L1. | E |
 
 **Follow-up slices in dependency order:**
@@ -1292,13 +1320,33 @@ remain.
   `test_extern_wider_widths_declare` and four new unit tests in
   `compiler/tests/unit/numeric_int_float_test.sfn`.
 
-- **Slice D — `as` casts + reject silent int↔float coercion.**
-  Parser/lexer addition for `expr as Type`. Lowering: emit `fpext`
-  / `fptosi` / `sitofp` / `trunc` / `zext` per the source/target
-  pair. Tighten `dominant_type` to refuse coercion between integer
-  and float without an explicit `as`. This closes L2 and L3 cleanly
-  — but only after Slice E (or in lockstep with it) so the compiler
-  source can be migrated off `number` first.
+- **Slice D — `as` cast LLVM lowering matrix.** ✅ **Shipped
+  2026-05-03.** Parser/AST/native-IR rendering for `expr as Type`
+  landed in PR #289 (Slice D parser-only). The LLVM lowering matrix
+  in `lower_cast_expression`
+  (`compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`)
+  now emits `sitofp` / `fptosi` / `sext` / `zext` / `trunc` /
+  `fpext` / `fptrunc` per the source/target pair, plus a hard
+  rejection for `as bool` (the fix-it points at `x != 0`).
+  Verified by `compiler/tests/unit/numeric_cast_test.sfn` (extended)
+  and `compiler/tests/e2e/test_numeric_cast.sh` (8 LLVM-shape
+  pinning cases). The matrix opens with a no-op
+  `coerce_operand_to_type(lowered.operand, lowered.operand.llvm_type, …)`
+  keepalive call to defeat an alpha.8 seed dead-code pass that
+  otherwise elides the `let operand = lowered.operand` binding and
+  prevents the matrix from firing — `lower_return_instruction` in
+  `statement.sfn` works around the same quirk by passing `operand`
+  to `coerce_operand_to_type` immediately after binding.
+  **The L2/L3 silent-widening rejection (the architect's
+  `dominant_type` tightening) is deferred to Slice E.** The
+  rejection cannot ship before Slice E retires `number` because
+  the lowered compiler/runtime code mixes i64 (from runtime
+  helpers like `string.length`) and double (`number` alias)
+  pervasively — `for i in 0..arr.length` is the canonical
+  break case with no semantically meaningful fix-it. Slice D
+  ships the `as` cast escape valve so authors can spell the
+  conversion explicitly today; the implicit-rejection path
+  rides on Slice E.
 
 - **Slice E — Bare-literal defaulting + `number` retirement.**
   Per `CLAUDE.md` Pre-1.0 Syntax Reform §3, `number` becomes an

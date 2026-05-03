@@ -1,32 +1,41 @@
 // Unit tests pinning the parser + emitter behaviour for `expr as Type`
 // casts (Slice D, docs/runtime_architecture.md §3.7).
 //
-// Slice D ships parser + AST + native-IR rendering for `as` casts:
-// `parse_postfix_chain` recognizes the soft keyword `as` (already
-// used for import aliases at parser/declarations.sfn:625) and
-// builds an `Expression.Cast { operand, target_type }`. Both
-// `format_expression` sites render the node as `(operand) as <type>`
-// — the wrapping parens contain any embedded operators so the
-// existing LLVM lowering recognizer (`parse_cast_expression` in
-// llvm/expression_lowering/native/core_parsing.sfn) recovers the
-// operand cleanly via `strip_enclosing_parentheses`.
+// Slice D ships parser + AST + native-IR rendering and the numeric
+// LLVM lowering matrix for `as` casts:
+//   * `parse_postfix_chain` recognizes the soft keyword `as` (already
+//     used for import aliases at parser/declarations.sfn:625) and
+//     builds an `Expression.Cast { operand, target_type }`.
+//   * Both `format_expression` sites render the node as
+//     `(operand) as <type>` — the wrapping parens contain any
+//     embedded operators so the LLVM lowering recognizer
+//     (`parse_cast_expression` in
+//     `llvm/expression_lowering/native/core_parsing.sfn`) recovers
+//     the operand cleanly via `strip_enclosing_parentheses`.
+//   * `lower_cast_expression` in
+//     `llvm/expression_lowering/native/core_literals_lowering.sfn`
+//     adds the numeric-pair matrix on top of the existing
+//     pointer↔pointer / int↔pointer branches:
+//        i*  → i*  (wider)   → sext (zext when source is i1)
+//        i*  → i*  (narrower)→ trunc
+//        i*  → double/float  → sitofp
+//        double/float → i*   → fptosi
+//        float → double      → fpext
+//        double → float      → fptrunc
+//        any  → i1 via `as`  → diagnostic ("use `x != 0`")
+//   * `dominant_type` returns the empty sentinel when one side is
+//     integer and the other is float, and `harmonise_operands`
+//     surfaces a diagnostic suggesting an explicit `as` cast.
 //
-// The numeric-pair LLVM lowering matrix (sitofp / fptosi / sext /
-// trunc / fpext / fptrunc) is a follow-up — see the Slice D PR
-// thread for the diagnosed alpha.8 seed self-host bug that blocks
-// the inline predicate dispatch. Today numeric `as` casts hit the
-// existing "unsupported cast" diagnostic in lower_cast_expression;
-// pointer↔pointer / int↔pointer casts (already handled by the
-// existing recognizer + lowering) are unaffected.
-//
-// These tests pin the front-end shape so a future regression in
-// the parser/emitter is caught here independently of the deferred
-// lowering work. They use return statements rather than in-body
+// LLVM-shape pinning lives in `compiler/tests/e2e/test_numeric_cast.sh`;
+// these tests pin the front-end shape (parse → typecheck → native IR)
+// so a regression in the parser/emitter surfaces here independently
+// of the LLVM backend. They use return statements rather than in-body
 // `let` initializers because the function-body parser preserves
 // `let` lines as `Expression.Raw` text wholesale (an unrelated
 // limitation predating Slice D); return-position expressions go
 // through `parse_expression_bp` → `parse_postfix_chain` and exercise
-// the new Cast node.
+// the Cast node.
 import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
@@ -89,5 +98,58 @@ test "cast: float as int typechecks with no diagnostics" {
 
 test "cast: chained casts typecheck" {
     let diagnostics = _diagnostics("fn widen(x: i32) -> i64 { return x as i32 as i64; }");
+    assert diagnostics.length == 0;
+}
+
+// ── Additional integer-width casts pin the matrix shape ──────────
+//
+// These exercise the parser/format paths for the integer-width
+// pairs that the LLVM lowering matrix covers (sext / trunc / zext).
+// LLVM-side pinning is in compiler/tests/e2e/test_numeric_cast.sh.
+test "cast: int as i32 narrowing renders parens-wrapped operand" {
+    let asm = _emit("fn narrow(x: int) -> i32 { return x as i32; }");
+    assert index_of(asm, "ret (x) as i32") >= 0;
+}
+
+test "cast: i32 as i64 widening renders parens-wrapped operand" {
+    let asm = _emit("fn widen(x: i32) -> i64 { return x as i64; }");
+    assert index_of(asm, "ret (x) as i64") >= 0;
+}
+
+test "cast: i8 as i64 widening renders parens-wrapped operand" {
+    let asm = _emit("fn widen(x: i8) -> i64 { return x as i64; }");
+    assert index_of(asm, "ret (x) as i64") >= 0;
+}
+
+test "cast: bool as i64 (i1 → i64) renders parens-wrapped operand" {
+    let asm = _emit("fn widen(x: bool) -> i64 { return x as i64; }");
+    assert index_of(asm, "ret (x) as i64") >= 0;
+}
+
+test "cast: f32 as float widening renders parens-wrapped operand" {
+    let asm = _emit("fn widen(x: f32) -> float { return x as float; }");
+    assert index_of(asm, "ret (x) as float") >= 0;
+}
+
+test "cast: float as f32 narrowing renders parens-wrapped operand" {
+    let asm = _emit("fn narrow(x: float) -> f32 { return x as f32; }");
+    assert index_of(asm, "ret (x) as f32") >= 0;
+}
+
+// ── Explicit int↔float casts in binary ops typecheck clean ────────
+//
+// Pre-Slice-D, mixed `int` + `float` in a binary op lowered with a
+// silent fpext (see L2/L3 in `docs/runtime_architecture.md` §3.7);
+// closing that hazard depends on Slice E's bare-literal defaulting
+// retiring `number`, so the `dominant_type` tightening rides on
+// Slice E rather than here. Slice D ships the `as` cast escape
+// valve so authors can spell the conversion explicitly today.
+test "cast: explicit int→float cast in binary op typechecks clean" {
+    let diagnostics = _diagnostics("fn add(x: int, y: float) -> float { return x as float + y; }");
+    assert diagnostics.length == 0;
+}
+
+test "cast: explicit float→int cast in binary op typechecks clean" {
+    let diagnostics = _diagnostics("fn add(x: int, y: float) -> int { return x + y as int; }");
     assert diagnostics.length == 0;
 }
