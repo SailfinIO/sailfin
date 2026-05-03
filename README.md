@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://sailfin.dev">
-    <img src="https://raw.githubusercontent.com/SailfinIO/sailfin/main/site/public/images/sfn_wordmark_simple.svg" alt="Sailfin" width="220">
+    <img src="https://raw.githubusercontent.com/SailfinIO/sailfin/main/site/public/images/sfn_lang_logo_256.svg" alt="Sailfin" width="128">
   </a>
 </p>
 
