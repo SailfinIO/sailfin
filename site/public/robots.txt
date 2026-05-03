@@ -1,0 +1,15 @@
+# Sailfin allows search engines, AI crawlers, and AI training crawlers to
+# index this site. Sailfin is positioned as a verification layer for
+# AI-generated code; broad ingestion into model training corpora is part
+# of the project's adoption strategy. See CLAUDE.md ("LLM & Agent Adoption
+# Strategy") in the repo for context.
+#
+# NOTE: Cloudflare's "Managed robots.txt" / "AI Audit" feature, when enabled
+# on the zone, intercepts /robots.txt at the edge and serves its own policy
+# regardless of this file. To make this file authoritative, disable that
+# feature in the Cloudflare dashboard for sfn.dev.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://sailfin.dev/sitemap-index.xml
