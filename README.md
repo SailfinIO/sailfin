@@ -1,8 +1,10 @@
 <p align="center">
   <a href="https://sailfin.dev">
-    <img src="https://sailfin.dev/images/sfn_lockup.svg" alt="Sailfin" width="360">
+    <img src="https://raw.githubusercontent.com/SailfinIO/sailfin/main/site/public/images/sfn_lockup.svg" alt="Sailfin" width="360">
   </a>
 </p>
+
+<h1 align="center">Sailfin</h1>
 
 <p align="center">
   <strong>A compiled systems language with compile-time capability enforcement.</strong>
