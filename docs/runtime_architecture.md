@@ -86,6 +86,8 @@
 >   semantics line up with the tightened lowering rule. Slice D
 >   ships the `as` cast escape valve so authors can spell the
 >   conversion explicitly today.
+>   Tracked: seed-DCE workaround in issue #295, L2/L3 closure
+>   follow-up in issue #296.
 > - **Diagnosed and fixed 2026-05-02 (PR #289 follow-up).** The
 >   reported "string-aliasing seed bug" was a parser silent-skip in
 >   `parse_struct_field` (`compiler/src/parser/declarations.sfn`).
@@ -1346,7 +1348,8 @@ follow-up.
   break case with no semantically meaningful fix-it. Slice D
   ships the `as` cast escape valve so authors can spell the
   conversion explicitly today; the implicit-rejection path
-  rides on Slice E.
+  rides on Slice E. Tracked: seed-DCE workaround in issue #295,
+  L2/L3 closure follow-up in issue #296.
 
 - **Slice E — Bare-literal defaulting + `number` retirement.**
   Per `CLAUDE.md` Pre-1.0 Syntax Reform §3, `number` becomes an

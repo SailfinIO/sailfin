@@ -1159,13 +1159,17 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             string_constants: lowered.string_constants
         };
     }
-    // Slice D (2026-05-03): bind `operand` via `coerce_operand_to_type`
-    // (a no-op when source and target types match) before any field
-    // access. The function call materialises the struct in the seed's
-    // SSA form and prevents the alpha.8 dead-code pass from eliding a
-    // direct `let operand = lowered.operand` binding — `lower_return_instruction`
-    // works around the same DCE quirk by passing `operand` to
-    // `coerce_operand_to_type` immediately after the binding.
+    // Seed-DCE workaround — tracked in issue #295. Bind `operand`
+    // via `coerce_operand_to_type` (a no-op when source and target
+    // types match) before any field access. The function call
+    // materialises the struct in the seed's SSA form and prevents
+    // the alpha.8 dead-code pass from eliding a direct
+    // `let operand = lowered.operand` binding —
+    // `lower_return_instruction` works around the same DCE quirk
+    // by passing `operand` to `coerce_operand_to_type` immediately
+    // after the binding. Once the seed bug is fixed and a fixed
+    // seed is pinned, delete this `_operand_keepalive` line and
+    // both surrounding comments.
     let _operand_keepalive = coerce_operand_to_type(lowered.operand, lowered.operand.llvm_type, lowered.temp_index, lowered.lines);
     let operand = lowered.operand;
     if operand.llvm_type == target_type {
@@ -1328,10 +1332,7 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             + operand.value
             + " to "
             + target_type);
-        let casted = LLVMOperand {
-            llvm_type: target_type,
-            value: cast_name
-        };
+        let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
