@@ -222,6 +222,36 @@ fn load_local_operand(local: LocalBinding, temp_index: number, lines: string[]) 
     };
 }
 
+// Slice D (2026-05-03): integer/float LLVM-type predicates shared by
+// `dominant_type` (silent-coercion guard) and `lower_cast_expression`
+// (numeric `as` matrix). LLVM types here are the ones produced by
+// `map_type_annotation`: `i1`/`i8`/`i16`/`i32`/`i64` for integers and
+// `double`/`float` for floats. Pointer types (e.g. `i8*`, `i64*`) are
+// handled by separate branches in their respective callers.
+fn is_integer_llvm_type(value: string) -> boolean {
+    if value == "i1" { return true; }
+    if value == "i8" { return true; }
+    if value == "i16" { return true; }
+    if value == "i32" { return true; }
+    if value == "i64" { return true; }
+    return false;
+}
+
+fn is_float_llvm_type(value: string) -> boolean {
+    if value == "double" { return true; }
+    if value == "float" { return true; }
+    return false;
+}
+
+fn integer_llvm_width(value: string) -> number {
+    if value == "i1" { return 1; }
+    if value == "i8" { return 8; }
+    if value == "i16" { return 16; }
+    if value == "i32" { return 32; }
+    if value == "i64" { return 64; }
+    return 0;
+}
+
 // Collapse runs of consecutive spaces to a single space inside LLVM type strings.
 // Uses find_substring_from + substring which rely on the C runtime (grapheme_at)
 // rather than the [] operator that older seeds miscompile.
@@ -1484,19 +1514,16 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     };
 }
 
-// LIMITATION (numeric types Slice A — see docs/runtime_architecture.md
-// §3.7 limitations table L2/L3): when one operand is integer (i64)
-// and the other is float (double), the rule below silently widens
-// the integer side to double. That can truncate above 2^53 and is
-// fundamentally a footgun for runtime authors handling indices
-// alongside model arithmetic. Slice D (`as` casts + reject silent
-// int↔float coercion) tightens this — once that ships, cross-type
-// pairings here become a hard error and authors must spell the
-// intent explicitly. Pre-Slice-D the silent widening is preserved
-// because the compiler's own self-host depends on `number`-typed
-// loop counters meeting integer literals (`i += 1`) without
-// erroring; that compatibility goes away when Slice E retires
-// `number`.
+// Slice D (2026-05-03): closed L2 + L3 from docs/runtime_architecture.md
+// §3.7. When one operand is integer and the other is float, the rule
+// below used to silently widen the integer side to `double`, which
+// truncates above 2^53 and is a footgun for runtime authors handling
+// indices alongside model arithmetic. Now those pairings return the
+// empty-string sentinel; `harmonise_operands` picks that up and emits
+// a diagnostic suggesting an explicit `as` cast. The compiler source
+// uses `: number` (= double) throughout — no in-tree code mixes
+// annotated int and float — so the tightening is self-host-safe and
+// only fires in user code that crosses the boundary without saying so.
 fn dominant_type(first: string, second: string) -> string {
     if first.length == 0 { return second; }
     if second.length == 0 { return first; }
@@ -1512,6 +1539,16 @@ fn dominant_type(first: string, second: string) -> string {
     if first_is_pointer {
         if second_is_pointer { return first; }
     }
+    // Slice D: refuse silent int↔float coercion. Empty sentinel is
+    // recognised by harmonise_operands (and surfaces an "unsupported
+    // array literal element type" diagnostic for array-literal
+    // inference, which is the same fix-it shape — add an `as` cast).
+    let first_is_int = is_integer_llvm_type(first);
+    let second_is_int = is_integer_llvm_type(second);
+    let first_is_float = is_float_llvm_type(first);
+    let second_is_float = is_float_llvm_type(second);
+    if first_is_int { if second_is_float { return ""; } }
+    if first_is_float { if second_is_int { return ""; } }
     let mut _if79: boolean = false;
     if first == "double" { _if79 = true; }
     if second == "double" { _if79 = true; }
@@ -1569,6 +1606,27 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
         };
     }
     let target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type);
+    // Slice D: dominant_type returns the empty sentinel when one
+    // side is integer and the other is float (L2/L3 in
+    // docs/runtime_architecture.md §3.7). Surface the diagnostic
+    // here with a fix-it suggestion and bail with null operands so
+    // the caller's existing failure-path catches it.
+    if target_type.length == 0 {
+        diagnostics.push("llvm lowering: cannot mix integer (`"
+            + left_operand.llvm_type
+            + "`) and floating-point (`"
+            + right_operand.llvm_type
+            + "`) operands without an explicit cast; use `expr as int`"
+            + " or `expr as float` to choose the result type");
+        return BinaryAlignmentResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            left: null,
+            right: null,
+            diagnostics: diagnostics,
+            result_type: ""
+        };
+    }
     let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines);
     let mut _ci0: number = 0;
     loop {

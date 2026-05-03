@@ -47,7 +47,13 @@ import { array_pointer_element_type } from "../arrays";
 import { split_array_elements } from "../splitting";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
-import { coerce_operand_to_type, dominant_type } from "./core_operands";
+import {
+    coerce_operand_to_type,
+    dominant_type,
+    integer_llvm_width,
+    is_float_llvm_type,
+    is_integer_llvm_type
+} from "./core_operands";
 import { parse_array_literal_metadata } from "./core_parsing";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import {
@@ -289,7 +295,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         // an array of by-value structs. The visible symptom is fields past
         // the first 8 bytes reading uninitialized memory.
         let _ielt_base = inferred_element_type;
-        let _op_type = lowered.operand.llvm_type;
+        let _op_type = operand.llvm_type;
         let mut _keep_element_type: boolean = false;
         if _ielt_base.length > 0 {
             if starts_with(_ielt_base, "%") {
@@ -336,7 +342,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
         }
         if !_keep_element_type {
-            inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type);
+            inferred_element_type = dominant_type(inferred_element_type, operand.llvm_type);
         }
         index += 1;
     }
@@ -1113,9 +1119,24 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
     };
 }
 
-fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
+// Slice D (2026-05-03): the `![io]` declaration plus the
+// `debug_lowering`-gated print of `operand.llvm_type` below are not
+// optional. They prevent the alpha.8/alpha.9 seed compiler from
+// eliding the `let operand = lowered.operand` binding via an
+// over-aggressive dead-code pass. Without them, every read of
+// `operand.llvm_type` further down silently substitutes `target_type`
+// (the previous string-typed local), so the cast matrix never
+// matches the source operand's type and falls through to the
+// generic "unsupported cast" diagnostic. The pattern matches
+// `lower_return_instruction` in `statement.sfn`, which uses the same
+// `if debug_lowering { print.err(... operand.llvm_type ...) }` gate
+// to keep the binding observable. Once a seed without this pass
+// becomes the pinned version (post-Slice-D self-host), this gate
+// can be removed and `![io]` dropped.
+fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
     let mut diagnostics = parse.diagnostics;
     let empty_constants = empty_string_constant_set();
+    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
     if !parse.success {
         return ExpressionResult {
             lines: lines,
@@ -1153,12 +1174,38 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             string_constants: lowered.string_constants
         };
     }
-    let operand = lowered.operand;
-    if operand.llvm_type == target_type {
+    // Slice D (2026-05-03): seed-DCE workaround. The
+    // alpha.8/alpha.9 seed mis-indexes `lowered.operand.llvm_type`
+    // (reads field 1 — `value` — instead of field 0) and silently
+    // elides any `let operand_*` bindings derived from it, so
+    // every subsequent reference reads null and the cast matrix
+    // never matches. Reaching for `fs.exists` with both fields
+    // baked into the path forces the seed to materialise the
+    // correct field-0/field-1 loads. The path lives under a
+    // sentinel directory that doesn't exist, so the syscall is
+    // a single `stat` returning false — no filesystem mutation,
+    // no stderr noise. Tracked as a seed miscompile to remove
+    // once a fixed seed becomes pinned (see follow-up issue).
+    let _seed_dce_keepalive: boolean = fs.exists("/tmp/.sfn-seed-dce-keepalive/cast/"
+        + lowered.operand.llvm_type
+        + "/"
+        + lowered.operand.value
+        + "/"
+        + target_type);
+    let operand_type: string = lowered.operand.llvm_type;
+    let operand_value: string = lowered.operand.value;
+    if debug_lowering {
+        print.err("emit-llvm: lower_cast operand=" + operand_type
+            + " value="
+            + operand_value
+            + " target="
+            + target_type);
+    }
+    if operand_type == target_type {
         return ExpressionResult {
             lines: lowered.lines,
             temp_index: lowered.temp_index,
-            operand: operand,
+            operand: lowered.operand,
             diagnostics: diagnostics,
             string_constants: lowered.string_constants
         };
@@ -1169,11 +1216,11 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     let cast_name = format_temp_name(current_temp);
     current_temp += 1;
 
-    if ends_with_pointer_suffix(operand.llvm_type) {
+    if ends_with_pointer_suffix(operand_type) {
         if ends_with_pointer_suffix(target_type) {
-            current_lines.push("  " + cast_name + " = bitcast " + operand.llvm_type
+            current_lines.push("  " + cast_name + " = bitcast " + operand_type
                 + " "
-                + operand.value
+                + operand_value
                 + " to "
                 + target_type);
             let casted = LLVMOperand {
@@ -1190,12 +1237,12 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         }
     }
 
-    if !ends_with_pointer_suffix(operand.llvm_type) {
+    if !ends_with_pointer_suffix(operand_type) {
         if ends_with_pointer_suffix(target_type) {
-            if starts_with(operand.llvm_type, "i") {
-                current_lines.push("  " + cast_name + " = inttoptr " + operand.llvm_type
+            if starts_with(operand_type, "i") {
+                current_lines.push("  " + cast_name + " = inttoptr " + operand_type
                     + " "
-                    + operand.value
+                    + operand_value
                     + " to "
                     + target_type);
                 let casted = LLVMOperand {
@@ -1213,12 +1260,12 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         }
     }
 
-    if ends_with_pointer_suffix(operand.llvm_type) {
+    if ends_with_pointer_suffix(operand_type) {
         if !ends_with_pointer_suffix(target_type) {
             if starts_with(target_type, "i") {
-                current_lines.push("  " + cast_name + " = ptrtoint " + operand.llvm_type
+                current_lines.push("  " + cast_name + " = ptrtoint " + operand_type
                     + " "
-                    + operand.value
+                    + operand_value
                     + " to "
                     + target_type);
                 let casted = LLVMOperand {
@@ -1236,7 +1283,98 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
         }
     }
 
-    diagnostics.push("llvm lowering: unsupported cast from `" + operand.llvm_type
+    // Slice D (2026-05-03): numeric `as` cast lowering matrix. See
+    // docs/runtime_architecture.md §3.7 (Slice D row). Both sides
+    // are non-pointer at this point — pointer cases were handled
+    // above and the identity case was filtered earlier.
+    //   int  → wider int       → sext (or zext when source is i1)
+    //   int  → narrower int    → trunc
+    //   int  → double/float    → sitofp
+    //   double/float → int     → fptosi
+    //   float → double         → fpext
+    //   double → float         → fptrunc
+    //   any  → i1 via `as`     → diagnostic (use `x != 0`)
+    let operand_is_int = is_integer_llvm_type(operand_type);
+    let operand_is_float = is_float_llvm_type(operand_type);
+    let target_is_int = is_integer_llvm_type(target_type);
+    let target_is_float = is_float_llvm_type(target_type);
+
+    if target_type == "i1" {
+        if operand_is_int {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        if operand_is_float {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0.0` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+
+    let mut numeric_op_name: string = "";
+
+    if operand_is_int {
+        if target_is_float { numeric_op_name = "sitofp"; }
+    }
+    if operand_is_float {
+        if target_is_int { numeric_op_name = "fptosi"; }
+    }
+    if operand_is_int {
+        if target_is_int {
+            let src_width = integer_llvm_width(operand_type);
+            let dst_width = integer_llvm_width(target_type);
+            if dst_width > src_width {
+                if operand_type == "i1" { numeric_op_name = "zext"; }
+                if operand_type != "i1" { numeric_op_name = "sext"; }
+            }
+            if dst_width < src_width { numeric_op_name = "trunc"; }
+        }
+    }
+    if operand_is_float {
+        if target_is_float {
+            if operand_type == "float" {
+                if target_type == "double" { numeric_op_name = "fpext"; }
+            }
+            if operand_type == "double" {
+                if target_type == "float" { numeric_op_name = "fptrunc"; }
+            }
+        }
+    }
+
+    if numeric_op_name.length > 0 {
+        current_lines.push("  " + cast_name + " = " + numeric_op_name + " "
+            + operand_type
+            + " "
+            + operand_value
+            + " to "
+            + target_type);
+        let casted = LLVMOperand {
+            llvm_type: target_type,
+            value: cast_name
+        };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: casted,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
+    }
+
+    diagnostics.push("llvm lowering: unsupported cast from `" + operand_type
         + "` to `"
         + target_type
         + "`");
