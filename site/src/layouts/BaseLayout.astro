@@ -3,11 +3,18 @@ import SiteHeader from "../components/SiteHeader.astro";
 import Footer from "../components/Footer.astro";
 import "../styles/global.css";
 
+interface Article {
+  headline: string;
+  datePublished: string;
+  author?: string;
+}
+
 interface Props {
   title: string;
   description?: string;
   image?: string;
   type?: "website" | "article";
+  article?: Article;
 }
 
 const {
@@ -15,12 +22,79 @@ const {
   description = "A compiled systems language with compile-time capability enforcement.",
   image = "/images/og_card.png",
   type = "website",
+  article,
 } = Astro.props;
 
 const siteUrl = Astro.site ?? new URL("https://sailfin.dev");
 const canonicalURL = new URL(Astro.url.pathname, siteUrl);
 const ogImage = new URL(image, siteUrl);
 const pageTitle = title === "Home" ? "Sailfin" : `${title} - Sailfin`;
+const isHome = Astro.url.pathname === "/";
+
+const orgId = new URL("/#organization", siteUrl).toString();
+const websiteId = new URL("/#website", siteUrl).toString();
+const logoUrl = new URL("/images/sfn_lang_logo_256.png", siteUrl).toString();
+const repoUrl = "https://github.com/SailfinIO/sailfin";
+
+// Escape `<` to neutralize any accidental `</script>` sequence inside the
+// JSON-LD payload — defense in depth even though every value is author-controlled.
+const ldJson = (data: unknown) =>
+  JSON.stringify(data).replace(/</g, "\\u003c");
+
+const organizationLd = {
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "@id": orgId,
+  name: "Sailfin",
+  legalName: "Sailfin, LLC",
+  url: siteUrl.toString(),
+  logo: logoUrl,
+  sameAs: [repoUrl],
+};
+
+const websiteLd = {
+  "@context": "https://schema.org",
+  "@type": "WebSite",
+  "@id": websiteId,
+  name: "Sailfin",
+  url: siteUrl.toString(),
+  description:
+    "A compiled systems language with compile-time capability enforcement.",
+  publisher: { "@id": orgId },
+};
+
+const softwareLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "Sailfin",
+  description:
+    "A compiled systems language where every function declares its capabilities — IO, network, clock, and more — with compile-time effect checking.",
+  url: siteUrl.toString(),
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "Linux, macOS",
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+  license: "https://www.gnu.org/licenses/old-licenses/gpl-2.0.html",
+  codeRepository: repoUrl,
+  author: { "@id": orgId },
+  publisher: { "@id": orgId },
+};
+
+const blogPostingLd = article
+  ? {
+      "@context": "https://schema.org",
+      "@type": "BlogPosting",
+      headline: article.headline,
+      datePublished: article.datePublished,
+      dateModified: article.datePublished,
+      description,
+      image: ogImage.toString(),
+      mainEntityOfPage: { "@type": "WebPage", "@id": canonicalURL.toString() },
+      author: article.author
+        ? { "@type": "Person", name: article.author }
+        : { "@id": orgId },
+      publisher: { "@id": orgId },
+    }
+  : null;
 ---
 
 <!doctype html>
@@ -48,6 +122,18 @@ const pageTitle = title === "Home" ? "Sailfin" : `${title} - Sailfin`;
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
     <meta name="twitter:image:alt" content="Sailfin — systems language with compile-time capabilities" />
+
+    <!-- Structured data (JSON-LD). Organization + WebSite ship on every page;
+         SoftwareApplication is homepage-only; BlogPosting is emitted when a
+         layout passes an `article` prop. -->
+    <script type="application/ld+json" set:html={ldJson(organizationLd)} />
+    <script type="application/ld+json" set:html={ldJson(websiteLd)} />
+    {isHome && (
+      <script type="application/ld+json" set:html={ldJson(softwareLd)} />
+    )}
+    {blogPostingLd && (
+      <script type="application/ld+json" set:html={ldJson(blogPostingLd)} />
+    )}
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />

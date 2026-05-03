@@ -10,9 +10,13 @@ interface Props {
 }
 
 const { title, description, date, author, image } = Astro.props;
+
+const article = date
+  ? { headline: title, datePublished: date, author }
+  : undefined;
 ---
 
-<BaseLayout title={title} description={description} image={image} type="article">
+<BaseLayout title={title} description={description} image={image} type="article" article={article}>
   <article class="blog-post">
     <header class="blog-header">
       <h1>{title}</h1>

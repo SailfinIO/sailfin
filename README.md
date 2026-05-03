@@ -1,7 +1,35 @@
-# Sailfin
+<p align="center">
+  <a href="https://sailfin.dev">
+    <img src="https://raw.githubusercontent.com/SailfinIO/sailfin/main/site/public/images/sfn_lockup.svg" alt="Sailfin" width="360">
+  </a>
+</p>
 
-Sailfin is a compiled systems language with compile-time capability enforcement.
-Every function declares what it can do — IO, network, clock, and more — and the compiler checks direct usage of effectful operations against those declarations before your code runs.
+<h1 align="center">Sailfin</h1>
+
+<p align="center">
+  <strong>A compiled systems language with compile-time capability enforcement.</strong>
+</p>
+
+<p align="center">
+  Every function declares what it can do — IO, network, clock, and more — and the compiler checks direct usage of effectful operations against those declarations before your code runs.
+</p>
+
+<p align="center">
+  <a href="https://sailfin.dev"><strong>Website</strong></a> ·
+  <a href="https://sailfin.dev/docs/getting-started/install">Install</a> ·
+  <a href="https://sailfin.dev/docs/reference/spec/">Language Spec</a> ·
+  <a href="https://sailfin.dev/roadmap">Roadmap</a> ·
+  <a href="https://sailfin.dev/blog">Blog</a> ·
+  <a href="https://sailfin.dev/llms.txt"><code>llms.txt</code></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/SailfinIO/sailfin/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/SailfinIO/sailfin?include_prereleases&display_name=tag"></a>
+  <a href="https://github.com/SailfinIO/sailfin/blob/main/LICENSE"><img alt="License: GPL v2" src="https://img.shields.io/badge/license-GPL_v2-blue"></a>
+  <a href="https://github.com/SailfinIO/sailfin/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/SailfinIO/sailfin?style=flat"></a>
+</p>
+
+---
 
 ## Why Sailfin
 
