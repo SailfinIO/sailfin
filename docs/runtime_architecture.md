@@ -86,11 +86,21 @@
 >   fields like `operand.llvm_type`. Fix: bring `parse_struct_field`
 >   in line with `parse_enum_variant_field` (declarations.sfn:1338)
 >   — accept `,` and `;`, and let the last field omit the terminator
->   before `}`. Pinned by
->   `compiler/tests/unit/struct_field_separator_test.sfn` (8 cases)
->   and `compiler/tests/e2e/test_struct_field_separator.sh` (4
->   cases including the original PR #289 repro). With this fix the
->   numeric-pair LLVM lowering matrix is unblocked.
+>   before `}`. A sibling pre-existing bug surfaced on PR #290 review:
+>   accepting `,` exposed that the existing `collect_until` had no
+>   angle-bracket balancing, so a generic-typed field like
+>   `inner: Result<T, E>` mis-captured at the inner comma. Added
+>   `collect_type_annotation_until` (`token_utils.sfn`) which balances
+>   `<` / `>` (and ungues the lexer-fused `>>` shift token from inside
+>   nested generics) on top of the existing `()` / `{}` / `[]`
+>   balancing; routed struct field, enum variant field, and function
+>   parameter type captures through it. Pinned by
+>   `compiler/tests/unit/struct_field_separator_test.sfn` (11 cases
+>   incl. 3 generic-type cases) and
+>   `compiler/tests/e2e/test_struct_field_separator.sh` (6 cases
+>   including the original PR #289 repro and a `Result<T, E>` round-
+>   trip). With this fix the numeric-pair LLVM lowering matrix is
+>   unblocked.
 
 This document is the architectural blueprint for the Sailfin-native runtime that
 will replace the C runtime (`runtime/native/`) before the 1.0 release. It

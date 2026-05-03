@@ -94,3 +94,38 @@ test "struct field: mut qualifier with comma separator" {
     assert index_of(asm, ".field mut value: number") >= 0;
     assert index_of(asm, ".field label: string") >= 0;
 }
+
+// ── Generic argument lists balance angle brackets ────────────────────
+//
+// Surfaced by Copilot's review on PR #290: with `,` accepted as a
+// terminator, a comma inside `<...>` could be mistaken for the field
+// terminator, mis-capturing `Result<T, E>` as `Result<T` and emitting
+// a stray field for `E>`. The fix routes type-annotation captures
+// through `collect_type_annotation_until` (token_utils.sfn), which
+// balances `<` / `>` in addition to `()`, `{}`, `[]`. This keeps
+// generic argument lists intact while leaving expression captures
+// (e.g. `let x = a < b;`) on the original `collect_until` path where
+// `<` is unambiguously a comparison operator.
+test "struct field: generic with comma in args captures whole type" {
+    let asm = _emit("struct Box { inner: Result<string, number>, label: string }");
+    assert index_of(asm, ".field inner: Result<string, number>") >= 0;
+    assert index_of(asm, ".field label: string") >= 0;
+}
+
+test "struct field: nested generic with `>>` captures whole type" {
+    // The lexer glues the closing brackets of nested generics into a
+    // single `>>` shift token. The angle-balanced capture unglues it
+    // back to two closes when emitted from inside a generic context.
+    let asm = _emit("struct Wrap { deep: Map<string, Result<int, Error>>, other: int }");
+    assert index_of(asm, ".field deep: Map<string, Result<int, Error>>") >= 0;
+    assert index_of(asm, ".field other: int") >= 0;
+}
+
+test "struct field: generic-typed field with semicolon separator" {
+    // Pre-fix this also misparsed: `collect_until` saw the inner `,`
+    // first and stripped the trailing `, E>;`. With angle balancing
+    // semicolon-terminated generic fields parse cleanly too.
+    let asm = _emit("struct Box { inner: Result<string, number>; label: string; }");
+    assert index_of(asm, ".field inner: Result<string, number>") >= 0;
+    assert index_of(asm, ".field label: string") >= 0;
+}

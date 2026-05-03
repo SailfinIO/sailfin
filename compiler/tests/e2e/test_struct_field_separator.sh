@@ -198,6 +198,83 @@ EOF
     return 0
 }
 
+# ---- Test: generic-typed field captures whole type (Copilot review) -
+# Surfaced on PR #290: with `,` accepted as a terminator, the inner
+# comma in `Result<T, E>` could be mistaken for the field terminator.
+# The fix routes type captures through `collect_type_annotation_until`
+# which balances `<` / `>` in addition to `()`/`{}`/`[]`. Pin the
+# native-IR shape end-to-end so a regression in either the new helper
+# or its call sites surfaces here.
+test_generic_type_captures_whole_type() {
+    local src="$SCRATCH/generic_field.sfn"
+    local asm="$SCRATCH/generic_field.sfn-asm"
+    cat > "$src" <<'EOF'
+struct Box {
+    inner: Result<string, number>,
+    label: string
+}
+
+fn unwrap(box: Box) -> Result<string, number> {
+    return box.inner;
+}
+
+fn main() {
+    let b = Box { inner: "hi", label: "x" };
+}
+EOF
+    if ! "$BINARY" emit -o "$asm" native "$src" > /dev/null 2>&1; then
+        echo "[test]   sfn emit native failed for generic-typed struct field"
+        return 1
+    fi
+    # Pre-fix: `.field inner: Result<string` (truncated at the comma)
+    # with a stray `.field number` line and `label: string` silently
+    # dropped. Post-fix: the full type round-trips.
+    if ! grep -qE "\\.field inner: Result<string, number>" "$asm"; then
+        echo "[test]   missing '.field inner: Result<string, number>' (truncation regression)"
+        grep -E "\\.field" "$asm" || true
+        return 1
+    fi
+    if ! grep -qE "\\.field label: string" "$asm"; then
+        echo "[test]   missing '.field label: string' (later-field-dropped regression)"
+        grep -E "\\.field" "$asm" || true
+        return 1
+    fi
+    # Function parameter / return type captures use the same helper.
+    if ! grep -qE "\\.fn unwrap\\(box: Box\\) -> Result<string, number>" "$asm"; then
+        echo "[test]   function return type misparsed (expected 'Result<string, number>')"
+        grep -E "\\.fn unwrap" "$asm" || true
+        return 1
+    fi
+    return 0
+}
+
+# ---- Test: nested generics with lexer-glued `>>` token --------------
+test_nested_generic_with_shift_token() {
+    local src="$SCRATCH/nested_generic.sfn"
+    local asm="$SCRATCH/nested_generic.sfn-asm"
+    cat > "$src" <<'EOF'
+struct Wrap {
+    deep: Map<string, Result<int, Error>>,
+    other: int
+}
+EOF
+    if ! "$BINARY" emit -o "$asm" native "$src" > /dev/null 2>&1; then
+        echo "[test]   sfn emit native failed for nested-generic struct field"
+        return 1
+    fi
+    if ! grep -qE "\\.field deep: Map<string, Result<int, Error>>" "$asm"; then
+        echo "[test]   missing nested '.field deep: Map<string, Result<int, Error>>'"
+        grep -E "\\.field" "$asm" || true
+        return 1
+    fi
+    if ! grep -qE "\\.field other: int" "$asm"; then
+        echo "[test]   missing trailing '.field other: int' after nested generic"
+        grep -E "\\.field" "$asm" || true
+        return 1
+    fi
+    return 0
+}
+
 run_test "comma-separated struct fields render as non-empty %T = type { ... }" \
     test_comma_struct_renders_with_fields
 run_test "struct-string-field comparison reaches the matching branch" \
@@ -206,6 +283,10 @@ run_test "mixed comma/semicolon and trailing-omit field separators accepted" \
     test_mixed_and_trailing_separators
 run_test "struct-string-field read survives function boundary" \
     test_struct_string_field_through_function
+run_test "generic-typed field captures whole type (Result<T, E>)" \
+    test_generic_type_captures_whole_type
+run_test "nested generic with lexer-glued '>>' token captures whole type" \
+    test_nested_generic_with_shift_token
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

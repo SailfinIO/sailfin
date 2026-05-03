@@ -33,6 +33,7 @@ import {
     advance_to_symbol,
     append_token,
     collect_parenthesized,
+    collect_type_annotation_until,
     collect_until,
     consume_keyword,
     consume_symbol,
@@ -480,7 +481,11 @@ fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
     let separator_result = consume_annotation_separator(parser);
     if separator_result.found {
         parser = separator_result.parser;
-        let capture = collect_until(skip_trivia(parser), ["=", ",", ")"]);
+        // Function parameter type annotation — angle-balanced so generic
+        // args like `Result<T, E>` capture as one type. The default-value
+        // capture below still uses plain `collect_until` because `<` /
+        // `>` are comparison operators in expression position.
+        let capture = collect_type_annotation_until(skip_trivia(parser), ["=", ",", ")"]);
         parser = capture.parser;
         let text = trim_text(tokens_to_text(capture.tokens));
         if text.length > 0 {
@@ -1086,7 +1091,10 @@ fn parse_struct_field(parser: Parser) -> StructFieldParseResult {
         };
     }
 
-    let capture = collect_until(skip_trivia(current), [";", ",", "}"]);
+    // Generic args may contain commas (`Result<T, E>`); use the
+    // angle-balancing variant so only a top-level `,`/`;`/`}` ends the
+    // capture. See `collect_type_annotation_until` for safety scope.
+    let capture = collect_type_annotation_until(skip_trivia(current), [";", ",", "}"]);
     current = capture.parser;
     let type_text = trim_text(tokens_to_text(capture.tokens));
     if type_text.length == 0 {
@@ -1381,7 +1389,9 @@ fn parse_enum_variant_field(parser: Parser) -> StructFieldParseResult {
     }
     current = sep_result.parser;
 
-    let capture = collect_until(skip_trivia(current), [",", "}", ";"]);
+    // Type-annotation context: angle-balanced so `Result<T, E>` parses
+    // as one type, not as a `Result<T` prefix + stray `E>` field.
+    let capture = collect_type_annotation_until(skip_trivia(current), [",", "}", ";"]);
     current = capture.parser;
     let mut type_text = trim_text(tokens_to_text(capture.tokens));
     loop {
