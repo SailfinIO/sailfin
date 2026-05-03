@@ -26,7 +26,6 @@
   <!-- Wordmark -->
   <g font-family="'Inter', -apple-system, 'Segoe UI', sans-serif" fill="#f4eefb">
     <text x="72" y="240" font-size="128" font-weight="800" letter-spacing="-5">sfn</text>
-    <text x="72" y="290" font-size="22" font-weight="600" letter-spacing="8" fill="#cfc4e0">SAILFIN</text>
   </g>
 
   <!-- Tagline -->

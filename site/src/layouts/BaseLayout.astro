@@ -126,13 +126,13 @@ const blogPostingLd = article
     <!-- Structured data (JSON-LD). Organization + WebSite ship on every page;
          SoftwareApplication is homepage-only; BlogPosting is emitted when a
          layout passes an `article` prop. -->
-    <script type="application/ld+json" set:html={ldJson(organizationLd)} />
-    <script type="application/ld+json" set:html={ldJson(websiteLd)} />
+    <script type="application/ld+json" set:html={ldJson(organizationLd)}></script>
+    <script type="application/ld+json" set:html={ldJson(websiteLd)}></script>
     {isHome && (
-      <script type="application/ld+json" set:html={ldJson(softwareLd)} />
+      <script type="application/ld+json" set:html={ldJson(softwareLd)}></script>
     )}
     {blogPostingLd && (
-      <script type="application/ld+json" set:html={ldJson(blogPostingLd)} />
+      <script type="application/ld+json" set:html={ldJson(blogPostingLd)}></script>
     )}
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />
