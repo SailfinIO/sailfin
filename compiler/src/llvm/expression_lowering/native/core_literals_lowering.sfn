@@ -1187,6 +1187,47 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     let cast_name = format_temp_name(current_temp);
     current_temp += 1;
 
+    // `as bool` is rejected uniformly — pointer, integer, or float
+    // sources should all use a comparison (`x != null`, `x != 0`,
+    // `x != 0.0`) rather than a bit-pattern reinterpretation that
+    // happens to land in `i1`. Done before the pointer-cast
+    // branches so `ptr as bool` doesn't sneak through `ptrtoint`.
+    if target_type == "i1" {
+        if ends_with_pointer_suffix(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != null` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        if is_integer_llvm_type(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        if is_float_llvm_type(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0.0` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
+
     if ends_with_pointer_suffix(operand.llvm_type) {
         if ends_with_pointer_suffix(target_type) {
             current_lines.push("  " + cast_name + " = bitcast " + operand.llvm_type
@@ -1258,47 +1299,41 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     // docs/runtime_architecture.md §3.7. Both sides are non-pointer
     // at this point — pointer cases were handled above and the
     // identity case was filtered earlier.
-    //   int  → wider int       → sext (or zext when source is i1)
-    //   int  → narrower int    → trunc
-    //   int  → double/float    → sitofp
+    //   i1  → int (wider)      → zext      (true → 1, not -1)
+    //   i1  → double/float     → uitofp    (true → 1.0, not -1.0)
+    //   i*  → int (wider)      → sext
+    //   i*  → int (narrower)   → trunc
+    //   i*  → double/float     → sitofp
     //   double/float → int     → fptosi
     //   float → double         → fpext
     //   double → float         → fptrunc
-    //   any  → i1 via `as`     → diagnostic (use `x != 0`)
+    //   any  → i1 via `as`     → diagnostic (handled above)
+    //
+    // KNOWN LIMITATION: source-level unsigned widths (`u8`/`u16`/
+    // `u32`) collapse to `i8`/`i16`/`i32` in `map_primitive_type`,
+    // so this matrix can't tell signed from unsigned for non-i1
+    // sources. `255_u8 as u64` therefore lowers as `sext` and
+    // becomes `-1` (sign-extended) rather than `255` (zero-
+    // extended). Distinguishing requires source-level type tracking
+    // through the cast lowering — deferred to a Slice D follow-up
+    // alongside the `as bool` audit; see issue #295/#296. The
+    // architect's brief explicitly accepted "all integer casts emit
+    // signed forms" for this slice.
     let operand_is_int = is_integer_llvm_type(operand.llvm_type);
     let operand_is_float = is_float_llvm_type(operand.llvm_type);
     let target_is_int = is_integer_llvm_type(target_type);
     let target_is_float = is_float_llvm_type(target_type);
 
-    if target_type == "i1" {
-        if operand_is_int {
-            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
-                + " use a comparison like `x != 0` instead");
-            return ExpressionResult {
-                lines: current_lines,
-                temp_index: current_temp,
-                operand: null,
-                diagnostics: diagnostics,
-                string_constants: lowered.string_constants
-            };
-        }
-        if operand_is_float {
-            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
-                + " use a comparison like `x != 0.0` instead");
-            return ExpressionResult {
-                lines: current_lines,
-                temp_index: current_temp,
-                operand: null,
-                diagnostics: diagnostics,
-                string_constants: lowered.string_constants
-            };
-        }
-    }
-
     let mut numeric_op_name: string = "";
 
     if operand_is_int {
-        if target_is_float { numeric_op_name = "sitofp"; }
+        if target_is_float {
+            // `sitofp i1 1` would produce -1.0 (LLVM treats `i1` as
+            // signed where `true` = -1). For `bool as float` we want
+            // `true` → 1.0, so use `uitofp` for the i1 source.
+            if operand.llvm_type == "i1" { numeric_op_name = "uitofp"; }
+            if operand.llvm_type != "i1" { numeric_op_name = "sitofp"; }
+        }
     }
     if operand_is_float {
         if target_is_int { numeric_op_name = "fptosi"; }

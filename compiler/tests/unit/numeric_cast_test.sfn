@@ -6,26 +6,35 @@
 //   * `parse_postfix_chain` recognizes the soft keyword `as` (already
 //     used for import aliases at parser/declarations.sfn:625) and
 //     builds an `Expression.Cast { operand, target_type }`.
-//   * Both `format_expression` sites render the node as
-//     `(operand) as <type>` — the wrapping parens contain any
-//     embedded operators so the LLVM lowering recognizer
+//   * The native `.sfn-asm` emitter (`emit_native_format`) renders
+//     the node as `(operand) as <type>` — the wrapping parens
+//     contain any embedded operators so the LLVM lowering recognizer
 //     (`parse_cast_expression` in
 //     `llvm/expression_lowering/native/core_parsing.sfn`) recovers
-//     the operand cleanly via `strip_enclosing_parentheses`.
+//     the operand cleanly via `strip_enclosing_parentheses`. The
+//     Sailfin-source emitter (`emitter_sailfin_expr`) renders the
+//     human-friendly `expr as Type` form (no operand parens — no
+//     re-parse step consumes its output), which is why the
+//     test_emit assertions below pin the parens-wrapped form (we
+//     check the native-IR rendering).
 //   * `lower_cast_expression` in
 //     `llvm/expression_lowering/native/core_literals_lowering.sfn`
 //     adds the numeric-pair matrix on top of the existing
 //     pointer↔pointer / int↔pointer branches:
-//        i*  → i*  (wider)   → sext (zext when source is i1)
-//        i*  → i*  (narrower)→ trunc
+//        i1  → int  (wider)  → zext
+//        i*  → i*   (wider)  → sext
+//        i*  → i*   (narrower)→ trunc
+//        i1  → double/float  → uitofp
 //        i*  → double/float  → sitofp
 //        double/float → i*   → fptosi
 //        float → double      → fpext
 //        double → float      → fptrunc
 //        any  → i1 via `as`  → diagnostic ("use `x != 0`")
-//   * `dominant_type` returns the empty sentinel when one side is
-//     integer and the other is float, and `harmonise_operands`
-//     surfaces a diagnostic suggesting an explicit `as` cast.
+//
+// L2/L3 silent-widening rejection (the architect's `dominant_type`
+// tightening) is **deferred to Slice E** — it can't ship before
+// `number` retires because the lowered code mixes i64↔double
+// pervasively. See issue #296 for the follow-up.
 //
 // LLVM-shape pinning lives in `compiler/tests/e2e/test_numeric_cast.sh`;
 // these tests pin the front-end shape (parse → typecheck → native IR)
