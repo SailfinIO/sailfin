@@ -47,7 +47,13 @@ import { array_pointer_element_type } from "../arrays";
 import { split_array_elements } from "../splitting";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
-import { coerce_operand_to_type, dominant_type } from "./core_operands";
+import {
+    coerce_operand_to_type,
+    dominant_type,
+    integer_llvm_width,
+    is_float_llvm_type,
+    is_integer_llvm_type
+} from "./core_operands";
 import { parse_array_literal_metadata } from "./core_parsing";
 import { coerce_operand_to_string, emit_string_concat, lower_string_literal } from "./core_strings";
 import {
@@ -1153,6 +1159,18 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             string_constants: lowered.string_constants
         };
     }
+    // Seed-DCE workaround — tracked in issue #295. Bind `operand`
+    // via `coerce_operand_to_type` (a no-op when source and target
+    // types match) before any field access. The function call
+    // materialises the struct in the seed's SSA form and prevents
+    // the alpha.8 dead-code pass from eliding a direct
+    // `let operand = lowered.operand` binding —
+    // `lower_return_instruction` works around the same DCE quirk
+    // by passing `operand` to `coerce_operand_to_type` immediately
+    // after the binding. Once the seed bug is fixed and a fixed
+    // seed is pinned, delete this `_operand_keepalive` line and
+    // both surrounding comments.
+    let _operand_keepalive = coerce_operand_to_type(lowered.operand, lowered.operand.llvm_type, lowered.temp_index, lowered.lines);
     let operand = lowered.operand;
     if operand.llvm_type == target_type {
         return ExpressionResult {
@@ -1168,6 +1186,47 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     let mut current_temp = lowered.temp_index;
     let cast_name = format_temp_name(current_temp);
     current_temp += 1;
+
+    // `as bool` is rejected uniformly — pointer, integer, or float
+    // sources should all use a comparison (`x != null`, `x != 0`,
+    // `x != 0.0`) rather than a bit-pattern reinterpretation that
+    // happens to land in `i1`. Done before the pointer-cast
+    // branches so `ptr as bool` doesn't sneak through `ptrtoint`.
+    if target_type == "i1" {
+        if ends_with_pointer_suffix(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != null` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        if is_integer_llvm_type(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+        if is_float_llvm_type(operand.llvm_type) {
+            diagnostics.push("llvm lowering: cast to `bool` via `as` is rejected;"
+                + " use a comparison like `x != 0.0` instead");
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: null,
+                diagnostics: diagnostics,
+                string_constants: lowered.string_constants
+            };
+        }
+    }
 
     if ends_with_pointer_suffix(operand.llvm_type) {
         if ends_with_pointer_suffix(target_type) {
@@ -1234,6 +1293,88 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
                 };
             }
         }
+    }
+
+    // Slice D (2026-05-03): numeric `as` cast lowering matrix. See
+    // docs/runtime_architecture.md §3.7. Both sides are non-pointer
+    // at this point — pointer cases were handled above and the
+    // identity case was filtered earlier.
+    //   i1  → int (wider)      → zext      (true → 1, not -1)
+    //   i1  → double/float     → uitofp    (true → 1.0, not -1.0)
+    //   i*  → int (wider)      → sext
+    //   i*  → int (narrower)   → trunc
+    //   i*  → double/float     → sitofp
+    //   double/float → int     → fptosi
+    //   float → double         → fpext
+    //   double → float         → fptrunc
+    //   any  → i1 via `as`     → diagnostic (handled above)
+    //
+    // KNOWN LIMITATION: source-level unsigned widths (`u8`/`u16`/
+    // `u32`) collapse to `i8`/`i16`/`i32` in `map_primitive_type`,
+    // so this matrix can't tell signed from unsigned for non-i1
+    // sources. `255_u8 as u64` therefore lowers as `sext` and
+    // becomes `-1` (sign-extended) rather than `255` (zero-
+    // extended). Distinguishing requires source-level type tracking
+    // through the cast lowering — deferred to a Slice D follow-up
+    // alongside the `as bool` audit; see issue #295/#296. The
+    // architect's brief explicitly accepted "all integer casts emit
+    // signed forms" for this slice.
+    let operand_is_int = is_integer_llvm_type(operand.llvm_type);
+    let operand_is_float = is_float_llvm_type(operand.llvm_type);
+    let target_is_int = is_integer_llvm_type(target_type);
+    let target_is_float = is_float_llvm_type(target_type);
+
+    let mut numeric_op_name: string = "";
+
+    if operand_is_int {
+        if target_is_float {
+            // `sitofp i1 1` would produce -1.0 (LLVM treats `i1` as
+            // signed where `true` = -1). For `bool as float` we want
+            // `true` → 1.0, so use `uitofp` for the i1 source.
+            if operand.llvm_type == "i1" { numeric_op_name = "uitofp"; }
+            if operand.llvm_type != "i1" { numeric_op_name = "sitofp"; }
+        }
+    }
+    if operand_is_float {
+        if target_is_int { numeric_op_name = "fptosi"; }
+    }
+    if operand_is_int {
+        if target_is_int {
+            let src_width = integer_llvm_width(operand.llvm_type);
+            let dst_width = integer_llvm_width(target_type);
+            if dst_width > src_width {
+                if operand.llvm_type == "i1" { numeric_op_name = "zext"; }
+                if operand.llvm_type != "i1" { numeric_op_name = "sext"; }
+            }
+            if dst_width < src_width { numeric_op_name = "trunc"; }
+        }
+    }
+    if operand_is_float {
+        if target_is_float {
+            if operand.llvm_type == "float" {
+                if target_type == "double" { numeric_op_name = "fpext"; }
+            }
+            if operand.llvm_type == "double" {
+                if target_type == "float" { numeric_op_name = "fptrunc"; }
+            }
+        }
+    }
+
+    if numeric_op_name.length > 0 {
+        current_lines.push("  " + cast_name + " = " + numeric_op_name + " "
+            + operand.llvm_type
+            + " "
+            + operand.value
+            + " to "
+            + target_type);
+        let casted = LLVMOperand { llvm_type: target_type, value: cast_name };
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: casted,
+            diagnostics: diagnostics,
+            string_constants: lowered.string_constants
+        };
     }
 
     diagnostics.push("llvm lowering: unsupported cast from `" + operand.llvm_type

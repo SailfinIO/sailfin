@@ -222,6 +222,36 @@ fn load_local_operand(local: LocalBinding, temp_index: number, lines: string[]) 
     };
 }
 
+// Slice D (2026-05-03): integer/float LLVM-type predicates shared by
+// `dominant_type` (silent-coercion guard) and `lower_cast_expression`
+// (numeric `as` matrix). LLVM types here are the ones produced by
+// `map_type_annotation`: `i1`/`i8`/`i16`/`i32`/`i64` for integers and
+// `double`/`float` for floats. Pointer types (e.g. `i8*`, `i64*`) are
+// handled by separate branches in their respective callers.
+fn is_integer_llvm_type(value: string) -> boolean {
+    if value == "i1" { return true; }
+    if value == "i8" { return true; }
+    if value == "i16" { return true; }
+    if value == "i32" { return true; }
+    if value == "i64" { return true; }
+    return false;
+}
+
+fn is_float_llvm_type(value: string) -> boolean {
+    if value == "double" { return true; }
+    if value == "float" { return true; }
+    return false;
+}
+
+fn integer_llvm_width(value: string) -> number {
+    if value == "i1" { return 1; }
+    if value == "i8" { return 8; }
+    if value == "i16" { return 16; }
+    if value == "i32" { return 32; }
+    if value == "i64" { return 64; }
+    return 0;
+}
+
 // Collapse runs of consecutive spaces to a single space inside LLVM type strings.
 // Uses find_substring_from + substring which rely on the C runtime (grapheme_at)
 // rather than the [] operator that older seeds miscompile.
@@ -1484,19 +1514,17 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     };
 }
 
-// LIMITATION (numeric types Slice A — see docs/runtime_architecture.md
-// §3.7 limitations table L2/L3): when one operand is integer (i64)
+// LIMITATION (numeric types L2/L3 — see docs/runtime_architecture.md
+// §3.7 + tracked in issue #296): when one operand is integer (i64)
 // and the other is float (double), the rule below silently widens
-// the integer side to double. That can truncate above 2^53 and is
-// fundamentally a footgun for runtime authors handling indices
-// alongside model arithmetic. Slice D (`as` casts + reject silent
-// int↔float coercion) tightens this — once that ships, cross-type
-// pairings here become a hard error and authors must spell the
-// intent explicitly. Pre-Slice-D the silent widening is preserved
-// because the compiler's own self-host depends on `number`-typed
-// loop counters meeting integer literals (`i += 1`) without
-// erroring; that compatibility goes away when Slice E retires
-// `number`.
+// the integer side to double. Closing this depends on Slice E
+// (bare-literal defaulting + `number` retirement) shipping first
+// — without it, every comparison that mixes a runtime helper's
+// i64 return against a `: number` (= double) local hits the
+// tightened path and breaks user code (`for i in 0..arr.length`
+// is the canonical case). Slice D shipped the `as` cast lowering
+// matrix so authors can spell the conversion explicitly today;
+// the silent-widening rejection rides on Slice E (#296).
 fn dominant_type(first: string, second: string) -> string {
     if first.length == 0 { return second; }
     if second.length == 0 { return first; }
