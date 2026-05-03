@@ -459,9 +459,7 @@ fn collect_type_annotation_until(parser: Parser, terminators: string[]) -> Captu
                 // (`Map<K, Result<T, E>>`) into a single `>>` shift token.
                 // Inside an angle context we unglue it back to two closes;
                 // floor at 0 in case of malformed input.
-                if angle_depth >= 2 {
-                    angle_depth -= 2;
-                } else if angle_depth == 1 {
+                if angle_depth >= 2 { angle_depth -= 2; } else if angle_depth == 1 {
                     angle_depth = 0;
                 }
             }
