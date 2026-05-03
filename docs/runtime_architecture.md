@@ -65,19 +65,42 @@
 >   emitter (`emitter_sailfin_expr`) renders the human-friendly
 >   `expr as Type` form (no operand parens — no re-parse step
 >   consumes its output). The numeric-pair LLVM lowering matrix
->   (sitofp / fptosi / sext / trunc / fpext / fptrunc) is deferred:
->   the alpha.8 seed exhibits a string-aliasing self-host bug
->   (struct-field reads of type `string` mis-evaluate when bound
->   into let-locals or passed as function arguments inside a new
->   branch chain — they read back as the literal "0"). The bug
->   blocks the inline predicate dispatch the architect's plan
->   relies on; diagnosing it is the follow-up that lands the
->   numeric matrix. Today numeric `as` casts hit the existing
->   "unsupported cast" diagnostic in `lower_cast_expression`;
->   pointer↔pointer / int↔pointer casts (already handled by the
->   pre-Slice-D lowering) are unaffected. Pinned by
->   `compiler/tests/unit/numeric_cast_test.sfn` (7 tests covering
->   parser shape, chain associativity, precedence, and typecheck).
+>   (sitofp / fptosi / sext / trunc / fpext / fptrunc) is deferred
+>   as a follow-up, but the previously-cited "alpha.8 seed exhibits
+>   a string-aliasing self-host bug" was not what it appeared.
+>   Pinned by `compiler/tests/unit/numeric_cast_test.sfn` (7 tests
+>   covering parser shape, chain associativity, precedence, and
+>   typecheck).
+> - **Diagnosed and fixed 2026-05-02 (PR #289 follow-up).** The
+>   reported "string-aliasing seed bug" was a parser silent-skip in
+>   `parse_struct_field` (`compiler/src/parser/declarations.sfn`).
+>   The function only accepted `;` as the field terminator. Any
+>   struct declared with Rust/TS-style commas — `struct Pair { a:
+>   string, b: number }` — silently parsed as an empty struct (no
+>   diagnostic), the LLVM-lowering pass rendered `%Pair = type {}`,
+>   and every downstream field read had no GEP path, so it loaded
+>   whatever zero value the lowering guessed (`load double 0.0` →
+>   `number_to_string(0.0)` = literal "0"). The numeric-cast
+>   architect's plan triggered this because their predicate-dispatch
+>   helpers used comma-separated struct definitions and read string
+>   fields like `operand.llvm_type`. Fix: bring `parse_struct_field`
+>   in line with `parse_enum_variant_field` (declarations.sfn:1338)
+>   — accept `,` and `;`, and let the last field omit the terminator
+>   before `}`. A sibling pre-existing bug surfaced on PR #290 review:
+>   accepting `,` exposed that the existing `collect_until` had no
+>   angle-bracket balancing, so a generic-typed field like
+>   `inner: Result<T, E>` mis-captured at the inner comma. Added
+>   `collect_type_annotation_until` (`token_utils.sfn`) which balances
+>   `<` / `>` (and ungues the lexer-fused `>>` shift token from inside
+>   nested generics) on top of the existing `()` / `{}` / `[]`
+>   balancing; routed struct field, enum variant field, and function
+>   parameter type captures through it. Pinned by
+>   `compiler/tests/unit/struct_field_separator_test.sfn` (11 cases
+>   incl. 3 generic-type cases) and
+>   `compiler/tests/e2e/test_struct_field_separator.sh` (6 cases
+>   including the original PR #289 repro and a `Result<T, E>` round-
+>   trip). With this fix the numeric-pair LLVM lowering matrix is
+>   unblocked.
 
 This document is the architectural blueprint for the Sailfin-native runtime that
 will replace the C runtime (`runtime/native/`) before the 1.0 release. It

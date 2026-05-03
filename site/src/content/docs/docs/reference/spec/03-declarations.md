@@ -70,7 +70,7 @@ struct User implements Greeter {
 ```
 
 - Fields default to immutable; `mut` allows reassignment
-- Fields end with `;` and use `:` for the type annotation
+- Fields use `:` for the type annotation and may be terminated with `;`, `,`, or — for the last field in the body — nothing at all. The semicolon form is canonical; the comma and bare-last forms are accepted to match Rust/TS conventions
 - Methods are defined with `fn` inside the struct body; the first parameter is bare `self`
 - The `implements` clause lists interfaces the struct satisfies (comma-separated for multiple)
 - Struct literals: `Point { x: 1.0, y: 2.0 }`

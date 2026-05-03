@@ -405,6 +405,74 @@ fn collect_until(parser: Parser, terminators: string[]) -> CaptureResult {
     return CaptureResult { parser: current, tokens: captured };
 }
 
+// Like `collect_until`, but also balances `<` / `>` so that a comma inside
+// a generic argument list (e.g. `Result<T, E>`) does not prematurely
+// terminate the capture. Only safe in type-annotation contexts where `<`
+// is unambiguously a generic-bracket open and never a comparison operator
+// — call sites: struct field types, enum variant field types, and
+// function parameter types. NEVER use this for default-value or
+// expression captures (where `a < b` is a boolean comparison and the
+// `>` may live arbitrarily far away or never appear at all).
+fn collect_type_annotation_until(parser: Parser, terminators: string[]) -> CaptureResult {
+    let mut current = parser;
+    let mut captured: Token[] = [];
+    let mut paren_depth: number = 0;
+    let mut brace_depth: number = 0;
+    let mut bracket_depth: number = 0;
+    let mut angle_depth: number = 0;
+
+    loop {
+        let token = parser_peek_raw(current);
+        if token.kind.variant == "EndOfFile" { break; }
+
+        let mut at_top_level: boolean = false;
+        if paren_depth == 0 {
+            if brace_depth == 0 {
+                if bracket_depth == 0 {
+                    if angle_depth == 0 { at_top_level = true; }
+                }
+            }
+        }
+        let is_symbol = token.kind.variant == "Symbol";
+        let mut should_stop = false;
+        if at_top_level {
+            if is_symbol {
+                should_stop = string_array_contains(terminators, token.lexeme);
+            }
+        }
+        if should_stop { break; }
+
+        captured = append_token(captured, token);
+
+        if is_symbol {
+            let sym = token.lexeme;
+            if strings_equal(sym, "(") { paren_depth += 1; } else if strings_equal(sym, ")") {
+                if paren_depth > 0 { paren_depth -= 1; }
+            } else if strings_equal(sym, "{") { brace_depth += 1; } else if strings_equal(sym, "}") {
+                if brace_depth > 0 { brace_depth -= 1; }
+            } else if strings_equal(sym, "[") { bracket_depth += 1; } else if strings_equal(sym, "]") {
+                if bracket_depth > 0 { bracket_depth -= 1; }
+            } else if strings_equal(sym, "<") { angle_depth += 1; } else if strings_equal(sym, ">") {
+                if angle_depth > 0 { angle_depth -= 1; }
+            } else if strings_equal(sym, ">>") {
+                // The lexer glues the closing brackets of nested generics
+                // (`Map<K, Result<T, E>>`) into a single `>>` shift token.
+                // Inside an angle context we unglue it back to two closes;
+                // floor at 0 in case of malformed input.
+                if angle_depth >= 2 { angle_depth -= 2; } else if angle_depth == 1 {
+                    angle_depth = 0;
+                }
+            }
+        }
+
+        let advanced = parser_advance_raw(current);
+        if advanced.index == current.index { break; }
+        current = advanced;
+    }
+
+    return CaptureResult { parser: current, tokens: captured };
+}
+
 fn collect_parenthesized(parser: Parser) -> ParenthesizedParseResult {
     let mut current = skip_trivia(parser);
     let start = parser_peek_raw(current);

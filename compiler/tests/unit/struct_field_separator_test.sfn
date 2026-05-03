@@ -1,0 +1,131 @@
+// Regression coverage for `parse_struct_field` field-terminator handling
+// (`compiler/src/parser/declarations.sfn`).
+//
+// History: PR #289 surfaced a "struct-string-field reads misfire" symptom
+// — direct `==` comparisons against literal strings on a struct field
+// always returned false, and concat reads of the same field rendered "0"
+// instead of the bound value. The reporter diagnosed it as a string-
+// aliasing self-host bug. The actual root cause was a parser silent-skip:
+// `parse_struct_field` only accepted `;` as the field terminator, so a
+// struct declared with Rust/TS-style commas ("a: T, b: U") parsed as an
+// empty struct (no diagnostic), the LLVM lowering rendered `%T = type {}`,
+// and every downstream field read had no GEP path, so it loaded whatever
+// zero value the lowering guessed (literal "0" through number→string).
+//
+// The fix brings `parse_struct_field` in line with `parse_enum_variant_field`
+// (declarations.sfn:1338) — both forms of separator (`,` and `;`) work, and
+// the last field can omit the terminator before `}`. These tests pin the
+// parser shape so the regression cannot resurface silently.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+
+fn _emit(source: string) -> string {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "struct_field_separator_test");
+}
+
+// ── Comma-separated fields parse as fields, not silently as nothing ──
+test "struct field: comma separator captures all fields" {
+    let asm = _emit("struct Pair { name: string, age: number }");
+    // Both fields must appear in the layout; pre-fix the seed produced
+    // `size=0` and emitted only a `noop` body.
+    assert index_of(asm, ".layout field name type=string") >= 0;
+    assert index_of(asm, ".layout field age type=number") >= 0;
+    assert index_of(asm, ".field name: string") >= 0;
+    assert index_of(asm, ".field age: number") >= 0;
+}
+
+test "struct field: comma separator yields non-zero size" {
+    let asm = _emit("struct Pair { name: string, age: number }");
+    // Two pointer/double-sized fields → size 16. The pre-fix output
+    // was `size=0 align=1`, which is the diagnostic for "field-list
+    // collapsed to empty".
+    assert index_of(asm, ".layout struct name=Pair size=16 align=8") >= 0;
+}
+
+// ── Semicolon-separated fields stay working (status quo) ─────────────
+test "struct field: semicolon separator still works" {
+    let asm = _emit("struct Pair { name: string; age: number; }");
+    assert index_of(asm, ".layout field name type=string") >= 0;
+    assert index_of(asm, ".layout field age type=number") >= 0;
+}
+
+// ── Mixed and trailing terminator are accepted ───────────────────────
+test "struct field: mixed separators accepted" {
+    let asm = _emit("struct Trio { a: string, b: number; c: boolean }");
+    assert index_of(asm, ".layout field a type=string") >= 0;
+    assert index_of(asm, ".layout field b type=number") >= 0;
+    assert index_of(asm, ".layout field c type=boolean") >= 0;
+}
+
+test "struct field: last field without terminator accepted" {
+    // `}` immediately following the type is treated as the implicit
+    // end of the field list — matches Rust's optional-trailing-comma
+    // ergonomic and the existing `parse_enum_variant_field` precedent.
+    let asm = _emit("struct Pair { name: string; age: number }");
+    assert index_of(asm, ".layout field name type=string") >= 0;
+    assert index_of(asm, ".layout field age type=number") >= 0;
+}
+
+test "struct field: trailing comma accepted" {
+    let asm = _emit("struct Pair { name: string, age: number, }");
+    assert index_of(asm, ".layout field name type=string") >= 0;
+    assert index_of(asm, ".layout field age type=number") >= 0;
+}
+
+// ── String-typed field round-trips through the layout ────────────────
+//
+// Anchors the specific shape the PR #289 reporter hit: a struct
+// containing two string fields. Pre-fix this produced
+// `%LLVMOperand = type {}` in the rendered IR; post-fix the layout
+// lines carry both field types so the LLVM rendering pass can emit
+// `%LLVMOperand = type { i8*, i8* }` and downstream GEPs resolve.
+test "struct field: two-string-field struct preserves both fields" {
+    let asm = _emit("struct LLVMOperand { llvm_type: string, value: string }");
+    assert index_of(asm, ".layout field llvm_type type=string offset=0 size=8 align=8") >= 0;
+    assert index_of(asm, ".layout field value type=string offset=8 size=8 align=8") >= 0;
+    assert index_of(asm, ".layout struct name=LLVMOperand size=16 align=8") >= 0;
+}
+
+// ── `mut` qualifier is preserved across both separator forms ─────────
+test "struct field: mut qualifier with comma separator" {
+    let asm = _emit("struct Counter { mut value: number, label: string }");
+    assert index_of(asm, ".field mut value: number") >= 0;
+    assert index_of(asm, ".field label: string") >= 0;
+}
+
+// ── Generic argument lists balance angle brackets ────────────────────
+//
+// Surfaced by Copilot's review on PR #290: with `,` accepted as a
+// terminator, a comma inside `<...>` could be mistaken for the field
+// terminator, mis-capturing `Result<T, E>` as `Result<T` and emitting
+// a stray field for `E>`. The fix routes type-annotation captures
+// through `collect_type_annotation_until` (token_utils.sfn), which
+// balances `<` / `>` in addition to `()`, `{}`, `[]`. This keeps
+// generic argument lists intact while leaving expression captures
+// (e.g. `let x = a < b;`) on the original `collect_until` path where
+// `<` is unambiguously a comparison operator.
+test "struct field: generic with comma in args captures whole type" {
+    let asm = _emit("struct Box { inner: Result<string, number>, label: string }");
+    assert index_of(asm, ".field inner: Result<string, number>") >= 0;
+    assert index_of(asm, ".field label: string") >= 0;
+}
+
+test "struct field: nested generic with `>>` captures whole type" {
+    // The lexer glues the closing brackets of nested generics into a
+    // single `>>` shift token. The angle-balanced capture unglues it
+    // back to two closes when emitted from inside a generic context.
+    let asm = _emit("struct Wrap { deep: Map<string, Result<int, Error>>, other: int }");
+    assert index_of(asm, ".field deep: Map<string, Result<int, Error>>") >= 0;
+    assert index_of(asm, ".field other: int") >= 0;
+}
+
+test "struct field: generic-typed field with semicolon separator" {
+    // Pre-fix this also misparsed: `collect_until` saw the inner `,`
+    // first and stripped the trailing `, E>;`. With angle balancing
+    // semicolon-terminated generic fields parse cleanly too.
+    let asm = _emit("struct Box { inner: Result<string, number>; label: string; }");
+    assert index_of(asm, ".field inner: Result<string, number>") >= 0;
+    assert index_of(asm, ".field label: string") >= 0;
+}
