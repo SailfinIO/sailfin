@@ -132,13 +132,14 @@ test "enumerate: sfn_sources resolved relative to manifest dir" {
     // The fixture declares two `sfn-sources` whose paths are
     // relative to the manifest dir (`runtime/native/`). Per the
     // `_rcr_resolve_path` rule, `../sfn/io.sfn` joins against
-    // `runtime/native/` → `runtime/native/../sfn/io.sfn`. The
-    // resolver does not collapse `..` segments — that's the
-    // caller's job (or the OS's) since path normalization rules
-    // vary by platform.
+    // `runtime/native/` and the result is normalized to collapse
+    // the `..` segment — `runtime/sfn/io.sfn` lands canonical so
+    // downstream `sfn emit` invocations don't trip the import
+    // resolver on unnormalized paths (see `_rcr_normalize_path`
+    // for the rationale).
     assert a.sfn_sources.length == 2;
-    assert a.sfn_sources[0] == scratch + "/runtime/native/../sfn/io.sfn";
-    assert a.sfn_sources[1] == scratch + "/runtime/native/../sfn/clock.sfn";
+    assert a.sfn_sources[0] == scratch + "/runtime/sfn/io.sfn";
+    assert a.sfn_sources[1] == scratch + "/runtime/sfn/clock.sfn";
     process.run(["rm", "-rf", scratch]);
 }
 
@@ -187,10 +188,11 @@ test "enumerate: prelude_entry resolved relative to manifest dir" {
     assert result.length == 1;
     // `prelude-entry = "../prelude.sfn"` from
     // `<scratch>/runtime/native/capsule.toml` resolves to
-    // `<scratch>/runtime/native/../prelude.sfn` — kept as the
-    // literal join, no `..` collapsing (that's the caller's
-    // responsibility, same as every other path in the resolver).
-    assert result[0].prelude_entry == scratch + "/runtime/native/../prelude.sfn";
+    // `<scratch>/runtime/prelude.sfn` after `_rcr_normalize_path`
+    // collapses the `..` segment. Canonical paths matter for
+    // any downstream consumer that feeds the path back into the
+    // compiler's import resolver.
+    assert result[0].prelude_entry == scratch + "/runtime/prelude.sfn";
     process.run(["rm", "-rf", scratch]);
 }
 

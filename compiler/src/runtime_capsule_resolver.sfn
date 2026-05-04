@@ -99,15 +99,97 @@ fn _rcr_path_join(base: string, name: string) -> string {
     return base + "/" + name;
 }
 
+// Collapse `.` and `..` segments in a `/`-separated path. Used
+// by `_rcr_resolve_path` to produce canonical workspace-rooted
+// paths from manifest entries that climb out of the manifest
+// dir (e.g. `runtime/native` + `../sfn/io.sfn` →
+// `runtime/sfn/io.sfn`, not `runtime/native/../sfn/io.sfn`).
+//
+// Why canonicalize here: downstream consumers feed these paths
+// to `sfn emit` as the source argument. The compiler's import
+// resolver (the path arithmetic that turns
+// `import { write } from "./platform/libc"` into a sibling
+// `.sfn` to load) does not normalize `..` segments — passing a
+// `runtime/native/../sfn/io.sfn` source path resolves the
+// import as `runtime/native/../sfn/platform/libc`, which the
+// import-loader's lookup table does not match cleanly. Canonical
+// paths sidestep that by ensuring the source path string has
+// no `..` segments to begin with.
+//
+// Only collapses lexically; does not touch the filesystem (no
+// symlink resolution). Leading `..` segments that can't be
+// collapsed survive in the output (e.g. `../sfn/io.sfn` stays
+// `../sfn/io.sfn` when there's no parent to consume).
+fn _rcr_normalize_path(path: string) -> string {
+    if path.length == 0 { return path; }
+    let mut absolute: boolean = false;
+    if substring(path, 0, 1) == "/" { absolute = true; }
+    let mut segments: string[] = [];
+    let mut start: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i > path.length { break; }
+        if i == path.length || substring(path, i, i + 1) == "/" {
+            if i > start {
+                let segment = substring(path, start, i);
+                if segment == "." {
+                    // skip
+                } else if segment == ".." {
+                    if segments.length > 0 {
+                        let last = segments[segments.length - 1];
+                        if last != ".." {
+                            // Pop the last segment.
+                            let mut popped: string[] = [];
+                            let mut pi: number = 0;
+                            loop {
+                                if pi >= segments.length - 1 { break; }
+                                popped.push(segments[pi]);
+                                pi += 1;
+                            }
+                            segments = popped;
+                        } else {
+                            segments.push("..");
+                        }
+                    } else if !absolute {
+                        // No parent to climb out of; preserve `..`.
+                        segments.push("..");
+                    }
+                    // For absolute paths, leading `..` is dropped
+                    // (`/..` stays `/`).
+                } else {
+                    segments.push(segment);
+                }
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    let mut out: string = "";
+    if absolute { out = "/"; }
+    let mut j: number = 0;
+    loop {
+        if j >= segments.length { break; }
+        if j > 0 { out = out + "/"; }
+        out = out + segments[j];
+        j += 1;
+    }
+    if out.length == 0 {
+        if absolute { return "/"; }
+        return ".";
+    }
+    return out;
+}
+
 // Resolve `manifest_dir + "/" + relative`. The manifest is
 // Cargo-style: paths are relative to the manifest dir, but
 // humans sometimes write `./src/foo.c` instead of `src/foo.c`.
 // `strip_prefix` (shared from `string_utils.sfn`) collapses
 // both forms to the canonical "no leading `./`" shape before
-// the join.
+// the join, and `_rcr_normalize_path` collapses any remaining
+// `..` segments — see that helper for the rationale.
 fn _rcr_resolve_path(manifest_dir: string, relative: string) -> string {
     let cleaned = strip_prefix(relative, "./");
-    return _rcr_path_join(manifest_dir, cleaned);
+    return _rcr_normalize_path(_rcr_path_join(manifest_dir, cleaned));
 }
 
 // Apply `_rcr_resolve_path` to every entry in `relatives`.
