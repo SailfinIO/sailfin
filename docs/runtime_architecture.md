@@ -1,6 +1,6 @@
 # Sailfin-Native Runtime Architecture
 
-**Date:** 2026-04-15 (last reviewed 2026-05-02 — see "Status delta" below)
+**Date:** 2026-04-15 (last reviewed 2026-05-04 — see "Status delta" below)
 **Author:** Compiler architect (design review)
 **Companion docs:** `docs/runtime_audit.md` (current C runtime state),
 `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI), `docs/build-performance.md` (perf analysis)
@@ -8,6 +8,30 @@
 > **Status delta.** Track milestone progress here so the body
 > below stays consistent with the tree:
 >
+> - **First C-to-Sailfin runtime migration: shipped 2026-05-04.**
+>   `runtime/sfn/clock.sfn` exposes `sfn_sleep(seconds: float) -> void
+>   ![clock]`, and the runtime helper registry now routes `sleep`
+>   and `runtime_sleep_fn` call sites through `@sfn_sleep` instead
+>   of `@sailfin_runtime_sleep`. The wrapper still trampolines
+>   through the C function for one PR; PR 2 (gated on §2.9 Q7
+>   — opaque-handle sizing for `* Timespec`) rewrites the body
+>   to call `nanosleep` directly and deletes
+>   `sailfin_runtime_sleep` from the C runtime. See Appendix A
+>   for the migration table; the `sailfin_runtime_sleep → sfn_sleep`
+>   row is the first to flip from "M2 — planned" to "wrapper
+>   shipped, C body retires in PR 2."
+> - **`kind = "runtime"` capsules gain `sfn-sources` field.** The
+>   production-ready replacement for the Makefile-staged
+>   `prelude.o` pattern. Schema documented in
+>   `docs/proposals/build-architecture.md` §4.7.
+>   `_clang_compile_runtime_capsule_objects` consumes the field
+>   in `compiler/src/cli_main.sfn`. Both `runtime/sfn/io.sfn` and
+>   `runtime/sfn/clock.sfn` ship through this path; future M2
+>   modules (process, memory, …) join by adding manifest entries,
+>   no Makefile edits per file. Path normalization
+>   (`_rcr_normalize_path`) collapses `..` segments so consumers
+>   see canonical paths regardless of how the manifest spells the
+>   relative offset.
 > - M0.5 arena-in-C: **shipped, default-on** (PRs #249, #251, #252).
 > - M0 hard prerequisite #7 (`extern fn` typed linker-resolved symbols):
 >   **shipped 2026-05-01** (parser + typecheck + native-IR + LLVM `declare`).
@@ -1784,7 +1808,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_print_raw` | `sfn_print` | M2 |
 | `sailfin_runtime_print_err` | `sfn_print_err` | M2 |
 | `sailfin_runtime_print_info/warn/error` | `sfn_print_info/warn/error` | M2 |
-| `sailfin_runtime_sleep` | `sfn_sleep` | M2 |
+| `sailfin_runtime_sleep` | `sfn_sleep` | **M2 — wrapper shipped 2026-05-04, C body retires in PR 2 (gated on §2.9 Q7)** |
 | `sailfin_runtime_monotonic_millis` | `sfn_clock_millis` | M2 |
 | `sailfin_runtime_string_length` | `SfnString.len` (field access) | M1 |
 | `sailfin_runtime_string_concat` | `sfn_str_concat` | M2 |

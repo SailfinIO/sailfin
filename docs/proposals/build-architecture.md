@@ -840,6 +840,7 @@ c-sources = [
   "src/native_driver.c",
 ]
 ll-sources = ["ir/runtime_globals.ll"]
+sfn-sources = ["../sfn/io.sfn", "../sfn/clock.sfn"]
 prelude-entry = "../runtime/prelude.sfn"
 ```
 
@@ -847,6 +848,23 @@ The driver's link phase reads this and produces the same output the bash
 script produces today, but declaratively. When the Sailfin runtime rewrite
 lands, `c-sources` is replaced with `entry = "src/mod.sfn"` and the link
 step loses a special case.
+
+The `sfn-sources` field is the Sailfin-side counterpart to `c-sources`.
+Each entry points at a `.sfn` module the runtime capsule wants compiled
+and linked alongside its C/LL surface. The driver
+(`_clang_compile_runtime_capsule_objects` in `compiler/src/cli_main.sfn`)
+spawns the running compiler subprocess to emit `.ll`, then `clang -c`
+produces the cached `.o`. As of the sleep migration (clock.sfn), the
+runtime capsule declares both `c-sources` and `sfn-sources`; new
+runtime modules ship by adding an entry to the latter, no Makefile or
+build-script edits required.
+
+`prelude-entry` is the transitional Stage D bridge for the prelude —
+once the prelude moves under `capsules/sfn/prelude/` (Stage F per §4.8),
+the field retires and the prelude joins the dep graph as an implicit
+library. `sfn-sources` then becomes the only path runtime modules ship
+through until the C runtime itself is rewritten (M3) and the entire
+runtime capsule flips to `kind = "library"` with `entry = "src/mod.sfn"`.
 
 ### 4.8 Prelude as a capsule
 

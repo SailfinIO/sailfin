@@ -8,6 +8,32 @@
 > **Status delta since 2026-04-15** (keep this list short; once an item is
 > fully shipped fold it into the body and remove the bullet here):
 >
+> - **First C-to-Sailfin runtime migration — `sleep` call path shipped 2026-05-04.**
+>   Compiled user `sleep(N)` and `runtime.sleep(N)` calls now lower to
+>   `call void @sfn_sleep(double ...)` instead of
+>   `call void @sailfin_runtime_sleep(...)` directly. The wrapper lives at
+>   `runtime/sfn/clock.sfn` and trampolines through the C function for
+>   one PR; PR 2 (gated on §2.9 Q7 — opaque-handle sizing for `* Timespec`)
+>   rewrites the body to call `nanosleep` directly and deletes
+>   `sailfin_runtime_sleep` from `runtime/native/src/sailfin_runtime.c`.
+>   Pinned by `compiler/tests/e2e/test_runtime_clock_skeleton.sh` and
+>   `compiler/tests/e2e/test_sleep_routes_to_sfn_clock.sh` (the call-site
+>   rewrite sentinel — fails immediately if the registry rewire is
+>   reverted).
+> - **`kind = "runtime"` capsules gain `sfn-sources` field.** Production-
+>   ready replacement for the Makefile-staged `prelude.o` pattern: any
+>   `runtime/sfn/*.sfn` module the runtime capsule wants linked into
+>   every consumer is declared in the manifest. The driver
+>   (`_clang_compile_runtime_capsule_objects` in
+>   `compiler/src/cli_main.sfn`) iterates each entry, spawns the running
+>   compiler to emit `.ll`, then `clang -c` produces the cached `.o` —
+>   no Makefile edits per file. `runtime/sfn/io.sfn` (proven by PR #303)
+>   and `runtime/sfn/clock.sfn` (this migration) are now both linked
+>   through this path. Schema unit tests in
+>   `compiler/tests/unit/runtime_capsule_resolver_test.sfn` pin the
+>   shape; resolver path normalization (`_rcr_normalize_path`) collapses
+>   `..` segments so consumers see canonical paths regardless of how
+>   the manifest spells the relative offset.
 > - **M0.5 arena-in-C — shipped, default-on** (`runtime/native/src/sailfin_arena.c`,
 >   PR #252 + Phase 5a mark/rewind PR #251).
 > - **Effect enforcement gate — shipped** (Phases A–F, PRs #241–#245). Effect
@@ -131,7 +157,7 @@ calls to it in current code paths.
 | Symbol | Status | Notes |
 |---|---|---|
 | `sailfin_runtime_print_raw/err/info/warn/error` | ✅ | stdout/stderr line writes |
-| `sailfin_runtime_sleep` | ✅ | Accepts milliseconds as double |
+| `sailfin_runtime_sleep` | ⚠ Trampoline | Compiled user code now calls `@sfn_sleep` (defined in `runtime/sfn/clock.sfn`); the C function survives only as the wrapper's backing until PR 2 retires it. |
 | `sailfin_runtime_monotonic_millis` | ✅ | Clock-backed, used for bench |
 | `sailfin_runtime_log_execution` | ✅ | Prints value via `print.info`, returns value |
 
