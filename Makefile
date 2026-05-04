@@ -215,7 +215,7 @@ test-unit:
 	echo "═══ unit: $$pass/$$total passed, $$fail failed ═══"; \
 	if [ $$fail -gt 0 ]; then \
 		echo ""; \
-		printf "$$failed_files"; \
+		printf '%b' "$$failed_files"; \
 		exit 1; \
 	fi
 
@@ -243,7 +243,7 @@ test-integration:
 	echo "═══ integration: $$pass/$$total passed, $$fail failed ═══"; \
 	if [ $$fail -gt 0 ]; then \
 		echo ""; \
-		printf "$$failed_files"; \
+		printf '%b' "$$failed_files"; \
 		exit 1; \
 	fi
 
@@ -279,7 +279,7 @@ test-e2e:
 	echo "═══ e2e: $$pass/$$total passed, $$fail failed ═══"; \
 	if [ $$fail -gt 0 ]; then \
 		echo ""; \
-		printf "$$failed_files"; \
+		printf '%b' "$$failed_files"; \
 		exit 1; \
 	fi
 
@@ -314,7 +314,7 @@ test-capsules:
 	echo "═══ capsules: $$pass/$$total passed, $$fail failed ═══"; \
 	if [ $$fail -gt 0 ]; then \
 		echo ""; \
-		printf "$$failed_files"; \
+		printf '%b' "$$failed_files"; \
 		exit 1; \
 	fi
 

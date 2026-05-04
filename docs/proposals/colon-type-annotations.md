@@ -254,21 +254,26 @@ The proposal table listed `compiler/src`, `compiler/tests`, `examples`, and
 `capsules/` in any tree-wide refactor; it is a first-class part of the code
 under self-hosting.
 
-### Same-named struct + capsule resolution = SIGSEGV (resolved by relocation)
+### Same-named struct + capsule resolution = SIGSEGV (no longer reproducible in capsule tests; underlying bug not fixed)
 
 Originally `compiler/tests/unit/layers_test.sfn` was renamed to
 `nn_layers_test.sfn` to work around a compiler crash: the test file shared
 its base name with the capsule `sfn/layers`, both defined a `Linear`
 struct, and all-colon annotations on both crashed the compiler.
 
-The capsule-test reorganization (May 2026) made the workaround unnecessary:
-all capsule-flavored tests now live under `capsules/<scope>/<name>/tests/`,
-where the auto-resolve heuristic that triggered the crash does not fire.
-Verified on `0.5.10-alpha.9` — a same-name `Linear` struct in
-`capsules/sfn/layers/tests/layers_test.sfn` compiles cleanly. The bug shape
-no longer has a live reproducer; if it resurfaces, add a regression test
-under `compiler/tests/unit/` matching the original `<capsule-name>_test.sfn`
-pattern.
+The capsule-test reorganization (May 2026) makes the workaround
+unnecessary in practice: all capsule-flavored tests now live under
+`capsules/<scope>/<name>/tests/`, where the auto-resolve heuristic that
+triggered the crash does not fire. Verified on `0.5.10-alpha.9` — a
+same-name `Linear` struct in `capsules/sfn/layers/tests/layers_test.sfn`
+compiles cleanly.
+
+This is **relocation, not a fix**: the underlying compiler bug almost
+certainly still exists, it just no longer has a live reproducer in tree.
+If a future change re-introduces a `compiler/tests/unit/<capsule-name>_test.sfn`
+file with a same-named struct, expect the SIGSEGV to come back — track it
+down in the capsule auto-resolve / duplicate-symbol path rather than
+renaming the file again.
 
 ### Capsule-flavored unit tests have moved to their capsules
 
