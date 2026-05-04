@@ -1,7 +1,9 @@
-// Regression tests for sfn/toml capsule value types and accessors.
-// The full parser depends on char_code/number_to_string (prelude functions
-// unavailable in standalone test files). This tests the value construction,
-// accessor, and tree traversal logic.
+// Tests for sfn/toml capsule value types and accessors.
+//
+// Moved from compiler/tests/unit/toml_test.sfn. Helpers and the TomlValue
+// struct stay inlined here. Once the duplicate-`declare round` bug is fixed
+// (and the parser path that depends on the floor/_truncate chain is sound),
+// switch to `import { ... } from "../src/mod"` and exercise the real parser.
 
 struct TomlValue {
     kind: string;

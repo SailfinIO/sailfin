@@ -15,6 +15,12 @@ The test runner discovers files named `*_test.sfn` under `<path>` (recursively),
 - `integration/` — multi-subsystem or effectful tests (async/runtime bridging, capability enforcement, IO/net/model adapters).
 - `e2e/` — CLI-level and test-runner-level behavior (file discovery, relative import inlining, exit codes).
 
+Capsule-flavored tests (functions, types, and behaviors that belong to a
+capsule, not the compiler itself) live under
+`capsules/<scope>/<name>/tests/*_test.sfn` and are run by `make test-capsules`
+(also rolled into `make test`). Use the compiler test suites here only for
+tests that exercise compiler features (lexer/parser/typecheck/effects/emit/IR).
+
 ## File naming
 
 - Use `*_test.sfn` (required for discovery).

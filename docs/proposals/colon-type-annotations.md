@@ -254,40 +254,34 @@ The proposal table listed `compiler/src`, `compiler/tests`, `examples`, and
 `capsules/` in any tree-wide refactor; it is a first-class part of the code
 under self-hosting.
 
-### Same-named struct + capsule resolution = SIGSEGV
+### Same-named struct + capsule resolution = SIGSEGV (resolved by relocation)
 
-Renamed `compiler/tests/unit/layers_test.sfn` →
-`compiler/tests/unit/nn_layers_test.sfn` to work around a compiler crash. The
-test file shares its base name with the capsule `sfn/layers`, and both define
-a `Linear` struct. Bisection findings:
+Originally `compiler/tests/unit/layers_test.sfn` was renamed to
+`nn_layers_test.sfn` to work around a compiler crash: the test file shared
+its base name with the capsule `sfn/layers`, both defined a `Linear`
+struct, and all-colon annotations on both crashed the compiler.
 
-- All-colon test struct + all-colon capsule struct → SIGSEGV during
-  compilation of the test file (compiler dies, never reaches user-code
-  execution).
-- Reverting **any single field** in the test's struct from `:` to `->` makes
-  it pass.
-- Renaming the test file (identical content) makes it pass — even with both
-  files using all colons.
-- Issue does **not** reproduce in a minimal `/tmp/` test with the same struct
-  shape.
+The capsule-test reorganization (May 2026) made the workaround unnecessary:
+all capsule-flavored tests now live under `capsules/<scope>/<name>/tests/`,
+where the auto-resolve heuristic that triggered the crash does not fire.
+Verified on `0.5.10-alpha.9` — a same-name `Linear` struct in
+`capsules/sfn/layers/tests/layers_test.sfn` compiles cleanly. The bug shape
+no longer has a live reproducer; if it resurfaces, add a regression test
+under `compiler/tests/unit/` matching the original `<capsule-name>_test.sfn`
+pattern.
 
-The compiler appears to auto-resolve `compiler/tests/unit/<name>_test.sfn`
-against capsule `sfn/<name>` when the names align, and the resulting
-duplicate-symbol path crashes instead of producing a clean diagnostic. The
-crash predates this migration but was not exercised because pre-migration
-both definitions used arrows.
+### Capsule-flavored unit tests have moved to their capsules
 
-### Capsule-flavored unit tests should move to their capsules
+Done. `compiler/tests/unit/{layers,nn,tensor,losses,math,path,toml,fmt,
+json_structs}_test.sfn` were moved to `capsules/sfn/<name>/tests/`, run via
+the new `make test-capsules` target. Helpers stay inlined for now — see the
+header comment in each moved file for the follow-ups blocking a switch to
+`import { ... } from "../src/mod"`. Briefly:
 
-`compiler/tests/unit/{layers,nn,tensor,losses}_test.sfn` and similar are
-exercising capsule functionality, not language features per se. The
-long-term home for these is alongside the capsule (`capsules/sfn/layers/tests/`,
-etc.), reached by per-capsule test infrastructure that does not yet exist.
-The rename above is a temporary workaround. Do not move these tests until
-the capsule-test infra exists, or coverage will silently drop. When moves
-happen, draft new compiler-focused regression tests that re-cover whichever
-language behavior the moved tests were incidentally validating (e.g., the
-duplicate-name segfault case above).
+- Importing capsule functions that internally iterate arrays surfaces a
+  duplicate-`declare round` LLVM error in the test module.
+- The runtime `floor`/`round`/`_truncate` chain that array indexing relies
+  on returns wrong values for some inputs.
 
 ### Migration script is one-way and was deleted
 

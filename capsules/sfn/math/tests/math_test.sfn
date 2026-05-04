@@ -1,6 +1,19 @@
-// Regression tests for sfn/math capsule functions.
-// Tests only pure-arithmetic functions that don't depend on prelude
-// functions (char_code, number_to_string) unavailable in standalone test files.
+// Tests for sfn/math — pure-arithmetic helpers.
+//
+// Moved from compiler/tests/unit/math_test.sfn. The colocated test would
+// like to import the real capsule API, but doing so currently surfaces a
+// compiler bug where forward-declarations of `round` (used by the array-
+// indexing lowering) are emitted twice for the same module, producing an
+// LLVM `invalid redefinition of function 'round'` error. Until that's fixed,
+// this test continues to use inline `_`-prefixed copies of the capsule
+// helpers — same coverage as before the move, just colocated with the
+// capsule it documents.
+//
+// FOLLOW-UP — switch to `import { ... } from "../src/mod"` once:
+//   1. The duplicate-`declare round` emission bug is fixed (affects every
+//      capsule whose imported function uses array indexing internally).
+//   2. The runtime `_truncate` / `floor` / `round` chain returns correct
+//      values (currently mis-parses `number_to_string` for some inputs).
 
 fn _abs(x: number) -> number {
     if x < 0 { return 0 - x; }
@@ -44,8 +57,6 @@ fn _mean(values: number[]) -> number {
     if values.length == 0 { return 0; }
     return _sum(values) / values.length;
 }
-
-// -- Tests --
 
 test "math: abs" {
     assert _abs(5) == 5;
@@ -92,7 +103,7 @@ test "math: mean" {
     assert _mean([]) == 0;
 }
 
-// Note: floor, ceil, round, pow, mod, is_integer depend on _truncate
-// which uses number_to_string and char_code (prelude functions not available
-// in standalone test files). Those will be tested once capsule-level
-// test support is added to the test runner.
+// Note: floor, ceil, round, pow, mod, is_integer require either:
+//   (a) the bug fixes in the capsule (import path), or
+//   (b) inlined `_truncate` re-implementation here.
+// Skipped to keep the test file scoped to coverage that holds today.

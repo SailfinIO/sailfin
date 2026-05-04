@@ -1,6 +1,10 @@
-// Regression tests for sfn/fmt capsule additions.
-// Tests only functions that don't depend on char_code/char_at (prelude
-// functions unavailable in standalone test files).
+// Tests for sfn/fmt capsule string-manipulation helpers.
+//
+// Moved from compiler/tests/unit/fmt_test.sfn. Helpers stay inlined here —
+// the original was constrained to functions that don't reach the prelude
+// `char_code`/`char_at` paths. When `import { ... } from "../src/mod"`
+// becomes safe (no duplicate-declare emission, prelude paths covered by
+// the real capsule), drop the `_`-prefixed copies and import the real API.
 
 fn _find(text: string, needle: string, start: number) -> number {
     if needle.length == 0 { return start; }
