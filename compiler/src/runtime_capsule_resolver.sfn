@@ -147,18 +147,14 @@ fn _rcr_normalize_path(path: string) -> string {
                                 pi += 1;
                             }
                             segments = popped;
-                        } else {
-                            segments.push("..");
-                        }
+                        } else { segments.push(".."); }
                     } else if !absolute {
                         // No parent to climb out of; preserve `..`.
                         segments.push("..");
                     }
                     // For absolute paths, leading `..` is dropped
                     // (`/..` stays `/`).
-                } else {
-                    segments.push(segment);
-                }
+                } else { segments.push(segment); }
             }
             start = i + 1;
         }
