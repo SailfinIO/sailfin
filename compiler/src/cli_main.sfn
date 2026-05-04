@@ -368,7 +368,7 @@ fn _runtime_obj_prefix(capsule_name: string) -> string {
 // without a runtime dep, the caller falls through to the legacy
 // `_clang_compile_runtime_objects` helper that uses the
 // hardcoded `runtime_root/native/...` layout.
-fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) -> RuntimeLinkInputs ![io] {
+fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string, sailfin_exe: string) -> RuntimeLinkInputs ![io] {
     let mut objects: string[] = [];
     let mut link_libs: string[] = [];
     let mut i: number = 0;
@@ -443,6 +443,65 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
             objects.push(obj);
             li += 1;
         }
+        // sfn-sources: every `.sfn` module the capsule wants
+        // linked alongside its C/LL sources. The driver spawns
+        // the running compiler subprocess (`sailfin_exe`) to
+        // emit `.ll`, then `clang -c` produces the `.o`. Cached
+        // by capsule-prefix + full basename + opt-flag, same
+        // as c-sources / ll-sources. This is the production-
+        // ready replacement for the Makefile-staged
+        // `prelude.o` pattern: every future
+        // `runtime/sfn/*.sfn` module ships declaratively in
+        // the manifest's `[build] sfn-sources` and gets
+        // emitted+linked here.
+        let mut si: number = 0;
+        loop {
+            if si >= cap.sfn_sources.length { break; }
+            let src = cap.sfn_sources[si];
+            let obj = _path_join(out_dir, cap_prefix + _path_basename(src)
+                + opt_flag
+                + ".o");
+            if !fs.exists(obj) {
+                if sailfin_exe.length == 0 {
+                    print("sfn build: cannot compile runtime sfn-source "
+                        + src
+                        + " — `sailfin_exe` is empty");
+                    print("           hint: this path requires a Sailfin compiler binary that can emit LLVM. The bootstrap surfaces it via `--binary-dir` injected by the C driver; end-user builds need the runtime capsule to ship pre-built objects in a future Stage F.");
+                    return _failed_runtime_link_inputs();
+                }
+                let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
+                    + opt_flag
+                    + ".ll");
+                let rc_emit = process.run([sailfin_exe, "emit", "-o", ll_path, "llvm", src]);
+                if rc_emit != 0 {
+                    print("sfn build: failed to emit LLVM IR for runtime sfn-source "
+                        + src
+                        + " (sfn emit exit="
+                        + number_to_string(rc_emit)
+                        + ")");
+                    return _failed_runtime_link_inputs();
+                }
+                if !fs.exists(ll_path) {
+                    print("sfn build: emit produced no output for runtime sfn-source "
+                        + src
+                        + " (expected "
+                        + ll_path
+                        + ")");
+                    return _failed_runtime_link_inputs();
+                }
+                let rc_obj = process.run(["clang", opt_flag, "-Wno-override-module", "-c", ll_path, "-o", obj]);
+                if rc_obj != 0 {
+                    print("sfn build: failed to compile runtime sfn-source "
+                        + src
+                        + " (clang exit="
+                        + number_to_string(rc_obj)
+                        + ")");
+                    return _failed_runtime_link_inputs();
+                }
+            }
+            objects.push(obj);
+            si += 1;
+        }
         // link-libs flow through verbatim (resolver doesn't
         // path-resolve these — they're linker flags like `-lm`).
         let mut bi: number = 0;
@@ -506,14 +565,14 @@ fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_fla
     return [runtime_obj, arena_obj, globals_obj, prelude_obj];
 }
 
-fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string) -> number ![io] {
+fn _clang_link_with_opt(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, sailfin_exe: string) -> number ![io] {
     // Thin wrapper: most callers have one .ll; capsule-aware callers use
     // _clang_link_multi_with_opt directly.
     let single: string[] = [ll_path];
-    return _clang_link_multi_with_opt(single, out_path, runtime_root, runtime_capsules, opt_flag, cache_dir);
+    return _clang_link_multi_with_opt(single, out_path, runtime_root, runtime_capsules, opt_flag, cache_dir, sailfin_exe);
 }
 
-fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string) -> number ![io] {
+fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], opt_flag: string, cache_dir: string, sailfin_exe: string) -> number ![io] {
     if ll_paths.length == 0 {
         print("_clang_link_multi_with_opt: no input .ll files");
         return 1;
@@ -535,7 +594,7 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     let mut runtime_objs: string[] = [];
     let mut runtime_link_libs: string[] = [];
     if runtime_capsules.length > 0 {
-        let inputs = _clang_compile_runtime_capsule_objects(runtime_capsules, cache_dir, opt_flag);
+        let inputs = _clang_compile_runtime_capsule_objects(runtime_capsules, cache_dir, opt_flag, sailfin_exe);
         if !inputs.success { return 1; }
         runtime_objs = inputs.object_paths;
         runtime_link_libs = inputs.link_libs;
@@ -620,15 +679,21 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     return process.run(args);
 }
 
-fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[]) -> number ![io] {
+fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], sailfin_exe: string) -> number ![io] {
     // Default link used by `build` and `run` for single-module programs.
-    return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", "build/sailfin");
+    return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", "build/sailfin", sailfin_exe);
 }
 
-fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[]) -> number ![io] {
+fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], sailfin_exe: string) -> number ![io] {
     // Default link used by `build` and `run` for multi-module programs
-    // (main source + capsule dependency modules).
-    return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, runtime_capsules, "-O2", "build/sailfin");
+    // (main source + capsule dependency modules). `sailfin_exe` is the
+    // path to the running compiler binary (used to subprocess-emit
+    // any runtime-capsule `sfn-sources` to LLVM IR before clang -c).
+    // Empty string is acceptable when no runtime capsule declares
+    // `sfn-sources`; the compile loop in
+    // `_clang_compile_runtime_capsule_objects` surfaces a diagnostic
+    // if the field is non-empty but `sailfin_exe` is missing.
+    return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, runtime_capsules, "-O2", "build/sailfin", sailfin_exe);
 }
 
 struct _CapsuleBuildSpec {
@@ -1197,7 +1262,14 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             all_lls.push(capsule_lls[cli]);
             cli += 1;
         }
-        let rc = _clang_link_multi(all_lls, exe_path, runtime_root, capsule_result.runtime_capsules);
+        // Reuse the `sailfin_exe` computed for the
+        // subprocess-per-module compile path. When it's empty
+        // (positional builds), the runtime capsule's
+        // `sfn-sources` field must also be empty or the link
+        // step bails with a targeted diagnostic — that's the
+        // production-deployment story (pre-built runtime `.o`s
+        // ship alongside the binary, no on-the-fly emit).
+        let rc = _clang_link_multi(all_lls, exe_path, runtime_root, capsule_result.runtime_capsules, sailfin_exe);
         if rc != 0 {
             if !json_flag {
                 print("link failed (clang exit=" + number_to_string(rc) + ")");
@@ -1308,7 +1380,14 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             all_lls.push(capsule_lls[rli]);
             rli += 1;
         }
-        let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root, run_capsule_result.runtime_capsules);
+        // `sfn run` doesn't compile sfn-sources on demand —
+        // those flow only through `sfn build -p compiler`'s
+        // subprocess-per-module path. Empty `sailfin_exe`
+        // surfaces a diagnostic if the runtime capsule
+        // declares sfn-sources we don't have a cached `.o` for.
+        let mut run_sailfin_exe: string = "";
+        if binary_dir.length > 0 { run_sailfin_exe = binary_dir + "/sailfin"; }
+        let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root, run_capsule_result.runtime_capsules, run_sailfin_exe);
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
             print("run: native link failed; attempting seed fallback via `sfn run`");
