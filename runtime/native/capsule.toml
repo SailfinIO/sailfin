@@ -32,6 +32,18 @@ kind = "runtime"
 # against this exact manifest text guards the format.
 c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c", "src/native_driver.c"]
 ll-sources = ["ir/runtime_globals.ll"]
+# `sfn-sources` is the schema slot for Sailfin runtime modules
+# (`runtime/sfn/*.sfn`) compiled and linked alongside the C
+# sources above. The TOML getter and resolver field both ship
+# in this PR, but **no consumer is wired up yet** — link-time
+# subprocess-spawn-and-emit of runtime modules requires
+# build-system work that is out of scope here (see issue #308's
+# IPC-isolation track). The field is intentionally absent from
+# the active manifest so a reader does not infer that
+# `runtime/sfn/io.sfn` and `runtime/sfn/clock.sfn` are linked
+# into compiled binaries today — they are not. The follow-up
+# PR that lands the link infrastructure will populate this
+# array; this PR only ships the schema scaffolding.
 include-dirs = ["include"]
 link-libs = ["-lm"]
 

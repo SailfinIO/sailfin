@@ -1893,6 +1893,26 @@ void sailfin_runtime_sleep(double seconds)
 #endif
 }
 
+/* Sleep migration trampoline. After the runtime helper registry
+ * rewire (commit "feat(runtime): wire sleep call sites through
+ * @sfn_sleep trampoline"), compiled user `sleep(N)` and the prelude's
+ * `runtime_sleep_fn` lambda both lower to `call void @sfn_sleep(double)`.
+ * That symbol must be defined for the link to resolve; this C
+ * function provides it globally via the existing runtime object.
+ *
+ * The intended end-state is a Sailfin implementation of `sfn_sleep`
+ * compiled from `runtime/sfn/clock.sfn`. PR 2 of the migration
+ * replaces this trampoline once the build infrastructure for
+ * compiling and linking runtime/sfn-side modules is reliably in
+ * place (depends on issue #308's IPC-isolation track). At that
+ * point the C runtime stops defining `sfn_sleep` and the Sailfin
+ * `clock.o` becomes the sole definition site.
+ */
+void sfn_sleep(double seconds)
+{
+    sailfin_runtime_sleep(seconds);
+}
+
 /* Check if a string pointer looks like a corrupted double-encoded value.
    On macOS ARM64, valid user-space pointers are < 0x800000000000.
    Double-encoded pointers (via ptrtoint→sitofp→double→bitcast back) produce

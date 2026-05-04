@@ -741,6 +741,14 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "runtime_resolve_runtime_type_fn");
     helpers = append_unique_effect(helpers, "runtime_serve_fn");
     helpers = append_unique_effect(helpers, "runtime_sleep_fn");
+    // The C trampoline `sailfin_runtime_sleep` backs `@sfn_sleep`
+    // for the sleep migration. Runtime modules importing it
+    // (e.g. `runtime/sfn/clock.sfn`) need its declare line in
+    // their emitted IR — the import-declaration emitter skips
+    // names that match registered helper symbols, so the helper
+    // preamble has to take over. Disappears when PR 2 retires the
+    // C trampoline.
+    helpers = append_unique_effect(helpers, "sailfin_runtime_sleep");
     helpers = append_unique_effect(helpers, "runtime_spawn_fn");
     helpers = append_unique_effect(helpers, "runtime_to_debug_string_fn");
     helpers = append_unique_effect(helpers, "runtime_create_capability_grant");

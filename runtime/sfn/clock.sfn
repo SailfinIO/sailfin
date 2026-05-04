@@ -1,0 +1,42 @@
+// runtime/sfn/clock.sfn
+//
+// **Status: dormant — not linked into any binary today.** This file
+// pins the future shape of the Sailfin definition of `sfn_sleep`
+// for documentation and typecheck/emit smoke testing. The symbol
+// `@sfn_sleep` that compiled user `sleep(N)` calls actually resolve
+// to today is defined as a C trampoline in
+// `runtime/native/src/sailfin_runtime.c`.
+//
+// PR 2 of the sleep migration replaces the C trampoline with a real
+// Sailfin link of this file, once the build infrastructure for
+// compiling `runtime/sfn/*.sfn` modules into link-time `.o`s is
+// reliably in place. That infrastructure depends on issue #308's
+// IPC-isolation track (the parent compiler subprocess-spawning a
+// child compiler currently races on shared `build/sailfin/.foo`
+// scratch state, producing miscompiled IR for runtime modules).
+// Until then, the registry rewire in
+// `compiler/src/llvm/runtime_helpers.sfn` ships the call-site
+// routing and the C trampoline backs the symbol.
+//
+// What this file proves today:
+//   - `sfn check runtime/sfn/clock.sfn` typechecks cleanly.
+//   - `sfn fmt --check runtime/sfn/clock.sfn` is canonical.
+//   - `sfn emit llvm runtime/sfn/clock.sfn` produces well-formed
+//     LLVM IR with `define void @sfn_sleep(double)` and a call to
+//     the imported `sailfin_runtime_sleep` trampoline.
+//
+// Pinned by `compiler/tests/e2e/test_runtime_clock_skeleton.sh`
+// (typecheck + fmt + LLVM `define`/`call` shape) and
+// `test_sleep_routes_to_sfn_clock.sh` (call-site rewrite sentinel —
+// fails the moment the registry rewire is reverted).
+//
+// When PR 2 lands and this file becomes the sole definition site,
+// the `// dormant` framing here gets stripped, the C trampoline in
+// `sailfin_runtime.c` is deleted, and the libc-direct rewrite
+// (over `nanosleep` in `platform/posix.sfn`, gated on §2.9 Q7) can
+// either land in PR 2 or follow as PR 3.
+import { sailfin_runtime_sleep } from "./platform/libc";
+
+fn sfn_sleep(seconds: float) -> void ![clock] {
+    sailfin_runtime_sleep(seconds);
+}

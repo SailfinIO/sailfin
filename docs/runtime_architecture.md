@@ -1,6 +1,6 @@
 # Sailfin-Native Runtime Architecture
 
-**Date:** 2026-04-15 (last reviewed 2026-05-02 — see "Status delta" below)
+**Date:** 2026-04-15 (last reviewed 2026-05-04 — see "Status delta" below)
 **Author:** Compiler architect (design review)
 **Companion docs:** `docs/runtime_audit.md` (current C runtime state),
 `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI), `docs/build-performance.md` (perf analysis)
@@ -8,6 +8,33 @@
 > **Status delta.** Track milestone progress here so the body
 > below stays consistent with the tree:
 >
+> - **Sleep call-site routing shipped 2026-05-04 (PR 1 of the sleep
+>   migration).** The runtime helper registry routes compiled user
+>   `sleep(N)` and `runtime_sleep_fn` call sites through
+>   `@sfn_sleep` instead of `@sailfin_runtime_sleep` directly.
+>   **`@sfn_sleep` is defined as a C trampoline** in
+>   `runtime/native/src/sailfin_runtime.c` — three lines, calls
+>   `sailfin_runtime_sleep`. The Sailfin definition
+>   (`runtime/sfn/clock.sfn`, exposing
+>   `sfn_sleep(seconds: float) -> void ![clock]`) ships in the
+>   tree as a typecheck/emit smoke target and as the future
+>   definition site, but is **not linked into any binary today**.
+>   PR 2 of the migration replaces the C trampoline with a real
+>   Sailfin link of `clock.sfn` once issue #308's link-time
+>   build infrastructure lands. Appendix A's
+>   `sailfin_runtime_sleep → sfn_sleep` row is now "call-site
+>   routed, C trampoline backs the symbol; Sailfin replacement in
+>   PR 2."
+> - **`kind = "runtime"` capsules gain `sfn-sources` schema slot
+>   (dormant).** TOML getter `toml_get_sfn_sources`, the
+>   `RuntimeCapsuleArtifacts.sfn_sources` field on the resolver,
+>   and `_rcr_normalize_path` for canonical path output all ship
+>   in this PR. **No consumer is wired up yet** — the active
+>   `runtime/native/capsule.toml` does NOT populate the field.
+>   PR 2 introduces the link-time compile loop that consumes it.
+>   This split keeps PR 1 small while the build-system
+>   prerequisite (issue #308's IPC-isolation track) is being
+>   addressed independently.
 > - M0.5 arena-in-C: **shipped, default-on** (PRs #249, #251, #252).
 > - M0 hard prerequisite #7 (`extern fn` typed linker-resolved symbols):
 >   **shipped 2026-05-01** (parser + typecheck + native-IR + LLVM `declare`).
@@ -1784,7 +1811,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_print_raw` | `sfn_print` | M2 |
 | `sailfin_runtime_print_err` | `sfn_print_err` | M2 |
 | `sailfin_runtime_print_info/warn/error` | `sfn_print_info/warn/error` | M2 |
-| `sailfin_runtime_sleep` | `sfn_sleep` | M2 |
+| `sailfin_runtime_sleep` | `sfn_sleep` | **Call-site routed 2026-05-04; `@sfn_sleep` currently a C trampoline. Sailfin link in PR 2 (gated on issue #308 + §2.9 Q7).** |
 | `sailfin_runtime_monotonic_millis` | `sfn_clock_millis` | M2 |
 | `sailfin_runtime_string_length` | `SfnString.len` (field access) | M1 |
 | `sailfin_runtime_string_concat` | `sfn_str_concat` | M2 |
