@@ -11,12 +11,17 @@
 > - M0.5 arena-in-C: **shipped, default-on** (PRs #249, #251, #252).
 > - M0 hard prerequisite #7 (`extern fn` typed linker-resolved symbols):
 >   **shipped 2026-05-01** (parser + typecheck + native-IR + LLVM `declare`).
->   Cross-module call-site resolution is the remaining sub-step; see §3.6.
+>   Runtime-module imported extern call lowering is now pinned by
+>   `runtime/sfn/io.sfn`; general typecheck-level call-site resolution is
+>   the remaining sub-step; see §3.6.
 > - First `runtime/sfn/platform/libc.sfn` skeleton: **shipped 2026-05-01**
 >   (12 extern declarations, typecheck + fmt + LLVM `declare` emission
->   verified by `compiler/tests/e2e/test_runtime_libc_skeleton.sh`). The
->   file is not yet imported anywhere — the runtime continues to reach
->   libc through the C runtime until M2.
+>   verified by `compiler/tests/e2e/test_runtime_libc_skeleton.sh`).
+> - First Sailfin-native runtime service wrapper: **shipped 2026-05-04.**
+>   `runtime/sfn/io.sfn` imports `write` from `./platform/libc` and exposes
+>   `sfn_write_fd(...) ![io]`. Pinned by
+>   `compiler/tests/e2e/test_runtime_io_skeleton.sh`, which verifies
+>   typecheck/fmt and LLVM lowering of the imported extern call site.
 > - Three further `runtime/sfn/platform/*.sfn` skeletons: **shipped
 >   2026-05-02.** `pthread.sfn` (11 decls), `posix.sfn` (4 decls),
 >   `net.sfn` (9 decls) — together they validate the extern pipeline
@@ -1128,10 +1133,13 @@ two threads produces the expected sum (no races, no lost increments).
 
 ### 3.6 Extern Function Lowering
 
-**Status (2026-05-01): Shipped end-to-end.** Parser, typechecker, native-IR
-emitter, and LLVM `declare` lowering are all in place. The remaining
-sub-step is cross-module call-site resolution against the typecheck symbol
-table (see "Open follow-up" below).
+**Status (2026-05-04): Shipped end-to-end for declarations and runtime-module
+LLVM call lowering.** Parser, typechecker, native-IR emitter, and standalone
+LLVM `declare` lowering are all in place. `runtime/sfn/io.sfn` now proves a
+runtime module can import `./platform/libc` and lower a call site against the
+imported extern (`write`). The remaining sub-step is general cross-module
+call-site resolution against the typecheck symbol table (see "Open follow-up"
+below).
 
 **What ships today:**
 
@@ -1176,10 +1184,12 @@ table (see "Open follow-up" below).
    call sites emit `call @fname(args...)` with direct argument passing —
    no wrapper, no marshalling.
 
-**Open follow-up: cross-module call-site resolution.** Today the typecheck
-symbol table is duplicate-detection-only — the compiler does not resolve
-`Call` expressions against it (in-module or cross-module). When that
-resolver lands:
+**Open follow-up: typecheck-level call-site resolution.** Today the typecheck
+symbol table is duplicate-detection-only — the typechecker does not resolve
+`Call` expressions against it (in-module or cross-module). LLVM lowering can
+consume imported extern functions for runtime modules, as pinned by
+`runtime/sfn/io.sfn`, but typecheck still cannot diagnose unresolved calls or
+validate imported extern argument shapes. When that resolver lands:
 
 - `typecheck_import_loader.sfn` will gain a parallel `imported_externs`
   channel keyed off `kind == "extern function"` so externs declared in
@@ -1824,6 +1834,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 ### M2 (Core Runtime in Sailfin)
 - `runtime/sfn/` (all new files per §1.5)
 - `runtime/sfn/platform/*.sfn` (new — `extern fn` declarations, no C)
+- `runtime/sfn/io.sfn` (started — `sfn_write_fd` over `platform/libc.write`)
 - `runtime/prelude.sfn` (rewrite delegates)
 - `compiler/src/llvm/lowering/instructions.sfn` (scope drop emission)
 - `compiler/src/llvm/lowering/instructions_try.sfn` (catch cleanup)

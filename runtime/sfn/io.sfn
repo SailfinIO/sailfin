@@ -1,0 +1,11 @@
+// runtime/sfn/io.sfn
+//
+// First Sailfin-native runtime service wrapper over the platform
+// extern layer. This module intentionally stays tiny: it proves
+// runtime modules can import `runtime/sfn/platform/*.sfn` declarations
+// and lower call sites against linker-resolved extern symbols.
+import { write } from "./platform/libc";
+
+fn sfn_write_fd(fd: i32, buf: * u8, count: usize) -> i64 ![io] {
+    return write(fd, buf, count);
+}
