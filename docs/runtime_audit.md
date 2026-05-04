@@ -20,6 +20,20 @@
 >   `compiler/tests/e2e/test_sleep_routes_to_sfn_clock.sh` (the call-site
 >   rewrite sentinel — fails immediately if the registry rewire is
 >   reverted).
+>
+>   **Open follow-ups surfaced by this migration** (block PR 2 cleanly):
+>   - [#305](https://github.com/SailfinIO/sailfin/issues/305) — standalone
+>     `sfn emit llvm` omits `declare` lines for some imported externs.
+>   - [#306](https://github.com/SailfinIO/sailfin/issues/306) — extern call
+>     return type defaults to `i8*` when call result is unused (produces
+>     invalid IR; tolerated by clang for unused returns).
+>   - [#307](https://github.com/SailfinIO/sailfin/issues/307) — `sleep()`
+>     unit semantics mismatch (prelude says ms, C runtime treats as s).
+>     Pre-existing; should be resolved before PR 2 locks the units.
+>   - [#308](https://github.com/SailfinIO/sailfin/issues/308) — `sfn run`
+>     on a positional input outside any capsule fails to link the
+>     runtime sfn-source `.o`s. Seed fallback masks the failure today;
+>     end-user installs post-migration won't have that fallback.
 > - **`kind = "runtime"` capsules gain `sfn-sources` field.** Production-
 >   ready replacement for the Makefile-staged `prelude.o` pattern: any
 >   `runtime/sfn/*.sfn` module the runtime capsule wants linked into
