@@ -1,13 +1,16 @@
-// Regression tests for sfn/layers capsule functions.
+// Tests for sfn/layers capsule functions.
 //
-// NOTE: Renamed from layers_test.sfn during the colon-annotation migration.
-// When a test file `<name>_test.sfn` shares its base name with capsule
-// `sfn/<name>` and both define same-named structs with all-colon field
-// annotations, the compiler segfaults during compilation of the test file.
-// This rename is a temporary workaround that unblocks the syntax migration.
-// The underlying bug and the long-term plan to move capsule-flavored unit
-// tests into their respective capsules are documented in
-// `docs/proposals/colon-type-annotations.md` (Lessons Learned).
+// Moved from compiler/tests/unit/nn_layers_test.sfn. The "nn_" prefix was
+// originally a workaround for the same-name-struct + capsule auto-resolution
+// SIGSEGV documented in docs/proposals/colon-type-annotations.md. The bug
+// no longer reproduces from `capsules/<scope>/<name>/tests/`, so the file
+// is renamed back to its natural `layers_test.sfn` here.
+//
+// Helpers remain inlined: switching to `import { ... } from "../src/mod"`
+// currently surfaces a duplicate-`declare round` LLVM error caused by the
+// array-indexing lowering used in `forward_linear`. Once that compiler bug
+// is fixed, this file should drop the `_`-prefixed copies and import the
+// real capsule API.
 
 // -- Types and helpers copied from sfn/layers --
 

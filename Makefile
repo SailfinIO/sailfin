@@ -98,7 +98,7 @@ NATIVE_BIN ?= build/native/sailfin$(EXE_EXT)
 # Which compiler binary to use for running Sailfin-native tests.
 # Default: the native compiler alias produced by `make compile`.
 
-.PHONY: help install fetch-seed test test-unit test-integration test-e2e compile check check-fast package clean bench test-arena
+.PHONY: help install fetch-seed test test-unit test-integration test-e2e test-capsules compile check check-fast package clean bench test-arena
 
 .PHONY: ci-prepare-test-artifacts ci-package ci-package-installer
 
@@ -116,6 +116,7 @@ help:
 	@echo "  make test-unit      # Run Sailfin-native unit tests"
 	@echo "  make test-integration # Run Sailfin-native integration tests"
 	@echo "  make test-e2e       # Run Sailfin-native end-to-end tests"
+	@echo "  make test-capsules  # Run per-capsule tests under capsules/"
 	@echo "  make package        # Build + package native artifacts into dist/"
 	@echo "  make fetch-seed     # Download the latest released seed"
 	@echo "  make bench          # Benchmark per-module compile time and memory"
@@ -140,7 +141,7 @@ else
 endif
 	@echo "[install] installed $(DESTDIR)$(BINDIR)/$(INSTALL_NAME)$(EXE_EXT)"
 
-test: test-unit test-integration test-e2e
+test: test-unit test-integration test-e2e test-capsules
 
 # =============================================================================
 # Seed management (download a released compiler)
@@ -214,7 +215,7 @@ test-unit:
 	echo "═══ unit: $$pass/$$total passed, $$fail failed ═══"; \
 	if [ $$fail -gt 0 ]; then \
 		echo ""; \
-		printf "$$failed_files"; \
+		printf '%b' "$$failed_files"; \
 		exit 1; \
 	fi
 
@@ -242,7 +243,7 @@ test-integration:
 	echo "═══ integration: $$pass/$$total passed, $$fail failed ═══"; \
 	if [ $$fail -gt 0 ]; then \
 		echo ""; \
-		printf "$$failed_files"; \
+		printf '%b' "$$failed_files"; \
 		exit 1; \
 	fi
 
@@ -278,7 +279,42 @@ test-e2e:
 	echo "═══ e2e: $$pass/$$total passed, $$fail failed ═══"; \
 	if [ $$fail -gt 0 ]; then \
 		echo ""; \
-		printf "$$failed_files"; \
+		printf '%b' "$$failed_files"; \
+		exit 1; \
+	fi
+
+# Per-capsule tests live alongside each capsule under
+# `capsules/<scope>/<name>/tests/*_test.sfn`. Discovered by
+# walking every `tests/` dir under `capsules/`. A capsule without a
+# `tests/` dir is silently skipped; the suite as a whole only fails
+# if at least one *_test.sfn exists somewhere and any of them fail.
+test-capsules:
+	@if [ ! -x $(NATIVE_BIN) ]; then \
+		echo "[test-capsules] missing $(NATIVE_BIN); running make compile"; \
+		$(MAKE) compile; \
+	fi
+	@pass=0; fail=0; failed_files=""; \
+	files=$$(find capsules -path '*/tests/*_test.sfn' -print 2>/dev/null | sort); \
+	if [ -z "$$files" ]; then \
+		echo "[test-capsules] no *_test.sfn files under capsules/*/tests"; \
+		echo ""; \
+		echo "═══ capsules: 0/0 passed, 0 failed ═══"; \
+		exit 0; \
+	fi; \
+	for f in $$files; do \
+		if bash scripts/run_native_test.sh $(NATIVE_BIN) "$$f"; then \
+			pass=$$((pass + 1)); \
+		else \
+			fail=$$((fail + 1)); \
+			failed_files="$$failed_files  $$(basename $$f)\n"; \
+		fi; \
+	done; \
+	total=$$((pass + fail)); \
+	echo ""; \
+	echo "═══ capsules: $$pass/$$total passed, $$fail failed ═══"; \
+	if [ $$fail -gt 0 ]; then \
+		echo ""; \
+		printf '%b' "$$failed_files"; \
 		exit 1; \
 	fi
 

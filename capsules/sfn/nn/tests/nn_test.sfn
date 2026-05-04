@@ -1,4 +1,10 @@
-// Regression tests for sfn/nn capsule functions.
+// Tests for sfn/nn capsule functions.
+//
+// Moved from compiler/tests/unit/nn_test.sfn. Helpers stay inlined here:
+// switching to `import { ... } from "../src/mod"` currently surfaces a
+// duplicate-`declare round` LLVM error caused by the array-indexing
+// lowering. Once that compiler bug is fixed, this file should drop the
+// `_`-prefixed copies and import the real capsule API.
 
 // -- Helpers copied from sfn/nn --
 

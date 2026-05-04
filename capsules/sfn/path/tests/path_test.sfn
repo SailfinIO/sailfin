@@ -1,0 +1,75 @@
+// Tests for sfn/path — pure path-string utilities.
+//
+// Moved from compiler/tests/unit/path_test.sfn. The previous version
+// re-implemented every helper with `_`-prefixed copies; this version imports
+// the real capsule API directly via the sibling src/mod.sfn.
+
+import {
+    join,
+    dirname,
+    basename,
+    ext,
+    stem,
+    is_absolute,
+    is_relative,
+    normalize,
+} from "../src/mod";
+
+test "path: join combines two path segments" {
+    assert strings_equal(join("foo", "bar"), "foo/bar");
+    assert strings_equal(join("foo/", "bar"), "foo/bar");
+    assert strings_equal(join("foo", "/bar"), "foo/bar");
+    assert strings_equal(join("foo/", "/bar"), "foo/bar");
+    assert strings_equal(join("", "bar"), "bar");
+    assert strings_equal(join("foo", ""), "foo");
+}
+
+test "path: dirname returns parent directory" {
+    assert strings_equal(dirname("/foo/bar.txt"), "/foo");
+    assert strings_equal(dirname("bar.txt"), ".");
+    assert strings_equal(dirname("/foo"), "/");
+    assert strings_equal(dirname(""), ".");
+}
+
+test "path: basename returns final component" {
+    assert strings_equal(basename("/foo/bar.txt"), "bar.txt");
+    assert strings_equal(basename("bar.txt"), "bar.txt");
+    assert strings_equal(basename("/foo/bar/"), "bar");
+    assert strings_equal(basename(""), "");
+}
+
+test "path: ext returns file extension" {
+    assert strings_equal(ext("file.txt"), ".txt");
+    assert strings_equal(ext("file.tar.gz"), ".gz");
+    assert strings_equal(ext("Makefile"), "");
+    assert strings_equal(ext(".gitignore"), "");
+    assert strings_equal(ext("/path/to/file.rs"), ".rs");
+}
+
+test "path: stem returns basename without extension" {
+    assert strings_equal(stem("file.txt"), "file");
+    assert strings_equal(stem("file.tar.gz"), "file.tar");
+    assert strings_equal(stem("Makefile"), "Makefile");
+}
+
+test "path: is_absolute and is_relative" {
+    assert is_absolute("/foo") == true;
+    assert is_absolute("foo") == false;
+    assert is_absolute("") == false;
+    assert is_relative("foo") == true;
+    assert is_relative("/foo") == false;
+}
+
+test "path: normalize resolves . and .." {
+    assert strings_equal(normalize("/foo/./bar"), "/foo/bar");
+    assert strings_equal(normalize("/foo/bar/../baz"), "/foo/baz");
+    assert strings_equal(normalize("/foo//bar"), "/foo/bar");
+    assert strings_equal(normalize(""), ".");
+    assert strings_equal(normalize("/"), "/");
+    assert strings_equal(normalize("foo/./bar"), "foo/bar");
+}
+
+test "path: normalize handles leading .." {
+    assert strings_equal(normalize("../foo"), "../foo");
+    assert strings_equal(normalize("/foo/../../bar"), "/bar");
+}

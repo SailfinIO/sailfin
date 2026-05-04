@@ -1,6 +1,10 @@
-// Regression tests for sfn/json capsule additions.
-// Tests constructors, accessors, and the new helper functions.
-// Does not test stringify_pretty (requires number_to_string from prelude).
+// Tests for sfn/json capsule constructors and accessors.
+//
+// Moved from compiler/tests/unit/json_structs_test.sfn. Helpers and the
+// JsonValue struct stay inlined here. Skip stringify_pretty — it routes
+// through `number_to_string`/`char_code` paths the test runner doesn't
+// link to today. When `import { ... } from "../src/mod"` is safe, switch
+// to the real capsule API and grow coverage to the parse/stringify roundtrip.
 
 struct JsonValue {
     kind: string;
