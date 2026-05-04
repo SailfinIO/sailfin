@@ -32,6 +32,20 @@ kind = "runtime"
 # against this exact manifest text guards the format.
 c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c", "src/native_driver.c"]
 ll-sources = ["ir/runtime_globals.ll"]
+# `sfn-sources` lists Sailfin runtime modules compiled and linked
+# alongside the C sources above. The driver
+# (`_clang_compile_runtime_capsule_objects` in `compiler/src/cli_main.sfn`)
+# spawns the running compiler subprocess to emit `.ll` for each
+# entry, then `clang -c` produces the cached `.o`. This is the
+# production-ready replacement for the Makefile-staged
+# `prelude.o` pattern: no per-file Makefile changes are needed
+# when a new runtime service module ships.
+#
+# `runtime/sfn/io.sfn` exposes `sfn_write_fd(...) ![io]` over the
+# imported libc `write` extern from `./platform/libc`. It is the
+# first module to consume the new pipeline; future M2 wrappers
+# (clock, process, memory, …) join this list.
+sfn-sources = ["../sfn/io.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 
