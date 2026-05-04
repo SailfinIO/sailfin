@@ -328,6 +328,22 @@ fn toml_get_link_libs(text: string) -> string[] {
     return _toml_split_lines_into_array(toml_get_string_array(text, "build", "link-libs"));
 }
 
+// Sailfin sources compiled and linked alongside the runtime
+// capsule's C sources. Each entry is a path (relative to the
+// manifest dir) to a `.sfn` module the resolver hands the
+// driver, which then spawns the compiler subprocess to emit
+// `.ll` then `clang -c` to produce a `.o`. This is the
+// production-ready replacement for the Makefile-staged
+// `prelude.o` pattern: any `runtime/sfn/*.sfn` module a
+// runtime capsule wants linked into every consumer ships
+// declaratively here, and `sfn build -p compiler` picks it
+// up automatically — no Makefile changes per file.
+//
+// Returns `[]` when unset.
+fn toml_get_sfn_sources(text: string) -> string[] {
+    return _toml_split_lines_into_array(toml_get_string_array(text, "build", "sfn-sources"));
+}
+
 // Transitional Stage D field — the entry path for the Sailfin
 // prelude lowered alongside the runtime capsule's C sources.
 // Returns `""` when unset. Stage F retires this field once

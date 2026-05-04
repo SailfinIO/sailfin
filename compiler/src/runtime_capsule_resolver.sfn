@@ -38,6 +38,7 @@ import {
     toml_get_ll_sources,
     toml_get_name,
     toml_get_prelude_entry,
+    toml_get_sfn_sources,
     toml_get_workspace_members
 } from "./toml_parser";
 
@@ -48,11 +49,22 @@ import {
 // `link_libs` is intentionally not path-resolved — these are
 // linker flags (e.g. `-lm`, `-lpthread`), not files. They flow
 // through verbatim.
+//
+// `sfn_sources` is the production-ready replacement for the
+// Makefile-staged `prelude.o` pattern: any `runtime/sfn/*.sfn`
+// module the runtime capsule wants linked into every consumer
+// is declared in the manifest's `[build] sfn-sources` array.
+// The driver iterates each entry, spawns the compiler subprocess
+// to emit `.ll`, and runs `clang -c` to produce the `.o`. This
+// path is what enables the Sailfin-native runtime modules
+// (`runtime/sfn/clock.sfn`, `runtime/sfn/io.sfn`, …) to ship
+// without per-module Makefile wiring.
 struct RuntimeCapsuleArtifacts {
     capsule_name: string;
     manifest_dir: string;
     c_sources: string[];
     ll_sources: string[];
+    sfn_sources: string[];
     include_dirs: string[];
     link_libs: string[];
     prelude_entry: string;
@@ -63,11 +75,13 @@ fn empty_runtime_capsule_artifacts() -> RuntimeCapsuleArtifacts {
     let empty2: string[] = [];
     let empty3: string[] = [];
     let empty4: string[] = [];
+    let empty5: string[] = [];
     return RuntimeCapsuleArtifacts {
         capsule_name: "",
         manifest_dir: "",
         c_sources: empty,
         ll_sources: empty2,
+        sfn_sources: empty5,
         include_dirs: empty3,
         link_libs: empty4,
         prelude_entry: ""
@@ -173,6 +187,7 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
     let manifest_dir = _rcr_path_join(workspace_root, member_path);
     let c_sources_rel = toml_get_c_sources(manifest_text);
     let ll_sources_rel = toml_get_ll_sources(manifest_text);
+    let sfn_sources_rel = toml_get_sfn_sources(manifest_text);
     let include_dirs_rel = toml_get_include_dirs(manifest_text);
     let link_libs = toml_get_link_libs(manifest_text);
     let prelude_entry_rel = toml_get_prelude_entry(manifest_text);
@@ -185,6 +200,7 @@ fn _rcr_artifacts_from_manifest(workspace_root: string, member_path: string, man
         manifest_dir: manifest_dir,
         c_sources: _rcr_resolve_paths(manifest_dir, c_sources_rel),
         ll_sources: _rcr_resolve_paths(manifest_dir, ll_sources_rel),
+        sfn_sources: _rcr_resolve_paths(manifest_dir, sfn_sources_rel),
         include_dirs: _rcr_resolve_paths(manifest_dir, include_dirs_rel),
         link_libs: link_libs,
         prelude_entry: prelude_entry
