@@ -35,11 +35,25 @@ fn _starts_with(value: string, prefix: string) -> boolean {
     return true;
 }
 
+fn _is_identifier_char(ch: string) -> boolean {
+    if ch.length != 1 { return false; }
+    if ch == "_" { return true; }
+    let alphanum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut i: number = 0;
+    loop {
+        if i >= alphanum.length { break; }
+        if alphanum[i] == ch { return true; }
+        i += 1;
+    }
+    return false;
+}
+
 fn _detect_unsupported_statement_keyword(text: string) -> string {
-    if _starts_with(text, "while ") { return "while"; }
-    if _starts_with(text, "while(") { return "while"; }
-    if _starts_with(text, "while{") { return "while"; }
-    return "";
+    if !_starts_with(text, "while") { return ""; }
+    if text.length == 5 { return "while"; }
+    let next = text[5];
+    if _is_identifier_char(next) { return ""; }
+    return "while";
 }
 
 fn _strings_equal(a: string, b: string) -> boolean {
@@ -101,12 +115,38 @@ test "unsupported keywords: detects `while` with brace" {
     assert _detect_unsupported_statement_keyword("while{ true } { break; }") == "while";
 }
 
+test "unsupported keywords: detects `while` followed by newline" {
+    // `parse_unknown_statement` collects raw whitespace tokens, so source
+    // formatted as `while\n    cond { … }` reaches the detector with
+    // `\n` directly after `while`. Must still trigger E0411.
+    assert _detect_unsupported_statement_keyword("while\n    i < 3 { i += 1; }") == "while";
+}
+
+test "unsupported keywords: detects `while` followed by tab" {
+    assert _detect_unsupported_statement_keyword("while\ti < 3 { i += 1; }") == "while";
+}
+
+test "unsupported keywords: detects `while` followed by carriage return" {
+    assert _detect_unsupported_statement_keyword("while\r\ni < 3 { }") == "while";
+}
+
+test "unsupported keywords: detects `while` followed by comment-start" {
+    // Conservative: `while/*comment*/cond` is still a `while` keyword
+    // — the boundary check rejects identifier-continuation chars only.
+    assert _detect_unsupported_statement_keyword("while/*c*/i < 3 { }") == "while";
+}
+
+test "unsupported keywords: detects bare `while` token" {
+    assert _detect_unsupported_statement_keyword("while") == "while";
+}
+
 test "unsupported keywords: ignores identifiers that share a prefix" {
-    // `whilepass`, `while_count`, etc. must not fire — the match is anchored
-    // on the trailing space/paren/brace after the keyword.
+    // `whilepass`, `while_count`, etc. must not fire — the boundary check
+    // rejects when the byte after `while` is `[A-Za-z0-9_]`.
     assert _detect_unsupported_statement_keyword("whilepass = init();") == "";
     assert _detect_unsupported_statement_keyword("while_count += 1;") == "";
     assert _detect_unsupported_statement_keyword("whileness.flag = true;") == "";
+    assert _detect_unsupported_statement_keyword("while1") == "";
 }
 
 test "unsupported keywords: returns empty for unrelated unknown text" {

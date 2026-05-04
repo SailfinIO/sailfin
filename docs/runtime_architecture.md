@@ -90,11 +90,13 @@
 >   surrounding statements with it. 15 `while` loops in
 >   `core_literals_lowering.sfn` (introduced when the file was
 >   split out of `core.sfn`) were silently dead. Fix: rewrote the
->   15 sites to canonical `loop { if X { break; } … }`, deleted
->   the `_operand_keepalive` workaround, and added a hard parser
->   diagnostic in `parse_block_statement` rejecting reserved-but-
->   unimplemented keywords at statement position with a fix-it
->   pointing at `loop`.
+>   15 sites to canonical `loop { if !cond { break; } body }`
+>   form (the on-disk rewrites use the de-Morgan'd form
+>   `if i >= L { break; }` since each site's condition was
+>   `i < L`), deleted the `_operand_keepalive` workaround, and
+>   added a hard parser diagnostic in `parse_block_statement`
+>   rejecting reserved-but-unimplemented keywords at statement
+>   position with a fix-it pointing at `loop`.
 > - **Diagnosed and fixed 2026-05-02 (PR #289 follow-up).** The
 >   reported "string-aliasing seed bug" was a parser silent-skip in
 >   `parse_struct_field` (`compiler/src/parser/declarations.sfn`).

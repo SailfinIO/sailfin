@@ -983,7 +983,9 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                                 let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
                                 let mut _ci8: number = 0;
                                 loop {
-                                    if _ci8 >= boxed.diagnostics.length { break; }
+                                    if _ci8 >= boxed.diagnostics.length {
+                                        break;
+                                    }
                                     diagnostics.push(boxed.diagnostics[_ci8]);
                                     _ci8 += 1;
                                 }
