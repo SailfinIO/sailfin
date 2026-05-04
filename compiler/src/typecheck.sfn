@@ -31,7 +31,9 @@ import {
     check_type_parameters,
     clone_bindings,
     detect_removed_ai_keyword,
+    detect_unsupported_statement_keyword,
     make_removed_keyword_diagnostic,
+    make_unsupported_statement_keyword_diagnostic,
     register_local_symbol,
     register_symbol
 } from "./typecheck_types";
@@ -401,6 +403,13 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             return ScopeResult {
                 bindings: bindings,
                 diagnostics: [make_removed_keyword_diagnostic(keyword)]
+            };
+        }
+        let unsupported = detect_unsupported_statement_keyword(statement.text);
+        if unsupported.length > 0 {
+            return ScopeResult {
+                bindings: bindings,
+                diagnostics: [make_unsupported_statement_keyword_diagnostic(unsupported)]
             };
         }
         return ScopeResult { bindings: bindings, diagnostics: [] };

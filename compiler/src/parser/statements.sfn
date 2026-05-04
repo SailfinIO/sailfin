@@ -310,6 +310,20 @@ fn parse_block_statement(parser: Parser) -> BlockStatementParseResult {
         return parse_assert_statement(after_decorators);
     }
 
+    // Reserved but not implemented at statement position.
+    // Without this guard, `while X { ... }` would fall through to
+    // `parse_expression_statement` and be silently absorbed into a
+    // brace-balanced `eval` instruction, eating surrounding statements
+    // along with it. Routing through `parse_unknown_statement` instead
+    // lets `typecheck.sfn` emit `E0411` with a `loop`/`break` fix-it.
+    if identifier_matches(token, "while") {
+        return BlockStatementParseResult {
+            parser: original,
+            statement: null,
+            success: false
+        };
+    }
+
     let expression_result = parse_expression_statement(after_decorators, decorators);
     if expression_result.success { return expression_result; }
 

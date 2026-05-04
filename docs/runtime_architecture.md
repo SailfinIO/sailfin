@@ -65,15 +65,7 @@
 >   fix-it suggesting `x != 0`. Pinned by
 >   `compiler/tests/unit/numeric_cast_test.sfn` (extended) and
 >   `compiler/tests/e2e/test_numeric_cast.sh` (8 LLVM-shape
->   pinning cases). The matrix opens with a no-op
->   `coerce_operand_to_type(lowered.operand, lowered.operand.llvm_type, …)`
->   keepalive call — without it, the alpha.8 seed's dead-code pass
->   elides the `let operand = lowered.operand` binding and the
->   matrix never matches; passing `lowered.operand` to a function
->   first materialises the struct in the seed's SSA form
->   (`lower_return_instruction` works around the same DCE quirk by
->   passing `operand` to `coerce_operand_to_type` immediately after
->   binding). Self-host stays green.
+>   pinning cases). Self-host stays green.
 >   **L2/L3 silent-widening rejection deferred to Slice E.**
 >   The architect's plan called for `dominant_type` to refuse
 >   silent int↔float coercion at the same time, but the lowered
@@ -85,9 +77,24 @@
 >   default integer literals to `int`) so the language
 >   semantics line up with the tightened lowering rule. Slice D
 >   ships the `as` cast escape valve so authors can spell the
->   conversion explicitly today.
->   Tracked: seed-DCE workaround in issue #295, L2/L3 closure
->   follow-up in issue #296.
+>   conversion explicitly today. L2/L3 closure follow-up is
+>   tracked in issue #296.
+> - **Issue #295 closed 2026-05-04.** The "alpha.8 seed DCE"
+>   reported alongside Slice D was misdiagnosed. Root cause: the
+>   parser has no `while` keyword (Sailfin's only loop construct
+>   is `loop` per `grammar.md` and `spec/04-statements.md`), but
+>   `parse_block_statement` silently fell through to
+>   `parse_expression_statement` for unrecognized statement-leading
+>   identifiers — so `while X { … }` was absorbed into an opaque
+>   `eval` instruction that the LLVM lowerer dropped, taking
+>   surrounding statements with it. 15 `while` loops in
+>   `core_literals_lowering.sfn` (introduced when the file was
+>   split out of `core.sfn`) were silently dead. Fix: rewrote the
+>   15 sites to canonical `loop { if X { break; } … }`, deleted
+>   the `_operand_keepalive` workaround, and added a hard parser
+>   diagnostic in `parse_block_statement` rejecting reserved-but-
+>   unimplemented keywords at statement position with a fix-it
+>   pointing at `loop`.
 > - **Diagnosed and fixed 2026-05-02 (PR #289 follow-up).** The
 >   reported "string-aliasing seed bug" was a parser silent-skip in
 >   `parse_struct_field` (`compiler/src/parser/declarations.sfn`).

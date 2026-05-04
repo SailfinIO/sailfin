@@ -1108,6 +1108,35 @@ fn make_removed_keyword_diagnostic(keyword: string) -> Diagnostic {
     };
 }
 
+// Match a reserved keyword that has no statement-level implementation.
+// `parse_block_statement` routes these to `parse_unknown_statement` so the
+// diagnostic surfaces here instead of being silently absorbed by the
+// expression-statement fallthrough. Currently only `while` (Sailfin's
+// canonical loop is `loop` per `grammar.md` / `spec/04-statements.md`).
+fn detect_unsupported_statement_keyword(text: string) -> string {
+    if starts_with(text, "while ") { return "while"; }
+    if starts_with(text, "while(") { return "while"; }
+    if starts_with(text, "while{") { return "while"; }
+    return "";
+}
+
+fn make_unsupported_statement_keyword_diagnostic(keyword: string) -> Diagnostic {
+    let mut message: string = "`" + keyword + "` is reserved but not implemented;";
+    if strings_equal(keyword, "while") {
+        message = message + " Sailfin's only loop construct is `loop`."
+            + " Rewrite `while cond { body }` as"
+            + " `loop { if !cond { break; } body }`.";
+    }
+    return Diagnostic {
+        code: "E0411",
+        severity: "error",
+        message: message,
+        file_path: "",
+        primary: null,
+        suggestion: null
+    };
+}
+
 fn make_missing_interface_member_diagnostic(struct_name: string, interface_name: string, member_name: string) -> Diagnostic {
     return Diagnostic {
         code: "E0301",
