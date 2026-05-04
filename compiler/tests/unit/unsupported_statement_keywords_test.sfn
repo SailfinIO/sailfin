@@ -1,0 +1,166 @@
+// Regression tests covering the typecheck diagnostic for reserved keywords
+// that have no statement-level implementation. Currently scoped to `while`
+// (Sailfin's only loop construct is `loop` per
+// `site/src/content/docs/docs/reference/grammar.md` and
+// `spec/04-statements.md`). When source uses `while`, `parse_block_statement`
+// in `compiler/src/parser/statements.sfn` returns `success: false` so the
+// block parser falls through to `parse_unknown_statement`, and the typechecker
+// then emits E0411 with a fix-it pointing at `loop` / `break`.
+//
+// Why this test exists: prior to the fix, `while` was silently absorbed into
+// an opaque `eval` instruction by the expression-statement fallthrough, eating
+// surrounding statements with it. The 15 `while` loops in
+// `core_literals_lowering.sfn` were silently dead code (issue #295). The fix
+// must keep the rejection in place so the regression cannot reappear.
+//
+// Kept self-contained (no imports, no struct literals) to match the pattern
+// used by `removed_ai_keywords_test.sfn` and `fmt_test.sfn` — the standalone
+// test runner cannot link the string_utils → runtime chain.
+//
+// The helpers below mirror the logic in
+// `compiler/src/typecheck_types.sfn::detect_unsupported_statement_keyword` and
+// `compiler/src/typecheck_types.sfn::make_unsupported_statement_keyword_diagnostic`
+// — keep them in sync when that file changes.
+// -------------------------------------------------------------------
+// Local helpers
+// -------------------------------------------------------------------
+fn _starts_with(value: string, prefix: string) -> boolean {
+    if prefix.length > value.length { return false; }
+    let mut index: number = 0;
+    loop {
+        if index >= prefix.length { break; }
+        if value[index] != prefix[index] { return false; }
+        index += 1;
+    }
+    return true;
+}
+
+fn _is_identifier_char(ch: string) -> boolean {
+    if ch.length != 1 { return false; }
+    if ch == "_" { return true; }
+    let alphanum = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut i: number = 0;
+    loop {
+        if i >= alphanum.length { break; }
+        if alphanum[i] == ch { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _detect_unsupported_statement_keyword(text: string) -> string {
+    if !_starts_with(text, "while") { return ""; }
+    if text.length == 5 { return "while"; }
+    let next = text[5];
+    if _is_identifier_char(next) { return ""; }
+    return "while";
+}
+
+fn _strings_equal(a: string, b: string) -> boolean {
+    if a.length != b.length { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= a.length { break; }
+        if a[i] != b[i] { return false; }
+        i += 1;
+    }
+    return true;
+}
+
+fn _diagnostic_message(keyword: string) -> string {
+    let mut message: string = "`" + keyword + "` is reserved but not implemented;";
+    if _strings_equal(keyword, "while") {
+        message = message + " Sailfin's only loop construct is `loop`."
+            + " Rewrite `while cond { body }` as"
+            + " `loop { if !cond { break; } body }`.";
+    }
+    return message;
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > haystack.length { return false; }
+    let limit = haystack.length - needle.length;
+    let mut i: number = 0;
+    loop {
+        if i > limit { break; }
+        let mut matched: boolean = true;
+        let mut j: number = 0;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matched = false;
+                break;
+            }
+            j += 1;
+        }
+        if matched { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// Tests
+// -------------------------------------------------------------------
+test "unsupported keywords: detects `while` with space" {
+    assert _detect_unsupported_statement_keyword("while i < 3 { i += 1; }") == "while";
+}
+
+test "unsupported keywords: detects `while` with paren" {
+    assert _detect_unsupported_statement_keyword("while(true) { break; }") == "while";
+}
+
+test "unsupported keywords: detects `while` with brace" {
+    assert _detect_unsupported_statement_keyword("while{ true } { break; }") == "while";
+}
+
+test "unsupported keywords: detects `while` followed by newline" {
+    // `parse_unknown_statement` collects raw whitespace tokens, so source
+    // formatted as `while\n    cond { … }` reaches the detector with
+    // `\n` directly after `while`. Must still trigger E0411.
+    assert _detect_unsupported_statement_keyword("while\n    i < 3 { i += 1; }") == "while";
+}
+
+test "unsupported keywords: detects `while` followed by tab" {
+    assert _detect_unsupported_statement_keyword("while\ti < 3 { i += 1; }") == "while";
+}
+
+test "unsupported keywords: detects `while` followed by carriage return" {
+    assert _detect_unsupported_statement_keyword("while\r\ni < 3 { }") == "while";
+}
+
+test "unsupported keywords: detects `while` followed by comment-start" {
+    // Conservative: `while/*comment*/cond` is still a `while` keyword
+    // — the boundary check rejects identifier-continuation chars only.
+    assert _detect_unsupported_statement_keyword("while/*c*/i < 3 { }") == "while";
+}
+
+test "unsupported keywords: detects bare `while` token" {
+    assert _detect_unsupported_statement_keyword("while") == "while";
+}
+
+test "unsupported keywords: ignores identifiers that share a prefix" {
+    // `whilepass`, `while_count`, etc. must not fire — the boundary check
+    // rejects when the byte after `while` is `[A-Za-z0-9_]`.
+    assert _detect_unsupported_statement_keyword("whilepass = init();") == "";
+    assert _detect_unsupported_statement_keyword("while_count += 1;") == "";
+    assert _detect_unsupported_statement_keyword("whileness.flag = true;") == "";
+    assert _detect_unsupported_statement_keyword("while1") == "";
+}
+
+test "unsupported keywords: returns empty for unrelated unknown text" {
+    assert _detect_unsupported_statement_keyword("???") == "";
+    assert _detect_unsupported_statement_keyword("let x = 1;") == "";
+    assert _detect_unsupported_statement_keyword("") == "";
+    assert _detect_unsupported_statement_keyword("loop { if x { break; } }") == "";
+}
+
+test "unsupported keywords: diagnostic message names the keyword and points at loop/break" {
+    let msg = _diagnostic_message("while");
+    assert _starts_with(msg, "`while` is reserved but not implemented");
+    // The fix-it must steer the user at `loop` and `break`, not at adding
+    // a `while` keyword.
+    assert _contains(msg, "loop");
+    assert _contains(msg, "break");
+}

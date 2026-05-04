@@ -113,8 +113,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                     };
                 }
                 let with_sep = emit_string_concat(current_operand, sep.operand, current_temp, current_lines);
-                let _ci0 = 0;
-                while _ci0 < with_sep.diagnostics.length {
+                let mut _ci0: number = 0;
+                loop {
+                    if _ci0 >= with_sep.diagnostics.length { break; }
                     diagnostics.push(with_sep.diagnostics[_ci0]);
                     _ci0 += 1;
                 }
@@ -133,8 +134,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
 
             let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, "");
-            let _ci1 = 0;
-            while _ci1 < lowered.diagnostics.length {
+            let mut _ci1: number = 0;
+            loop {
+                if _ci1 >= lowered.diagnostics.length { break; }
                 diagnostics.push(lowered.diagnostics[_ci1]);
                 _ci1 += 1;
             }
@@ -153,8 +155,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
 
             let as_string = coerce_operand_to_string(lowered.operand, current_temp, current_lines);
-            let _ci2 = 0;
-            while _ci2 < as_string.diagnostics.length {
+            let mut _ci2: number = 0;
+            loop {
+                if _ci2 >= as_string.diagnostics.length { break; }
                 diagnostics.push(as_string.diagnostics[_ci2]);
                 _ci2 += 1;
             }
@@ -173,8 +176,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
 
             let appended = emit_string_concat(current_operand, as_string.operand, current_temp, current_lines);
-            let _ci3 = 0;
-            while _ci3 < appended.diagnostics.length {
+            let mut _ci3: number = 0;
+            loop {
+                if _ci3 >= appended.diagnostics.length { break; }
                 diagnostics.push(appended.diagnostics[_ci3]);
                 _ci3 += 1;
             }
@@ -207,8 +211,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             };
         }
         let finished = emit_string_concat(current_operand, close.operand, current_temp, current_lines);
-        let _ci4 = 0;
-        while _ci4 < finished.diagnostics.length {
+        let mut _ci4: number = 0;
+        loop {
+            if _ci4 >= finished.diagnostics.length { break; }
             diagnostics.push(finished.diagnostics[_ci4]);
             _ci4 += 1;
         }
@@ -658,8 +663,9 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 field_value_text = literal_field.name;
             }
             let lowered = lower_expression(field_value_text, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
-            let _ci5 = 0;
-            while _ci5 < lowered.diagnostics.length {
+            let mut _ci5: number = 0;
+            loop {
+                if _ci5 >= lowered.diagnostics.length { break; }
                 diagnostics.push(lowered.diagnostics[_ci5]);
                 _ci5 += 1;
             }
@@ -668,8 +674,9 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             if lowered.operand != null {
                 let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines);
-                let _ci6 = 0;
-                while _ci6 < coerced.diagnostics.length {
+                let mut _ci6: number = 0;
+                loop {
+                    if _ci6 >= coerced.diagnostics.length { break; }
                     diagnostics.push(coerced.diagnostics[_ci6]);
                     _ci6 += 1;
                 }
@@ -955,8 +962,9 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
             if literal_index >= 0 {
                 let literal_field = parse.fields[literal_index];
                 let lowered = lower_expression(literal_field.value, bindings, locals, current_temp, current_lines, functions, context, expected.llvm_type);
-                let _ci7 = 0;
-                while _ci7 < lowered.diagnostics.length {
+                let mut _ci7: number = 0;
+                loop {
+                    if _ci7 >= lowered.diagnostics.length { break; }
                     diagnostics.push(lowered.diagnostics[_ci7]);
                     _ci7 += 1;
                 }
@@ -973,8 +981,11 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         if !ends_with_pointer_suffix(field_operand.llvm_type) {
                             if field_is_aggregate {
                                 let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
-                                let _ci8 = 0;
-                                while _ci8 < boxed.diagnostics.length {
+                                let mut _ci8: number = 0;
+                                loop {
+                                    if _ci8 >= boxed.diagnostics.length {
+                                        break;
+                                    }
                                     diagnostics.push(boxed.diagnostics[_ci8]);
                                     _ci8 += 1;
                                 }
@@ -987,8 +998,9 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         }
                     }
                     let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines);
-                    let _ci9 = 0;
-                    while _ci9 < coerced.diagnostics.length {
+                    let mut _ci9: number = 0;
+                    loop {
+                        if _ci9 >= coerced.diagnostics.length { break; }
                         diagnostics.push(coerced.diagnostics[_ci9]);
                         _ci9 += 1;
                     }
@@ -1145,8 +1157,9 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     }
 
     let lowered = lower_expression(parse.value, bindings, locals, temp_index, lines, functions, context, "");
-    let _ci10 = 0;
-    while _ci10 < lowered.diagnostics.length {
+    let mut _ci10: number = 0;
+    loop {
+        if _ci10 >= lowered.diagnostics.length { break; }
         diagnostics.push(lowered.diagnostics[_ci10]);
         _ci10 += 1;
     }
@@ -1159,18 +1172,6 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
             string_constants: lowered.string_constants
         };
     }
-    // Seed-DCE workaround — tracked in issue #295. Bind `operand`
-    // via `coerce_operand_to_type` (a no-op when source and target
-    // types match) before any field access. The function call
-    // materialises the struct in the seed's SSA form and prevents
-    // the alpha.8 dead-code pass from eliding a direct
-    // `let operand = lowered.operand` binding —
-    // `lower_return_instruction` works around the same DCE quirk
-    // by passing `operand` to `coerce_operand_to_type` immediately
-    // after the binding. Once the seed bug is fixed and a fixed
-    // seed is pinned, delete this `_operand_keepalive` line and
-    // both surrounding comments.
-    let _operand_keepalive = coerce_operand_to_type(lowered.operand, lowered.operand.llvm_type, lowered.temp_index, lowered.lines);
     let operand = lowered.operand;
     if operand.llvm_type == target_type {
         return ExpressionResult {
@@ -1315,10 +1316,9 @@ fn lower_cast_expression(parse: CastParseResult, bindings: ParameterBinding[], l
     // sources. `255_u8 as u64` therefore lowers as `sext` and
     // becomes `-1` (sign-extended) rather than `255` (zero-
     // extended). Distinguishing requires source-level type tracking
-    // through the cast lowering — deferred to a Slice D follow-up
-    // alongside the `as bool` audit; see issue #295/#296. The
-    // architect's brief explicitly accepted "all integer casts emit
-    // signed forms" for this slice.
+    // through the cast lowering — deferred to a Slice D follow-up.
+    // The architect's brief explicitly accepted "all integer casts
+    // emit signed forms" for this slice.
     let operand_is_int = is_integer_llvm_type(operand.llvm_type);
     let operand_is_float = is_float_llvm_type(operand.llvm_type);
     let target_is_int = is_integer_llvm_type(target_type);
@@ -1427,8 +1427,9 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
 
         let expr_text = parsed.expressions[index];
         let lowered_expr = lower_expression(expr_text, bindings, locals, current_temp, current_lines, functions, context, "i8*");
-        let _ci11 = 0;
-        while _ci11 < lowered_expr.diagnostics.length {
+        let mut _ci11: number = 0;
+        loop {
+            if _ci11 >= lowered_expr.diagnostics.length { break; }
             diagnostics.push(lowered_expr.diagnostics[_ci11]);
             _ci11 += 1;
         }
@@ -1450,8 +1451,9 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         }
 
         let coerced = coerce_operand_to_string(lowered_expr.operand, current_temp, current_lines);
-        let _ci12 = 0;
-        while _ci12 < coerced.diagnostics.length {
+        let mut _ci12: number = 0;
+        loop {
+            if _ci12 >= coerced.diagnostics.length { break; }
             diagnostics.push(coerced.diagnostics[_ci12]);
             _ci12 += 1;
         }
@@ -1472,8 +1474,9 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         }
 
         let concat1 = emit_string_concat(current_operand, coerced.operand, current_temp, current_lines);
-        let _ci13 = 0;
-        while _ci13 < concat1.diagnostics.length {
+        let mut _ci13: number = 0;
+        loop {
+            if _ci13 >= concat1.diagnostics.length { break; }
             diagnostics.push(concat1.diagnostics[_ci13]);
             _ci13 += 1;
         }
@@ -1506,8 +1509,9 @@ fn try_lower_interpolated_string_literal(literal: string, bindings: ParameterBin
         }
 
         let concat2 = emit_string_concat(current_operand, part_value.operand, current_temp, current_lines);
-        let _ci14 = 0;
-        while _ci14 < concat2.diagnostics.length {
+        let mut _ci14: number = 0;
+        loop {
+            if _ci14 >= concat2.diagnostics.length { break; }
             diagnostics.push(concat2.diagnostics[_ci14]);
             _ci14 += 1;
         }
