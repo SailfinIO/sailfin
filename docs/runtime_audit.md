@@ -1,6 +1,6 @@
 # Runtime Audit: Sailfin-Native Runtime Plan
 
-**Date:** 2026-04-15 (last reviewed 2026-05-01 — see "Status delta" below)
+**Date:** 2026-04-15 (last reviewed 2026-05-04 — see "Status delta" below)
 **Previous revision:** pre-April 2026 (dated, superseded)
 **Companion docs:** `site/src/content/docs/docs/reference/runtime-abi.md` (target ABI), `docs/build-performance.md`
 (self-hosting perf analysis that surfaced the memory-management crisis)
@@ -14,15 +14,19 @@
 >   violations now block compilation by default.
 > - **`extern fn` — shipped** (parser + native-IR emitter + LLVM `declare`
 >   emission + typecheck registration as of 2026-05-01). Hard prerequisite #7
->   below is satisfied. Cross-module *call-site* resolution against the
->   typecheck symbol table is the open follow-up; today the symbol table is
->   duplicate-detection-only, so externs round-trip without a resolver.
+>   below is satisfied. `runtime/sfn/io.sfn` now proves runtime-module LLVM
+>   call lowering against an imported extern (`write` from `./platform/libc`).
+>   General typecheck-level call-site resolution remains the open follow-up;
+>   today the typecheck symbol table is duplicate-detection-only.
 > - **First `runtime/sfn/platform/libc.sfn` skeleton — shipped 2026-05-01**
 >   (12 declarations covering libc memory, fd-based I/O, stdio filesystem,
->   environment). Not imported anywhere yet; the C runtime continues to
->   serve libc calls until M2. Pinned by
+>   environment). Pinned by
 >   `compiler/tests/e2e/test_runtime_libc_skeleton.sh` (typecheck + fmt +
 >   LLVM `declare` emission for every symbol).
+> - **First Sailfin-native runtime service wrapper — shipped 2026-05-04.**
+>   `runtime/sfn/io.sfn` imports `write` from `./platform/libc` and exposes
+>   `sfn_write_fd(...) ![io]`; pinned by
+>   `compiler/tests/e2e/test_runtime_io_skeleton.sh`.
 > - **Three further `runtime/sfn/platform/*.sfn` skeletons — shipped
 >   2026-05-02.** `pthread.sfn` (11 declarations: pthread_create / join,
 >   mutex lifecycle, condition-variable lifecycle), `posix.sfn` (4
@@ -407,12 +411,16 @@ compiler features that do not exist in the current toolchain.
      unsafe` when applicable) in `.sfn-asm`.
    - LLVM lowering: emits `declare <ret> @<name>(<args>)` directives at
      the module level (`compiler/src/llvm/lowering/emission.sfn:332`).
+   - **Runtime-module LLVM import path:** `runtime/sfn/io.sfn` imports
+     `write` from `./platform/libc`; lowering emits the imported
+     declaration and an unmangled call to `@write`.
    - **Open follow-up:** the typecheck symbol table is duplicate-
-     detection-only; cross-module call-site resolution is not yet wired.
-     When call-site resolution lands, `typecheck_import_loader.sfn`
+     detection-only; typecheck-level call-site resolution is not yet
+     wired. When call-site resolution lands, `typecheck_import_loader.sfn`
      gains a parallel `imported_externs` channel keyed off
      `kind == "extern function"` so externs declared in
-     `runtime/sfn/platform/*.sfn` resolve in importing modules.
+     `runtime/sfn/platform/*.sfn` resolve in importing modules before
+     LLVM lowering.
    - **No C source files authored in the toolchain.** With `extern fn`
      shipped end-to-end, the runtime can reach platform syscalls without
      a permanent C shim. The M0.5 arena-in-C is the *only* exception,
