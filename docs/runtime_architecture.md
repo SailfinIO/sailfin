@@ -8,30 +8,33 @@
 > **Status delta.** Track milestone progress here so the body
 > below stays consistent with the tree:
 >
-> - **First C-to-Sailfin runtime migration: shipped 2026-05-04.**
->   `runtime/sfn/clock.sfn` exposes `sfn_sleep(seconds: float) -> void
->   ![clock]`, and the runtime helper registry now routes `sleep`
->   and `runtime_sleep_fn` call sites through `@sfn_sleep` instead
->   of `@sailfin_runtime_sleep`. The wrapper still trampolines
->   through the C function for one PR; PR 2 (gated on §2.9 Q7
->   — opaque-handle sizing for `* Timespec`) rewrites the body
->   to call `nanosleep` directly and deletes
->   `sailfin_runtime_sleep` from the C runtime. See Appendix A
->   for the migration table; the `sailfin_runtime_sleep → sfn_sleep`
->   row is the first to flip from "M2 — planned" to "wrapper
->   shipped, C body retires in PR 2."
-> - **`kind = "runtime"` capsules gain `sfn-sources` field.** The
->   production-ready replacement for the Makefile-staged
->   `prelude.o` pattern. Schema documented in
->   `docs/proposals/build-architecture.md` §4.7.
->   `_clang_compile_runtime_capsule_objects` consumes the field
->   in `compiler/src/cli_main.sfn`. Both `runtime/sfn/io.sfn` and
->   `runtime/sfn/clock.sfn` ship through this path; future M2
->   modules (process, memory, …) join by adding manifest entries,
->   no Makefile edits per file. Path normalization
->   (`_rcr_normalize_path`) collapses `..` segments so consumers
->   see canonical paths regardless of how the manifest spells the
->   relative offset.
+> - **Sleep call-site routing shipped 2026-05-04 (PR 1 of the sleep
+>   migration).** The runtime helper registry routes compiled user
+>   `sleep(N)` and `runtime_sleep_fn` call sites through
+>   `@sfn_sleep` instead of `@sailfin_runtime_sleep` directly.
+>   **`@sfn_sleep` is defined as a C trampoline** in
+>   `runtime/native/src/sailfin_runtime.c` — three lines, calls
+>   `sailfin_runtime_sleep`. The Sailfin definition
+>   (`runtime/sfn/clock.sfn`, exposing
+>   `sfn_sleep(seconds: float) -> void ![clock]`) ships in the
+>   tree as a typecheck/emit smoke target and as the future
+>   definition site, but is **not linked into any binary today**.
+>   PR 2 of the migration replaces the C trampoline with a real
+>   Sailfin link of `clock.sfn` once issue #308's link-time
+>   build infrastructure lands. Appendix A's
+>   `sailfin_runtime_sleep → sfn_sleep` row is now "call-site
+>   routed, C trampoline backs the symbol; Sailfin replacement in
+>   PR 2."
+> - **`kind = "runtime"` capsules gain `sfn-sources` schema slot
+>   (dormant).** TOML getter `toml_get_sfn_sources`, the
+>   `RuntimeCapsuleArtifacts.sfn_sources` field on the resolver,
+>   and `_rcr_normalize_path` for canonical path output all ship
+>   in this PR. **No consumer is wired up yet** — the active
+>   `runtime/native/capsule.toml` does NOT populate the field.
+>   PR 2 introduces the link-time compile loop that consumes it.
+>   This split keeps PR 1 small while the build-system
+>   prerequisite (issue #308's IPC-isolation track) is being
+>   addressed independently.
 > - M0.5 arena-in-C: **shipped, default-on** (PRs #249, #251, #252).
 > - M0 hard prerequisite #7 (`extern fn` typed linker-resolved symbols):
 >   **shipped 2026-05-01** (parser + typecheck + native-IR + LLVM `declare`).
@@ -1808,7 +1811,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 | `sailfin_runtime_print_raw` | `sfn_print` | M2 |
 | `sailfin_runtime_print_err` | `sfn_print_err` | M2 |
 | `sailfin_runtime_print_info/warn/error` | `sfn_print_info/warn/error` | M2 |
-| `sailfin_runtime_sleep` | `sfn_sleep` | **M2 — wrapper shipped 2026-05-04, C body retires in PR 2 (gated on §2.9 Q7)** |
+| `sailfin_runtime_sleep` | `sfn_sleep` | **Call-site routed 2026-05-04; `@sfn_sleep` currently a C trampoline. Sailfin link in PR 2 (gated on issue #308 + §2.9 Q7).** |
 | `sailfin_runtime_monotonic_millis` | `sfn_clock_millis` | M2 |
 | `sailfin_runtime_string_length` | `SfnString.len` (field access) | M1 |
 | `sailfin_runtime_string_concat` | `sfn_str_concat` | M2 |

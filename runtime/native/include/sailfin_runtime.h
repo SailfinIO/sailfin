@@ -36,6 +36,19 @@ extern "C"
 
     void sailfin_runtime_sleep(double seconds);
 
+    /* Sleep migration trampoline: compiled user `sleep(N)` calls now
+     * lower to `@sfn_sleep` (via the runtime helper registry rewire
+     * in compiler/src/llvm/runtime_helpers.sfn). This C function
+     * provides the symbol globally so all link paths resolve cleanly.
+     * The eventual Sailfin definition (runtime/sfn/clock.sfn) replaces
+     * this C trampoline in PR 2 of the migration, once the build
+     * infrastructure for compiling runtime/sfn-side modules into
+     * link-time .o artifacts is in place (depends on issue #308's
+     * IPC-isolation track). For now the symbol is defined here so
+     * the call-site rewire ships without requiring that infrastructure.
+     */
+    void sfn_sleep(double seconds);
+
     // Monotonic clock for profiling/timing.
     // Returns an integer millisecond count as a `double` for stage2 ABI.
     double sailfin_runtime_monotonic_millis(void);

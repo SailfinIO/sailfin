@@ -113,6 +113,18 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_sleep_fn", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"]
     });
+    // Type signature for the C entrypoint `sailfin_runtime_sleep`,
+    // which `runtime/sfn/clock.sfn`'s `sfn_sleep` body imports
+    // (and the C-trampoline `sfn_sleep` in `sailfin_runtime.c`
+    // also calls). Without this descriptor, calls to
+    // `sailfin_runtime_sleep` from a runtime module fall through
+    // the default call path which string-coerces numeric args via
+    // `sailfin_runtime_number_to_string`. Registering the
+    // signature makes the call lowering type-correct for any
+    // future caller.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "sailfin_runtime_sleep", symbol: "sailfin_runtime_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"]
+    });
 
     // Monotonic clock for profiling/timing.
     // Support both the prelude binding name and direct calls.

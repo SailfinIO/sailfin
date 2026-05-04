@@ -840,7 +840,7 @@ c-sources = [
   "src/native_driver.c",
 ]
 ll-sources = ["ir/runtime_globals.ll"]
-sfn-sources = ["../sfn/io.sfn", "../sfn/clock.sfn"]
+# sfn-sources = ["../sfn/io.sfn", "../sfn/clock.sfn"]  # dormant; PR 2 enables
 prelude-entry = "../runtime/prelude.sfn"
 ```
 
@@ -851,13 +851,16 @@ step loses a special case.
 
 The `sfn-sources` field is the Sailfin-side counterpart to `c-sources`.
 Each entry points at a `.sfn` module the runtime capsule wants compiled
-and linked alongside its C/LL surface. The driver
-(`_clang_compile_runtime_capsule_objects` in `compiler/src/cli_main.sfn`)
-spawns the running compiler subprocess to emit `.ll`, then `clang -c`
-produces the cached `.o`. As of the sleep migration (clock.sfn), the
-runtime capsule declares both `c-sources` and `sfn-sources`; new
-runtime modules ship by adding an entry to the latter, no Makefile or
-build-script edits required.
+and linked alongside its C/LL surface. **Schema status (2026-05-04):**
+the TOML getter, the `RuntimeCapsuleArtifacts.sfn_sources` resolver
+field, and `_rcr_normalize_path` for canonical workspace-rooted output
+are all in place. **No driver consumes the field yet** — the link-time
+compile loop that subprocess-spawns the running compiler to emit
+`.ll` for each entry is gated on issue #308's IPC-isolation track
+(parent-compiler-spawning-child-compiler currently races on shared
+`build/sailfin/.foo` scratch state, producing miscompiled IR).
+PR 2 of the sleep migration introduces both halves — the link
+loop and the manifest population — once #308 lands.
 
 `prelude-entry` is the transitional Stage D bridge for the prelude —
 once the prelude moves under `capsules/sfn/prelude/` (Stage F per §4.8),

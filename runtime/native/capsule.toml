@@ -32,28 +32,18 @@ kind = "runtime"
 # against this exact manifest text guards the format.
 c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c", "src/native_driver.c"]
 ll-sources = ["ir/runtime_globals.ll"]
-# `sfn-sources` lists Sailfin runtime modules compiled and linked
-# alongside the C sources above. The driver
-# (`_clang_compile_runtime_capsule_objects` in `compiler/src/cli_main.sfn`)
-# spawns the running compiler subprocess to emit `.ll` for each
-# entry, then `clang -c` produces the cached `.o`. This is the
-# production-ready replacement for the Makefile-staged
-# `prelude.o` pattern: no per-file Makefile changes are needed
-# when a new runtime service module ships.
-#
-# `runtime/sfn/io.sfn` exposes `sfn_write_fd(...) ![io]` over the
-# imported libc `write` extern from `./platform/libc`. It is the
-# first module to consume the new pipeline; future M2 wrappers
-# (process, memory, …) join this list.
-#
-# `runtime/sfn/clock.sfn` exposes `sfn_sleep(...) ![clock]` —
-# the FIRST C-to-Sailfin runtime migration. Compiled user
-# `sleep(N)` calls now route through `@sfn_sleep` (defined in
-# clock.sfn) instead of the C entrypoint `@sailfin_runtime_sleep`.
-# The wrapper body still trampolines through the C function for
-# one PR — see clock.sfn's header for the libc-direct rewrite
-# sequencing.
-sfn-sources = ["../sfn/io.sfn", "../sfn/clock.sfn"]
+# `sfn-sources` is the schema slot for Sailfin runtime modules
+# (`runtime/sfn/*.sfn`) compiled and linked alongside the C
+# sources above. The TOML getter and resolver field both ship
+# in this PR, but **no consumer is wired up yet** — link-time
+# subprocess-spawn-and-emit of runtime modules requires
+# build-system work that is out of scope here (see issue #308's
+# IPC-isolation track). The field is intentionally absent from
+# the active manifest so a reader does not infer that
+# `runtime/sfn/io.sfn` and `runtime/sfn/clock.sfn` are linked
+# into compiled binaries today — they are not. The follow-up
+# PR that lands the link infrastructure will populate this
+# array; this PR only ships the schema scaffolding.
 include-dirs = ["include"]
 link-libs = ["-lm"]
 

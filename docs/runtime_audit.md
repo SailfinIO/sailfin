@@ -8,46 +8,52 @@
 > **Status delta since 2026-04-15** (keep this list short; once an item is
 > fully shipped fold it into the body and remove the bullet here):
 >
-> - **First C-to-Sailfin runtime migration — `sleep` call path shipped 2026-05-04.**
->   Compiled user `sleep(N)` and `runtime.sleep(N)` calls now lower to
->   `call void @sfn_sleep(double ...)` instead of
->   `call void @sailfin_runtime_sleep(...)` directly. The wrapper lives at
->   `runtime/sfn/clock.sfn` and trampolines through the C function for
->   one PR; PR 2 (gated on §2.9 Q7 — opaque-handle sizing for `* Timespec`)
->   rewrites the body to call `nanosleep` directly and deletes
->   `sailfin_runtime_sleep` from `runtime/native/src/sailfin_runtime.c`.
->   Pinned by `compiler/tests/e2e/test_runtime_clock_skeleton.sh` and
->   `compiler/tests/e2e/test_sleep_routes_to_sfn_clock.sh` (the call-site
->   rewrite sentinel — fails immediately if the registry rewire is
->   reverted).
+> - **Sleep call-site routing shipped 2026-05-04 (PR 1 of the sleep
+>   migration).** Compiled user `sleep(N)` and `runtime.sleep(N)` calls
+>   now lower to `call void @sfn_sleep(double ...)` rather than
+>   `call void @sailfin_runtime_sleep(...)` directly. **The symbol
+>   `@sfn_sleep` is currently defined as a C trampoline in
+>   `runtime/native/src/sailfin_runtime.c`** that simply calls
+>   `sailfin_runtime_sleep`. The Sailfin file `runtime/sfn/clock.sfn`
+>   exists in the tree as the future definition site but is not linked
+>   into any binary today. PR 2 of the migration replaces the C
+>   trampoline with a real Sailfin link of `clock.sfn` once the build
+>   infrastructure for compiling `runtime/sfn/*.sfn` modules into
+>   link-time `.o` artifacts is in place (depends on issue #308's
+>   IPC-isolation track — parent-compiler-spawning-child-compiler
+>   currently races on shared scratch state). Pinned by
+>   `compiler/tests/e2e/test_runtime_clock_skeleton.sh` (clock.sfn
+>   standalone emit shape) and
+>   `compiler/tests/e2e/test_sleep_routes_to_sfn_clock.sh` (call-site
+>   rewire sentinel).
 >
->   **Open follow-ups surfaced by this migration** (block PR 2 cleanly):
+>   This is intentionally framed as **call-site routing**, not a
+>   migration: nothing has actually moved into Sailfin yet. The
+>   value of PR 1 is the registry rewire and the schema scaffolding
+>   that PR 2 builds on.
+>
+>   **Open follow-ups identified during this work:**
 >   - [#305](https://github.com/SailfinIO/sailfin/issues/305) — standalone
->     `sfn emit llvm` omits `declare` lines for some imported externs.
->   - [#306](https://github.com/SailfinIO/sailfin/issues/306) — extern call
->     return type defaults to `i8*` when call result is unused (produces
->     invalid IR; tolerated by clang for unused returns).
+>     `sfn emit llvm` produces inconsistent IR for runtime modules
+>     under specific output-path / scratch-state combinations.
+>   - [#306](https://github.com/SailfinIO/sailfin/issues/306) — extern
+>     call return type defaults to `i8*` when call result is unused.
 >   - [#307](https://github.com/SailfinIO/sailfin/issues/307) — `sleep()`
 >     unit semantics mismatch (prelude says ms, C runtime treats as s).
->     Pre-existing; should be resolved before PR 2 locks the units.
->   - [#308](https://github.com/SailfinIO/sailfin/issues/308) — `sfn run`
->     on a positional input outside any capsule fails to link the
->     runtime sfn-source `.o`s. Seed fallback masks the failure today;
->     end-user installs post-migration won't have that fallback.
-> - **`kind = "runtime"` capsules gain `sfn-sources` field.** Production-
->   ready replacement for the Makefile-staged `prelude.o` pattern: any
->   `runtime/sfn/*.sfn` module the runtime capsule wants linked into
->   every consumer is declared in the manifest. The driver
->   (`_clang_compile_runtime_capsule_objects` in
->   `compiler/src/cli_main.sfn`) iterates each entry, spawns the running
->   compiler to emit `.ll`, then `clang -c` produces the cached `.o` —
->   no Makefile edits per file. `runtime/sfn/io.sfn` (proven by PR #303)
->   and `runtime/sfn/clock.sfn` (this migration) are now both linked
->   through this path. Schema unit tests in
+>   - [#308](https://github.com/SailfinIO/sailfin/issues/308) — link-time
+>     subprocess-emit of runtime/sfn/*.sfn modules races on shared
+>     `build/sailfin/.foo` scratch IPC files — PR 2's hard prerequisite.
+> - **`kind = "runtime"` capsules gain `sfn-sources` schema field
+>   (dormant in this PR).** TOML getter
+>   (`toml_get_sfn_sources`), `RuntimeCapsuleArtifacts.sfn_sources`
+>   field on the resolver, and `_rcr_normalize_path` for canonical
+>   path output all ship. **No consumer is wired up yet** — the
+>   active `runtime/native/capsule.toml` does NOT populate the
+>   field; that lands when PR 2 introduces the link-time compile
+>   infrastructure. Schema unit tests in
 >   `compiler/tests/unit/runtime_capsule_resolver_test.sfn` pin the
->   shape; resolver path normalization (`_rcr_normalize_path`) collapses
->   `..` segments so consumers see canonical paths regardless of how
->   the manifest spells the relative offset.
+>   shape so the dormant scaffolding is regression-tested even
+>   without an end-to-end consumer.
 > - **M0.5 arena-in-C — shipped, default-on** (`runtime/native/src/sailfin_arena.c`,
 >   PR #252 + Phase 5a mark/rewind PR #251).
 > - **Effect enforcement gate — shipped** (Phases A–F, PRs #241–#245). Effect
@@ -171,7 +177,7 @@ calls to it in current code paths.
 | Symbol | Status | Notes |
 |---|---|---|
 | `sailfin_runtime_print_raw/err/info/warn/error` | ✅ | stdout/stderr line writes |
-| `sailfin_runtime_sleep` | ⚠ Trampoline | Compiled user code now calls `@sfn_sleep` (defined in `runtime/sfn/clock.sfn`); the C function survives only as the wrapper's backing until PR 2 retires it. |
+| `sailfin_runtime_sleep` | ✅ | Existing C entrypoint. Backs `sfn_sleep` (a thin C trampoline added in this PR) which compiled user code now calls. |
 | `sailfin_runtime_monotonic_millis` | ✅ | Clock-backed, used for bench |
 | `sailfin_runtime_log_execution` | ✅ | Prints value via `print.info`, returns value |
 
