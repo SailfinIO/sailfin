@@ -44,8 +44,16 @@ ll-sources = ["ir/runtime_globals.ll"]
 # `runtime/sfn/io.sfn` exposes `sfn_write_fd(...) ![io]` over the
 # imported libc `write` extern from `./platform/libc`. It is the
 # first module to consume the new pipeline; future M2 wrappers
-# (clock, process, memory, …) join this list.
-sfn-sources = ["../sfn/io.sfn"]
+# (process, memory, …) join this list.
+#
+# `runtime/sfn/clock.sfn` exposes `sfn_sleep(...) ![clock]` —
+# the FIRST C-to-Sailfin runtime migration. Compiled user
+# `sleep(N)` calls now route through `@sfn_sleep` (defined in
+# clock.sfn) instead of the C entrypoint `@sailfin_runtime_sleep`.
+# The wrapper body still trampolines through the C function for
+# one PR — see clock.sfn's header for the libc-direct rewrite
+# sequencing.
+sfn-sources = ["../sfn/io.sfn", "../sfn/clock.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 

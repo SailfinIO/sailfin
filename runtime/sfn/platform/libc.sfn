@@ -76,3 +76,19 @@ extern fn fwrite(buf: * u8, size: usize, nmemb: usize, f: * File) -> usize;
 // table — adapters must copy before storing. Adapters are gated
 // by `![io]` per the §3.6 effect-on-wrapper rule.
 extern fn getenv(name: * u8) -> * u8;
+
+// ── Temporary trampoline: deleted in the sleep migration's PR 2 ──
+// `sailfin_runtime_sleep` is the existing C entrypoint that
+// `runtime/sfn/clock.sfn`'s `sfn_sleep` wrapper trampolines
+// through today. The PR 2 follow-up (gated on §2.9 Q7,
+// platform-conditional opaque-handle sizing for `* Timespec`)
+// rewrites `sfn_sleep`'s body to call `nanosleep` directly via
+// `runtime/sfn/platform/posix.sfn` and DELETES this declaration
+// in the same PR alongside the C function definition.
+//
+// This is the only `sailfin_runtime_*` symbol declared in
+// `platform/libc.sfn`. The file is otherwise a pure libc surface;
+// reviewers should reject any change that adds another
+// `sailfin_runtime_*` extern here without a matching deletion
+// PR queued behind it.
+extern fn sailfin_runtime_sleep(seconds: float) -> void;

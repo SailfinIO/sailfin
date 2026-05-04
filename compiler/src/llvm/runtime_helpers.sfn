@@ -97,12 +97,21 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "http.post", symbol: "sailfin_intrinsic_http_post", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: ["net"]
     });
 
-    // Concurrency intrinsics (sleep is existing)
+    // Concurrency intrinsics. Sleep call sites route through the
+    // Sailfin-native wrapper `@sfn_sleep` (defined in
+    // `runtime/sfn/clock.sfn` and linked via the runtime capsule's
+    // `sfn-sources`) rather than directly through the C
+    // `@sailfin_runtime_sleep` entrypoint. The wrapper body
+    // currently trampolines through the C function for one PR —
+    // the libc-direct rewrite (over `nanosleep`) is gated on
+    // §2.9 Q7 of the runtime architecture (platform-conditional
+    // opaque-handle sizing). When that lands, `sailfin_runtime_sleep`
+    // disappears from both the C runtime and `platform/libc.sfn`.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "sleep", symbol: "sailfin_runtime_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"]
+        target: "sleep", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"]
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "runtime_sleep_fn", symbol: "sailfin_runtime_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"]
+        target: "runtime_sleep_fn", symbol: "sfn_sleep", return_type: "void", parameter_types: ["double"], effects: ["clock"]
     });
 
     // Monotonic clock for profiling/timing.

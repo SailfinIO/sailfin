@@ -1,0 +1,28 @@
+// runtime/sfn/clock.sfn
+//
+// First C-to-Sailfin runtime migration. Compiled user-program
+// `sleep(...)` calls now lower to `@sfn_sleep` (defined here)
+// rather than the C entrypoint `@sailfin_runtime_sleep` directly.
+// The wrapper body still trampolines through the C function for
+// one PR — the libc-direct rewrite (`nanosleep` over a Sailfin-
+// constructed `Timespec`) waits on §2.9 Q7 of the runtime
+// architecture (platform-conditional opaque-handle sizing). When
+// that lands, this body switches to `nanosleep`, the trampoline
+// disappears from `runtime/sfn/platform/libc.sfn`, and
+// `sailfin_runtime_sleep` is deleted from the C runtime.
+//
+// What's migrated today: the *call path*. Every `sleep(N)` and
+// `runtime.sleep(N)` in compiled output now passes through a
+// real type-checked, effect-checked Sailfin function before
+// reaching the C entrypoint. The compiler is no longer the
+// only thing standing between user code and C.
+//
+// Pinned by `compiler/tests/e2e/test_runtime_clock_skeleton.sh`
+// (typecheck + fmt + LLVM `declare`/`call` shape) and
+// `test_sleep_routes_to_sfn_clock.sh` (call-site rewrite
+// sentinel — fails the moment the registry rewire is reverted).
+import { sailfin_runtime_sleep } from "./platform/libc";
+
+fn sfn_sleep(seconds: float) -> void ![clock] {
+    sailfin_runtime_sleep(seconds);
+}
