@@ -1247,7 +1247,9 @@ The trailing follow-up to #308 + #311. Closes the file-IPC removal campaign: aft
 
 `.test_runner_active` (#311) was intra-process state and got module-local booleans with explicit `enter/exit` lifecycle. The four flags retired by #312 are different: they're env-var-style debug knobs that the user sets once before invoking the compiler. The orchestrator never toggles them mid-run, but they ARE inherited by spawned children (the runtime-sfn-source emit loop, parallel per-module emit), and `_env_flag` reads are popen-shaped — which would be ~1ms per probe on the lowering hot paths if read naively.
 
-**Replacement:** `compiler/src/llvm/lowering_debug_state.sfn` exports three lazy-init cached probes backed by sentinel-encoded `let mut number` caches (`-1` = uninit, `0` = false, `1` = true). First call performs `_env_flag(...) || _legacy_flag_file(...)`; subsequent calls return the cached value without a syscall.
+**Replacement:** `compiler/src/llvm/lowering_debug_state.sfn` exports three lazy-init cached probes. Each flag is backed by two `boolean` cells — `_X_initialized` (have we read the env yet?) and `_X_value` (the resolved env-or-legacy probe result). On first call, the probe reads `_env_flag(...) || _legacy_flag_file(...)`, stores the result in `_X_value`, and flips `_X_initialized` to true. Subsequent calls test `_X_initialized`, skip the syscall, and return `_X_value`.
+
+A single sentinel-encoded `int` cache (`-1` = uninit, `0`/`1` = resolved) was the obvious first design but lowers to `load i64` followed by `sitofp` + `fcmp oeq` because the seed compiler silently widens `int` operands to `double` when comparing against integer literals (the Slice E int↔float disambiguation gap; see roadmap). The dual-boolean shape keeps the hot path on pure-i1 IR — `load i1` → `br i1` → `load i1` — with no float widening. This matches the IR shape `compiler/src/test_runner_state.sfn` produces for the `.test_runner_active` marker after issue #311.
 
 | Env var (preferred)               | Legacy file probe (back-compat one release)   | Effect                                                           |
 | --------------------------------- | --------------------------------------------- | ---------------------------------------------------------------- |
@@ -1275,7 +1277,7 @@ The first three are read inside the LLVM lowering pipeline and use the cached he
 | `compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn` |  1          | `.trace_call_lowering`     |
 | `compiler/src/llvm/expression_lowering/native/statement.sfn`          |  2          | `.trace_lowering` ×2       |
 
-**Probe cost.** Lazy-init: one popen per cache on the first probe; every subsequent read is a single `load i64` + compare. For a 138-module self-host with all three lowering flags off, the total cost is 3 popens (one per flag at first probe per process), versus the pre-migration cost of 13 hot-path × N statements × M functions × `fs.exists` syscalls.
+**Probe cost.** Lazy-init: one popen per cache on the first probe; every subsequent read is a `load i1` (initialized?) → `br i1` → `load i1` (value), all integer ops, no syscall. For a 138-module self-host with all three lowering flags off, the total cost is 3 popens (one per flag at first probe per process), versus the pre-migration cost of 13 hot-path × N statements × M functions × `fs.exists` syscalls.
 
 **Back-compat.** `_legacy_flag_file` continues to honour `touch build/sailfin/.X` for one release. Drop the legacy fallback in the release after #312 ships. Tracked as the trailing item in the file-IPC removal campaign (#197 → #200 → #201 → #217 → #284 → #308 → #311 → #312).
 

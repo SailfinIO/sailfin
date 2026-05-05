@@ -29,8 +29,19 @@
 // `lower_to_llvm_lines_with_parsed_context`, `emit_llvm_function`,
 // `lower_instruction_range`, and friends. A naive `_env_flag` swap
 // would have added ~1ms × N statements × M functions of overhead.
-// The sentinel-cached probe collapses that to one popen at first
-// use and a `load i1` thereafter.
+// The cached probe collapses that to one popen at first use and
+// two `load i1` reads thereafter.
+//
+// **Why dual-boolean (not sentinel-encoded int).** Each flag is
+// represented by two `boolean` cells: `_X_initialized` and `_X_value`.
+// A single sentinel-encoded `int` cache (`-1` = uninit) would lower
+// to `load i64` followed by `sitofp` + `fcmp oeq` because the seed
+// compiler silently widens `int` operands to `double` when comparing
+// against integer literals (the Slice E int↔float disambiguation
+// gap; see roadmap). Two booleans give pure-i1 IR — `load i1` →
+// `br i1` → `load i1` — with no float ops on the hot path. This is
+// the same shape `compiler/src/test_runner_state.sfn` uses for the
+// `.test_runner_active` marker after issue #311.
 //
 // **Lifetime contract.** Each toggle is read from the env exactly
 // once per process (lazily, on first probe). Subsequent probes hit
@@ -47,12 +58,18 @@ import { _env_flag, _legacy_flag_file } from "../cli_commands_utils";
 
 export { trace_lowering, trace_call_lowering, skip_module_globals };
 
-// Sentinel: -1 = uninitialized, 0 = false, 1 = true. Direct boolean
-// caches can't distinguish "false" from "not yet read", which would
-// re-probe on every call after a negative result.
-let mut _trace_lowering_cached: number = -1;
-let mut _trace_call_lowering_cached: number = -1;
-let mut _skip_module_globals_cached: number = -1;
+// Per-flag cache cells. `_X_initialized` flips from false to true on
+// the first call to the flag's probe; `_X_value` is the resolved
+// env-or-legacy probe result. Order of writes is irrelevant under
+// single-threaded compile (the runtime is single-process per stage),
+// but for clarity the value is written before the initialized flag
+// in each probe body.
+let mut _trace_lowering_initialized: boolean = false;
+let mut _trace_lowering_value: boolean = false;
+let mut _trace_call_lowering_initialized: boolean = false;
+let mut _trace_call_lowering_value: boolean = false;
+let mut _skip_module_globals_initialized: boolean = false;
+let mut _skip_module_globals_value: boolean = false;
 
 // True when the user requested LLVM-lowering stderr trace via
 // `SAILFIN_TRACE_LOWERING=1` (or the legacy `.trace_lowering` file).
@@ -60,13 +77,12 @@ let mut _skip_module_globals_cached: number = -1;
 // `lowering_helpers_mangling.sfn`. First call performs the env
 // probe; later calls return the cached boolean.
 fn trace_lowering() -> boolean ![io] {
-    if _trace_lowering_cached < 0 {
-        let active = _env_flag("SAILFIN_TRACE_LOWERING") || _legacy_flag_file("build/sailfin/.trace_lowering");
-        if active { _trace_lowering_cached = 1; } else {
-            _trace_lowering_cached = 0;
-        }
+    if !_trace_lowering_initialized {
+        _trace_lowering_value = _env_flag("SAILFIN_TRACE_LOWERING")
+            || _legacy_flag_file("build/sailfin/.trace_lowering");
+        _trace_lowering_initialized = true;
     }
-    return _trace_lowering_cached == 1;
+    return _trace_lowering_value;
 }
 
 // True when the user requested call-lowering trace via
@@ -76,14 +92,12 @@ fn trace_lowering() -> boolean ![io] {
 // `core_call_lowering.sfn`. Independent of `trace_lowering` because
 // users typically want one or the other, not both.
 fn trace_call_lowering() -> boolean ![io] {
-    if _trace_call_lowering_cached < 0 {
-        let active = _env_flag("SAILFIN_TRACE_CALL_LOWERING")
+    if !_trace_call_lowering_initialized {
+        _trace_call_lowering_value = _env_flag("SAILFIN_TRACE_CALL_LOWERING")
             || _legacy_flag_file("build/sailfin/.trace_call_lowering");
-        if active { _trace_call_lowering_cached = 1; } else {
-            _trace_call_lowering_cached = 0;
-        }
+        _trace_call_lowering_initialized = true;
     }
-    return _trace_call_lowering_cached == 1;
+    return _trace_call_lowering_value;
 }
 
 // True when the user requested module-globals emission to be
@@ -92,12 +106,10 @@ fn trace_call_lowering() -> boolean ![io] {
 // triaging emitter regressions in module-global lowering. Read
 // once per module compile.
 fn skip_module_globals() -> boolean ![io] {
-    if _skip_module_globals_cached < 0 {
-        let active = _env_flag("SAILFIN_SKIP_MODULE_GLOBALS")
+    if !_skip_module_globals_initialized {
+        _skip_module_globals_value = _env_flag("SAILFIN_SKIP_MODULE_GLOBALS")
             || _legacy_flag_file("build/sailfin/.skip_module_globals");
-        if active { _skip_module_globals_cached = 1; } else {
-            _skip_module_globals_cached = 0;
-        }
+        _skip_module_globals_initialized = true;
     }
-    return _skip_module_globals_cached == 1;
+    return _skip_module_globals_value;
 }
