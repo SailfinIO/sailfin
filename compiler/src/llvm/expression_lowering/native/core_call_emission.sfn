@@ -4,8 +4,8 @@
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
 import { NativeFunction } from "../../../native_ir";
 import { find_last_index_of_char, substring } from "../../../string_utils";
-import { trace_lowering } from "../../lowering_debug_state";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
+import { trace_lowering } from "../../lowering_debug_state";
 import { merge_string_constants } from "../../strings";
 import { find_interface_info_by_name } from "../../type_context_queries";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";

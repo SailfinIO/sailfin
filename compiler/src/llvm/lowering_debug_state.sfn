@@ -45,11 +45,7 @@
 // shim in the release after #312 ships.
 import { _env_flag, _legacy_flag_file } from "../cli_commands_utils";
 
-export {
-    trace_lowering,
-    trace_call_lowering,
-    skip_module_globals,
-};
+export { trace_lowering, trace_call_lowering, skip_module_globals };
 
 // Sentinel: -1 = uninitialized, 0 = false, 1 = true. Direct boolean
 // caches can't distinguish "false" from "not yet read", which would
@@ -65,11 +61,8 @@ let mut _skip_module_globals_cached: number = -1;
 // probe; later calls return the cached boolean.
 fn trace_lowering() -> boolean ![io] {
     if _trace_lowering_cached < 0 {
-        let active = _env_flag("SAILFIN_TRACE_LOWERING")
-            || _legacy_flag_file("build/sailfin/.trace_lowering");
-        if active {
-            _trace_lowering_cached = 1;
-        } else {
+        let active = _env_flag("SAILFIN_TRACE_LOWERING") || _legacy_flag_file("build/sailfin/.trace_lowering");
+        if active { _trace_lowering_cached = 1; } else {
             _trace_lowering_cached = 0;
         }
     }
@@ -86,9 +79,7 @@ fn trace_call_lowering() -> boolean ![io] {
     if _trace_call_lowering_cached < 0 {
         let active = _env_flag("SAILFIN_TRACE_CALL_LOWERING")
             || _legacy_flag_file("build/sailfin/.trace_call_lowering");
-        if active {
-            _trace_call_lowering_cached = 1;
-        } else {
+        if active { _trace_call_lowering_cached = 1; } else {
             _trace_call_lowering_cached = 0;
         }
     }
@@ -104,9 +95,7 @@ fn skip_module_globals() -> boolean ![io] {
     if _skip_module_globals_cached < 0 {
         let active = _env_flag("SAILFIN_SKIP_MODULE_GLOBALS")
             || _legacy_flag_file("build/sailfin/.skip_module_globals");
-        if active {
-            _skip_module_globals_cached = 1;
-        } else {
+        if active { _skip_module_globals_cached = 1; } else {
             _skip_module_globals_cached = 0;
         }
     }

@@ -13,8 +13,8 @@ import {
     substring
 } from "../../../string_utils";
 import { test_runner_trace } from "../../../test_runner_state";
-import { trace_lowering } from "../../lowering_debug_state";
 import { default_return_literal } from "../../expressions_helpers";
+import { trace_lowering } from "../../lowering_debug_state";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
 // Import types from modular structure

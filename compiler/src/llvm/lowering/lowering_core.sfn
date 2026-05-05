@@ -35,7 +35,6 @@ import {
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
 import { test_runner_active, test_runner_trace } from "../../test_runner_state";
-import { trace_lowering, trace_call_lowering, skip_module_globals } from "../lowering_debug_state";
 import {
     collect_direct_function_effects,
     collect_function_call_graph,
@@ -46,6 +45,7 @@ import {
     apply_layout_manifest_to_module,
     collect_imported_module_context_for_module
 } from "../imports";
+import { skip_module_globals, trace_call_lowering, trace_lowering } from "../lowering_debug_state";
 import { collect_exported_symbol_names } from "../rendering_helpers";
 import { empty_string_constant_set, escape_string_for_llvm } from "../strings";
 import {

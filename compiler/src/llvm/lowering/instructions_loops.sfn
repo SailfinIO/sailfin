@@ -3,11 +3,11 @@
 // Control flow handler: loop instruction lowering (infinite loops with break/continue).
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
 import { char_code, grapheme_at, substring } from "../../string_utils";
-import { trace_lowering } from "../lowering_debug_state";
 import { lower_expression } from "../expression_lowering/native/core";
 import { find_local_binding } from "../expressions_bindings";
 import { format_temp_name } from "../expressions_helpers";
 import { make_child_scope_id } from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,

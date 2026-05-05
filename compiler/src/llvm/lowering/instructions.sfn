@@ -10,11 +10,11 @@
 import { NativeFunction, NativeInstruction } from "../../native_ir";
 import { substring } from "../../string_utils";
 import { test_runner_trace } from "../../test_runner_state";
-import { trace_lowering } from "../lowering_debug_state";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
 import { lower_expression_statement, lower_return_instruction } from "../expression_lowering/native/statement";
 import { parse_inline_let_expression } from "../expression_lowering/native/statement_parsing";
 import { apply_lifetime_release_events } from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,

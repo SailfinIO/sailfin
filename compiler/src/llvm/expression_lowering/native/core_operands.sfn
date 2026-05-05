@@ -7,8 +7,8 @@
 // relational operators (`emit_comparison_instruction`, `emit_boolean_and`),
 // and provides local variable loading (`load_local_operand`).
 import { char_code } from "../../../string_utils";
-import { trace_lowering } from "../../lowering_debug_state";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
+import { trace_lowering } from "../../lowering_debug_state";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
     BinaryAlignmentResult,

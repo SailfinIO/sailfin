@@ -13,10 +13,10 @@
 import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
 import { test_runner_trace } from "../../test_runner_state";
-import { trace_lowering } from "../lowering_debug_state";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
 import { default_return_literal } from "../expressions_helpers";
 import { format_root_scope_id } from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
 import { should_internalize_function } from "../rendering_helpers";
 import {
     append_string_constant,

@@ -2,7 +2,6 @@
 //
 // Let binding instruction lowering.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { trace_lowering } from "../lowering_debug_state";
 import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
@@ -16,6 +15,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
 import { find_function_by_name_or_import } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
