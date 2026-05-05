@@ -40,9 +40,17 @@
 >     call return type defaults to `i8*` when call result is unused.
 >   - [#307](https://github.com/SailfinIO/sailfin/issues/307) — `sleep()`
 >     unit semantics mismatch (prelude says ms, C runtime treats as s).
->   - [#308](https://github.com/SailfinIO/sailfin/issues/308) — link-time
->     subprocess-emit of runtime/sfn/*.sfn modules races on shared
->     `build/sailfin/.foo` scratch IPC files — PR 2's hard prerequisite.
+>   - [#308](https://github.com/SailfinIO/sailfin/issues/308) —
+>     **resolved (PR A).** Re-scoped from "scratch-dir isolation"
+>     to "remove file-IPC for compiler debug toggles + wire the
+>     runtime sfn-sources consumer." Toggle file probes
+>     (`build/sailfin/.skip_typecheck`, `.trace_emit`,
+>     `.trace_test_runner`, `.dump_test_sources`) now read
+>     `SAILFIN_*` env vars first with a one-release file shim;
+>     `_compile_runtime_sfn_sources` in `cli_main.sfn` spawns
+>     children via `sh -c "VAR= <self> emit ..."` so child env
+>     is explicit. Dormant — manifest population + C trampoline
+>     removal happen in PR B of the sleep migration.
 > - **`kind = "runtime"` capsules gain `sfn-sources` schema field
 >   (dormant in this PR).** TOML getter
 >   (`toml_get_sfn_sources`), `RuntimeCapsuleArtifacts.sfn_sources`

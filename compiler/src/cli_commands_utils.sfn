@@ -11,6 +11,8 @@ export {
     _toml_trim_cmd,
     _shell_read_cmd,
     _get_env_cmd,
+    _env_flag,
+    _legacy_flag_file,
     _get_home_cmd,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,
@@ -121,6 +123,46 @@ fn _get_env_cmd(name: string) -> string ![io] {
 }
 
 fn _get_home_cmd() -> string ![io] { return _get_env_cmd("HOME"); }
+
+// Compiler debug toggle: returns true when `name` is set to a value
+// other than "", "0", or "false". The legacy file probes
+// (`build/sailfin/.skip_typecheck`, `.trace_emit`,
+// `.test_runner_active`, `.trace_test_runner`,
+// `.dump_test_sources`) raced when a parent compiler spawned a
+// child for runtime-module emit — the child inherited the parent's
+// cwd and silently picked up parent-toggled flags. Env vars
+// inherit by default but the parent can clear them per-spawn with
+// `sh -c "SAILFIN_X= <self> ..."`. See `_compile_runtime_sfn_sources`
+// in `cli_main.sfn` for the producer side. `_legacy_flag_file`
+// preserves one release of back-compat for scripts that still
+// `touch build/sailfin/.foo`; drop in the next release.
+fn _env_flag(name: string) -> boolean ![io] {
+    let v = _get_env_cmd(name);
+    if v.length == 0 { return false; }
+    if v == "0" { return false; }
+    if v == "false" { return false; }
+    return true;
+}
+
+// Back-compat: scripts that still `touch build/sailfin/.foo` keep
+// working for one release. The deprecation note lives in
+// `docs/build-performance.md` rather than at runtime — printing on
+// every probe would spam test runs that legitimately have the
+// file in place. Drop this helper (and the file probes) in the
+// next release.
+//
+// **Race-safety knob.** When a parent compiler spawns a child
+// (`_compile_runtime_sfn_sources` in `cli_main.sfn`), the child
+// gets `SAILFIN_NO_LEGACY_PROBE=1` so it ignores any flag files
+// left in the shared cwd by the parent. Without this knob, the
+// back-compat shim would re-introduce the same parent/child
+// IPC race issue #308 was fixed for users who haven't migrated
+// off the file probes yet. Only the user-launched parent reads
+// the legacy files; spawned children stay clean.
+fn _legacy_flag_file(path: string) -> boolean ![io] {
+    if _get_env_cmd("SAILFIN_NO_LEGACY_PROBE").length > 0 { return false; }
+    return fs.exists(path);
+}
 
 fn _ensure_dir_cmd(path: string) ![io] {
     if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
