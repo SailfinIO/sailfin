@@ -19,7 +19,11 @@
 #include <sys/wait.h>
 #endif
 
-#if !defined(__APPLE__)
+#if !defined(_WIN32)
+/* `<time.h>` is needed on every POSIX target (Linux, macOS, BSD) for
+ * `time_t`, `struct timespec`, and `nanosleep` — used by
+ * `sailfin_runtime_sleep`. macOS's `<mach/mach_time.h>` does not
+ * transitively export these. */
 #include <time.h>
 #endif
 
@@ -1884,8 +1888,29 @@ void sailfin_runtime_sleep(double milliseconds)
         return;
     }
 #if defined(_WIN32)
-    double clamped = milliseconds > 4294967295.0 ? 4294967295.0 : milliseconds;
-    Sleep((DWORD)clamped);
+    /* Win32 `Sleep(INFINITE)` (= 0xFFFFFFFF) blocks forever, so clamp
+     * any value at or above that to `INFINITE - 1` (~49.7 days). The
+     * loss of precision here only matters for absurdly long sleeps,
+     * for which an extra millisecond of clamping is irrelevant.
+     *
+     * Round fractional milliseconds UP so sub-millisecond inputs
+     * (e.g. `sleep(0.5)`) still sleep at least 1 ms, matching the
+     * POSIX `nanosleep` path below. Without this, `(DWORD)0.5`
+     * truncates to 0 and `Sleep(0)` only yields the scheduler. */
+    DWORD win_ms;
+    if (milliseconds >= 4294967294.0)
+    {
+        win_ms = 0xFFFFFFFEu;
+    }
+    else
+    {
+        win_ms = (DWORD)milliseconds;
+        if ((double)win_ms < milliseconds)
+        {
+            win_ms += 1;
+        }
+    }
+    Sleep(win_ms);
 #else
     /* nanosleep is the recommended POSIX primitive (usleep was removed
      * in POSIX.1-2008 and errors when useconds_t >= 1,000,000). Split
