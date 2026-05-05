@@ -14,6 +14,7 @@ import {
 } from "../../../string_utils";
 import { test_runner_trace } from "../../../test_runner_state";
 import { default_return_literal } from "../../expressions_helpers";
+import { trace_lowering } from "../../lowering_debug_state";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
 // Import types from modular structure
@@ -160,7 +161,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     // in the 0.5.0-alpha.22 seed.
     let mut current_bindings = bindings;
     let mut current_locals = locals;
-    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let debug_lowering = trace_lowering();
     if debug_lowering {
         print.err("emit-llvm: lower_expression_statement start fn="
             + function_name
@@ -400,7 +401,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     let mut lifetime_regions: LifetimeRegionMetadata[] = [];
     let mut lifetime_releases: LifetimeReleaseEvent[] = [];
     let mut current_next_region: number = next_region_id;
-    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let debug_lowering = trace_lowering();
     let trace = test_runner_trace();
 
     // Use parameters directly instead of file IPC.

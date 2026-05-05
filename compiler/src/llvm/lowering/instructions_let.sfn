@@ -15,6 +15,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
 import { find_function_by_name_or_import } from "../rendering_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
@@ -79,7 +80,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     let mut lifetime_releases: LifetimeReleaseEvent[] = [];
     let mut current_next_region: number = next_region_id;
     let mut mutations: LocalMutation[] = [];
-    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let debug_lowering = trace_lowering();
     if initializer_span == null { initializer_span = instruction.span; }
 
     let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span);

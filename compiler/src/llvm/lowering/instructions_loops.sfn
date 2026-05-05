@@ -7,6 +7,7 @@ import { lower_expression } from "../expression_lowering/native/core";
 import { find_local_binding } from "../expressions_bindings";
 import { format_temp_name } from "../expressions_helpers";
 import { make_child_scope_id } from "../lifetime";
+import { trace_lowering } from "../lowering_debug_state";
 import { empty_string_constant_set, merge_string_constants } from "../strings";
 import {
     BlockLoweringResult,
@@ -125,7 +126,7 @@ fn lower_loop_instruction(function: NativeFunction, start_index: number, llvm_re
     let mut collected_mutations: LocalMutation[] = [];
     let mut collected_string_constants: StringConstant[] = empty_string_constant_set();
 
-    let debug_loop = fs.exists("build/sailfin/.trace_lowering");
+    let debug_loop = trace_lowering();
     if debug_loop {
         print.err("emit-llvm: lower_loop start fn=" + function.name
             + " start_index="

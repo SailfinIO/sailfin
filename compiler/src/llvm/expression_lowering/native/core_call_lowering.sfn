@@ -5,6 +5,7 @@ import { NativeFunction } from "../../../native_ir";
 import { index_of, substring } from "../../../string_utils";
 import { format_temp_name } from "../../expressions_helpers";
 import { is_simple_identifier } from "../../expressions_helpers";
+import { trace_call_lowering } from "../../lowering_debug_state";
 import { find_runtime_helper } from "../../runtime_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { resolve_enum_info_for_literal, resolve_enum_variant_info } from "../../type_context_queries";
@@ -60,7 +61,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
 
     // Check if this is an enum variant constructor call (e.g., LiteralValue.Null())
     let dot_index = index_of(trimmed_target, ".");
-    let trace_calls = fs.exists("build/sailfin/.trace_call_lowering");
+    let trace_calls = trace_call_lowering();
     if trace_calls {
         print.err("call_lowering: target='" + trimmed_target + "' dot_index="
             + number_to_string(dot_index)

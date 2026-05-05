@@ -5,6 +5,7 @@
 import { NativeFunction } from "../../../native_ir";
 import { find_last_index_of_char, substring } from "../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
+import { trace_lowering } from "../../lowering_debug_state";
 import { merge_string_constants } from "../../strings";
 import { find_interface_info_by_name } from "../../type_context_queries";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
@@ -41,7 +42,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     let mut result_lines = current_lines;
     let mut result_temp: number = current_temp;
     let mut result_diagnostics = diagnostics;
-    let _trace_ccl = fs.exists("build/sailfin/.trace_lowering");
+    let _trace_ccl = trace_lowering();
 
     // Coerce operands to expected parameter types
     if _trace_ccl {

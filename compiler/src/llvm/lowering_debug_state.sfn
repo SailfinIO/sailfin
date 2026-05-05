@@ -1,0 +1,115 @@
+// compiler/src/llvm/lowering_debug_state.sfn
+//
+// Cached env-var probes for compiler-internal LLVM-lowering debug
+// toggles. Replaces three `fs.exists("build/sailfin/.X")` flag-file
+// probes that issue #312 retired:
+//
+//   build/sailfin/.trace_lowering        — 11 probe sites on per-
+//                                          statement / per-function
+//                                          lowering hot paths
+//   build/sailfin/.trace_call_lowering   — 2 probe sites paired with
+//                                          .trace_lowering on the
+//                                          enum/call lowering path
+//   build/sailfin/.skip_module_globals   — 1 probe site at module-
+//                                          globals emission entry
+//
+// **Why migrate.** The flag-file pattern was the same race-prone
+// shape that issues #308 and #311 retired for user-facing toggles
+// and the `.test_runner_active` marker: a parent compiler that
+// touched any of these files silently affected spawned children
+// (the runtime-sfn-source emit loop in `_compile_runtime_sfn_sources`,
+// the parallel per-module emit loop in `_cr_run_parallel_emit`).
+// Env vars inherit cleanly and can be scrubbed per-spawn with
+// `sh -c "SAILFIN_X= <self> ..."` when isolation is required.
+//
+// **Why cache.** `_env_flag` reads the env via
+// `_get_env_cmd → _shell_read_cmd → sailfin_runtime_shell_capture`
+// (popen). That cost is ~1ms per probe — negligible at startup,
+// but `.trace_lowering` is read inside per-statement loops in
+// `lower_to_llvm_lines_with_parsed_context`, `emit_llvm_function`,
+// `lower_instruction_range`, and friends. A naive `_env_flag` swap
+// would have added ~1ms × N statements × M functions of overhead.
+// The cached probe collapses that to one popen at first use and
+// two `load i1` reads thereafter.
+//
+// **Why dual-boolean (not sentinel-encoded int).** Each flag is
+// represented by two `boolean` cells: `_X_initialized` and `_X_value`.
+// A single sentinel-encoded `int` cache (`-1` = uninit) would lower
+// to `load i64` followed by `sitofp` + `fcmp oeq` because the seed
+// compiler silently widens `int` operands to `double` when comparing
+// against integer literals (the Slice E int↔float disambiguation
+// gap; see roadmap). Two booleans give pure-i1 IR — `load i1` →
+// `br i1` → `load i1` — with no float ops on the hot path. This is
+// the same shape `compiler/src/test_runner_state.sfn` uses for the
+// `.test_runner_active` marker after issue #311.
+//
+// **Lifetime contract.** Each toggle is read from the env exactly
+// once per process (lazily, on first probe). Subsequent probes hit
+// the cached value. The compiler does not re-read the env mid-run;
+// users wanting to toggle a flag re-invoke the binary. This matches
+// the `.test_runner_active` semantics in `test_runner_state.sfn`
+// but lazy-init rather than explicit-enter, because trace flags are
+// process-global rather than scoped to a single CLI subcommand.
+//
+// **Back-compat.** `_legacy_flag_file` keeps `touch
+// build/sailfin/.trace_lowering` working for one release. Drop the
+// shim in the release after #312 ships.
+import { _env_flag, _legacy_flag_file } from "../cli_commands_utils";
+
+export { trace_lowering, trace_call_lowering, skip_module_globals };
+
+// Per-flag cache cells. `_X_initialized` flips from false to true on
+// the first call to the flag's probe; `_X_value` is the resolved
+// env-or-legacy probe result. Order of writes is irrelevant under
+// single-threaded compile (the runtime is single-process per stage),
+// but for clarity the value is written before the initialized flag
+// in each probe body.
+let mut _trace_lowering_initialized: boolean = false;
+let mut _trace_lowering_value: boolean = false;
+let mut _trace_call_lowering_initialized: boolean = false;
+let mut _trace_call_lowering_value: boolean = false;
+let mut _skip_module_globals_initialized: boolean = false;
+let mut _skip_module_globals_value: boolean = false;
+
+// True when the user requested LLVM-lowering stderr trace via
+// `SAILFIN_TRACE_LOWERING=1` (or the legacy `.trace_lowering` file).
+// Read in 11 sites across `lowering/`, `expression_lowering/`, and
+// `lowering_helpers_mangling.sfn`. First call performs the env
+// probe; later calls return the cached boolean.
+fn trace_lowering() -> boolean ![io] {
+    if !_trace_lowering_initialized {
+        _trace_lowering_value = _env_flag("SAILFIN_TRACE_LOWERING")
+            || _legacy_flag_file("build/sailfin/.trace_lowering");
+        _trace_lowering_initialized = true;
+    }
+    return _trace_lowering_value;
+}
+
+// True when the user requested call-lowering trace via
+// `SAILFIN_TRACE_CALL_LOWERING=1` (or the legacy
+// `.trace_call_lowering` file). Read in 2 sites — enum lowering in
+// `lowering_core.sfn` and the call emission path in
+// `core_call_lowering.sfn`. Independent of `trace_lowering` because
+// users typically want one or the other, not both.
+fn trace_call_lowering() -> boolean ![io] {
+    if !_trace_call_lowering_initialized {
+        _trace_call_lowering_value = _env_flag("SAILFIN_TRACE_CALL_LOWERING")
+            || _legacy_flag_file("build/sailfin/.trace_call_lowering");
+        _trace_call_lowering_initialized = true;
+    }
+    return _trace_call_lowering_value;
+}
+
+// True when the user requested module-globals emission to be
+// skipped via `SAILFIN_SKIP_MODULE_GLOBALS=1` (or the legacy
+// `.skip_module_globals` file). Behavior-changing — used for
+// triaging emitter regressions in module-global lowering. Read
+// once per module compile.
+fn skip_module_globals() -> boolean ![io] {
+    if !_skip_module_globals_initialized {
+        _skip_module_globals_value = _env_flag("SAILFIN_SKIP_MODULE_GLOBALS")
+            || _legacy_flag_file("build/sailfin/.skip_module_globals");
+        _skip_module_globals_initialized = true;
+    }
+    return _skip_module_globals_value;
+}

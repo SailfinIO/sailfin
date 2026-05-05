@@ -12,6 +12,7 @@ import {
     NativeStruct
 } from "../../native_ir";
 import { substring } from "../../string_utils";
+import { trace_lowering } from "../lowering_debug_state";
 import {
     CapabilityManifest,
     TraitDescriptor,
@@ -43,7 +44,7 @@ import {
 
 fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], current_module_slug: string, imported_native_texts: string[], native_text_path: string) -> MangledModuleResult ![io] {
     let mut diagnostics: string[] = [];
-    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let debug_lowering = trace_lowering();
     if debug_lowering {
         print.err("emit-llvm: mangle start module=" + current_module_slug);
     }

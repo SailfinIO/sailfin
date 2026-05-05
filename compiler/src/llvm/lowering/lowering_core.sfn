@@ -45,6 +45,7 @@ import {
     apply_layout_manifest_to_module,
     collect_imported_module_context_for_module
 } from "../imports";
+import { skip_module_globals, trace_call_lowering, trace_lowering } from "../lowering_debug_state";
 import { collect_exported_symbol_names } from "../rendering_helpers";
 import { empty_string_constant_set, escape_string_for_llvm } from "../strings";
 import {
@@ -278,7 +279,7 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
 }
 
 fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path: string) -> LoweredLLVMLinesResult ![io] {
-    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let debug_lowering = trace_lowering();
     if debug_lowering { print.err("emit-llvm: phase=start"); }
     if debug_lowering {
         let mut artifact_count: number = 0;
@@ -298,7 +299,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         print.err("emit-llvm: dbg-F after diagnostics sanitize");
     }
     let safe_entry_points = sanitize_entry_points(native_module.entry_points, debug_lowering);
-    let _trace_enums = fs.exists("build/sailfin/.trace_call_lowering");
+    let _trace_enums = trace_call_lowering();
 
     let mut is_test_module = is_test_module_slug(native_module.module_name);
     if !is_test_module {
@@ -498,7 +499,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
         if debug_lowering {
             print.err("emit-llvm: module bindings empty; skipping module globals");
         }
-    } else if fs.exists("build/sailfin/.skip_module_globals") {
+    } else if skip_module_globals() {
         if debug_lowering {
             print.err("emit-llvm: skipping module globals");
         }
