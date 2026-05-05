@@ -207,7 +207,8 @@ fn compile_to_llvm(source: string) -> string ![io] {
 // when the big joined IR string was returned and then printed.
 fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] {
     let program: Program = parse_program(source);
-    let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK") || _legacy_flag_file("build/sailfin/.skip_typecheck");
+    let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
+        || _legacy_flag_file("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
         if typecheck_has_errors(program) {
             let diagnostics = typecheck_diagnostics(program);
@@ -226,7 +227,8 @@ fn print_llvm_with_module(source: string, module_name: string) -> boolean ![io] 
 
 fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![io] {
     let program: Program = parse_program(source);
-    let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK") || _legacy_flag_file("build/sailfin/.skip_typecheck");
+    let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
+        || _legacy_flag_file("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
         if typecheck_has_errors(program) {
             let diagnostics = typecheck_diagnostics(program);
@@ -276,7 +278,8 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
     let t_parse = _ms_since(t0);
 
     let t1 = monotonic_millis();
-    let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK") || _legacy_flag_file("build/sailfin/.skip_typecheck");
+    let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
+        || _legacy_flag_file("build/sailfin/.skip_typecheck");
     let mut t_typecheck: number = 0;
     if !skip_typecheck {
         t_typecheck = _ms_since(t1);
@@ -543,7 +546,8 @@ fn _looks_like_llvm_text(text: string) -> boolean {
 // is safe to invoke from parallel workers.
 fn compile_to_llvm_file_with_module(source: string, module_name: string, out_path: string) -> boolean ![io] {
     let program: Program = parse_program(source);
-    let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK") || _legacy_flag_file("build/sailfin/.skip_typecheck");
+    let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
+        || _legacy_flag_file("build/sailfin/.skip_typecheck");
     if !skip_typecheck {
         if typecheck_has_errors(program) {
             let diagnostics = typecheck_diagnostics(program);

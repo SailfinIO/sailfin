@@ -33,11 +33,6 @@ import {
 } from "./capsule_resolver";
 import { handle_check_command } from "./cli_check";
 import {
-    _env_flag,
-    _shell_read_cmd,
-    _shell_single_quote_arg
-} from "./cli_commands_utils";
-import {
     handle_add_command,
     handle_config_command,
     handle_fmt_command,
@@ -48,6 +43,7 @@ import {
     handle_publish_command,
     handle_test_command
 } from "./cli_commands";
+import { _env_flag, _shell_read_cmd, _shell_single_quote_arg } from "./cli_commands_utils";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_with_module,
@@ -519,7 +515,10 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
     let mut probe: number = 0;
     loop {
         if probe >= runtime_capsules.length { break; }
-        if runtime_capsules[probe].sfn_sources.length > 0 { has_any = true; break; }
+        if runtime_capsules[probe].sfn_sources.length > 0 {
+            has_any = true;
+            break;
+        }
         probe += 1;
     }
     if !has_any {
@@ -566,8 +565,7 @@ fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out
                     + _shell_single_quote_arg(src);
                 let rc = process.run(["sh", "-c", cmd]);
                 if rc != 0 {
-                    print("sfn build: failed to emit runtime sfn-source "
-                        + src
+                    print("sfn build: failed to emit runtime sfn-source " + src
                         + " (child exit="
                         + number_to_string(rc)
                         + ")");
