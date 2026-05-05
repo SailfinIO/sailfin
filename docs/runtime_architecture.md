@@ -16,7 +16,7 @@
 >   `runtime/native/src/sailfin_runtime.c` — three lines, calls
 >   `sailfin_runtime_sleep`. The Sailfin definition
 >   (`runtime/sfn/clock.sfn`, exposing
->   `sfn_sleep(seconds: float) -> void ![clock]`) ships in the
+>   `sfn_sleep(milliseconds: float) -> void ![clock]`) ships in the
 >   tree as a typecheck/emit smoke target and as the future
 >   definition site, but is **not linked into any binary today**.
 >   PR 2 of the migration replaces the C trampoline with a real
@@ -855,7 +855,7 @@ runtime model invocation is post-1.0 (per roadmap).
 #### 2.7.4 Clock Adapter
 
 - `sfn_clock_millis() -> i64` — via `extern fn clock_gettime` in `platform/posix.sfn`.
-- `sfn_sleep(ms: i64) -> void` — via `extern fn nanosleep` in `platform/posix.sfn`.
+- `sfn_sleep(milliseconds: float) -> void` — via `extern fn nanosleep` in `platform/posix.sfn`. The unit (milliseconds) is the public contract end-to-end; see `runtime/sfn/clock.sfn` and the `sleep(ms)` surface in `runtime/prelude.sfn` / `capsules/sfn/time/src/mod.sfn`. Issue #307 audited and locked the units across all four layers.
 
 ### 2.8 I/O and Timing Primitives
 

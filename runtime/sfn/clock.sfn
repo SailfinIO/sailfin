@@ -7,6 +7,13 @@
 // to today is defined as a C trampoline in
 // `runtime/native/src/sailfin_runtime.c`.
 //
+// Unit contract: `milliseconds`. This matches the public `sleep(ms)`
+// surface in the prelude (`runtime/prelude.sfn`) and the `time`
+// capsule (`capsules/sfn/time/src/mod.sfn`), the language spec
+// (`site/.../reference/standard-library.md`), and
+// `docs/runtime_architecture.md` §2.7.4. Issue #307 is the unit
+// audit that locked this in across all four layers.
+//
 // PR 2 of the sleep migration replaces the C trampoline with a real
 // Sailfin link of this file, once the build infrastructure for
 // compiling `runtime/sfn/*.sfn` modules into link-time `.o`s is
@@ -28,7 +35,9 @@
 // Pinned by `compiler/tests/e2e/test_runtime_clock_skeleton.sh`
 // (typecheck + fmt + LLVM `define`/`call` shape) and
 // `test_sleep_routes_to_sfn_clock.sh` (call-site rewrite sentinel —
-// fails the moment the registry rewire is reverted).
+// fails the moment the registry rewire is reverted). The end-to-end
+// unit semantics are pinned by
+// `test_sleep_unit_semantics.sh` (issue #307).
 //
 // When PR 2 lands and this file becomes the sole definition site,
 // the `// dormant` framing here gets stripped, the C trampoline in
@@ -37,6 +46,6 @@
 // either land in PR 2 or follow as PR 3.
 import { sailfin_runtime_sleep } from "./platform/libc";
 
-fn sfn_sleep(seconds: float) -> void ![clock] {
-    sailfin_runtime_sleep(seconds);
+fn sfn_sleep(milliseconds: float) -> void ![clock] {
+    sailfin_runtime_sleep(milliseconds);
 }
