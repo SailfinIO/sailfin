@@ -1870,26 +1870,45 @@ void sailfin_runtime_debug_dump_ptr(void *ptr)
     fflush(stderr);
 }
 
-void sailfin_runtime_sleep(double seconds)
+void sailfin_runtime_sleep(double milliseconds)
 {
-    if (seconds <= 0.0)
+    /* Contract: input is milliseconds. Public surface is `sleep(ms)` in
+     * the prelude / `time` capsule (see runtime/prelude.sfn,
+     * capsules/sfn/time/src/mod.sfn) and `sfn_sleep(milliseconds)` in
+     * the Sailfin wrapper (runtime/sfn/clock.sfn). Documented at
+     * docs/runtime_architecture.md §2.7.4 and the language spec
+     * (site/.../reference/standard-library.md). Aligns with
+     * JS setTimeout / Java Thread.sleep / Rust Duration::from_millis. */
+    if (milliseconds <= 0.0)
     {
         return;
     }
 #if defined(_WIN32)
-    double millis = seconds * 1000.0;
-    if (millis > 4294967295.0)
-    {
-        millis = 4294967295.0;
-    }
-    Sleep((DWORD)millis);
+    double clamped = milliseconds > 4294967295.0 ? 4294967295.0 : milliseconds;
+    Sleep((DWORD)clamped);
 #else
-    double micros = seconds * 1000000.0;
-    if (micros > 2147483647.0)
+    /* nanosleep is the recommended POSIX primitive (usleep was removed
+     * in POSIX.1-2008 and errors when useconds_t >= 1,000,000). Split
+     * the duration into integer seconds + nanoseconds and resume on
+     * EINTR so signal delivery can't shorten the wait. */
+    double whole_seconds = milliseconds / 1000.0;
+    time_t secs = (time_t)whole_seconds;
+    double residual_ms = milliseconds - (double)secs * 1000.0;
+    long nanos = (long)(residual_ms * 1000000.0);
+    if (nanos < 0)
     {
-        micros = 2147483647.0;
+        nanos = 0;
     }
-    usleep((useconds_t)micros);
+    else if (nanos >= 1000000000L)
+    {
+        nanos = 999999999L;
+    }
+    struct timespec req = { secs, nanos };
+    struct timespec rem;
+    while (nanosleep(&req, &rem) == -1 && errno == EINTR)
+    {
+        req = rem;
+    }
 #endif
 }
 
@@ -1900,6 +1919,10 @@ void sailfin_runtime_sleep(double seconds)
  * That symbol must be defined for the link to resolve; this C
  * function provides it globally via the existing runtime object.
  *
+ * Argument is milliseconds — same contract as the public `sleep(ms)`
+ * surface and `sailfin_runtime_sleep` (see issue #307 for the unit
+ * audit that locked this in).
+ *
  * The intended end-state is a Sailfin implementation of `sfn_sleep`
  * compiled from `runtime/sfn/clock.sfn`. PR 2 of the migration
  * replaces this trampoline once the build infrastructure for
@@ -1908,9 +1931,9 @@ void sailfin_runtime_sleep(double seconds)
  * point the C runtime stops defining `sfn_sleep` and the Sailfin
  * `clock.o` becomes the sole definition site.
  */
-void sfn_sleep(double seconds)
+void sfn_sleep(double milliseconds)
 {
-    sailfin_runtime_sleep(seconds);
+    sailfin_runtime_sleep(milliseconds);
 }
 
 /* Check if a string pointer looks like a corrupted double-encoded value.

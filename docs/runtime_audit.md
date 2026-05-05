@@ -38,8 +38,14 @@
 >     under specific output-path / scratch-state combinations.
 >   - [#306](https://github.com/SailfinIO/sailfin/issues/306) — extern
 >     call return type defaults to `i8*` when call result is unused.
->   - [#307](https://github.com/SailfinIO/sailfin/issues/307) — `sleep()`
->     unit semantics mismatch (prelude says ms, C runtime treats as s).
+>   - [#307](https://github.com/SailfinIO/sailfin/issues/307) — **resolved
+>     2026-05-05.** `sleep()` unit semantics audited and locked to
+>     **milliseconds end-to-end** across the prelude / `sfn/time` capsule,
+>     `runtime/sfn/clock.sfn` (`sfn_sleep(milliseconds: float)`),
+>     `runtime/sfn/platform/libc.sfn`, and the C entrypoint
+>     (`sailfin_runtime_sleep(double milliseconds)`). POSIX implementation
+>     upgraded from deprecated `usleep` to `nanosleep` with EINTR-resume.
+>     Pinned by `compiler/tests/e2e/test_sleep_unit_semantics.sh`.
 >   - [#308](https://github.com/SailfinIO/sailfin/issues/308) —
 >     **resolved (PR A).** Re-scoped from "scratch-dir isolation"
 >     to "remove file-IPC for compiler debug toggles + wire the

@@ -80,7 +80,9 @@ extern fn getenv(name: * u8) -> * u8;
 // ── Temporary trampoline: deleted in the sleep migration's PR 2 ──
 // `sailfin_runtime_sleep` is the existing C entrypoint that
 // `runtime/sfn/clock.sfn`'s `sfn_sleep` wrapper trampolines
-// through today. The PR 2 follow-up (gated on §2.9 Q7,
+// through today. Argument is milliseconds — same contract as the
+// public `sleep(ms)` surface (issue #307 locked the units across
+// all layers). The PR 2 follow-up (gated on §2.9 Q7,
 // platform-conditional opaque-handle sizing for `* Timespec`)
 // rewrites `sfn_sleep`'s body to call `nanosleep` directly via
 // `runtime/sfn/platform/posix.sfn` and DELETES this declaration
@@ -91,4 +93,4 @@ extern fn getenv(name: * u8) -> * u8;
 // reviewers should reject any change that adds another
 // `sailfin_runtime_*` extern here without a matching deletion
 // PR queued behind it.
-extern fn sailfin_runtime_sleep(seconds: float) -> void;
+extern fn sailfin_runtime_sleep(milliseconds: float) -> void;
