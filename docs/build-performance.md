@@ -1185,6 +1185,24 @@ build/sailfin/.skip_test_inlining        build/sailfin/.trace_emit
 
 These are checked via `fs.exists`/`fs.readFile` as a workaround for the lack of `--feature-flag X=Y` plumbing in the CLI. They carry no pipeline data and add no per-module I/O overhead in the common case (the seed checks once at startup). Migrating these to env vars or proper CLI flags is a hygiene cleanup, not a performance task.
 
+### Compiler debug toggles — env-var migration (issue #308)
+
+The flag-file pattern raced when the parent compiler spawned a child compiler to emit a runtime sfn-source at link time: the child inherited the parent's cwd and silently picked up parent-written flag files. As of issue #308, the user-facing debug toggles are env vars; the file probes still work for one release as a back-compat shim and will be removed in the release after.
+
+| Env var (preferred)               | Legacy file probe (back-compat one release)   | Effect                                                                |
+| --------------------------------- | --------------------------------------------- | --------------------------------------------------------------------- |
+| `SAILFIN_TRACE_EMIT`              | `build/sailfin/.trace_emit`                   | Compiler stderr trace inside emit pipeline                            |
+| `SAILFIN_SKIP_TYPECHECK`          | `build/sailfin/.skip_typecheck`               | Skip typecheck before LLVM emit (debug shortcut, NOT for production)  |
+| `SAILFIN_TRACE_TEST_RUNNER`       | `build/sailfin/.trace_test_runner`            | Test runner stderr trace                                              |
+| `SAILFIN_DUMP_TEST_SOURCES`       | `build/sailfin/.dump_test_sources`            | Dump per-test source bundles to scratch dir                           |
+| `SAILFIN_DISABLE_RUNTIME_SFN_SOURCES` | (no file probe — new flag)                | Skip the link-time runtime-sfn-source emit loop entirely (rollback)   |
+
+A toggle is **on** when the env var is set to a value other than `""`, `"0"`, or `"false"`.
+
+Not yet migrated (deferred to a follow-up PR for hot-path caching design): `build/sailfin/.test_runner_active` and the LLVM-lowering `.trace_test_runner` reads paired with it. These are checked inside lowering hot loops and would regress per-popen cost without a module-local cache.
+
+The file probes `build/sailfin/.phase_functions_diagnostics`, `.phase_types_diagnostics`, `.skip_module_globals`, `.skip_test_inlining`, `.trace_argv`, `.trace_call_lowering`, `.trace_lowering` were not migrated by issue #308 — they're internal compiler diagnostics that aren't user-facing. Future hygiene cleanup, not blocking.
+
 ### Pre-0.5.9 census (kept for the historical record)
 
 | Date       | `fs.*` calls          | Dotfile refs | Active data-flow channels |

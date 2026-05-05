@@ -33,6 +33,10 @@ import {
 } from "./capsule_resolver";
 import { handle_check_command } from "./cli_check";
 import {
+    _env_flag,
+    _shell_single_quote_arg
+} from "./cli_commands_utils";
+import {
     handle_add_command,
     handle_config_command,
     handle_fmt_command,
@@ -460,6 +464,135 @@ fn _clang_compile_runtime_capsule_objects(runtime_capsules: RuntimeCapsuleArtifa
     };
 }
 
+// Resolve the path to the running compiler binary so we can spawn
+// it as a child to emit runtime `.sfn` modules at link time. Reads
+// `/proc/self/exe` (Linux). Returns `""` on failure — caller treats
+// that as "skip the runtime-sfn-sources loop with a diagnostic".
+fn _resolve_self_path() -> string ![io] {
+    let raw = _shell_read_cmd("readlink -f /proc/self/exe");
+    return raw;
+}
+
+// Issue #308: compile every `sfn-sources` entry from a list of
+// `kind = "runtime"` capsule artifacts into link-ready `.o`s.
+//
+// The parent compiler spawns `<self> emit --module-name <slug>
+// -o <ll> llvm <src>` per source, then runs `clang -c <ll> -o
+// <obj>`. Both `.ll` and `.o` outputs are cached under `out_dir`
+// keyed by capsule prefix + basename + opt_flag, mirroring
+// `_clang_compile_runtime_capsule_objects` for `c-sources` and
+// `ll-sources`.
+//
+// **Race-safety contract.** The child compiler is invoked through
+// `sh -c "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK=
+// SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= <self>
+// emit ..."` so any debug toggles set in the parent's environment
+// are explicitly cleared for the child. This is the post-#308
+// replacement for the previous `build/sailfin/.foo` flag-file
+// pattern, which raced because the child inherited the parent's
+// cwd. Env-var inheritance is precise: parent controls exactly
+// what the child sees.
+//
+// **Rollback gate.** Set `SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1`
+// to skip this path entirely (returns success with no objects).
+// Cheap insurance for the dormant manifest era; remove once the
+// runtime capsule manifest population (PR B follow-up) ships.
+//
+// Returns success-with-empty-objects when no capsule has any
+// `sfn_sources` entries — the caller's existing fallback through
+// `_clang_compile_runtime_capsule_objects` covers the dormant
+// case (which is every build today, since
+// `runtime/native/capsule.toml` deliberately omits `sfn-sources`).
+fn _compile_runtime_sfn_sources(runtime_capsules: RuntimeCapsuleArtifacts[], out_dir: string, opt_flag: string) -> RuntimeLinkInputs ![io] {
+    let mut objects: string[] = [];
+    let empty_libs: string[] = [];
+    if _env_flag("SAILFIN_DISABLE_RUNTIME_SFN_SOURCES") {
+        return RuntimeLinkInputs {
+            object_paths: objects,
+            link_libs: empty_libs,
+            success: true
+        };
+    }
+    // Quick path: nothing to do if no capsule declares sfn_sources.
+    let mut has_any: boolean = false;
+    let mut probe: number = 0;
+    loop {
+        if probe >= runtime_capsules.length { break; }
+        if runtime_capsules[probe].sfn_sources.length > 0 { has_any = true; break; }
+        probe += 1;
+    }
+    if !has_any {
+        return RuntimeLinkInputs {
+            object_paths: objects,
+            link_libs: empty_libs,
+            success: true
+        };
+    }
+    let self_path = _resolve_self_path();
+    if self_path.length == 0 {
+        print("sfn build: cannot resolve self path for runtime sfn-source emit (readlink -f /proc/self/exe failed)");
+        return _failed_runtime_link_inputs();
+    }
+    let mut i: number = 0;
+    loop {
+        if i >= runtime_capsules.length { break; }
+        let cap = runtime_capsules[i];
+        let cap_prefix = _runtime_obj_prefix(cap.capsule_name);
+        let mut si: number = 0;
+        loop {
+            if si >= cap.sfn_sources.length { break; }
+            let src = cap.sfn_sources[si];
+            let slug = module_name_from_path(src);
+            let ll_path = _path_join(out_dir, cap_prefix + _path_basename(src)
+                + opt_flag
+                + ".ll");
+            let obj_path = _path_join(out_dir, cap_prefix + _path_basename(src)
+                + opt_flag
+                + ".o");
+            if !fs.exists(ll_path) {
+                // Build the `sh -c` argv. Each `KEY= ` clears that
+                // toggle for the child; everything else inherits
+                // from the parent (PATH, HOME, PWD, etc.). The
+                // shell-quote escaping here protects against paths
+                // that contain spaces or shell metacharacters.
+                let cmd = "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= "
+                    + _shell_single_quote_arg(self_path)
+                    + " emit --module-name "
+                    + _shell_single_quote_arg(slug)
+                    + " -o "
+                    + _shell_single_quote_arg(ll_path)
+                    + " llvm "
+                    + _shell_single_quote_arg(src);
+                let rc = process.run(["sh", "-c", cmd]);
+                if rc != 0 {
+                    print("sfn build: failed to emit runtime sfn-source "
+                        + src
+                        + " (child exit="
+                        + number_to_string(rc)
+                        + ")");
+                    return _failed_runtime_link_inputs();
+                }
+            }
+            if !fs.exists(obj_path) {
+                let rc2 = process.run(["clang", opt_flag, "-Wno-override-module", "-c", ll_path, "-o", obj_path]);
+                if rc2 != 0 {
+                    print("sfn build: failed to compile runtime sfn-source object "
+                        + obj_path);
+                    return _failed_runtime_link_inputs();
+                }
+            }
+            objects.push(obj_path);
+            si += 1;
+        }
+        i += 1;
+    }
+    return RuntimeLinkInputs {
+        object_paths: objects,
+        link_libs: empty_libs,
+        success: true
+    };
+}
+
 fn _clang_compile_runtime_objects(runtime_root: string, out_dir: string, opt_flag: string) -> string[] ![io] {
     // Build (or reuse) cached runtime object files so repeated `test` invocations
     // don't recompile the runtime C sources per test file.
@@ -539,6 +672,22 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         if !inputs.success { return 1; }
         runtime_objs = inputs.object_paths;
         runtime_link_libs = inputs.link_libs;
+        // Issue #308: compile any `sfn-sources` declared by a
+        // `kind = "runtime"` capsule into link-ready `.o`s and
+        // append before the prelude. Dormant by default — no
+        // active manifest declares `sfn-sources` today, so this
+        // returns success-with-no-objects and the loop is a
+        // no-op. PR B of the sleep migration flips
+        // `runtime/native/capsule.toml` to populate the array,
+        // at which point this branch becomes load-bearing.
+        let sfn_inputs = _compile_runtime_sfn_sources(runtime_capsules, cache_dir, opt_flag);
+        if !sfn_inputs.success { return 1; }
+        let mut soi: number = 0;
+        loop {
+            if soi >= sfn_inputs.object_paths.length { break; }
+            runtime_objs.push(sfn_inputs.object_paths[soi]);
+            soi += 1;
+        }
         // The runtime capsule's `prelude-entry` field (Stage D
         // PR1 transitional bridge) isn't yet consumed here —
         // the prelude continues to ship as a pre-built `.o`

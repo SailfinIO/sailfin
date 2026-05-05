@@ -21,9 +21,11 @@ import {
     _ends_with_cmd,
     _ensure_dir_cmd,
     _ensure_dir_recursive_cmd,
+    _env_flag,
     _extract_sfnpkg_cmd,
     _get_env_cmd,
     _get_home_cmd,
+    _legacy_flag_file,
     _has_prefix_cmd,
     _looks_like_test_file_cmd,
     _resolve_capsule_name_cmd,
@@ -334,8 +336,8 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
 
     let ll_path = scratch_root + "/test.ll";
     let exe_path = scratch_root + "/test";
-    let dump_sources = fs.exists("build/sailfin/.dump_test_sources");
-    let trace_runner = fs.exists("build/sailfin/.trace_test_runner");
+    let dump_sources = _env_flag("SAILFIN_DUMP_TEST_SOURCES") || _legacy_flag_file("build/sailfin/.dump_test_sources");
+    let trace_runner = _env_flag("SAILFIN_TRACE_TEST_RUNNER") || _legacy_flag_file("build/sailfin/.trace_test_runner");
 
     // Partition test files into resolution groups. Within a group,
     // every file shares `(project_root, workspace_root)`, so a single
