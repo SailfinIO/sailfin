@@ -10,7 +10,7 @@ on:
   # Short-circuit before booting the agent: the only labels that should ever
   # trigger work here are design-approved or bug. Anything else, exit at the
   # workflow level — saves the first-turn cost of writing a noop.
-  skip-if-no-match: 'label:design-approved OR label:bug'
+  skip-if-no-match: 'label:design-approved,bug'
 
 imports:
   - shared/build-mcp-server.md
