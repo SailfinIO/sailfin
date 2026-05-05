@@ -71,7 +71,7 @@ EOF
     # repo's real runtime so the link can satisfy prelude/runtime
     # symbol references. The interesting field is sfn-sources,
     # which the consumer under test materializes into a .o.
-    cat > "$ws/runtime/native/capsule.toml" <<EOF
+    cat > "$ws/runtime/native/capsule.toml" <<'EOF'
 [capsule]
 name = "sfn/runtime-native"
 version = "0.0.1"
@@ -81,7 +81,12 @@ required = []
 
 [build]
 kind = "runtime"
-c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c", "src/native_driver.c"]
+# Intentionally omit native_driver.c — it defines `main` for the
+# compiler binary itself and would conflict with the consumer's
+# `main()`. The remaining c-sources cover arena, runtime helpers,
+# crypto, and base64 — enough to satisfy the link without an
+# entry-point clash.
+c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c"]
 ll-sources = ["ir/runtime_globals.ll"]
 sfn-sources = ["../sfn/test_marker.sfn"]
 include-dirs = ["include"]
