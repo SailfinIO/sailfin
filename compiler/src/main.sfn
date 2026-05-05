@@ -32,6 +32,7 @@ import { LayoutManifest } from "./native_ir";
 import { split_lines } from "./native_ir_utils_text";
 import { parse_program } from "./parser/mod";
 import { substring } from "./string_utils";
+import { test_runner_trace } from "./test_runner_state";
 import { Token } from "./token";
 import { toml_get_dependencies } from "./toml_parser";
 import {
@@ -367,13 +368,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
 // before reporting and bailing. Warnings (e.g. future W01xx load
 // warnings) flow through without aborting the test compile.
 fn compile_tests_to_llvm_file_with_module_imports(source: string, module_name: string, out_path: string, imported_interfaces: Statement[], imported_manifests: LayoutManifest[], imported_native_texts: string[], imported_function_effects: ImportSymbolTable, imported_capabilities_required: string[]) -> boolean ![io] {
-    let trace_file = _env_flag("SAILFIN_TRACE_TEST_RUNNER") || _legacy_flag_file("build/sailfin/.trace_test_runner");
-    let active_file = fs.exists("build/sailfin/.test_runner_active");
-    let mut _let_trace: boolean = false;
-    if trace_file {
-        if active_file { _let_trace = true; }
-    }
-    let trace = _let_trace;
+    let trace = test_runner_trace();
     if trace { print.err("test compiler (imports): parse_program start"); }
     let program: Program = parse_program(source);
     let diagnostics = typecheck_diagnostics_with_imports(program, imported_interfaces);

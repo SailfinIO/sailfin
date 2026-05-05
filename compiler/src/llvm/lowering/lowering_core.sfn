@@ -34,6 +34,7 @@ import {
     parse_native_functions_from_text
 } from "../../native_ir_api";
 import { substring } from "../../string_utils";
+import { test_runner_active, test_runner_trace } from "../../test_runner_state";
 import {
     collect_direct_function_effects,
     collect_function_call_graph,
@@ -301,9 +302,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
 
     let mut is_test_module = is_test_module_slug(native_module.module_name);
     if !is_test_module {
-        if fs.exists("build/sailfin/.test_runner_active") {
-            is_test_module = true;
-        }
+        if test_runner_active() { is_test_module = true; }
     }
 
     let mut safe_imports = sanitize_imports(parse.imports, debug_lowering);
@@ -357,12 +356,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
 
     // ── Trace/timing setup ──────────────────────────────────────────
-    let mut _let250: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let250 = true; }
-    }
-    let trace = _let250;
-    let timing = fs.exists("build/sailfin/.test_runner_active");
+    let trace = test_runner_trace();
+    let timing = test_runner_active();
     let start_ms = monotonic_millis();
 
     if trace {

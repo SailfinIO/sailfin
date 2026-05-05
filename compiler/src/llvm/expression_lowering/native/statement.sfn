@@ -12,6 +12,7 @@ import {
     find_last_index_of_char,
     substring
 } from "../../../string_utils";
+import { test_runner_trace } from "../../../test_runner_state";
 import { default_return_literal } from "../../expressions_helpers";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
@@ -400,11 +401,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     let mut lifetime_releases: LifetimeReleaseEvent[] = [];
     let mut current_next_region: number = next_region_id;
     let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
-    let mut _let147: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let147 = true; }
-    }
-    let trace = _let147;
+    let trace = test_runner_trace();
 
     // Use parameters directly instead of file IPC.
     let fn_name = function.name;

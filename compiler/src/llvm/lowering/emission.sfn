@@ -12,6 +12,7 @@
 // emitter delegates async wrapper generation to the async module.
 import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
+import { test_runner_trace } from "../../test_runner_state";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
 import { default_return_literal } from "../expressions_helpers";
 import { format_root_scope_id } from "../lifetime";
@@ -344,11 +345,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         };
     }
 
-    let mut _let198: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let198 = true; }
-    }
-    let trace = _let198;
+    let trace = test_runner_trace();
     if trace {
         print.err("test llvm: emit_llvm_function preview " + fn_name
             + " instrs="

@@ -4,6 +4,7 @@
 // through the function call graph to build capability manifests.
 import { NativeFunction, NativeInstruction } from "../native_ir";
 import { char_at, substring } from "../string_utils";
+import { test_runner_trace } from "../test_runner_state";
 import { find_runtime_helper } from "./runtime_helpers";
 import {
     CapabilityManifest,
@@ -701,11 +702,7 @@ fn propagate_function_effects(direct_effects: FunctionEffectEntry[], call_graph:
         index += 1;
     }
 
-    let mut _let50: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let50 = true; }
-    }
-    let trace = _let50;
+    let trace = test_runner_trace();
     let mut iteration: number = 0;
     let max_iterations = call_graph.length * 8 + 16;
 

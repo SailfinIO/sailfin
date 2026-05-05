@@ -9,6 +9,7 @@
 // seed's per-module streaming emission limit.
 import { NativeFunction, NativeInstruction } from "../../native_ir";
 import { substring } from "../../string_utils";
+import { test_runner_trace } from "../../test_runner_state";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
 import { lower_expression_statement, lower_return_instruction } from "../expression_lowering/native/statement";
 import { parse_inline_let_expression } from "../expression_lowering/native/statement_parsing";
@@ -80,11 +81,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: number, end: n
             + " current_bindings_len="
             + number_to_string(current_bindings.length));
     }
-    let mut _let220: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let220 = true; }
-    }
-    let trace = _let220;
+    let trace = test_runner_trace();
     if trace {
         if start_index == 0 {
             if scope_depth == 0 {

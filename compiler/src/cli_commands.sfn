@@ -49,6 +49,7 @@ import {
 } from "./main";
 import { LayoutManifest } from "./native_ir";
 import { substring } from "./string_utils";
+import { enter_test_runner_mode, exit_test_runner_mode } from "./test_runner_state";
 import {
     toml_add_dependency,
     toml_add_dev_dependency,
@@ -168,11 +169,13 @@ fn _clang_link_test_cmd_with_deps(ll_path: string, out_path: string, runtime_roo
 // any in-process plumbing.
 //
 // Persistent control flags (`.trace_test_runner`,
-// `.dump_test_sources`) and the run-marker (`.test_runner_active`)
-// stay rooted at `build/sailfin/` so an `unset SAILFIN_TEST_SCRATCH`
-// run still observes user-toggled debug switches and so the
-// marker file remains discoverable across processes for the
-// existing diagnostic tooling that grep's for it.
+// `.dump_test_sources`) stay rooted at `build/sailfin/` so an
+// `unset SAILFIN_TEST_SCRATCH` run still observes user-toggled
+// debug switches. The run-marker that used to live at
+// `build/sailfin/.test_runner_active` is now process-local state
+// in `compiler/src/test_runner_state.sfn`; it never had a
+// cross-process consumer, so the filesystem round-trip was pure
+// overhead. See issue #311 for the migration rationale.
 fn _test_scratch_root() -> string ![io] {
     let env = _get_env_cmd("SAILFIN_TEST_SCRATCH");
     if env.length > 0 { return env; }
@@ -319,18 +322,20 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     _ensure_dir_cmd(scratch_root);
     _ensure_dir_cmd(scratch_root + "/test-o0");
 
-    // Persistent control flags + run-marker stay at the fixed
-    // `build/sailfin/` root; see `_test_scratch_root` for the
-    // rationale. Per-test ephemera (`test.ll`, the linked test
-    // exe, `test-source-*` dumps) live under `scratch_root` so
-    // concurrent invocations don't clobber each other.
-    let test_runner_active_path = "build/sailfin/.test_runner_active";
-    _write_text_cmd(test_runner_active_path, "");
+    // Resolve the trace toggle once (popen-cost is fine on the
+    // cold orchestrator path) and stash both bits in the
+    // process-local `test_runner_state` module so the LLVM
+    // lowering pipeline reads them via direct boolean loads
+    // instead of re-probing the filesystem on every statement.
+    // See `compiler/src/test_runner_state.sfn` for the contract.
+    let trace_runner = _env_flag("SAILFIN_TRACE_TEST_RUNNER")
+        || _legacy_flag_file("build/sailfin/.trace_test_runner");
+    enter_test_runner_mode(trace_runner);
 
     let test_files = _collect_test_files_cmd(root, 25);
     if test_files.length == 0 {
         print("no Sailfin test files found under: " + root);
-        fs.deleteFile(test_runner_active_path);
+        exit_test_runner_mode();
         return 1;
     }
 
@@ -338,8 +343,6 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     let exe_path = scratch_root + "/test";
     let dump_sources = _env_flag("SAILFIN_DUMP_TEST_SOURCES")
         || _legacy_flag_file("build/sailfin/.dump_test_sources");
-    let trace_runner = _env_flag("SAILFIN_TRACE_TEST_RUNNER")
-        || _legacy_flag_file("build/sailfin/.trace_test_runner");
 
     // Partition test files into resolution groups. Within a group,
     // every file shares `(project_root, workspace_root)`, so a single
@@ -404,7 +407,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         if resolution.staging_failed {
             // Resolver already emitted a structured error to stderr
             // (slug collision, stage-write, or compile failure).
-            fs.deleteFile(test_runner_active_path);
+            exit_test_runner_mode();
             return 2;
         }
         // Single-pass loader: returns both the parsed interface set
@@ -472,7 +475,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
         if !_compiled {
             print("test runner: compile failed for " + path);
-            fs.deleteFile(test_runner_active_path);
+            exit_test_runner_mode();
             return 1;
         }
 
@@ -480,7 +483,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths);
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
-            fs.deleteFile(test_runner_active_path);
+            exit_test_runner_mode();
             return link_rc;
         }
         if trace_runner { print.err("test runner: exec start"); }
@@ -491,7 +494,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         }
         if run_rc != 0 {
             print("test failed: " + path);
-            fs.deleteFile(test_runner_active_path);
+            exit_test_runner_mode();
             return run_rc;
         }
         // Phase 5a: rewind arena scratch back to the per-test
@@ -503,7 +506,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
         index += 1;
     }
-    fs.deleteFile(test_runner_active_path);
+    exit_test_runner_mode();
     return 0;
 }
 
