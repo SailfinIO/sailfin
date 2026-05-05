@@ -49,6 +49,7 @@ import {
 } from "./main";
 import { LayoutManifest } from "./native_ir";
 import { substring } from "./string_utils";
+import { enter_test_runner_mode, exit_test_runner_mode } from "./test_runner_state";
 import {
     toml_add_dependency,
     toml_add_dev_dependency,
@@ -59,10 +60,6 @@ import {
     toml_get_version
 } from "./toml_parser";
 import { format_source } from "./tools/fmt";
-import {
-    enter_test_runner_mode,
-    exit_test_runner_mode
-} from "./test_runner_state";
 import { load_imported_interfaces_from_paths } from "./typecheck_import_loader";
 
 // Validate a path segment (scope, name) contains no traversal or illegal chars.

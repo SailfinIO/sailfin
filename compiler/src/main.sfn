@@ -32,8 +32,8 @@ import { LayoutManifest } from "./native_ir";
 import { split_lines } from "./native_ir_utils_text";
 import { parse_program } from "./parser/mod";
 import { substring } from "./string_utils";
-import { Token } from "./token";
 import { test_runner_trace } from "./test_runner_state";
+import { Token } from "./token";
 import { toml_get_dependencies } from "./toml_parser";
 import {
     typecheck_diagnostics,

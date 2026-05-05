@@ -12,6 +12,7 @@
 // emitter delegates async wrapper generation to the async module.
 import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
+import { test_runner_trace } from "../../test_runner_state";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
 import { default_return_literal } from "../expressions_helpers";
 import { format_root_scope_id } from "../lifetime";
@@ -48,7 +49,6 @@ import { emit_async_function } from "./emission_async";
 import { build_define_header_line } from "./emission_header";
 import { lower_instruction_range } from "./instructions";
 import { module_user_main_symbol } from "./module_globals";
-import { test_runner_trace } from "../../test_runner_state";
 
 fn is_safe_llvm_type_text(value: string) -> boolean {
     if value == null { return false; }

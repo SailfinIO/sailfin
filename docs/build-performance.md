@@ -1218,15 +1218,15 @@ Issue #308 explicitly deferred the `.test_runner_active` marker and the six pair
 | Symbol                          | Replaces                                                                  |
 | ------------------------------- | ------------------------------------------------------------------------- |
 | `enter_test_runner_mode(trace)` | `_write_text_cmd("build/sailfin/.test_runner_active", "")` at orchestrator entry |
-| `exit_test_runner_mode()`       | `fs.deleteFile("build/sailfin/.test_runner_active")` at all 8 cleanup paths      |
+| `exit_test_runner_mode()`       | `fs.deleteFile("build/sailfin/.test_runner_active")` at the 6 cleanup paths      |
 | `test_runner_active() -> boolean` | `fs.exists("build/sailfin/.test_runner_active")` at 2 lowering sites             |
 | `test_runner_trace() -> boolean`  | The paired `if fs.exists(.trace_test_runner) { if fs.exists(.test_runner_active) }` pattern at 6 lowering sites |
 
-**Sites migrated** (10 reads + 1 writer + 8 cleanup paths):
+**Sites migrated** (10 reads + 1 writer + 6 cleanup paths — no-tests, staging-failure, compile-failure, link-failure, run-failure, success):
 
 | File                                                               | Probe count | Notes                                                |
 | ------------------------------------------------------------------ | ----------- | ---------------------------------------------------- |
-| `compiler/src/cli_commands.sfn`                                    |  9          | Writer + 8 cleanup paths                             |
+| `compiler/src/cli_commands.sfn`                                    |  7          | Writer (`enter_test_runner_mode`) + 6 cleanup paths  |
 | `compiler/src/main.sfn`                                            |  1          | `compile_tests_to_llvm_file_with_module_imports`     |
 | `compiler/src/llvm/effects.sfn`                                    |  1          | `propagate_function_effects` trace gate              |
 | `compiler/src/llvm/imports.sfn`                                    |  1          | `collect_imported_module_context_for_module` trace   |

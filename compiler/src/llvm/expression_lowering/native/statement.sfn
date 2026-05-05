@@ -12,6 +12,7 @@ import {
     find_last_index_of_char,
     substring
 } from "../../../string_utils";
+import { test_runner_trace } from "../../../test_runner_state";
 import { default_return_literal } from "../../expressions_helpers";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
@@ -61,7 +62,6 @@ import { lower_lvalue_assignment_stmt } from "./statement_assignment";
 import { parse_assignment_expression, parse_inline_let_expression } from "./statement_parsing";
 import { detect_suspension_conflicts } from "./statement_suspension";
 import { map_parameter_type, map_struct_type_annotation } from "./statement_type_mapping";
-import { test_runner_trace } from "../../../test_runner_state";
 
 fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);

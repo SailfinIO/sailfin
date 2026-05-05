@@ -119,17 +119,31 @@ EOF
     return 0
 }
 
-# 3. Outside of `sfn test`, the in-process flag stays false.
-#    If a regression accidentally inverted the default, every
-#    `sfn build` / `sfn emit` would treat user code as a test
-#    module and strip imports. Guard against that by emitting an
-#    LLVM file from a non-test source and verifying it carries
-#    its imports through.
+# 3. Outside of `sfn test`, the in-process flag stays false AND
+#    the behavior-changing `is_test_module` gate that it controls
+#    stays off. The gate's effect is `safe_imports = []` in
+#    `lowering_core.sfn`, which strips cross-module symbol mangling
+#    so imported function calls remain bare-named. Pin the gate by
+#    emitting a non-test source that imports a sibling helper and
+#    verifying the helper's call site uses the mangled cross-module
+#    symbol. A regression that flipped the default to true would
+#    leave the call unmangled (or drop the `declare` for the
+#    imported function entirely), and this check would fail —
+#    catching the case where timing prints stay off but import
+#    stripping fires anyway.
 test_in_process_flag_default_false() {
-    mkdir -p "$SCRATCH/proj3"
+    mkdir -p "$SCRATCH/proj3/sub"
+    cat > "$SCRATCH/proj3/sub/helper.sfn" <<'EOF'
+fn add_one(x: number) -> number {
+    return x + 1;
+}
+EOF
     cat > "$SCRATCH/proj3/main.sfn" <<'EOF'
+import { add_one } from "./sub/helper";
+
 fn main() ![io] {
-    print.info("not a test");
+    let result = add_one(41);
+    print.info(number_to_string(result));
 }
 EOF
     local log="$SCRATCH/emit.log"
@@ -138,10 +152,31 @@ EOF
         cat "$log"
         return 1
     fi
-    # If `test_runner_active()` returned true here, the LLVM
-    # lowering would print the timing block reserved for test
-    # modules (`test llvm: phase=parse ms=…`). Its absence
-    # confirms the in-process flag defaulted to false.
+
+    # Behavior-changing gate (the load-bearing assertion):
+    # cross-module symbol mangling fired — the call to the imported
+    # helper points at the mangled name, not the bare `add_one`.
+    # We don't pin the LLVM return type here (the seed compiler
+    # falls back to i8* when the helper module's layout manifest
+    # isn't pre-staged); the mangled suffix `__sub__helper` is the
+    # gate-firing signal we actually care about.
+    if ! grep -qE '@add_one__[A-Za-z0-9_]*sub__helper' "$SCRATCH/proj3/main.ll"; then
+        echo "[test]   imported helper call was not mangled (is_test_module=true regression — imports were stripped):"
+        echo "[test]   --- emitted IR (lines containing 'add_one') ---"
+        grep -nE 'add_one' "$SCRATCH/proj3/main.ll" || true
+        return 1
+    fi
+    # The mangled `declare` for the imported helper must also be
+    # present; without it, the bitcode would link with an undefined
+    # reference. Stripped imports drop this declare entirely.
+    if ! grep -qE '^declare [^@]*@add_one__[A-Za-z0-9_]*sub__helper' "$SCRATCH/proj3/main.ll"; then
+        echo "[test]   imported helper declare missing from emitted IR:"
+        grep -nE 'add_one|declare' "$SCRATCH/proj3/main.ll" | head -20 || true
+        return 1
+    fi
+
+    # Belt-and-suspenders: the trace/timing prints reserved for
+    # test-runner-active modules should also stay quiet.
     if grep -q "^test llvm: phase=" "$log"; then
         echo "[test]   in-process test-runner flag should be false outside sfn test:"
         cat "$log"

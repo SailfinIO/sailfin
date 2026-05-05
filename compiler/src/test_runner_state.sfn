@@ -4,9 +4,11 @@
 // (`cli_commands.sfn:handle_test_command`) and the LLVM lowering
 // pipeline. Replaces two flag files that issue #311 retired:
 //
-//   build/sailfin/.test_runner_active   — was: written/deleted by
-//                                          handle_test_command,
-//                                          read in 8 LLVM lowering
+//   build/sailfin/.test_runner_active   — was: written by
+//                                          handle_test_command at
+//                                          entry, deleted on each of
+//                                          the 6 return paths,
+//                                          read in 2 LLVM lowering
 //                                          sites + 1 main.sfn site
 //   build/sailfin/.trace_test_runner    — was: env-var or legacy
 //                                          file, paired-read in 6
@@ -31,7 +33,6 @@
 //
 // Probes (`test_runner_active()` / `test_runner_trace()`) are
 // pure reads of process-local state — no IO, no effect.
-
 let mut _active: boolean = false;
 let mut _trace: boolean = false;
 
@@ -59,9 +60,7 @@ fn exit_test_runner_mode() {
 // in 10+ LLVM lowering sites — including the behavior-changing
 // `is_test_module` gate in `lowering_core.sfn` — and in
 // `compile_tests_to_llvm_file_with_module_imports` in `main.sfn`.
-fn test_runner_active() -> boolean {
-    return _active;
-}
+fn test_runner_active() -> boolean { return _active; }
 
 // True only when the runner is active AND the user requested
 // trace output. Replaces the paired
