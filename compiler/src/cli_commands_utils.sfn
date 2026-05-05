@@ -150,7 +150,17 @@ fn _env_flag(name: string) -> boolean ![io] {
 // every probe would spam test runs that legitimately have the
 // file in place. Drop this helper (and the file probes) in the
 // next release.
+//
+// **Race-safety knob.** When a parent compiler spawns a child
+// (`_compile_runtime_sfn_sources` in `cli_main.sfn`), the child
+// gets `SAILFIN_NO_LEGACY_PROBE=1` so it ignores any flag files
+// left in the shared cwd by the parent. Without this knob, the
+// back-compat shim would re-introduce the same parent/child
+// IPC race issue #308 was fixed for users who haven't migrated
+// off the file probes yet. Only the user-launched parent reads
+// the legacy files; spawned children stay clean.
 fn _legacy_flag_file(path: string) -> boolean ![io] {
+    if _get_env_cmd("SAILFIN_NO_LEGACY_PROBE").length > 0 { return false; }
     return fs.exists(path);
 }
 

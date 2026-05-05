@@ -236,7 +236,7 @@ fn compile_to_llvm_with_module(source: string, module_name: string) -> string ![
             return "";
         }
     } else {
-        print.err("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
+        print.err("emit-llvm: skipping typecheck (SAILFIN_SKIP_TYPECHECK set, or legacy build/sailfin/.skip_typecheck file present)");
     }
     if _reject_reexport_violations(program) { return ""; }
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
@@ -292,7 +292,7 @@ fn compile_to_llvm_with_module_timed(source: string, module_name: string) -> str
         }
     } else {
         t_typecheck = _ms_since(t1);
-        print.err("emit-llvm: skipping typecheck (build/sailfin/.skip_typecheck present)");
+        print.err("emit-llvm: skipping typecheck (SAILFIN_SKIP_TYPECHECK set, or legacy build/sailfin/.skip_typecheck file present)");
     }
     if _reject_reexport_violations(program) {
         print.err(_timing_line(module_name, "parse", t_parse));
@@ -555,7 +555,7 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
             return false;
         }
     } else {
-        print.err("emit-llvm-file: skipping typecheck (build/sailfin/.skip_typecheck present)");
+        print.err("emit-llvm-file: skipping typecheck (SAILFIN_SKIP_TYPECHECK set, or legacy build/sailfin/.skip_typecheck file present)");
     }
     if _reject_reexport_violations(program) { return false; }
     if validate_and_render_effects(program, source, module_name, empty_import_symbols()) > 0 {
