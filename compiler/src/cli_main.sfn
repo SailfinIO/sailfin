@@ -43,7 +43,7 @@ import {
     handle_publish_command,
     handle_test_command
 } from "./cli_commands";
-import { _env_flag, _shell_read_cmd, _shell_single_quote_arg } from "./cli_commands_utils";
+import { _env_flag, _legacy_flag_file, _shell_read_cmd, _shell_single_quote_arg } from "./cli_commands_utils";
 import {
     compile_to_llvm_file_with_module,
     compile_to_llvm_with_module,
@@ -869,7 +869,8 @@ fn _resolve_capsule_build_spec(p: string) -> _CapsuleBuildSpec ![io] {
 }
 
 fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
-    let trace_argv = fs.exists("build/sailfin/.trace_argv");
+    let trace_argv = _env_flag("SAILFIN_TRACE_ARGV")
+        || _legacy_flag_file("build/sailfin/.trace_argv");
     if trace_argv {
         print.err("cli: argv.len=" + number_to_string(argv.length));
         let mut trace_index: number = 0;

@@ -10,6 +10,7 @@
 import { NativeFunction, NativeInstruction } from "../../native_ir";
 import { substring } from "../../string_utils";
 import { test_runner_trace } from "../../test_runner_state";
+import { trace_lowering } from "../lowering_debug_state";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
 import { lower_expression_statement, lower_return_instruction } from "../expression_lowering/native/statement";
 import { parse_inline_let_expression } from "../expression_lowering/native/statement_parsing";
@@ -67,7 +68,7 @@ fn lower_instruction_range(function: NativeFunction, start_index: number, end: n
     let mut active_label: string = current_label;
     let mut guard: number = 0;
     let max_guard = (end - start_index) * 16 + 1024;
-    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let debug_lowering = trace_lowering();
     if debug_lowering {
         print.err("emit-llvm: lower_instruction_range name=" + function.name
             + " start="

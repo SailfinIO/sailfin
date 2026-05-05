@@ -1174,6 +1174,8 @@ The remaining `fs.*` surface is concentrated in CLI / orchestration paths that l
 The remaining `build/sailfin/.xxx` references are **all flag/diagnostic gates**:
 
 ```
+(historical inventory — all flag-file probes have since been retired by issues
+#308, #311, and #312. See the migration sections below for the full census.)
 build/sailfin/.dump_test_sources         build/sailfin/.skip_typecheck
 build/sailfin/.phase_functions_diagnostics build/sailfin/.trace_argv
 build/sailfin/.phase_types_diagnostics   build/sailfin/.trace_call_lowering
@@ -1182,7 +1184,7 @@ build/sailfin/.skip_test_inlining        build/sailfin/.trace_lowering
                                          build/sailfin/.trace_test_runner
 ```
 
-These are checked via `fs.exists`/`fs.readFile` as a workaround for the lack of `--feature-flag X=Y` plumbing in the CLI. They carry no pipeline data and add no per-module I/O overhead in the common case (the seed checks once at startup). Migrating these to env vars or proper CLI flags is a hygiene cleanup, not a performance task.
+These were checked via `fs.exists`/`fs.readFile` as a workaround for the lack of `--feature-flag X=Y` plumbing in the CLI. They carried no pipeline data, but the parent/child cwd-inheritance pattern raced with subprocess-emit. The migration to env vars (issue #308) and module-local state (#311, #312) closed that gap.
 
 > Issue #311 (May 2026) retired `build/sailfin/.test_runner_active` entirely.
 > The marker was intra-process state masquerading as cross-process IPC — the
@@ -1207,7 +1209,7 @@ The flag-file pattern raced when the parent compiler spawned a child compiler to
 
 A toggle is **on** when the env var is set to a value other than `""`, `"0"`, or `"false"`.
 
-The file probes `build/sailfin/.phase_functions_diagnostics`, `.phase_types_diagnostics`, `.skip_module_globals`, `.skip_test_inlining`, `.trace_argv`, `.trace_call_lowering`, `.trace_lowering` were not migrated by issue #308 — they're internal compiler diagnostics that aren't user-facing. Future hygiene cleanup, not blocking.
+The internal compiler-diagnostic probes (`build/sailfin/.phase_functions_diagnostics`, `.phase_types_diagnostics`, `.skip_module_globals`, `.skip_test_inlining`, `.trace_argv`, `.trace_call_lowering`, `.trace_lowering`) were not user-facing and were deferred from issue #308. They have since been retired — `.phase_*_diagnostics` and `.skip_test_inlining` were already gone (replaced with in-memory diagnostics or removed entirely) when #312 audited the inventory; the four remaining hot- and cold-path probes (`.trace_lowering`, `.trace_call_lowering`, `.skip_module_globals`, `.trace_argv`) were migrated to env vars by issue #312. See the **Internal compiler-diagnostic toggle migration (issue #312)** section below.
 
 ### Test-runner state migration (issue #311)
 
@@ -1239,7 +1241,43 @@ The writer side did **not** need a `setenv` extern or `sh -c` wrapper: in-proces
 
 **Probe cost.** Each probe is now a single `load i1` from a global, no syscall. The `is_test_module` gate (the only behavior-changing read) is hit once per module; the trace gates short-circuit on `_active` so the `_trace` load is skipped when the runner isn't engaged.
 
-This pattern — module-local mutable state for compiler-internal coordination — generalises to the other unmigrated debug toggles (`.phase_*_diagnostics`, `.skip_test_inlining`, `.trace_lowering`, `.trace_call_lowering`) when they get the same hygiene pass.
+### Internal compiler-diagnostic toggle migration (issue #312)
+
+The trailing follow-up to #308 + #311. Closes the file-IPC removal campaign: after this migration, `grep -nE 'fs.exists\("build/sailfin/\.(phase|skip|trace|dump)_' compiler/src/` returns zero matches outside the new module's header comment.
+
+`.test_runner_active` (#311) was intra-process state and got module-local booleans with explicit `enter/exit` lifecycle. The four flags retired by #312 are different: they're env-var-style debug knobs that the user sets once before invoking the compiler. The orchestrator never toggles them mid-run, but they ARE inherited by spawned children (the runtime-sfn-source emit loop, parallel per-module emit), and `_env_flag` reads are popen-shaped — which would be ~1ms per probe on the lowering hot paths if read naively.
+
+**Replacement:** `compiler/src/llvm/lowering_debug_state.sfn` exports three lazy-init cached probes backed by sentinel-encoded `let mut number` caches (`-1` = uninit, `0` = false, `1` = true). First call performs `_env_flag(...) || _legacy_flag_file(...)`; subsequent calls return the cached value without a syscall.
+
+| Env var (preferred)               | Legacy file probe (back-compat one release)   | Effect                                                           |
+| --------------------------------- | --------------------------------------------- | ---------------------------------------------------------------- |
+| `SAILFIN_TRACE_LOWERING`          | `build/sailfin/.trace_lowering`               | Stderr trace inside LLVM lowering (per-statement / per-function) |
+| `SAILFIN_TRACE_CALL_LOWERING`     | `build/sailfin/.trace_call_lowering`          | Stderr trace inside the call-lowering / enum-literal path       |
+| `SAILFIN_SKIP_MODULE_GLOBALS`     | `build/sailfin/.skip_module_globals`          | Skip module-globals emission (debug shortcut for triage)        |
+| `SAILFIN_TRACE_ARGV`              | `build/sailfin/.trace_argv`                   | Print parsed CLI argv at compiler entry                         |
+
+The first three are read inside the LLVM lowering pipeline and use the cached helper. `SAILFIN_TRACE_ARGV` is read once at `sailfin_cli_main` entry (cold path) and uses `_env_flag` directly without a cache.
+
+**Sites migrated** (15 reads — 11 hot + 4 cold):
+
+| File                                                                  | Probe count | Flag                       |
+| --------------------------------------------------------------------- | ----------: | -------------------------- |
+| `compiler/src/cli_main.sfn`                                           |  1          | `.trace_argv` (cold)       |
+| `compiler/src/llvm/lowering/lowering_core.sfn`                        |  3          | trace + call-trace + skip  |
+| `compiler/src/llvm/lowering/instructions.sfn`                         |  1          | `.trace_lowering`          |
+| `compiler/src/llvm/lowering/instructions_let.sfn`                     |  1          | `.trace_lowering`          |
+| `compiler/src/llvm/lowering/instructions_loops.sfn`                   |  1          | `.trace_lowering`          |
+| `compiler/src/llvm/lowering/emission.sfn`                             |  1          | `.trace_lowering`          |
+| `compiler/src/llvm/lowering/lowering_helpers_mangling.sfn`            |  1          | `.trace_lowering`          |
+| `compiler/src/llvm/expression_lowering/native/core.sfn`               |  1          | `.trace_lowering`          |
+| `compiler/src/llvm/expression_lowering/native/core_operands.sfn`      |  1          | `.trace_lowering`          |
+| `compiler/src/llvm/expression_lowering/native/core_call_emission.sfn` |  1          | `.trace_lowering`          |
+| `compiler/src/llvm/expression_lowering/native/core_call_lowering.sfn` |  1          | `.trace_call_lowering`     |
+| `compiler/src/llvm/expression_lowering/native/statement.sfn`          |  2          | `.trace_lowering` ×2       |
+
+**Probe cost.** Lazy-init: one popen per cache on the first probe; every subsequent read is a single `load i64` + compare. For a 138-module self-host with all three lowering flags off, the total cost is 3 popens (one per flag at first probe per process), versus the pre-migration cost of 13 hot-path × N statements × M functions × `fs.exists` syscalls.
+
+**Back-compat.** `_legacy_flag_file` continues to honour `touch build/sailfin/.X` for one release. Drop the legacy fallback in the release after #312 ships. Tracked as the trailing item in the file-IPC removal campaign (#197 → #200 → #201 → #217 → #284 → #308 → #311 → #312).
 
 ### Pre-0.5.9 census (kept for the historical record)
 

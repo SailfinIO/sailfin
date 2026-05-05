@@ -12,6 +12,7 @@ import {
     NativeStruct,
     NativeEnum
 } from "../../../native_ir";
+import { trace_lowering } from "../../lowering_debug_state";
 import {
     substring,
     char_code,
@@ -405,7 +406,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
     let trimmed = trim_text(expression);
     let mut diagnostics: string[] = [];
     let empty_constants = empty_string_constant_set();
-    let dbg_expr = fs.exists("build/sailfin/.trace_lowering");
+    let dbg_expr = trace_lowering();
     if dbg_expr {
         print.err("emit-llvm: lower_expression ENTER expr=" + trimmed
             + " bindings_len="

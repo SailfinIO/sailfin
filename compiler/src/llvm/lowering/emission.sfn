@@ -13,6 +13,7 @@
 import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
 import { test_runner_trace } from "../../test_runner_state";
+import { trace_lowering } from "../lowering_debug_state";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
 import { default_return_literal } from "../expressions_helpers";
 import { format_root_scope_id } from "../lifetime";
@@ -240,7 +241,7 @@ fn prepare_parameters_from_function(function: NativeFunction, context: TypeConte
 
 fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], effects: string[], context: TypeContext, module_name: string, entry_points: string[], exported_symbols: string[], imported_functions: NativeFunction[], module_globals: LocalBinding[], module_init_symbol: string, needs_module_init_call: boolean) -> LoweredLLVMFunction ![io] {
     let mut diagnostics: string[] = [];
-    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let debug_lowering = trace_lowering();
 
     let fn_name = function.name;
     let fn_return_type = function.return_type;

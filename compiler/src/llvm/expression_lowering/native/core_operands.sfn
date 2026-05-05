@@ -7,6 +7,7 @@
 // relational operators (`emit_comparison_instruction`, `emit_boolean_and`),
 // and provides local variable loading (`load_local_operand`).
 import { char_code } from "../../../string_utils";
+import { trace_lowering } from "../../lowering_debug_state";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
 import {
@@ -1468,7 +1469,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
 }
 
 fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[]) -> CoercionResult ![io] {
-    let debug_coerce = fs.exists("build/sailfin/.trace_lowering");
+    let debug_coerce = trace_lowering();
     if debug_coerce {
         print.err("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type
             + " target="

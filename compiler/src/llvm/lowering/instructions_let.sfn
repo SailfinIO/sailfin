@@ -2,6 +2,7 @@
 //
 // Let binding instruction lowering.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
+import { trace_lowering } from "../lowering_debug_state";
 import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
@@ -79,7 +80,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     let mut lifetime_releases: LifetimeReleaseEvent[] = [];
     let mut current_next_region: number = next_region_id;
     let mut mutations: LocalMutation[] = [];
-    let debug_lowering = fs.exists("build/sailfin/.trace_lowering");
+    let debug_lowering = trace_lowering();
     if initializer_span == null { initializer_span = instruction.span; }
 
     let suspension_diagnostics = detect_suspension_conflicts(instruction.value, current_locals, current_bindings, function.name, initializer_span);
