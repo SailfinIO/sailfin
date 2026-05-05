@@ -48,6 +48,7 @@ import { emit_async_function } from "./emission_async";
 import { build_define_header_line } from "./emission_header";
 import { lower_instruction_range } from "./instructions";
 import { module_user_main_symbol } from "./module_globals";
+import { test_runner_trace } from "../../test_runner_state";
 
 fn is_safe_llvm_type_text(value: string) -> boolean {
     if value == null { return false; }
@@ -344,11 +345,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
         };
     }
 
-    let mut _let198: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let198 = true; }
-    }
-    let trace = _let198;
+    let trace = test_runner_trace();
     if trace {
         print.err("test llvm: emit_llvm_function preview " + fn_name
             + " instrs="

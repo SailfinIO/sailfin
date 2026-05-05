@@ -1171,19 +1171,27 @@ The remaining `fs.*` surface is concentrated in CLI / orchestration paths that l
 | `version.sfn`                               |            6 | resolve compiler version          |
 | `llvm/runtime_helpers.sfn`                  |            5 | runtime IR file reads             |
 
-The 48 remaining `build/sailfin/.xxx` references are **all flag/diagnostic gates**:
+The remaining `build/sailfin/.xxx` references are **all flag/diagnostic gates**:
 
 ```
 build/sailfin/.dump_test_sources         build/sailfin/.skip_typecheck
-build/sailfin/.phase_functions_diagnostics build/sailfin/.test_runner_active
-build/sailfin/.phase_types_diagnostics   build/sailfin/.trace_argv
-build/sailfin/.skip_module_globals       build/sailfin/.trace_call_lowering
-build/sailfin/.skip_test_inlining        build/sailfin/.trace_emit
-                                         build/sailfin/.trace_lowering
+build/sailfin/.phase_functions_diagnostics build/sailfin/.trace_argv
+build/sailfin/.phase_types_diagnostics   build/sailfin/.trace_call_lowering
+build/sailfin/.skip_module_globals       build/sailfin/.trace_emit
+build/sailfin/.skip_test_inlining        build/sailfin/.trace_lowering
                                          build/sailfin/.trace_test_runner
 ```
 
 These are checked via `fs.exists`/`fs.readFile` as a workaround for the lack of `--feature-flag X=Y` plumbing in the CLI. They carry no pipeline data and add no per-module I/O overhead in the common case (the seed checks once at startup). Migrating these to env vars or proper CLI flags is a hygiene cleanup, not a performance task.
+
+> Issue #311 (May 2026) retired `build/sailfin/.test_runner_active` entirely.
+> The marker was intra-process state masquerading as cross-process IPC — the
+> test orchestrator (`handle_test_command`) calls the LLVM lowering pipeline
+> via direct in-process function calls, never via a spawned child compiler.
+> The 10+ `fs.exists` probes on per-statement / per-function lowering hot
+> paths now read process-local booleans in `compiler/src/test_runner_state.sfn`
+> instead. See the **Test-runner state migration (issue #311)** section below
+> for the full census of replaced sites.
 
 ### Compiler debug toggles — env-var migration (issue #308)
 
@@ -1199,9 +1207,39 @@ The flag-file pattern raced when the parent compiler spawned a child compiler to
 
 A toggle is **on** when the env var is set to a value other than `""`, `"0"`, or `"false"`.
 
-Not yet migrated (deferred to a follow-up PR for hot-path caching design): `build/sailfin/.test_runner_active` and the LLVM-lowering `.trace_test_runner` reads paired with it. These are checked inside lowering hot loops and would regress per-popen cost without a module-local cache.
-
 The file probes `build/sailfin/.phase_functions_diagnostics`, `.phase_types_diagnostics`, `.skip_module_globals`, `.skip_test_inlining`, `.trace_argv`, `.trace_call_lowering`, `.trace_lowering` were not migrated by issue #308 — they're internal compiler diagnostics that aren't user-facing. Future hygiene cleanup, not blocking.
+
+### Test-runner state migration (issue #311)
+
+Issue #308 explicitly deferred the `.test_runner_active` marker and the six paired `.trace_test_runner` reads in LLVM lowering on the assumption that they were cross-process IPC needing an env-var plus per-process cache. Issue #311's design pass found the assumption was wrong: the marker is **intra-process state**. The producer (`compiler/src/cli_commands.sfn:handle_test_command`) and every consumer (the LLVM lowering pipeline) run in the **same Sailfin process** — `compile_tests_to_llvm_file_with_module_imports` is called via direct in-process function call, and `process.run([exe_path])` runs the *compiled test binary*, not a nested `sfn` invocation. Round-tripping that state through the filesystem cost one `fs.exists` syscall per probe per statement on the lowering hot paths.
+
+**Replacement:** `compiler/src/test_runner_state.sfn` exports four functions backed by two module-level `let mut` booleans:
+
+| Symbol                          | Replaces                                                                  |
+| ------------------------------- | ------------------------------------------------------------------------- |
+| `enter_test_runner_mode(trace)` | `_write_text_cmd("build/sailfin/.test_runner_active", "")` at orchestrator entry |
+| `exit_test_runner_mode()`       | `fs.deleteFile("build/sailfin/.test_runner_active")` at all 8 cleanup paths      |
+| `test_runner_active() -> boolean` | `fs.exists("build/sailfin/.test_runner_active")` at 2 lowering sites             |
+| `test_runner_trace() -> boolean`  | The paired `if fs.exists(.trace_test_runner) { if fs.exists(.test_runner_active) }` pattern at 6 lowering sites |
+
+**Sites migrated** (10 reads + 1 writer + 8 cleanup paths):
+
+| File                                                               | Probe count | Notes                                                |
+| ------------------------------------------------------------------ | ----------- | ---------------------------------------------------- |
+| `compiler/src/cli_commands.sfn`                                    |  9          | Writer + 8 cleanup paths                             |
+| `compiler/src/main.sfn`                                            |  1          | `compile_tests_to_llvm_file_with_module_imports`     |
+| `compiler/src/llvm/effects.sfn`                                    |  1          | `propagate_function_effects` trace gate              |
+| `compiler/src/llvm/imports.sfn`                                    |  1          | `collect_imported_module_context_for_module` trace   |
+| `compiler/src/llvm/expression_lowering/native/statement.sfn`       |  1          | `lower_return_instruction` (per-`return`)            |
+| `compiler/src/llvm/lowering/emission.sfn`                          |  1          | `emit_llvm_function` (per-function)                  |
+| `compiler/src/llvm/lowering/instructions.sfn`                      |  1          | `lower_instruction_range` (per-block)                |
+| `compiler/src/llvm/lowering/lowering_core.sfn`                     |  3          | `is_test_module` gate (behavior-changing) + trace + timing |
+
+The writer side did **not** need a `setenv` extern or `sh -c` wrapper: in-process state has no producer/consumer fork. No back-compat shim was needed either — the marker file was never user-facing; nothing outside the compiler ever wrote or read it.
+
+**Probe cost.** Each probe is now a single `load i1` from a global, no syscall. The `is_test_module` gate (the only behavior-changing read) is hit once per module; the trace gates short-circuit on `_active` so the `_trace` load is skipped when the runner isn't engaged.
+
+This pattern — module-local mutable state for compiler-internal coordination — generalises to the other unmigrated debug toggles (`.phase_*_diagnostics`, `.skip_test_inlining`, `.trace_lowering`, `.trace_call_lowering`) when they get the same hygiene pass.
 
 ### Pre-0.5.9 census (kept for the historical record)
 

@@ -1,0 +1,78 @@
+// compiler/src/test_runner_state.sfn
+//
+// In-process test-runner state shared between the orchestrator
+// (`cli_commands.sfn:handle_test_command`) and the LLVM lowering
+// pipeline. Replaces two flag files that issue #311 retired:
+//
+//   build/sailfin/.test_runner_active   — was: written/deleted by
+//                                          handle_test_command,
+//                                          read in 8 LLVM lowering
+//                                          sites + 1 main.sfn site
+//   build/sailfin/.trace_test_runner    — was: env-var or legacy
+//                                          file, paired-read in 6
+//                                          lowering trace gates
+//
+// Both were intra-process state masquerading as cross-process IPC.
+// The test runner invokes `compile_tests_to_llvm_file_with_module_-
+// imports` via direct in-process function calls, never via a
+// spawned child compiler — `process.run([exe_path])` runs the
+// compiled test binary, not a nested `sfn`. Each `fs.exists()`
+// probe was a popen-shaped syscall on hot paths inside per-
+// statement / per-function loops.
+//
+// Lifetime contract:
+//
+//   `enter_test_runner_mode(trace)` — called once at the top of
+//   `handle_test_command` after the env-flag is resolved.
+//
+//   `exit_test_runner_mode()` — called at every return path of
+//   `handle_test_command`, including early exits on resolver
+//   failure, compile failure, link failure, and run failure.
+//
+// Probes (`test_runner_active()` / `test_runner_trace()`) are
+// pure reads of process-local state — no IO, no effect.
+
+let mut _active: boolean = false;
+let mut _trace: boolean = false;
+
+// Mark the running compile as part of a `sfn test` invocation.
+// `trace` is the resolved value of the `SAILFIN_TRACE_TEST_RUNNER`
+// env-var (with one-release back-compat for the legacy
+// `build/sailfin/.trace_test_runner` flag file). The orchestrator
+// resolves it once at entry; every downstream probe reads from
+// the cached state instead of re-popening the env.
+fn enter_test_runner_mode(trace: boolean) {
+    _active = true;
+    _trace = trace;
+}
+
+// Clear the markers. Called from every return path of
+// `handle_test_command`. Idempotent: safe to call when the
+// markers are already cleared (e.g. defensive cleanup in a
+// future refactor).
+fn exit_test_runner_mode() {
+    _active = false;
+    _trace = false;
+}
+
+// True when the running compile was invoked via `sfn test`. Read
+// in 10+ LLVM lowering sites — including the behavior-changing
+// `is_test_module` gate in `lowering_core.sfn` — and in
+// `compile_tests_to_llvm_file_with_module_imports` in `main.sfn`.
+fn test_runner_active() -> boolean {
+    return _active;
+}
+
+// True only when the runner is active AND the user requested
+// trace output. Replaces the paired
+//
+//   if fs.exists("build/sailfin/.trace_test_runner") {
+//       if fs.exists("build/sailfin/.test_runner_active") { ... }
+//   }
+//
+// pattern in 6 lowering sites. Short-circuits via `_active` so
+// the `_trace` read is skipped when the runner isn't engaged.
+fn test_runner_trace() -> boolean {
+    if !_active { return false; }
+    return _trace;
+}

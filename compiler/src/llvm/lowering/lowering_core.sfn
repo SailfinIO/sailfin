@@ -83,6 +83,7 @@ import {
 import { lower_all_functions } from "./lowering_phase_functions";
 import { gather_imported_module_symbols } from "./lowering_phase_imports";
 import { render_llvm_preamble } from "./lowering_phase_render";
+import { test_runner_active, test_runner_trace } from "../../test_runner_state";
 // Phase modules
 import {
     recover_safe_functions,
@@ -301,7 +302,7 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
 
     let mut is_test_module = is_test_module_slug(native_module.module_name);
     if !is_test_module {
-        if fs.exists("build/sailfin/.test_runner_active") {
+        if test_runner_active() {
             is_test_module = true;
         }
     }
@@ -357,12 +358,8 @@ fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in
     diagnostics = extend_string_lines_checked(diagnostics, safe_parse_diagnostics, "parse");
 
     // ── Trace/timing setup ──────────────────────────────────────────
-    let mut _let250: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let250 = true; }
-    }
-    let trace = _let250;
-    let timing = fs.exists("build/sailfin/.test_runner_active");
+    let trace = test_runner_trace();
+    let timing = test_runner_active();
     let start_ms = monotonic_millis();
 
     if trace {

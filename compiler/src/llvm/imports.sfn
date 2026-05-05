@@ -10,6 +10,7 @@ import {
 } from "../native_ir";
 import { parse_layout_manifest, parse_native_imports_for_import } from "../native_ir_api";
 import { substring } from "../string_utils";
+import { test_runner_trace } from "../test_runner_state";
 import { ImportedModuleContext, LayoutManifestApplication } from "./types";
 import {
     append_string,
@@ -35,11 +36,7 @@ fn collect_imported_module_context(imports: NativeImport[]) -> ImportedModuleCon
 }
 
 fn collect_imported_module_context_for_module(imports: NativeImport[], current_module_slug: string) -> ImportedModuleContext ![io] {
-    let mut _let189: boolean = false;
-    if fs.exists("build/sailfin/.trace_test_runner") {
-        if fs.exists("build/sailfin/.test_runner_active") { _let189 = true; }
-    }
-    let trace = _let189;
+    let trace = test_runner_trace();
     if trace {
         print.err("test llvm: collect_imported_module_context start (imports="
             + number_to_string(imports.length)
