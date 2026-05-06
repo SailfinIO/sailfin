@@ -713,7 +713,15 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
 fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution {
     let mut result_target = trimmed_target;
     let mut function_entry: NativeFunction? = null;
-    let mut llvm_return: string = "i8*";
+    // Empty signals "unresolved". `coerce_and_emit_call` emits a fatal
+    // diagnostic (`llvm lowering [fatal]: cannot resolve return type ...`)
+    // when this stays empty through emission; the emit-level entrypoints
+    // (`compile_native_text_to_llvm_file`, `write_llvm_ir`) scan for the
+    // `[fatal]` sentinel and return `false`, so the CLI exits non-zero
+    // rather than guessing a return type. Pre-issue #306 this defaulted
+    // to `i8*`, producing declare/call type mismatches that clang
+    // tolerated for unused returns but were structurally malformed.
+    let mut llvm_return: string = "";
     let mut expected_params: string[] = [];
     let mut is_trait_dispatch: boolean = false;
     let mut result_diagnostics: string[] = [];
@@ -747,7 +755,15 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
                         let sig = interface_info2.signatures[sig_idx];
                         if sig.name == method_name {
                             llvm_return = map_return_type(context, sig.return_type);
-                            if llvm_return.length == 0 { llvm_return = "i8*"; }
+                            if llvm_return.length == 0 {
+                                result_diagnostics.push("llvm lowering: trait `"
+                                    + interface_name
+                                    + "` method `"
+                                    + method_name
+                                    + "` has unsupported return type `"
+                                    + sig.return_type
+                                    + "`");
+                            }
                             expected_params = ["i8*"];
                             break;
                         }
