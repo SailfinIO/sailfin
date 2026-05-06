@@ -1,0 +1,11 @@
+// Fixture for compiler/tests/e2e/test_atomic_add_sub_compile.sh.
+// Exercises `atomic_add` and `atomic_sub` so the emitted LLVM IR
+// contains exactly one `atomicrmw add` and one `atomicrmw sub`
+// instruction — matches the verification regex in issue #332. Each
+// builtin returns the **previous** value at `*ptr`; the surrounding
+// reference-counting idiom (retain on `atomic_add`, release-then-
+// free on `atomic_sub == 1`) is the M2 RC use case this fixture
+// models.
+fn retain(rc: * int) -> int { return atomic_add(rc, 1); }
+
+fn release(rc: * int) -> int { return atomic_sub(rc, 1); }
