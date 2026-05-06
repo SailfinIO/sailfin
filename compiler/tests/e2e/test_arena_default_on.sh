@@ -23,9 +23,11 @@
 # `native_driver.c` atexit hook to print either:
 #   "[sailfin-arena] label=... pages=... capacity=..."  (arena on)
 # or:
-#   "[sailfin-arena] label=... stats=disabled (SAILFIN_USE_ARENA not set)"
-# (arena off). Grepping for either token is a deterministic signal
-# without relying on RSS measurements or process-internal state.
+#   "[sailfin-arena] label=... stats=disabled (SAILFIN_USE_ARENA=\"<v>\" opt-out)"
+# (arena off; `<v>` echoes the explicit opt-out value — `0`, `""`,
+# or `false` — since unset now means "take the default" and never
+# reaches this branch). Grepping for either token is a deterministic
+# signal without relying on RSS measurements or process-internal state.
 
 set -euo pipefail
 

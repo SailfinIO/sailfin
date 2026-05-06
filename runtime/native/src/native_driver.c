@@ -107,10 +107,16 @@ static void _arena_stats_atexit(void)
     if (!sfn_arena_enabled())
     {
         // Avoid creating the global arena just to dump empty stats.
+        // With the #324 default-on flip, the only way to reach this
+        // branch is an explicit opt-out (SAILFIN_USE_ARENA={0,'',false}),
+        // so surface the actual value the user set so the log line is
+        // self-explanatory.
+        const char *opt_out = getenv("SAILFIN_USE_ARENA");
         fprintf(stderr,
                 "[sailfin-arena] label=%s stats=disabled "
-                "(SAILFIN_USE_ARENA not set)\n",
-                _arena_stats_label);
+                "(SAILFIN_USE_ARENA=\"%s\" opt-out)\n",
+                _arena_stats_label,
+                opt_out ? opt_out : "");
         return;
     }
     fprintf(stderr, "[sailfin-arena] label=%s ", _arena_stats_label);
