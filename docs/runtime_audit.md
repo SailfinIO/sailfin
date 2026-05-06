@@ -73,7 +73,7 @@
 > - **Effect enforcement gate — shipped** (Phases A–F, PRs #241–#245). Effect
 >   violations now block compilation by default.
 > - **`extern fn` — shipped** (parser + native-IR emitter + LLVM `declare`
->   emission + typecheck registration as of 2026-05-01). Hard prerequisite #7
+>   emission + typecheck registration as of 2026-05-01). Hard prerequisite #6
 >   below is satisfied. `runtime/sfn/io.sfn` now proves runtime-module LLVM
 >   call lowering against an imported extern (`write` from `./platform/libc`).
 >   General typecheck-level call-site resolution remains the open follow-up;
@@ -412,9 +412,11 @@ Implications for this audit:
    it once in C — as a temporary unblocker — or doing it once in Sailfin — as
    the real runtime primitive — should be a single decision, not two.
 2. **The compiler must gain real drop signals before a safe runtime is
-   possible.** Affine/Linear are parsed but not enforced; without enforcement,
-   the runtime can't trust any drop the compiler claims to emit. This is the
-   reason `SAILFIN_ENABLE_STRING_FREE` is off by default today.
+   possible.** Per `CLAUDE.md`, ownership types are deferred post-1.0; the
+   runtime instead relies on conservative drop emission keyed off
+   compiler-known allocation kinds (M1.5, epic #322). Until M1.5 ships,
+   the runtime can't trust any drop the compiler claims to emit. This is
+   the reason `SAILFIN_ENABLE_STRING_FREE` is off by default today.
 3. **Files-as-GC is cheap to delete but expensive to replace.** ~336 dotfile
    references to `build/sailfin/.xxx` IPC temp paths remain. Every one of those
    is a latent allocation that needs a real drop when IPC goes away.
@@ -447,15 +449,22 @@ compiler features that do not exist in the current toolchain.
 4. **Generic trait/interface constraints** (`fn sort<T: Comparable>`) —
    roadmap §2. Needed for typed containers: `Channel<T>`, `Array<T>`,
    `Future<T>`, `Hash<K, V>`, `String` wrapper over `{ptr, len}`.
-5. **Destructors / deterministic drop emission** — no roadmap entry yet.
-   The compiler needs to emit explicit drop calls at scope exit for any type
-   that owns heap state. Without this, the runtime can't distinguish "caller
-   handed me this to consume" from "caller wants to keep using this."
-6. **Affine/Linear enforcement (or explicit removal)** — roadmap §2. Either
-   actually enforce move/consume so the runtime can trust drop signals, or
-   remove the syntax. "Parsed but unenforced" is worse than absent because
-   it implies a guarantee the runtime can't rely on.
-7. **`extern fn` with typed linker-resolved symbols.** ✅ **Shipped 2026-05-01.**
+5. **Conservative drop emission scoped to compiler-known allocation kinds
+   (M1.5)** — tracked by epic #322 (split out of #321's M1.5 reassessment).
+   The compiler emits explicit drop calls at scope exit for every owned local
+   whose `LocalBinding.allocation_kind` is `"rc"`; arena-allocated locals
+   emit nothing (bulk reset handles them). Conservative escape analysis
+   promotes a binding to `"rc"` only at compiler-known boundaries
+   (function return in v0; closure capture and channel send once those land).
+   This supersedes the previous prereq pair (drop emission as a separate
+   bullet, plus a "move/consume enforcement (or explicit removal)" bullet
+   for ownership types). Per `CLAUDE.md`, ownership types
+   (`Affine<T>` / `Linear<T>`) are **deferred post-1.0** — the runtime trusts
+   compiler-emitted drops keyed off allocation kind, not move-semantics
+   enforcement. See `docs/runtime_architecture.md` §3.1 for the seam
+   (`LocalBinding.allocation_kind` + `emit_scope_drops`) and #322 for the
+   sub-issue split.
+6. **`extern fn` with typed linker-resolved symbols.** ✅ **Shipped 2026-05-01.**
    The Sailfin runtime must reach platform syscalls (`pthread_create`,
    `fopen`, `posix_spawnp`, `malloc`, `write`, `clock_gettime`, `socket`,
    etc.) from Sailfin source.
@@ -489,19 +498,19 @@ compiler features that do not exist in the current toolchain.
 
 ### Soft prerequisites (runtime rewrite can start but each gap becomes a scar)
 
-8. **Structured-unwind exception emission.** The compiler lowering currently
+7. **Structured-unwind exception emission.** The compiler lowering currently
    threads exceptions through TLS flags and polling (`has_exception` after
    every call). Moving the runtime to Sailfin without also moving to explicit
    landing-pad emission pushes a perf tax onto every function call.
-9. **ABI-version metadata in emitted IR.** `runtime_abi.md` assumes a
+8. **ABI-version metadata in emitted IR.** `runtime_abi.md` assumes a
    `sailfin_abi_version` emitted into IR. No emitter code does this yet.
-10. **Array/slice syntax primitives.** Today `string[]` and `T[]` are
-    compiler-special. A Sailfin runtime should be able to define `Array<T>`
-    and `Slice<T>` in Sailfin and have the compiler lower `T[]` to them.
-11. **Tagged-union / sum-type layout control.** For `Value`, `Result<T, E>`,
+9. **Array/slice syntax primitives.** Today `string[]` and `T[]` are
+   compiler-special. A Sailfin runtime should be able to define `Array<T>`
+   and `Slice<T>` in Sailfin and have the compiler lower `T[]` to them.
+10. **Tagged-union / sum-type layout control.** For `Value`, `Result<T, E>`,
     `Option<T>`. Enums exist but the compiler does not currently expose
     layout controls needed for niche-filled optionals and stable tag encoding.
-12. **Atomic intrinsics.** Reference counting and the scheduler's task queue
+11. **Atomic intrinsics.** Reference counting and the scheduler's task queue
     need atomic increment/decrement, compare-and-swap, and fence operations.
     LLVM provides these as intrinsics; the compiler must expose them as
     typed Sailfin builtins (e.g. `atomic_add`, `atomic_cas`). Without this,
@@ -580,10 +589,12 @@ Entrypoints that are C-based today and must be gone by 1.0:
 
 Reordered from the previous audit to reflect the April 2026 reality.
 
-- **M0 — Compiler prerequisites** (roadmap §0 + ownership enforcement).
-  Integer types, `Result<T, E>`, closures-with-capture, destructors,
-  enforceable ownership. The runtime rewrite cannot produce a better runtime
-  than the compiler can describe.
+- **M0 — Compiler prerequisites** (roadmap §0). Integer types, `Result<T, E>`,
+  closures-with-capture. Per `CLAUDE.md`, ownership enforcement
+  (`Affine<T>` / `Linear<T>`) is **deferred post-1.0**; the runtime instead
+  relies on conservative drop emission keyed off compiler-known allocation
+  kinds (M1.5). The runtime rewrite cannot produce a better runtime than
+  the compiler can describe.
 - **M0.5 — Arena allocator in C** *(optional unblocker)*. If the compiler
   perf work needs a temporary memory-reclamation primitive before M1, it lives
   in the C runtime and is deleted at M3. Scope: bump allocator, reset per
@@ -592,6 +603,14 @@ Reordered from the previous audit to reflect the April 2026 reality.
   `site/src/content/docs/docs/reference/runtime-abi.md` v0, emit ABI version metadata in IR, switch string and
   array lowering to `{ptr, len, [cap]}` layouts. All subsequent work assumes
   this ABI.
+- **M1.5 — Drop emission** (epic #322, split out of #321). Compiler emits
+  scope-exit drop calls keyed off `LocalBinding.allocation_kind`
+  (`"arena" | "rc" | "static" | "stack"`) via `emit_scope_drops` in
+  `instructions_helpers.sfn`. Conservative escape rule promotes
+  arena → rc only at function-return boundaries in v0; closure-capture and
+  channel-send boundaries follow once those features land. Without this
+  milestone every M2 service leaks (no drops emitted) and `string_drop` /
+  `array_drop` stay disabled by default — see `runtime_architecture.md` §3.1.
 - **M2 — Core runtime in Sailfin.** Strings, arrays, exceptions, logging,
   timing, process spawn. Minimum surface to self-host `hello-world.sfn` and
   run the test suite without the C runtime.
