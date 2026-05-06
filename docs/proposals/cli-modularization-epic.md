@@ -97,7 +97,7 @@ in section 7.
 |---|---|---|
 | `src/mod.sfn` — types `Arg`/`Flag`/`Command`/`Matches` | 31–62 | `src/types.sfn` (re-exported by `mod.sfn`) |
 | `src/mod.sfn` — builders `arg`, `arg_optional`, `flag*`, `command`, `with_*` | 64–215 | `src/builder.sfn` |
-| `src/mod.sfn` — `run()` (exiting parse) | 219–373 | `src/parser.sfn` (renamed `run_or_exit`) |
+| `src/mod.sfn` — `run()` (exiting parse) | 219–373 | `src/parser.sfn` (kept as `run()`; `parse()` added alongside) |
 | `src/mod.sfn` — accessors `get`, `get_or`, `has_flag`, `has`, `subcommand`, `positionals` | 377–466 | `src/matches.sfn` |
 | `src/mod.sfn` — help formatting `_format_help`, `_flag_label`, width helpers | 470–615 | `src/help.sfn` |
 | `src/mod.sfn` — ANSI styling `bold`, `dim`, color helpers, `_esc`, `_ansi_wrap` | 624–678 | `src/style.sfn` |
@@ -183,13 +183,13 @@ capsules/sfn/cli/
     mod.sfn                 # re-exports public surface only
     types.sfn               # Arg, Flag, Command, Matches, ParseError, ParseResult, ExitCode
     builder.sfn             # arg, flag, flag_int, flag_choice, command, with_*
-    parser.sfn              # parse() (non-exiting), run_or_exit() (exits)
+    parser.sfn              # parse() (non-exiting), run() (exits, unchanged)
     matches.sfn             # get, get_or, has_flag, has, subcommand, positionals,
                             # get_int, get_float, get_path, get_choice, count_flag
     help.sfn                # render_help_text(), render_help_tree() (structured)
     style.sfn               # bold, dim, color helpers + NO_COLOR/TTY gate
     print.sfn               # print_error/warn/success/hint/diag/status
-    exit_codes.sfn          # EXIT_OK, EXIT_USAGE, EXIT_BUILD_FAIL, EXIT_INTERNAL
+    exit_codes.sfn          # EXIT_OK, EXIT_BUILD_FAIL, EXIT_USAGE, EXIT_NOT_FOUND, EXIT_INTERNAL
   tests/
     cli_test.sfn            # imports from "sfn/cli" — no inlined redefinitions
     parser_test.sfn         # focused parser coverage
@@ -223,7 +223,7 @@ with_about, with_long_about
 
 // Parsing
 parse,            // -> ParseResult (no exit, no print)
-run_or_exit,      // -> Matches ![io] (current run() semantics, renamed)
+run,              // -> Matches ![io] (existing semantics; calls process.exit())
 
 // Matches accessors
 get, get_or, has_flag, has, subcommand, positionals,
@@ -240,18 +240,20 @@ style_default, style_disabled, style_for_stream, no_color_active
 print_error, print_warn, print_success, print_hint, print_diag, print_status
 
 // Exit codes
-EXIT_OK, EXIT_USAGE, EXIT_BUILD_FAIL, EXIT_NOT_FOUND, EXIT_INTERNAL
+EXIT_OK, EXIT_BUILD_FAIL, EXIT_USAGE, EXIT_NOT_FOUND, EXIT_INTERNAL
 ```
 
 Notes on the new types:
 
 - `ParseError` — struct `{ kind: string; message: string; hint: string;
   exit_code: number }` with `kind` ∈ `{ "unknown_flag", "missing_value",
-  "missing_required_arg", "unknown_subcommand", "type_error",
-  "exclusive_violation", "help_requested", "version_requested" }`.
-  `help_requested` and `version_requested` are not errors per se but
-  reuse the result channel to keep `parse()` non-exiting; the caller
-  decides whether to print and exit.
+  "missing_required_arg", "missing_required_flag", "unknown_subcommand",
+  "type_error", "exclusive_violation", "help_requested",
+  "version_requested" }`. `missing_required_arg` covers positionals;
+  `missing_required_flag` covers flags marked via `flag_required` (added
+  in Issue 1.8). `help_requested` and `version_requested` are not errors
+  per se but reuse the result channel to keep `parse()` non-exiting; the
+  caller decides whether to print and exit.
 - `ParseResult` — sentinel-flag struct `{ ok: boolean; matches: Matches;
   error: ParseError }`. Switches to `Result<Matches, ParseError>` once
   the language ships it (Phase 1 of runtime sequencing).
@@ -381,7 +383,8 @@ compiler — they expand the capsule surface so Phase 2 can consume it.
 7. `flag_repeat` (`-v -v -v` collects values) + `repeated` accessor.
 8. `flag_count` (counted boolean) + `count_flag`.
 9. `flag_required` + missing-required-flag diagnostic.
-10. `flag_env(env_var_name)` — flag falls back to env var.
+10. `flag_env(f, "VAR_NAME")` — decorate an existing flag to fall back
+    to the env var when the flag is absent on the command line.
 11. `flag_group_exclusive`, `flag_group_required_one`.
 12. `arg_variadic` — `<files>...` positional collection.
 13. `--key=value` syntax + `--` end-of-options sentinel.
@@ -577,9 +580,15 @@ Every issue below uses the contract from
 - **Size:** M. **Type:** feature. **Depends on:** 0.5.2.
 
 #### Issue 1.2 — Exit code constants
-- **Goal:** Define `EXIT_OK = 0`, `EXIT_USAGE = 2`,
-  `EXIT_BUILD_FAIL = 1`, `EXIT_NOT_FOUND = 1`, `EXIT_INTERNAL = 70`
+- **Goal:** Define `EXIT_OK = 0`, `EXIT_BUILD_FAIL = 1`,
+  `EXIT_USAGE = 2`, `EXIT_NOT_FOUND = 3`, `EXIT_INTERNAL = 70`
   in `exit_codes.sfn`. Use them in the existing `run()` body.
+  Codes follow the loose tooling convention (Rust/Cargo): `1` is
+  the generic "operation failed" code, `2` is reserved for usage
+  errors, `3` distinguishes "input not found" so scripts/CI can
+  branch on missing-file vs. compile-failure without parsing
+  stderr. `70` matches sysexits.h `EX_SOFTWARE` for internal
+  panics.
 - **Acceptance:** constants exported; `run()` uses them; tests pass.
 - **Size:** XS. **Type:** feature. **Depends on:** 0.1.
 
