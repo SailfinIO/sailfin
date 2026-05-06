@@ -100,6 +100,7 @@ import {
 import { emit_llvm_function } from "./emission";
 import {
     compile_native_text_to_llvm_file,
+    has_fatal_lowering_diagnostic,
     lower_to_llvm_lines_with_parsed_context,
     lower_to_llvm_lines_with_parsed_context_for_tests
 } from "./lowering_core";
@@ -307,6 +308,14 @@ fn write_llvm_ir(native_module: NativeModule, out_path: string) -> boolean ![io]
         if lowered_lines.diagnostics.length > 0 {
             print.err("emit-llvm: diagnostic " + lowered_lines.diagnostics[0]);
         }
+        return false;
+    }
+    // Refuse to write IR when any lowering pass surfaced a `[fatal]`
+    // diagnostic (issue #306). The lines may look complete but a
+    // side-effecting call could have been silently dropped at the
+    // unresolved-callee gate; writing the file would lie about
+    // success.
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
         return false;
     }
     return write_llvm_lines_chunked(out_path, lines);

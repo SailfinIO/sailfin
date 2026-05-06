@@ -713,9 +713,14 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
 fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelperDescriptor?, method_operand: LLVMOperand?, is_array_concat: boolean, array_concat_element_type: string, functions: NativeFunction[], context: TypeContext) -> CallSignatureResolution {
     let mut result_target = trimmed_target;
     let mut function_entry: NativeFunction? = null;
-    // Empty signals "unresolved"; the emitter hard-fails rather than guessing
-    // i8*, which used to produce LLVM IR with declare/call type mismatches
-    // (issue #306).
+    // Empty signals "unresolved". `coerce_and_emit_call` emits a fatal
+    // diagnostic (`llvm lowering [fatal]: cannot resolve return type ...`)
+    // when this stays empty through emission; the emit-level entrypoints
+    // (`compile_native_text_to_llvm_file`, `write_llvm_ir`) scan for the
+    // `[fatal]` sentinel and return `false`, so the CLI exits non-zero
+    // rather than guessing a return type. Pre-issue #306 this defaulted
+    // to `i8*`, producing declare/call type mismatches that clang
+    // tolerated for unused returns but were structurally malformed.
     let mut llvm_return: string = "";
     let mut expected_params: string[] = [];
     let mut is_trait_dispatch: boolean = false;

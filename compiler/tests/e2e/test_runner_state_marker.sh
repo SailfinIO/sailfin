@@ -161,11 +161,15 @@ fn main() ![io] {
 }
 EOF
     local log="$SCRATCH/emit.log"
-    if ! SAILFIN_TRACE_LOWERING=1 "$BINARY" emit -o "$SCRATCH/proj3/main.ll" llvm "$SCRATCH/proj3/main.sfn" > "$log" 2>&1; then
-        echo "[test]   sfn emit failed:"
-        cat "$log"
-        return 1
-    fi
+    # `sfn emit llvm` is allowed to exit non-zero here: the
+    # standalone-emit path doesn't pre-stage imported function
+    # signatures, so issue #306's fatal diagnostic can fire on the
+    # call to `add_one` (the import declaration was seen, but the
+    # helper module's `.sfn-asm` wasn't built). That's expected and
+    # *orthogonal* to what this test is pinning — we only care about
+    # the mangling pass observing the import. The trace lines we
+    # need are emitted before any fatal-diagnostic gate runs.
+    SAILFIN_TRACE_LOWERING=1 "$BINARY" emit -o "$SCRATCH/proj3/main.ll" llvm "$SCRATCH/proj3/main.sfn" > "$log" 2>&1 || true
 
     # Behavior-changing gate (the load-bearing assertion):
     # the mangling pass saw the import. If `is_test_module` had

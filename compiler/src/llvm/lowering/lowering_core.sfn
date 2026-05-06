@@ -261,6 +261,14 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
         print.err("emit-llvm: lowered lines null");
         return false;
     }
+    // Refuse to write IR when any lowering pass surfaced a `[fatal]`
+    // diagnostic. Currently issued by `core_call_emission.sfn` for
+    // calls whose return type cannot be resolved (issue #306) — a
+    // partial IR file with the side-effecting call silently dropped
+    // would be worse than no output at all.
+    if has_fatal_lowering_diagnostic(lowered_lines.diagnostics) {
+        return false;
+    }
     let lowered_count = lowered_lines.lines.length;
     if lowered_count > 0 {
         let defined = collect_defined_function_symbols(lowered_lines.lines);
@@ -276,6 +284,22 @@ fn compile_native_text_to_llvm_file(native_text: string, module_name: string, ou
     }
     if fs.exists(out_path) { fs.deleteFile(out_path); }
     return write_llvm_lines_chunked(out_path, lines);
+}
+
+// Returns true if any diagnostic in the list carries the `[fatal]`
+// sentinel tag. Lowering passes use this prefix to escalate a
+// diagnostic from "warning the user sees on stderr" to "the build
+// must exit non-zero" — see `core_call_emission.sfn` for the
+// canonical issuer (issue #306).
+fn has_fatal_lowering_diagnostic(diagnostics: string[]) -> boolean {
+    if diagnostics == null { return false; }
+    let mut idx: number = 0;
+    loop {
+        if idx >= diagnostics.length { break; }
+        if index_of(diagnostics[idx], "[fatal]") >= 0 { return true; }
+        idx += 1;
+    }
+    return false;
 }
 
 fn lower_to_llvm_lines_with_parsed_context(native_module: NativeModule, parse_in: ParseNativeResult, imported_manifests: LayoutManifest[], imported_native_texts: string[], diagnostics_in: string[], mangle_symbols: boolean, native_text_override_path: string) -> LoweredLLVMLinesResult ![io] {
