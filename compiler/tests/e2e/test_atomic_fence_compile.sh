@@ -48,18 +48,18 @@ test_atomic_fence_emits_expected_ir() {
     #   atomic_fence() → exactly one `fence seq_cst` line per call site,
     #   no operands, no alignment clause.
     local missing=0
-    if ! grep -qE '^\s*fence seq_cst$' "$ll"; then
+    if ! grep -qE '^[[:space:]]*fence seq_cst$' "$ll"; then
         echo "[test]   missing 'fence seq_cst' line in emitted IR"
         missing=$((missing + 1))
     fi
     # Defence against a regression that adds an alignment clause or
     # an operand to the fence instruction (LLVM rejects both for
     # `fence`, but we also want a fast unit-style failure here).
-    if grep -qE '^\s*fence seq_cst.*align' "$ll"; then
+    if grep -qE '^[[:space:]]*fence seq_cst.*align' "$ll"; then
         echo "[test]   regression: 'fence seq_cst' emitted with align clause"
         missing=$((missing + 1))
     fi
-    if grep -qE '^\s*fence seq_cst[[:space:]]+i' "$ll"; then
+    if grep -qE '^[[:space:]]*fence seq_cst[[:space:]]+i' "$ll"; then
         echo "[test]   regression: 'fence seq_cst' emitted with an operand"
         missing=$((missing + 1))
     fi
@@ -69,7 +69,9 @@ test_atomic_fence_emits_expected_ir() {
 # ---- Verification regex from the issue counts == call sites in fixture ----
 # The fixture has two `atomic_fence()` call sites. The issue's verification
 # block specifies `grep -c '^\s*fence seq_cst$'` should match the call-site
-# count.
+# count; we use the POSIX-portable `[[:space:]]*` form here so the test
+# runs cleanly under BSD grep on the macos-arm64 CI matrix (BSD ERE
+# does not honour the PCRE `\s` escape).
 test_fence_count_matches_call_sites() {
     local ll="$SCRATCH/atomic_fence_count.ll"
     if ! "$BINARY" emit -o "$ll" llvm "$FIXTURE" > /dev/null 2>&1; then
@@ -77,7 +79,7 @@ test_fence_count_matches_call_sites() {
         return 1
     fi
     local hits
-    hits="$(grep -cE '^\s*fence seq_cst$' "$ll" || true)"
+    hits="$(grep -cE '^[[:space:]]*fence seq_cst$' "$ll" || true)"
     if [ "${hits:-0}" -ne 2 ]; then
         echo "[test]   expected 2 'fence seq_cst' lines, got ${hits:-0}"
         return 1
@@ -113,7 +115,7 @@ EOF
         echo "         stderr was: $stderr" | head -5
         return 1
     fi
-    if [ -f "$ll" ] && grep -qE '^\s*fence seq_cst$' "$ll"; then
+    if [ -f "$ll" ] && grep -qE '^[[:space:]]*fence seq_cst$' "$ll"; then
         echo "[test]   regression: emitted 'fence seq_cst' for bogus arity call"
         return 1
     fi
