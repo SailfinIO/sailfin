@@ -1095,6 +1095,24 @@ could stay in the caller's arena), but it is correct without
 interprocedural escape analysis and matches what the existing compiler can
 already reason about.
 
+**Scope of function-return promotion (M1.5.5, issue #329).** The
+implementation in `lower_return_instruction` covers exactly one case:
+`return <ident>;` where `<ident>` resolves to a heap-typed local
+(`is_heap_type` excludes `i1`/`i8`/`i16`/`i32`/`i64`/`float`/`double`,
+allows pointer suffixes and `{...}` struct shapes). The matching
+`LocalBinding.allocation_kind` is flipped from `"arena"` to `"rc"` via
+`promote_local_to_rc` in `core_scopes.sfn`. Borrows
+(`OwnershipInfo.variant == "Borrow"`) are never promoted — the borrow
+base owns the resource, so a release on the borrowed alias would
+double-free. Returned **parameters** are also untouched today —
+`find_local_binding` is the lookup used, and parameters live in
+`ParameterBinding[]`, not `LocalBinding[]`. Closure capture promotion is
+M1 work (#321), channel send promotion is M4 work; both are explicitly
+out of scope here. Interprocedural escape analysis (e.g., recognising
+that a returned value is immediately consumed at the call site without
+escaping the caller's arena) is post-M2 work; the conservative rule
+over-promotes in that case but stays sound.
+
 **Required changes (sub-issues under #322):**
 
 1. **`compiler/src/llvm/lowering/instructions.sfn`** — at the end of each scope

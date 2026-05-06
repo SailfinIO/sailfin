@@ -1,0 +1,31 @@
+// Fixture for compiler/tests/e2e/test_drop_emission_escape_promotion.sh.
+//
+// Exercises M1.5.5 conservative escape promotion (issue #329):
+//
+//   - `make_string` declares a heap-typed local (`s: string`, lowered as
+//     `i8*`) and is the operand of a `return` statement. After M1.5.5
+//     ships, `lower_return_instruction` flips that local's
+//     `allocation_kind` from "arena" to "rc".
+//   - `make_int` declares a primitive local (`n: int`, lowered as
+//     `i64`). The `is_heap_type` predicate must NOT promote it — a
+//     spurious `sfn_rc_release(i8* <int>)` would be a use-after-free
+//     against a non-pointer.
+//   - `forwarder` returns a parameter, not a local. The lowering pass
+//     does not promote parameters today (only locals — `return p;` is a
+//     parameter use, not a local rebind).
+//
+// No `main` — the harness drives `sfn emit llvm` directly. The IR is
+// the artifact under test; what we pin downstream is the existence of
+// the runtime ABI (`declare void @sfn_rc_release(i8*)`) and the absence
+// of any spurious drop on a primitive return.
+fn make_string() -> string {
+    let s = "hi";
+    return s;
+}
+
+fn make_int() -> int {
+    let n: int = 42;
+    return n;
+}
+
+fn forwarder(p: string) -> string { return p; }

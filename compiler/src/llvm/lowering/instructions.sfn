@@ -266,6 +266,12 @@ fn lower_instruction_range(function: NativeFunction, start_index: number, end: n
                 let lowered = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
                 current_temp = lowered.temp_index;
                 current_next_region = lowered.next_region_id;
+                // M1.5.5 (issue #329): capture the locals back so that the
+                // escape-promotion flip on `allocation_kind` (and the existing
+                // `mark_local_consumed` write) survives into the function-body
+                // scope-exit drop seam in `emit_llvm_function`.
+                current_locals = lowered.locals;
+                current_bindings = lowered.bindings;
                 collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
                 terminated = true;
                 index += 1;
@@ -504,6 +510,11 @@ fn lower_instruction_range(function: NativeFunction, start_index: number, end: n
                     let _lowered_ret_21 = lower_return_instruction(function, instruction, llvm_return, current_bindings, current_locals, current_temp, current_lines, current_next_region, scope_id, scope_depth, functions, context);
                     current_temp = _lowered_ret_21.temp_index;
                     current_next_region = _lowered_ret_21.next_region_id;
+                    // M1.5.5 (issue #329): mirror the tag-0 path above so the
+                    // recovery-parser branch also propagates promoted/consumed
+                    // bindings into the function-body drop seam.
+                    current_locals = _lowered_ret_21.locals;
+                    current_bindings = _lowered_ret_21.bindings;
                     collected_string_constants = merge_string_constants(collected_string_constants, _lowered_ret_21.string_constants);
                     terminated = true;
                     index += 1;
