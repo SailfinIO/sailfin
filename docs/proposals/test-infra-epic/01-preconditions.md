@@ -80,10 +80,16 @@ itself. Same call-site shape; effect annotations drop to `![pure]`.
 - Effect-polymorphism rollout (post-1.0) folds these back into the
   generic `assert_eq` and `pure_assert_*` becomes an alias deprecated
   in one minor.
-- `capsules/sfn/test/capsule.toml` `required` drops to `[]` for the
-  `![pure]` API surface; `![io]` stays for `with_tmp_dir`/diagnostics.
+- A test calling only `pure_assert_*` (or `expect(...)` once 1.4 ships)
+  can stay `![pure]` even though `sfn/test`'s manifest still declares
+  `required = ["io"]` — the capsule's `required` describes what the
+  capsule's own functions do, not what every caller must declare.
+- `capsules/sfn/test/capsule.toml` is **unchanged** by this issue; the
+  capsule keeps `required = ["io"]` because the lifecycle/fixture/
+  legacy-shim surfaces still use `print.err` and `process.run`.
 
-**Files affected:** `capsules/sfn/test/src/mod.sfn`, `capsules/sfn/test/capsule.toml`.
+**Files affected:** `capsules/sfn/test/src/mod.sfn`. (No change to
+`capsule.toml` — manifest semantics already permit pure callers.)
 
 ---
 
@@ -153,13 +159,14 @@ output one event per line, schema-versioned.
   - `{"event":"start","total":N,"schema_version":1}` once at start
   - `{"event":"test","name":...,"file":...,"line":...,"status":"pass"|"fail"|"skip","duration_ms":N,"effects":[...],"assertion":{...}?}` per test
   - `{"event":"summary","passed":N,"failed":N,"skipped":N,"duration_ms":N}` once at end
-- Schema documented at `site/src/content/docs/docs/reference/spec/§9-test-json.md`.
+- Schema documented as a new "Test runner JSON output" section appended to the existing `site/src/content/docs/docs/reference/spec/11-testing.md` chapter (the spec uses numbered filenames `NN-name.md`; testing already lives at chapter §11).
 - Schema version is bumped on any breaking change; old consumers see
   `schema_version` and can refuse.
 
 **Files affected:** `compiler/src/cli_commands.sfn:312`, new
 `compiler/src/test_runner_json.sfn`,
-`site/src/content/docs/docs/reference/spec/§9-test-json.md` (new).
+`site/src/content/docs/docs/reference/spec/11-testing.md` (extend with
+a "Test runner JSON output" section).
 
 ---
 

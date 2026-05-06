@@ -19,11 +19,7 @@ capsules/sfn/test/
 │   ├── snapshot.sfn         # to_match_snapshot
 │   ├── compile_assert.sfn   # assert_compiles / assert_does_not_compile
 │   └── runner.sfn           # run_tests entry point (used by sfn test)
-└── tests/
-    ├── expect_test.sfn
-    ├── matcher_test.sfn
-    ├── lifecycle_test.sfn
-    └── fixtures_test.sfn
+└── tests/                   # one *_test.sfn per src/ module
 ```
 
 ## Core: matchers and expectations
@@ -67,20 +63,27 @@ fn Expectation<Result<T, E>>.to_be_err(self: Expectation<Result<T, E>>) -> () ![
 
 ## Legacy assertion shims (preserved through 1.0; deprecated post-1.0)
 
-Per-type fan-out for the no-generics era. `pure_assert_*` returns a
-`Result` instead of printing, so callers stay `![pure]`.
+Per-type fan-out for the no-generics era. **Two API tiers:** legacy
+`assert_eq_*` print on failure (`![io]`); `pure_assert_*` return
+`Result<(), AssertFailure>` and stay `![pure]`. The runner reads the
+Result via the P2 structured hook. When row-polymorphic effects ship
+post-1.0, both tiers collapse into a single `assert_eq<T, E>`
+parameterized over the caller's effect row.
 
 ```sfn
-fn assert_eq<T: Equatable>(actual: T, expected: T, label: string) ![pure];   // when generics ship
-fn assert_eq_int(actual: int, expected: int, label: string) ![pure];
-fn assert_eq_float(actual: float, expected: float, tolerance: float, label: string) ![pure];
-fn assert_eq_string(actual: string, expected: string, label: string) ![pure];
-fn assert_eq_bool(actual: boolean, expected: boolean, label: string) ![pure];
-fn assert_array_eq<T: Equatable>(actual: T[], expected: T[], label: string) ![pure];
+// Legacy `![io]` shims — print diagnostics on failure
+fn assert_eq<T: Equatable>(actual: T, expected: T, label: string) ![io];   // when generics ship
+fn assert_eq_int(actual: int, expected: int, label: string) ![io];
+fn assert_eq_float(actual: float, expected: float, tolerance: float, label: string) ![io];
+fn assert_eq_string(actual: string, expected: string, label: string) ![io];
+fn assert_eq_bool(actual: boolean, expected: boolean, label: string) ![io];
+fn assert_array_eq<T: Equatable>(actual: T[], expected: T[], label: string) ![io];
 
-// Pure variant — returns rather than prints, runner consumes the Result
+// Pure variant — returns rather than prints; runner consumes the Result
 fn pure_assert_eq_int(actual: int, expected: int, label: string) -> Result<(), AssertFailure>;
 fn pure_assert_eq_string(actual: string, expected: string, label: string) -> Result<(), AssertFailure>;
+fn pure_assert_eq_float(actual: float, expected: float, tolerance: float, label: string) -> Result<(), AssertFailure>;
+fn pure_assert_eq_bool(actual: boolean, expected: boolean, label: string) -> Result<(), AssertFailure>;
 // ... etc
 ```
 
@@ -100,19 +103,16 @@ that file. Errors in `before_*` mark every dependent test as `fail`
 
 ## Fixtures
 
-Closure-scoped resource setup. All require closures-with-capture (1.0
-critical path Phase 2).
+Closure-scoped resource setup. All require closures-with-capture
+(1.0 critical path Phase 2). `with_tmp_dir` uses `fs.mkdtemp` (P5)
+with prefix `sfn-test-` and removes recursively on scope exit;
+`with_env` and `with_cwd` save/restore.
 
 ```sfn
 fn with_tmp_dir<R>(body: fn(dir: string) -> R) -> R ![io];
 fn with_env<R>(name: string, value: string, body: fn() -> R) -> R ![io];
 fn with_cwd<R>(dir: string, body: fn() -> R) -> R ![io];
 ```
-
-`with_tmp_dir` uses `fs.mkdtemp` (P5) with prefix `sfn-test-` and
-recursively removes the dir on scope exit. `with_env` saves/restores
-the previous env value (or unsets). `with_cwd` saves/restores the
-process cwd.
 
 ## Snapshots
 
@@ -189,9 +189,11 @@ their own compile callback.
 | `assert_compiles` | `![io]` (process.run_capture) |
 | `run_tests` | `![io]` |
 
-`capsules/sfn/test/capsule.toml` declares
-`required = ["io"]` so the lifecycle/fixture/runner side keeps
-working. The `expect` and `pure_assert` paths are `![pure]` and could
-in principle live in a separate `sfn/test-pure` capsule if effect
-polymorphism lands and forces the split. Today the simplest path is
-one capsule, two API tiers.
+`capsules/sfn/test/capsule.toml` keeps `required = ["io"]` because
+lifecycle/fixture/runner/legacy-shim surfaces use `print.err` and
+`process.run`. **Importing `sfn/test` does NOT force `![io]` on the
+consumer** — `required` declares what the capsule's own code does, not
+what every caller must. A test calling only `expect(...)` or
+`pure_assert_*` stays `![pure]`. P3 (`01-preconditions.md`) relies on
+this to give pure tests a pure path without splitting the capsule.
+Until row-polymorphic effects land, **one capsule, two API tiers**.

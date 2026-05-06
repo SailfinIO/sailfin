@@ -52,9 +52,14 @@ test "auth: stores hash to disk" ![io] {
 
 1. **Self-hosting:** every phase leaves `make compile && make check`
    green. No phase can require a feature the released seed can't compile.
-2. **No new C runtime code:** every capability the framework needs comes
-   from existing or near-term Sailfin/capsule features. Gaps become
-   precondition issues (see `01-preconditions.md`).
+2. **Bounded C runtime growth:** the framework itself adds no C
+   runtime code beyond the explicitly-scoped Phase 0 extern bindings
+   listed in `01-preconditions.md` (P2's `sailfin_assert_fail` hook,
+   P4's `process.run_capture` extern, P5's fs perms/mkdtemp/symlink
+   externs). Those are the only C-side additions; everything else
+   comes from existing or near-term Sailfin/capsule features. Phase
+   1+ contains no new C entries — once Phase 0 closes, the C surface
+   freezes for the rest of the epic.
 3. **One framework, all consumers:** the compiler's tests, the
    `sfn/runtime-native` capsule's tests (post-port), every
    `capsules/sfn/*` test, and every end-user capsule test all use the

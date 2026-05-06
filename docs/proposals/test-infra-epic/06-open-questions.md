@@ -77,8 +77,6 @@ Cost of keeping: one extra parser keyword (already there).
 Cost of switching: weeks of rewrites + a deprecation cycle for marginal
 syntactic uniformity.
 
-**Decision needed:** approve "keep keyword" / propose alternative.
-
 ---
 
 ## Q2. Deprecate the `assert` keyword?
@@ -116,9 +114,6 @@ The soft deprecation:
 - opt-out flag: `--allow-bare-assert`
 - removal post-1.0 only if the warning has had two minor releases of
   burn-in and capsule authors haven't pushed back
-
-**Decision needed:** approve "soft-deprecate inside tests only" /
-propose alternative scope.
 
 ---
 
@@ -161,56 +156,25 @@ effects.** That keeps the API small but slips the framework behind a
 roadmap item with no ETA. We'd lose 6-12 months of agent-adoption
 runway to avoid two function names.
 
-**Decision needed:** approve "ship interim" / approve "block on row
-polymorphism" / propose alternative.
+---
+
+## Smaller questions deferred to grooming
+
+- **Q4. JSON schema location:** extend `site/src/content/docs/docs/reference/spec/11-testing.md` with a "Test runner JSON output" section (the spec uses numbered `NN-name.md` filenames; testing already lives at chapter §11).
+- **Q5. Snapshot directory:** `<package>/tests/__snapshots__/<key>.snap` (Vitest convention).
+- **Q6. Default `--jobs`:** 1 for Phase 1-3 (serial). Phase 4 ships default `nproc / 2`, configurable via `[test] jobs = N` in `capsule.toml`.
+- **Q7. `assert false` runtime hook fd:** propose `fd 3` with scratch-file fallback. Defer to P2 implementation.
+- **Q8. Test-only capsule dependencies:** `[dev-dependencies]` in `capsule.toml`. Probably yes, post-1.0 — defer.
 
 ---
 
-## Other questions raised but not blocking
+## Next steps
 
-These are smaller decisions that can be made during grooming, listed
-here so the user has visibility:
+1. `/groom` this epic into `claude-ready` GitHub issues. Each P1-P6 becomes one issue (`type:feature, size:s|m, priority:high`); each phase issue (1.1-3.5) becomes one issue. Q4-Q8 land as inline notes on the relevant issues.
+2. `/pickup` consumes Phase 0 issues immediately — parallelizable across three agents. Phase 0 should land within ~2 weeks; Phase 1 follows.
 
-- **Q4. JSON schema location:** propose
-  `site/src/content/docs/docs/reference/spec/§9-test-json.md`
-  (sibling of the planned `sfn check --json` schema). Defer to whoever
-  owns the spec layout.
-- **Q5. Snapshot directory:** `<package>/tests/__snapshots__/<key>.snap`
-  (Vitest convention). Trivially renamable.
-- **Q6. Default `--jobs`:** 1 for Phase 1-3 (serial). Phase 4 ships
-  default `nproc / 2`. Configurable per-capsule via
-  `[test] jobs = N` in `capsule.toml`.
-- **Q7. `assert false` runtime hook fd:** propose `fd 3` (test-runner
-  reserves) with fallback to a scratch file. Defer to P2 implementation.
-- **Q8. Test-only capsule dependencies:** add `[dev-dependencies]`
-  section to `capsule.toml`? Today `sfn/test` would be a regular dep.
-  Probably yes, but post-1.0 — defer.
+Issue scope locks in per the Q1-Q3 decisions:
 
----
-
-## Next steps (Q1-Q3 resolved)
-
-With Q1-Q3 decided:
-
-1. Run `/groom` against this epic to break each phase into individual
-   `claude-ready` GitHub issues.
-2. Each precondition (P1-P6) becomes one issue under
-   `type:feature, size:s|m, priority:high`.
-3. Each phase issue (1.1, 1.2, ..., 3.5) becomes one issue.
-4. Q4-Q8 become inline notes on the relevant issues; no separate
-   tracking needed.
-5. `/pickup` can start consuming issues from Phase 0 immediately —
-   they're parallelizable across three agents.
-
-Phase 0 should land within ~2 weeks at 3 agents. Phase 1 follows.
-
-The downstream-issue scope locks in (per the Q1-Q3 decisions):
-
-- **Issue 1.4 (`expect` builder):** keyword form `test "..." { }`
-  remains canonical; no `@test fn` parser work.
-- **Issue 3.3 (assert deprecation):** scope is W0210 inside `test`
-  blocks only. Hard-deprecation post-1.0 is its own issue contingent
-  on adoption telemetry.
-- **Issue P3 (pure assertions):** ships as a complete second API tier,
-  not as a placeholder. Capsule docs name both forms; tooling treats
-  them as siblings until row polymorphism collapses them.
+- **1.4 (`expect`):** keyword form `test "..." { }` remains canonical; no `@test fn` parser work.
+- **3.3 (assert deprecation):** W0210 inside `test` blocks only. Hard-deprecation post-1.0 is a separate issue contingent on adoption telemetry.
+- **P3 (pure assertions):** ships as a complete second API tier, not a placeholder. Both forms documented; tooling treats them as siblings until row polymorphism collapses them.
