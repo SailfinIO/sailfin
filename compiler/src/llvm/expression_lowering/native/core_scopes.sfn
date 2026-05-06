@@ -154,6 +154,80 @@ fn is_scope_descendant(parent: string, candidate: string) -> boolean {
 // without touching every call site again. See issue #325.
 fn default_allocation_kind() -> string { return "arena"; }
 
+// Conservative escape promotion: flip the named local's `allocation_kind`
+// from "arena" to "rc" (M1.5.5, issue #329). Used by `lower_return_instruction`
+// when an `Identifier` operand of a `return` statement names a heap-typed
+// local that is not a borrow.
+//
+// Shadowing semantics: this helper rewrites the **last** binding that
+// matches `name`, mirroring `find_local_binding` (which scans from the
+// end so an inner-scope shadow wins over an outer-scope binding with
+// the same name). Promoting every match would incorrectly drop an
+// outer-scope value when only the shadow was returned.
+//
+// Constraints honoured by this helper (so callers don't have to repeat them):
+//   - Only an `arena` binding is rewritten. Other sentinels (`stack`,
+//     `static`, an existing `rc`) are left untouched.
+//   - Borrowed bindings (`ownership.variant == "Borrow"`) are never
+//     promoted — the borrow base owns the resource.
+//
+// Caller responsibilities:
+//   - Decide that the binding is heap-typed (use `is_heap_type` on the
+//     `llvm_type`). This helper is allocation-kind only and does not
+//     re-derive heap-ness.
+//   - Pass the original binding name; case- and scope-sensitive lookup
+//     mirrors `find_local_binding`.
+//
+// Determinism: the returned `LocalBinding[]` preserves insertion order;
+// only the matched binding is rewritten in place.
+fn promote_local_to_rc(locals: LocalBinding[], name: string) -> LocalBinding[] {
+    // Resolve the same binding `find_local_binding` would: the last
+    // entry whose `name` matches. If no entry matches, the array is
+    // returned untouched.
+    let mut target_index: number = -1;
+    let mut scan: number = locals.length;
+    loop {
+        if scan <= 0 { break; }
+        scan -= 1;
+        if locals[scan].name == name {
+            target_index = scan;
+            break;
+        }
+    }
+    if target_index < 0 { return locals; }
+    let mut result: LocalBinding[] = [];
+    let mut index: number = 0;
+    loop {
+        if index >= locals.length { break; }
+        let entry = locals[index];
+        let mut updated = entry;
+        if index == target_index {
+            if entry.allocation_kind == "arena" {
+                let mut allow: boolean = true;
+                if entry.ownership != null {
+                    if entry.ownership.variant == "Borrow" { allow = false; }
+                }
+                if allow {
+                    updated = LocalBinding {
+                        name: entry.name,
+                        pointer: entry.pointer,
+                        llvm_type: entry.llvm_type,
+                        type_annotation: entry.type_annotation,
+                        ownership: entry.ownership,
+                        consumed: entry.consumed,
+                        scope_id: entry.scope_id,
+                        scope_depth: entry.scope_depth,
+                        allocation_kind: "rc"
+                    };
+                }
+            }
+        }
+        result.push(updated);
+        index += 1;
+    }
+    return result;
+}
+
 fn append_local_binding(values: LocalBinding[], value: LocalBinding) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
     let mut index: number = 0;

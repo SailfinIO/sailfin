@@ -13,7 +13,7 @@ import {
     substring
 } from "../../../string_utils";
 import { test_runner_trace } from "../../../test_runner_state";
-import { default_return_literal } from "../../expressions_helpers";
+import { default_return_literal, is_simple_identifier } from "../../expressions_helpers";
 import { trace_lowering } from "../../lowering_debug_state";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
@@ -57,8 +57,10 @@ import {
     default_allocation_kind,
     find_local_binding,
     infer_borrow_base_scope,
-    make_lifetime_region_metadata
+    make_lifetime_region_metadata,
+    promote_local_to_rc
 } from "./core_scopes";
+import { is_heap_type } from "./core_type_mapping";
 import { lower_lvalue_assignment_stmt } from "./statement_assignment";
 // Submodules extracted from this file
 import { parse_assignment_expression, parse_inline_let_expression } from "./statement_parsing";
@@ -642,6 +644,21 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             current_locals = mark_local_consumed(current_locals, consumption.name);
         } else if consumption.kind == "parameter" {
             current_bindings = mark_parameter_consumed(current_bindings, consumption.name);
+        }
+    }
+    // M1.5.5 (issue #329): conservative escape promotion. When the return
+    // expression is a bare identifier naming a heap-typed local, flip that
+    // local's `allocation_kind` from `arena` to `rc` so the M1.5.2/3/4 drop
+    // emission paths can release it at scope exit. Borrows and primitive
+    // (non-heap) locals are not promoted — see `is_heap_type` and
+    // `promote_local_to_rc` for the exact rules.
+    let trimmed_return_expr = trim_text(instr_expression);
+    if is_simple_identifier(trimmed_return_expr) {
+        let returned_local = find_local_binding(current_locals, trimmed_return_expr);
+        if returned_local != null {
+            if is_heap_type(returned_local.llvm_type) {
+                current_locals = promote_local_to_rc(current_locals, trimmed_return_expr);
+            }
         }
     }
     return ExpressionStatementResult {

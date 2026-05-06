@@ -481,3 +481,47 @@ fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
     // Fallback to generic pointer for unresolved types (e.g., imported structs/enums not in type context)
     return "i8*";
 }
+
+// Heap-allocation predicate keyed on the LLVM type string (M1.5.5, issue #329).
+//
+// The conservative escape-promotion rule in `lower_return_instruction` only
+// flips a returned local from `arena` to `rc` when the local's value lives on
+// the heap. Primitive scalars (`i64`, `double`, `i1`, ...) are stack values
+// and have no destructor to call — promoting them would emit a bogus
+// `sfn_rc_release` against an integer.
+//
+// True only for **pointer-suffixed** LLVM types — `i8*` (strings, opaque
+// pointers), `%MyStruct*` (boxed structs/enums under the 0.5.8+ ABI),
+// `i8**`, etc. These are the shapes `emit_scope_drops` (in
+// `instructions_helpers.sfn`) knows how to release: load the pointer
+// out of the alloca slot, optionally bitcast to `i8*`, and call
+// `sfn_rc_release(i8*)`.
+//
+// False for everything else, including:
+//   - the empty string, `void`, and primitive scalars (`i1`/`i8`/`i16`/
+//     `i32`/`i64`/`i128`/`half`/`float`/`double`/`fp128`).
+//   - by-value aggregate shapes such as `{i8*, i64}` (SfnString) or
+//     `{T*, i64, i64}` (SfnArray). `emit_scope_drops` cannot bitcast an
+//     aggregate to `i8*`, so promoting such a binding to `rc` today
+//     would either be semantically wrong (release the wrong pointer) or
+//     produce invalid LLVM IR. If/when the SfnString/SfnArray/union
+//     value-type ABIs land, this predicate must be widened in lockstep
+//     with `emit_scope_drops` learning to extract the heap pointer
+//     field — never one without the other.
+fn is_heap_type(llvm_type: string) -> boolean {
+    let trimmed = trim_text(llvm_type);
+    if trimmed.length == 0 { return false; }
+    if trimmed == "void" { return false; }
+    if trimmed == "i1" { return false; }
+    if trimmed == "i8" { return false; }
+    if trimmed == "i16" { return false; }
+    if trimmed == "i32" { return false; }
+    if trimmed == "i64" { return false; }
+    if trimmed == "i128" { return false; }
+    if trimmed == "half" { return false; }
+    if trimmed == "float" { return false; }
+    if trimmed == "double" { return false; }
+    if trimmed == "fp128" { return false; }
+    if ends_with_pointer_suffix(trimmed) { return true; }
+    return false;
+}

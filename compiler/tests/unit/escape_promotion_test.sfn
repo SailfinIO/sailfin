@@ -1,0 +1,242 @@
+// Round-trip pin for the conservative escape-promotion rule (issue #329, M1.5.5).
+//
+// `lower_return_instruction` flips a returned local's `allocation_kind`
+// from "arena" to "rc" so the M1.5.2/3/4 drop-emission paths can release
+// it at scope exit. The actual call-site is wired in `statement.sfn`,
+// but the rule itself is two helpers — `is_heap_type` and
+// `promote_local_to_rc` — so the policy can be unit-tested in isolation.
+//
+// Acceptance criteria covered (paraphrased from #329):
+//
+//   1. A heap-typed local that is the operand of a `return` flips to "rc".
+//   2. A primitive-typed local (i64 / double / i1) stays "arena" — the
+//      caller (`lower_return_instruction`) gates promotion on
+//      `is_heap_type`, so this pins the predicate directly.
+//   3. A local that is NOT named in any `return` keeps "arena".
+//   4. Borrows are never promoted (`ownership.variant == "Borrow"` stays
+//      "arena" even when named).
+//
+// Plus a few "predicate hygiene" cases for `is_heap_type` so future
+// changes to the predicate don't silently expand or shrink the heap-type
+// surface (over-match → use-after-free, under-match → leak).
+import { append_local_binding, find_local_binding, promote_local_to_rc } from "../../src/llvm/expression_lowering/native/core_scopes";
+import { is_heap_type } from "../../src/llvm/expression_lowering/native/core_type_mapping";
+import { LocalBinding, OwnershipInfo } from "../../src/llvm/types";
+
+fn _make_binding(name: string, llvm_type: string, kind: string, ownership: OwnershipInfo?) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: "%slot",
+        llvm_type: llvm_type,
+        type_annotation: "",
+        ownership: ownership,
+        consumed: false,
+        scope_id: "fn:test",
+        scope_depth: 0,
+        allocation_kind: kind
+    };
+}
+
+fn _borrow_ownership() -> OwnershipInfo {
+    return OwnershipInfo {
+        variant: "Borrow",
+        base: "x",
+        mutable: false,
+        span: null,
+        region_id: -1
+    };
+}
+
+// -----------------------------------------------------------------------------
+// is_heap_type — primitives stay false; pointers and struct shapes are true.
+// -----------------------------------------------------------------------------
+test "is_heap_type: empty and void are not heap" {
+    assert ! is_heap_type("");
+    assert ! is_heap_type("void");
+}
+
+test "is_heap_type: integer scalars are not heap" {
+    assert ! is_heap_type("i1");
+    assert ! is_heap_type("i8");
+    assert ! is_heap_type("i16");
+    assert ! is_heap_type("i32");
+    assert ! is_heap_type("i64");
+}
+
+test "is_heap_type: floating scalars are not heap" {
+    assert ! is_heap_type("float");
+    assert ! is_heap_type("double");
+}
+
+test "is_heap_type: pointer suffixes are heap (string, struct, array elt)" {
+    assert is_heap_type("i8*");
+    assert is_heap_type("i8**");
+    assert is_heap_type("%MyStruct*");
+    assert is_heap_type("%SfnArray*");
+}
+
+test "is_heap_type: by-value aggregates are NOT heap until emit_scope_drops can release them" {
+    // `emit_scope_drops` (instructions_helpers.sfn) only knows how to load a
+    // pointer out of the alloca slot and bitcast to `i8*` before calling
+    // `sfn_rc_release`. Aggregate value types (`{i8*, i64}` for SfnString,
+    // `{T*, i64, i64}` for SfnArray, union payloads `{i32, ...}`) cannot be
+    // bitcast to `i8*`; promoting them today would either drop the wrong
+    // pointer or produce invalid LLVM. The predicate stays narrow until
+    // drop emission learns to extract the heap pointer field.
+    assert ! is_heap_type("{i8*, i64}");
+    assert ! is_heap_type("{i8*, i64, i64}");
+    assert ! is_heap_type("{ i32, i64 }");
+}
+
+// -----------------------------------------------------------------------------
+// promote_local_to_rc — the four acceptance cases listed on #329.
+// -----------------------------------------------------------------------------
+test "promote_local_to_rc: heap-typed return flips arena -> rc" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("s", "i8*", "arena", null));
+    let promoted = promote_local_to_rc(locals, "s");
+    assert promoted.length == 1;
+    let found = find_local_binding(promoted, "s");
+    assert found != null;
+    assert found.allocation_kind == "rc";
+}
+
+test "promote_local_to_rc: primitive return stays arena (helper is name-only; predicate is the gate)" {
+    // The caller (`lower_return_instruction`) only invokes this helper after
+    // `is_heap_type` returns true; an i64 local would never reach this path.
+    // Pin that the predicate gate works by asserting the predicate result —
+    // and by also pinning that the helper itself is conservative on the
+    // already-promoted case (idempotent — see the "no-op on rc" test below).
+    assert ! is_heap_type("i64");
+    assert ! is_heap_type("double");
+    assert ! is_heap_type("i1");
+}
+
+test "promote_local_to_rc: non-returned local keeps arena" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("s", "i8*", "arena", null));
+    locals = append_local_binding(locals, _make_binding("other", "i8*", "arena", null));
+    // Promote only `s` — `other` was never the operand of a return.
+    let promoted = promote_local_to_rc(locals, "s");
+    let s_binding = find_local_binding(promoted, "s");
+    let other_binding = find_local_binding(promoted, "other");
+    assert s_binding != null;
+    assert other_binding != null;
+    assert s_binding.allocation_kind == "rc";
+    assert other_binding.allocation_kind == "arena";
+}
+
+test "promote_local_to_rc: borrows are never promoted" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("borrowed", "i8*", "arena", _borrow_ownership()));
+    let promoted = promote_local_to_rc(locals, "borrowed");
+    let found = find_local_binding(promoted, "borrowed");
+    assert found != null;
+    assert found.allocation_kind == "arena";
+}
+
+// -----------------------------------------------------------------------------
+// promote_local_to_rc — invariants that protect the IR shape.
+// -----------------------------------------------------------------------------
+test "promote_local_to_rc: missing name leaves the array unchanged" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("a", "i8*", "arena", null));
+    locals = append_local_binding(locals, _make_binding("b", "i8*", "arena", null));
+    let promoted = promote_local_to_rc(locals, "missing");
+    assert promoted.length == 2;
+    let a_binding = find_local_binding(promoted, "a");
+    let b_binding = find_local_binding(promoted, "b");
+    assert a_binding != null;
+    assert b_binding != null;
+    assert a_binding.allocation_kind == "arena";
+    assert b_binding.allocation_kind == "arena";
+}
+
+test "promote_local_to_rc: existing rc binding is not re-flipped" {
+    // `LocalBinding[]` is rebuilt for every promotion; pinning that an
+    // already-rc binding round-trips ensures the helper is safe to call
+    // even after a future caller (M1.5.3 mid-function exit drops) might
+    // promote on a path the return-site already covered.
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("s", "i8*", "rc", null));
+    let promoted = promote_local_to_rc(locals, "s");
+    let found = find_local_binding(promoted, "s");
+    assert found != null;
+    assert found.allocation_kind == "rc";
+}
+
+test "promote_local_to_rc: insertion order is preserved" {
+    // `emit_scope_drops` walks `LocalBinding[]` in insertion order to make
+    // the IR byte-identical across runs. Any reorder here would cascade
+    // into every drop-emission test pinning a specific line sequence.
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("a", "i8*", "arena", null));
+    locals = append_local_binding(locals, _make_binding("b", "i8*", "arena", null));
+    locals = append_local_binding(locals, _make_binding("c", "i8*", "arena", null));
+    let promoted = promote_local_to_rc(locals, "b");
+    assert promoted.length == 3;
+    assert promoted[0].name == "a";
+    assert promoted[1].name == "b";
+    assert promoted[2].name == "c";
+    assert promoted[0].allocation_kind == "arena";
+    assert promoted[1].allocation_kind == "rc";
+    assert promoted[2].allocation_kind == "arena";
+}
+
+test "promote_local_to_rc: only the matching binding's kind changes; other fields are untouched" {
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, _make_binding("s", "i8*", "arena", null));
+    let promoted = promote_local_to_rc(locals, "s");
+    let found = find_local_binding(promoted, "s");
+    assert found != null;
+    assert found.name == "s";
+    assert found.pointer == "%slot";
+    assert found.llvm_type == "i8*";
+    assert found.scope_id == "fn:test";
+    assert found.scope_depth == 0;
+    assert ! found.consumed;
+}
+
+fn _make_binding_with_pointer(name: string, llvm_type: string, kind: string, pointer: string) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: pointer,
+        llvm_type: llvm_type,
+        type_annotation: "",
+        ownership: null,
+        consumed: false,
+        scope_id: "fn:test",
+        scope_depth: 0,
+        allocation_kind: kind
+    };
+}
+
+test "promote_local_to_rc: shadowed name only promotes the last match (mirrors find_local_binding)" {
+    // `find_local_binding` resolves shadowed names by scanning from the end
+    // (inner-scope shadow wins over outer-scope binding). `promote_local_to_rc`
+    // must follow the same rule, otherwise a `return s;` inside an inner
+    // scope would silently promote an outer-scope `s` and we'd emit a drop
+    // against a value the caller still owns.
+    //
+    // Construct two bindings named `s` with distinct alloca slots, then
+    // promote and assert only the second (most-recent) one flips to "rc".
+    let outer = _make_binding_with_pointer("s", "i8*", "arena", "%l_outer");
+    let inner = _make_binding_with_pointer("s", "i8*", "arena", "%l_inner");
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, outer);
+    locals = append_local_binding(locals, inner);
+    let promoted = promote_local_to_rc(locals, "s");
+    assert promoted.length == 2;
+    // Outer (older) binding must NOT have flipped.
+    assert promoted[0].pointer == "%l_outer";
+    assert promoted[0].allocation_kind == "arena";
+    // Inner (most-recent) binding is the one find_local_binding would
+    // resolve, so it is the one that flips.
+    assert promoted[1].pointer == "%l_inner";
+    assert promoted[1].allocation_kind == "rc";
+    // Sanity: find_local_binding agrees on which binding "s" resolves to.
+    let resolved = find_local_binding(promoted, "s");
+    assert resolved != null;
+    assert resolved.pointer == "%l_inner";
+    assert resolved.allocation_kind == "rc";
+}
