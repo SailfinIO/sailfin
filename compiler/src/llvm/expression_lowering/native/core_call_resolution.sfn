@@ -4,6 +4,7 @@
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
 import { NativeFunction } from "../../../native_ir";
 import { find_last_index_of_char, index_of, substring } from "../../../string_utils";
+import { is_atomic_builtin, lower_atomic_builtin } from "../../atomics";
 import { is_simple_identifier } from "../../expressions_helpers";
 import { find_function_by_name, find_function_by_name_or_import } from "../../rendering_helpers";
 import { find_runtime_helper } from "../../runtime_helpers";
@@ -46,6 +47,26 @@ import {
     map_array_pointer_type,
     map_return_type
 } from "./core_type_mapping";
+
+// Pre-resolution dispatch hook for atomic builtins (M0-Atomics — see
+// `compiler/src/llvm/atomics.sfn` and issue #331). Returns a non-null
+// `ExpressionResult` when `trimmed_target` matches one of the six
+// reserved atomic-builtin names; the caller (`lower_call_expression`
+// in `core_call_lowering.sfn`) returns it directly without consulting
+// the runtime-helper registry, signature resolution, or call emission.
+//
+// Atomic ops lower to LLVM `load atomic` / `store atomic` / `atomicrmw`
+// / `cmpxchg` / `fence` instructions which have a fundamentally
+// different IR shape than the `call @symbol(...)` template the rest
+// of the call pipeline assumes — short-circuiting here is the
+// cleanest fit. This hook also prevents a future user-defined
+// function named `atomic_load` from shadowing the builtin (which
+// would otherwise be a hazard once the runtime starts depending on
+// these names).
+fn try_dispatch_atomic_builtin(trimmed_target: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult? ![io] {
+    if !is_atomic_builtin(trimmed_target) { return null; }
+    return lower_atomic_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
+}
 
 // Resolve fused concat/push targets (e.g. `valuesconcat(xs)` → `concat`).
 // Also handles parse_member_access dispatch and struct-method fallback.
@@ -847,5 +868,6 @@ fn resolve_call_signature(trimmed_target: string, helper_descriptor: RuntimeHelp
 export {
     resolve_call_method_target,
     resolve_parsed_method_dispatch,
-    resolve_call_signature
+    resolve_call_signature,
+    try_dispatch_atomic_builtin
 };

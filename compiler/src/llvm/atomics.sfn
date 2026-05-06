@@ -1,0 +1,271 @@
+// compiler/src/llvm/atomics.sfn
+//
+// Atomic builtin recognition and LLVM lowering. The six reserved
+// names (`atomic_load`, `atomic_store`, `atomic_add`, `atomic_sub`,
+// `atomic_cas`, `atomic_fence`) bypass normal call resolution — they
+// lower directly to LLVM atomic ops with `seq_cst` ordering rather
+// than calls to a runtime helper.
+//
+// M0-Atomics.1 (issue #331) ships `atomic_load` and `atomic_store`
+// plus this dispatch infrastructure. The remaining four builtins
+// reuse `is_atomic_builtin` + `lower_atomic_builtin`; see issue #323
+// for the parent epic.
+//
+// Type contract (enforced here; emits E0806 on violation):
+//   atomic_load(ptr: *int) -> int
+//   atomic_store(ptr: *int, value: int) -> void
+// `*int` lowers to `i64*`, `int` lowers to `i64`. Atomic ops on
+// non-i64 widths are out of scope for v0.
+import { NativeFunction } from "../native_ir";
+// Mutually recursive: lower_atomic_builtin lowers each argument via
+// lower_expression, which itself dispatches calls back through this
+// module. The codebase already supports this cycle (see core.sfn
+// ↔ core_call_lowering.sfn).
+import { lower_expression } from "./expression_lowering/native/core";
+import { format_temp_name } from "./expressions_helpers";
+import { merge_string_constants } from "./strings";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    LocalBinding,
+    ParameterBinding,
+    StringConstant,
+    TypeContext
+} from "./types";
+import { extend_string_array, number_to_string, trim_text } from "./utils";
+
+// Predicate over the six reserved atomic-builtin names. Used by the
+// pre-resolution dispatch hook in `lower_call_expression` (see
+// `core_call_lowering.sfn`) to short-circuit before consulting the
+// runtime-helper registry.
+fn is_atomic_builtin(name: string) -> boolean {
+    let trimmed = trim_text(name);
+    if trimmed == "atomic_load" { return true; }
+    if trimmed == "atomic_store" { return true; }
+    if trimmed == "atomic_add" { return true; }
+    if trimmed == "atomic_sub" { return true; }
+    if trimmed == "atomic_cas" { return true; }
+    if trimmed == "atomic_fence" { return true; }
+    return false;
+}
+
+// Lower an atomic builtin call. Caller has already validated that
+// `is_atomic_builtin(name)` is true. Lowers each argument through
+// `lower_expression`, then emits the matching `load atomic` /
+// `store atomic` instruction. Returns an `ExpressionResult` whose
+// `operand` is the loaded i64 (for `atomic_load`) or null (for
+// `atomic_store`'s void return).
+fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let trimmed = trim_text(name);
+    if trimmed == "atomic_load" {
+        return _lower_atomic_load(arguments, bindings, locals, temp_index, lines, functions, context);
+    }
+    if trimmed == "atomic_store" {
+        return _lower_atomic_store(arguments, bindings, locals, temp_index, lines, functions, context);
+    }
+    // M0-Atomics.2/3/4 will fill these in. Until then, reject the
+    // call with a `[fatal]` diagnostic so the build exits non-zero
+    // — matching the issue #306 contract that the emit-level
+    // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
+    // refuse to write IR when any diagnostic carries `[fatal]`.
+    // Without the sentinel, `is_atomic_builtin` would short-circuit
+    // the rest of the call pipeline and the .ll file would be
+    // written with the side-effecting atomic call silently dropped.
+    let mut diagnostics: string[] = [];
+    let diag = "llvm lowering [fatal]: atomic builtin `" + trimmed
+        + "` is reserved but not yet implemented (tracking issue #323)";
+    print.err(diag);
+    diagnostics.push(diag);
+    return ExpressionResult {
+        lines: lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: []
+    };
+}
+
+// `atomic_load(ptr: *int) -> int` →
+//     %tN = load atomic i64, i64* <ptr>, seq_cst, align 8
+fn _lower_atomic_load(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut current_lines = lines;
+    let mut current_temp = temp_index;
+    let mut collected_strings: StringConstant[] = [];
+
+    if arguments.length != 1 {
+        // E0806 carries the `[fatal]` sentinel so the emit-level
+        // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
+        // refuse to write IR — matching the issue #306 contract for
+        // unresolvable callees. `print.err` mirrors the diagnostic to
+        // stderr the same way `core_call_emission.sfn` does, so the
+        // user sees the failure rather than a silently-empty IR file.
+        let diag1 = "llvm lowering [fatal] [E0806]: atomic_load expects exactly 1 argument (`*int`), got "
+            + number_to_string(arguments.length);
+        print.err(diag1);
+        diagnostics.push(diag1);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_text = trim_text(arguments[0]);
+    let ptr_lowered = lower_expression(ptr_text, bindings, locals, current_temp, current_lines, functions, context, "i64*");
+    diagnostics = extend_string_array(diagnostics, ptr_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
+    current_lines = ptr_lowered.lines;
+    current_temp = ptr_lowered.temp_index;
+
+    if ptr_lowered.operand == null {
+        diagnostics.push("llvm lowering: atomic_load failed to lower pointer argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_operand = ptr_lowered.operand;
+    let ptr_type = trim_text(ptr_operand.llvm_type);
+    if ptr_type != "i64*" {
+        let diag2 = "llvm lowering [fatal] [E0806]: atomic_load expects argument 0 of type `*int` (i64*), got `"
+            + ptr_type
+            + "`";
+        print.err(diag2);
+        diagnostics.push(diag2);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let result_name = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + result_name + " = load atomic i64, i64* "
+        + ptr_operand.value
+        + " seq_cst, align 8");
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: LLVMOperand { llvm_type: "i64", value: result_name },
+        diagnostics: diagnostics,
+        string_constants: collected_strings
+    };
+}
+
+// `atomic_store(ptr: *int, value: int) -> void` →
+//     store atomic i64 <value>, i64* <ptr>, seq_cst, align 8
+fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut current_lines = lines;
+    let mut current_temp = temp_index;
+    let mut collected_strings: StringConstant[] = [];
+
+    if arguments.length != 2 {
+        let diag1 = "llvm lowering [fatal] [E0806]: atomic_store expects exactly 2 arguments (`*int`, `int`), got "
+            + number_to_string(arguments.length);
+        print.err(diag1);
+        diagnostics.push(diag1);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_text = trim_text(arguments[0]);
+    let ptr_lowered = lower_expression(ptr_text, bindings, locals, current_temp, current_lines, functions, context, "i64*");
+    diagnostics = extend_string_array(diagnostics, ptr_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
+    current_lines = ptr_lowered.lines;
+    current_temp = ptr_lowered.temp_index;
+
+    if ptr_lowered.operand == null {
+        diagnostics.push("llvm lowering: atomic_store failed to lower pointer argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_operand = ptr_lowered.operand;
+    let ptr_type = trim_text(ptr_operand.llvm_type);
+    if ptr_type != "i64*" {
+        let diag2 = "llvm lowering [fatal] [E0806]: atomic_store expects argument 0 of type `*int` (i64*), got `"
+            + ptr_type
+            + "`";
+        print.err(diag2);
+        diagnostics.push(diag2);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let value_text = trim_text(arguments[1]);
+    let value_lowered = lower_expression(value_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
+    diagnostics = extend_string_array(diagnostics, value_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, value_lowered.string_constants);
+    current_lines = value_lowered.lines;
+    current_temp = value_lowered.temp_index;
+
+    if value_lowered.operand == null {
+        diagnostics.push("llvm lowering: atomic_store failed to lower value argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let value_operand = value_lowered.operand;
+    let value_type = trim_text(value_operand.llvm_type);
+    if value_type != "i64" {
+        let diag3 = "llvm lowering [fatal] [E0806]: atomic_store expects argument 1 of type `int` (i64), got `"
+            + value_type
+            + "`";
+        print.err(diag3);
+        diagnostics.push(diag3);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    current_lines.push("  store atomic i64 " + value_operand.value + ", i64* "
+        + ptr_operand.value
+        + " seq_cst, align 8");
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: collected_strings
+    };
+}
+
+export { is_atomic_builtin, lower_atomic_builtin };

@@ -1,0 +1,69 @@
+// Unit tests for the `atomic_load` / `atomic_store` builtins
+// (M0-Atomics.1, issue #331).
+//
+// The four lowering acceptance cases (load happy-path, store
+// happy-path, type-error on non-pointer arg, type-error on non-int
+// value arg) are pinned end-to-end in
+// `compiler/tests/e2e/test_atomic_load_store_compile.sh` — that
+// shell test drives a real `sfn emit llvm` invocation and greps
+// the emitted IR for `load atomic i64 ... seq_cst, align 8` /
+// `store atomic i64 ... seq_cst, align 8`, plus stderr for the
+// E0806 diagnostic on the type-error cases.
+//
+// We can't pin the same IR shape from a unit test because importing
+// the LLVM-lowering stack (`lower_to_llvm_ir_from_text` in
+// `llvm/lowering/entrypoints`, or transitively via
+// `compile_to_llvm` in `main`) blows the per-test 180s CI budget on
+// the GitHub Linux runner — see
+// https://github.com/SailfinIO/sailfin/actions/runs/25439053692/job/74625128990
+// where this file timed out (exit 124) while every other unit test
+// in the same suite ran in <1s. The sub-issue contract still cares
+// about ≥4 unit cases passing; this file pins the predicate /
+// reserved-name surface that the dispatch hook keys on, so a
+// regression in `is_atomic_builtin` (which gates whether the LLVM
+// lowering even runs) surfaces here without paying the lowering
+// import cost.
+import { is_atomic_builtin } from "../../src/llvm/atomics";
+
+// ── Predicate recognises the implemented names ──
+test "atomics: is_atomic_builtin recognises atomic_load" {
+    assert is_atomic_builtin("atomic_load");
+}
+
+test "atomics: is_atomic_builtin recognises atomic_store" {
+    assert is_atomic_builtin("atomic_store");
+}
+
+// ── Predicate reserves the future names too ──
+// The remaining four (`atomic_add`, `atomic_sub`, `atomic_cas`,
+// `atomic_fence`) ship in M0-Atomics.2/3/4. Reserving them up front
+// means a user-defined function with one of these names would route
+// through the (unimplemented) builtin dispatch and surface a clear
+// "reserved but not yet implemented" diagnostic instead of silently
+// shadowing the eventual builtin once the runtime starts depending
+// on it.
+test "atomics: is_atomic_builtin reserves atomic_add / atomic_sub" {
+    assert is_atomic_builtin("atomic_add");
+    assert is_atomic_builtin("atomic_sub");
+}
+
+test "atomics: is_atomic_builtin reserves atomic_cas / atomic_fence" {
+    assert is_atomic_builtin("atomic_cas");
+    assert is_atomic_builtin("atomic_fence");
+}
+
+// ── Predicate rejects non-atomic identifiers ──
+test "atomics: is_atomic_builtin rejects unrelated identifiers" {
+    assert ! is_atomic_builtin("foo");
+    assert ! is_atomic_builtin("");
+}
+
+test "atomics: is_atomic_builtin rejects partial / near-miss names" {
+    // Defence against a future regression that loosens the predicate
+    // to a startsWith / endsWith match — only the exact six reserved
+    // names should fire the dispatch hook.
+    assert ! is_atomic_builtin("atomic");
+    assert ! is_atomic_builtin("load");
+    assert ! is_atomic_builtin("atomic_loa");
+    assert ! is_atomic_builtin("atomic_loadx");
+}
