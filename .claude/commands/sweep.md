@@ -16,7 +16,7 @@ Parse `$ARGUMENTS` as a mix of flags and numbers:
 **Bare numbers** — treat each as a PR or issue number that just merged or closed; the command resolves PR → linked issue(s) automatically.
 
 Examples:
-- `/sweep` — auto-detect closed issues/PRs in the last 24h, default budget = 2
+- `/sweep` — auto-detect merged PRs in the last 24h (and their linked issues), default budget = 2
 - `/sweep 367` — anchor on PR/issue #367, default budget = 2
 - `/sweep --greedy 367 332` — anchor on two merges, budget = 4
 - `/sweep --greedy=6 --dry-run` — preview-only, budget = 6, auto-detect merges
@@ -29,14 +29,22 @@ If parsing yields no flags and no numbers: budget = 2, auto-detect merges, real 
 
 Resolve the merge anchor set.
 
-If `$ARGUMENTS` includes bare numbers, use them directly:
+If `$ARGUMENTS` includes bare numbers, use them directly. Try `gh pr view` first
+because `closingIssuesReferences` and `mergedAt` are PR-only fields, and
+`gh issue view <N>` resolves PRs as issues (they share a number space) — so
+querying `gh issue view` first would silently skip the PR-specific data.
 
 ```bash
 for N in <numbers>; do
-  gh issue view $N --json number,title,state,closingIssuesReferences,closedAt 2>/dev/null \
-    || gh pr view $N --json number,title,state,closingIssuesReferences,mergedAt
+  # PR-first: PRs carry mergedAt + closingIssuesReferences.
+  gh pr view $N --json number,title,state,closingIssuesReferences,mergedAt 2>/dev/null \
+    || gh issue view $N --json number,title,state,closedAt
 done
 ```
+
+For raw issue anchors (closed manually, no PR), there's no
+`closingIssuesReferences` to expand — treat the issue itself as the
+closed trigger.
 
 Otherwise, auto-detect merges in the last 24h:
 
@@ -57,11 +65,21 @@ gh issue list --label blocked --state open \
 gh issue list --label claude-ready --state open \
   --json number,title,labels,body,assignees --limit 100
 
+# gh pr list does not support --json files; just list PRs here. Phase 4
+# fetches file lists per PR via gh pr view.
 gh pr list --label agent-authored --state open \
-  --json number,title,headRefName,files --limit 20
+  --json number,title,headRefName --limit 20
 ```
 
-If `agent-authored` returns zero PRs, also check for any open PR on a `claude/*` branch (the human-driven `/pickup` flow). Those count toward the budget the same way.
+Always include open PRs on a `claude/*` branch (the human-driven `/pickup` flow) in the in-flight set — they count toward the budget the same way as `agent-authored` PRs, and both categories can be live simultaneously:
+
+```bash
+gh pr list --state open \
+  --json number,title,headRefName \
+  --jq '[.[] | select(.headRefName | startswith("claude/"))]'
+```
+
+The in-flight set is the union of the two queries (de-duped by PR number).
 
 ---
 
