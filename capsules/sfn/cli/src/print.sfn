@@ -1,0 +1,23 @@
+// sfn/cli — styled diagnostic helpers.
+//
+// Prefixed status helpers for CLI output: errors and warnings go to
+// stderr; success and hints follow the same prefix convention.
+fn print_error(message: string) -> void ![io] {
+    // Print an error message to stderr, prefixed with "error: ".
+    print.err("error: " + message);
+}
+
+fn print_warn(message: string) -> void ![io] {
+    // Print a warning message to stderr, prefixed with "warn: ".
+    print.err("warn: " + message);
+}
+
+fn print_success(message: string) -> void ![io] {
+    // Print a success message to stdout, prefixed with "ok: ".
+    print("ok: " + message);
+}
+
+fn print_hint(message: string) -> void ![io] {
+    // Print a hint message to stderr, prefixed with "hint: ".
+    print.err("hint: " + message);
+}

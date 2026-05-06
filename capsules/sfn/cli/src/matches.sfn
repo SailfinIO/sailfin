@@ -1,0 +1,91 @@
+// sfn/cli — match accessors.
+//
+// Read helpers for `Matches` returned by `run()`: by-name lookup of
+// positional values and flag values, presence checks, and the matched
+// subcommand name.
+import { Matches } from "./types";
+
+fn get(m: Matches, name: string) -> string {
+    // Get the value of a positional argument or value flag by name.
+    // Returns empty string if not found.
+    let mut i: number = 0;
+    loop {
+        if i >= m.positional_names.length { break; }
+        if strings_equal(m.positional_names[i], name) {
+            return m.positional_values[i];
+        }
+        i += 1;
+    }
+    // Also search flag values.
+    i = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            return m.flag_values[i];
+        }
+        i += 1;
+    }
+    return "";
+}
+
+fn get_or(m: Matches, name: string, default_value: string) -> string {
+    // Get the value of an argument or flag, returning default_value if the
+    // argument was not provided. Unlike `get()`, this correctly distinguishes
+    // between "not provided" and "provided as empty string" by checking
+    // whether the name exists in the parsed matches.
+    let mut i: number = 0;
+    loop {
+        if i >= m.positional_names.length { break; }
+        if strings_equal(m.positional_names[i], name) {
+            return m.positional_values[i];
+        }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) {
+            return m.flag_values[i];
+        }
+        i += 1;
+    }
+    return default_value;
+}
+
+fn has_flag(m: Matches, name: string) -> boolean {
+    // Returns true if a boolean flag was present on the command line.
+    let mut i: number = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn has(m: Matches, name: string) -> boolean {
+    // Returns true if any argument or flag with the given name was provided.
+    let mut i: number = 0;
+    loop {
+        if i >= m.positional_names.length { break; }
+        if strings_equal(m.positional_names[i], name) { return true; }
+        i += 1;
+    }
+    i = 0;
+    loop {
+        if i >= m.flag_names.length { break; }
+        if strings_equal(m.flag_names[i], name) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn subcommand(m: Matches) -> string {
+    // Returns the matched subcommand name, or empty string if none.
+    return m.subcommand_name;
+}
+
+fn positionals(m: Matches) -> string[] {
+    // Returns all positional argument values in order.
+    return m.positional_values;
+}

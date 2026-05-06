@@ -1,0 +1,36 @@
+// sfn/cli — type definitions.
+//
+// Core data structures for command and matches: `Arg`, `Flag`, `Command`,
+// and `Matches`. Re-exported from `mod.sfn` as part of the public surface.
+struct Arg {
+    name: string;
+    description: string;
+    is_optional: boolean;
+    default_value: string;
+}
+
+struct Flag {
+    long_name: string;
+    short_name: string;
+    description: string;
+    takes_value: boolean;
+}
+
+struct Command {
+    name: string;
+    description: string;
+    version: string;
+    args: Arg[];
+    flags: Flag[];
+    subcmds: Command[];
+}
+
+struct Matches {
+    command_name: string;
+    subcommand_name: string;
+    positional_names: string[];
+    positional_values: string[];
+    flag_names: string[];
+    flag_values: string[];
+    flag_present: boolean[];
+}

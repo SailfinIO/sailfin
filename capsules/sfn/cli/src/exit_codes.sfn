@@ -1,0 +1,5 @@
+// sfn/cli — exit code constants.
+//
+// Reserved for Phase 1 (Issue 1.2). Will host `EXIT_OK`,
+// `EXIT_BUILD_FAIL`, `EXIT_USAGE`, `EXIT_NOT_FOUND`, and `EXIT_INTERNAL`
+// once typed flags and the non-exiting `parse()` variant land.
