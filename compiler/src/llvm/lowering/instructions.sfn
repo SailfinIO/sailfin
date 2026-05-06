@@ -36,7 +36,12 @@ import {
     trim_text
 } from "../utils";
 import { lower_for_instruction } from "./instructions_for";
-import { _parse_int_from_string, extend_lifetime_regions, extend_mutations } from "./instructions_helpers";
+import {
+    _parse_int_from_string,
+    emit_drops_for_scope_chain,
+    extend_lifetime_regions,
+    extend_mutations
+} from "./instructions_helpers";
 import { lower_if_instruction } from "./instructions_if";
 import { lower_let_instruction } from "./instructions_let";
 import { append_loop_context, last_loop_context, lower_loop_instruction } from "./instructions_loops";
@@ -434,6 +439,17 @@ fn lower_instruction_range(function: NativeFunction, start_index: number, end: n
                         + "`");
                 } else {
                     let loop_context = last_loop_context(current_loop_stack);
+                    // M1.5.3 (issue #327): drop every scope between the
+                    // `break` point and the loop's enclosing scope
+                    // (exclusive — the enclosing scope outlives the loop).
+                    let _break_result = emit_drops_for_scope_chain(current_locals, scope_id, loop_context.outer_scope_id, false, current_temp);
+                    let mut _bd_i: number = 0;
+                    loop {
+                        if _bd_i >= _break_result.lines.length { break; }
+                        current_lines.push(_break_result.lines[_bd_i]);
+                        _bd_i += 1;
+                    }
+                    current_temp = _break_result.next_temp;
                     current_lines.push("  br label %" + loop_context.break_label);
                     terminated = true;
                 }
@@ -449,6 +465,17 @@ fn lower_instruction_range(function: NativeFunction, start_index: number, end: n
                         + "`");
                 } else {
                     let loop_context = last_loop_context(current_loop_stack);
+                    // M1.5.3 (issue #327): drop every scope between the
+                    // `continue` point and the loop body scope so each
+                    // iteration releases its in-scope owned locals.
+                    let _cont_result = emit_drops_for_scope_chain(current_locals, scope_id, loop_context.outer_scope_id, false, current_temp);
+                    let mut _cd_i: number = 0;
+                    loop {
+                        if _cd_i >= _cont_result.lines.length { break; }
+                        current_lines.push(_cont_result.lines[_cd_i]);
+                        _cd_i += 1;
+                    }
+                    current_temp = _cont_result.next_temp;
                     current_lines.push("  br label %" + loop_context.continue_label);
                     terminated = true;
                 }

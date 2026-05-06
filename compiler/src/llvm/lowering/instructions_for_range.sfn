@@ -30,7 +30,12 @@ import {
 import { extend_string_array, trim_text } from "../utils";
 import { lower_instruction_range } from "./instructions";
 import { allocate_block_label } from "./instructions_condition";
-import { _parse_int_from_string, extend_lifetime_regions, extend_mutations } from "./instructions_helpers";
+import {
+    _parse_int_from_string,
+    emit_scope_drops,
+    extend_lifetime_regions,
+    extend_mutations
+} from "./instructions_helpers";
 import { append_loop_context } from "./instructions_loops";
 import { collect_mutation_names, find_mutation_for_name } from "./phi";
 
@@ -458,7 +463,8 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
 
     let loop_context = LoopContext {
         break_label: loop_exit_label,
-        continue_label: loop_increment_label
+        continue_label: loop_increment_label,
+        outer_scope_id: scope_id
     };
     let stacked = append_loop_context(loop_stack, loop_context);
 
@@ -482,7 +488,17 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     collected_mutations = extend_mutations(collected_mutations, body_result.mutations);
     collected_string_constants = merge_string_constants(collected_string_constants, body_result.string_constants);
 
+    // M1.5.3 (issue #327): drop the for-range body's owned RC locals at
+    // end-of-iteration so each iteration starts with fresh refcounts.
     if !body_result.terminated {
+        let _range_close_result = emit_scope_drops(body_result.locals, loop_body_scope_id, current_temp);
+        let mut _rcd_i: number = 0;
+        loop {
+            if _rcd_i >= _range_close_result.lines.length { break; }
+            current_lines.push(_range_close_result.lines[_rcd_i]);
+            _rcd_i += 1;
+        }
+        current_temp = _range_close_result.next_temp;
         current_lines.push("  br label %" + loop_increment_label);
     }
 

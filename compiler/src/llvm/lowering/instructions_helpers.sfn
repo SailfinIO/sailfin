@@ -3,9 +3,14 @@
 // Shared helper utilities extracted from instructions.sfn so that
 // lower_instruction_range occupies position 1 in its module -- within
 // the v0.1.1 seed's per-module streaming emission limit.
-import { char_code, grapheme_at } from "../../string_utils";
-import { LifetimeRegionMetadata, LocalBinding, LocalMutation } from "../types";
-import { extend_string_array } from "../utils";
+import { char_code, grapheme_at, substring } from "../../string_utils";
+import {
+    LifetimeRegionMetadata,
+    LocalBinding,
+    LocalMutation,
+    ScopeDropResult
+} from "../types";
+import { extend_string_array, number_to_string } from "../utils";
 
 fn clone_local_bindings(values: LocalBinding[]) -> LocalBinding[] {
     let mut result: LocalBinding[] = [];
@@ -66,32 +71,36 @@ fn insert_lines_before_index(lines: string[], index: number, insert_lines: strin
 }
 
 // Emit drop instructions for every owned RC local in `scope_id` that is
-// still live at scope close. M1.5.2 ships the seam: `allocation_kind ==
-// "rc"` is not yet populated by any escape rule (M1.5.5 work), so this
-// returns `[]` for every real call site today. Borrows and consumed
-// locals are skipped — drop emission is owner-only. Iterates in
-// insertion order; do not sort (seedcheck depends on byte-identical IR).
+// still live at scope close. M1.5.2 ships the seam, M1.5.3 (issue #327)
+// extends it to mid-function-exit terminators (return / break /
+// continue / loop-body close / match-arm close / block close). Borrows
+// and consumed locals are skipped — drop emission is owner-only.
+// Iterates in insertion order; do not sort (seedcheck depends on
+// byte-identical IR).
 //
 // `binding.pointer` is the alloca slot (e.g. `%l5`); the slot itself has
 // type `<llvm_type>*`. The helper loads the stored value out of the slot
 // before calling `sfn_rc_release(i8*)`, with a bitcast when the value
-// type is not already `i8*`. Temp names are derived deterministically
-// from the slot name (`<slot>.drop`, `<slot>.drop_raw`) so callers do
-// not have to thread a temp index — and so the IR is byte-identical
-// across runs.
+// type is not already `i8*`. Temp names are derived from the slot name
+// suffixed with the per-binding `temp_index` (`%l5.drop.7`,
+// `%l5.drop_raw.7`); the suffix guarantees uniqueness when the same
+// scope is closed at multiple terminator points within one function (a
+// function with two `return`s would otherwise re-define `%l5.drop`,
+// which LLVM rejects).
 //
-// For an rc local with `llvm_type == "i8*"`:
+// For an rc local with `llvm_type == "i8*"` (single drop step):
 //
-//     %l5.drop = load i8*, i8** %l5
-//     call void @sfn_rc_release(i8* %l5.drop)
+//     %l5.drop.7 = load i8*, i8** %l5
+//     call void @sfn_rc_release(i8* %l5.drop.7)
 //
 // For an rc local with a non-i8* pointer-typed value (e.g. struct ptr):
 //
-//     %l5.drop_raw = load %MyStruct*, %MyStruct** %l5
-//     %l5.drop = bitcast %MyStruct* %l5.drop_raw to i8*
-//     call void @sfn_rc_release(i8* %l5.drop)
-fn emit_scope_drops(locals: LocalBinding[], scope_id: string) -> string[] {
+//     %l5.drop_raw.7 = load %MyStruct*, %MyStruct** %l5
+//     %l5.drop.7 = bitcast %MyStruct* %l5.drop_raw.7 to i8*
+//     call void @sfn_rc_release(i8* %l5.drop.7)
+fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: number) -> ScopeDropResult {
     let mut lines: string[] = [];
+    let mut current_temp: number = temp_index;
     let mut index: number = 0;
     loop {
         if index >= locals.length { break; }
@@ -103,12 +112,14 @@ fn emit_scope_drops(locals: LocalBinding[], scope_id: string) -> string[] {
         if binding.ownership != null {
             if binding.ownership.variant == "Borrow" { continue; }
         }
-        let drop_temp = binding.pointer + ".drop";
+        let suffix = "." + number_to_string(current_temp);
+        current_temp += 1;
+        let drop_temp = binding.pointer + ".drop" + suffix;
         if binding.llvm_type == "i8*" {
             lines.push("  " + drop_temp + " = load i8*, i8** " + binding.pointer);
             lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
         } else {
-            let raw_temp = binding.pointer + ".drop_raw";
+            let raw_temp = binding.pointer + ".drop_raw" + suffix;
             lines.push("  " + raw_temp + " = load " + binding.llvm_type + ", "
                 + binding.llvm_type
                 + "* "
@@ -120,7 +131,80 @@ fn emit_scope_drops(locals: LocalBinding[], scope_id: string) -> string[] {
             lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
         }
     }
-    return lines;
+    return ScopeDropResult { lines: lines, next_temp: current_temp };
+}
+
+// Strip the rightmost `__<segment>` from `scope_id`, returning the
+// parent scope id. Mirrors `make_child_scope_id` (which joins parent +
+// "__" + child) so the walk reverses one nesting step per call. Returns
+// "" when `scope_id` has no `__` separator (it is the function root or
+// otherwise atomic). The separator is two consecutive `_` graphemes —
+// sanitize_symbol replaces non-alphanumeric chars with single `_`, so a
+// double `_` is reserved for the join boundary.
+fn parent_scope_id(scope_id: string) -> string {
+    let len = scope_id.length;
+    if len < 2 { return ""; }
+    let mut last_dunder: number = -1;
+    let mut i: number = 0;
+    loop {
+        if i + 1 >= len { break; }
+        let ch = grapheme_at(scope_id, i);
+        if ch == "_" {
+            let next_ch = grapheme_at(scope_id, i + 1);
+            if next_ch == "_" {
+                last_dunder = i;
+                i += 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    if last_dunder < 0 { return ""; }
+    return substring(scope_id, 0, last_dunder);
+}
+
+// Walk the scope chain from `from_scope` outward, emitting drops at
+// each scope until reaching `to_scope`. The walk stops *before*
+// emitting drops for `to_scope` when `include_target == false`, or
+// *after* when `include_target == true`.
+//
+// Use cases (M1.5.3, issue #327):
+//   - `return` mid-body: walk from current scope to function root,
+//     `include_target = true` (the function root scope's drops are the
+//     responsibility of the explicit-return path — the function-body
+//     drop seam in `emission.sfn` is skipped when the body is
+//     terminated).
+//   - `break` / `continue`: walk from current scope to the loop's
+//     enclosing scope, `include_target = false` (the enclosing scope
+//     outlives the loop).
+//
+// A guard caps the walk at 64 nesting levels so a malformed scope id
+// can't induce an unbounded loop. The guard ceiling is well above any
+// realistic scope nesting depth (Sailfin source rarely exceeds ~10
+// nested blocks).
+fn emit_drops_for_scope_chain(locals: LocalBinding[], from_scope: string, to_scope: string, include_target: boolean, temp_index: number) -> ScopeDropResult {
+    let mut lines: string[] = [];
+    let mut current_temp: number = temp_index;
+    let mut current: string = from_scope;
+    let mut guard: number = 0;
+    loop {
+        if guard > 64 { break; }
+        guard += 1;
+        if current.length == 0 { break; }
+        if current == to_scope {
+            if include_target {
+                let target_result = emit_scope_drops(locals, current, current_temp);
+                lines = extend_string_array(lines, target_result.lines);
+                current_temp = target_result.next_temp;
+            }
+            break;
+        }
+        let scope_result = emit_scope_drops(locals, current, current_temp);
+        lines = extend_string_array(lines, scope_result.lines);
+        current_temp = scope_result.next_temp;
+        current = parent_scope_id(current);
+    }
+    return ScopeDropResult { lines: lines, next_temp: current_temp };
 }
 
 fn _parse_int_from_string(text: string) -> number {

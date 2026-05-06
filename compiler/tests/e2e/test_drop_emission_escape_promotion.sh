@@ -18,19 +18,10 @@
 #      does not promote `p` either — only locals are reached by the
 #      `find_local_binding` step inside `lower_return_instruction`.
 #
-# What this script does NOT yet pin: a `>= 1` count of
-# `call void @sfn_rc_release(...)` lines. The actual call-site emission
-# at `return` lives in M1.5.3 (issue #327, "Mid-function exit drops").
-# Until M1.5.3 ships, the function-body scope-exit drop seam in
-# `emit_llvm_function` is the only emit path, and it only fires for
-# functions that fall through without an explicit terminator — which a
-# heap-returning function never does. The unit test pins the
-# `arena -> rc` flip; this script pins the IR-shape invariants that have
-# to hold once the call sites do start firing.
-#
-# When M1.5.3 lands, flip the `EXPECT_RELEASE_CALLS_GE` constant below
-# from 0 to 1 (or higher) and the script will start enforcing the
-# stronger guarantee from #329 acceptance criterion #8.
+# Now that M1.5.3 (issue #327) ships explicit-return drop emission, the
+# `make_string` function — whose returned local is escape-promoted to
+# `kind == "rc"` — produces a real `call void @sfn_rc_release(...)` line
+# at its return. The floor below is `>= 1` for that reason.
 #
 # Usage:
 #   compiler/tests/e2e/test_drop_emission_escape_promotion.sh <compiler-binary>
@@ -42,8 +33,11 @@ BINARY="$(realpath "$BINARY")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURE="$SCRIPT_DIR/fixtures/escape_promotion_basic.sfn"
 
-# When M1.5.3 ships drop emission at `return` sites, raise this to 1.
-EXPECT_RELEASE_CALLS_GE=0
+# M1.5.3 (issue #327) made explicit `return` a real drop site. The
+# escape-promoted heap-typed return in `make_string` now emits `>= 1`
+# release call. `make_int` (primitive return) and `forwarder` (parameter
+# return) still emit zero — the per-function tests below scope to those.
+EXPECT_RELEASE_CALLS_GE=1
 
 PASS=0
 FAIL=0

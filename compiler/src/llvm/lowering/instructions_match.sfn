@@ -60,6 +60,7 @@ import { allocate_block_label, lower_condition_to_i1 } from "./instructions_cond
 import {
     _parse_int_from_string,
     clone_local_bindings,
+    emit_scope_drops,
     extend_lifetime_regions,
     extend_mutations
 } from "./instructions_helpers";
@@ -704,6 +705,17 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
         });
 
         if !body_result.terminated {
+            // M1.5.3 (issue #327): drop arm-local owned RC values at the
+            // arm body close, before falling through to the join block.
+            let _arm_scope_id = make_child_scope_id(scope_id, body_labels[index]);
+            let _arm_close_result = emit_scope_drops(body_result.locals, _arm_scope_id, current_temp);
+            let mut _acd_i: number = 0;
+            loop {
+                if _acd_i >= _arm_close_result.lines.length { break; }
+                current_lines.push(_arm_close_result.lines[_acd_i]);
+                _acd_i += 1;
+            }
+            current_temp = _arm_close_result.next_temp;
             merged_bindings = merge_parameter_bindings(merged_bindings, body_result.bindings);
             current_lines.push("  br label %" + merge_label);
             all_terminated = false;
