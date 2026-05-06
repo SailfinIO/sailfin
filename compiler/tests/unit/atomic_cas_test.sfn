@@ -1,0 +1,39 @@
+// Unit tests for the `atomic_cas` builtin (M0-Atomics.3, issue
+// #333). The same CI-budget constraint that
+// `atomic_load_store_test.sfn` and `atomic_add_sub_test.sfn` document
+// applies here verbatim — importing `lower_atomic_builtin` pulls in
+// `lower_expression` and the rest of `compiler/src/llvm/expression_lowering/native/core`,
+// which blows the per-test 180s GitHub Actions budget. So this file
+// pins the predicate surface that gates whether the LLVM lowering
+// for `atomic_cas` runs at all, and the actual IR shape (the
+// `cmpxchg ptr ..., i64 ..., i64 ... seq_cst seq_cst, align 8` line
+// followed by the `extractvalue { i64, i1 } %cmpxchg_result, 1`
+// line) gets pinned end-to-end in
+// `compiler/tests/e2e/test_atomic_cas_compile.sh`. The type-error
+// rejections on the second and third arguments are pinned in that
+// same e2e file via `[fatal] [E0806]` stderr probes.
+import { is_atomic_builtin } from "../../src/llvm/atomics";
+
+// ── Predicate recognises atomic_cas ──
+test "atomics: is_atomic_builtin recognises atomic_cas" {
+    assert is_atomic_builtin("atomic_cas");
+}
+
+// Whitespace tolerance: `lower_atomic_builtin` calls `trim_text`
+// before dispatching, so the predicate must accept the same surface
+// that the dispatch hook sees in practice.
+test "atomics: is_atomic_builtin recognises atomic_cas after trim" {
+    assert is_atomic_builtin(" atomic_cas ");
+}
+
+// Defence against a future regression that loosens the predicate
+// to a startsWith / endsWith match — only the exact six reserved
+// names should fire the dispatch hook, even for plausible
+// near-misses around the `atomic_cas` name.
+test "atomics: is_atomic_builtin rejects partial atomic_cas names" {
+    assert ! is_atomic_builtin("cas");
+    assert ! is_atomic_builtin("atomic_ca");
+    assert ! is_atomic_builtin("atomic_casx");
+    assert ! is_atomic_builtin("atomic_compare_and_swap");
+    assert ! is_atomic_builtin("cmpxchg");
+}
