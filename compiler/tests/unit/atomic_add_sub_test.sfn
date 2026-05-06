@@ -1,0 +1,50 @@
+// Unit tests for the `atomic_add` / `atomic_sub` builtins
+// (M0-Atomics.2, issue #332). Predecessor M0-Atomics.1 documents
+// the reason these tests can't import the LLVM lowering stack to
+// pin the IR shape directly — see `atomic_load_store_test.sfn` for
+// the full background and the GitHub Actions run that timed out at
+// 180s. The same constraint applies here: importing
+// `lower_atomic_builtin` pulls in `lower_expression` and the rest
+// of `compiler/src/llvm/expression_lowering/native/core`, which
+// blows the per-test CI budget.
+//
+// The IR shape (`atomicrmw add ptr ..., i64 ... seq_cst, align 8`
+// on the happy path, `[fatal] [E0806]` on the type-error path) is
+// pinned end-to-end in
+// `compiler/tests/e2e/test_atomic_add_sub_compile.sh`. This file
+// pins the predicate surface that gates whether the LLVM lowering
+// for these builtins runs at all, plus a few near-miss negatives
+// so a regression in `is_atomic_builtin` surfaces here without
+// paying the lowering import cost.
+import { is_atomic_builtin } from "../../src/llvm/atomics";
+
+// ── Predicate recognises the implemented names ──
+test "atomics: is_atomic_builtin recognises atomic_add" {
+    assert is_atomic_builtin("atomic_add");
+}
+
+test "atomics: is_atomic_builtin recognises atomic_sub" {
+    assert is_atomic_builtin("atomic_sub");
+}
+
+// Whitespace tolerance: `lower_atomic_builtin` calls `trim_text`
+// before dispatching, so the predicate must accept the same
+// surface that the dispatch hook sees in practice.
+test "atomics: is_atomic_builtin recognises atomic_add / atomic_sub after trim" {
+    assert is_atomic_builtin(" atomic_add ");
+    assert is_atomic_builtin(" atomic_sub ");
+}
+
+// Defence against a future regression that loosens the predicate
+// to a startsWith / endsWith match — only the exact six reserved
+// names should fire the dispatch hook, even for plausible
+// near-misses around the `atomic_add` / `atomic_sub` names.
+test "atomics: is_atomic_builtin rejects partial atomic_add / atomic_sub names" {
+    assert ! is_atomic_builtin("add");
+    assert ! is_atomic_builtin("sub");
+    assert ! is_atomic_builtin("atomic_ad");
+    assert ! is_atomic_builtin("atomic_addx");
+    assert ! is_atomic_builtin("atomic_su");
+    assert ! is_atomic_builtin("atomic_subx");
+    assert ! is_atomic_builtin("atomic_add_seq_cst");
+}

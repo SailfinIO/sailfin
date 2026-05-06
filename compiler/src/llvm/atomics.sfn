@@ -7,13 +7,16 @@
 // than calls to a runtime helper.
 //
 // M0-Atomics.1 (issue #331) ships `atomic_load` and `atomic_store`
-// plus this dispatch infrastructure. The remaining four builtins
-// reuse `is_atomic_builtin` + `lower_atomic_builtin`; see issue #323
-// for the parent epic.
+// plus this dispatch infrastructure. M0-Atomics.2 (issue #332) adds
+// `atomic_add` / `atomic_sub`. The remaining two builtins reuse
+// `is_atomic_builtin` + `lower_atomic_builtin`; see issue #323 for
+// the parent epic.
 //
 // Type contract (enforced here; emits E0806 on violation):
 //   atomic_load(ptr: *int) -> int
 //   atomic_store(ptr: *int, value: int) -> void
+//   atomic_add(ptr: *int, delta: int) -> int   // returns OLD value
+//   atomic_sub(ptr: *int, delta: int) -> int   // returns OLD value
 //   atomic_fence() -> void
 // `*int` lowers to `i64*`, `int` lowers to `i64`. Atomic ops on
 // non-i64 widths are out of scope for v0. `atomic_fence` is the
@@ -69,7 +72,13 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
     if trimmed == "atomic_fence" {
         return _lower_atomic_fence(arguments, temp_index, lines);
     }
-    // M0-Atomics.2/3 will fill these in. Until then, reject the
+    if trimmed == "atomic_add" {
+        return _lower_atomic_rmw("add", "atomic_add", arguments, bindings, locals, temp_index, lines, functions, context);
+    }
+    if trimmed == "atomic_sub" {
+        return _lower_atomic_rmw("sub", "atomic_sub", arguments, bindings, locals, temp_index, lines, functions, context);
+    }
+    // M0-Atomics.3 will fill in `atomic_cas`. Until then, reject the
     // call with a `[fatal]` diagnostic so the build exits non-zero
     // — matching the issue #306 contract that the emit-level
     // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
@@ -307,6 +316,135 @@ fn _lower_atomic_fence(arguments: string[], temp_index: number, lines: string[])
         operand: null,
         diagnostics: diagnostics,
         string_constants: []
+    };
+}
+
+// `atomic_add(ptr: *int, delta: int) -> int` →
+//     %tN = atomicrmw add ptr <ptr>, i64 <delta> seq_cst, align 8
+// `atomic_sub(ptr: *int, delta: int) -> int` →
+//     %tN = atomicrmw sub ptr <ptr>, i64 <delta> seq_cst, align 8
+//
+// Returns the **previous** value at `*ptr` — this is LLVM `atomicrmw`
+// semantics and is what reference-counting needs. The canonical RC
+// release pattern is "if `atomic_sub(rc, 1) == 1` then free", which
+// only works because we observe the value before the decrement. Do
+// NOT split this into a `load` + arithmetic + `store` (or compose it
+// from `atomic_load` + `atomic_store`) — that race is the entire
+// reason we lower to a single `atomicrmw` instruction.
+//
+// Shared between `atomic_add` and `atomic_sub`: only the LLVM op
+// mnemonic (`add` vs `sub`) differs. `name` is threaded through to
+// the diagnostics so the user sees the Sailfin-level builtin name
+// (e.g. `atomic_sub`) rather than the LLVM op.
+fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut current_lines = lines;
+    let mut current_temp = temp_index;
+    let mut collected_strings: StringConstant[] = [];
+
+    if arguments.length != 2 {
+        let diag1 = "llvm lowering [fatal] [E0806]: " + name
+            + " expects exactly 2 arguments (`*int`, `int`), got "
+            + number_to_string(arguments.length);
+        print.err(diag1);
+        diagnostics.push(diag1);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_text = trim_text(arguments[0]);
+    let ptr_lowered = lower_expression(ptr_text, bindings, locals, current_temp, current_lines, functions, context, "i64*");
+    diagnostics = extend_string_array(diagnostics, ptr_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
+    current_lines = ptr_lowered.lines;
+    current_temp = ptr_lowered.temp_index;
+
+    if ptr_lowered.operand == null {
+        diagnostics.push("llvm lowering: " + name
+            + " failed to lower pointer argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_operand = ptr_lowered.operand;
+    let ptr_type = trim_text(ptr_operand.llvm_type);
+    if ptr_type != "i64*" {
+        let diag2 = "llvm lowering [fatal] [E0806]: " + name
+            + " expects argument 0 of type `*int` (i64*), got `"
+            + ptr_type
+            + "`";
+        print.err(diag2);
+        diagnostics.push(diag2);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let delta_text = trim_text(arguments[1]);
+    let delta_lowered = lower_expression(delta_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
+    diagnostics = extend_string_array(diagnostics, delta_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, delta_lowered.string_constants);
+    current_lines = delta_lowered.lines;
+    current_temp = delta_lowered.temp_index;
+
+    if delta_lowered.operand == null {
+        diagnostics.push("llvm lowering: " + name
+            + " failed to lower delta argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let delta_operand = delta_lowered.operand;
+    let delta_type = trim_text(delta_operand.llvm_type);
+    if delta_type != "i64" {
+        let diag3 = "llvm lowering [fatal] [E0806]: " + name
+            + " expects argument 1 of type `int` (i64), got `"
+            + delta_type
+            + "`";
+        print.err(diag3);
+        diagnostics.push(diag3);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let result_name = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + result_name + " = atomicrmw " + op + " ptr "
+        + ptr_operand.value
+        + ", i64 "
+        + delta_operand.value
+        + " seq_cst, align 8");
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: LLVMOperand { llvm_type: "i64", value: result_name },
+        diagnostics: diagnostics,
+        string_constants: collected_strings
     };
 }
 
