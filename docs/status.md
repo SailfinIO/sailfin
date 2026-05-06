@@ -713,7 +713,7 @@ The runtime rewrite depends on compiler features that must ship first. The
 | Bitwise integer operators (`&`, `|`, `^`, `<<`, `>>`) | **Shipped 2026-05-02** as numeric Slice B (see row above) — lex/parse/lower to LLVM `and`/`or`/`xor`/`shl`/`ashr i64`. The lowering also emits a clear diagnostic when bitwise/shift ops are applied to `double` operands. The cross-type half (typecheck-side rejection of `double & x`) was originally bundled into Slice D's `dominant_type` tightening but moved to Slice E along with the rest of the int↔float disambiguation work — see issue #296. | SHA-256, Base64, flags, enum tag extraction now unblocked |
 | Closures with capture | Planned | `map`/`filter`/`reduce`, spawn handlers, route handlers |
 | Generic type constraints | Planned | `Array<T>`, `Slice<T>`, `HashMap<K, V>`, `Channel<T>` |
-| Deterministic drop emission | Planned | Memory reclamation — enables `string_drop` and `array_drop` |
+| Deterministic drop emission | **M1.5 — in flight (#322)**. Promoted out of the "core runtime in Sailfin" milestone by the 2026-05-06 runtime-rewrite reassessment (#321) into its own epic so reviewers can audit the seam (`LocalBinding.allocation_kind` + `emit_scope_drops`) independently of core-runtime service PRs. Conservative escape rule in v0 is function-return promotion only; closure-capture and channel-send promotion follow once those features land. See `docs/runtime_architecture.md` §3.1 and §4.5b, and `docs/runtime_audit.md` Hard prereq #5. | Memory reclamation — enables `string_drop` and `array_drop`; unblocks every allocating Sailfin-native runtime service that follows |
 | Atomic intrinsics | Planned | Reference counting, task queues, channel implementation |
 
 See `docs/runtime_audit.md` for the full migration plan.

@@ -36,7 +36,7 @@
 >   prerequisite (issue #308's IPC-isolation track) is being
 >   addressed independently.
 > - M0.5 arena-in-C: **shipped, default-on** (PRs #249, #251, #252).
-> - M0 hard prerequisite #7 (`extern fn` typed linker-resolved symbols):
+> - M0 hard prerequisite #6 (`extern fn` typed linker-resolved symbols):
 >   **shipped 2026-05-01** (parser + typecheck + native-IR + LLVM `declare`).
 >   Runtime-module imported extern call lowering is now pinned by
 >   `runtime/sfn/io.sfn`; general typecheck-level call-site resolution is
@@ -86,6 +86,34 @@
 >   + `number` retirement) remain sequenced follow-ups.
 > - Other M0 items (`Result<T, E>` + `?`, closures with capture, atomic
 >   intrinsics) remain planned.
+> - **Drop emission promoted to its own milestone: M1.5.** The 2026-05-06
+>   reassessment (#321) lifted drop emission into its own milestone —
+>   previously it was hidden inside the core-runtime bullet list. M1.5 is
+>   its own epic (#322) because the work touches `instructions.sfn`,
+>   `instructions_try.sfn`, `core_scopes.sfn`, `instructions_helpers.sfn`,
+>   and adds `LocalBinding.allocation_kind` to `types.sfn` — the largest
+>   single compiler change on the runtime path, and one reviewers should
+>   not approve as a side-effect of "ship the runtime" PRs. M1.5 lands
+>   between M1 (ABI lock) and the core-runtime milestone so every
+>   Sailfin-native runtime service has trustable scope-exit drops from
+>   day one. The seam is `LocalBinding.allocation_kind` +
+>   `emit_scope_drops`; conservative escape rule promotes arena → rc only
+>   at function-return boundaries in v0. See §3.1 and #322 for the full
+>   sub-issue split. The old "drop emission lives inside the core-runtime
+>   milestone" framing in the body is superseded by §3.1; the §4.6
+>   "core-runtime prereqs" entry now reads "M1.5 (drop emission)" rather
+>   than "soft: drop emission."
+> - **Hard prereq renumbering in `runtime_audit.md` (this PR).** The
+>   previous Hard prereq #5 ("Destructors / deterministic drop emission")
+>   and #6 ("Affine/Linear enforcement (or explicit removal)") collapse
+>   into a single new #5 ("Conservative drop emission scoped to
+>   compiler-known allocation kinds — M1.5"). Per `CLAUDE.md`, ownership
+>   types (`Affine<T>` / `Linear<T>`) are deferred post-1.0; the runtime
+>   trusts compiler-emitted drops keyed off `allocation_kind`, not
+>   move-semantics enforcement. Subsequent prereqs renumber:
+>   `extern fn` is now Hard prereq #6 (was #7); soft prereqs are now
+>   #7–#11 (were #8–#12). Cross-references inside this document are
+>   updated.
 > - **Slice D — `as` cast lowering: shipped 2026-05-03.** Parser/AST/
 >   native-IR rendering for `expr as Type` (PR #289) is now backed
 >   by the LLVM lowering matrix in `lower_cast_expression`
@@ -398,7 +426,7 @@ atomic intrinsics emitted directly by the compiler — not through a C helper
 and not through platform `pthread_mutex` calls. `sfn_rc_retain` emits
 `atomicrmw add`, `sfn_rc_release` emits `atomicrmw sub` (see §3.5).
 This requires the compiler to expose atomic intrinsics as Sailfin builtins
-(`runtime_audit.md` soft prerequisite #12, hard for M2).
+(`runtime_audit.md` soft prerequisite #11, hard for M2).
 
 **API:**
 - `sfn_rc_alloc(size: i64, drop_fn: fn(i8*) -> void) -> i8*` — allocate a
@@ -1034,30 +1062,68 @@ constants into the compiler — simpler for v0. See open question Q7.
 
 ### 3.1 Drop Emission at Scope Exit
 
+**Milestone: M1.5** (epic #322, split out of #321's runtime-rewrite
+reassessment). Drop emission was previously a single bullet inside M2; the
+reassessment lifted it into its own milestone because it touches enough
+compiler files (instructions emission, try/catch cleanup, scope tracking,
+allocation-kind metadata) to deserve dedicated review and self-host
+between PRs. M1.5 lands before M2 — every Sailfin-native runtime service
+that allocates depends on the compiler emitting drops to avoid leaking,
+and `string_drop` / `array_drop` stay default-off until M1.5 ships.
+
 **Current state:** The compiler tracks lifetime regions in
 `compiler/src/llvm/types.sfn` (`LifetimeRegionMetadata`, `LifetimeReleaseEvent`)
 and has scope tracking (`ScopeMetadata`, `scope_id`, `scope_depth` on
 `LocalBinding`). It does **not** emit any drop calls.
 
-**Required changes:**
+**The seam — `LocalBinding.allocation_kind` + `emit_scope_drops`.** The
+new `allocation_kind: "arena" | "rc" | "static" | "stack"` field on
+`LocalBinding` is the single piece of state the rest of the pipeline reads:
+arena bindings emit nothing at scope exit (bulk reset handles them), `"rc"`
+bindings emit `call void @sfn_rc_release`, and `"static"` / `"stack"` are
+no-ops. `emit_scope_drops` is the one helper every drop site funnels
+through, so the policy lives in one place and reviewers can audit it
+independently from the call sites.
+
+**Conservative escape rule (v0).** A `let x = ...` defaults to `"arena"`.
+The escape analysis promotes a binding to `"rc"` only at compiler-known
+boundaries: in v0 that is **function-return promotion only** (the compiler
+already knows which values flow into a `ret`). Closure capture and channel
+send promote to `"rc"` once those features land — they are not in scope for
+M1.5's first cut. This over-counts arena allocations (some returned values
+could stay in the caller's arena), but it is correct without
+interprocedural escape analysis and matches what the existing compiler can
+already reason about.
+
+**Required changes (sub-issues under #322):**
 
 1. **`compiler/src/llvm/lowering/instructions.sfn`** — at the end of each scope
-   (function body, block body, loop body), insert `call void @sfn_rc_release`
-   for each owned RC local that was initialized in that scope. Use
-   `OwnershipInfo.variant` to skip borrows.
+   (function body, block body, loop body, match arm body), insert
+   `call void @sfn_rc_release` for each owned RC local that was initialized
+   in that scope. Use `OwnershipInfo.variant` to skip borrows. Mid-function
+   exits (`return`, `break`, `continue`) emit drops for in-scope owned
+   locals before the terminator.
 
 2. **`compiler/src/llvm/lowering/instructions_try.sfn`** — at catch entry,
-   emit cleanup calls for all owned locals in the `try` scope that may have been
-   initialized. Guard each with a null-check (`icmp ne ptr %local, null`).
+   emit cleanup calls for all owned locals in the `try` scope that may have
+   been initialized. Guard each with an init-sentinel null-check
+   (`icmp ne ptr %local, null`) so partial initialization on the throw path
+   stays sound.
 
 3. **`compiler/src/llvm/expression_lowering/native/core_scopes.sfn`** — extend
-   `append_local_binding` to record whether the binding is arena-allocated or
-   RC-allocated. Add an `allocation_kind` field to `LocalBinding`:
-   `"arena" | "rc" | "static" | "stack"`.
+   `append_local_binding` to record `allocation_kind` based on the assigned
+   expression's heap shape. Until M2 RC ships, every binding stays `"arena"`
+   (data-model change only); the conservative escape rule flips return
+   sites to `"rc"` once M2 supplies the `sfn_rc_release` symbol.
 
 4. **`compiler/src/llvm/lowering/instructions_helpers.sfn`** — add a helper
    `emit_scope_drops(locals: LocalBinding[], scope_id: string) -> string[]`
    that generates the drop IR lines for all owned locals in the given scope.
+
+**Cross-link:** see epic #322 for the sub-issue split (data-model PR →
+scope-exit emission → mid-function exits → try/catch cleanup → conservative
+escape promotion → doc cleanup) and #321 §"Sequencing — REVISED" for the
+M0 → M0.5 → M1 → **M1.5** → M2 placement.
 
 ### 3.2 Escape Analysis Encoding
 
@@ -1152,7 +1218,7 @@ recognizes the name and emits the intrinsic directly. Memory ordering is
 added post-1.0 if profiling shows contention.
 
 **Prerequisite status:** Hard for M2 (RC correctness) and M4 (scheduler
-correctness). Soft prerequisite #12 in `runtime_audit.md`, but functionally
+correctness). Soft prerequisite #11 in `runtime_audit.md`, but functionally
 blocking for M2.
 
 **Fast-fail criterion:** A Sailfin test `let r = atomic_add(&counter, 1)` from
@@ -1450,6 +1516,8 @@ M0.5: Arena in C (temporary — YES, do it)
  ↓
 M1: ABI Lock + Codegen Switch
  ↓
+M1.5: Drop Emission (epic #322 — split out of M2 by #321)
+ ↓
 M2: Core Runtime in Sailfin
  ↓
 M3: Capability Adapters in Sailfin + Delete C Runtime
@@ -1506,20 +1574,29 @@ to the arena.
   cannot accept user-provided callbacks that close over local state.
 - **`extern fn` with typed linker-resolved symbols.** Without this, the runtime
   cannot reach platform syscalls from Sailfin source — the entire pure-Sailfin
-  runtime architecture depends on this feature. This is hard prerequisite #7
+  runtime architecture depends on this feature. This is hard prerequisite #6
   in `runtime_audit.md`.
 
+**What must ship before M1.5 can begin (epic #322):**
+- M0 (above), specifically the data-model groundwork. M1.5 adds
+  `LocalBinding.allocation_kind` and `emit_scope_drops` on top of the
+  existing `LifetimeRegionMetadata` / `OwnershipInfo` machinery — see §3.1.
+
 **What must ship before M2 can begin:**
+- M1.5 (drop emission, epic #322). Without M1.5 every allocating
+  Sailfin-native runtime service leaks at scope exit and `string_drop` /
+  `array_drop` stay default-off. This was previously framed as a "soft
+  prereq" inside M2; the 2026-05-06 reassessment (#321) lifted it to its
+  own milestone.
 - Atomic intrinsics (§3.5). Required for sound RC and the scheduler. Soft
-  prereq #12 in `runtime_audit.md`, but hard for M2.
+  prereq #11 in `runtime_audit.md`, but hard for M2.
 
 **What can ship after M1 (soft prereqs — desirable but not blocking):**
 - Generic trait/interface constraints. Needed for fully typed `Channel<T>` and
   `Array<T>` in the prelude but not for the runtime internals.
-- Affine/Linear enforcement. The runtime can operate correctly with the
-  conservative "arena by default, RC at boundaries" model without the compiler
-  enforcing move semantics. Enforcement improves safety guarantees but doesn't
-  change runtime correctness.
+- Affine/Linear enforcement is **deferred post-1.0** per `CLAUDE.md`. The
+  runtime trusts compiler-emitted drops keyed off `LocalBinding.allocation_kind`
+  (M1.5), not move-semantics enforcement.
 
 **Fast-fail criteria:**
 1. Integer literals compile to `i64`, not `double`: `let x: int = 42; assert x + 1 == 43;`
@@ -1574,16 +1651,65 @@ to the arena.
    both old and new layouts (detected via ABI version tag). This layer is
    deleted at M3.
 
-**Unblocks:** M2 (Sailfin-native runtime implementation).
+**Unblocks:** M1.5 (drop emission); the Sailfin-native runtime milestone
+follows.
 
 **Fast-fail criteria:**
 1. `make compile` and `make check` pass with the new ABI.
 2. String length is read from the struct field, not computed by `strlen`.
 3. Array push does not involve hidden headers or canary writes.
 
+### 4.5b M1.5 — Drop Emission
+
+**Compiler prereqs:** M1 (ABI lock).
+
+**Tracking:** epic #322 (split out of #321's runtime-rewrite reassessment).
+Previously hidden inside M2's bullet list; promoted to its own milestone
+because the work touches enough compiler files (instructions emission,
+try/catch cleanup, scope tracking, allocation-kind metadata) that
+reviewers should not approve it as a side-effect of an "M2 ships the
+runtime" PR. See §3.1 for the seam.
+
+**Deliverables (sub-issues under #322 split into S/M PRs each):**
+1. `LocalBinding.allocation_kind` field (`"arena" | "rc" | "static" | "stack"`)
+   in `compiler/src/llvm/types.sfn`, populated by `append_local_binding` in
+   `core_scopes.sfn` based on the assigned expression's heap shape.
+2. `emit_scope_drops` helper in
+   `compiler/src/llvm/lowering/instructions_helpers.sfn` — single funnel
+   for every drop site; reads `OwnershipInfo.variant` to skip borrows.
+3. Scope-exit emission in `compiler/src/llvm/lowering/instructions.sfn`:
+   function bodies, block bodies, loop bodies, match-arm bodies.
+4. Mid-function-exit emission: `return`, `break`, `continue` emit drops
+   for in-scope owned locals before the terminator.
+5. Try/catch cleanup in `compiler/src/llvm/lowering/instructions_try.sfn`:
+   guarded drops with init-sentinel null-checks at catch entry.
+6. Conservative escape rule (v0): `let x = ...` defaults to `"arena"`;
+   function-return promotes to `"rc"`. Closure-capture and channel-send
+   promotion follow once those features land.
+
+**Unblocks:** M2 (Sailfin-native runtime). Also unblocks the eventual
+default-on flip of `SAILFIN_ENABLE_STRING_FREE` (currently disabled because
+the compiler can't trust its own drop signals — see `runtime_audit.md`
+§"The `string_drop` reality").
+
+**Fast-fail criteria:**
+1. `compiler/tests/e2e/test_drop_emission_basic.sh` pins that an
+   allocated-and-discarded RC value emits a release call.
+2. `compiler/tests/e2e/test_drop_emission_try_catch.sh` pins that
+   try/catch unwind emits guarded drops.
+3. `make compile && make check` stay green throughout the sub-issue split
+   (each PR self-hosts).
+4. `bash scripts/diag_determinism_sweep.sh
+   compiler/src/llvm/lowering/instructions.sfn 20` shows byte-identical
+   IR across runs (drop emission must be deterministic).
+
 ### 4.6 M2 — Core Runtime in Sailfin
 
-**Compiler prereqs:** M1 (ABI lock). Soft: drop emission (§3.1).
+**Compiler prereqs:** M1 (ABI lock) and **M1.5 (drop emission, epic #322 —
+see §3.1)**. M1.5 was previously framed as a soft prereq inside M2; the
+2026-05-06 reassessment (#321) lifted it to its own milestone so every
+allocating Sailfin-native service in M2 ships with trustable scope-exit
+drops.
 
 **Deliverables:**
 1. `runtime/sfn/memory/arena.sfn` — arena allocator (port from C M0.5 +
@@ -1726,9 +1852,10 @@ the scheduler lands.** This avoids premature thread-safety complexity.
 **Yes.** M1 changes the data layouts but not the ownership model. The compiler
 continues to not emit drops; the global arena handles bulk deallocation at
 process exit, same as today (but intentionally instead of accidentally). Drop
-emission is needed for M2 (Sailfin-native runtime) to handle RC'd values that
-escape arenas. M1 without drops is already a massive improvement over the
-current C-string ABI.
+emission is **M1.5** (epic #322) — its own milestone between M1 and M2, so
+that M2's Sailfin-native runtime services can trust scope-exit drops without
+the M1.5 work landing as a side-effect of an "M2 ships the runtime" PR. M1
+without drops is already a massive improvement over the current C-string ABI.
 
 **Q6: Variadic `extern fn` for `snprintf` (and similar).**
 
@@ -1773,7 +1900,7 @@ require no compiler feature. Revisit in 1.1 if the maintenance cost grows.
 | ABI switch (M1) breaks self-hosting in subtle ways | Medium | High — compiler can't compile itself | Dual-ABI support during transition: the C runtime accepts both old and new layouts keyed on the `sfn_abi_version` global. Remove dual support at M3. |
 | Sailfin-native runtime (M2) is slower than C runtime | Low | Medium — morale/credibility | The C runtime has heavy defensive overhead (hash table lookups, pointer plausibility checks, strlen scans). The native runtime eliminates all of this. Profile continuously. |
 | Thread pool scheduler (M4) has correctness bugs under load | Medium | Medium — blocks concurrency features | Start with mutex-guarded queue (simple, correct). Optimize to lock-free only after correctness is proven. |
-| The compiler's existing lifetime/ownership tracking is insufficient for drop emission | Medium | High — delays M2 | The conservative approach (arena for everything, no drops, bulk reset at exit) works for the compiler and short-lived programs. RC + drops are needed only for long-lived programs and can be deferred to late M2 or M3. |
+| The compiler's existing lifetime/ownership tracking is insufficient for drop emission | Medium | High — delays M1.5 (and therefore the runtime rewrite) | The conservative approach (arena for everything, no drops, bulk reset at exit) works for the compiler and short-lived programs. M1.5 (epic #322) ships the conservative escape rule (function-return promotion only in v0) on top of the existing `LifetimeRegionMetadata` / `OwnershipInfo` machinery; full closure-capture and channel-send promotion can be deferred to a later milestone if M1.5 reveals gaps. |
 
 ---
 
@@ -1853,20 +1980,22 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 - `compiler/src/llvm/lowering/emission.sfn` (string literal layout change)
 - `compiler/src/llvm/expression_lowering/native/core_strings.sfn` (SfnString ops)
 - `compiler/src/llvm/expression_lowering/native/core_ops_lowering.sfn` (array ops)
-- `compiler/src/llvm/expression_lowering/native/core_scopes.sfn` (allocation_kind)
-- `compiler/src/llvm/types.sfn` (add allocation_kind to LocalBinding)
 - `compiler/src/llvm/lowering/lowering_phase_types.sfn` (struct layout emission)
 - `site/src/content/docs/docs/reference/runtime-abi.md` (lock to v0)
+
+### M1.5 (Drop Emission — epic #322, split out of M2 by #321)
+- `compiler/src/llvm/types.sfn` (add `allocation_kind` to `LocalBinding`)
+- `compiler/src/llvm/expression_lowering/native/core_scopes.sfn` (record `allocation_kind` in `append_local_binding`)
+- `compiler/src/llvm/lowering/instructions_helpers.sfn` (new `emit_scope_drops` helper)
+- `compiler/src/llvm/lowering/instructions.sfn` (scope-exit + mid-function-exit emission)
+- `compiler/src/llvm/lowering/instructions_try.sfn` (catch-entry cleanup with init sentinels)
+- New: `compiler/tests/e2e/test_drop_emission_basic.sh`, `test_drop_emission_try_catch.sh`
 
 ### M2 (Core Runtime in Sailfin)
 - `runtime/sfn/` (all new files per §1.5)
 - `runtime/sfn/platform/*.sfn` (new — `extern fn` declarations, no C)
 - `runtime/sfn/io.sfn` (started — `sfn_write_fd` over `platform/libc.write`)
 - `runtime/prelude.sfn` (rewrite delegates)
-- `compiler/src/llvm/lowering/instructions.sfn` (scope drop emission)
-- `compiler/src/llvm/lowering/instructions_try.sfn` (catch cleanup)
-- `compiler/src/llvm/lowering/instructions_helpers.sfn` (emit_scope_drops)
-- `compiler/src/llvm/expression_lowering/native/core_scopes.sfn` (drop tracking)
 - `Makefile` (link Sailfin-native runtime instead of C runtime)
 - `scripts/build.sh` (compile runtime modules alongside compiler)
 
