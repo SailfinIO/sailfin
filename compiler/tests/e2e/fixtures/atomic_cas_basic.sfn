@@ -1,0 +1,16 @@
+// Fixture for compiler/tests/e2e/test_atomic_cas_compile.sh.
+// Exercises `atomic_cas` so the emitted LLVM IR contains both a
+// `cmpxchg ptr ..., i64 ..., i64 ... seq_cst seq_cst, align 8` line
+// and the `extractvalue { i64, i1 } %cmpxchg_result, 1` follow-up
+// that unwraps the success bit. Two call sites — one in a return
+// expression, one in an `if` condition — match the verification
+// pattern from issue #333 ("compiles a fixture using atomic_cas in
+// a comparison expression: `if atomic_cas(p, 0, 1) { ... }`").
+fn try_set(flag: * int, expected: int, new: int) -> boolean {
+    return atomic_cas(flag, expected, new);
+}
+
+fn try_acquire(flag: * int) -> int {
+    if atomic_cas(flag, 0, 1) { return 1; }
+    return 0;
+}

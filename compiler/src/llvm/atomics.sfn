@@ -8,20 +8,26 @@
 //
 // M0-Atomics.1 (issue #331) ships `atomic_load` and `atomic_store`
 // plus this dispatch infrastructure. M0-Atomics.2 (issue #332) adds
-// `atomic_add` / `atomic_sub`. The remaining two builtins reuse
-// `is_atomic_builtin` + `lower_atomic_builtin`; see issue #323 for
-// the parent epic.
+// `atomic_add` / `atomic_sub`. M0-Atomics.3 (issue #333) adds
+// `atomic_cas`. The last builtin reuses `is_atomic_builtin` +
+// `lower_atomic_builtin`; see issue #323 for the parent epic.
 //
 // Type contract (enforced here; emits E0806 on violation):
 //   atomic_load(ptr: *int) -> int
 //   atomic_store(ptr: *int, value: int) -> void
-//   atomic_add(ptr: *int, delta: int) -> int   // returns OLD value
-//   atomic_sub(ptr: *int, delta: int) -> int   // returns OLD value
+//   atomic_add(ptr: *int, delta: int) -> int           // returns OLD value
+//   atomic_sub(ptr: *int, delta: int) -> int           // returns OLD value
+//   atomic_cas(ptr: *int, expected: int, new: int) -> bool  // success bit
 //   atomic_fence() -> void
-// `*int` lowers to `i64*`, `int` lowers to `i64`. Atomic ops on
-// non-i64 widths are out of scope for v0. `atomic_fence` is the
-// odd one out — no operands, no SSA temp, just a single
-// `fence seq_cst` line acting as a cross-thread memory barrier.
+// `*int` lowers to `i64*`, `int` lowers to `i64`, `bool` lowers to
+// `i1`. Atomic ops on non-i64 widths are out of scope for v0.
+// `atomic_fence` is the odd one out — no operands, no SSA temp,
+// just a single `fence seq_cst` line acting as a cross-thread
+// memory barrier. `atomic_cas` is the other odd one — `cmpxchg`
+// returns a `{i64, i1}` aggregate, so the lowering emits a follow-up
+// `extractvalue` to expose the success bit (`i1` → Sailfin `bool`)
+// and discards the value slot (the v0 contract is success-bit only;
+// a `Result`-shaped return is post-1.0).
 import { NativeFunction } from "../native_ir";
 // Mutually recursive: lower_atomic_builtin lowers each argument via
 // lower_expression, which itself dispatches calls back through this
@@ -78,8 +84,13 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
     if trimmed == "atomic_sub" {
         return _lower_atomic_rmw("sub", "atomic_sub", arguments, bindings, locals, temp_index, lines, functions, context);
     }
-    // M0-Atomics.3 will fill in `atomic_cas`. Until then, reject the
-    // call with a `[fatal]` diagnostic so the build exits non-zero
+    if trimmed == "atomic_cas" {
+        return _lower_atomic_cas(arguments, bindings, locals, temp_index, lines, functions, context);
+    }
+    // No remaining unimplemented atomic builtins — every reserved
+    // name above is wired through. If a future name is added to
+    // `is_atomic_builtin` without a matching dispatch arm, fall
+    // through to a `[fatal]` diagnostic so the build exits non-zero
     // — matching the issue #306 contract that the emit-level
     // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
     // refuse to write IR when any diagnostic carries `[fatal]`.
@@ -443,6 +454,174 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
         lines: current_lines,
         temp_index: current_temp,
         operand: LLVMOperand { llvm_type: "i64", value: result_name },
+        diagnostics: diagnostics,
+        string_constants: collected_strings
+    };
+}
+
+// `atomic_cas(ptr: *int, expected: int, new: int) -> bool` →
+//     %tA = cmpxchg ptr <ptr>, i64 <expected>, i64 <new> seq_cst seq_cst, align 8
+//     %tB = extractvalue { i64, i1 } %tA, 1
+//
+// Returns the **success bit** (i1 → Sailfin `bool`) — `true` if the
+// swap landed, `false` if the location held something other than
+// `expected`. The `i64` slot of the cmpxchg aggregate (the actual
+// value at the location, whether the swap succeeded or not) is
+// intentionally discarded; v0 is success-bit only and a
+// `Result`-shaped return is deferred to post-1.0 (issue #333 notes).
+//
+// Both memory orderings on `cmpxchg` are pinned to `seq_cst`
+// (success and failure). v0 also ships strong cmpxchg only — no
+// `cmpxchg weak` — matching the rest of the M0 atomics surface.
+fn _lower_atomic_cas(arguments: string[], bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut current_lines = lines;
+    let mut current_temp = temp_index;
+    let mut collected_strings: StringConstant[] = [];
+
+    if arguments.length != 3 {
+        let diag1 = "llvm lowering [fatal] [E0806]: atomic_cas expects exactly 3 arguments (`*int`, `int`, `int`), got "
+            + number_to_string(arguments.length);
+        print.err(diag1);
+        diagnostics.push(diag1);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_text = trim_text(arguments[0]);
+    let ptr_lowered = lower_expression(ptr_text, bindings, locals, current_temp, current_lines, functions, context, "i64*");
+    diagnostics = extend_string_array(diagnostics, ptr_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, ptr_lowered.string_constants);
+    current_lines = ptr_lowered.lines;
+    current_temp = ptr_lowered.temp_index;
+
+    if ptr_lowered.operand == null {
+        diagnostics.push("llvm lowering: atomic_cas failed to lower pointer argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let ptr_operand = ptr_lowered.operand;
+    let ptr_type = trim_text(ptr_operand.llvm_type);
+    if ptr_type != "i64*" {
+        let diag2 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 0 of type `*int` (i64*), got `"
+            + ptr_type
+            + "`";
+        print.err(diag2);
+        diagnostics.push(diag2);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let expected_text = trim_text(arguments[1]);
+    let expected_lowered = lower_expression(expected_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
+    diagnostics = extend_string_array(diagnostics, expected_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, expected_lowered.string_constants);
+    current_lines = expected_lowered.lines;
+    current_temp = expected_lowered.temp_index;
+
+    if expected_lowered.operand == null {
+        diagnostics.push("llvm lowering: atomic_cas failed to lower expected argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let expected_operand = expected_lowered.operand;
+    let expected_type = trim_text(expected_operand.llvm_type);
+    if expected_type != "i64" {
+        let diag3 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 1 of type `int` (i64), got `"
+            + expected_type
+            + "`";
+        print.err(diag3);
+        diagnostics.push(diag3);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let new_text = trim_text(arguments[2]);
+    let new_lowered = lower_expression(new_text, bindings, locals, current_temp, current_lines, functions, context, "i64");
+    diagnostics = extend_string_array(diagnostics, new_lowered.diagnostics);
+    collected_strings = merge_string_constants(collected_strings, new_lowered.string_constants);
+    current_lines = new_lowered.lines;
+    current_temp = new_lowered.temp_index;
+
+    if new_lowered.operand == null {
+        diagnostics.push("llvm lowering: atomic_cas failed to lower new argument");
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    let new_operand = new_lowered.operand;
+    let new_type = trim_text(new_operand.llvm_type);
+    if new_type != "i64" {
+        let diag4 = "llvm lowering [fatal] [E0806]: atomic_cas expects argument 2 of type `int` (i64), got `"
+            + new_type
+            + "`";
+        print.err(diag4);
+        diagnostics.push(diag4);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: current_temp,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: collected_strings
+        };
+    }
+
+    // Two SSA temps come out of this lowering: the cmpxchg aggregate
+    // and the extracted i1 success bit. Allocating them via the
+    // existing `format_temp_name` + counter keeps the SSA names
+    // deterministic across runs (the issue calls out determinism in
+    // the "Notes for Claude" section).
+    let cmpxchg_name = format_temp_name(current_temp);
+    current_temp += 1;
+    let success_name = format_temp_name(current_temp);
+    current_temp += 1;
+
+    current_lines.push("  " + cmpxchg_name + " = cmpxchg ptr " + ptr_operand.value
+        + ", i64 "
+        + expected_operand.value
+        + ", i64 "
+        + new_operand.value
+        + " seq_cst seq_cst, align 8");
+    current_lines.push("  " + success_name + " = extractvalue { i64, i1 } "
+        + cmpxchg_name
+        + ", 1");
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: current_temp,
+        operand: LLVMOperand { llvm_type: "i1", value: success_name },
         diagnostics: diagnostics,
         string_constants: collected_strings
     };
