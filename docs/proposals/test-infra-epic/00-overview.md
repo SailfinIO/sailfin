@@ -97,10 +97,12 @@ test "auth: stores hash to disk" ![io] {
 | `03-capsule-api.md` | the `sfn/test` API surface at Phase 3 completion |
 | `04-bash-collapse.md` | 38-script migration table, hold-outs justified |
 | `05-roadmap-delta.md` | how this epic moves on `sailfin.dev/roadmap` |
-| `06-open-questions.md` | 3 decisions the user needs to make before grooming |
+| `06-open-questions.md` | original 3 decisions, now resolved (2026-05-06) — keep `test` keyword, soft-deprecate `assert` in tests, ship `pure_assert_*` interim |
 
 ## Reading order
 
-If you only have ten minutes, read this file plus `06-open-questions.md`
-and tell us which way to call the three decisions. With those answers we
-can `/groom` the epic into individual issues and start Phase 0.
+If you only have ten minutes, read this file plus `02-phases.md` for
+the phased issue list. The decisions in `06-open-questions.md` are
+locked in — calls were made on long-term language-health grounds —
+so the next step is `/groom` to break this epic into `claude-ready`
+issues and start Phase 0.

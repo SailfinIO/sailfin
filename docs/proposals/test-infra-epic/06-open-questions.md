@@ -1,15 +1,66 @@
-# Open questions for the user
+# Decisions
 
-These three decisions cannot be made by the architect alone. They are
-all reversible, but the migration costs differ. Each has a recommended
-answer with one-sentence justification — say "approve" / "reject" /
-"discuss" on each and we can `/groom` the epic into individual issues.
+Originally three open questions; all three resolved 2026-05-06 by the
+project lead with the directive *"decide based on the long-term health
+of the language so it can be a production-ready, performant systems
+language competing with modern peers."* Calls and rationale below.
+Original analysis preserved beneath each decision as the historical
+record.
+
+## Decision summary
+
+| Q | Decision | One-line rationale |
+|---|---|---|
+| Q1 | **Keep the `test "..." { }` keyword. Do NOT add `@test fn`.** | String-literal test names are strictly better diagnostics than mangled function names; Zig precedent shows the keyword form ships in production systems languages; switching costs weeks for marginal convention alignment with Rust. |
+| Q2 | **Soft-deprecate bare `assert` inside `test` blocks (W0210). Outside tests, `assert` stays. Hard-deprecate to error post-1.0 only if `expect()` adoption is universal.** | `expect(x).to_be(y)` produces structurally better failures inside tests; `assert` outside tests is the only debug primitive Sailfin has until `panic!`/`unreachable!` ship. Two-tier deprecation matches Rust's `assert_eq!` evolution. |
+| Q3 | **Ship the `pure_assert_*` interim now (P3). Do NOT block the framework on row-polymorphic effects.** | No peer systems language (Rust, Zig, Go) has effect polymorphism, and they all ship test frameworks. Blocking on a perfect-future feature for a 6-12 month slip is the wrong trade for a language fighting for adoption. |
+
+## Long-term health context
+
+The decision criterion was explicitly *"production-ready, performant,
+competing with modern systems languages."* That argues for:
+
+- **Don't innovate where convention wins.** Test syntax is not a
+  Sailfin differentiator. The three differentiators per `CLAUDE.md` are
+  effect system, capability security, structured concurrency. Spend
+  novelty budget there.
+- **Ship usable surface, then refine.** A test framework gated on
+  effect polymorphism is a framework that doesn't exist. A framework
+  with two near-identical assertion families exists and works.
+- **LLM error rates matter strategically.** If telemetry post-1.0 shows
+  agents systematically mis-write `test "name" { }` (because Rust's
+  `#[test]` dominates training data), revisit Q1 then. Reversing a
+  keyword decision post-1.0 by adding `@test fn` as an alternative form
+  is a one-issue parser change. Reversing now to discover it wasn't the
+  problem costs weeks.
+
+Each question's full analysis is preserved below.
 
 ---
 
 ## Q1. Keep `test "..." { }` as a keyword, or migrate to `@test fn ...`?
 
-**Recommendation: keep the keyword.**
+**Status: DECIDED — keep the keyword. Do NOT add `@test fn` as an alternative form.**
+
+**Rationale (long-term language health).** The `CLAUDE.md` "libraries
+over keywords" rule applies most strongly to *new* keywords; this one
+exists, has a first-class AST node, lowers through the full pipeline,
+and is exercised by ~150 tests in `compiler/tests/` plus every capsule
+test. The "boring syntax wins / match Rust" argument cuts the other
+way here: Zig — the systems language Sailfin most closely resembles in
+positioning — ships exactly this `test "name" { }` form, and Zig is a
+production-ready peer. String-literal test names are objectively
+better than function-name-mangled forms for failure reporting, JSON
+output, `-k` filtering, and human readability — that semantic gain is
+the "compelling reason" the design framework calls for. Adding
+`@test fn` as an *alternative* form would create two-ways-to-do-X
+which the language's design discipline rejects more strongly than
+keyword-vs-decorator stylistic uniformity. If post-1.0 telemetry shows
+agents systematically mis-write the keyword form, we add `@test fn`
+as a one-issue parser change at that point — the keyword stays
+canonical regardless.
+
+**Original recommendation (architect): keep the keyword.**
 
 The `TestDeclaration` AST node (`compiler/src/ast.sfn:132,187`) is
 already first-class and lowers through the full pipeline. The runner
@@ -32,8 +83,26 @@ syntactic uniformity.
 
 ## Q2. Deprecate the `assert` keyword?
 
-**Recommendation: soft-deprecate inside `test` blocks only (issue 3.3,
-warning W0210). Outside tests, `assert` stays.**
+**Status: DECIDED — soft-deprecate inside `test` blocks (W0210). Outside tests, `assert` stays. Hard-deprecate to error post-1.0 only if `expect()` adoption is universal in capsule and end-user code.**
+
+**Rationale (long-term language health).** Inside a test, the
+diagnostics gap between `assert x == y` (boolean abort, no expected/
+actual surfaced) and `expect(x).to_be(y)` (typed expected/actual,
+structural diff, file:line:span via P2) is large enough that no
+production-ready language has settled on bare boolean assert as the
+test-time idiom: Rust pushes `assert_eq!`, Go pushes table-driven
+`if got != want`, Swift pushes `XCTAssertEqual`. The W0210 warning
+gives existing code a graceful path while making the better idiom the
+default for new code. Outside tests, however, `assert` is the only
+runtime-checked debug primitive Sailfin currently has — `panic!()` and
+`unreachable!()` are not yet shipped. Removing it from non-test code
+would create a hole that breaks systems-language ergonomics where
+fail-fast invariants matter (parser internal consistency, lowering
+preconditions). The two-tier deprecation (warning now, error post-1.0
+contingent on universal `expect` adoption) lets the language grow into
+the better default without a hard cutover.
+
+**Original recommendation (architect): soft-deprecate inside `test` blocks only (issue 3.3, warning W0210). Outside tests, `assert` stays.**
 
 `assert` is a useful debug primitive and Sailfin doesn't have
 `panic!()`/`unreachable!()` macros — taking `assert` away from
@@ -55,8 +124,27 @@ propose alternative scope.
 
 ## Q3. Where does `sfn/test` get effect-polymorphism from?
 
-**Recommendation: ship the `pure_assert_*` interim now (issue P3) and
-absorb the API churn when row-polymorphic effects land post-1.0.**
+**Status: DECIDED — ship the `pure_assert_*` interim now (P3). Do NOT block the framework on row-polymorphic effects.**
+
+**Rationale (long-term language health).** No peer modern systems
+language ships effect polymorphism: not Rust, not Zig, not Go, not
+Swift. They all ship usable test frameworks anyway. Blocking Sailfin's
+test framework on a roadmap item with no ETA, when peer languages have
+demonstrated for years that you can ship without it, is the wrong
+trade for a language fighting for adoption. The interim cost is
+explicit and bounded: two function families per assertion type
+(`assert_eq_int` and `pure_assert_eq_int`), zero runtime overhead,
+mechanical to collapse into a single generic `assert_eq<T>` once row
+polymorphism lands. The deprecation path is clean: when row
+polymorphism ships, `pure_assert_*` becomes a deprecated alias for
+the unified `assert_*<E>` for one minor release, then is removed.
+Holding the framework hostage to a 6-12 month feature slip — for the
+strategic value of saving capsule authors from learning two function
+names — is exactly the kind of perfectionism that ships nothing. The
+interim API is the production-ready answer; the polymorphic API is the
+post-1.0 polish.
+
+**Original recommendation (architect): ship the interim and absorb the API churn when row-polymorphic effects land post-1.0.**
 
 The clean answer is row-polymorphic effects (`![E]` row variable on
 the assertion) so a single `assert_eq` works whether the caller is
@@ -100,9 +188,9 @@ here so the user has visibility:
 
 ---
 
-## What happens after the user answers Q1-Q3
+## Next steps (Q1-Q3 resolved)
 
-Once we have decisions on Q1-Q3:
+With Q1-Q3 decided:
 
 1. Run `/groom` against this epic to break each phase into individual
    `claude-ready` GitHub issues.
@@ -115,3 +203,14 @@ Once we have decisions on Q1-Q3:
    they're parallelizable across three agents.
 
 Phase 0 should land within ~2 weeks at 3 agents. Phase 1 follows.
+
+The downstream-issue scope locks in (per the Q1-Q3 decisions):
+
+- **Issue 1.4 (`expect` builder):** keyword form `test "..." { }`
+  remains canonical; no `@test fn` parser work.
+- **Issue 3.3 (assert deprecation):** scope is W0210 inside `test`
+  blocks only. Hard-deprecation post-1.0 is its own issue contingent
+  on adoption telemetry.
+- **Issue P3 (pure assertions):** ships as a complete second API tier,
+  not as a placeholder. Capsule docs name both forms; tooling treats
+  them as siblings until row polymorphism collapses them.
