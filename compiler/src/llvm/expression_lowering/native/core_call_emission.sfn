@@ -241,6 +241,27 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     }
     let argument_text = join_with_separator(rendered_args, ", ");
 
+    // Hard-fail when the signature resolver could not determine the
+    // callee's return type. Emitting `call i8*` against a `declare void`
+    // (or vice versa) produces structurally invalid LLVM IR; clang
+    // tolerates it for unused returns but the IR is malformed and the
+    // bug eventually surfaces as a verifier error or a miscompile.
+    // See issue #306 — this replaces the previous silent `i8*` default.
+    if llvm_return.length == 0 {
+        let unresolved_diag = "llvm lowering: cannot resolve return type for call to `"
+            + trimmed_target
+            + "` — callee signature is not known to the compiler";
+        print.err(unresolved_diag);
+        result_diagnostics.push(unresolved_diag);
+        return ExpressionResult {
+            lines: result_lines,
+            temp_index: result_temp,
+            operand: null,
+            diagnostics: result_diagnostics,
+            string_constants: collected_string_constants
+        };
+    }
+
     // Trait dispatch call
     if substring(trimmed_target, 0, 16) == "trait_dispatch__" {
         let after_prefix = substring(trimmed_target, 16, trimmed_target.length);

@@ -125,12 +125,26 @@ EOF
 #    `lowering_core.sfn`, which strips cross-module symbol mangling
 #    so imported function calls remain bare-named. Pin the gate by
 #    emitting a non-test source that imports a sibling helper and
-#    verifying the helper's call site uses the mangled cross-module
-#    symbol. A regression that flipped the default to true would
-#    leave the call unmangled (or drop the `declare` for the
-#    imported function entirely), and this check would fail —
-#    catching the case where timing prints stay off but import
-#    stripping fires anyway.
+#    verifying the mangling pass observed the import — i.e. it
+#    computed at least one import substitution (`import_subs >= 1`).
+#    A regression that flipped the default to true would set
+#    `safe_imports = []`, the mangling pass would compute
+#    `import_subs=0`, and this check would fail — catching the case
+#    where timing prints stay off but import stripping fires anyway.
+#
+#    NOTE on signal choice: pre-issue #306, this assertion used to
+#    pin the mangled IR call site (`@add_one__<slug>__sub__helper`).
+#    That worked only because the lowering pipeline's silent `i8*`
+#    fallback emitted a structurally-invalid `call i8* @add_one(...)`
+#    instruction whose return type later became the synthesized
+#    declare (a feedback loop on broken IR). Issue #306's Phase A
+#    promoted that silent default to a hard error, so when standalone
+#    `sfn emit llvm` runs without per-module-built imported function
+#    bodies, the call is now intentionally not emitted (the user gets
+#    a "cannot resolve return type" diagnostic instead of malformed
+#    IR). The mangling pass's own `import_subs` count is the next
+#    most direct, post-Phase A signal that the imports list survived
+#    the `is_test_module` gate.
 test_in_process_flag_default_false() {
     mkdir -p "$SCRATCH/proj3/sub"
     cat > "$SCRATCH/proj3/sub/helper.sfn" <<'EOF'
@@ -147,36 +161,33 @@ fn main() ![io] {
 }
 EOF
     local log="$SCRATCH/emit.log"
-    if ! "$BINARY" emit -o "$SCRATCH/proj3/main.ll" llvm "$SCRATCH/proj3/main.sfn" > "$log" 2>&1; then
+    if ! SAILFIN_TRACE_LOWERING=1 "$BINARY" emit -o "$SCRATCH/proj3/main.ll" llvm "$SCRATCH/proj3/main.sfn" > "$log" 2>&1; then
         echo "[test]   sfn emit failed:"
         cat "$log"
         return 1
     fi
 
     # Behavior-changing gate (the load-bearing assertion):
-    # cross-module symbol mangling fired — the call to the imported
-    # helper points at the mangled name, not the bare `add_one`.
-    # We don't pin the LLVM return type here (the seed compiler
-    # falls back to i8* when the helper module's layout manifest
-    # isn't pre-staged); the mangled suffix `__sub__helper` is the
-    # gate-firing signal we actually care about.
-    if ! grep -qE '@add_one__[A-Za-z0-9_]*sub__helper' "$SCRATCH/proj3/main.ll"; then
-        echo "[test]   imported helper call was not mangled (is_test_module=true regression — imports were stripped):"
-        echo "[test]   --- emitted IR (lines containing 'add_one') ---"
-        grep -nE 'add_one' "$SCRATCH/proj3/main.ll" || true
+    # the mangling pass saw the import. If `is_test_module` had
+    # silently defaulted to true, `safe_imports` would have been
+    # cleared and `import_subs` would be 0.
+    local import_subs_line
+    import_subs_line=$(grep -E '^emit-llvm: mangle import_subs=' "$log" | tail -1 || true)
+    if [ -z "$import_subs_line" ]; then
+        echo "[test]   missing 'mangle import_subs=' trace line — lowering trace did not run:"
+        cat "$log"
         return 1
     fi
-    # The mangled `declare` for the imported helper must also be
-    # present; without it, the bitcode would link with an undefined
-    # reference. Stripped imports drop this declare entirely.
-    if ! grep -qE '^declare [^@]*@add_one__[A-Za-z0-9_]*sub__helper' "$SCRATCH/proj3/main.ll"; then
-        echo "[test]   imported helper declare missing from emitted IR:"
-        grep -nE 'add_one|declare' "$SCRATCH/proj3/main.ll" | head -20 || true
+    local subs="${import_subs_line##*=}"
+    if [ "$subs" -lt 1 ]; then
+        echo "[test]   import_subs=$subs (expected >= 1; is_test_module=true regression — imports were stripped):"
+        cat "$log"
         return 1
     fi
 
-    # Belt-and-suspenders: the trace/timing prints reserved for
-    # test-runner-active modules should also stay quiet.
+    # Belt-and-suspenders: the test-runner-active timing prints
+    # (gated on the in-process flag, not on SAILFIN_TRACE_LOWERING)
+    # should still stay quiet.
     if grep -q "^test llvm: phase=" "$log"; then
         echo "[test]   in-process test-runner flag should be false outside sfn test:"
         cat "$log"

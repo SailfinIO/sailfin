@@ -76,14 +76,26 @@ test_emit_wrapper_shape() {
         echo "[test]   missing wrapper definition: define void @sfn_sleep(...)"
         missing=$((missing + 1))
     fi
-    # The wrapper body must reference the imported trampoline, even
-    # if the standalone emit doesn't include the explicit `declare`
-    # line (the stage-2 build path picks it up via the per-module
-    # imported-extern walk; standalone emit currently doesn't, but
-    # that's a separate compiler issue tracked elsewhere — this
-    # test pins the call-site shape, not the declare).
-    if ! grep -qE "call .* @sailfin_runtime_sleep\(" "$ll"; then
-        echo "[test]   missing call to imported trampoline inside sfn_sleep body"
+    # The wrapper body must reference the imported trampoline with
+    # the correct `void` return type matching the `declare void
+    # @sailfin_runtime_sleep(double)` line. Pre-issue #306, the
+    # silent `i8*` default for unresolvable callees produced
+    # `call i8* @sailfin_runtime_sleep(...)` against the void
+    # declare — structurally invalid IR that clang tolerated only
+    # because the result was unused. The Phase A fix promotes the
+    # silent default to a hard error, so this assertion now pins
+    # the typed shape (`call void`), not just the symbol presence.
+    if ! grep -qE "call void @sailfin_runtime_sleep\(" "$ll"; then
+        echo "[test]   missing typed call to imported trampoline: call void @sailfin_runtime_sleep(...)"
+        echo "[test]   --- call lines mentioning sailfin_runtime_sleep ---"
+        grep -nE 'call.*@sailfin_runtime_sleep' "$ll" || true
+        missing=$((missing + 1))
+    fi
+    # Belt-and-suspenders: explicitly forbid the pre-fix
+    # `call i8*` shape from regressing.
+    if grep -qE "call i8\* @sailfin_runtime_sleep\(" "$ll"; then
+        echo "[test]   found pre-#306 'call i8* @sailfin_runtime_sleep(...)' shape — silent i8* default regressed:"
+        grep -nE 'call.*@sailfin_runtime_sleep' "$ll" || true
         missing=$((missing + 1))
     fi
     return "$missing"
