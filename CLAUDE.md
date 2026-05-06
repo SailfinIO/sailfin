@@ -272,6 +272,7 @@ Use `/add-feature <name>` for the full orchestrated workflow. The pipeline stage
 5. Add regression tests to `compiler/tests/`
 6. Update the language spec at `site/src/content/docs/docs/reference/spec/` (add/update the chapter §N file if shipped) or `site/src/content/docs/docs/reference/preview/` (add/update the design-preview page if planned)
 7. Update `docs/status.md` with implementation status
+8. Run `sfn fmt --write` on every touched `.sfn` file before committing — CI runs `sfn fmt --check` and will reject the PR otherwise. See `.claude/rules/formatting.md`.
 
 ### Fixing Effect Checker Issues
 
@@ -502,7 +503,8 @@ Before declaring a feature "shipped in Stage1":
 4. Lowers to LLVM IR (`compiler/src/llvm/lowering/entrypoints.sfn`)
 5. Has regression coverage (`compiler/tests/`)
 6. Self-hosts (compiler compiles itself)
-7. Documented in `docs/status.md` and under `site/src/content/docs/docs/reference/spec/` (the appropriate §N chapter)
+7. Passes `sfn fmt --check` on every touched `.sfn` file (CI gate; see `.claude/rules/formatting.md`)
+8. Documented in `docs/status.md` and under `site/src/content/docs/docs/reference/spec/` (the appropriate §N chapter)
 
 ### Do Not Use Python Bootstrap (Stage0)
 
