@@ -14,8 +14,11 @@
 // Type contract (enforced here; emits E0806 on violation):
 //   atomic_load(ptr: *int) -> int
 //   atomic_store(ptr: *int, value: int) -> void
+//   atomic_fence() -> void
 // `*int` lowers to `i64*`, `int` lowers to `i64`. Atomic ops on
-// non-i64 widths are out of scope for v0.
+// non-i64 widths are out of scope for v0. `atomic_fence` is the
+// odd one out — no operands, no SSA temp, just a single
+// `fence seq_cst` line acting as a cross-thread memory barrier.
 import { NativeFunction } from "../native_ir";
 // Mutually recursive: lower_atomic_builtin lowers each argument via
 // lower_expression, which itself dispatches calls back through this
@@ -63,7 +66,10 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
     if trimmed == "atomic_store" {
         return _lower_atomic_store(arguments, bindings, locals, temp_index, lines, functions, context);
     }
-    // M0-Atomics.2/3/4 will fill these in. Until then, reject the
+    if trimmed == "atomic_fence" {
+        return _lower_atomic_fence(arguments, temp_index, lines);
+    }
+    // M0-Atomics.2/3 will fill these in. Until then, reject the
     // call with a `[fatal]` diagnostic so the build exits non-zero
     // — matching the issue #306 contract that the emit-level
     // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
@@ -265,6 +271,42 @@ fn _lower_atomic_store(arguments: string[], bindings: ParameterBinding[], locals
         operand: null,
         diagnostics: diagnostics,
         string_constants: collected_strings
+    };
+}
+
+// `atomic_fence() -> void` →
+//     fence seq_cst
+// Trivial: zero arguments, no SSA temp, no aggregate result. The
+// only failure path is "called with arguments" — rejected with
+// E0806 (the same code M0-Atomics.1 reserved for atomic-arity /
+// type errors), extended with an "expected zero arguments"
+// message as the sub-issue contract specifies.
+fn _lower_atomic_fence(arguments: string[], temp_index: number, lines: string[]) -> ExpressionResult ![io] {
+    let mut diagnostics: string[] = [];
+    let mut current_lines = lines;
+
+    if arguments.length != 0 {
+        let diag = "llvm lowering [fatal] [E0806]: atomic_fence expects zero arguments, got "
+            + number_to_string(arguments.length);
+        print.err(diag);
+        diagnostics.push(diag);
+        return ExpressionResult {
+            lines: current_lines,
+            temp_index: temp_index,
+            operand: null,
+            diagnostics: diagnostics,
+            string_constants: []
+        };
+    }
+
+    current_lines.push("  fence seq_cst");
+
+    return ExpressionResult {
+        lines: current_lines,
+        temp_index: temp_index,
+        operand: null,
+        diagnostics: diagnostics,
+        string_constants: []
     };
 }
 

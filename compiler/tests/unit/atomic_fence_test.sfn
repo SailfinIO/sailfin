@@ -1,0 +1,42 @@
+// Unit tests for the `atomic_fence` builtin (M0-Atomics.4, issue
+// #334). The predecessor M0-Atomics.1 unit suite documents the
+// reason these tests can't import the LLVM lowering stack to pin
+// the IR shape directly — see `atomic_load_store_test.sfn` for the
+// full background and the GitHub Actions run that timed out at
+// 180s. The same constraint applies here: importing
+// `lower_atomic_builtin` pulls in `lower_expression` and the rest
+// of `compiler/src/llvm/expression_lowering/native/core`, which
+// blows the per-test CI budget.
+//
+// The IR shape (`fence seq_cst` on the happy path, `[fatal] [E0806]`
+// on the arity-error path) is pinned end-to-end in
+// `compiler/tests/e2e/test_atomic_fence_compile.sh`. This file
+// pins the predicate surface so a regression in
+// `is_atomic_builtin` — which gates whether the LLVM lowering for
+// `atomic_fence` runs at all — surfaces here without paying the
+// lowering import cost.
+import { is_atomic_builtin } from "../../src/llvm/atomics";
+
+// ── Predicate recognises the implemented name ──
+test "atomics: is_atomic_builtin recognises atomic_fence" {
+    assert is_atomic_builtin("atomic_fence");
+}
+
+// Whitespace tolerance: `lower_atomic_builtin` calls `trim_text`
+// before dispatching, so the predicate must accept the same
+// surface that the dispatch hook sees in practice.
+test "atomics: is_atomic_builtin recognises atomic_fence after trim" {
+    assert is_atomic_builtin("atomic_fence");
+    assert is_atomic_builtin(" atomic_fence ");
+}
+
+// Defence against a future regression that loosens the predicate
+// to a startsWith / endsWith match — only the exact six reserved
+// names should fire the dispatch hook, even for plausible
+// near-misses around the `atomic_fence` name.
+test "atomics: is_atomic_builtin rejects partial atomic_fence names" {
+    assert ! is_atomic_builtin("fence");
+    assert ! is_atomic_builtin("atomic_fenc");
+    assert ! is_atomic_builtin("atomic_fencex");
+    assert ! is_atomic_builtin("atomic_fence_seq_cst");
+}

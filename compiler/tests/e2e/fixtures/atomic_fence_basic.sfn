@@ -1,0 +1,17 @@
+// Fixture for compiler/tests/e2e/test_atomic_fence_compile.sh.
+// Exercises `atomic_fence` between two atomic ops so the emitted
+// LLVM IR contains exactly two `fence seq_cst` instructions —
+// matches the verification regex in issue #334. The surrounding
+// `atomic_store` / `atomic_load` pair is lifted from the
+// M0-Atomics.1 fixture; together they prove the fence does not
+// disturb sibling atomic lowering and is emitted standalone (no
+// SSA temp, no operands).
+fn flush(counter: * int, value: int) {
+    atomic_store(counter, value);
+    atomic_fence();
+}
+
+fn observe(counter: * int) -> int {
+    atomic_fence();
+    return atomic_load(counter);
+}
