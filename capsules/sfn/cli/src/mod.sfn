@@ -36,6 +36,18 @@
 //   - style.sfn       bold, dim, color helpers, _esc, _ansi_wrap
 //   - print.sfn       print_error, print_warn, print_success, print_hint
 //   - exit_codes.sfn  reserved for Phase 1 (Issue 1.2)
+//
+// Visibility: underscore-prefixed names (`_format_help`, `_pad`, `_esc`,
+// `_ansi_wrap`, `_starts_with`, `_find_flag_long`, `_find_flag_short`,
+// `_resolve_active`, `_help_hint`, `_flag_label`, `_max_*_width`) are
+// private capsule helpers by convention and are intentionally NOT
+// re-exported from `mod.sfn`. The pre-split `mod.sfn` had no explicit
+// `export {}` block, so Sailfin's default "export everything" rule made
+// these symbols technically importable from `sfn/cli`; in practice they
+// are not part of the public API surface listed in
+// `docs/proposals/cli-modularization-epic.md` §4.1, and no in-tree
+// consumer imports them. This barrel narrows the published surface to
+// match the documented contract.
 // ---- Types ----
 export {
     Arg,
