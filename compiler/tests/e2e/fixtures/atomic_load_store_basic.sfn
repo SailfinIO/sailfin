@@ -1,0 +1,11 @@
+// Fixture for compiler/tests/e2e/test_atomic_load_store_compile.sh.
+// Exercises both `atomic_load` and `atomic_store` so the emitted
+// LLVM IR contains exactly one `load atomic` and one `store atomic`
+// instruction. Lives in fixtures/ so the e2e shell harness can hand
+// it to `sfn emit llvm` without compiling a program against it
+// (no `main`).
+fn read_counter(counter: * int) -> int { return atomic_load(counter); }
+
+fn write_counter(counter: * int, value: int) {
+    atomic_store(counter, value);
+}

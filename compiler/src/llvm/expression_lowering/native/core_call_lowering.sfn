@@ -32,7 +32,11 @@ import { array_pointer_element_type } from "../arrays";
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
 import { coerce_and_emit_call } from "./core_call_emission";
-import { resolve_call_method_target, resolve_call_signature } from "./core_call_resolution";
+import {
+    resolve_call_method_target,
+    resolve_call_signature,
+    try_dispatch_atomic_builtin
+} from "./core_call_resolution";
 import { lower_enum_literal } from "./core_literals_lowering";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding, find_parameter_binding, replace_llvm_operand } from "./core_scopes";
@@ -58,6 +62,13 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
             string_constants: empty_constants
         };
     }
+
+    // Pre-resolution dispatch for atomic builtins (issue #331). These
+    // lower to `load atomic` / `store atomic` / `atomicrmw` / `cmpxchg`
+    // / `fence` rather than function calls, so they short-circuit the
+    // entire call pipeline.
+    let atomic_dispatch = try_dispatch_atomic_builtin(trimmed_target, arguments, bindings, locals, temp_index, lines, functions, context);
+    if atomic_dispatch != null { return atomic_dispatch; }
 
     // Check if this is an enum variant constructor call (e.g., LiteralValue.Null())
     let dot_index = index_of(trimmed_target, ".");

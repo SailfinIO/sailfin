@@ -1,0 +1,74 @@
+// Unit tests for the `atomic_load` / `atomic_store` builtins
+// (M0-Atomics.1, issue #331). The four lowering cases pin the
+// LLVM IR shape on synthetic inputs; the predicate cases pin the
+// reserved-name surface so a future user-defined `atomic_load`
+// can't accidentally shadow the builtin.
+//
+// The E0806 diagnostic stream is observable on stderr from the
+// compiler binary itself; that pinning lives in
+// `compiler/tests/e2e/test_atomic_load_store_compile.sh` so this
+// file stays focused on the IR-shape contract.
+import { is_atomic_builtin } from "../../src/llvm/atomics";
+import { compile_to_llvm } from "../../src/main";
+import { index_of } from "../../src/string_utils";
+
+fn _ir_for(source: string) -> string ![io] {
+    return compile_to_llvm(source);
+}
+
+// ── Predicate covers the six reserved names ──
+test "atomics: is_atomic_builtin recognises atomic_load and atomic_store" {
+    assert is_atomic_builtin("atomic_load");
+    assert is_atomic_builtin("atomic_store");
+}
+
+test "atomics: is_atomic_builtin reserves the future names too" {
+    // The remaining four (`atomic_add`, `atomic_sub`, `atomic_cas`,
+    // `atomic_fence`) ship in M0-Atomics.2/3/4 — but the predicate
+    // already claims them so a user-defined function with the same
+    // name can't quietly shadow the eventual builtin.
+    assert is_atomic_builtin("atomic_add");
+    assert is_atomic_builtin("atomic_sub");
+    assert is_atomic_builtin("atomic_cas");
+    assert is_atomic_builtin("atomic_fence");
+}
+
+test "atomics: is_atomic_builtin rejects non-atomic identifiers" {
+    assert ! is_atomic_builtin("foo");
+    assert ! is_atomic_builtin("");
+    assert ! is_atomic_builtin("atomic");
+    assert ! is_atomic_builtin("load");
+}
+
+// ── Happy-path lowering: load + store emit the expected atomic IR ──
+test "atomics: atomic_load(ptr) lowers to load atomic i64 ... seq_cst, align 8" ![io] {
+    let ir = _ir_for("fn read_counter(counter: *int) -> int { return atomic_load(counter); }");
+    assert index_of(ir, "load atomic i64") >= 0;
+    assert index_of(ir, "seq_cst") >= 0;
+    assert index_of(ir, "align 8") >= 0;
+}
+
+test "atomics: atomic_store(ptr, value) lowers to store atomic i64 ... seq_cst, align 8" ![io] {
+    let ir = _ir_for("fn write_counter(counter: *int, value: int) { atomic_store(counter, value); }");
+    assert index_of(ir, "store atomic i64") >= 0;
+    assert index_of(ir, "seq_cst") >= 0;
+    assert index_of(ir, "align 8") >= 0;
+}
+
+// ── Type-error rejection: non-pointer / non-int args refuse to emit IR ──
+// E0806 is fatal in lowering, so `compile_to_llvm` returns empty IR (no
+// `load atomic` / `store atomic`). The exact diagnostic text and code
+// are pinned in the e2e shell test, which can capture stderr.
+test "atomics: atomic_load with non-pointer argument refuses to emit IR" ![io] {
+    let ir = _ir_for("fn bad() -> int { return atomic_load(42); }");
+    // `42` lowers to a non-pointer; the builtin must reject the call
+    // rather than emit malformed `load atomic` IR.
+    assert index_of(ir, "load atomic i64") < 0;
+}
+
+test "atomics: atomic_store with non-int value argument refuses to emit IR" ![io] {
+    let ir = _ir_for("fn bad(p: *int) { atomic_store(p, \"hello\"); }");
+    // `\"hello\"` lowers to i8*, not i64; the builtin must reject the
+    // call rather than emit `store atomic i64` against a string operand.
+    assert index_of(ir, "store atomic i64") < 0;
+}
