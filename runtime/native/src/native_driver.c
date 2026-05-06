@@ -34,12 +34,12 @@ extern double sailfin_cli_main__cli_main(SailfinPtrArray *argv);
 
 // Optional process-exit arena telemetry. Gated on SAILFIN_DUMP_ARENA_STATS=1
 // alone — when set, the atexit hook always runs.  At exit it checks
-// SAILFIN_USE_ARENA: if the arena is on, prints the page/capacity/utilization
-// stats line; otherwise prints a single "stats=disabled" line so the user
-// knows they probably forgot to set SAILFIN_USE_ARENA=1.  Both lines carry
-// a label derived from argv so per-module aggregation across a parallel
-// build log is just a grep + awk away.  See docs/build-performance.md
-// Phase 0 for context.
+// `sfn_arena_enabled()`: if the arena is on (the default since #324), prints
+// the page/capacity/utilization stats line; otherwise prints a single
+// "stats=disabled" line so the user knows they explicitly opted out via
+// SAILFIN_USE_ARENA={0,'',false}.  Both lines carry a label derived from argv
+// so per-module aggregation across a parallel build log is just a grep + awk
+// away.  See docs/build-performance.md Phase 0 for context.
 static char _arena_stats_label[256] = "<unknown>";
 
 static int _arena_stats_enabled(void)
@@ -107,10 +107,16 @@ static void _arena_stats_atexit(void)
     if (!sfn_arena_enabled())
     {
         // Avoid creating the global arena just to dump empty stats.
+        // With the #324 default-on flip, the only way to reach this
+        // branch is an explicit opt-out (SAILFIN_USE_ARENA={0,'',false}),
+        // so surface the actual value the user set so the log line is
+        // self-explanatory.
+        const char *opt_out = getenv("SAILFIN_USE_ARENA");
         fprintf(stderr,
                 "[sailfin-arena] label=%s stats=disabled "
-                "(SAILFIN_USE_ARENA not set)\n",
-                _arena_stats_label);
+                "(SAILFIN_USE_ARENA=\"%s\" opt-out)\n",
+                _arena_stats_label,
+                opt_out ? opt_out : "");
         return;
     }
     fprintf(stderr, "[sailfin-arena] label=%s ", _arena_stats_label);

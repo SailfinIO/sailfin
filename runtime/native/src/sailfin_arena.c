@@ -267,11 +267,13 @@ static void _init_arena_enabled(void)
      * installed binaries so end users don't have to set the env
      * var themselves.
      *
-     * Opt-out: `SAILFIN_USE_ARENA=0` (or any value starting with
-     * '0' or empty after explicit set) disables the arena and the
-     * runtime falls back to the malloc/owned-string-hash path.
-     * Useful for the `make test-arena` IR-equivalence harness and
-     * for diagnosing arena-vs-malloc divergences.
+     * Opt-out: `SAILFIN_USE_ARENA=0` (or `""` or `"false"`) disables
+     * the arena and the runtime falls back to the malloc/owned-string-
+     * hash path. Useful for the `make test-arena` IR-equivalence harness
+     * and for diagnosing arena-vs-malloc divergences. The off-set
+     * matches the Sailfin-side `_env_flag` contract in
+     * `compiler/src/cli_commands_utils.sfn` so a single mental model
+     * applies across every `SAILFIN_*` toggle.
      *
      * Empty env: `SAILFIN_USE_ARENA=` (set but empty) is treated
      * as opt-out, mirroring the `=0` case. This is a deliberate
@@ -288,9 +290,9 @@ static void _init_arena_enabled(void)
         _arena_enabled = 1;
         return;
     }
-    if (env[0] == '\0' || env[0] == '0')
+    if (env[0] == '\0' || strcmp(env, "0") == 0 || strcmp(env, "false") == 0)
     {
-        /* Explicit opt-out: empty string or starts with '0'. */
+        /* Explicit opt-out: empty string, "0", or "false". */
         _arena_enabled = 0;
         return;
     }
