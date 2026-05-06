@@ -490,14 +490,24 @@ fn map_parameter_type(context: TypeContext, parameter_type: string) -> string {
 // and have no destructor to call — promoting them would emit a bogus
 // `sfn_rc_release` against an integer.
 //
-// True for shapes that the runtime expects to release:
-//   - any pointer suffix (`i8*`, `%MyStruct*`, `i8**`, ...) — strings, raw
-//     pointers, struct/enum pointers under the boxed ABI.
-//   - any compound shape that begins with `{` — `{i8*, i64}` (SfnString),
-//     `{T*, i64, i64}` (SfnArray), `{i32, ...}` (union payloads).
+// True only for **pointer-suffixed** LLVM types — `i8*` (strings, opaque
+// pointers), `%MyStruct*` (boxed structs/enums under the 0.5.8+ ABI),
+// `i8**`, etc. These are the shapes `emit_scope_drops` (in
+// `instructions_helpers.sfn`) knows how to release: load the pointer
+// out of the alloca slot, optionally bitcast to `i8*`, and call
+// `sfn_rc_release(i8*)`.
 //
-// False for the empty string, `void`, and the primitive scalar types
-// (`i1`, `i8`, `i16`, `i32`, `i64`, `float`, `double`, `half`, `fp128`).
+// False for everything else, including:
+//   - the empty string, `void`, and primitive scalars (`i1`/`i8`/`i16`/
+//     `i32`/`i64`/`i128`/`half`/`float`/`double`/`fp128`).
+//   - by-value aggregate shapes such as `{i8*, i64}` (SfnString) or
+//     `{T*, i64, i64}` (SfnArray). `emit_scope_drops` cannot bitcast an
+//     aggregate to `i8*`, so promoting such a binding to `rc` today
+//     would either be semantically wrong (release the wrong pointer) or
+//     produce invalid LLVM IR. If/when the SfnString/SfnArray/union
+//     value-type ABIs land, this predicate must be widened in lockstep
+//     with `emit_scope_drops` learning to extract the heap pointer
+//     field — never one without the other.
 fn is_heap_type(llvm_type: string) -> boolean {
     let trimmed = trim_text(llvm_type);
     if trimmed.length == 0 { return false; }
@@ -513,6 +523,5 @@ fn is_heap_type(llvm_type: string) -> boolean {
     if trimmed == "double" { return false; }
     if trimmed == "fp128" { return false; }
     if ends_with_pointer_suffix(trimmed) { return true; }
-    if starts_with(trimmed, "{") { return true; }
     return false;
 }

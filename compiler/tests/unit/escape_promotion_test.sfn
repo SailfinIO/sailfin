@@ -75,12 +75,17 @@ test "is_heap_type: pointer suffixes are heap (string, struct, array elt)" {
     assert is_heap_type("%SfnArray*");
 }
 
-test "is_heap_type: braced struct shapes are heap (SfnString, SfnArray, union)" {
-    // The runtime treats SfnString/SfnArray/union payloads as heap-allocated
-    // values that need an rc release at scope exit.
-    assert is_heap_type("{i8*, i64}");
-    assert is_heap_type("{i8*, i64, i64}");
-    assert is_heap_type("{ i32, i64 }");
+test "is_heap_type: by-value aggregates are NOT heap until emit_scope_drops can release them" {
+    // `emit_scope_drops` (instructions_helpers.sfn) only knows how to load a
+    // pointer out of the alloca slot and bitcast to `i8*` before calling
+    // `sfn_rc_release`. Aggregate value types (`{i8*, i64}` for SfnString,
+    // `{T*, i64, i64}` for SfnArray, union payloads `{i32, ...}`) cannot be
+    // bitcast to `i8*`; promoting them today would either drop the wrong
+    // pointer or produce invalid LLVM. The predicate stays narrow until
+    // drop emission learns to extract the heap pointer field.
+    assert ! is_heap_type("{i8*, i64}");
+    assert ! is_heap_type("{i8*, i64, i64}");
+    assert ! is_heap_type("{ i32, i64 }");
 }
 
 // -----------------------------------------------------------------------------
@@ -190,4 +195,48 @@ test "promote_local_to_rc: only the matching binding's kind changes; other field
     assert found.scope_id == "fn:test";
     assert found.scope_depth == 0;
     assert ! found.consumed;
+}
+
+fn _make_binding_with_pointer(name: string, llvm_type: string, kind: string, pointer: string) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: pointer,
+        llvm_type: llvm_type,
+        type_annotation: "",
+        ownership: null,
+        consumed: false,
+        scope_id: "fn:test",
+        scope_depth: 0,
+        allocation_kind: kind
+    };
+}
+
+test "promote_local_to_rc: shadowed name only promotes the last match (mirrors find_local_binding)" {
+    // `find_local_binding` resolves shadowed names by scanning from the end
+    // (inner-scope shadow wins over outer-scope binding). `promote_local_to_rc`
+    // must follow the same rule, otherwise a `return s;` inside an inner
+    // scope would silently promote an outer-scope `s` and we'd emit a drop
+    // against a value the caller still owns.
+    //
+    // Construct two bindings named `s` with distinct alloca slots, then
+    // promote and assert only the second (most-recent) one flips to "rc".
+    let outer = _make_binding_with_pointer("s", "i8*", "arena", "%l_outer");
+    let inner = _make_binding_with_pointer("s", "i8*", "arena", "%l_inner");
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, outer);
+    locals = append_local_binding(locals, inner);
+    let promoted = promote_local_to_rc(locals, "s");
+    assert promoted.length == 2;
+    // Outer (older) binding must NOT have flipped.
+    assert promoted[0].pointer == "%l_outer";
+    assert promoted[0].allocation_kind == "arena";
+    // Inner (most-recent) binding is the one find_local_binding would
+    // resolve, so it is the one that flips.
+    assert promoted[1].pointer == "%l_inner";
+    assert promoted[1].allocation_kind == "rc";
+    // Sanity: find_local_binding agrees on which binding "s" resolves to.
+    let resolved = find_local_binding(promoted, "s");
+    assert resolved != null;
+    assert resolved.pointer == "%l_inner";
+    assert resolved.allocation_kind == "rc";
 }

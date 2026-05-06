@@ -1097,11 +1097,20 @@ already reason about.
 
 **Scope of function-return promotion (M1.5.5, issue #329).** The
 implementation in `lower_return_instruction` covers exactly one case:
-`return <ident>;` where `<ident>` resolves to a heap-typed local
-(`is_heap_type` excludes `i1`/`i8`/`i16`/`i32`/`i64`/`float`/`double`,
-allows pointer suffixes and `{...}` struct shapes). The matching
+`return <ident>;` where `<ident>` resolves to a heap-typed local.
+`is_heap_type` accepts only **pointer-suffixed** LLVM types (`i8*`,
+`%MyStruct*`, `i8**`, ...) — the shapes `emit_scope_drops` already
+knows how to release via load + bitcast + `sfn_rc_release(i8*)`.
+By-value aggregate shapes (`{i8*, i64}` for SfnString, `{T*, i64, i64}`
+for SfnArray, union payloads) are intentionally excluded today: drop
+emission cannot bitcast an aggregate to `i8*`, so promoting one would
+either drop the wrong pointer or produce invalid LLVM. The predicate
+must widen in lockstep with drop emission learning to extract the heap
+pointer field — never one without the other. The matching
 `LocalBinding.allocation_kind` is flipped from `"arena"` to `"rc"` via
-`promote_local_to_rc` in `core_scopes.sfn`. Borrows
+`promote_local_to_rc` in `core_scopes.sfn`, which mirrors
+`find_local_binding`'s "last match wins" semantics so a shadowed inner
+binding doesn't accidentally promote its outer-scope namesake. Borrows
 (`OwnershipInfo.variant == "Borrow"`) are never promoted — the borrow
 base owns the resource, so a release on the borrowed alias would
 double-free. Returned **parameters** are also untouched today —

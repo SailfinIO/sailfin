@@ -159,6 +159,12 @@ fn default_allocation_kind() -> string { return "arena"; }
 // when an `Identifier` operand of a `return` statement names a heap-typed
 // local that is not a borrow.
 //
+// Shadowing semantics: this helper rewrites the **last** binding that
+// matches `name`, mirroring `find_local_binding` (which scans from the
+// end so an inner-scope shadow wins over an outer-scope binding with
+// the same name). Promoting every match would incorrectly drop an
+// outer-scope value when only the shadow was returned.
+//
 // Constraints honoured by this helper (so callers don't have to repeat them):
 //   - Only an `arena` binding is rewritten. Other sentinels (`stack`,
 //     `static`, an existing `rc`) are left untouched.
@@ -175,13 +181,27 @@ fn default_allocation_kind() -> string { return "arena"; }
 // Determinism: the returned `LocalBinding[]` preserves insertion order;
 // only the matched binding is rewritten in place.
 fn promote_local_to_rc(locals: LocalBinding[], name: string) -> LocalBinding[] {
+    // Resolve the same binding `find_local_binding` would: the last
+    // entry whose `name` matches. If no entry matches, the array is
+    // returned untouched.
+    let mut target_index: number = -1;
+    let mut scan: number = locals.length;
+    loop {
+        if scan <= 0 { break; }
+        scan -= 1;
+        if locals[scan].name == name {
+            target_index = scan;
+            break;
+        }
+    }
+    if target_index < 0 { return locals; }
     let mut result: LocalBinding[] = [];
     let mut index: number = 0;
     loop {
         if index >= locals.length { break; }
         let entry = locals[index];
         let mut updated = entry;
-        if entry.name == name {
+        if index == target_index {
             if entry.allocation_kind == "arena" {
                 let mut allow: boolean = true;
                 if entry.ownership != null {
