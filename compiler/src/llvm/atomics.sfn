@@ -17,15 +17,15 @@
 //   atomic_store(ptr: *int, value: int) -> void
 //   atomic_add(ptr: *int, delta: int) -> int           // returns OLD value
 //   atomic_sub(ptr: *int, delta: int) -> int           // returns OLD value
-//   atomic_cas(ptr: *int, expected: int, new: int) -> bool  // success bit
+//   atomic_cas(ptr: *int, expected: int, new: int) -> boolean  // success bit
 //   atomic_fence() -> void
-// `*int` lowers to `i64*`, `int` lowers to `i64`, `bool` lowers to
-// `i1`. Atomic ops on non-i64 widths are out of scope for v0.
+// `*int` lowers to `i64*`, `int` lowers to `i64`, `boolean` lowers
+// to `i1`. Atomic ops on non-i64 widths are out of scope for v0.
 // `atomic_fence` is the odd one out — no operands, no SSA temp,
 // just a single `fence seq_cst` line acting as a cross-thread
 // memory barrier. `atomic_cas` is the other odd one — `cmpxchg`
 // returns a `{i64, i1}` aggregate, so the lowering emits a follow-up
-// `extractvalue` to expose the success bit (`i1` → Sailfin `bool`)
+// `extractvalue` to expose the success bit (`i1` → Sailfin `boolean`)
 // and discards the value slot (the v0 contract is success-bit only;
 // a `Result`-shaped return is post-1.0).
 import { NativeFunction } from "../native_ir";
@@ -459,15 +459,15 @@ fn _lower_atomic_rmw(op: string, name: string, arguments: string[], bindings: Pa
     };
 }
 
-// `atomic_cas(ptr: *int, expected: int, new: int) -> bool` →
+// `atomic_cas(ptr: *int, expected: int, new: int) -> boolean` →
 //     %tA = cmpxchg ptr <ptr>, i64 <expected>, i64 <new> seq_cst seq_cst, align 8
 //     %tB = extractvalue { i64, i1 } %tA, 1
 //
-// Returns the **success bit** (i1 → Sailfin `bool`) — `true` if the
-// swap landed, `false` if the location held something other than
-// `expected`. The `i64` slot of the cmpxchg aggregate (the actual
-// value at the location, whether the swap succeeded or not) is
-// intentionally discarded; v0 is success-bit only and a
+// Returns the **success bit** (i1 → Sailfin `boolean`) — `true` if
+// the swap landed, `false` if the location held something other
+// than `expected`. The `i64` slot of the cmpxchg aggregate (the
+// actual value at the location, whether the swap succeeded or
+// not) is intentionally discarded; v0 is success-bit only and a
 // `Result`-shaped return is deferred to post-1.0 (issue #333 notes).
 //
 // Both memory orderings on `cmpxchg` are pinned to `seq_cst`
