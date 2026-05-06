@@ -4,16 +4,26 @@
 // reserved-name surface so a future user-defined `atomic_load`
 // can't accidentally shadow the builtin.
 //
+// We drive `parse → emit_native → lower_to_llvm_ir_from_text`
+// directly rather than `compile_to_llvm` so the test file's
+// transitive import surface stays narrow — importing all of
+// `main` pulls in CLI/fmt/check and pushes the test compile
+// over the per-test 180s CI timeout.
+//
 // The E0806 diagnostic stream is observable on stderr from the
 // compiler binary itself; that pinning lives in
 // `compiler/tests/e2e/test_atomic_load_store_compile.sh` so this
 // file stays focused on the IR-shape contract.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
 import { is_atomic_builtin } from "../../src/llvm/atomics";
-import { compile_to_llvm } from "../../src/main";
+import { lower_to_llvm_ir_from_text } from "../../src/llvm/lowering/entrypoints";
+import { parse_program } from "../../src/parser/mod";
 import { index_of } from "../../src/string_utils";
 
 fn _ir_for(source: string) -> string ![io] {
-    return compile_to_llvm(source);
+    let program = parse_program(source);
+    let native_text = emit_native_text_with_module_name(program, "atomics_test");
+    return lower_to_llvm_ir_from_text(native_text, "atomics_test");
 }
 
 // ── Predicate covers the six reserved names ──
@@ -56,9 +66,9 @@ test "atomics: atomic_store(ptr, value) lowers to store atomic i64 ... seq_cst, 
 }
 
 // ── Type-error rejection: non-pointer / non-int args refuse to emit IR ──
-// E0806 is fatal in lowering, so `compile_to_llvm` returns empty IR (no
-// `load atomic` / `store atomic`). The exact diagnostic text and code
-// are pinned in the e2e shell test, which can capture stderr.
+// E0806 is fatal in lowering, so the IR stream omits the rejected
+// `load atomic` / `store atomic` line. The exact diagnostic text and
+// code are pinned in the e2e shell test, which can capture stderr.
 test "atomics: atomic_load with non-pointer argument refuses to emit IR" ![io] {
     let ir = _ir_for("fn bad() -> int { return atomic_load(42); }");
     // `42` lowers to a non-pointer; the builtin must reject the call
