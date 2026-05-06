@@ -149,6 +149,11 @@ fn is_scope_descendant(parent: string, candidate: string) -> boolean {
     return starts_with(candidate, prefix);
 }
 
+// Default allocation kind for newly-constructed `LocalBinding`s. Centralised
+// here so M1.5.5 (escape promotion) has a single seam to flip the default
+// without touching every call site again. See issue #325.
+fn default_allocation_kind() -> string { return "arena"; }
+
 fn append_local_binding(values: LocalBinding[], value: LocalBinding) -> LocalBinding[] {
     let mut out: LocalBinding[] = [];
     let mut index: number = 0;

@@ -169,6 +169,10 @@ struct LocalBinding {
     consumed: boolean;
     scope_id: string;
     scope_depth: number;
+    // Allocation kind for drop emission (M1.5). Sentinels: "arena" (default —
+    // bump-allocated, no destructor needed), "rc" (escapes to ref-counted, set
+    // by M1.5.5 escape promotion), "static" / "stack" (reserved for M2/M3).
+    allocation_kind: string;
 }
 
 struct ModuleGlobalLoweringResult {

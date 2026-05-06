@@ -574,7 +574,8 @@ fn update_local_ownership(locals: LocalBinding[], name: string, ownership: Owner
                 ownership: ownership,
                 consumed: entry.consumed,
                 scope_id: entry.scope_id,
-                scope_depth: entry.scope_depth
+                scope_depth: entry.scope_depth,
+                allocation_kind: entry.allocation_kind
             };
             result.push(updated);
         } else { result.push(entry); }

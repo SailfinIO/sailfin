@@ -54,6 +54,7 @@ import {
     append_lifetime_region,
     append_lifetime_release_event,
     append_local_binding,
+    default_allocation_kind,
     find_local_binding,
     infer_borrow_base_scope,
     make_lifetime_region_metadata
@@ -143,7 +144,8 @@ fn _ipc_make_local_binding(name: string, pointer: string, llvm_type: string, typ
         ownership: null,
         consumed: false,
         scope_id: scope_id,
-        scope_depth: scope_depth
+        scope_depth: scope_depth,
+        allocation_kind: default_allocation_kind()
     };
 }
 

@@ -78,7 +78,8 @@ fn _match_make_local_binding(name: string, pointer: string, llvm_type: string, s
         ownership: null,
         consumed: false,
         scope_id: scope_id,
-        scope_depth: scope_depth
+        scope_depth: scope_depth,
+        allocation_kind: "arena"
     };
 }
 
@@ -670,7 +671,7 @@ fn lower_match_instruction(function: NativeFunction, start_index: number, llvm_r
 
                         base_locals.push(LocalBinding {
                             name: subject_name, pointer: local_alloca_temp, llvm_type: payload_type, type_annotation: "", ownership: null, consumed: false, scope_id: make_child_scope_id(scope_id, body_labels[index]), scope_depth: scope_depth
-                                + 1
+                                + 1, allocation_kind: "arena"
                         });
                         base_local_id += 1;
                     }
