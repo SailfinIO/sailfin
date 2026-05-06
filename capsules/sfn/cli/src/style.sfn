@@ -1,0 +1,47 @@
+// sfn/cli — terminal styling helpers.
+//
+// ANSI styling requires an ESC (0x1B) byte prefix. The bootstrap string
+// unescaper does not support \xHH escapes, so these functions degrade
+// gracefully to plain text. Once \xHH or char_from_code() support lands,
+// swap the _esc() helper to return the real ESC character.
+fn _esc() -> string {
+    // Returns the ANSI escape prefix. Currently returns empty string
+    // because the bootstrap compiler does not support \xHH escapes.
+    // TODO: return real ESC (0x1B) once the string unescaper supports it.
+    return "";
+}
+
+fn _ansi_wrap(code: string, text: string) -> string {
+    let e = _esc();
+    if e.length == 0 { return text; }
+    return e + "[" + code + "m" + text + e + "[0m";
+}
+
+fn bold(text: string) -> string {
+    // Wrap text in ANSI bold escape codes.
+    return _ansi_wrap("1", text);
+}
+
+fn dim(text: string) -> string {
+    // Wrap text in ANSI dim escape codes.
+    return _ansi_wrap("2", text);
+}
+
+fn underline(text: string) -> string {
+    // Wrap text in ANSI underline escape codes.
+    return _ansi_wrap("4", text);
+}
+
+fn red(text: string) -> string { return _ansi_wrap("31", text); }
+
+fn green(text: string) -> string { return _ansi_wrap("32", text); }
+
+fn yellow(text: string) -> string { return _ansi_wrap("33", text); }
+
+fn blue(text: string) -> string { return _ansi_wrap("34", text); }
+
+fn magenta(text: string) -> string { return _ansi_wrap("35", text); }
+
+fn cyan(text: string) -> string { return _ansi_wrap("36", text); }
+
+fn gray(text: string) -> string { return _ansi_wrap("90", text); }

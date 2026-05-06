@@ -1,0 +1,161 @@
+// sfn/cli — help text formatting.
+//
+// Renders the `--help` output for a `Command`: usage line, subcommands,
+// positional arguments, and flag rows. The `help()` function returns
+// the rendered string; `print_help()` writes it to stdout.
+//
+// Note: `_pad` lives here (not in `parser.sfn` as listed in the
+// modularization proposal §3.1) because it is only used by the help
+// renderer. Keeping it next to its only caller avoids a circular import
+// between `parser.sfn` (which calls `_format_help`) and `help.sfn`.
+import { Arg, Command, Flag } from "./types";
+
+fn help(cmd: Command) -> string {
+    // Generate help text for a command.
+    return _format_help(cmd, cmd.name);
+}
+
+fn print_help(cmd: Command) -> void ![io] {
+    // Print help text for a command to stdout.
+    print(_format_help(cmd, cmd.name));
+}
+
+fn _format_help(cmd: Command, program: string) -> string {
+    let mut out: string = "";
+
+    // Description.
+    if cmd.description.length > 0 { out = out + cmd.description + "\n\n"; }
+
+    // Usage line.
+    out = out + "usage:\n";
+    out = out + "  " + program;
+    if cmd.subcmds.length > 0 { out = out + " <command>"; }
+    if cmd.flags.length > 0 { out = out + " [options]"; }
+    let mut ai: number = 0;
+    loop {
+        if ai >= cmd.args.length { break; }
+        let a = cmd.args[ai];
+        if a.is_optional { out = out + " [" + a.name + "]"; } else {
+            out = out + " <" + a.name + ">";
+        }
+        ai += 1;
+    }
+    out = out + "\n";
+
+    // Subcommands.
+    if cmd.subcmds.length > 0 {
+        out = out + "\ncommands:\n";
+        let col_width = _max_name_width(cmd) + 2;
+        let mut si: number = 0;
+        loop {
+            if si >= cmd.subcmds.length { break; }
+            let sub = cmd.subcmds[si];
+            out = out + "  " + _pad(sub.name, col_width) + sub.description
+                + "\n";
+            si += 1;
+        }
+    }
+
+    // Positional arguments.
+    if cmd.args.length > 0 {
+        out = out + "\narguments:\n";
+        let arg_width = _max_arg_width(cmd) + 2;
+        ai = 0;
+        loop {
+            if ai >= cmd.args.length { break; }
+            let a = cmd.args[ai];
+            let label = "<" + a.name + ">";
+            out = out + "  " + _pad(label, arg_width) + a.description;
+            if a.is_optional {
+                out = out + " (default: " + a.default_value + ")";
+            }
+            out = out + "\n";
+            ai += 1;
+        }
+    }
+
+    // Flags.
+    out = out + "\noptions:\n";
+    let flag_width = _max_flag_width(cmd) + 2;
+    let mut fi: number = 0;
+    loop {
+        if fi >= cmd.flags.length { break; }
+        let f = cmd.flags[fi];
+        let label = _flag_label(f);
+        out = out + "  " + _pad(label, flag_width) + f.description + "\n";
+        fi += 1;
+    }
+    // Built-in flags.
+    out = out + "  " + _pad("-h, --help", flag_width)
+        + "Show this help message\n";
+    if cmd.version.length > 0 {
+        out = out + "  " + _pad("-V, --version", flag_width) + "Show version\n";
+    }
+
+    return out;
+}
+
+fn _flag_label(f: Flag) -> string {
+    let mut label: string = "";
+    if f.short_name.length > 0 { label = "-" + f.short_name + ", "; } else {
+        label = "    ";
+    }
+    label = label + "--" + f.long_name;
+    if f.takes_value { label = label + " <value>"; }
+    return label;
+}
+
+fn _max_name_width(cmd: Command) -> number {
+    let mut max: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.subcmds.length { break; }
+        if cmd.subcmds[i].name.length > max {
+            max = cmd.subcmds[i].name.length;
+        }
+        i += 1;
+    }
+    return max;
+}
+
+fn _max_arg_width(cmd: Command) -> number {
+    let mut max: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.args.length { break; }
+        // +2 for the angle brackets.
+        let w = cmd.args[i].name.length + 2;
+        if w > max { max = w; }
+        i += 1;
+    }
+    return max;
+}
+
+fn _max_flag_width(cmd: Command) -> number {
+    let mut max: number = 0;
+    let built_in_help = 10;  // "-h, --help"
+    let built_in_version = 13;  // "-V, --version"
+    if built_in_help > max { max = built_in_help; }
+    if built_in_version > max { max = built_in_version; }
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        let w = _flag_label(cmd.flags[i]).length;
+        if w > max { max = w; }
+        i += 1;
+    }
+    return max;
+}
+
+fn _pad(text: string, width: number) -> string {
+    // Right-pad text with spaces to the given width.
+    if text.length >= width { return text + "  "; }
+    let mut out: string = text;
+    let mut i: number = text.length;
+    loop {
+        if i >= width { break; }
+        out = out + " ";
+        i += 1;
+    }
+    return out;
+}

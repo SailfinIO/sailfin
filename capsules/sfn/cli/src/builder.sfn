@@ -1,0 +1,158 @@
+// sfn/cli — argument, flag, and command builders.
+//
+// Declarative builder functions for constructing `Command` definitions:
+// argument constructors (`arg`, `arg_optional`), flag constructors (`flag`,
+// `flag_value`, `flag_short`, `flag_value_short`), and command/composition
+// helpers (`command`, `with_version`, `with_arg`, `with_flag`,
+// `with_subcommand`).
+import { Arg, Flag, Command } from "./types";
+
+// ---- Arg builders ----
+fn arg(name: string, description: string) -> Arg {
+    // Create a required positional argument.
+    return Arg {
+        name: name,
+        description: description,
+        is_optional: false,
+        default_value: ""
+    };
+}
+
+fn arg_optional(name: string, description: string, default_value: string) -> Arg {
+    // Create an optional positional argument with a default value.
+    return Arg {
+        name: name,
+        description: description,
+        is_optional: true,
+        default_value: default_value
+    };
+}
+
+// ---- Flag builders ----
+fn flag(long_name: string, description: string) -> Flag {
+    // Create a boolean flag (e.g. --verbose).
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: false
+    };
+}
+
+fn flag_value(long_name: string, description: string) -> Flag {
+    // Create a flag that takes a value (e.g. --output FILE).
+    return Flag {
+        long_name: long_name,
+        short_name: "",
+        description: description,
+        takes_value: true
+    };
+}
+
+fn flag_short(long_name: string, short_name: string, description: string) -> Flag {
+    // Create a boolean flag with a short alias (e.g. --verbose / -v).
+    return Flag {
+        long_name: long_name,
+        short_name: short_name,
+        description: description,
+        takes_value: false
+    };
+}
+
+fn flag_value_short(long_name: string, short_name: string, description: string) -> Flag {
+    // Create a value flag with a short alias (e.g. --output / -o FILE).
+    return Flag {
+        long_name: long_name,
+        short_name: short_name,
+        description: description,
+        takes_value: true
+    };
+}
+
+// ---- Command builders ----
+fn command(name: string, description: string) -> Command {
+    // Create a new CLI command definition.
+    let empty_args: Arg[] = [];
+    let empty_flags: Flag[] = [];
+    let empty_cmds: Command[] = [];
+    return Command {
+        name: name,
+        description: description,
+        version: "",
+        args: empty_args,
+        flags: empty_flags,
+        subcmds: empty_cmds
+    };
+}
+
+fn with_version(cmd: Command, version: string) -> Command {
+    // Set the version string for the command.
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: version,
+        args: cmd.args,
+        flags: cmd.flags,
+        subcmds: cmd.subcmds
+    };
+}
+
+fn with_arg(cmd: Command, a: Arg) -> Command {
+    // Add a positional argument to the command.
+    let mut new_args: Arg[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.args.length { break; }
+        new_args.push(cmd.args[i]);
+        i += 1;
+    }
+    new_args.push(a);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: new_args,
+        flags: cmd.flags,
+        subcmds: cmd.subcmds
+    };
+}
+
+fn with_flag(cmd: Command, f: Flag) -> Command {
+    // Add a flag to the command.
+    let mut new_flags: Flag[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.flags.length { break; }
+        new_flags.push(cmd.flags[i]);
+        i += 1;
+    }
+    new_flags.push(f);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: cmd.args,
+        flags: new_flags,
+        subcmds: cmd.subcmds
+    };
+}
+
+fn with_subcommand(cmd: Command, sub: Command) -> Command {
+    // Add a subcommand to the command.
+    let mut new_subs: Command[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= cmd.subcmds.length { break; }
+        new_subs.push(cmd.subcmds[i]);
+        i += 1;
+    }
+    new_subs.push(sub);
+    return Command {
+        name: cmd.name,
+        description: cmd.description,
+        version: cmd.version,
+        args: cmd.args,
+        flags: cmd.flags,
+        subcmds: new_subs
+    };
+}
