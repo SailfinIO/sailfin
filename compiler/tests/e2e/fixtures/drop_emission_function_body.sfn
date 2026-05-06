@@ -1,0 +1,22 @@
+// Fixture for compiler/tests/e2e/test_drop_emission_function_body.sh.
+//
+// Exercises the M1.5.2 scope-exit drop seam: the compiler must (a)
+// always declare `@sfn_rc_release(i8*)` in the emitted module preamble
+// so the runtime ABI is visible to downstream linkers, and (b) emit
+// zero `call void @sfn_rc_release` lines until M1.5.5 escape promotion
+// flips at least one local binding's `allocation_kind` to "rc".
+//
+// No `main` — the harness drives `sfn emit llvm` directly. Each
+// function below has plain owned arena locals (the default kind),
+// which is exactly the byte-identical-against-main case the issue's
+// acceptance criteria pin: `emit_scope_drops` returns `[]` for every
+// real call site today.
+fn drop_one() {
+    let x: int = 42;
+}
+
+fn drop_many() {
+    let a: int = 1;
+    let b: int = 2;
+    let c: int = 3;
+}

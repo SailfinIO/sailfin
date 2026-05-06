@@ -65,6 +65,31 @@ fn insert_lines_before_index(lines: string[], index: number, insert_lines: strin
     return result;
 }
 
+// Emit `call void @sfn_rc_release(i8* %ptr)` lines for every owned RC local
+// that belongs to `scope_id` and is still live at scope close. M1.5.2 ships
+// the seam: `allocation_kind == "rc"` is not yet populated by any escape
+// rule (M1.5.5 work), so this returns `[]` for every real call site today.
+// Borrows and consumed locals are skipped — drop emission is owner-only.
+// Iterates in insertion order; do not sort (seedcheck depends on byte-
+// identical IR).
+fn emit_scope_drops(locals: LocalBinding[], scope_id: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: number = 0;
+    loop {
+        if index >= locals.length { break; }
+        let binding = locals[index];
+        index += 1;
+        if binding.scope_id != scope_id { continue; }
+        if binding.allocation_kind != "rc" { continue; }
+        if binding.consumed { continue; }
+        if binding.ownership != null {
+            if binding.ownership.variant == "Borrow" { continue; }
+        }
+        lines.push("  call void @sfn_rc_release(i8* " + binding.pointer + ")");
+    }
+    return lines;
+}
+
 fn _parse_int_from_string(text: string) -> number {
     let len = text.length;
     if len == 0 { return 0; }

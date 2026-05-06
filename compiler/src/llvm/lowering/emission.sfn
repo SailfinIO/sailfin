@@ -49,6 +49,7 @@ import {
 import { emit_async_function } from "./emission_async";
 import { build_define_header_line } from "./emission_header";
 import { lower_instruction_range } from "./instructions";
+import { emit_scope_drops } from "./instructions_helpers";
 import { module_user_main_symbol } from "./module_globals";
 
 fn is_safe_llvm_type_text(value: string) -> boolean {
@@ -482,6 +483,13 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     if !_eb_terminated { _if201 = true; }
     if !_eb_has_terminator { _if201 = true; }
     if _if201 {
+        // Function-body scope-exit drops (M1.5.2 / issue #326).
+        // Emit `call void @sfn_rc_release(...)` for every owned RC local
+        // in the function-body scope before the implicit ret. Returns []
+        // until M1.5.5 escape promotion populates `allocation_kind = "rc"`,
+        // so the seam is in place but no IR change is observable today.
+        let _drop_lines = emit_scope_drops(_eb_result.locals, format_root_scope_id(fn_name));
+        lines = extend_string_array(lines, _drop_lines);
         if llvm_return == "void" {
             lines = append_string(lines, "  ret void");
         } else {

@@ -165,6 +165,13 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     if find_function_by_name(context_functions, "sailfin_runtime_free") == null {
         lines.push("declare void @sailfin_runtime_free(i8*)");
     }
+    // Scope-exit drop helper (M1.5.2 / issue #326). Always declared so the
+    // emit-llvm output exposes the runtime ABI even when the current module
+    // has no `allocation_kind == "rc"` locals (today: all of them, since
+    // M1.5.5 escape promotion has not landed). The C stub is a no-op.
+    if find_function_by_name(context_functions, "sfn_rc_release") == null {
+        lines.push("declare void @sfn_rc_release(i8*)");
+    }
     lines.push("");
 
     // Runtime global

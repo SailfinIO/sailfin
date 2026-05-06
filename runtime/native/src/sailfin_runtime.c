@@ -1765,6 +1765,22 @@ void sailfin_runtime_string_drop(char *text)
     free(text);
 }
 
+/* Scope-exit drop helper for owned RC locals (M1.5.2 / issue #326).
+ *
+ * The compiler emits `call void @sfn_rc_release(i8* %ptr)` for every
+ * owned local with `allocation_kind == "rc"` at scope close. Until
+ * M1.5.5 ships escape promotion, no local is ever marked rc — the
+ * compiler emits zero calls today and this stub is unreachable from
+ * user code. The stub is intentionally a no-op so a future caller
+ * against an arena-allocated pointer cannot trigger a use-after-free;
+ * M2 will replace this with the real refcount-decrement-and-free path
+ * once `runtime/sfn/memory.sfn` lands.
+ */
+void sfn_rc_release(void *ptr)
+{
+    (void)ptr;
+}
+
 void sailfin_runtime_print_raw(char *msg)
 {
     if (msg)
