@@ -69,8 +69,9 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // wrapper packs (page_index, used) into the mantissa.
     //
     // Both helpers are no-ops when the arena is disabled
-    // (SAILFIN_USE_ARENA unset on the seed; default-on flip pending
-    // a follow-up PR). Calling them on a disabled arena is safe.
+    // (`SAILFIN_USE_ARENA={0,'',false}` opt-out — the runtime
+    // default flipped on May 6 via #324). Calling them on a
+    // disabled arena is safe.
     //
     // Today's callers reach the C symbols via `extern fn` declarations
     // (the 0.5.9 seed compiler doesn't carry these descriptors yet).

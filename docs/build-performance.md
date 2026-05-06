@@ -29,7 +29,7 @@ Status of every track named in the original RCA. "Shipped" means the work landed
 
 | Track                                                           | Status                                                                        | Expected wall-time delta (remaining work) |
 | --------------------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------------------------- |
-| Phase 0 — M0.5 arena allocator                                  | **Shipped** (default-on April 19); arena stats env gate shipped April 25     | counted                                   |
+| Phase 0 — M0.5 arena allocator                                  | **Shipped** (default-on April 19 for selfhost; default-on for installed binaries May 6 via #324); arena stats env gate shipped April 25 | counted                                   |
 | Phase 1 — O(n²) array accumulation sweep                        | **Shipped** (April 25 re-audit confirms zero residual `.concat([x])` sites in `llvm/lowering` + `llvm/expression_lowering`; `extend_string_lines` is in-place push) | <2%                                       |
 | Phase 2 — File-based IPC channel removal                        | **Shipped** (0.5.9 — first IPC-free seed)                                     | counted                                   |
 | Phase 3a — Import-discovery fast-path scanner                   | **Shipped**                                                                   | counted                                   |
@@ -80,7 +80,7 @@ The C runtime (`runtime/native/src/sailfin_runtime.c`) has fundamental memory ma
 
 3. **Arrays are never freed.** No `array_drop` or array lifecycle management exists. Every `string[]` or `NativeFunction[]` allocated during compilation leaks.
 
-4. **No GC, no RC; arena allocator shipped, default-on for selfhost builds, off by default for installed binaries.** The runtime tracks owned strings in a hash table for safe freeing, but this is opt-in and disabled. There is no generational GC or reference counting. The M0.5 bump-allocator arena landed in PR #174 (`runtime/native/src/sailfin_arena.c`) and is wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`. `scripts/build.sh` exports `SAILFIN_USE_ARENA=1` for the selfhost build (April 19 flip), so `make compile`, `make check`, and `make test` all run under the arena. **Installed binaries do not yet get the arena by default** — end users running `sfn check` or `sfn test` need to set `SAILFIN_USE_ARENA=1` themselves until the runtime-side default-on flip lands as a separate workstream. The M0.5 fast-fail criteria (per-module RAM < 512 MB, `make check` passes with arena on) have not yet been formally validated in CI.
+4. **No GC, no RC; arena allocator shipped, default-on for selfhost builds and installed binaries.** The runtime tracks owned strings in a hash table for safe freeing, but this is opt-in and disabled. There is no generational GC or reference counting. The M0.5 bump-allocator arena landed in PR #174 (`runtime/native/src/sailfin_arena.c`) and is wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`. `scripts/build.sh` exports `SAILFIN_USE_ARENA=1` for the selfhost build (April 19 flip), and the runtime-side `_init_arena_enabled` default flipped to `1` on May 6 (#324) so installed binaries also get the arena without surfacing an env-var contract. End users opt out with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) — kept as the regression-bisect escape hatch for at least one release. The M0.5 fast-fail criteria (per-module RAM < 512 MB, `make check` passes with arena on) have not yet been formally validated in CI.
 
 ### The consequence
 
@@ -363,7 +363,7 @@ Headline measurement:
 | `sfn check` 60 files                | 98 s SIGSEGV               | ~80 s clean                         |
 | `sfn check compiler/src/` (132 files)| 120 s SIGSEGV             | 130 s clean (rc=1, 2 errors found)  |
 
-Open follow-up: `SAILFIN_USE_ARENA=1` is exported by `scripts/build.sh` (so `make compile`/`make check`/`make test` get the arena), but installed binaries used by end users do not get the arena by default. Phase 5a only helps when the arena is on. A separate PR flips `_init_arena_enabled` to default `1` (with `SAILFIN_USE_ARENA=0` as the opt-out) so `sfn check` for end users gets the arena without surfacing an env-var contract.
+Open follow-up: **resolved May 6 via #324.** `_init_arena_enabled` now defaults `1` for installed binaries, with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) as the opt-out kept for at least one release. `sfn check` and `sfn test` for end users get the arena without surfacing an env-var contract; `scripts/build.sh` keeps its explicit `SAILFIN_USE_ARENA=${SAILFIN_USE_ARENA:-1}` export and CI keeps `SAILFIN_USE_ARENA: "1"` in `.github/workflows/ci.yml` as belt-and-suspenders. Pinned by `compiler/tests/e2e/test_arena_default_on.sh`.
 
 ### Phase 5: Long-Lived Compiler Process (Future)
 
