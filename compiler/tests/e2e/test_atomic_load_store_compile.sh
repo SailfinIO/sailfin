@@ -91,9 +91,25 @@ fn bad() -> int {
     return atomic_load(42);
 }
 EOF
-    # We expect the compiler to surface an E0806 diagnostic. The
-    # exact exit code is best-effort (LLVM lowering may still emit
-    # partial IR), so we assert on the diagnostic stream instead.
+    # E0806 is emitted as a `[fatal]`-tagged lowering diagnostic and
+    # printed to stderr from `lower_atomic_builtin`. We assert two
+    # signals:
+    #   1. the E0806 code is present on stderr
+    #   2. the .ll file (if produced) does NOT contain a `load atomic`
+    #      line — i.e. the bogus call was rejected before lowering
+    #      would have emitted malformed `load atomic i64 ... i64 ...`
+    #      IR
+    #
+    # We intentionally don't gate on the exit code: today
+    # `compile_to_llvm_file_with_module` falls back to the
+    # `write_llvm_ir(NativeModule)` path when the primary text-mode
+    # path returns false, so even fatal lowering diagnostics can end
+    # up with exit 0 + a partial-but-valid-looking .ll file (the
+    # `[fatal]` call site emits no instruction so the surrounding
+    # function body simply ends with `ret <T> 0`). Wiring the fatal
+    # gate cleanly through the fallback is out of scope for
+    # M0-Atomics.1; the stderr + IR checks below are the durable
+    # invariants for now.
     local stderr
     stderr="$("$BINARY" emit -o "$ll" llvm "$src" 2>&1 1>/dev/null || true)"
     if ! echo "$stderr" | grep -q "E0806"; then
@@ -101,9 +117,6 @@ EOF
         echo "         stderr was: $stderr" | head -5
         return 1
     fi
-    # Defence-in-depth: the bogus call must NOT have produced a
-    # valid `load atomic` line — that would mean we lowered a malformed
-    # IR shape (i64 instead of i64*).
     if [ -f "$ll" ] && grep -qE "load atomic i64" "$ll"; then
         echo "[test]   regression: emitted 'load atomic i64' for non-pointer arg"
         return 1
@@ -120,6 +133,8 @@ fn bad(p: *int) {
     atomic_store(p, "hello");
 }
 EOF
+    # See test_atomic_load_rejects_non_pointer_arg above for the
+    # rationale on why we don't gate on exit code.
     local stderr
     stderr="$("$BINARY" emit -o "$ll" llvm "$src" 2>&1 1>/dev/null || true)"
     if ! echo "$stderr" | grep -q "E0806"; then

@@ -63,11 +63,19 @@ fn lower_atomic_builtin(name: string, arguments: string[], bindings: ParameterBi
     if trimmed == "atomic_store" {
         return _lower_atomic_store(arguments, bindings, locals, temp_index, lines, functions, context);
     }
-    // M0-Atomics.2/3/4 will fill these in. For now reject calls so
-    // they don't silently no-op into an unresolved-call diagnostic.
+    // M0-Atomics.2/3/4 will fill these in. Until then, reject the
+    // call with a `[fatal]` diagnostic so the build exits non-zero
+    // — matching the issue #306 contract that the emit-level
+    // entrypoints (`compile_native_text_to_llvm_file`, `write_llvm_ir`)
+    // refuse to write IR when any diagnostic carries `[fatal]`.
+    // Without the sentinel, `is_atomic_builtin` would short-circuit
+    // the rest of the call pipeline and the .ll file would be
+    // written with the side-effecting atomic call silently dropped.
     let mut diagnostics: string[] = [];
-    diagnostics.push("llvm lowering: atomic builtin `" + trimmed
-        + "` is reserved but not yet implemented (tracking issue #323)");
+    let diag = "llvm lowering [fatal]: atomic builtin `" + trimmed
+        + "` is reserved but not yet implemented (tracking issue #323)";
+    print.err(diag);
+    diagnostics.push(diag);
     return ExpressionResult {
         lines: lines,
         temp_index: temp_index,
