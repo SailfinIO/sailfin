@@ -293,7 +293,7 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
                     + err_slot);
                 catch_locals = append_local_binding(catch_locals, LocalBinding {
                     name: trimmed_name, pointer: err_slot, llvm_type: "i8*", type_annotation: "string", ownership: null, consumed: false, scope_id: catch_scope_id, scope_depth: scope_depth
-                        + 1
+                        + 1, allocation_kind: "arena"
                 });
             }
         }

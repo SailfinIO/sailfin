@@ -177,7 +177,8 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
         ownership: null,
         consumed: false,
         scope_id: scope_id,
-        scope_depth: 0
+        scope_depth: 0,
+        allocation_kind: "arena"
     };
     let mut locals: LocalBinding[] = [];
     locals.push(local);

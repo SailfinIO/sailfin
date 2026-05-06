@@ -49,7 +49,7 @@ export {
     load_local_operand
 } from "./core_operands";
 
-export { append_local_binding, find_local_binding, append_llvm_operand } from "./core_scopes";
+export { append_local_binding, find_local_binding, append_llvm_operand, default_allocation_kind } from "./core_scopes";
 
 export { parse_enum_literal, parse_struct_pattern, parse_range_iterable } from "./core_parse";
 

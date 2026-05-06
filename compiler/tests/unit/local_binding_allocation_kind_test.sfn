@@ -1,0 +1,62 @@
+// Round-trip pin for `LocalBinding.allocation_kind` (issue #325, M1.5.1).
+//
+// Adds a parallel `allocation_kind: string` field to `LocalBinding` so the
+// upcoming drop-emission helpers (M1.5.2+) can branch on allocation kind
+// without changing IR. This file pins:
+//
+//   1. `default_allocation_kind()` returns the "arena" sentinel.
+//   2. A freshly-constructed `LocalBinding { ..., allocation_kind: "arena" }`
+//      survives a round trip through `append_local_binding` —
+//      i.e. the field is actually stored on the struct, not lost in the
+//      vec push.
+//   3. `find_local_binding` reads back the same kind that was pushed.
+//
+// Why these matter: M1.5.5 (escape promotion) flips the kind to "rc" for
+// values that escape. If the field doesn't survive the standard
+// add/lookup helpers today, every downstream user of the field reads "".
+import {
+    append_local_binding,
+    default_allocation_kind,
+    find_local_binding
+} from "../../src/llvm/expression_lowering/native/core_scopes";
+import { LocalBinding } from "../../src/llvm/types";
+
+fn _make_binding(name: string, kind: string) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: "%slot",
+        llvm_type: "i64",
+        type_annotation: "int",
+        ownership: null,
+        consumed: false,
+        scope_id: "fn:test",
+        scope_depth: 0,
+        allocation_kind: kind
+    };
+}
+
+test "local_binding: default_allocation_kind is arena" {
+    assert default_allocation_kind() == "arena";
+}
+
+test "local_binding: append preserves allocation_kind" {
+    let binding = _make_binding("x", "arena");
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, binding);
+    assert locals.length == 1;
+    assert locals[0].allocation_kind == "arena";
+    // Other fields must also survive the append unchanged.
+    assert locals[0].name == "x";
+    assert locals[0].pointer == "%slot";
+    assert locals[0].llvm_type == "i64";
+}
+
+test "local_binding: find_local_binding reads back allocation_kind" {
+    let binding = _make_binding("y", "arena");
+    let mut locals: LocalBinding[] = [];
+    locals = append_local_binding(locals, binding);
+    let found = find_local_binding(locals, "y");
+    assert found != null;
+    assert found.allocation_kind == "arena";
+    assert found.name == "y";
+}
