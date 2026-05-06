@@ -1,0 +1,98 @@
+// Round-trip pin for `emit_scope_drops` (issue #326, M1.5.2).
+//
+// The helper emits the load + (optional) bitcast + `call void
+// @sfn_rc_release(i8* ...)` sequence for every owned RC local in the
+// named scope at scope close. The function-body terminator path in
+// `emit_llvm_function` calls this helper before the implicit `ret`.
+// Today no real call site has `allocation_kind == "rc"` (M1.5.5 escape
+// promotion is not yet shipped), so the helper returns `[]` for every
+// real call and the IR diff against main is zero outside the new
+// `declare void @sfn_rc_release(i8*)` line.
+//
+// `LocalBinding.pointer` is the alloca slot (e.g. `%l5`) — the slot
+// itself has type `<llvm_type>*`. The helper must load the value out
+// of the slot and bitcast it to `i8*` (when needed) before calling
+// `sfn_rc_release`. The synthetic bindings below mirror the real
+// representation so M1.5.5 (the first call site that flips a binding
+// to "rc") can land without regressing the seam.
+import { emit_scope_drops } from "../../src/llvm/lowering/instructions_helpers";
+import { LocalBinding, OwnershipInfo } from "../../src/llvm/types";
+
+fn _make_binding(name: string, slot: string, llvm_type: string, kind: string, consumed: boolean, scope_id: string, ownership: OwnershipInfo?) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: slot,
+        llvm_type: llvm_type,
+        type_annotation: "string",
+        ownership: ownership,
+        consumed: consumed,
+        scope_id: scope_id,
+        scope_depth: 0,
+        allocation_kind: kind
+    };
+}
+
+fn _borrow_ownership() -> OwnershipInfo {
+    return OwnershipInfo {
+        variant: "Borrow",
+        base: "x",
+        mutable: false,
+        span: null,
+        region_id: -1
+    };
+}
+
+test "emit_scope_drops: arena-only locals emit zero drop lines" {
+    let bindings: LocalBinding[] = [_make_binding("a", "%l1", "i8*", "arena", false, "fn:foo", null), _make_binding("b", "%l2", "i8*", "arena", false, "fn:foo", null)];
+    let lines = emit_scope_drops(bindings, "fn:foo");
+    assert lines.length == 0;
+}
+
+test "emit_scope_drops: a single i8* rc local emits load + call (no bitcast)" {
+    let bindings: LocalBinding[] = [_make_binding("a", "%l1", "i8*", "arena", false, "fn:foo", null), _make_binding("b", "%l2", "i8*", "rc", false, "fn:foo", null)];
+    let lines = emit_scope_drops(bindings, "fn:foo");
+    assert lines.length == 2;
+    assert lines[0] == "  %l2.drop = load i8*, i8** %l2";
+    assert lines[1] == "  call void @sfn_rc_release(i8* %l2.drop)";
+}
+
+test "emit_scope_drops: a non-i8* rc local emits load + bitcast + call" {
+    let bindings: LocalBinding[] = [_make_binding("box", "%l3", "%MyStruct*", "rc", false, "fn:foo", null)];
+    let lines = emit_scope_drops(bindings, "fn:foo");
+    assert lines.length == 3;
+    assert lines[0] == "  %l3.drop_raw = load %MyStruct*, %MyStruct** %l3";
+    assert lines[1] == "  %l3.drop = bitcast %MyStruct* %l3.drop_raw to i8*";
+    assert lines[2] == "  call void @sfn_rc_release(i8* %l3.drop)";
+}
+
+test "emit_scope_drops: borrowed rc locals are skipped" {
+    let bindings: LocalBinding[] = [_make_binding("borrowed", "%l1", "i8*", "rc", false, "fn:foo", _borrow_ownership())];
+    let lines = emit_scope_drops(bindings, "fn:foo");
+    assert lines.length == 0;
+}
+
+test "emit_scope_drops: consumed rc locals are skipped" {
+    let bindings: LocalBinding[] = [_make_binding("moved", "%l1", "i8*", "rc", true, "fn:foo", null)];
+    let lines = emit_scope_drops(bindings, "fn:foo");
+    assert lines.length == 0;
+}
+
+test "emit_scope_drops: locals from a different scope are skipped" {
+    let bindings: LocalBinding[] = [_make_binding("outer", "%l1", "i8*", "rc", false, "fn:foo", null), _make_binding("inner", "%l2", "i8*", "rc", false, "fn:foo:block:1", null)];
+    let lines = emit_scope_drops(bindings, "fn:foo");
+    assert lines.length == 2;
+    assert lines[0] == "  %l1.drop = load i8*, i8** %l1";
+    assert lines[1] == "  call void @sfn_rc_release(i8* %l1.drop)";
+}
+
+test "emit_scope_drops: emits drops in insertion order (no sort)" {
+    let bindings: LocalBinding[] = [_make_binding("c", "%l3", "i8*", "rc", false, "fn:foo", null), _make_binding("a", "%l1", "i8*", "rc", false, "fn:foo", null), _make_binding("b", "%l2", "i8*", "rc", false, "fn:foo", null)];
+    let lines = emit_scope_drops(bindings, "fn:foo");
+    assert lines.length == 6;
+    assert lines[0] == "  %l3.drop = load i8*, i8** %l3";
+    assert lines[1] == "  call void @sfn_rc_release(i8* %l3.drop)";
+    assert lines[2] == "  %l1.drop = load i8*, i8** %l1";
+    assert lines[3] == "  call void @sfn_rc_release(i8* %l1.drop)";
+    assert lines[4] == "  %l2.drop = load i8*, i8** %l2";
+    assert lines[5] == "  call void @sfn_rc_release(i8* %l2.drop)";
+}

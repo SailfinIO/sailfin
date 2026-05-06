@@ -65,6 +65,64 @@ fn insert_lines_before_index(lines: string[], index: number, insert_lines: strin
     return result;
 }
 
+// Emit drop instructions for every owned RC local in `scope_id` that is
+// still live at scope close. M1.5.2 ships the seam: `allocation_kind ==
+// "rc"` is not yet populated by any escape rule (M1.5.5 work), so this
+// returns `[]` for every real call site today. Borrows and consumed
+// locals are skipped — drop emission is owner-only. Iterates in
+// insertion order; do not sort (seedcheck depends on byte-identical IR).
+//
+// `binding.pointer` is the alloca slot (e.g. `%l5`); the slot itself has
+// type `<llvm_type>*`. The helper loads the stored value out of the slot
+// before calling `sfn_rc_release(i8*)`, with a bitcast when the value
+// type is not already `i8*`. Temp names are derived deterministically
+// from the slot name (`<slot>.drop`, `<slot>.drop_raw`) so callers do
+// not have to thread a temp index — and so the IR is byte-identical
+// across runs.
+//
+// For an rc local with `llvm_type == "i8*"`:
+//
+//     %l5.drop = load i8*, i8** %l5
+//     call void @sfn_rc_release(i8* %l5.drop)
+//
+// For an rc local with a non-i8* pointer-typed value (e.g. struct ptr):
+//
+//     %l5.drop_raw = load %MyStruct*, %MyStruct** %l5
+//     %l5.drop = bitcast %MyStruct* %l5.drop_raw to i8*
+//     call void @sfn_rc_release(i8* %l5.drop)
+fn emit_scope_drops(locals: LocalBinding[], scope_id: string) -> string[] {
+    let mut lines: string[] = [];
+    let mut index: number = 0;
+    loop {
+        if index >= locals.length { break; }
+        let binding = locals[index];
+        index += 1;
+        if binding.scope_id != scope_id { continue; }
+        if binding.allocation_kind != "rc" { continue; }
+        if binding.consumed { continue; }
+        if binding.ownership != null {
+            if binding.ownership.variant == "Borrow" { continue; }
+        }
+        let drop_temp = binding.pointer + ".drop";
+        if binding.llvm_type == "i8*" {
+            lines.push("  " + drop_temp + " = load i8*, i8** " + binding.pointer);
+            lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
+        } else {
+            let raw_temp = binding.pointer + ".drop_raw";
+            lines.push("  " + raw_temp + " = load " + binding.llvm_type + ", "
+                + binding.llvm_type
+                + "* "
+                + binding.pointer);
+            lines.push("  " + drop_temp + " = bitcast " + binding.llvm_type
+                + " "
+                + raw_temp
+                + " to i8*");
+            lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
+        }
+    }
+    return lines;
+}
+
 fn _parse_int_from_string(text: string) -> number {
     let len = text.length;
     if len == 0 { return 0; }

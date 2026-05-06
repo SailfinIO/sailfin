@@ -74,6 +74,12 @@ extern "C"
     char *sailfin_runtime_string_append(char *buf, char *suffix);
     // Drop/free a runtime-owned string (no-op for non-owned/persistent values).
     void sailfin_runtime_string_drop(char *text);
+    // Scope-exit drop helper for owned RC locals (M1.5.2 / issue #326).
+    // Called by emit_scope_drops at function-body scope close. Today the
+    // compiler never emits a call (no local has `allocation_kind == "rc"`
+    // until M1.5.5 escape promotion ships); the stub is a no-op so a
+    // future caller against an arena pointer cannot trigger UAF.
+    void sfn_rc_release(void *ptr);
     double sailfin_runtime_string_to_number(char *text);
     // Dynamic member access for boxed/runtime values.
     // Currently used for `.variant` on boxed enums.

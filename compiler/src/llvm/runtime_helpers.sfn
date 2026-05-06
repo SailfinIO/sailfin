@@ -308,6 +308,14 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.drop", symbol: "sailfin_runtime_string_drop", return_type: "void", parameter_types: ["i8*"], effects: []
     });
+    // Scope-exit drop helper for owned RC locals (M1.5.2, issue #326).
+    // Emit_scope_drops generates `call void @sfn_rc_release(i8* %ptr)` for
+    // each owned local with `allocation_kind == "rc"` at scope close. The
+    // C-side stub is a no-op until M2 ships real RC semantics — calling
+    // it against arena pointers (everything pre-M1.5.5) must not free.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "rc.release", symbol: "sfn_rc_release", return_type: "void", parameter_types: ["i8*"], effects: []
+    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "number.to_string", symbol: "sailfin_runtime_number_to_string", return_type: "i8*", parameter_types: ["double"], effects: []
     });
