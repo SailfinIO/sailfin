@@ -704,6 +704,7 @@ fn seed_default_runtime_helpers(initial: string[]) -> string[] {
     helpers = append_unique_effect(helpers, "strings_equal");
     helpers = append_unique_effect(helpers, "char_code");
     helpers = append_unique_effect(helpers, "runtime_raise_value_error_fn");
+    helpers = append_unique_effect(helpers, "runtime_assert_fail_fn");
     helpers = append_unique_effect(helpers, "runtime.bounds_check");
     // Phase 5a: arena mark/rewind for in-process multi-module tools.
     // No-op when SAILFIN_USE_ARENA is unset; declared unconditionally

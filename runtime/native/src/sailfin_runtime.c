@@ -58,6 +58,7 @@ extern char **environ;
 
 static bool _env_enabled(const char *name);
 static int _env_int(const char *name, int fallback);
+static int64_t _clamp_to_i64(double v);
 
 static void _print_line(FILE *stream, const char *prefix, const char *msg);
 
@@ -6225,6 +6226,139 @@ void sailfin_runtime_raise_value_error(void *message)
 void runtime_raise_value_error_fn(void *message)
 {
     sailfin_runtime_raise_value_error(message);
+}
+
+/* sailfin_assert_fail — structured assertion-failure record writer.
+ *
+ * Wire format (newline-delimited key:value, ASCII / UTF-8, NUL-free):
+ *
+ *   line 1: "SFAF"            (magic; sentinel for the runner's reader)
+ *   line 2: "v:1"             (format version; future readers gate on it)
+ *   line 3: "file:<path>"     (test source path; may be empty)
+ *   line 4: "line:<decimal>"  (signed decimal line number, 1-based)
+ *   line 5: "col:<decimal>"   (signed decimal column, 1-based)
+ *   line 6: "msg:<text>"      (assertion message; UTF-8, no embedded \n)
+ *
+ * Each line is terminated with a single '\n'. The record is
+ * NUL-free on purpose: the test runner reads the file via
+ * `fs.readFile`, which goes through Sailfin's NUL-terminated string
+ * ABI. A length-prefixed binary record would survive `read(2)` but
+ * be truncated at the first 0x00 inside any little-endian integer
+ * field. Text avoids that whole class of bug; ints are still
+ * unambiguous because every line has an explicit key prefix and the
+ * value is bounded by the next '\n'. Forward-compat is via the
+ * version line: readers that don't recognise `v:N` skip the record
+ * entirely instead of misinterpreting unknown fields.
+ *
+ * Sink resolution (first match wins):
+ *   1. SAILFIN_TEST_FAIL_FD set to a writable fd (parent opens before
+ *      spawn; child inherits the fd unchanged via posix_spawnp).
+ *   2. ${SAILFIN_TEST_SCRATCH}/fail.bin (append).
+ *   3. No sink → caller is not a test runner; write nothing. The
+ *      diagnostic still hits stderr via sailfin_runtime_raise_value_error
+ *      and the process aborts — same observable behavior as before.
+ *
+ * Append mode is intentional: a single test process that triggers
+ * multiple `assert false` calls before aborting will leave one
+ * record per call, in order. The runner reads the first valid one
+ * (consistent with C's "first crash wins" stack-unwind expectation).
+ */
+static FILE *_sfn_open_assert_fail_sink(int *out_fd_borrowed)
+{
+    /* Returns a FILE* the caller must fclose unless `*out_fd_borrowed`
+     * is non-zero, in which case the caller must `fflush` only —
+     * closing would close the parent's fd. */
+    *out_fd_borrowed = 0;
+    const char *fd_env = getenv("SAILFIN_TEST_FAIL_FD");
+    if (fd_env && *fd_env)
+    {
+        char *end = NULL;
+        long parsed = strtol(fd_env, &end, 10);
+        if (end != fd_env && parsed >= 0 && parsed <= 65535)
+        {
+#if defined(_WIN32)
+            FILE *fp = _fdopen((int)parsed, "ab");
+#else
+            FILE *fp = fdopen((int)parsed, "ab");
+#endif
+            if (fp)
+            {
+                *out_fd_borrowed = 1;
+                return fp;
+            }
+        }
+    }
+    const char *scratch = getenv("SAILFIN_TEST_SCRATCH");
+    if (scratch && *scratch)
+    {
+        size_t need = strlen(scratch) + sizeof("/fail.bin");
+        char *path = (char *)malloc(need);
+        if (!path)
+            return NULL;
+        snprintf(path, need, "%s/fail.bin", scratch);
+        FILE *fp = fopen(path, "ab");
+        free(path);
+        return fp;
+    }
+    return NULL;
+}
+
+/* Replace any '\n' in `s` with ' ' so the value cannot leak across
+ * record-line boundaries. Returns a freshly-malloc'd buffer the
+ * caller must free, or NULL on allocation failure. */
+static char *_sfn_strip_newlines(const char *s)
+{
+    if (!s)
+        s = "";
+    size_t n = strlen(s);
+    char *out = (char *)malloc(n + 1);
+    if (!out)
+        return NULL;
+    for (size_t i = 0; i < n; i++)
+    {
+        char c = s[i];
+        out[i] = (c == '\n' || c == '\r') ? ' ' : c;
+    }
+    out[n] = '\0';
+    return out;
+}
+
+void sailfin_assert_fail(const char *file, int64_t line, int64_t col, const char *msg)
+{
+    int fd_borrowed = 0;
+    FILE *sink = _sfn_open_assert_fail_sink(&fd_borrowed);
+    if (sink)
+    {
+        char *file_clean = _sfn_strip_newlines(file ? file : "");
+        char *msg_clean = _sfn_strip_newlines(msg ? msg : "assertion failed");
+        if (file_clean && msg_clean)
+        {
+            fprintf(
+                sink,
+                "SFAF\nv:1\nfile:%s\nline:%lld\ncol:%lld\nmsg:%s\n",
+                file_clean,
+                (long long)line,
+                (long long)col,
+                msg_clean);
+        }
+        free(file_clean);
+        free(msg_clean);
+        fflush(sink);
+        if (!fd_borrowed)
+            fclose(sink);
+    }
+    sailfin_runtime_raise_value_error((void *)(msg ? msg : "assertion failed"));
+}
+
+/* Sailfin-callable trampoline: the parser emits
+ *   runtime_assert_fail_fn(file, line, col, msg)
+ * with line/col passed as Sailfin `number` (LLVM `double`). The
+ * spec-defined symbol (`sailfin_assert_fail`) takes int64_t, so we
+ * clamp/convert here. Mirrors `substring_unchecked`'s double→i64
+ * trampoline. */
+void runtime_assert_fail_fn(const char *file, double line, double col, const char *msg)
+{
+    sailfin_assert_fail(file, _clamp_to_i64(line), _clamp_to_i64(col), msg);
 }
 
 /* Wrapper: the compiler may emit calls to substring_unchecked with double

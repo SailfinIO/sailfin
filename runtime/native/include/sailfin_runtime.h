@@ -260,6 +260,28 @@ extern "C"
     void *sailfin_runtime_to_debug_string(void *value);
     void sailfin_runtime_raise_value_error(void *message);
 
+    /* Structured assertion failure hook.
+     *
+     * Replaces the stdout-grep heuristic in scripts/run_native_test.sh:
+     * a failing `assert` lowers to a call into this helper, which
+     * writes a typed record describing (file, line, col, message)
+     * before the process aborts. The test runner consumes the
+     * record after the test exits and surfaces a typed
+     * AssertFailure to the caller — no regex matching.
+     *
+     * Sink resolution (first match wins):
+     *   1. `SAILFIN_TEST_FAIL_FD` env var set to an open writable fd.
+     *   2. `${SAILFIN_TEST_SCRATCH}/fail.bin` (append).
+     *   3. No sink → write nothing. Non-test callers see the same
+     *      abort path as `sailfin_runtime_raise_value_error`.
+     *
+     * Wire format: newline-delimited key:value text, NUL-free so the
+     * record survives Sailfin's NUL-terminated string read path.
+     * Documented next to the helper implementation in
+     * sailfin_runtime.c.
+     */
+    void sailfin_assert_fail(const char *file, int64_t line, int64_t col, const char *msg);
+
     // ---- Exceptions (native runtime minimal) ----
 
     // Exception state helpers (used by native lowering).

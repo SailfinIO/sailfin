@@ -102,51 +102,28 @@ _run_once() {
 
 _run_once
 
-# Retry policy. Three classes of transient failure justify a retry:
+# Retry policy. Issue #364 deleted the regex-classified retry that
+# matched on stdout patterns like "no such file or directory" /
+# "link failed" — those patterns are now redundant because the
+# structured assert-fail record (see
+# `runtime/native/src/sailfin_runtime.c:sailfin_assert_fail` and
+# `compiler/src/cli_commands.sfn:_consume_assert_failure_record`)
+# gives the runner an exit-code-driven failure path with typed
+# attribution; transient I/O flakes still surface as a non-zero
+# exit, but masking them via `case "$output"` regexes was hiding
+# real compile failures and producing flake-like behavior.
 #
-#   1. Signal-kill (137 OOM, 139 segfault) — transient under CI memory
-#      pressure. Original retry case.
-#   2. Transient compile-emit failures — exit 1 with telltale patterns
-#      indicating the compiler couldn't durably emit a capsule .ll
-#      file or clang couldn't find one at link time. These manifest
-#      under sustained memory/IO pressure during the seedcheck phase
-#      of `make check` after the seedcheck binary has just consumed
-#      ~5–10 minutes of resources building itself. Each test in
-#      isolation passes; the same test in the long sequential loop
-#      sometimes silently emits an empty/partial .ll that clang then
-#      can't link. This is the same class of flake that
-#      `scripts/build.sh` mitigates via `EMIT_RETRIES=3` for the seed
-#      compile path. The patterns we match here are I/O-shaped, not
-#      assertion-shaped, so we never mask real test-logic failures —
-#      a missing-effect or wrong-line assertion failure would bubble
-#      up as an `assertion failed` line that none of these patterns
-#      catch.
-#   3. Future: timeouts (124) — currently fail loud so we can spot
-#      genuine compile-time regressions instead of papering over
-#      them. Extend if/when needed.
-#
-# Override with SAILFIN_TEST_RETRY=0 to disable retries entirely
-# (useful for diagnosing flakes vs real failures during perf work).
-_should_retry_on_io_pressure() {
-    if [ "${SAILFIN_TEST_RETRY:-1}" = "0" ]; then return 1; fi
-    if [ $RC_INNER -ne 1 ]; then return 1; fi
-    case "$output" in
-        *"no such file or directory"*) return 0 ;;
-        *"link failed"*) return 0 ;;
-        *"fs.writeLines failed"*) return 0 ;;
-        *"capsule-resolver: failed to lower"*) return 0 ;;
-        *"empty llvm output"*) return 0 ;;
-        *"emit-llvm-file:"*) return 0 ;;
-    esac
-    return 1
-}
-
-if [ $RC_INNER -eq 137 ] || [ $RC_INNER -eq 139 ]; then
-    echo "[test] RETRY: $BASENAME (exit code $RC_INNER, retrying once)"
-    _run_once
-elif _should_retry_on_io_pressure; then
-    echo "[test] RETRY: $BASENAME (transient I/O-pressure failure, retrying once)"
-    _run_once
+# What stays: signal-kill retry (137 OOM, 139 segfault). These are
+# transient under sustained CI memory pressure during the
+# seedcheck phase of `make check`, and they don't depend on stdout
+# inspection. Override with SAILFIN_TEST_RETRY=0 to disable
+# retries entirely (useful when diagnosing flake vs real failure
+# during perf work).
+if [ "${SAILFIN_TEST_RETRY:-1}" != "0" ]; then
+    if [ $RC_INNER -eq 137 ] || [ $RC_INNER -eq 139 ]; then
+        echo "[test] RETRY: $BASENAME (exit code $RC_INNER, retrying once)"
+        _run_once
+    fi
 fi
 
 if [ $RC_INNER -ne 0 ]; then
@@ -169,28 +146,13 @@ if [ $RC_INNER -ne 0 ]; then
     exit 1
 fi
 
-# The binary must produce SOME output — a silent exit is not a pass
-if [ -z "$output" ]; then
-    echo "[test] FAIL: $BASENAME (no output — binary is non-functional)"
-    exit 1
-fi
-
-# Check for test pass indicators
-if grep -qiE "pass|ok|success" <<< "$output"; then
-    echo "[test] PASS: $BASENAME"
-    exit 0
-fi
-
-# If there's output but no pass indicator, check for explicit failures.
-# Use identifier-safe boundary matching to avoid false positives from
-# identifiers like "runtime_raise_value_error_fn" in debug trace output.
-# Avoids grep -P (PCRE) since BSD grep on macOS doesn't support it.
-if grep -qiE '(^|[^[:alnum:]_])(fail(ed|ure)?|error|panic|abort)([^[:alnum:]_]|$)' <<< "$output"; then
-    echo "[test] FAIL: $BASENAME"
-    echo "$output" | tail -5
-    exit 1
-fi
-
-# Output exists but no clear pass/fail — treat as pass (test ran without error)
+# Issue #364: pass/fail is decided by exit code alone. The previous
+# "grep stdout for fail|panic|error" heuristic produced false
+# positives whenever a test legitimately printed those words (e.g. a
+# test that prints the literal word "panic" as part of its
+# assertions about diagnostic output). The compiler now writes a
+# structured AssertFailure record on `assert false`, and the test
+# runner inside `compiler/src/cli_commands.sfn` reads it before
+# returning a non-zero exit code — so a clean exit IS a clean test.
 echo "[test] PASS: $BASENAME"
 exit 0

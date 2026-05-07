@@ -1,0 +1,40 @@
+// Issue #364: structured assertion-failure record round-trip.
+//
+// This test does NOT trigger an assertion failure itself — that
+// would crash the test process and short-circuit subsequent
+// assertions. It exists for two reasons:
+//
+//   1. Regression guard against the old grep heuristic in
+//      `scripts/run_native_test.sh` (lines 178-196 pre-#364): a
+//      test whose pass output contains the literal word "panic"
+//      must not be flagged as failing. The bash heuristic matched
+//      `(fail|error|panic|abort)` against stdout and would have
+//      tripped on this file's output below.
+//
+//   2. Smoke-test that the new lowering still type-checks and
+//      executes for an `assert true;` no-op call. The structured
+//      record path (sailfin_assert_fail) only fires when the
+//      condition is false; the typed sink (fd 3 / fail.bin) stays
+//      empty for passing asserts, which is exactly what the test
+//      runner's _consume_assert_failure_record relies on for the
+//      pass case.
+//
+// The negative path (a deliberately-failing test that *does*
+// produce a fail.bin record) is exercised by the smoke command
+// documented in the issue's verification block; running it here
+// would make this whole file fail and defeat the regression
+// guard.
+test "assert_fail_record: pass output containing the word panic is not flagged" {
+    let diagnostic_text = "panic: divide by zero (this is just a string, not a real panic)";
+    print(diagnostic_text);
+    print("error: another false-positive trigger word");
+    print("aborted: yet another");
+    print("operation failed: and one more");
+    assert diagnostic_text.length > 0;
+}
+
+test "assert_fail_record: passing asserts leave no record behind" {
+    assert 1 + 1 == 2;
+    assert "ok" == "ok";
+    assert true;
+}

@@ -162,6 +162,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_raise_value_error_fn", symbol: "sailfin_runtime_raise_value_error", return_type: "void", parameter_types: ["i8*"], effects: []
     });
+    // Issue #364: structured assertion failure record. The desugared
+    // `assert e;` lowering routes through this trampoline so the test
+    // runner can read a typed `(file, line, col, message)` record
+    // instead of grep'ping stdout for "fail|panic|error" matches.
+    // The trampoline takes Sailfin `number` (i.e. LLVM `double`) for
+    // line/col; it clamps + forwards to `sailfin_assert_fail` whose
+    // ABI matches the spec's `(*const u8, i64, i64, *const u8)`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime_assert_fail_fn", symbol: "runtime_assert_fail_fn", return_type: "void", parameter_types: ["i8*", "double", "double", "i8*"], effects: []
+    });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "runtime_is_string_fn", symbol: "sailfin_runtime_is_string", return_type: "i1", parameter_types: ["i8*"], effects: []
     });
