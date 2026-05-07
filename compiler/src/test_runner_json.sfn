@@ -1,0 +1,293 @@
+// compiler/src/test_runner_json.sfn
+//
+// JSON-line event emitters for `sfn test --json`. Pure module: no I/O,
+// no global state. The CLI orchestrator (`cli_commands.sfn`) is
+// responsible for writing the rendered strings to stdout, one event
+// per line.
+//
+// Wire format (jsonl, schema-versioned):
+//
+//   {"event":"start","total":N,"schema_version":1}
+//   {"event":"test","name":"...","file":"...","line":N,
+//    "status":"pass"|"fail"|"skip","duration_ms":N,"effects":[...],
+//    "assertion":{...}?}
+//   {"event":"summary","passed":N,"failed":N,"skipped":N,"duration_ms":N}
+//
+// Issue #368 (P6 — sfn test --json event stream).
+//
+// Schema version policy: bump `TEST_RUNNER_JSON_SCHEMA_VERSION` on any
+// breaking change to the wire format. Consumers SHOULD refuse to
+// process unknown versions rather than try to compatibilize. New
+// optional fields can be added without a bump because consumers ignore
+// unknown keys; new event kinds, removed fields, or repurposed field
+// types are breaking.
+//
+// `AssertFailure` is the typed shape from `assert_failure.sfn`
+// (issue #364). Both this module and the human-readable test runner
+// (in `cli_commands.sfn`) consume it without copying — keep its
+// definition in `assert_failure.sfn`.
+import { AssertFailure } from "./assert_failure";
+import { Program, SourceSpan, Statement } from "./ast";
+import { substring } from "./string_utils";
+
+// Bumped only on a breaking change to any of the three event shapes.
+// Consumers (the planned MCP `sailfin_test_runner` tool, CI scrapers,
+// the `assert_compiles` integration) hard-fail on unknown values.
+let TEST_RUNNER_JSON_SCHEMA_VERSION: number = 1;
+
+// One test entry collected from a parsed source file. Populated by
+// `collect_test_entries` before the test binary runs so the runner
+// can emit per-test events even when the binary aborts mid-suite
+// (a failing `assert e;` kills the whole test process).
+struct TestEntry {
+    name: string;
+    file: string;
+    line: number;
+    effects: string[];
+}
+
+fn _trj_empty_effects() -> string[] {
+    let out: string[] = [];
+    return out;
+}
+
+fn _trj_make_test_entry(name: string, file: string, line: number, effects: string[]) -> TestEntry {
+    return TestEntry {
+        name: name,
+        file: file,
+        line: line,
+        effects: effects
+    };
+}
+
+// -------------------------------------------------------------------
+// Primitive JSON encoders
+// -------------------------------------------------------------------
+// Mirrors `diagnostics_json.sfn`'s escaper: same six escapes
+// (`\"`, `\\`, `\n`, `\r`, `\t`) plus a literal-passthrough for
+// everything else. Test names and effect labels are ASCII-clean by
+// the lexer, so a minimal escaper is sufficient.
+fn _trj_escape_string(s: string) -> string {
+    let mut out: string = "";
+    let mut i: number = 0;
+    loop {
+        if i >= s.length { break; }
+        let ch = substring(s, i, i + 1);
+        if ch == "\"" { out = out + "\\\""; } else if ch == "\\" {
+            out = out + "\\\\";
+        } else if ch == "\n" { out = out + "\\n"; } else if ch == "\r" {
+            out = out + "\\r";
+        } else if ch == "\t" { out = out + "\\t"; } else { out = out + ch; }
+        i += 1;
+    }
+    return out;
+}
+
+fn _trj_quote(s: string) -> string {
+    return "\"" + _trj_escape_string(s) + "\"";
+}
+
+fn _trj_field(name: string, value: string) -> string {
+    return _trj_quote(name) + ":" + value;
+}
+
+fn _trj_string_field(name: string, value: string) -> string {
+    return _trj_field(name, _trj_quote(value));
+}
+
+fn _trj_number_field(name: string, value: number) -> string {
+    return _trj_field(name, _trj_number_to_string(value));
+}
+
+// Local copy of `number_to_string` to keep this module pure (no `main`
+// dependency). Same algorithm as `diagnostics_json.sfn`'s
+// `_dj_number_to_string`.
+fn _trj_number_to_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let mut working: number = value;
+    let mut negative: boolean = false;
+    if working < 0 {
+        negative = true;
+        working = 0 - working;
+    }
+    let digits = "0123456789";
+    let mut remaining: number = working;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    if negative { output = "-" + output; }
+    return output;
+}
+
+fn _trj_join(parts: string[], sep: string) -> string {
+    if parts.length == 0 { return ""; }
+    let mut out = parts[0];
+    let mut i: number = 1;
+    loop {
+        if i >= parts.length { break; }
+        out = out + sep + parts[i];
+        i += 1;
+    }
+    return out;
+}
+
+fn _trj_render_string_array(values: string[]) -> string {
+    if values.length == 0 { return "[]"; }
+    let mut parts: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= values.length { break; }
+        parts.push(_trj_quote(values[i]));
+        i += 1;
+    }
+    return "[" + _trj_join(parts, ",") + "]";
+}
+
+// -------------------------------------------------------------------
+// AssertFailure → JSON object
+// -------------------------------------------------------------------
+// Render `AssertFailure` as the inner `assertion` object. Field order
+// is stable so golden-file tests stay diff-clean even though jsonl
+// semantics don't require it. The runner only attaches this object
+// when `failure.present` is true; the encoder itself is total and
+// ignores `present`.
+fn render_assert_failure_json(failure: AssertFailure) -> string {
+    let mut parts: string[] = [];
+    parts.push(_trj_string_field("file", failure.file));
+    parts.push(_trj_number_field("line", failure.line));
+    parts.push(_trj_number_field("col", failure.col));
+    parts.push(_trj_string_field("message", failure.message));
+    return "{" + _trj_join(parts, ",") + "}";
+}
+
+// -------------------------------------------------------------------
+// Top-level event emitters
+// -------------------------------------------------------------------
+// First line of a `sfn test --json` run. Emitted exactly once,
+// before any `test` event. `total` is the count of test declarations
+// across every file the runner will execute; consumers use it to
+// drive a progress bar without buffering the whole stream.
+fn render_start_event(total: number) -> string {
+    let mut parts: string[] = [];
+    parts.push(_trj_string_field("event", "start"));
+    parts.push(_trj_number_field("total", total));
+    parts.push(_trj_number_field("schema_version", TEST_RUNNER_JSON_SCHEMA_VERSION));
+    return "{" + _trj_join(parts, ",") + "}";
+}
+
+// One per test. `status` is `"pass"`, `"fail"`, or `"skip"`. The
+// optional `assertion` object is attached when `failure.present` is
+// true; the runner currently sets it only on the failing test (the
+// process aborts on the first failure, so per-test attribution past
+// that point is "skip" with no assertion). `duration_ms` is the
+// wall-clock time the runner observed for this test; for tests that
+// share a file's binary process, the per-test slice is approximated
+// by even-distribution of the file's run time over its tests. See
+// the spec for the full schema.
+fn render_test_event(name: string, file: string, line: number, status: string, duration_ms: number, effects: string[], failure: AssertFailure) -> string {
+    let mut parts: string[] = [];
+    parts.push(_trj_string_field("event", "test"));
+    parts.push(_trj_string_field("name", name));
+    parts.push(_trj_string_field("file", file));
+    parts.push(_trj_number_field("line", line));
+    parts.push(_trj_string_field("status", status));
+    parts.push(_trj_number_field("duration_ms", duration_ms));
+    parts.push(_trj_field("effects", _trj_render_string_array(effects)));
+    if failure.present {
+        parts.push(_trj_field("assertion", render_assert_failure_json(failure)));
+    }
+    return "{" + _trj_join(parts, ",") + "}";
+}
+
+// Final line of a `sfn test --json` run. Emitted exactly once, after
+// the last `test` event. `duration_ms` is the wall-clock time of the
+// whole runner invocation.
+fn render_summary_event(passed: number, failed: number, skipped: number, duration_ms: number) -> string {
+    let mut parts: string[] = [];
+    parts.push(_trj_string_field("event", "summary"));
+    parts.push(_trj_number_field("passed", passed));
+    parts.push(_trj_number_field("failed", failed));
+    parts.push(_trj_number_field("skipped", skipped));
+    parts.push(_trj_number_field("duration_ms", duration_ms));
+    return "{" + _trj_join(parts, ",") + "}";
+}
+
+// -------------------------------------------------------------------
+// Pre-run parse pass: collect test names + spans
+// -------------------------------------------------------------------
+// Walk a parsed `Program` and pick out each `TestDeclaration` in
+// source order. The runner uses this ahead of compilation so it can
+// emit per-test events even when the test binary aborts mid-suite,
+// and so the `start` event's `total` count is exact rather than an
+// estimate. Returns an empty array if `program.statements` contains
+// no test declarations (the runner should still emit a summary in
+// that case).
+fn collect_test_entries(program: Program, file_path: string) -> TestEntry[] {
+    let mut out: TestEntry[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let stmt = program.statements[i];
+        if stmt.variant == "TestDeclaration" {
+            let mut line: number = 0;
+            if stmt.name_span != null {
+                let span: SourceSpan? = stmt.name_span;
+                line = span.start_line;
+            }
+            out.push(_trj_make_test_entry(stmt.name, file_path, line, stmt.effects));
+        }
+        i += 1;
+    }
+    return out;
+}
+
+// Map an assertion failure record back to a test in this file. The
+// record's `line` field is the assert statement's source line; pick
+// the test whose `line` is the largest line ≤ failure.line (i.e. the
+// closest preceding test in source order). Returns `-1` when the
+// failure record is absent or when no test precedes the recorded
+// line — the runner falls back to treating the first not-yet-passed
+// test as the failing one in those cases.
+fn locate_failing_test(entries: TestEntry[], failure: AssertFailure) -> number {
+    if !failure.present { return -1; }
+    if failure.line <= 0 { return -1; }
+    let mut best_index: number = -1;
+    let mut best_line: number = -1;
+    let mut i: number = 0;
+    loop {
+        if i >= entries.length { break; }
+        let entry_line = entries[i].line;
+        if entry_line > 0 {
+            if entry_line <= failure.line {
+                if entry_line > best_line {
+                    best_line = entry_line;
+                    best_index = i;
+                }
+            }
+        }
+        i += 1;
+    }
+    return best_index;
+}
+
+export {
+    TEST_RUNNER_JSON_SCHEMA_VERSION,
+    TestEntry,
+    collect_test_entries,
+    locate_failing_test,
+    render_assert_failure_json,
+    render_start_event,
+    render_summary_event,
+    render_test_event
+};
