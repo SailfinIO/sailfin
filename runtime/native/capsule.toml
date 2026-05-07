@@ -32,18 +32,33 @@ kind = "runtime"
 # against this exact manifest text guards the format.
 c-sources = ["src/sailfin_arena.c", "src/sailfin_runtime.c", "src/sailfin_sha256.c", "src/sailfin_base64.c", "src/native_driver.c"]
 ll-sources = ["ir/runtime_globals.ll"]
-# `sfn-sources` is the schema slot for Sailfin runtime modules
-# (`runtime/sfn/*.sfn`) compiled and linked alongside the C
-# sources above. The TOML getter and resolver field both ship
-# in this PR, but **no consumer is wired up yet** — link-time
-# subprocess-spawn-and-emit of runtime modules requires
-# build-system work that is out of scope here (see issue #308's
-# IPC-isolation track). The field is intentionally absent from
-# the active manifest so a reader does not infer that
-# `runtime/sfn/io.sfn` and `runtime/sfn/clock.sfn` are linked
-# into compiled binaries today — they are not. The follow-up
-# PR that lands the link infrastructure will populate this
-# array; this PR only ships the schema scaffolding.
+# `sfn-sources` lists Sailfin runtime modules compiled and
+# linked alongside the C sources above. M2.1 (#394) populates
+# this with the first proof-of-life module: a Sailfin-defined
+# arena allocator whose `sfn_arena_sfn_*` exports coexist with
+# the C arena's `sfn_arena_*` exports (see
+# `runtime/sfn/memory/arena.sfn` for the naming rationale).
+#
+# Two consumers honor this list:
+#   1. `_compile_runtime_sfn_sources` in `compiler/src/cli_main.sfn`
+#      — the Stage D PR2 link path used by `sfn build` against a
+#      project that declares `[dependencies] "sfn/runtime-native"`.
+#      That consumer became live with this PR; the regression test
+#      lives at
+#      `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`.
+#   2. `scripts/build.sh`'s `RUNTIME_SFN_ALLOW` allowlist — the
+#      `make compile` path. It does NOT read this manifest today
+#      (that wait until Stage D PR4 retires the build-script
+#      branch), but its allowlist is intentionally kept in lockstep
+#      with this `sfn-sources` array so the two paths stay honest
+#      about the same module list. A drift between the two surfaces
+#      as a `make check` failure: the seedcheck binary built by
+#      `sfn build` would link a different set of runtime modules
+#      than the first-pass binary built by `scripts/build.sh`,
+#      breaking byte-identical determinism.
+#
+# Single-line array per the parser limitation noted above.
+sfn-sources = ["../sfn/memory/arena.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 

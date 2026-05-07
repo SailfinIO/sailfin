@@ -445,23 +445,46 @@ if [[ "$IS_WORKER" -eq 0 ]]; then
     while IFS= read -r -d '' f; do
         SOURCES+=("$f")
     done < <(find "$COMPILER_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)
-    # Enumerate runtime/*.sfn but EXCLUDE runtime/sfn/ — those
-    # modules (runtime/sfn/clock.sfn, runtime/sfn/io.sfn,
-    # runtime/sfn/platform/*.sfn) are intended for the new
-    # `kind = "runtime"` capsule's `sfn-sources` link path which
-    # this script does not implement. Including them here causes
-    # duplicate-symbol conflicts with the C runtime's trampolines
-    # (e.g. `_sfn_sleep` defined in both `sailfin_runtime.c` and
-    # the `clock.sfn`-derived `native.linked.o`). Skipped per the
-    # sleep migration's architect note: build.sh ships only the
-    # legacy enumerate-everything bootstrap; the new sfn-sources
-    # consumer lands in PR 2 along with link-time isolation
-    # (issue #308). The exclude is exact-prefix, so individual
-    # files can still be added back to the explicit SOURCES list
-    # if a future refactor needs them.
+    # Enumerate runtime/*.sfn but EXCLUDE most of runtime/sfn/ —
+    # modules like `runtime/sfn/clock.sfn` and `runtime/sfn/io.sfn`
+    # are dormant typecheck skeletons whose function bodies would
+    # collide with C runtime trampolines at link time (e.g.
+    # `clock.sfn`'s `fn sfn_sleep` vs. `sailfin_runtime.c`'s
+    # `sfn_sleep`).
+    #
+    # The `RUNTIME_SFN_ALLOW` allowlist below is the active link
+    # path for #394 (M2.1+M2.2): files listed here flow through
+    # the same emit→.ll→.o→llvm-link pipeline as
+    # `compiler/src/*.sfn`, picking up the new
+    # `runtime/sfn/memory/arena.sfn` Sailfin arena module
+    # alongside the C arena. Names in this module use the
+    # `sfn_arena_sfn_*` namespace (see the file header) so the
+    # link does not collide with C exports. Stage D PR4 retires
+    # this allowlist in favor of `_compile_runtime_sfn_sources`
+    # in `compiler/src/cli_main.sfn:521` — until that lands, this
+    # is the load-bearing wiring for `make compile`.
+    #
+    # Add to this list only after confirming the file (a) has no
+    # symbol-name collisions with `runtime/native/src/*.c` exports
+    # and (b) self-contains its `extern fn` declarations or
+    # imports only from files already in the list.
+    RUNTIME_SFN_ALLOW=(
+        "$RUNTIME_SRC/sfn/memory/arena.sfn"
+    )
     while IFS= read -r -d '' f; do
         case "$f" in
-            "$RUNTIME_SRC"/sfn/*) continue ;;
+            "$RUNTIME_SRC"/sfn/*)
+                keep=0
+                for allowed in "${RUNTIME_SFN_ALLOW[@]}"; do
+                    if [[ "$f" == "$allowed" ]]; then
+                        keep=1
+                        break
+                    fi
+                done
+                if [[ "$keep" -eq 0 ]]; then
+                    continue
+                fi
+                ;;
         esac
         SOURCES+=("$f")
     done < <(find "$RUNTIME_SRC" -name '*.sfn' -print0 | LC_ALL=C sort -z)

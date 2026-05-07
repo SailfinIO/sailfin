@@ -57,17 +57,30 @@
 >     children via `sh -c "VAR= <self> emit ..."` so child env
 >     is explicit. Dormant — manifest population + C trampoline
 >     removal happen in PR B of the sleep migration.
-> - **`kind = "runtime"` capsules gain `sfn-sources` schema field
->   (dormant in this PR).** TOML getter
->   (`toml_get_sfn_sources`), `RuntimeCapsuleArtifacts.sfn_sources`
->   field on the resolver, and `_rcr_normalize_path` for canonical
->   path output all ship. **No consumer is wired up yet** — the
->   active `runtime/native/capsule.toml` does NOT populate the
->   field; that lands when PR 2 introduces the link-time compile
->   infrastructure. Schema unit tests in
->   `compiler/tests/unit/runtime_capsule_resolver_test.sfn` pin the
->   shape so the dormant scaffolding is regression-tested even
->   without an end-to-end consumer.
+> - **`kind = "runtime"` capsules' `sfn-sources` schema is now
+>   live (M2.1+M2.2, issue #394, 2026-05-07).** The active
+>   `runtime/native/capsule.toml` populates `sfn-sources =
+>   ["../sfn/memory/arena.sfn"]` — the first proof-of-life entry.
+>   `_compile_runtime_sfn_sources` (the consumer shipped dormant
+>   in #308) fires on every `sfn build -p compiler` invocation,
+>   producing `build/sailfin/sfn__runtime-native__arena.sfn-O2.o`
+>   and threading it into the final link. The Sailfin module
+>   exports `sfn_arena_sfn_*` symbols that coexist with the C
+>   arena's `sfn_arena_*` exports — both link side-by-side until
+>   M3 retires `runtime/native/src/sailfin_arena.c`.
+>   `scripts/build.sh`'s `RUNTIME_SFN_ALLOW` allowlist mirrors
+>   the manifest entry so `make check`'s stage2/stage3 fixed-
+>   point binaries link the same module set; that allowlist
+>   retires when `make check` migrates to `sfn build` (Stage E
+>   PR3+). Pinned by
+>   `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`
+>   (synthetic-workspace consumer-fires test, dormant-era
+>   regression),
+>   `compiler/tests/e2e/test_runtime_sfn_sources_active.sh`
+>   (production-binary `nm` audit + manifest/allowlist drift
+>   check), and
+>   `compiler/tests/e2e/test_runtime_memory_arena.sh`
+>   (per-export typecheck/fmt/IR shape).
 > - **M0.5 arena-in-C — shipped, default-on** (`runtime/native/src/sailfin_arena.c`,
 >   PR #252 + Phase 5a mark/rewind PR #251).
 > - **Effect enforcement gate — shipped** (Phases A–F, PRs #241–#245). Effect

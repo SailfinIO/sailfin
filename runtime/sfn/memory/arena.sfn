@@ -1,0 +1,109 @@
+// runtime/sfn/memory/arena.sfn
+//
+// First Sailfin-native runtime module shipped into the
+// `build/native/sailfin` binary alongside the C arena. M2.1
+// proof-of-life per `docs/runtime_architecture.md` §2.1.1 and
+// issue #394 (epic #389).
+//
+// Status: stub bodies that delegate to libc `malloc` / `free` /
+// `realloc`. M3 replaces the bodies with a real page-chain bump
+// allocator (architect plan in #389 M2.2 / `runtime_architecture.md`
+// §2.1.1). Until then this module exists to prove the new
+// runtime/sfn/* link path:
+//
+//   - `runtime/sfn/memory/arena.sfn` compiles to a `.o` and
+//     links into the compiler binary via `scripts/build.sh`'s
+//     allowlist (and via `_compile_runtime_sfn_sources` in
+//     `compiler/src/cli_main.sfn:521` once `make compile`
+//     migrates to `sfn build` at Stage D PR4 — that's why
+//     `runtime/native/capsule.toml`'s `sfn-sources` is also
+//     populated with this file: it keeps the two source-of-truth
+//     paths honest about the same module list).
+//   - The Sailfin-emitted `sfn_arena_sfn_*` symbol family
+//     coexists with the C arena's matching `sfn_arena_*` exports
+//     (no link-time collision). Both arenas are linked into
+//     every compiler binary; the C arena remains the production
+//     allocator until M3 retires `runtime/native/src/sailfin_arena.c`.
+//
+// Naming: the `_sfn_` infix distinguishes this module's exports
+// from the C arena's API (`sfn_arena_create` vs.
+// `sfn_arena_sfn_create`). Both name families share the
+// `sfn_arena*` prefix so the issue's `nm | grep sfn_arena`
+// audit matches both, while `nm | grep sfn_arena_sfn_` is
+// the specific marker that proves THIS module shipped (and is
+// the assertion in `compiler/tests/e2e/test_runtime_sfn_sources_active.sh`).
+//
+// At M3 the cutover plan flips the C arena's `sfn_arena_*`
+// symbols to `static` (file-local) and replaces the bodies here
+// with the real page-chain implementation; a thin C trampoline
+// then bridges legacy callers. That migration is one PR with a
+// single rollback path because the namespace is already stable.
+//
+// Effects: none. Memory primitives live below the I/O layer
+// (same discipline as `runtime/sfn/platform/libc.sfn`). The
+// `![io]` / `![clock]` annotations attach to *adapters* that
+// wrap these primitives, never to the primitives themselves.
+//
+// Why not `import { malloc, free, realloc } from
+// "../platform/libc"`? The seed compiler shipped with this PR
+// (0.5.10-alpha.8) predates the typechecker's `float` accept-
+// list relaxation (HEAD's `compiler/src/typecheck_types.sfn:618`)
+// and rejects `runtime/sfn/platform/libc.sfn`'s
+// `sailfin_runtime_sleep(milliseconds: float)` declaration with
+// E0805 the moment any module imports from that file. Inlining
+// the three libc declarations we need keeps this module
+// self-contained for the seed's typechecker. Once the seed
+// catches up post-merge, a follow-up PR can flip these to a
+// cross-module import without touching the bodies.
+extern fn malloc(size: usize) -> * u8;
+
+extern fn free(ptr: * u8) -> void;
+
+extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
+
+// `sfn_arena_sfn_create(default_page_size)` returns an opaque
+// arena handle. M2.1 stub allocates a single libc heap block of
+// the requested size; M3 replaces this with a real ArenaPage
+// chain per `runtime_architecture.md` §2.1.1.
+//
+// `default_page_size = 0` is documented in §2.1.1 as "use the
+// implementation default" — the M0.5 C arena picks 1 MiB. The
+// stub forwards the literal request to `malloc`; a 0-byte
+// request yields a non-null pointer per ISO C, which the
+// destroy stub `free`s safely. The size policy is irrelevant
+// until M3 lands the real allocator.
+fn sfn_arena_sfn_create(default_page_size: usize) -> * u8 {
+    return malloc(default_page_size);
+}
+
+// `sfn_arena_sfn_alloc(arena, size, align)` is the bump
+// allocation primitive. M2.1 stub forwards `size` to `malloc`
+// and ignores `arena` / `align` — the real page-chain version
+// (M3) honors `align` via the `_align_up` helper from
+// `runtime/native/src/sailfin_arena.c:19`. Per the v0 C-ABI
+// accept-list, `align` rides as `usize`.
+fn sfn_arena_sfn_alloc(arena: * u8, size: usize, align: usize) -> * u8 {
+    return malloc(size);
+}
+
+// `sfn_arena_sfn_reset(arena)` resets all pages to `used = 0`
+// without freeing backing memory. M2.1 stub is a no-op because
+// the libc-backed allocator owns no per-allocation metadata to
+// reset. M3 walks the page list per `sailfin_arena.c:80`.
+fn sfn_arena_sfn_reset(arena: * u8) -> void { }
+
+// `sfn_arena_sfn_destroy(arena)` releases the arena and every
+// backing page. M2.1 stub forwards to libc `free`; M3 walks the
+// page list and frees each page before the arena struct itself
+// (`sailfin_arena.c:126`).
+fn sfn_arena_sfn_destroy(arena: * u8) -> void { free(arena); }
+
+// `sfn_arena_sfn_realloc(arena, ptr, old_size, new_size, align)`
+// is the grow-if-at-tip realloc optimized for the
+// `string_append` hot path (`runtime_architecture.md` §2.1.1).
+// M2.1 stub delegates to libc `realloc` — `old_size` and
+// `align` are unused at this stage. M3 implements the real
+// tip-grow logic (`sailfin_arena.c:208`).
+fn sfn_arena_sfn_realloc(arena: * u8, ptr: * u8, old_size: usize, new_size: usize, align: usize) -> * u8 {
+    return realloc(ptr, new_size);
+}
