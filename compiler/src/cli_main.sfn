@@ -672,9 +672,12 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         return 1;
     }
 
-    // Cache runtime compilation products under build/sailfin.
-    _ensure_dir("build");
-    _ensure_dir("build/sailfin");
+    // Cache runtime compilation products under `cache_dir`. With the
+    // legacy default this is `build/sailfin/`; with `--work-dir <DIR>`
+    // it is `<DIR>/sailfin/`. `mkdir -p` already creates intermediate
+    // dirs, so a single `_ensure_dir(cache_dir)` covers both cases —
+    // unconditionally creating `./build/` here would leak an empty
+    // directory into CWD when a virtualized work-dir was requested.
     _ensure_dir(cache_dir);
 
     // Stage D PR2 routing: when the resolver surfaced runtime
@@ -1369,6 +1372,16 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             _ensure_dir(work_dir);
         }
         _ensure_dir(sailfin_cache_dir);
+        // Make sure the parent dir of the resolved `out_path` exists
+        // before clang writes the binary / object. With
+        // `--work-dir <DIR>` the default binary lands at
+        // `<DIR>/native/sailfin`, but the only call site that creates
+        // `<DIR>/native/` is `stage_capsule_imports` — which
+        // `prepare_project_capsules` skips when the project has no
+        // capsule deps. Ensure unconditionally so positional builds
+        // (no deps) also succeed.
+        let out_parent = _dirname(out_path);
+        if out_parent.length > 0 { _ensure_dir(out_parent); }
 
         // Resolve and compile any capsule deps declared in the project's
         // capsule.toml before compiling the main source. stage_capsule_imports
