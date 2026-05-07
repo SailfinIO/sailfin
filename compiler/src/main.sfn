@@ -502,9 +502,11 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
     if native_text.length == 0 {
         print.err("emit-llvm-file: empty native output for module "
             + module_name);
+        // Drop any stale `.ll` from a previous build so downstream tooling
+        // that only stats `out_path` cannot mistake it for fresh output.
+        if fs.exists(out_path) { fs.deleteFile(out_path); }
         return false;
     }
-    if fs.exists(out_path) { fs.deleteFile(out_path); }
     return write_llvm_ir_from_native_text(native_text, module_name, out_path);
 }
 
