@@ -94,8 +94,10 @@ test_compiler_binary_exports_sfn_arena_sfn() {
         # Anchored on whitespace + symbol-end so a substring
         # collision (e.g. a hypothetical
         # `sfn_arena_sfn_create_helper`) does not satisfy the
-        # check.
-        if ! echo "$nm_log" | grep -qE "[[:space:]]${sym}\$"; then
+        # check. Here-string instead of `echo | grep` so
+        # `set -o pipefail` does not turn `grep -q`'s early exit
+        # into a SIGPIPE-induced false negative.
+        if ! grep -qE "[[:space:]]${sym}\$" <<< "$nm_log"; then
             echo "[test]   compiler binary missing Sailfin export: $sym"
             missing=$((missing + 1))
         fi
@@ -116,7 +118,7 @@ test_compiler_binary_keeps_c_arena_exports() {
     nm_log="$(nm "$BINARY" 2>/dev/null || true)"
     local missing=0
     for sym in sfn_arena_create sfn_arena_alloc sfn_arena_reset sfn_arena_destroy sfn_arena_realloc; do
-        if ! echo "$nm_log" | grep -qE "[[:space:]]${sym}\$"; then
+        if ! grep -qE "[[:space:]]${sym}\$" <<< "$nm_log"; then
             echo "[test]   compiler binary missing C arena export: $sym"
             missing=$((missing + 1))
         fi
@@ -135,7 +137,7 @@ test_nm_grep_sfn_arena_spec_names() {
     # one keeping these specific names.
     local nm_log
     nm_log="$(nm "$BINARY" 2>/dev/null || true)"
-    if ! echo "$nm_log" | grep -q "sfn_arena_alloc"; then
+    if ! grep -q "sfn_arena_alloc" <<< "$nm_log"; then
         echo "[test]   nm | grep sfn_arena_alloc matched no symbols"
         return 1
     fi
