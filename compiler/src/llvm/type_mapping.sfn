@@ -259,12 +259,17 @@ fn layout_annotation_represents_user_value(annotation: string) -> boolean {
 // =============================================================================
 // Array Type Helpers
 // =============================================================================
+// M1.B (#393): array struct shape is the {T*, i64, i64} aggregate
+// (data, len, cap). Cap is exposed inline so push/append paths can
+// grow the buffer in place without consulting the legacy hidden
+// header. See docs/runtime_architecture.md §2.3 and the v2 runtime
+// helpers in runtime/native/src/sailfin_runtime.c.
 fn array_struct_type_for_element(element_type: string) -> string {
-    return "{ " + element_type + "*, i64 }";
+    return "{ " + element_type + "*, i64, i64 }";
 }
 
 fn array_pointer_type_for_element(element_type: string) -> string {
-    return "{ " + element_type + "*, i64 }*";
+    return "{ " + element_type + "*, i64, i64 }*";
 }
 
 // =============================================================================
