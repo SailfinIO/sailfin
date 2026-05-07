@@ -41,4 +41,24 @@ fn is_canonical_effect(name: string) -> boolean {
     return false;
 }
 
-export { canonical_effects, is_canonical_effect };
+// `pure` is a sentinel meaning "this routine declares no effects" —
+// always allowed regardless of the capsule's capability surface, and
+// never satisfies a real effect requirement. Documented in the test-
+// infrastructure proposal
+// (`docs/proposals/test-infra-epic/01-preconditions.md` §P3) as the
+// annotation `![pure]` for `pure_assert_*` matchers and pure tests.
+//
+// Distinct from the canonical taxonomy: `pure` is not a capability the
+// capsule manifest can grant or deny; it's a no-op marker that makes
+// the empty effect set explicit at the call site. Adding it to
+// `canonical_effects()` would conflate the two concepts and break the
+// 1.0 lock on the canonical six.
+fn is_universally_allowed_effect(name: string) -> boolean {
+    return name == "pure";
+}
+
+export {
+    canonical_effects,
+    is_canonical_effect,
+    is_universally_allowed_effect
+};

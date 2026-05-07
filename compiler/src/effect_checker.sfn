@@ -46,6 +46,7 @@ import {
     localize_import_symbols_for_program,
     lookup_imported_function
 } from "./effect_imports";
+import { is_universally_allowed_effect } from "./effect_taxonomy";
 import { substring } from "./string_utils";
 import { Token, TokenKind } from "./token";
 
@@ -266,6 +267,15 @@ fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, cap
     loop {
         if i >= signature.effects.length { break; }
         let effect = signature.effects[i];
+        // `pure` is a sentinel for "explicitly empty effect set" — it
+        // never appears in the capsule capability surface but is
+        // always allowed on a function or test signature. See
+        // `effect_taxonomy.is_universally_allowed_effect` for the
+        // rationale (proposal: docs/proposals/test-infra-epic §P3).
+        if is_universally_allowed_effect(effect) {
+            i += 1;
+            continue;
+        }
         if !contains_effect(capabilities, effect) {
             excess = append_unique_effect(excess, effect);
         }
