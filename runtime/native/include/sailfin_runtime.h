@@ -19,6 +19,17 @@ extern "C"
         int64_t len;
     } SailfinPtrArray;
 
+    // Matches LLVM `{ i8*, i64 }` — the M1 ABI shape for SfnString
+    // (UTF-8 bytes + byte length). See docs/runtime_architecture.md §2.2.1.
+    // M1.A locks the call-boundary shape; bodies still treat the data
+    // pointer as NUL-terminated until M2.4 ships length-aware C bodies
+    // (or the Sailfin-native runtime port replaces them entirely).
+    typedef struct SfnString
+    {
+        char *data;
+        int64_t len;
+    } SfnString;
+
     // ---- Core helpers (minimal set) ----
 
     void sailfin_runtime_mark_persistent(char *ptr);
@@ -67,7 +78,21 @@ extern "C"
     int64_t sailfin_runtime_string_length(char *text);
     // `end` is an absolute index (like Python slicing), not a length.
     char *sailfin_runtime_substring(char *text, int64_t start, int64_t end);
+    // Legacy NUL-terminated entrypoint. Kept exported so seed-compiled
+    // IR (which still emits `call i8* @sailfin_runtime_string_concat(i8*, i8*)`)
+    // continues to link during the 2-pass self-host build. New compiler
+    // output routes through `sailfin_runtime_string_concat_v2` below.
     char *sailfin_runtime_string_concat(char *a, char *b);
+
+    // M1.A: takes the SfnString aggregate ABI by value. Body extracts
+    // `a.data` / `b.data` and forwards to the legacy NUL-terminated
+    // implementation until M2.4 rewrites for length-aware concat. Return
+    // type stays `char*` (legacy NUL-terminated heap buffer) —
+    // string-typed locals don't flip to aggregate until M1.A.2. The
+    // suffix lets the legacy entrypoint above stay link-stable while the
+    // seed bumps catch up; once the floor seed knows the new ABI the
+    // suffix can retire.
+    char *sailfin_runtime_string_concat_v2(SfnString a, SfnString b);
     // Append suffix to buf in-place (realloc). buf is consumed (ownership
     // transferred); suffix is borrowed. Only emitted by the compiler when buf
     // is a provably-unaliased intermediate from a prior concat/append.

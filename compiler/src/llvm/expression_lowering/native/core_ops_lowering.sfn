@@ -301,117 +301,55 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         let rhs = right_result.operand;
         let lhs_type = trim_text(lhs.llvm_type);
         let rhs_type = trim_text(rhs.llvm_type);
-        if lhs_type == "i8*" {
-            if rhs_type == "i8*" {
-                let mut current_lines = right_result.lines;
-                let mut current_temp = right_result.temp_index;
-                let concat_name = format_temp_name(current_temp);
-                current_temp += 1;
-                current_lines.push("  " + concat_name
-                    + " = call i8* @sailfin_runtime_string_concat(i8* "
-                    + lhs.value
-                    + ", i8* "
-                    + rhs.value
-                    + ")");
-                let operand = LLVMOperand {
-                    llvm_type: "i8*",
-                    value: concat_name
-                };
-                return ExpressionResult {
-                    lines: current_lines,
-                    temp_index: current_temp,
-                    operand: operand,
-                    diagnostics: diagnostics,
-                    string_constants: string_constants
-                };
-            }
+
+        // M1.A: unified string-concat path. Any combination of string-shaped
+        // (`i8*` or `{i8*, i64}`) and byte-shaped (`i8`, treated as a single
+        // codepoint stringification target) operands route through one
+        // emission that:
+        //   1. coerces each side to `i8*` first (handles i8 → i8*
+        //      stringification through the existing numeric-stringify path),
+        //   2. coerces each `i8*` to the `{i8*, i64}` aggregate via the
+        //      shim in `core_operands.sfn` (recovers length via strlen),
+        //   3. emits `call i8* @sailfin_runtime_string_concat_v2({i8*, i64}, {i8*, i64})`
+        //      against the locked M1.A registry signature.
+        // i8+i8 and any-side-is-string both fall through here.
+        let mut lhs_is_string_or_byte: boolean = false;
+        if lhs_type == "i8*" { lhs_is_string_or_byte = true; }
+        if lhs_type == "{i8*, i64}" { lhs_is_string_or_byte = true; }
+        if lhs_type == "i8" { lhs_is_string_or_byte = true; }
+        let mut rhs_is_string_or_byte: boolean = false;
+        if rhs_type == "i8*" { rhs_is_string_or_byte = true; }
+        if rhs_type == "{i8*, i64}" { rhs_is_string_or_byte = true; }
+        if rhs_type == "i8" { rhs_is_string_or_byte = true; }
+        let mut lhs_is_string_shape: boolean = false;
+        if lhs_type == "i8*" { lhs_is_string_shape = true; }
+        if lhs_type == "{i8*, i64}" { lhs_is_string_shape = true; }
+        let mut rhs_is_string_shape: boolean = false;
+        if rhs_type == "i8*" { rhs_is_string_shape = true; }
+        if rhs_type == "{i8*, i64}" { rhs_is_string_shape = true; }
+
+        let mut should_concat: boolean = false;
+        if lhs_is_string_shape {
+            if rhs_is_string_or_byte { should_concat = true; }
         }
-        if lhs_type == "i8*" {
-            if rhs_type == "i8" {
-                let mut current_lines = right_result.lines;
-                let mut current_temp = right_result.temp_index;
-                let coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
-                diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
-                current_lines = coerced.lines;
-                current_temp = coerced.temp_index;
-                if coerced.operand == null {
-                    return ExpressionResult {
-                        lines: current_lines,
-                        temp_index: current_temp,
-                        operand: null,
-                        diagnostics: diagnostics,
-                        string_constants: string_constants
-                    };
-                }
-
-                let concat_name = format_temp_name(current_temp);
-                current_temp += 1;
-                current_lines.push("  " + concat_name
-                    + " = call i8* @sailfin_runtime_string_concat(i8* "
-                    + lhs.value
-                    + ", i8* "
-                    + coerced.operand.value
-                    + ")");
-
-                let operand = LLVMOperand {
-                    llvm_type: "i8*",
-                    value: concat_name
-                };
-                return ExpressionResult {
-                    lines: current_lines,
-                    temp_index: current_temp,
-                    operand: operand,
-                    diagnostics: diagnostics,
-                    string_constants: string_constants
-                };
-            }
+        if rhs_is_string_shape {
+            if lhs_is_string_or_byte { should_concat = true; }
         }
         if lhs_type == "i8" {
-            if rhs_type == "i8*" {
-                let mut current_lines = right_result.lines;
-                let mut current_temp = right_result.temp_index;
-                let coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines);
-                diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
-                current_lines = coerced.lines;
-                current_temp = coerced.temp_index;
-                if coerced.operand == null {
-                    return ExpressionResult {
-                        lines: current_lines,
-                        temp_index: current_temp,
-                        operand: null,
-                        diagnostics: diagnostics,
-                        string_constants: string_constants
-                    };
-                }
-
-                let concat_name = format_temp_name(current_temp);
-                current_temp += 1;
-                current_lines.push("  " + concat_name
-                    + " = call i8* @sailfin_runtime_string_concat(i8* "
-                    + coerced.operand.value
-                    + ", i8* "
-                    + rhs.value
-                    + ")");
-
-                let operand = LLVMOperand {
-                    llvm_type: "i8*",
-                    value: concat_name
-                };
-                return ExpressionResult {
-                    lines: current_lines,
-                    temp_index: current_temp,
-                    operand: operand,
-                    diagnostics: diagnostics,
-                    string_constants: string_constants
-                };
-            }
+            if rhs_type == "i8" { should_concat = true; }
         }
 
-        if lhs_type == "i8" {
-            if rhs_type == "i8" {
-                let mut current_lines = right_result.lines;
-                let mut current_temp = right_result.temp_index;
+        if should_concat {
+            let mut current_lines = right_result.lines;
+            let mut current_temp = right_result.temp_index;
 
+            // Step 1: ensure both sides are at least `i8*`. For aggregate
+            // operands this is a no-op shim (extract data ptr); for byte
+            // (i8) operands it routes through the existing numeric-to-
+            // string path. Skip the i8* round-trip for already-aggregate
+            // operands so we don't pay the unnecessary extract.
+            let mut lhs_at_string = lhs;
+            if lhs_type != "{i8*, i64}" {
                 let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines);
                 diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics);
                 current_lines = lhs_coerced.lines;
@@ -425,7 +363,10 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                         string_constants: string_constants
                     };
                 }
-
+                lhs_at_string = lhs_coerced.operand;
+            }
+            let mut rhs_at_string = rhs;
+            if rhs_type != "{i8*, i64}" {
                 let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
                 diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics);
                 current_lines = rhs_coerced.lines;
@@ -439,42 +380,15 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                         string_constants: string_constants
                     };
                 }
-
-                let concat_name = format_temp_name(current_temp);
-                current_temp += 1;
-                current_lines.push("  " + concat_name
-                    + " = call i8* @sailfin_runtime_string_concat(i8* "
-                    + lhs_coerced.operand.value
-                    + ", i8* "
-                    + rhs_coerced.operand.value
-                    + ")");
-
-                let operand = LLVMOperand {
-                    llvm_type: "i8*",
-                    value: concat_name
-                };
-                return ExpressionResult {
-                    lines: current_lines,
-                    temp_index: current_temp,
-                    operand: operand,
-                    diagnostics: diagnostics,
-                    string_constants: string_constants
-                };
+                rhs_at_string = rhs_coerced.operand;
             }
-        }
 
-        let mut _if96: boolean = false;
-        if lhs_type == "i8*" { _if96 = true; }
-        if rhs_type == "i8*" { _if96 = true; }
-        if _if96 {
-            let mut current_lines = right_result.lines;
-            let mut current_temp = right_result.temp_index;
-
-            let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines);
-            diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics);
-            current_lines = lhs_coerced.lines;
-            current_temp = lhs_coerced.temp_index;
-            if lhs_coerced.operand == null {
+            // Step 2: lift both sides to the {i8*, i64} aggregate.
+            let lhs_agg = coerce_operand_to_type(lhs_at_string, "{i8*, i64}", current_temp, current_lines);
+            diagnostics = extend_string_array(diagnostics, lhs_agg.diagnostics);
+            current_lines = lhs_agg.lines;
+            current_temp = lhs_agg.temp_index;
+            if lhs_agg.operand == null {
                 return ExpressionResult {
                     lines: current_lines,
                     temp_index: current_temp,
@@ -483,12 +397,11 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     string_constants: string_constants
                 };
             }
-
-            let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
-            diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics);
-            current_lines = rhs_coerced.lines;
-            current_temp = rhs_coerced.temp_index;
-            if rhs_coerced.operand == null {
+            let rhs_agg = coerce_operand_to_type(rhs_at_string, "{i8*, i64}", current_temp, current_lines);
+            diagnostics = extend_string_array(diagnostics, rhs_agg.diagnostics);
+            current_lines = rhs_agg.lines;
+            current_temp = rhs_agg.temp_index;
+            if rhs_agg.operand == null {
                 return ExpressionResult {
                     lines: current_lines,
                     temp_index: current_temp,
@@ -501,10 +414,10 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let concat_name = format_temp_name(current_temp);
             current_temp += 1;
             current_lines.push("  " + concat_name
-                + " = call i8* @sailfin_runtime_string_concat(i8* "
-                + lhs_coerced.operand.value
-                + ", i8* "
-                + rhs_coerced.operand.value
+                + " = call i8* @sailfin_runtime_string_concat_v2({i8*, i64} "
+                + lhs_agg.operand.value
+                + ", {i8*, i64} "
+                + rhs_agg.operand.value
                 + ")");
             let operand = LLVMOperand {
                 llvm_type: "i8*",
@@ -680,19 +593,56 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
     let right_aligned = harmonised.right;
     let result_type = trim_text(harmonised.result_type);
     if match.symbol == "+" {
-        if result_type == "i8*" {
-            let temp_name = format_temp_name(harmonised.temp_index);
+        // M1.A: post-harmonise string fallback. The unified concat path
+        // higher up handles every literal/aggregate combination, but the
+        // legacy harmonise + dispatch path can still land here when both
+        // sides resolve to plain `i8*` (string-typed locals/params). Lift
+        // both to the {i8*, i64} aggregate ABI before calling the helper
+        // so the IR matches the registry signature.
+        let mut should_concat_aligned: boolean = false;
+        if result_type == "i8*" { should_concat_aligned = true; }
+        if result_type == "{i8*, i64}" { should_concat_aligned = true; }
+        if should_concat_aligned {
+            let mut current_lines = harmonised.lines;
+            let mut current_temp = harmonised.temp_index;
+            let lhs_agg = coerce_operand_to_type(left_aligned, "{i8*, i64}", current_temp, current_lines);
+            diagnostics = extend_string_array(diagnostics, lhs_agg.diagnostics);
+            current_lines = lhs_agg.lines;
+            current_temp = lhs_agg.temp_index;
+            if lhs_agg.operand == null {
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: null,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
+            }
+            let rhs_agg = coerce_operand_to_type(right_aligned, "{i8*, i64}", current_temp, current_lines);
+            diagnostics = extend_string_array(diagnostics, rhs_agg.diagnostics);
+            current_lines = rhs_agg.lines;
+            current_temp = rhs_agg.temp_index;
+            if rhs_agg.operand == null {
+                return ExpressionResult {
+                    lines: current_lines,
+                    temp_index: current_temp,
+                    operand: null,
+                    diagnostics: diagnostics,
+                    string_constants: string_constants
+                };
+            }
+            let temp_name = format_temp_name(current_temp);
             let line = "  " + temp_name
-                + " = call i8* @sailfin_runtime_string_concat(i8* "
-                + left_aligned.value
-                + ", i8* "
-                + right_aligned.value
+                + " = call i8* @sailfin_runtime_string_concat_v2({i8*, i64} "
+                + lhs_agg.operand.value
+                + ", {i8*, i64} "
+                + rhs_agg.operand.value
                 + ")";
-            let updated_lines = append_string(harmonised.lines, line);
+            current_lines.push(line);
             let operand = LLVMOperand { llvm_type: "i8*", value: temp_name };
             return ExpressionResult {
-                lines: updated_lines,
-                temp_index: harmonised.temp_index + 1,
+                lines: current_lines,
+                temp_index: current_temp + 1,
                 operand: operand,
                 diagnostics: diagnostics,
                 string_constants: string_constants

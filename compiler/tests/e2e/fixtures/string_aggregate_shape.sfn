@@ -1,0 +1,26 @@
+// Fixture for compiler/tests/e2e/test_string_aggregate_shape.sh.
+//
+// Pins the M1.A string-literal ABI shape: every string literal lowers
+// to an `{i8*, i64}` aggregate, the `.length` field on a fresh literal
+// expression resolves to a direct `extractvalue` of slot 1 (no
+// `sailfin_runtime_string_length` call), and `+` on string literals
+// forwards both sides as aggregates to
+// `@sailfin_runtime_string_concat_v2`. The `_v2` suffix is a transition
+// aid — the legacy `sailfin_runtime_string_concat(char*, char*)`
+// entrypoint stays exported so seed-compiled IR keeps linking until the
+// floor seed embeds the new ABI.
+//
+// Both `"hello"` and `"world"` are intentionally 5 bytes — the test
+// uses the `i64 5` immediate as a regression guard against the literal
+// length being miscounted (e.g. NUL accidentally included).
+//
+// Note: the M1.A scope keeps unannotated string-typed locals on the
+// legacy `i8*` shape (full local-shape flip lives in M1.A.2). Direct
+// literal usage exercises the aggregate operand path without crossing
+// that boundary.
+fn main() ![io] {
+    let h_len = "hello".length;
+    let w_len = "world".length;
+    let combined = "hello" + "world";
+    print.info(combined);
+}

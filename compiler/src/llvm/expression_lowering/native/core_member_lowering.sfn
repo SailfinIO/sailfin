@@ -669,6 +669,29 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
     }
 
     if parse.field == "length" {
+        // M1.A: SfnString aggregate `.length` is a direct `extractvalue`
+        // on the second slot — no NUL-walk, no runtime call. The legacy
+        // `i8*` branch below remains for string-typed locals/params,
+        // which still hold `i8*` until the M1.A.2 type-mapping flip.
+        if base_operand.llvm_type == "{i8*, i64}" {
+            let length_temp = format_temp_name(current_temp);
+            current_lines.push("  " + length_temp
+                + " = extractvalue {i8*, i64} "
+                + base_operand.value
+                + ", 1");
+            current_temp += 1;
+            let operand = LLVMOperand {
+                llvm_type: "i64",
+                value: length_temp
+            };
+            return ExpressionResult {
+                lines: current_lines,
+                temp_index: current_temp,
+                operand: operand,
+                diagnostics: diagnostics,
+                string_constants: collected_string_constants
+            };
+        }
         if base_operand.llvm_type == "i8*" {
             let length_temp = format_temp_name(current_temp);
             current_lines.push("  " + length_temp

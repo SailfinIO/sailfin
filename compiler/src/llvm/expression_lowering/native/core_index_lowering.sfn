@@ -93,8 +93,25 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
     let mut element_type: string = "";
     let mut is_heap_array: boolean = false;
     let mut is_string: boolean = false;
+    // M1.A: SfnString aggregate operands route through the same string
+    // index path as legacy `i8*` operands. Extract the data pointer up
+    // front so the existing grapheme_at call site below sees the
+    // pre-aggregate `i8*` shape unchanged.
+    let mut effective_base_operand = base_operand;
 
     if array_type == "i8*" {
+        element_type = "i8";
+        is_string = true;
+    } else if array_type == "{i8*, i64}" {
+        let extract_temp = format_temp_name(current_temp);
+        current_lines.push("  " + extract_temp + " = extractvalue {i8*, i64} "
+            + base_operand.value
+            + ", 0");
+        current_temp += 1;
+        effective_base_operand = LLVMOperand {
+            llvm_type: "i8*",
+            value: extract_temp
+        };
         element_type = "i8";
         is_string = true;
     } else if ends_with_pointer_suffix(array_type) {
@@ -186,7 +203,7 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         let call_temp = format_temp_name(current_temp);
         current_lines = append_string(current_lines, "  " + call_temp
             + " = call i8* @sailfin_runtime_grapheme_at(i8* "
-            + base_operand.value
+            + effective_base_operand.value
             + ", double "
             + index_as_double.operand.value
             + ")");

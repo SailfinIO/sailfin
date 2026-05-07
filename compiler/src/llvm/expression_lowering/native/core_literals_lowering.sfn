@@ -347,7 +347,18 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             }
         }
         if !_keep_element_type {
-            inferred_element_type = dominant_type(inferred_element_type, lowered.operand.llvm_type);
+            // M1.A: collapse SfnString aggregate operand type to legacy
+            // `i8*` for inference. String-typed array slots stay on the
+            // pre-aggregate `i8**` shape until M1.A.2 ships the type-
+            // mapping flip; user `let xs = ["a", "b"]` (no annotation)
+            // must produce `string[]` with `i8*` element slots, not a
+            // novel `{i8*, i64}**` shape that would break existing array
+            // helpers and prelude.
+            let mut element_for_dominant = lowered.operand.llvm_type;
+            if trim_text(lowered.operand.llvm_type) == "{i8*, i64}" {
+                element_for_dominant = "i8*";
+            }
+            inferred_element_type = dominant_type(inferred_element_type, element_for_dominant);
         }
         index += 1;
     }
@@ -390,23 +401,38 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         if ends_with_pointer_suffix(element_type) {
             if !ends_with_pointer_suffix(operand.llvm_type) {
                 if operand_is_aggregate {
-                    let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
-                    diagnostics = extend_string_array(diagnostics, boxed.diagnostics);
-                    current_lines = boxed.lines;
-                    current_temp = boxed.temp_index;
-                    if boxed.operand == null {
-                        diagnostics.push("llvm lowering: array literal element could not be boxed to `"
-                            + element_type
-                            + "`");
-                        return ExpressionResult {
-                            lines: current_lines,
-                            temp_index: current_temp,
-                            operand: null,
-                            diagnostics: diagnostics,
-                            string_constants: collected_string_constants
-                        };
+                    // M1.A: SfnString aggregate goes into a string-shaped
+                    // array slot (`element_type == "i8*"`) by unwrapping
+                    // the data pointer, NOT by boxing the aggregate. The
+                    // aggregate-as-array-element interpretation only
+                    // applies to user struct values; SfnString is a
+                    // value-typed string handle whose `data` is the
+                    // array's view.
+                    let mut should_unwrap_string: boolean = false;
+                    if trimmed_operand_type == "{i8*, i64}" {
+                        if element_type == "i8*" {
+                            should_unwrap_string = true;
+                        }
                     }
-                    prepared_operand = boxed.operand;
+                    if !should_unwrap_string {
+                        let boxed = box_aggregate_operand(operand, element_type, current_temp, current_lines, context);
+                        diagnostics = extend_string_array(diagnostics, boxed.diagnostics);
+                        current_lines = boxed.lines;
+                        current_temp = boxed.temp_index;
+                        if boxed.operand == null {
+                            diagnostics.push("llvm lowering: array literal element could not be boxed to `"
+                                + element_type
+                                + "`");
+                            return ExpressionResult {
+                                lines: current_lines,
+                                temp_index: current_temp,
+                                operand: null,
+                                diagnostics: diagnostics,
+                                string_constants: collected_string_constants
+                            };
+                        }
+                        prepared_operand = boxed.operand;
+                    }
                 }
             }
         }
@@ -980,19 +1006,32 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     if ends_with_pointer_suffix(expected.llvm_type) {
                         if !ends_with_pointer_suffix(field_operand.llvm_type) {
                             if field_is_aggregate {
-                                let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
-                                let mut _ci8: number = 0;
-                                loop {
-                                    if _ci8 >= boxed.diagnostics.length {
-                                        break;
+                                // M1.A: SfnString aggregate flowing into
+                                // an `i8*` struct field must be unwrapped
+                                // (extract data pointer), not boxed. Boxing
+                                // would store a {i8*, i64}* in the field
+                                // and break every legacy reader.
+                                let mut should_unwrap_string_field: boolean = false;
+                                if trimmed_field_type == "{i8*, i64}" {
+                                    if expected.llvm_type == "i8*" {
+                                        should_unwrap_string_field = true;
                                     }
-                                    diagnostics.push(boxed.diagnostics[_ci8]);
-                                    _ci8 += 1;
                                 }
-                                current_lines = boxed.lines;
-                                current_temp = boxed.temp_index;
-                                if boxed.operand != null {
-                                    field_operand = boxed.operand;
+                                if !should_unwrap_string_field {
+                                    let boxed = box_aggregate_operand(field_operand, expected.llvm_type, current_temp, current_lines, context);
+                                    let mut _ci8: number = 0;
+                                    loop {
+                                        if _ci8 >= boxed.diagnostics.length {
+                                            break;
+                                        }
+                                        diagnostics.push(boxed.diagnostics[_ci8]);
+                                        _ci8 += 1;
+                                    }
+                                    current_lines = boxed.lines;
+                                    current_temp = boxed.temp_index;
+                                    if boxed.operand != null {
+                                        field_operand = boxed.operand;
+                                    }
                                 }
                             }
                         }

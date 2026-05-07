@@ -309,8 +309,18 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.length", symbol: "sailfin_runtime_string_length", return_type: "i64", parameter_types: ["i8*"], effects: []
     });
+    // M1.A — string.concat parameters lock to the SfnString aggregate
+    // ABI. The new symbol `sailfin_runtime_string_concat_v2` accepts
+    // `{i8*, i64}` by value; its body extracts the data pointers and
+    // forwards to the legacy NUL-terminated `sailfin_runtime_string_concat`
+    // implementation until M2.4 ships a length-aware body. The `_v2`
+    // suffix is a transition aid: seed-compiled IR (which still emits
+    // `call i8* @sailfin_runtime_string_concat(i8*, i8*)`) keeps linking
+    // through the legacy entrypoint while the new compiler routes here.
+    // Return type stays `i8*` because string-typed locals don't flip to
+    // aggregate until M1.A.2.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.concat", symbol: "sailfin_runtime_string_concat", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: []
+        target: "string.concat", symbol: "sailfin_runtime_string_concat_v2", return_type: "i8*", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: []
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.append", symbol: "sailfin_runtime_string_append", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: []
