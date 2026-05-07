@@ -238,6 +238,23 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             }
             let operand_type = trim_text(operand.llvm_type);
             if operand_type.length > 0 { llvm_type = operand_type; }
+            // M1.A: SfnString aggregate operands (e.g. unannotated
+            // `let s = "hello"`) collapse the local's storage type to
+            // `i8*` for now. Locals/parameters stay on the legacy
+            // pre-aggregate shape until M1.A.2 ships the type-mapping
+            // flip; without this clamp, downstream `mut module_line =
+            // module_line + ...` reassignments would store the i8*
+            // concat result back into a `{i8*, i64}` alloca, producing
+            // a strlen-then-insertvalue round-trip on every iteration
+            // and (worse) breaking cross-module shape contracts that
+            // the seed compiler still wires up as `i8*`. The literal
+            // expression itself remains a `{i8*, i64}` constant in the
+            // IR — the let-binding coerces it down via the
+            // `coerce_pointer_or_struct` shim. The direct-`extractvalue`
+            // `.length` path therefore applies to fresh literal
+            // expressions (e.g. `"hello".length`), not to stored-then-
+            // loaded locals.
+            if llvm_type == "{i8*, i64}" { llvm_type = "i8*"; }
         }
     }
 

@@ -284,6 +284,20 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
     // Do not route these through the generic `array_push_slot` path, which uses
     // a different header layout and can break subsequent `append_string` calls.
     if element_type == "i8*" {
+        // M1.A: SfnString aggregate operands (literals after the M1.A
+        // flip) must shed the length prefix before reaching the
+        // `(_, i8*)` ABI of `sailfin_runtime_append_string`. The
+        // legacy `i8*` operand path passes through unchanged.
+        let mut value_at_string = value.value;
+        if value.llvm_type == "{i8*, i64}" {
+            let extract_temp = format_temp_name(current_temp);
+            current_lines.push("  " + extract_temp
+                + " = extractvalue {i8*, i64} "
+                + value.value
+                + ", 0");
+            current_temp += 1;
+            value_at_string = extract_temp;
+        }
         let pushed = format_temp_name(current_temp);
         current_temp += 1;
         // NOTE: Do not embed `{ ... }` literally in Sailfin strings; braces are
@@ -294,7 +308,7 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
             + " "
             + array.value
             + ", i8* "
-            + value.value
+            + value_at_string
             + ")");
         let result_operand = LLVMOperand {
             llvm_type: array.llvm_type,

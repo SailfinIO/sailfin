@@ -2273,6 +2273,12 @@ char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end
     return out;
 }
 
+// M1.A: legacy NUL-terminated implementation, exported under its
+// historical name so seed-compiled IR (which still emits
+// `call i8* @sailfin_runtime_string_concat(i8*, i8*)`) keeps linking
+// during the 2-pass self-host build. New compiler IR routes through
+// `sailfin_runtime_string_concat_v2`, which extracts the data pointers
+// from the SfnString aggregates and forwards here.
 char *sailfin_runtime_string_concat(char *a, char *b)
 {
     _runtime_enter();
@@ -2838,6 +2844,20 @@ char *sailfin_runtime_string_concat(char *a, char *b)
     }
 
     return out;
+}
+
+// M1.A: SfnString-by-value entrypoint. The new compiler emits
+// `call i8* @sailfin_runtime_string_concat_v2({i8*, i64} %a, {i8*, i64} %b)`
+// at every concat site (registry-locked in `runtime_helpers.sfn`).
+// We extract the data pointers and forward to the legacy NUL-terminated
+// impl until M2.4 ships a length-aware body. The `_v2` suffix lets the
+// pre-aggregate `sailfin_runtime_string_concat(char*, char*)` entrypoint
+// stay link-stable for seed-compiled IR during the 2-pass self-host
+// build; once the floor seed embeds the new ABI we can retire the
+// suffix and the legacy entrypoint together.
+char *sailfin_runtime_string_concat_v2(SfnString a, SfnString b)
+{
+    return sailfin_runtime_string_concat(a.data, b.data);
 }
 
 // =============================================================================
