@@ -130,7 +130,7 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
 
     // Imported function declarations
     if debug_lowering { print.err("emit-llvm: phase=render_imports"); }
-    let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context);
+    let imported_declarations = render_imported_function_declarations(imported_functions, local_functions, type_context, runtime_helpers);
     if imported_declarations != null {
         if imported_declarations.length > 0 {
             lines = extend_string_lines(lines, imported_declarations);
