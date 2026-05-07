@@ -137,10 +137,21 @@ fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: number
 // Strip the rightmost `__<segment>` from `scope_id`, returning the
 // parent scope id. Mirrors `make_child_scope_id` (which joins parent +
 // "__" + child) so the walk reverses one nesting step per call. Returns
-// "" when `scope_id` has no `__` separator (it is the function root or
-// otherwise atomic). The separator is two consecutive `_` graphemes —
-// sanitize_symbol replaces non-alphanumeric chars with single `_`, so a
-// double `_` is reserved for the join boundary.
+// "" when `scope_id` has no `__` separator (e.g. the function root,
+// which is `fn:<sanitized_name>` and never contains `__` in practice).
+//
+// Separator caveat: `sanitize_symbol` (compiler/src/llvm/utils.sfn)
+// preserves `_` and *drops* every non-`[A-Za-z0-9_]` character, so it
+// does NOT canonicalize multi-underscore runs. In principle a child
+// segment containing `__` could appear inside a sanitized scope id and
+// confuse a "find the last `__`" walk. In practice every caller of
+// `make_child_scope_id` in the LLVM lowering passes a basic-block
+// label (`then1`, `loopbody2`, `forbody3`, `matcharm4`, etc.) — block
+// labels are generated from `allocate_block_label` and never contain
+// `__`, so the join boundary is unambiguous. If a future caller starts
+// minting child segments from user identifiers, either prepend a
+// reserved sigil or canonicalise sanitize_symbol to collapse `__` runs
+// before relying on the walk here.
 fn parent_scope_id(scope_id: string) -> string {
     let len = scope_id.length;
     if len < 2 { return ""; }

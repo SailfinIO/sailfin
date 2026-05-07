@@ -694,6 +694,14 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     // owns the value now). Promotion flips `allocation_kind = "rc"` for
     // any heap-typed bare-identifier return so the receiving caller's
     // drop sites can release it.
+    //
+    // `analyze_value_ownership` returns `consumption == null` for
+    // pointer-typed values (today's `is_copy_type` reports any LLVM `*`
+    // type as a copy type), so we cannot rely solely on the consumption
+    // path to mark the returned local as moved. Below, escape-promoted
+    // heap-typed bare-identifier returns are *also* marked consumed —
+    // the value is now owned by the caller, and dropping it here would
+    // be a use-after-free once `sfn_rc_release` becomes non-no-op.
     if consumption != null {
         if consumption.kind == "local" {
             current_locals = mark_local_consumed(current_locals, consumption.name);
@@ -707,12 +715,21 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     // emission paths can release it at scope exit. Borrows and primitive
     // (non-heap) locals are not promoted — see `is_heap_type` and
     // `promote_local_to_rc` for the exact rules.
+    //
+    // M1.5.3 (issue #327): mark the same local consumed so the
+    // function-root drop site below skips it. Without this, a heap-
+    // typed return would emit BOTH a `mark_persistent` (caller-side
+    // ownership transfer) and an `sfn_rc_release` (drop here) — a
+    // semantic contradiction the M1.5.4 / runtime work would have to
+    // unpick later. Doing it once, at the escape site, keeps the
+    // ownership model coherent.
     let trimmed_return_expr = trim_text(instr_expression);
     if is_simple_identifier(trimmed_return_expr) {
         let returned_local = find_local_binding(current_locals, trimmed_return_expr);
         if returned_local != null {
             if is_heap_type(returned_local.llvm_type) {
                 current_locals = promote_local_to_rc(current_locals, trimmed_return_expr);
+                current_locals = mark_local_consumed(current_locals, trimmed_return_expr);
             }
         }
     }

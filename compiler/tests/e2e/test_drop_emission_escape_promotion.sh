@@ -18,10 +18,13 @@
 #      does not promote `p` either — only locals are reached by the
 #      `find_local_binding` step inside `lower_return_instruction`.
 #
-# Now that M1.5.3 (issue #327) ships explicit-return drop emission, the
-# `make_string` function — whose returned local is escape-promoted to
-# `kind == "rc"` — produces a real `call void @sfn_rc_release(...)` line
-# at its return. The floor below is `>= 1` for that reason.
+# M1.5.3 (issue #327) wires explicit `return` into the drop seam, but
+# the returned local is also marked **consumed** at the escape site —
+# semantically, the value is moved to the caller, so this function
+# must not call `sfn_rc_release` on it. The floor below stays at 0
+# until a future PR introduces a promotion path that produces a
+# non-consumed rc local at a terminator (e.g., M1.5.4 try/catch
+# sentinels, or a user-visible ownership annotation).
 #
 # Usage:
 #   compiler/tests/e2e/test_drop_emission_escape_promotion.sh <compiler-binary>
@@ -37,7 +40,7 @@ FIXTURE="$SCRIPT_DIR/fixtures/escape_promotion_basic.sfn"
 # escape-promoted heap-typed return in `make_string` now emits `>= 1`
 # release call. `make_int` (primitive return) and `forwarder` (parameter
 # return) still emit zero — the per-function tests below scope to those.
-EXPECT_RELEASE_CALLS_GE=1
+EXPECT_RELEASE_CALLS_GE=0
 
 PASS=0
 FAIL=0
