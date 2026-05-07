@@ -2,7 +2,7 @@
 # End-to-end parity test for `sfn build -p compiler --work-dir <DIR>`.
 #
 # Locks in the invariant that two driver runs into different `--work-dir`
-# roots produce byte-identical compilers and the same set of staged
+# roots produce equivalent compiler binaries and the same set of staged
 # import-context artifacts. This is the parity guard that
 # `make check`'s fixed-point comparison currently provides at a 30-min
 # wall-clock cost; surfacing the same regression at e2e-test time lets
@@ -10,6 +10,10 @@
 #
 # Acceptance criteria from #379:
 #   - SHA-256 of `<DIR>/native/sailfin` matches across two work-dir roots
+#     (Linux only — Mach-O binaries embed a per-link UUID/LC_UUID, so
+#     byte-for-byte equality is not a stable signal on macOS; on Darwin
+#     we instead assert the second binary is invokable, mirroring the
+#     fixed-point check in `.github/workflows/ci.yml`)
 #   - the set of `.ll` filenames under `<DIR>/native/import-context/`
 #     is identical between the two runs
 #   - per-build `timeout 600` (10 min)
@@ -32,6 +36,37 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
 # spawns. Mandatory on Linux per `.claude/rules/compiler-safety.md`;
 # best-effort on macOS where `ulimit -v` is unsupported.
 ulimit -v 8388608 2>/dev/null || true
+
+# macOS doesn't ship `timeout(1)`; coreutils provides `gtimeout`. Pick
+# whichever is available and fall back to "no timeout" if neither
+# exists, matching the convention in `scripts/run_native_test.sh` and
+# `scripts/build.sh`.
+if command -v timeout >/dev/null 2>&1; then
+    TIMEOUT_CMD="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+    TIMEOUT_CMD="gtimeout"
+else
+    TIMEOUT_CMD=""
+fi
+
+# `sha256sum` is GNU-only; macOS ships `shasum`. Use the same fallback
+# as `.github/workflows/ci.yml`'s fixed-point block and the diag
+# scripts under `scripts/diag_*.sh`.
+sha256_of() {
+    local path="$1"
+    sha256sum "$path" 2>/dev/null | awk '{print $1}' \
+        || shasum -a 256 "$path" | awk '{print $1}'
+}
+
+# Detect Darwin so the byte-equality assertion can be relaxed: Mach-O
+# binaries carry an `LC_UUID` load command that's regenerated on every
+# link, so two byte-identical inputs still produce non-identical
+# binaries.  CI's fixed-point check (ci.yml:238-244) handles this
+# the same way.
+IS_DARWIN=0
+case "$(uname -s 2>/dev/null || echo unknown)" in
+    Darwin) IS_DARWIN=1 ;;
+esac
 
 PASS=0
 FAIL=0
@@ -68,14 +103,23 @@ run_test() {
 
 # Build the compiler under the given work-dir. Output goes to a log
 # file we surface only on failure so passing runs don't drown the
-# `make test-e2e` summary in 138 module compile lines.
+# `make test-e2e` summary in 138 module compile lines. The
+# `cmd ... && rc=0 || rc=$?` pattern preserves the build's actual
+# exit code; an `if ! cmd; then rc=$?` would always observe `0`
+# because `!` itself succeeded.
 build_compiler_into() {
     local work_dir="$1"
     local log="$2"
     cd "$REPO_ROOT" || return 1
-    if ! timeout 600 "$BINARY" build -p compiler --work-dir "$work_dir" \
-            > "$log" 2>&1; then
-        local rc=$?
+    local rc=0
+    if [ -n "$TIMEOUT_CMD" ]; then
+        "$TIMEOUT_CMD" 600 "$BINARY" build -p compiler --work-dir "$work_dir" \
+            > "$log" 2>&1 && rc=0 || rc=$?
+    else
+        "$BINARY" build -p compiler --work-dir "$work_dir" \
+            > "$log" 2>&1 && rc=0 || rc=$?
+    fi
+    if [ "$rc" -ne 0 ]; then
         echo "[test]   sfn build -p compiler --work-dir $work_dir failed (rc=$rc)" >&2
         echo "[test]   tail of $log:" >&2
         tail -n 60 "$log" >&2 || true
@@ -99,16 +143,39 @@ test_build_b() {
 }
 run_test "sfn build -p compiler --work-dir <B> succeeds" test_build_b
 
-# ---- Test 3: SHA-256 of <A>/native/sailfin == <B>/native/sailfin ----
-# A divergence here means the work-dir absolute path leaked into the
-# compiled binary (e.g. via `__FILE__`-style metadata, debug-info path
-# prefixes, or RPATH). This is the headline parity invariant.
-test_binary_sha_match() {
+# ---- Test 3: SHA-256 (Linux) or runs-cleanly (macOS) ----
+# Linux ELF: byte-for-byte equality. A divergence here means the
+# work-dir absolute path leaked into the compiled binary (e.g. via
+# `__FILE__` metadata, debug-info path prefixes, or RPATH).
+# macOS Mach-O: skip the SHA equality (LC_UUID is per-link). Assert
+# the second binary is invokable instead, mirroring `ci.yml`'s
+# fixed-point block. Both invariants protect against a path leak that
+# corrupts the produced compiler.
+test_binary_parity() {
     [ -f "$WORK_A/native/sailfin" ] || return 1
     [ -f "$WORK_B/native/sailfin" ] || return 1
+
+    if [ "$IS_DARWIN" -eq 1 ]; then
+        # Mach-O LC_UUID makes byte equality unstable. Fall back to a
+        # weaker but still meaningful invariant: the work-dir-built
+        # compiler is invokable and reports a version string.
+        local ver_b
+        if ! ver_b="$("$WORK_B/native/sailfin" version 2>&1)"; then
+            echo "[test]   $WORK_B/native/sailfin failed to run \`version\`:" >&2
+            echo "$ver_b" >&2
+            return 1
+        fi
+        if [ -z "$ver_b" ]; then
+            echo "[test]   $WORK_B/native/sailfin produced empty version output" >&2
+            return 1
+        fi
+        echo "[test]   (darwin) skipping byte-equality (LC_UUID); B reports: $ver_b"
+        return 0
+    fi
+
     local sha_a sha_b
-    sha_a="$(sha256sum "$WORK_A/native/sailfin" | awk '{print $1}')"
-    sha_b="$(sha256sum "$WORK_B/native/sailfin" | awk '{print $1}')"
+    sha_a="$(sha256_of "$WORK_A/native/sailfin")"
+    sha_b="$(sha256_of "$WORK_B/native/sailfin")"
     if [ "$sha_a" != "$sha_b" ]; then
         echo "[test]   SHA-256 mismatch:" >&2
         echo "[test]     A=$sha_a ($WORK_A/native/sailfin)" >&2
@@ -116,7 +183,7 @@ test_binary_sha_match() {
         return 1
     fi
 }
-run_test "two --work-dir builds produce SHA-256 identical compilers" test_binary_sha_match
+run_test "two --work-dir builds produce equivalent compilers" test_binary_parity
 
 # ---- Test 4: import-context filename sets are identical ----
 # AC requires comparing `.ll` filename sets under
@@ -126,6 +193,9 @@ run_test "two --work-dir builds produce SHA-256 identical compilers" test_binary
 # sets. We compare the **full** set of filenames recursively — a
 # strictly stronger invariant that subsumes `.ll` and catches any
 # divergence in the staged module surface, regardless of suffix.
+# This invariant holds on both Linux and macOS because module names
+# and relative paths under import-context don't depend on link-time
+# UUIDs.
 test_import_context_set_matches() {
     local list_a="$LOG_A.ic-list"
     local list_b="$LOG_B.ic-list"
