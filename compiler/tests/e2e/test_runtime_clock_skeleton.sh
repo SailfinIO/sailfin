@@ -1,18 +1,26 @@
 #!/usr/bin/env bash
 # End-to-end test for runtime/sfn/clock.sfn.
 #
-# Mirrors test_runtime_io_skeleton.sh — verifies the clock wrapper
-# typechecks, formats, and emits the expected LLVM shape:
+# Mirrors test_runtime_io_skeleton.sh — runs four assertions against
+# the clock wrapper:
 #
-#   - The trampoline backing is declared as `declare void
-#     @sailfin_runtime_sleep(double)` (imported from libc.sfn).
-#   - The wrapper itself is defined as `define void
-#     @sfn_sleep(double ...)`.
-#   - The body emits `call void @sailfin_runtime_sleep(...)`.
+#   1. typecheck   — `sfn check runtime/sfn/clock.sfn` reports `ok`.
+#   2. fmt         — `sfn fmt --check runtime/sfn/clock.sfn` is canonical.
+#   3. define shape — emitted IR contains `define void @sfn_sleep(...)`
+#                     and `call void @sailfin_runtime_sleep(...)` in
+#                     the wrapper body (matching the void-typed declare).
+#   4. declare shape — emitted IR contains `declare void
+#                     @sailfin_runtime_sleep(double)` at line start.
+#                     The declare is currently produced by the helper
+#                     preamble workaround in
+#                     `compiler/src/llvm/lowering/lowering_helpers.sfn`
+#                     (the `sailfin_runtime_sleep` entry); without
+#                     this assertion, removing that entry would
+#                     silently emit invalid IR.
 #
-# When the libc-direct rewrite (PR 2) ships, this test updates to
-# expect `call void @nanosleep(...)` and the trampoline declaration
-# disappears.
+# When the libc-direct rewrite (PR 2) ships, the define/declare/call
+# assertions update to expect `call void @nanosleep(...)` and the
+# trampoline declaration disappears.
 
 set -euo pipefail
 
@@ -101,9 +109,31 @@ test_emit_wrapper_shape() {
     return "$missing"
 }
 
+test_emit_declare_shape() {
+    local ll="$SCRATCH/clock.ll"
+    if [ ! -f "$ll" ]; then
+        echo "[test]   $ll missing — test_emit_wrapper_shape must run first to produce it"
+        return 1
+    fi
+    # Anchored to line start so the call site (`call void
+    # @sailfin_runtime_sleep(...)`) does not accidentally satisfy
+    # this assertion. The declare is currently emitted via the
+    # `sailfin_runtime_sleep` entry in `seed_default_runtime_helpers`
+    # (compiler/src/llvm/lowering/lowering_helpers.sfn); removing
+    # that entry must trip this check, not pass it.
+    if ! grep -qE "^declare void @sailfin_runtime_sleep\(double\)" "$ll"; then
+        echo "[test]   missing imported trampoline declaration: declare void @sailfin_runtime_sleep(double)"
+        echo "[test]   --- declare lines mentioning sailfin_runtime_sleep ---"
+        grep -nE '^declare.*@sailfin_runtime_sleep' "$ll" || true
+        return 1
+    fi
+    return 0
+}
+
 run_test "sfn check runtime/sfn/clock.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/clock.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces sfn_sleep wrapper over imported sleep trampoline" test_emit_wrapper_shape
+run_test "sfn emit llvm declares sailfin_runtime_sleep trampoline" test_emit_declare_shape
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then
