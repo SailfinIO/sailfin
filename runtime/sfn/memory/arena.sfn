@@ -68,9 +68,11 @@ extern fn realloc(ptr: * u8, new_size: usize) -> * u8;
 //
 // `default_page_size = 0` is documented in §2.1.1 as "use the
 // implementation default" — the M0.5 C arena picks 1 MiB. The
-// stub forwards the literal request to `malloc`; a 0-byte
-// request yields a non-null pointer per ISO C, which the
-// destroy stub `free`s safely. The size policy is irrelevant
+// stub forwards the literal request to `malloc`; ISO C lets
+// `malloc(0)` return either `NULL` or a unique pointer that
+// `free` will accept, so callers must treat a `0`-byte request
+// as undefined-payload (the proof-of-life probe never reads
+// from the returned pointer). The size policy is irrelevant
 // until M3 lands the real allocator.
 fn sfn_arena_sfn_create(default_page_size: usize) -> * u8 {
     return malloc(default_page_size);

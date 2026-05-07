@@ -90,15 +90,18 @@ test_compiler_binary_exports_sfn_arena_sfn() {
     fi
     local missing=0
     for sym in sfn_arena_sfn_create sfn_arena_sfn_alloc sfn_arena_sfn_reset sfn_arena_sfn_destroy sfn_arena_sfn_realloc; do
-        # Match `<addr> T <sym>` or `<addr> t <sym>` (text section).
-        # Anchored on whitespace + symbol-end so a substring
-        # collision (e.g. a hypothetical
-        # `sfn_arena_sfn_create_helper`) does not satisfy the
+        # Require a defined text symbol (` T ` or ` t `) — an
+        # undefined-reference line (`U sfn_arena_sfn_create`)
+        # would otherwise satisfy a permissive end-of-line match
+        # and falsely report the binary as exporting the symbol
+        # while it actually only declares it. Anchored on
+        # symbol-end so a substring collision
+        # (`sfn_arena_sfn_create_helper`) does not satisfy the
         # check. Here-string instead of `echo | grep` so
         # `set -o pipefail` does not turn `grep -q`'s early exit
         # into a SIGPIPE-induced false negative.
-        if ! grep -qE "[[:space:]]${sym}\$" <<< "$nm_log"; then
-            echo "[test]   compiler binary missing Sailfin export: $sym"
+        if ! grep -qE "[[:space:]][Tt][[:space:]]${sym}\$" <<< "$nm_log"; then
+            echo "[test]   compiler binary missing Sailfin export: $sym (looked for ' T|t ${sym}' in nm output)"
             missing=$((missing + 1))
         fi
     done
@@ -113,13 +116,15 @@ test_compiler_binary_keeps_c_arena_exports() {
     # `runtime/native/src/sailfin_arena.c`. A patch that
     # accidentally drops the C arena would silently route
     # production through unfinished Sailfin stubs — this
-    # assertion catches that.
+    # assertion catches that. Same defined-text-symbol regex as
+    # the Sailfin-export assertion above (` T ` / ` t `) so an
+    # undefined reference cannot pass for an export.
     local nm_log
     nm_log="$(nm "$BINARY" 2>/dev/null || true)"
     local missing=0
     for sym in sfn_arena_create sfn_arena_alloc sfn_arena_reset sfn_arena_destroy sfn_arena_realloc; do
-        if ! grep -qE "[[:space:]]${sym}\$" <<< "$nm_log"; then
-            echo "[test]   compiler binary missing C arena export: $sym"
+        if ! grep -qE "[[:space:]][Tt][[:space:]]${sym}\$" <<< "$nm_log"; then
+            echo "[test]   compiler binary missing C arena export: $sym (looked for ' T|t ${sym}' in nm output)"
             missing=$((missing + 1))
         fi
     done
