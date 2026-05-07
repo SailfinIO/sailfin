@@ -1,21 +1,22 @@
 // Unit tests for the M1.C ABI lock prerequisites (issue #392).
 //
-// Two surfaces are pinned:
-//   1. `RuntimeHelperDescriptor.native_signature` — the optional
-//      Sailfin-native ABI symbol that M2 will populate per-helper to
-//      flip individual helpers from `sailfin_runtime_*` to `sfn_*`
-//      without rewriting their `parameter_types` / `return_type`.
-//      Today every default descriptor leaves it `null`; tomorrow each
-//      M2.x sub-issue sets it on the helpers it migrates. The tests
-//      below cover both branches of the field-flip predicate so a
-//      regression in the optional-field plumbing surfaces here.
-//   2. `@sfn_abi_version` / `@sfn_abi_hash` globals — the per-module
-//      ABI fingerprint the C runtime reads on startup to detect
-//      mismatches. The shell-side check
-//      (`sfn emit llvm examples/basics/hello-world.sfn | grep
-//      '@sfn_abi_version'`) is authoritative; this test pins the
-//      exact text the lowering emits so a typo in the global name or
-//      linkage spec breaks the unit suite before it ships.
+// Pins `RuntimeHelperDescriptor.native_signature` — the optional
+// Sailfin-native ABI symbol that M2 will populate per-helper to flip
+// individual helpers from `sailfin_runtime_*` to `sfn_*` without
+// rewriting their `parameter_types` / `return_type`. Today every
+// default descriptor leaves it `null`; tomorrow each M2.x sub-issue
+// sets it on the helpers it migrates. The tests below cover both
+// branches of the field-flip predicate so a regression in the
+// optional-field plumbing surfaces here.
+//
+// The companion `@sfn_abi_version` / `@sfn_abi_hash` globals emitted
+// by `lowering_phase_render.sfn` are NOT asserted from this file —
+// the LLVM-lowering import stack is too heavy for the unit budget
+// (see the atomic_load_store test note for the same constraint).
+// The verification command in issue #392
+// (`sfn emit llvm examples/basics/hello-world.sfn | grep '@sfn_abi'`)
+// covers them; an e2e regression test pinning the exact text and
+// linkage is tracked as a follow-up.
 import { RuntimeHelperDescriptor, find_runtime_helper } from "../../src/llvm/mod";
 
 // =============================================================================
