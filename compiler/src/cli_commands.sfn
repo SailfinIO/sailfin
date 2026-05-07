@@ -327,12 +327,18 @@ fn _af_parse_decimal(text: string) -> number {
     return value;
 }
 
-// Strip a leading "key:" from `line` and return the value, or "" if
-// the prefix doesn't match. Avoids importing `starts_with` here.
+// Predicate: does `line` begin with `prefix`?
+fn _af_has_prefix(line: string, prefix: string) -> boolean {
+    if line.length < prefix.length { return false; }
+    return strings_equal(substring(line, 0, prefix.length), prefix);
+}
+
+// Strip a leading "key:" from `line` and return the value. Callers
+// must verify the prefix via `_af_has_prefix` first; this helper
+// returns "" on mismatch only as a safety net (which is treated as
+// a literal empty value, not as a parse error).
 fn _af_strip_prefix(line: string, prefix: string) -> string {
-    if line.length < prefix.length { return ""; }
-    let head = substring(line, 0, prefix.length);
-    if !strings_equal(head, prefix) { return ""; }
+    if !_af_has_prefix(line, prefix) { return ""; }
     return substring(line, prefix.length, line.length);
 }
 
@@ -340,7 +346,9 @@ fn _af_strip_prefix(line: string, prefix: string) -> string {
 // `_empty_assert_failure()` (present=false) when the bytes don't
 // match the SFAF v:1 shape — that case is treated by the caller as
 // "no structured failure info" and the runner falls back to
-// exit-code-only reporting.
+// exit-code-only reporting. Every required prefix must match: a
+// truncated or corrupted record (e.g. mid-write crash) leaves
+// `present=false` rather than producing a misleading `path:0:0:`.
 fn _parse_assert_failure_record(bytes: string) -> AssertFailure {
     let mut out = _empty_assert_failure();
     if bytes.length < 5 { return out; }
@@ -348,6 +356,10 @@ fn _parse_assert_failure_record(bytes: string) -> AssertFailure {
     if lines.length < 6 { return out; }
     if !strings_equal(lines[0], "SFAF") { return out; }
     if !strings_equal(lines[1], "v:1") { return out; }
+    if !_af_has_prefix(lines[2], "file:") { return out; }
+    if !_af_has_prefix(lines[3], "line:") { return out; }
+    if !_af_has_prefix(lines[4], "col:") { return out; }
+    if !_af_has_prefix(lines[5], "msg:") { return out; }
     out.file = _af_strip_prefix(lines[2], "file:");
     let line_text = _af_strip_prefix(lines[3], "line:");
     let col_text = _af_strip_prefix(lines[4], "col:");
