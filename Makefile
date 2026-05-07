@@ -417,9 +417,33 @@ check:
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin
 	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
 	@echo "[check] verifying seed selfhost (stage2)..."
-	@SEED="build/native/sailfin" OUT="build/native/sailfin-seedcheck" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
-		WORK_DIR="build/selfhost/native-seedcheck" \
-		bash scripts/build.sh
+	@# Stage E PR3: stage2 routes through `sfn build -p compiler
+	@# --work-dir <DIR>` (the same path `make rebuild` uses for the
+	@# first-pass binary), replacing the legacy
+	@# `bash scripts/build.sh` invocation. The driver virtualises
+	@# `<DIR>/native/import-context/` and the default
+	@# `<DIR>/native/sailfin` output, but the per-module `.ll`
+	@# scratch root is still the legacy `build/sailfin/capsules/`
+	@# unless `SAILFIN_TEST_SCRATCH` is set (see
+	@# `_cr_scratch_root` in `compiler/src/capsule_resolver.sfn`);
+	@# without that override, stage3 would clobber stage2's
+	@# `.ll` files and the fixed-point hash-diff below would be
+	@# vacuous. `--no-cache` keeps stage2 and stage3 truly
+	@# independent (they're built by different compiler
+	@# binaries with potentially identical version stamps, so a
+	@# shared cache would let one stage's IR satisfy the
+	@# other's lookup and silently bypass the fresh emit). The
+	@# `OPT="$(NATIVE_OPT)"` parameter no longer plumbs through:
+	@# the driver hardcodes `-O2` per `Makefile:619-620`. The
+	@# default `NATIVE_OPT` is also `-O2`, so most callers see
+	@# no behavioural change; CI overrides that lower the opt
+	@# level for stage2/stage3 are silently ignored under the
+	@# driver path until the driver grows an `--opt` flag.
+	@mkdir -p build/selfhost/native-seedcheck
+	@SAILFIN_TEST_SCRATCH="build/selfhost/native-seedcheck/scratch" \
+		build/native/sailfin build --no-cache -p compiler \
+			--work-dir build/selfhost/native-seedcheck \
+			-o build/native/sailfin-seedcheck
 	@echo "[check] validating seedcheck binary can run programs..."
 	@sc="build/native/sailfin-seedcheck"; \
 	to="$(TIMEOUT_CMD)"; \
@@ -439,12 +463,20 @@ check:
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
 	@echo ""
 	@echo "[check] stage2 tests passed — building stage3 for fixed-point comparison..."
-	@SEED="build/native/sailfin-seedcheck" OUT="build/native/sailfin-stage3" OPT="$(NATIVE_OPT)" JOBS="$(BUILD_JOBS)" CLANG="$(CLANG)" MAX_TOTAL=3600 \
-		WORK_DIR="build/selfhost/native-stage3" \
-		bash scripts/build.sh
+	@# Stage E PR3: same flip as stage2 — driver `--work-dir`
+	@# with `SAILFIN_TEST_SCRATCH` per-stage isolation and
+	@# `--no-cache` so stage3's IR is freshly emitted by the
+	@# stage2 binary rather than served from a cache that
+	@# stage2 (or `make compile`) populated. See the stage2
+	@# block above for the rationale.
+	@mkdir -p build/selfhost/native-stage3
+	@SAILFIN_TEST_SCRATCH="build/selfhost/native-stage3/scratch" \
+		build/native/sailfin-seedcheck build --no-cache -p compiler \
+			--work-dir build/selfhost/native-stage3 \
+			-o build/native/sailfin-stage3
 	@echo "[check] comparing stage2 vs stage3 LLVM IR (fixed-point check)..."
-	@s2="build/selfhost/native-seedcheck/raw"; \
-	s3="build/selfhost/native-stage3/raw"; \
+	@s2="build/selfhost/native-seedcheck/scratch/capsules"; \
+	s3="build/selfhost/native-stage3/scratch/capsules"; \
 	s2_hashes=$$(find "$$s2" -name '*.ll' -exec $(HASH_CMD) {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | $(HASH_CMD) | awk '{print $$1}'); \
 	s3_hashes=$$(find "$$s3" -name '*.ll' -exec $(HASH_CMD) {} + 2>/dev/null | awk '{print $$1}' | LC_ALL=C sort | $(HASH_CMD) | awk '{print $$1}'); \
 	if [ "$$s2_hashes" = "$$s3_hashes" ]; then \
