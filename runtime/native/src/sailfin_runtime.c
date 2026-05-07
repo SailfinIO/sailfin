@@ -6543,13 +6543,17 @@ static SfnArray *_sfn_array_alloc_v2(int64_t initial_cap, size_t elem_size)
     if (initial_cap > 0)
     {
         size_t bytes = (size_t)initial_cap * elem_size;
-        if (bytes / elem_size != (size_t)initial_cap)
+        if (elem_size != 0 && bytes / elem_size != (size_t)initial_cap)
         {
-            return NULL; /* overflow */
+            /* multiplication overflow — free the struct so malloc-mode
+             * doesn't leak. `_rt_free` is a no-op under arena mode. */
+            _rt_free(out);
+            return NULL;
         }
         out->data = _rt_calloc((size_t)initial_cap, elem_size);
         if (!out->data)
         {
+            _rt_free(out);
             return NULL;
         }
         out->cap = initial_cap;
@@ -6605,7 +6609,21 @@ SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text)
     int64_t cap = a->cap < 0 ? 0 : a->cap;
     if (len >= cap)
     {
-        int64_t new_cap = cap < 8 ? 8 : cap * 2;
+        /* Take `max(cap*2, len+1, 8)` so a corrupted `len > cap` state
+         * (e.g., ABI mismatch) can't realloc to a too-small buffer
+         * and then write past the new tail. The doubling overflow
+         * guard catches `cap * 2` wrapping past INT64_MAX. */
+        int64_t doubled = cap < 8 ? 8 : cap * 2;
+        if (doubled < cap)
+        {
+            return NULL;
+        }
+        int64_t need = len + 1;
+        int64_t new_cap = doubled > need ? doubled : need;
+        if (new_cap < 0 || (size_t)new_cap > SIZE_MAX / sizeof(char *))
+        {
+            return NULL; /* multiplication overflow */
+        }
         size_t old_bytes = (size_t)cap * sizeof(char *);
         size_t new_bytes = (size_t)new_cap * sizeof(char *);
         void *new_data = _rt_realloc(a->data, old_bytes, new_bytes);
@@ -6648,13 +6666,25 @@ char *sailfin_runtime_array_push_slot_v2(void **data_ptr, int64_t *len_ptr,
     }
     if (len >= cap)
     {
-        int64_t new_cap = cap < 8 ? 8 : cap * 2;
+        /* Take `max(cap*2, len+1, 8)`. `len > cap` shouldn't happen
+         * under normal compiler emission, but a corrupted struct
+         * (uninitialized cap, ABI mismatch with seed-compiled IR)
+         * would otherwise let the slot at `[len]` land past the
+         * realloc'd buffer's end. The grow rule guarantees
+         * `new_cap >= len + 1` so the write below is in-bounds. */
+        int64_t doubled = cap < 8 ? 8 : cap * 2;
+        if (doubled < cap)
+        {
+            return NULL;
+        }
+        int64_t need = len + 1;
+        int64_t new_cap = doubled > need ? doubled : need;
+        if (new_cap < 0 || (size_t)new_cap > SIZE_MAX / (size_t)elem_size)
+        {
+            return NULL; /* multiplication overflow */
+        }
         size_t old_bytes = (size_t)cap * (size_t)elem_size;
         size_t new_bytes = (size_t)new_cap * (size_t)elem_size;
-        if (new_bytes / (size_t)elem_size != (size_t)new_cap)
-        {
-            return NULL; /* overflow */
-        }
         void *new_data = _rt_realloc(*data_ptr, old_bytes, new_bytes);
         if (!new_data)
         {
