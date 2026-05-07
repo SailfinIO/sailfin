@@ -5,7 +5,6 @@
       "Read",
       "Grep",
       "Glob",
-
       "Bash(make *)",
       "Bash(ulimit *)",
       "Bash(build/native/sailfin *)",
@@ -13,7 +12,6 @@
       "Bash(build/native/sailfin-seedcheck *)",
       "Bash(timeout * build/native/sailfin-seedcheck *)",
       "Bash(timeout 120 valgrind --tool=memcheck --track-origins=yes --error-exitcode=0 build/native/sailfin-seedcheck test compiler/tests/unit/function_signatures_test.sfn)",
-
       "Bash(git status*)",
       "Bash(git log*)",
       "Bash(git diff*)",
@@ -34,7 +32,6 @@
       "Bash(git ls-files*)",
       "Bash(git push -u origin claude/*)",
       "Bash(git push origin claude/*)",
-
       "Bash(gh pr *)",
       "Bash(gh issue *)",
       "Bash(gh run *)",
@@ -42,7 +39,6 @@
       "Bash(gh workflow *)",
       "Bash(gh release view*)",
       "Bash(gh release list*)",
-
       "Bash(ls *)",
       "Bash(wc *)",
       "Bash(head *)",
@@ -64,9 +60,10 @@
       "Bash(stat *)",
       "Bash(file *)",
       "Bash(du -sh *)",
-
       "WebFetch(domain:sailfin.dev)",
+      "WebFetch(domain:sfn.dev)",
       "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)"
     ],
@@ -99,7 +96,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/session-start.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start.sh"
+          }
         ]
       }
     ],
@@ -107,7 +107,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/inject-git-context.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/inject-git-context.sh"
+          }
         ]
       }
     ],
@@ -115,7 +118,10 @@
       {
         "matcher": "Bash",
         "hooks": [
-          { "type": "command", "command": ".claude/hooks/check-ulimit.sh" }
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-ulimit.sh"
+          }
         ]
       }
     ]

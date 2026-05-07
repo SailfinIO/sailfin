@@ -27,6 +27,13 @@ else
   echo "- seedcheck: not built (only needed for \`make check\`)"
 fi
 
+if [[ ! -f tools/mcp-server/dist/index.js ]]; then
+  echo "- mcp-server: building tools/mcp-server..."
+  (cd tools/mcp-server && npm ci --no-audit --no-fund --silent && npm run build --silent) 2>&1 | tail -3 || echo "  (mcp-server build failed — MCP tools unavailable)"
+else
+  echo "- mcp-server: tools/mcp-server/dist present"
+fi
+
 branch=$(git branch --show-current 2>/dev/null || echo "(detached)")
 echo "- branch: $branch"
 
