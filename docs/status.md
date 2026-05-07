@@ -714,7 +714,7 @@ The runtime rewrite depends on compiler features that must ship first. The
 | Closures with capture | Planned | `map`/`filter`/`reduce`, spawn handlers, route handlers |
 | Generic type constraints | Planned | `Array<T>`, `Slice<T>`, `HashMap<K, V>`, `Channel<T>` |
 | Deterministic drop emission | **M1.5 — in flight (#322)**. Promoted out of the "core runtime in Sailfin" milestone by the 2026-05-06 runtime-rewrite reassessment (#321) into its own epic so reviewers can audit the seam (`LocalBinding.allocation_kind` + `emit_scope_drops`) independently of core-runtime service PRs. Conservative escape rule in v0 is function-return promotion only; closure-capture and channel-send promotion follow once those features land. See `docs/runtime_architecture.md` §3.1 and §4.5b, and `docs/runtime_audit.md` Hard prereq #5. | Memory reclamation — enables `string_drop` and `array_drop`; unblocks every allocating Sailfin-native runtime service that follows |
-| Atomic intrinsics | Planned | Reference counting, task queues, channel implementation |
+| M0 Atomic intrinsics — shipped (#323) | **Shipped (M0, 2026-05-07)**. All six builtins (`atomic_load`, `atomic_store`, `atomic_add`, `atomic_sub`, `atomic_cas`, `atomic_fence`) parse, type-check, emit to native IR, and lower to LLVM `load atomic` / `store atomic` / `atomicrmw add` / `atomicrmw sub` / `cmpxchg` / `fence seq_cst`. Sub-issues: #331 (load/store), #332 (add/sub), #333 (cas), #334 (fence), #335 (docs). Memory ordering `seq_cst` for v0; relaxed/acquire/release variants post-1.0. See `docs/runtime_architecture.md` §3.5 and `docs/runtime_audit.md` item 11. | Reference counting (M2), task queues and channel flags (M4) |
 
 See `docs/runtime_audit.md` for the full migration plan.
 
