@@ -6,7 +6,11 @@
 #   - `s.length` resolves to a direct `extractvalue ..., 1` (no
 #     `sailfin_runtime_string_length` call).
 #   - `+` on strings emits
-#     `call i8* @sailfin_runtime_string_concat({i8*, i64} ..., {i8*, i64} ...)`.
+#     `call i8* @sailfin_runtime_string_concat_v2({i8*, i64} ..., {i8*, i64} ...)`.
+#     The `_v2` suffix is a transition aid: the legacy
+#     `sailfin_runtime_string_concat(char*, char*)` entrypoint stays
+#     link-stable for seed-compiled IR until the floor seed embeds the
+#     new ABI, then both can retire together.
 #   - No consumer re-extracts a literal as `[N x i8]` (regression guard
 #     against the legacy `bitcast i8* to [N x i8]*` consumer pattern).
 #
