@@ -512,12 +512,15 @@ compiler features that do not exist in the current toolchain.
     layout controls needed for niche-filled optionals and stable tag encoding.
 11. **Atomic intrinsics.** ✅ **Shipped in M0 (#323).** All six builtins
     (`atomic_load`, `atomic_store`, `atomic_add`, `atomic_sub`, `atomic_cas`,
-    `atomic_fence`) are parsed, type-checked, emitted to native IR, and lowered
-    to LLVM intrinsics (`load atomic`, `store atomic`, `atomicrmw add/sub`,
-    `cmpxchg`, `fence seq_cst`). Implemented across sub-issues #331 (load/store),
-    #332 (add/sub), #333 (cas), and #334 (fence). Memory ordering is `seq_cst`
-    for v0; relaxed/acquire/release variants are post-1.0. RC and shared-memory
-    concurrency primitives now have a sound atomic substrate.
+    `atomic_fence`) are parsed, emitted to native IR, and lowered to LLVM
+    intrinsics (`load atomic`, `store atomic`, `atomicrmw add/sub`, `cmpxchg`,
+    `fence seq_cst`). Arity and type validation (diagnostic E0806) is enforced
+    during LLVM lowering (`compiler/src/llvm/atomics.sfn`); the typecheck pass
+    treats atomic calls as ordinary call expressions. Implemented across
+    sub-issues #331 (load/store), #332 (add/sub), #333 (cas), and #334 (fence).
+    Memory ordering is `seq_cst` for v0; relaxed/acquire/release variants are
+    post-1.0. RC and shared-memory concurrency primitives now have a sound
+    atomic substrate.
 
 ### Items the runtime rewrite can deliberately **not** depend on
 

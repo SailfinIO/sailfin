@@ -1223,10 +1223,13 @@ concurrency primitives continue using the per-type spawn/await pattern
 
 ### 3.5 Atomic Intrinsics
 
-**Status: Shipped in M0 (#323).** Parser, typechecker, native-IR emitter, and
-LLVM lowering for all six builtins landed in sub-issues #331 (atomic_load /
-atomic_store), #332 (atomic_add / atomic_sub), #333 (atomic_cas), and #334
-(atomic_fence). See `docs/runtime_audit.md` for the promotion note.
+**Status: Shipped in M0 (#323).** Parser, native-IR emitter, and LLVM lowering
+for all six builtins landed in sub-issues #331 (atomic_load / atomic_store),
+#332 (atomic_add / atomic_sub), #333 (atomic_cas), and #334 (atomic_fence).
+Arity and type validation (E0806) is enforced during LLVM lowering in
+`compiler/src/llvm/atomics.sfn`; the typecheck pass treats atomic calls as
+ordinary call expressions (call-site resolution is not yet a typecheck
+responsibility). See `docs/runtime_audit.md` for the promotion note.
 
 **Shipped Sailfin builtins (compiler emits LLVM intrinsics directly):**
 
