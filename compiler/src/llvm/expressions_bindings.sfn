@@ -66,7 +66,8 @@ fn mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBinding[] {
                 consumed: true,
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
-                allocation_kind: entry.allocation_kind
+                allocation_kind: entry.allocation_kind,
+                init_sentinel: entry.init_sentinel
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -91,7 +92,8 @@ fn reset_local_consumption(locals: LocalBinding[], name: string) -> LocalBinding
                 consumed: false,
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
-                allocation_kind: entry.allocation_kind
+                allocation_kind: entry.allocation_kind,
+                init_sentinel: entry.init_sentinel
             };
             result.push(updated);
         } else { result.push(entry); }

@@ -56,7 +56,8 @@ fn bindings_mark_local_consumed(locals: LocalBinding[], name: string) -> LocalBi
                 consumed: true,
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
-                allocation_kind: entry.allocation_kind
+                allocation_kind: entry.allocation_kind,
+                init_sentinel: entry.init_sentinel
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -81,7 +82,8 @@ fn bindings_reset_local_consumption(locals: LocalBinding[], name: string) -> Loc
                 consumed: false,
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
-                allocation_kind: entry.allocation_kind
+                allocation_kind: entry.allocation_kind,
+                init_sentinel: entry.init_sentinel
             };
             result.push(updated);
         } else { result.push(entry); }
@@ -106,7 +108,8 @@ fn bindings_update_local_ownership(locals: LocalBinding[], name: string, ownersh
                 consumed: entry.consumed,
                 scope_id: entry.scope_id,
                 scope_depth: entry.scope_depth,
-                allocation_kind: entry.allocation_kind
+                allocation_kind: entry.allocation_kind,
+                init_sentinel: entry.init_sentinel
             };
             result.push(updated);
         } else { result.push(entry); }

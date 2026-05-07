@@ -154,7 +154,8 @@ fn _ipc_make_local_binding(name: string, pointer: string, llvm_type: string, typ
         consumed: false,
         scope_id: scope_id,
         scope_depth: scope_depth,
-        allocation_kind: default_allocation_kind()
+        allocation_kind: default_allocation_kind(),
+        init_sentinel: ""
     };
 }
 

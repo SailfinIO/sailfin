@@ -1,0 +1,38 @@
+// Fixture for compiler/tests/e2e/test_drop_emission_try_catch.sh.
+//
+// Exercises M1.5.4 init-sentinel guarded drops (issue #328):
+//
+//   - `try_with_rc` declares a heap-typed local inside a try body that
+//     is the operand of `return`. M1.5.5 (issue #329) flips its
+//     `allocation_kind` from "arena" to "rc" at function return; M1.5.4
+//     allocates an init sentinel for it and emits a sentinel-gated
+//     `sfn_rc_release` at catch entry.
+//   - `try_no_rc` declares a primitive local (i64) inside the try body.
+//     `is_heap_type` rejects scalars, so no sentinel is allocated and
+//     the catch handler emits no guarded release for it.
+//   - The catch body uses a named binding (`err`) so the take-exception
+//     call lands on a real slot. The guarded drops fire between the
+//     take-exception and the catch variable's store.
+//
+// No `main` — the harness drives `sfn emit llvm` directly. The IR is
+// the artifact under test; what we pin downstream is the presence /
+// absence of the sentinel allocas, the conditional branches, and the
+// release calls inside each function.
+fn try_with_rc() -> string {
+    let mut result: string = "";
+    try {
+        let s: string = "hi";
+        result = s;
+        return s;
+    } catch (err) { result = err; }
+    return result;
+}
+
+fn try_no_rc() -> int {
+    let mut total: int = 0;
+    try {
+        let n: int = 42;
+        total = n;
+    } catch (err) { total = -1; }
+    return total;
+}

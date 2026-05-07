@@ -173,6 +173,14 @@ struct LocalBinding {
     // bump-allocated, no destructor needed), "rc" (escapes to ref-counted, set
     // by M1.5.5 escape promotion), "static" / "stack" (reserved for M2/M3).
     allocation_kind: string;
+    // Init sentinel slot for try/catch unwind cleanup (M1.5.4, issue #328).
+    // When this binding lives inside a `try` body, an `i1` flag is allocated
+    // at function entry, zeroed before the let runs, and set after the let's
+    // value store. The catch handler loads this flag to decide whether the
+    // owned RC value is initialized before calling `sfn_rc_release`.
+    // Empty string = no sentinel (binding is outside any try body, or this
+    // is a non-let binding such as a catch variable / for-loop iterator).
+    init_sentinel: string;
 }
 
 struct ModuleGlobalLoweringResult {
@@ -359,6 +367,23 @@ struct HeapBoxResult {
 struct ScopeDropResult {
     lines: string[];
     next_temp: number;
+}
+
+// Result of `emit_guarded_scope_drops` (M1.5.4, issue #328). Like
+// `ScopeDropResult` but also threads the block-label counter, since the
+// guarded-drop emission allocates fresh `drop` / `skip` basic-block
+// labels per binding to host the conditional branch. `final_label` is
+// the basic-block label that becomes the active block after the last
+// guarded drop (the trailing `skip<N>` block); the catch handler must
+// thread it through to the catch body's `current_label` so subsequent
+// instructions emit into the right block. Empty when no drops were
+// emitted (no rc-eligible bindings descended from the try scope) — in
+// that case the caller keeps its existing active label.
+struct GuardedDropResult {
+    lines: string[];
+    next_temp: number;
+    next_block_counter: number;
+    final_label: string;
 }
 
 // =============================================================================
