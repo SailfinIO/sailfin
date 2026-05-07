@@ -1,6 +1,6 @@
 [capsule]
 name = "sfn/test"
-version = "0.1.0"
+version = "0.2.0"
 description = "Test assertion helpers and utilities for Sailfin"
 
 [dependencies]
