@@ -1223,11 +1223,15 @@ concurrency primitives continue using the per-type spawn/await pattern
 
 ### 3.5 Atomic Intrinsics
 
-**Current state:** The compiler has no atomic operation support. RC's
-`refcount` field, the scheduler's `shutdown` flag, and channel state flags all
-need atomic increment/decrement and fences.
+**Status: Shipped in M0 (#323).** Parser, native-IR emitter, and LLVM lowering
+for all six builtins landed in sub-issues #331 (atomic_load / atomic_store),
+#332 (atomic_add / atomic_sub), #333 (atomic_cas), and #334 (atomic_fence).
+Arity and type validation (E0806) is enforced during LLVM lowering in
+`compiler/src/llvm/atomics.sfn`; the typecheck pass treats atomic calls as
+ordinary call expressions (call-site resolution is not yet a typecheck
+responsibility). See `docs/runtime_audit.md` for the promotion note.
 
-**Required Sailfin builtins (compiler emits LLVM intrinsics directly):**
+**Shipped Sailfin builtins (compiler emits LLVM intrinsics directly):**
 
 | Sailfin builtin | LLVM intrinsic | Use |
 |---|---|---|
@@ -1241,12 +1245,12 @@ need atomic increment/decrement and fences.
 These are **compiler intrinsics** — builtins with dedicated LLVM lowering, not
 library functions. The user cannot define them in Sailfin; the compiler
 recognizes the name and emits the intrinsic directly. Memory ordering is
-`seq_cst` for v0 (simple, correct); relaxed/acquire/release variants can be
-added post-1.0 if profiling shows contention.
+`seq_cst` for v0 (simple, correct); relaxed/acquire/release variants are
+post-1.0.
 
-**Prerequisite status:** Hard for M2 (RC correctness) and M4 (scheduler
-correctness). Soft prerequisite #11 in `runtime_audit.md`, but functionally
-blocking for M2.
+**Prerequisite coverage:** Required for sound RC (M2) and the scheduler (M4).
+Shipped in M0 so that M2 and M4 can depend on a working atomic substrate without
+carrying an implementation risk.
 
 **Fast-fail criterion:** A Sailfin test `let r = atomic_add(&counter, 1)` from
 two threads produces the expected sum (no races, no lost increments).
@@ -1615,8 +1619,8 @@ to the arena.
   `array_drop` stay default-off. This was previously framed as a "soft
   prereq" inside M2; the 2026-05-06 reassessment (#321) lifted it to its
   own milestone.
-- Atomic intrinsics (§3.5). Required for sound RC and the scheduler. Soft
-  prereq #11 in `runtime_audit.md`, but hard for M2.
+- Atomic intrinsics (§3.5). **Shipped in M0 (#323, sub-issues #331–#334).** No
+  longer a blocker for M2.
 
 **What can ship after M1 (soft prereqs — desirable but not blocking):**
 - Generic trait/interface constraints. Needed for fully typed `Channel<T>` and
