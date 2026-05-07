@@ -3,7 +3,7 @@
 // CLI command handlers extracted from cli_main.sfn to keep
 // sailfin_cli_main under ~500 .sfn-asm instructions (avoids seed OOM).
 import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } from "./assert_failure";
-import { Statement } from "./ast";
+import { Program, Statement } from "./ast";
 import { is_safe_scope_name, parse_scope_name } from "./capsule_artifact";
 import {
     TestCapsuleResolution,
@@ -49,7 +49,16 @@ import {
     number_to_string
 } from "./main";
 import { LayoutManifest } from "./native_ir";
+import { parse_program } from "./parser/mod";
 import { substring } from "./string_utils";
+import {
+    TestEntry,
+    collect_test_entries,
+    locate_failing_test,
+    render_start_event,
+    render_summary_event,
+    render_test_event
+} from "./test_runner_json";
 import { enter_test_runner_mode, exit_test_runner_mode } from "./test_runner_state";
 import {
     toml_add_dependency,
@@ -353,10 +362,206 @@ fn _find_test_group(groups: TestGroup[], key: string) -> number {
     return -1;
 }
 
-fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
+// Synthesize an `AssertFailure` for a test that was skipped or for
+// which we have no `fail.bin` record. `present=true` so the JSON
+// emitter still attaches an `assertion` object — consumers can
+// inspect `message` for the runner's reason (compile failed, link
+// failed, process aborted before reaching this test, etc.). The
+// `line`/`col` are 0 because the failure is not pinned to a
+// specific source location.
+fn _synthetic_assert_failure(file: string, message: string) -> AssertFailure {
+    return AssertFailure {
+        present: true,
+        file: file,
+        line: 0,
+        col: 0,
+        message: message
+    };
+}
+
+// Per-file outcome buckets used by the JSON emitter. The runner
+// drives these as it processes each file; they're consumed at the
+// bottom of the loop iteration to emit per-test events without
+// re-entering the per-file branches.
+struct TestFileOutcome {
+    kind: string;
+    failed_index: number;
+    failure: AssertFailure;
+    elapsed_ms: number;
+}
+
+fn _outcome_all_pass(elapsed_ms: number) -> TestFileOutcome {
+    return TestFileOutcome {
+        kind: "pass",
+        failed_index: -1,
+        failure: _empty_assert_failure(),
+        elapsed_ms: elapsed_ms
+    };
+}
+
+fn _outcome_failed_at(failed_index: number, failure: AssertFailure, elapsed_ms: number) -> TestFileOutcome {
+    return TestFileOutcome {
+        kind: "fail",
+        failed_index: failed_index,
+        failure: failure,
+        elapsed_ms: elapsed_ms
+    };
+}
+
+fn _outcome_setup_failure(failure: AssertFailure) -> TestFileOutcome {
+    return TestFileOutcome {
+        kind: "setup_failed",
+        failed_index: -1,
+        failure: failure,
+        elapsed_ms: 0
+    };
+}
+
+// Even-distribution slice for per-test `duration_ms`. A file's
+// binary executes every test in one process, so per-test wall time
+// is not directly observable; spec §11 documents the
+// even-distribution approximation used here. Returns 0 when the
+// file produced no test entries.
+fn _trj_per_test_duration(file_elapsed_ms: number, test_count: number) -> number {
+    if test_count <= 0 { return 0; }
+    if file_elapsed_ms <= 0 { return 0; }
+    let mut quotient: number = 0;
+    let mut remaining: number = file_elapsed_ms;
+    loop {
+        if remaining < test_count { break; }
+        remaining -= test_count;
+        quotient += 1;
+    }
+    return quotient;
+}
+
+// Emit one jsonl `test` event per entry in `entries`, attributing
+// outcomes per `outcome.kind`. Stdout-only — caller must not have
+// mixed any human banner output into the same stream.
+fn _emit_file_test_events(entries: TestEntry[], outcome: TestFileOutcome) -> number ![io] {
+    let total_in_file = entries.length;
+    let per_test_ms = _trj_per_test_duration(outcome.elapsed_ms, total_in_file);
+    let mut passed: number = 0;
+    let mut failed: number = 0;
+    let mut skipped: number = 0;
+    let mut idx: number = 0;
+    loop {
+        if idx >= entries.length { break; }
+        let entry = entries[idx];
+        let mut status: string = "pass";
+        let mut event_failure: AssertFailure = _empty_assert_failure();
+        if strings_equal(outcome.kind, "pass") {
+            status = "pass";
+            passed += 1;
+        } else if strings_equal(outcome.kind, "setup_failed") {
+            status = "skip";
+            event_failure = outcome.failure;
+            skipped += 1;
+        } else {
+            // outcome.kind == "fail"
+            if outcome.failed_index < 0 {
+                // Couldn't pin the failure to a specific test; flag the
+                // first entry as the failing one and skip the rest. See
+                // spec §11 for the attribution rule.
+                if idx == 0 {
+                    status = "fail";
+                    event_failure = outcome.failure;
+                    failed += 1;
+                } else {
+                    status = "skip";
+                    skipped += 1;
+                }
+            } else {
+                if idx < outcome.failed_index {
+                    status = "pass";
+                    passed += 1;
+                } else if idx == outcome.failed_index {
+                    status = "fail";
+                    event_failure = outcome.failure;
+                    failed += 1;
+                } else {
+                    status = "skip";
+                    skipped += 1;
+                }
+            }
+        }
+        let line = render_test_event(entry.name, entry.file, entry.line, status, per_test_ms, entry.effects, event_failure);
+        print(line);
+        idx += 1;
+    }
+    // Pack pass/fail/skip into the outcome's `failed_index` slot via
+    // a side-effect-free encoding for the caller's running totals.
+    // Returning a struct from this function would force the caller
+    // into another pattern-match; instead we expose three accessors
+    // on a small typed counter.
+    return passed * 1000000 + failed * 1000 + skipped;
+}
+
+fn _trj_decode_passed(packed: number) -> number {
+    let mut p: number = packed;
+    if p < 0 { p = 0 - p; }
+    let mut count: number = 0;
+    loop {
+        if p < 1000000 { break; }
+        p -= 1000000;
+        count += 1;
+    }
+    return count;
+}
+
+fn _trj_decode_failed(packed: number) -> number {
+    let mut p: number = packed;
+    if p < 0 { p = 0 - p; }
+    // Strip the millions slot.
+    loop {
+        if p < 1000000 { break; }
+        p -= 1000000;
+    }
+    let mut count: number = 0;
+    loop {
+        if p < 1000 { break; }
+        p -= 1000;
+        count += 1;
+    }
+    return count;
+}
+
+fn _trj_decode_skipped(packed: number) -> number {
+    let mut p: number = packed;
+    if p < 0 { p = 0 - p; }
+    loop {
+        if p < 1000000 { break; }
+        p -= 1000000;
+    }
+    loop {
+        if p < 1000 { break; }
+        p -= 1000;
+    }
+    return p;
+}
+
+fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clock] {
+    // Flag parser: `--json` is the only recognised flag for now.
+    // Positional args carry the optional `path` argument; preserves
+    // pre-existing behaviour where `sfn test [path]` accepts at most
+    // one positional. The flag may appear before or after the path.
+    let mut json_output: boolean = false;
+    let mut positional: string[] = [];
+    let mut ai: number = 1;
+    loop {
+        if ai >= args.length { break; }
+        let arg = args[ai];
+        if strings_equal(arg, "--json") { json_output = true; } else {
+            positional.push(arg);
+        }
+        ai += 1;
+    }
     let mut root: string = ".";
-    if args.length == 2 { root = args[1]; } else if args.length != 1 {
-        print("usage: sfn test [path]");
+    if positional.length == 1 { root = positional[0]; } else if positional.length > 1 {
+        // Usage hints belong on stderr in `--json` mode so the stdout
+        // jsonl stream stays clean. Mirrored on the human path for
+        // consistency.
+        print.err("usage: sfn test [--json] [path]");
         return 2;
     }
 
@@ -378,7 +583,13 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
 
     let test_files = _collect_test_files_cmd(root, 25);
     if test_files.length == 0 {
-        print("no Sailfin test files found under: " + root);
+        if json_output {
+            // Still produce a valid jsonl stream so consumers don't
+            // have to special-case empty discovery — start, no test
+            // events, summary with all zeros.
+            print(render_start_event(0));
+            print(render_summary_event(0, 0, 0, 0));
+        } else { print("no Sailfin test files found under: " + root); }
         exit_test_runner_mode();
         return 1;
     }
@@ -499,12 +710,54 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
     // same accumulating-allocation wall `sfn check` did pre-Phase-5a.
     let test_scratch_mark = sailfin_intrinsic_runtime_arena_mark();
 
+    // Pre-parse pass: only run in `--json` mode. Walks every test
+    // file once, parses it, and pulls out the
+    // `test "name" { ... }` declarations. Three reasons the runner
+    // needs this: (1) the `start` event's `total` must be exact
+    // before the first per-test event is emitted; (2) per-test
+    // names and source spans must be known even when the test
+    // binary aborts mid-suite (the harness calls every `test:`
+    // symbol in sequence and a single `assert false;` brings the
+    // whole process down via `abort()`); (3) compile failures
+    // still need attribution to the affected tests so consumers
+    // see a `skip` event per declaration. The non-`--json` path
+    // skips the extra read+parse and matches the previous
+    // behaviour exactly — a measurable saving for the ~75-file
+    // self-host suite where every read+parse cycle adds up.
+    let mut per_file_entries: TestEntry[][] = [];
+    let mut total_tests: number = 0;
+    if json_output {
+        let mut pi: number = 0;
+        loop {
+            if pi >= test_files.length { break; }
+            let pre_path = test_files[pi];
+            let pre_source = fs.readFile(pre_path);
+            let pre_program: Program = parse_program(pre_source);
+            let entries = collect_test_entries(pre_program, pre_path);
+            per_file_entries.push(entries);
+            total_tests += entries.length;
+            pi += 1;
+        }
+        print(render_start_event(total_tests));
+    }
+
+    let runner_start_ms = monotonic_millis();
+
+    let mut total_passed: number = 0;
+    let mut total_failed: number = 0;
+    let mut total_skipped: number = 0;
+    let mut overall_rc: number = 0;
+
     let mut index: number = 0;
     loop {
         if index >= test_files.length { break; }
         let path = test_files[index];
         let group_idx = file_group_index[index];
-        print("test: " + path);
+        // `per_file_entries` is only populated in `--json` mode;
+        // the human path doesn't read it.
+        let mut entries: TestEntry[] = [];
+        if json_output { entries = per_file_entries[index]; }
+        if !json_output { print("test: " + path); }
         let source = fs.readFile(path);
         let module_name = module_name_from_path(path);
 
@@ -513,12 +766,30 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
             _write_text_cmd(scratch_root + "/test-source-" + safe + ".sfn", source);
         }
 
+        let file_start_ms = monotonic_millis();
+
         if trace_runner { print.err("test runner: compile start"); }
         _clean_lowering_state(scratch_root);
         let empty_manifests: LayoutManifest[] = [];
         let _compiled = compile_tests_to_llvm_file_with_module_imports(source, module_name, ll_path, groups[group_idx].interfaces, empty_manifests, groups[group_idx].native_texts, groups[group_idx].function_effects, groups[group_idx].capabilities_required);
         if !_compiled {
-            print("test runner: compile failed for " + path);
+            // Stderr stays usable for compiler-internal diagnostics
+            // even in `--json` mode; the affected tests show up as
+            // `skip` events with a synthetic assertion message so
+            // consumers can correlate the stderr noise with the
+            // tests that didn't run.
+            print.err("test runner: compile failed for " + path);
+            if json_output {
+                let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "compile failed"));
+                let packed = _emit_file_test_events(entries, outcome);
+                total_passed += _trj_decode_passed(packed);
+                total_failed += _trj_decode_failed(packed);
+                total_skipped += _trj_decode_skipped(packed);
+                overall_rc = 1;
+                sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                index += 1;
+                continue;
+            }
             exit_test_runner_mode();
             return 1;
         }
@@ -526,7 +797,21 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         if trace_runner { print.err("test runner: link start"); }
         let link_rc = _clang_link_test_cmd_with_deps(ll_path, exe_path, runtime_root, groups[group_idx].dep_ll_paths);
         if link_rc != 0 {
-            print("link failed (clang exit=" + number_to_string(link_rc) + ")");
+            print.err("link failed (clang exit=" + number_to_string(link_rc)
+                + ")");
+            if json_output {
+                let outcome = _outcome_setup_failure(_synthetic_assert_failure(path, "link failed (clang exit="
+                    + number_to_string(link_rc)
+                    + ")"));
+                let packed = _emit_file_test_events(entries, outcome);
+                total_passed += _trj_decode_passed(packed);
+                total_failed += _trj_decode_failed(packed);
+                total_skipped += _trj_decode_skipped(packed);
+                if overall_rc == 0 { overall_rc = link_rc; }
+                sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                index += 1;
+                continue;
+            }
             exit_test_runner_mode();
             return link_rc;
         }
@@ -549,12 +834,37 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         // so a stale record from a previous iteration can't leak
         // into the next pass. `present=false` is the pass case.
         let failure = _consume_assert_failure_record(scratch_root);
+        let file_elapsed_ms = monotonic_millis() - file_start_ms;
         if run_rc != 0 {
+            if json_output {
+                let mut effective = failure;
+                if !effective.present {
+                    effective = _synthetic_assert_failure(path, "test process exited with code "
+                        + number_to_string(run_rc));
+                }
+                let failed_index = locate_failing_test(entries, effective);
+                let outcome = _outcome_failed_at(failed_index, effective, file_elapsed_ms);
+                let packed = _emit_file_test_events(entries, outcome);
+                total_passed += _trj_decode_passed(packed);
+                total_failed += _trj_decode_failed(packed);
+                total_skipped += _trj_decode_skipped(packed);
+                if overall_rc == 0 { overall_rc = run_rc; }
+                sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
+                index += 1;
+                continue;
+            }
             if failure.present {
                 print("test failed: " + _format_assert_failure(path, failure));
             } else { print("test failed: " + path); }
             exit_test_runner_mode();
             return run_rc;
+        }
+        if json_output {
+            let outcome = _outcome_all_pass(file_elapsed_ms);
+            let packed = _emit_file_test_events(entries, outcome);
+            total_passed += _trj_decode_passed(packed);
+            total_failed += _trj_decode_failed(packed);
+            total_skipped += _trj_decode_skipped(packed);
         }
         // Phase 5a: rewind arena scratch back to the per-test
         // mark. Per-iteration allocations (parsed test AST,
@@ -565,8 +875,12 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         sailfin_intrinsic_runtime_arena_rewind(test_scratch_mark);
         index += 1;
     }
+    if json_output {
+        let runner_elapsed_ms = monotonic_millis() - runner_start_ms;
+        print(render_summary_event(total_passed, total_failed, total_skipped, runner_elapsed_ms));
+    }
     exit_test_runner_mode();
-    return 0;
+    return overall_rc;
 }
 
 // ═══════════════════════════════════════════════════════════════════

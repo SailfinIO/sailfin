@@ -19,3 +19,132 @@ test "name" ![effects] {
 - `assert expr;` is a statement form (no parens) and fails with the expression text
 
 ---
+
+## Test runner JSON output
+
+`sfn test --json` emits a machine-readable [JSON Lines](https://jsonlines.org/)
+event stream on stdout — one event per line, with no human banner output.
+Stderr remains usable for compiler-internal diagnostics that don't fit the
+schema (e.g. "compiler crashed" stack traces, `[trace]` runner logs).
+
+The stream is the canonical contract that CI tooling, the planned MCP
+`sailfin_test_runner` tool, and the `assert_compiles` integration consume to
+verify generated code passes its tests without scraping human-readable
+output.
+
+### Event shapes
+
+Three event kinds, schema-versioned:
+
+```jsonc
+// First line — exactly once per run.
+{"event":"start","total":42,"schema_version":1}
+
+// One per test, in source order.
+{"event":"test","name":"answer is 42","file":"path/to/foo_test.sfn",
+ "line":3,"status":"pass","duration_ms":12,"effects":["io"]}
+
+// `assertion` is attached when status == "fail" or when the runner
+// synthesised a skip/fail reason (compile failure, link failure,
+// process aborted before this test ran).
+{"event":"test","name":"breaks","file":"path/to/foo_test.sfn",
+ "line":7,"status":"fail","duration_ms":3,"effects":[],
+ "assertion":{"file":"path/to/foo_test.sfn","line":8,"col":12,
+              "message":"expected x == 42, got 41"}}
+
+// Last line — exactly once per run.
+{"event":"summary","passed":40,"failed":1,"skipped":1,"duration_ms":1284}
+```
+
+### Field semantics
+
+| Event     | Field            | Type      | Meaning                                                         |
+|-----------|------------------|-----------|-----------------------------------------------------------------|
+| `start`   | `total`          | integer   | Count of test declarations the runner discovered up front.      |
+| `start`   | `schema_version` | integer   | Currently `1`. Bumped only on a breaking change.                |
+| `test`    | `name`           | string    | The literal `test "..."` name from source.                      |
+| `test`    | `file`           | string    | Source file path, as discovered by `sfn test`.                  |
+| `test`    | `line`           | integer   | 1-based source line of the `test` keyword.                      |
+| `test`    | `status`         | string    | `"pass"`, `"fail"`, or `"skip"`.                                |
+| `test`    | `duration_ms`    | integer   | Wall-clock time approximation; see *Timing approximation* below.|
+| `test`    | `effects`        | string[]  | Effects declared on the test, e.g. `["io", "net"]`.             |
+| `test`    | `assertion`      | object?   | Present on `"fail"` and on synthesised `"skip"` reasons.        |
+| `summary` | `passed`         | integer   | Tests with `status == "pass"`.                                  |
+| `summary` | `failed`         | integer   | Tests with `status == "fail"`.                                  |
+| `summary` | `skipped`        | integer   | Tests with `status == "skip"`.                                  |
+| `summary` | `duration_ms`    | integer   | Wall-clock time of the entire `sfn test --json` invocation.     |
+
+The optional `assertion` object carries the typed
+[`AssertFailure`](https://github.com/SailfinIO/sailfin/blob/main/compiler/src/assert_failure.sfn)
+record:
+
+```jsonc
+{"file":"...","line":N,"col":N,"message":"..."}
+```
+
+When the runner cannot pin a failure to a specific source location (e.g. the
+file's compile or link step failed, or the test process aborted with no
+`fail.bin` record), `line` and `col` are `0` and `message` carries a
+synthesised reason (`"compile failed"`, `"link failed (clang exit=1)"`,
+`"test process exited with code 134"`, etc.).
+
+### Status attribution rule
+
+The Sailfin test runner compiles every `test "..." { ... }` block in a file
+into a single binary harness; an `assert false;` aborts the process via
+`abort()` and unblocks no later tests. The JSON attribution rule reflects
+that:
+
+- Tests in a file whose binary exits `0` are all marked `"pass"`.
+- When the binary exits non-zero with a `fail.bin` record, the runner
+  matches the assertion's `line` to the test whose `line` is the largest
+  ≤ the failure line (the closest preceding test in source order). That
+  test is marked `"fail"`; tests earlier in the file are marked `"pass"`;
+  tests later in the file are marked `"skip"`.
+- When the binary exits non-zero with no `fail.bin` record, the first test
+  in the file is marked `"fail"` with a synthesised `assertion.message`,
+  and the rest are marked `"skip"`.
+- When a file's compile or link fails, every test in that file is marked
+  `"skip"` with a synthesised `assertion.message`. The runner continues to
+  the next file so consumers see a full per-test stream.
+
+### Timing approximation
+
+`duration_ms` on a `test` event is the file's wall-clock execution time
+divided evenly across the file's tests. Per-test wall time is not
+directly observable today because every test in a file runs inside one
+process; consumers should treat `duration_ms` as an indication of
+roughly-balanced cost rather than a precise per-test measurement. The
+`summary.duration_ms` field is the total wall time of the `sfn test --json`
+invocation and is exact.
+
+### Schema version policy
+
+`schema_version` is a monotonically increasing integer attached to the
+`start` event. The current version is `1`.
+
+- Adding optional fields to existing events is **not** a breaking change.
+  Consumers are expected to ignore unknown fields.
+- Adding new event kinds is **not** a breaking change. Consumers should
+  ignore unknown `event` discriminators rather than fail.
+- Removing fields, repurposing field types, changing field semantics, or
+  changing event ordering is breaking. The version is bumped in lockstep.
+
+Consumers SHOULD hard-fail (refuse to process the stream) on an unknown
+`schema_version` rather than try to compatibilize forward-incompatible
+output.
+
+### Stream contract
+
+For any `sfn test --json` invocation:
+
+- The first line on stdout is always a `start` event.
+- The last line on stdout is always a `summary` event.
+- Every line between is a `test` event in source-discovery order.
+- Stdout contains nothing else — no human banners, no progress lines.
+- Stderr may contain anything (compiler diagnostics, runner traces).
+
+Consumers that pipe into `jq -c` can rely on every line being a complete
+JSON object with no trailing whitespace.
+
+---

@@ -1,0 +1,188 @@
+// Issue #368 / P6: golden-output check for the `sfn test --json`
+// event stream emitters.
+//
+// This file is the contract pin for the wire format documented in
+// `site/src/content/docs/docs/reference/spec/11-testing.md`. Each
+// test below exercises one event kind on a known input and
+// asserts on the exact rendered string. If any of these flip,
+// either the schema is changing on purpose (bump
+// `TEST_RUNNER_JSON_SCHEMA_VERSION` and update the spec) or the
+// emitter is drifting (fix the emitter).
+//
+// The end-to-end smoke path — driving the actual binary with a
+// mixed pass/fail fixture — lives in the issue's verification
+// block; reproducing it here would require subprocess piping
+// that integration tests intentionally avoid.
+import { AssertFailure, _empty_assert_failure } from "../../src/assert_failure";
+import { Program, Statement } from "../../src/ast";
+import { parse_program } from "../../src/parser/mod";
+import {
+    TEST_RUNNER_JSON_SCHEMA_VERSION,
+    TestEntry,
+    collect_test_entries,
+    locate_failing_test,
+    render_assert_failure_json,
+    render_start_event,
+    render_summary_event,
+    render_test_event
+} from "../../src/test_runner_json";
+
+fn _empty_effects() -> string[] {
+    let out: string[] = [];
+    return out;
+}
+
+fn _failure(file: string, line: number, col: number, message: string) -> AssertFailure {
+    return AssertFailure {
+        present: true,
+        file: file,
+        line: line,
+        col: col,
+        message: message
+    };
+}
+
+// --------------------------------------------------------------
+// Schema version constant
+// --------------------------------------------------------------
+test "test_runner_json: schema version is 1 (consumers hard-fail on unknown)" {
+    assert TEST_RUNNER_JSON_SCHEMA_VERSION == 1;
+}
+
+// --------------------------------------------------------------
+// `start` event
+// --------------------------------------------------------------
+test "test_runner_json: start event golden shape" {
+    let line = render_start_event(7);
+    assert line == "{\"event\":\"start\",\"total\":7,\"schema_version\":1}";
+}
+
+test "test_runner_json: start event handles zero-test discovery" {
+    let line = render_start_event(0);
+    assert line == "{\"event\":\"start\",\"total\":0,\"schema_version\":1}";
+}
+
+// --------------------------------------------------------------
+// `summary` event
+// --------------------------------------------------------------
+test "test_runner_json: summary event golden shape" {
+    let line = render_summary_event(40, 1, 1, 1284);
+    assert line == "{\"event\":\"summary\",\"passed\":40,\"failed\":1,\"skipped\":1,\"duration_ms\":1284}";
+}
+
+test "test_runner_json: summary all-zero shape (empty discovery)" {
+    let line = render_summary_event(0, 0, 0, 0);
+    assert line == "{\"event\":\"summary\",\"passed\":0,\"failed\":0,\"skipped\":0,\"duration_ms\":0}";
+}
+
+// --------------------------------------------------------------
+// `test` event — pass case (no `assertion` field)
+// --------------------------------------------------------------
+test "test_runner_json: test event pass shape omits assertion" {
+    let effects: string[] = ["io"];
+    let nothing = _empty_assert_failure();
+    let line = render_test_event("answer", "foo_test.sfn", 3, "pass", 12, effects, nothing);
+    assert line == "{\"event\":\"test\",\"name\":\"answer\",\"file\":\"foo_test.sfn\",\"line\":3,\"status\":\"pass\",\"duration_ms\":12,\"effects\":[\"io\"]}";
+}
+
+test "test_runner_json: test event with empty effects renders []" {
+    let nothing = _empty_assert_failure();
+    let line = render_test_event("plain", "bar_test.sfn", 1, "pass", 0, _empty_effects(), nothing);
+    assert line == "{\"event\":\"test\",\"name\":\"plain\",\"file\":\"bar_test.sfn\",\"line\":1,\"status\":\"pass\",\"duration_ms\":0,\"effects\":[]}";
+}
+
+test "test_runner_json: test event with multiple effects preserves order" {
+    let effects: string[] = ["io", "net", "clock"];
+    let nothing = _empty_assert_failure();
+    let line = render_test_event("multi", "x.sfn", 5, "pass", 1, effects, nothing);
+    assert line == "{\"event\":\"test\",\"name\":\"multi\",\"file\":\"x.sfn\",\"line\":5,\"status\":\"pass\",\"duration_ms\":1,\"effects\":[\"io\",\"net\",\"clock\"]}";
+}
+
+// --------------------------------------------------------------
+// `test` event — fail case (assertion attached from AssertFailure)
+// --------------------------------------------------------------
+test "test_runner_json: test event fail shape attaches assertion" {
+    let failure = _failure("foo_test.sfn", 8, 12, "expected x == 42");
+    let line = render_test_event("breaks", "foo_test.sfn", 7, "fail", 3, _empty_effects(), failure);
+    assert line == "{\"event\":\"test\",\"name\":\"breaks\",\"file\":\"foo_test.sfn\",\"line\":7,\"status\":\"fail\",\"duration_ms\":3,\"effects\":[],\"assertion\":{\"file\":\"foo_test.sfn\",\"line\":8,\"col\":12,\"message\":\"expected x == 42\"}}";
+}
+
+// --------------------------------------------------------------
+// AssertFailure → JSON
+// --------------------------------------------------------------
+test "test_runner_json: assertion shape is {file,line,col,message} in stable order" {
+    let failure = _failure("path/to/test.sfn", 12, 3, "boom");
+    let line = render_assert_failure_json(failure);
+    assert line == "{\"file\":\"path/to/test.sfn\",\"line\":12,\"col\":3,\"message\":\"boom\"}";
+}
+
+test "test_runner_json: assertion message escapes embedded quotes" {
+    let failure = _failure("t.sfn", 1, 1, "got \"ok\"");
+    let line = render_assert_failure_json(failure);
+    assert line == "{\"file\":\"t.sfn\",\"line\":1,\"col\":1,\"message\":\"got \\\"ok\\\"\"}";
+}
+
+test "test_runner_json: assertion message escapes backslashes" {
+    let failure = _failure("t.sfn", 1, 1, "C:\\path");
+    let line = render_assert_failure_json(failure);
+    assert line == "{\"file\":\"t.sfn\",\"line\":1,\"col\":1,\"message\":\"C:\\\\path\"}";
+}
+
+// --------------------------------------------------------------
+// Pre-run pass: collect_test_entries
+// --------------------------------------------------------------
+test "test_runner_json: collect_test_entries finds every test in source order" {
+    let source = "test \"first\" { assert true; }\n"
+        + "test \"second\" ![io] { assert true; }\n"
+        + "fn helper() { return; }\n"
+        + "test \"third\" { assert true; }\n";
+    let program: Program = parse_program(source);
+    let entries = collect_test_entries(program, "fixture.sfn");
+    assert entries.length == 3;
+    assert entries[0].name == "first";
+    assert entries[0].file == "fixture.sfn";
+    assert entries[0].line == 1;
+    assert entries[0].effects.length == 0;
+    assert entries[1].name == "second";
+    assert entries[1].line == 2;
+    assert entries[1].effects.length == 1;
+    assert entries[1].effects[0] == "io";
+    assert entries[2].name == "third";
+    assert entries[2].line == 4;
+}
+
+test "test_runner_json: collect_test_entries returns empty when no tests" {
+    let source = "fn nothing_to_see() -> number { return 0; }\n";
+    let program: Program = parse_program(source);
+    let entries = collect_test_entries(program, "no_tests.sfn");
+    assert entries.length == 0;
+}
+
+// --------------------------------------------------------------
+// locate_failing_test attribution rule
+// --------------------------------------------------------------
+test "test_runner_json: locate_failing_test picks closest preceding test" {
+    let source = "test \"a\" { assert true; }\n"
+        + "test \"b\" { assert true; }\n"
+        + "test \"c\" { assert true; }\n";
+    let program: Program = parse_program(source);
+    let entries = collect_test_entries(program, "f.sfn");
+    let failure = _failure("f.sfn", 2, 12, "boom");
+    // Test `b` is on line 2; failure at line 2 maps to index 1.
+    assert locate_failing_test(entries, failure) == 1;
+}
+
+test "test_runner_json: locate_failing_test returns -1 when failure absent" {
+    let entries: TestEntry[] = [];
+    let nothing = _empty_assert_failure();
+    assert locate_failing_test(entries, nothing) == -1;
+}
+
+test "test_runner_json: locate_failing_test returns -1 when no test precedes line 0" {
+    let source = "test \"only\" { assert true; }\n";
+    let program: Program = parse_program(source);
+    let entries = collect_test_entries(program, "f.sfn");
+    let failure = _failure("f.sfn", 0, 0, "synthetic — no record");
+    // failure.line == 0 → no preceding test, falls back to -1.
+    assert locate_failing_test(entries, failure) == -1;
+}
