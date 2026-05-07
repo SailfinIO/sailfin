@@ -97,11 +97,14 @@ test_compiler_binary_exports_sfn_arena_sfn() {
         # while it actually only declares it. Anchored on
         # symbol-end so a substring collision
         # (`sfn_arena_sfn_create_helper`) does not satisfy the
-        # check. Here-string instead of `echo | grep` so
-        # `set -o pipefail` does not turn `grep -q`'s early exit
-        # into a SIGPIPE-induced false negative.
-        if ! grep -qE "[[:space:]][Tt][[:space:]]${sym}\$" <<< "$nm_log"; then
-            echo "[test]   compiler binary missing Sailfin export: $sym (looked for ' T|t ${sym}' in nm output)"
+        # check. The optional `_` prefix accommodates macOS
+        # Mach-O `nm` output, which prepends an underscore to
+        # every C symbol (`T _sfn_arena_sfn_create`); Linux ELF
+        # `nm` emits the bare name. Here-string instead of `echo
+        # | grep` so `set -o pipefail` does not turn `grep -q`'s
+        # early exit into a SIGPIPE-induced false negative.
+        if ! grep -qE "[[:space:]][Tt][[:space:]]_?${sym}\$" <<< "$nm_log"; then
+            echo "[test]   compiler binary missing Sailfin export: $sym (looked for ' T|t [_]${sym}' in nm output)"
             missing=$((missing + 1))
         fi
     done
@@ -117,14 +120,16 @@ test_compiler_binary_keeps_c_arena_exports() {
     # accidentally drops the C arena would silently route
     # production through unfinished Sailfin stubs — this
     # assertion catches that. Same defined-text-symbol regex as
-    # the Sailfin-export assertion above (` T ` / ` t `) so an
-    # undefined reference cannot pass for an export.
+    # the Sailfin-export assertion above (` T ` / ` t `, with
+    # the optional macOS `_` prefix) so an undefined reference
+    # cannot pass for an export and Mach-O symbol mangling does
+    # not produce false negatives.
     local nm_log
     nm_log="$(nm "$BINARY" 2>/dev/null || true)"
     local missing=0
     for sym in sfn_arena_create sfn_arena_alloc sfn_arena_reset sfn_arena_destroy sfn_arena_realloc; do
-        if ! grep -qE "[[:space:]][Tt][[:space:]]${sym}\$" <<< "$nm_log"; then
-            echo "[test]   compiler binary missing C arena export: $sym (looked for ' T|t ${sym}' in nm output)"
+        if ! grep -qE "[[:space:]][Tt][[:space:]]_?${sym}\$" <<< "$nm_log"; then
+            echo "[test]   compiler binary missing C arena export: $sym (looked for ' T|t [_]${sym}' in nm output)"
             missing=$((missing + 1))
         fi
     done
