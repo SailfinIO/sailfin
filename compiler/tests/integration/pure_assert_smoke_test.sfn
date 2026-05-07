@@ -99,11 +99,11 @@ fn pure_assert_eq_float(actual: number, expected: number, tolerance: number, lab
     let diff = _abs(actual - expected);
     if diff <= tolerance { return _pure_ok(); }
     let message = "ASSERTION FAILED: " + label + "; expected: "
-        + _number_to_string(expected)
+        + number_to_string(expected)
         + " +/- "
-        + _number_to_string(tolerance)
+        + number_to_string(tolerance)
         + "; actual: "
-        + _number_to_string(actual);
+        + number_to_string(actual);
     return _pure_fail(message);
 }
 
@@ -177,6 +177,23 @@ test "pure_assert: eq_string mismatch yields failure" ![pure] {
 
 test "pure_assert: eq_float beyond tolerance yields failure" ![pure] {
     let r = pure_assert_eq_float(10, 0, 1, "wide-gap");
+    assert r.present;
+    assert r.message.length > 0;
+}
+
+// Fractional float coverage — the integer-only `_number_to_string`
+// would mangle these values in diagnostics and risk a runaway loop on
+// large doubles, so `pure_assert_eq_float` stringifies via the
+// runtime's `%.15g` `number_to_string`. These two cases lock in both
+// the within-tolerance and beyond-tolerance paths for non-integer
+// inputs.
+test "pure_assert: eq_float fractional within tolerance matches" ![pure] {
+    let r = pure_assert_eq_float(0.5, 0.6, 0.2, "fractional-close");
+    assert ! r.present;
+}
+
+test "pure_assert: eq_float fractional beyond tolerance yields failure" ![pure] {
+    let r = pure_assert_eq_float(0.5, 0.6, 0.05, "fractional-gap");
     assert r.present;
     assert r.message.length > 0;
 }

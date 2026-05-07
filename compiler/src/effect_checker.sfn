@@ -262,19 +262,37 @@ fn _analyze_statement_capabilities(statement: Statement, capabilities: string[])
 
 fn _analyze_routine_capabilities(signature: FunctionSignature, name: string, capabilities: string[]) -> CapabilityViolation[] {
     if signature.effects.length == 0 { return []; }
+    // `pure` is the only universally allowed effect, but only when it
+    // stands alone. `![pure, io]` is semantically contradictory — `pure`
+    // declares "no effects", so mixing it with concrete effects is a
+    // user error. We detect that here so the excess check below can let
+    // `pure` fall through (it's never in the capsule capability
+    // surface) and flag the contradiction with the existing E0403
+    // diagnostic.
+    let mut has_concrete_effect: boolean = false;
+    let mut probe: number = 0;
+    loop {
+        if probe >= signature.effects.length { break; }
+        if !is_universally_allowed_effect(signature.effects[probe]) {
+            has_concrete_effect = true;
+            break;
+        }
+        probe += 1;
+    }
     let mut excess: string[] = [];
     let mut i: number = 0;
     loop {
         if i >= signature.effects.length { break; }
         let effect = signature.effects[i];
-        // `pure` is a sentinel for "explicitly empty effect set" — it
-        // never appears in the capsule capability surface but is
-        // always allowed on a function or test signature. See
-        // `effect_taxonomy.is_universally_allowed_effect` for the
-        // rationale (proposal: docs/proposals/test-infra-epic §P3).
+        // `pure` standing alone (no concrete-effect peer) is the empty
+        // effect set; allow it regardless of the capability surface.
+        // `pure` mixed with concrete effects falls through and gets
+        // flagged as excess below.
         if is_universally_allowed_effect(effect) {
-            i += 1;
-            continue;
+            if !has_concrete_effect {
+                i += 1;
+                continue;
+            }
         }
         if !contains_effect(capabilities, effect) {
             excess = append_unique_effect(excess, effect);

@@ -333,12 +333,20 @@ fn pure_assert_eq_string(actual: string, expected: string, label: string) -> Ass
 fn pure_assert_eq_float(actual: number, expected: number, tolerance: number, label: string) -> AssertFailure ![pure] {
     let diff = _abs(actual - expected);
     if diff <= tolerance { return _pure_ok(); }
+    // Use the runtime's `%.15g`-format `number_to_string` here rather
+    // than the file-local `_number_to_string` (integer-only, repeated
+    // subtraction). Float comparisons routinely receive fractional
+    // inputs, and the integer-only formatter would mangle non-integer
+    // values in the diagnostic message and risk runaway loops on large
+    // doubles. Other helpers stay on `_number_to_string` because they
+    // operate on integer-shaped inputs in practice (counts, lengths,
+    // boolean-equivalent ints).
     let message = "ASSERTION FAILED: " + label + "; expected: "
-        + _number_to_string(expected)
+        + number_to_string(expected)
         + " +/- "
-        + _number_to_string(tolerance)
+        + number_to_string(tolerance)
         + "; actual: "
-        + _number_to_string(actual);
+        + number_to_string(actual);
     return _pure_fail(message);
 }
 
