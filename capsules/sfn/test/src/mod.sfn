@@ -5,11 +5,27 @@
 // `assert` keyword with more descriptive failure output.
 //
 // Requires ![io] for diagnostic printing on failure.
-
+//
+// Two API tiers (per `docs/proposals/test-infra-epic/03-capsule-api.md`):
+//
+//   1. Legacy `assert_*` — `![io]`. Prints diagnostics on mismatch via
+//      `print.err`, then `assert false` to fail the test.
+//   2. `pure_assert_*` — `![pure]`. Returns an `AssertFailure` record
+//      with `present == true` on mismatch (effectively
+//      `Result<(), AssertFailure>` until that type ships). The capsule
+//      body never prints; consumers (today: a hand-rolled `if r.present
+//      { assert false; }`; tomorrow: 1.4's `expect()` matcher) decide
+//      how to surface the failure. This lets a test calling only
+//      `pure_assert_*` stay `![pure]` even though the capsule manifest
+//      keeps `required = ["io"]` for the legacy tier.
+//
+// Both tiers collapse into a single generic `assert_eq` parameterized
+// over the caller's effect row when row-polymorphic effects ship
+// post-1.0. Until then, `pure_assert_*` is the production-ready
+// interim — see issue #370 / proposal §P3.
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
 fn _number_to_string(value: number) -> string {
     if value == 0 { return "0"; }
     let mut is_negative: boolean = false;
@@ -33,9 +49,7 @@ fn _number_to_string(value: number) -> string {
         output = ch + output;
         remaining = quotient;
     }
-    if is_negative {
-        output = "-" + output;
-    }
+    if is_negative { output = "-" + output; }
     return output;
 }
 
@@ -52,7 +66,6 @@ fn _abs(x: number) -> number {
 // ---------------------------------------------------------------------------
 // Equality assertions
 // ---------------------------------------------------------------------------
-
 fn assert_eq(actual: number, expected: number, label: string) ![io] {
     if actual == expected { return; }
     print.err("ASSERTION FAILED: " + label);
@@ -96,7 +109,6 @@ fn assert_bool_eq(actual: boolean, expected: boolean, label: string) ![io] {
 // ---------------------------------------------------------------------------
 // Comparison assertions
 // ---------------------------------------------------------------------------
-
 fn assert_gt(actual: number, threshold: number, label: string) ![io] {
     if actual > threshold { return; }
     print.err("ASSERTION FAILED: " + label);
@@ -132,7 +144,6 @@ fn assert_lte(actual: number, threshold: number, label: string) ![io] {
 // ---------------------------------------------------------------------------
 // String content assertions
 // ---------------------------------------------------------------------------
-
 fn _find_in_string(haystack: string, needle: string) -> number {
     if needle.length == 0 { return 0; }
     if needle.length > haystack.length { return -1; }
@@ -187,12 +198,12 @@ fn assert_ends_with(text: string, suffix: string, label: string) ![io] {
 // ---------------------------------------------------------------------------
 // Approximate equality (for floating-point / tolerance comparisons)
 // ---------------------------------------------------------------------------
-
 fn assert_approx(actual: number, expected: number, tolerance: number, label: string) ![io] {
     let diff = _abs(actual - expected);
     if diff <= tolerance { return; }
     print.err("ASSERTION FAILED: " + label);
-    print.err("  expected: " + _number_to_string(expected) + " +/- " + _number_to_string(tolerance));
+    print.err("  expected: " + _number_to_string(expected) + " +/- "
+        + _number_to_string(tolerance));
     print.err("  actual:   " + _number_to_string(actual));
     assert false;
 }
@@ -200,7 +211,6 @@ fn assert_approx(actual: number, expected: number, tolerance: number, label: str
 // ---------------------------------------------------------------------------
 // Array length assertions
 // ---------------------------------------------------------------------------
-
 fn assert_length(actual_length: number, expected_length: number, label: string) ![io] {
     if actual_length == expected_length { return; }
     print.err("ASSERTION FAILED: " + label);
@@ -228,7 +238,6 @@ fn assert_not_empty(actual_length: number, label: string) ![io] {
 // ---------------------------------------------------------------------------
 // Boolean assertions
 // ---------------------------------------------------------------------------
-
 fn assert_true(value: boolean, label: string) ![io] {
     if value { return; }
     print.err("ASSERTION FAILED: " + label);
@@ -243,4 +252,123 @@ fn assert_false(value: boolean, label: string) ![io] {
     print.err("  expected: false");
     print.err("  actual:   true");
     assert false;
+}
+
+// ---------------------------------------------------------------------------
+// Pure-effect assertions (issue #370 / proposal §P3)
+// ---------------------------------------------------------------------------
+//
+// The `pure_assert_*` family returns an `AssertFailure` record instead
+// of printing. Each helper is `![pure]` so a `![pure]` test calling
+// only these functions stays `![pure]` end-to-end. The capsule
+// manifest still declares `required = ["io"]` because the legacy tier
+// above (`assert_eq`, `assert_str_eq`, etc.) needs `print.err`; that
+// surface describes what the capsule's *own* functions can do, not
+// what every caller must declare.
+//
+// `AssertFailure` mirrors the shape used by P2 in
+// `compiler/src/cli_commands.sfn` (issue #364). The `present` field
+// is the discriminator: `present == false` is the "Ok(())" case,
+// `present == true` carries the diagnostic. When `Result<T, E>`
+// lands (1.0 critical-path Phase 1), the helpers move to
+// `Result<(), AssertFailure>` — `present == false` maps to `Ok(())`
+// and `present == true` to `Err(failure)` with no shape change.
+// At that point the duplicate definition here and in `cli_commands.sfn`
+// folds into a shared module.
+//
+// `file` / `line` / `col` stay empty / 0 today: Sailfin lacks
+// `__file__` / `__line__` macros, and a plain `fn` body cannot reach
+// out for the call-site span. 1.4's `expect()` matcher is parsed
+// directly and can attach those fields. Until then, `message` carries
+// the `label` plus a stringified expected/actual pair so a manual
+// `if r.present { assert false; }` consumer still gets actionable
+// output through P2's structured failure record.
+struct AssertFailure {
+    present: boolean;
+    file: string;
+    line: number;
+    col: number;
+    message: string;
+}
+
+fn _pure_ok() -> AssertFailure {
+    return AssertFailure {
+        present: false,
+        file: "",
+        line: 0,
+        col: 0,
+        message: ""
+    };
+}
+
+fn _pure_fail(message: string) -> AssertFailure {
+    return AssertFailure {
+        present: true,
+        file: "",
+        line: 0,
+        col: 0,
+        message: message
+    };
+}
+
+fn pure_assert_eq_int(actual: number, expected: number, label: string) -> AssertFailure ![pure] {
+    if actual == expected { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label + "; expected: "
+        + _number_to_string(expected)
+        + "; actual: "
+        + _number_to_string(actual);
+    return _pure_fail(message);
+}
+
+fn pure_assert_eq_string(actual: string, expected: string, label: string) -> AssertFailure ![pure] {
+    if actual == expected { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label + "; expected: \"" + expected
+        + "\""
+        + "; actual: \""
+        + actual
+        + "\"";
+    return _pure_fail(message);
+}
+
+fn pure_assert_eq_float(actual: number, expected: number, tolerance: number, label: string) -> AssertFailure ![pure] {
+    let diff = _abs(actual - expected);
+    if diff <= tolerance { return _pure_ok(); }
+    // Use the runtime's `%.15g`-format `number_to_string` here rather
+    // than the file-local `_number_to_string` (integer-only, repeated
+    // subtraction). Float comparisons routinely receive fractional
+    // inputs, and the integer-only formatter would mangle non-integer
+    // values in the diagnostic message and risk runaway loops on large
+    // doubles. Other helpers stay on `_number_to_string` because they
+    // operate on integer-shaped inputs in practice (counts, lengths,
+    // boolean-equivalent ints).
+    let message = "ASSERTION FAILED: " + label + "; expected: "
+        + number_to_string(expected)
+        + " +/- "
+        + number_to_string(tolerance)
+        + "; actual: "
+        + number_to_string(actual);
+    return _pure_fail(message);
+}
+
+fn pure_assert_eq_bool(actual: boolean, expected: boolean, label: string) -> AssertFailure ![pure] {
+    if actual == expected { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label + "; expected: "
+        + _bool_to_string(expected)
+        + "; actual: "
+        + _bool_to_string(actual);
+    return _pure_fail(message);
+}
+
+fn pure_assert_true(value: boolean, label: string) -> AssertFailure ![pure] {
+    if value { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label
+        + "; expected: true; actual: false";
+    return _pure_fail(message);
+}
+
+fn pure_assert_false(value: boolean, label: string) -> AssertFailure ![pure] {
+    if !value { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label
+        + "; expected: false; actual: true";
+    return _pure_fail(message);
 }

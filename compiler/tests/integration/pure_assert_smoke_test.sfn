@@ -1,0 +1,217 @@
+// Issue #370 (P3): pure_assert_* smoke — round-trips the
+// `pure_assert_*` family annotated `![pure]`, exercises both the
+// match (Ok) and mismatch (Err) paths, and locks in that `sfn check`
+// accepts the `![pure]` annotation as a no-op effect.
+//
+// Helpers are inlined here to mirror the existing capsule-test
+// pattern (`capsules/sfn/json/tests/json_test.sfn`'s "When `import {
+// ... } from "../src/mod"` is safe, switch to the real capsule API"
+// note). Once cross-capsule imports stabilise for integration tests,
+// these inline copies fold back into a single `import { ... } from
+// "../../../capsules/sfn/test/src/mod"`. The shape and effect rows
+// here match `capsules/sfn/test/src/mod.sfn` exactly so the eventual
+// switch is a 1:1 swap.
+struct AssertFailure {
+    present: boolean;
+    file: string;
+    line: number;
+    col: number;
+    message: string;
+}
+
+fn _number_to_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let mut is_negative: boolean = false;
+    let mut remaining: number = value;
+    if value < 0 {
+        is_negative = true;
+        remaining = 0 - value;
+    }
+    let mut output: string = "";
+    let digits = "0123456789";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    if is_negative { output = "-" + output; }
+    return output;
+}
+
+fn _bool_to_string(value: boolean) -> string {
+    if value { return "true"; }
+    return "false";
+}
+
+fn _abs(x: number) -> number {
+    if x < 0 { return 0 - x; }
+    return x;
+}
+
+fn _pure_ok() -> AssertFailure {
+    return AssertFailure {
+        present: false,
+        file: "",
+        line: 0,
+        col: 0,
+        message: ""
+    };
+}
+
+fn _pure_fail(message: string) -> AssertFailure {
+    return AssertFailure {
+        present: true,
+        file: "",
+        line: 0,
+        col: 0,
+        message: message
+    };
+}
+
+fn pure_assert_eq_int(actual: number, expected: number, label: string) -> AssertFailure ![pure] {
+    if actual == expected { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label + "; expected: "
+        + _number_to_string(expected)
+        + "; actual: "
+        + _number_to_string(actual);
+    return _pure_fail(message);
+}
+
+fn pure_assert_eq_string(actual: string, expected: string, label: string) -> AssertFailure ![pure] {
+    if actual == expected { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label + "; expected: \"" + expected
+        + "\""
+        + "; actual: \""
+        + actual
+        + "\"";
+    return _pure_fail(message);
+}
+
+fn pure_assert_eq_float(actual: number, expected: number, tolerance: number, label: string) -> AssertFailure ![pure] {
+    let diff = _abs(actual - expected);
+    if diff <= tolerance { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label + "; expected: "
+        + number_to_string(expected)
+        + " +/- "
+        + number_to_string(tolerance)
+        + "; actual: "
+        + number_to_string(actual);
+    return _pure_fail(message);
+}
+
+fn pure_assert_eq_bool(actual: boolean, expected: boolean, label: string) -> AssertFailure ![pure] {
+    if actual == expected { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label + "; expected: "
+        + _bool_to_string(expected)
+        + "; actual: "
+        + _bool_to_string(actual);
+    return _pure_fail(message);
+}
+
+fn pure_assert_true(value: boolean, label: string) -> AssertFailure ![pure] {
+    if value { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label
+        + "; expected: true; actual: false";
+    return _pure_fail(message);
+}
+
+fn pure_assert_false(value: boolean, label: string) -> AssertFailure ![pure] {
+    if !value { return _pure_ok(); }
+    let message = "ASSERTION FAILED: " + label
+        + "; expected: false; actual: true";
+    return _pure_fail(message);
+}
+
+// --- Match paths: every helper returns present == false on equality. ---
+test "pure_assert: eq_int matches" ![pure] {
+    let r = pure_assert_eq_int(42, 42, "answer");
+    assert ! r.present;
+    assert r.message.length == 0;
+}
+
+test "pure_assert: eq_string matches" ![pure] {
+    let r = pure_assert_eq_string("hello", "hello", "greeting");
+    assert ! r.present;
+}
+
+test "pure_assert: eq_float within tolerance matches" ![pure] {
+    let r = pure_assert_eq_float(1, 1, 0, "exact");
+    assert ! r.present;
+}
+
+test "pure_assert: eq_bool matches" ![pure] {
+    let r = pure_assert_eq_bool(true, true, "flag");
+    assert ! r.present;
+}
+
+test "pure_assert: true matches" ![pure] {
+    let r = pure_assert_true(true, "is_set");
+    assert ! r.present;
+}
+
+test "pure_assert: false matches" ![pure] {
+    let r = pure_assert_false(false, "is_clear");
+    assert ! r.present;
+}
+
+// --- Mismatch paths: every helper returns present == true with a populated message. ---
+test "pure_assert: eq_int mismatch yields failure" ![pure] {
+    let r = pure_assert_eq_int(1, 2, "off-by-one");
+    assert r.present;
+    assert r.message.length > 0;
+}
+
+test "pure_assert: eq_string mismatch yields failure" ![pure] {
+    let r = pure_assert_eq_string("foo", "bar", "names");
+    assert r.present;
+    assert r.message.length > 0;
+}
+
+test "pure_assert: eq_float beyond tolerance yields failure" ![pure] {
+    let r = pure_assert_eq_float(10, 0, 1, "wide-gap");
+    assert r.present;
+    assert r.message.length > 0;
+}
+
+// Fractional float coverage — the integer-only `_number_to_string`
+// would mangle these values in diagnostics and risk a runaway loop on
+// large doubles, so `pure_assert_eq_float` stringifies via the
+// runtime's `%.15g` `number_to_string`. These two cases lock in both
+// the within-tolerance and beyond-tolerance paths for non-integer
+// inputs.
+test "pure_assert: eq_float fractional within tolerance matches" ![pure] {
+    let r = pure_assert_eq_float(0.5, 0.6, 0.2, "fractional-close");
+    assert ! r.present;
+}
+
+test "pure_assert: eq_float fractional beyond tolerance yields failure" ![pure] {
+    let r = pure_assert_eq_float(0.5, 0.6, 0.05, "fractional-gap");
+    assert r.present;
+    assert r.message.length > 0;
+}
+
+test "pure_assert: eq_bool mismatch yields failure" ![pure] {
+    let r = pure_assert_eq_bool(true, false, "flag");
+    assert r.present;
+    assert r.message.length > 0;
+}
+
+test "pure_assert: true mismatch yields failure" ![pure] {
+    let r = pure_assert_true(false, "should_be_set");
+    assert r.present;
+    assert r.message.length > 0;
+}
+
+test "pure_assert: false mismatch yields failure" ![pure] {
+    let r = pure_assert_false(true, "should_be_clear");
+    assert r.present;
+    assert r.message.length > 0;
+}
