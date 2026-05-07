@@ -1,0 +1,73 @@
+// Regression coverage for the structured assertion-failure record
+// parser introduced in #375 and hardened in #384.
+//
+// Every required prefix (`file:` / `line:` / `col:` / `msg:`) must
+// match before `present = true`. A truncated or corrupted record
+// (e.g. mid-write crash, partial flush, garbled byte) must leave
+// `present = false` so the test runner falls back to exit-code-only
+// reporting instead of producing misleading `path:0:0:` attribution.
+//
+// In practice the C runtime always writes complete records (a
+// single `fprintf` followed by `fflush`), so this is defensive —
+// but the docstring on `_parse_assert_failure_record` promises
+// "missing or unparseable … leaves present=false" and the unit
+// test pins that contract.
+import { _parse_assert_failure_record } from "../../src/assert_failure";
+
+test "parse_assert_failure: empty input leaves present=false" {
+    let r = _parse_assert_failure_record("");
+    assert ! r.present;
+}
+
+test "parse_assert_failure: truncated header leaves present=false" {
+    let r = _parse_assert_failure_record("SFAF\nv:1\n");
+    assert ! r.present;
+}
+
+test "parse_assert_failure: missing magic leaves present=false" {
+    let r = _parse_assert_failure_record("NOPE\nv:1\nfile:foo.sfn\nline:1\ncol:1\nmsg:bang\n");
+    assert ! r.present;
+}
+
+test "parse_assert_failure: wrong version leaves present=false" {
+    let r = _parse_assert_failure_record("SFAF\nv:9\nfile:foo.sfn\nline:1\ncol:1\nmsg:bang\n");
+    assert ! r.present;
+}
+
+test "parse_assert_failure: missing file: prefix leaves present=false" {
+    let r = _parse_assert_failure_record("SFAF\nv:1\nGARBAGE\nline:1\ncol:1\nmsg:bang\n");
+    assert ! r.present;
+}
+
+test "parse_assert_failure: missing line: prefix leaves present=false" {
+    let r = _parse_assert_failure_record("SFAF\nv:1\nfile:foo.sfn\nGARBAGE\ncol:1\nmsg:bang\n");
+    assert ! r.present;
+}
+
+test "parse_assert_failure: missing col: prefix leaves present=false" {
+    let r = _parse_assert_failure_record("SFAF\nv:1\nfile:foo.sfn\nline:1\nGARBAGE\nmsg:bang\n");
+    assert ! r.present;
+}
+
+test "parse_assert_failure: missing msg: prefix leaves present=false" {
+    let r = _parse_assert_failure_record("SFAF\nv:1\nfile:foo.sfn\nline:1\ncol:1\nGARBAGE\n");
+    assert ! r.present;
+}
+
+test "parse_assert_failure: complete record populates every field" {
+    let r = _parse_assert_failure_record("SFAF\nv:1\nfile:foo.sfn\nline:42\ncol:7\nmsg:bang\n");
+    assert r.present;
+    assert r.file == "foo.sfn";
+    assert r.line == 42;
+    assert r.col == 7;
+    assert r.message == "bang";
+}
+
+test "parse_assert_failure: empty file/msg fields still parse cleanly" {
+    let r = _parse_assert_failure_record("SFAF\nv:1\nfile:\nline:0\ncol:0\nmsg:\n");
+    assert r.present;
+    assert r.file == "";
+    assert r.line == 0;
+    assert r.col == 0;
+    assert r.message == "";
+}
