@@ -447,7 +447,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
         // in-process compile path that has worked for tests since
         // Stage C2c — test fixtures stay well below the per-module
         // count where arena pressure becomes an issue.
-        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, empty_resolver_consumer(), "");
+        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, empty_resolver_consumer(), "", "");
         if resolution.staging_failed {
             // Resolver already emitted a structured error to stderr
             // (slug collision, stage-write, or compile failure).

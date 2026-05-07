@@ -253,7 +253,7 @@ fn handle_check_command(args: string[]) -> number ![io] {
         // this path. Pass an empty consumer; when `sfn check -p`
         // lands the consumer is computed from the project's manifest
         // the same way `sfn build` does it.
-        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths, empty_resolver_consumer());
+        let resolution = prepare_project_capsules_for_check(groups[gi].entry_paths, empty_resolver_consumer(), "");
         if resolution.staging_failed {
             // The resolver already wrote a structured error to
             // stderr (slug collision or stage-write failure).

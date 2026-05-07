@@ -74,7 +74,7 @@ fn _usage() -> string {
     out = out + "\n";
     out = out + "build & run:\n";
     out = out
-        + "  sfn build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] [--json] (<file.sfn> | -p <capsule-path>)\n";
+        + "  sfn build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] [--json] [--work-dir DIR] (<file.sfn> | -p <capsule-path>)\n";
     out = out
         + "  sfn run   [--no-cache] [--clean] [--cache-trace] (<file.sfn> | <exe>)\n";
     out = out
@@ -672,9 +672,12 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
         return 1;
     }
 
-    // Cache runtime compilation products under build/sailfin.
-    _ensure_dir("build");
-    _ensure_dir("build/sailfin");
+    // Cache runtime compilation products under `cache_dir`. With the
+    // legacy default this is `build/sailfin/`; with `--work-dir <DIR>`
+    // it is `<DIR>/sailfin/`. `mkdir -p` already creates intermediate
+    // dirs, so a single `_ensure_dir(cache_dir)` covers both cases —
+    // unconditionally creating `./build/` here would leak an empty
+    // directory into CWD when a virtualized work-dir was requested.
     _ensure_dir(cache_dir);
 
     // Stage D PR2 routing: when the resolver surfaced runtime
@@ -789,15 +792,38 @@ fn _clang_link_multi_with_opt(ll_paths: string[], out_path: string, runtime_root
     return process.run(args);
 }
 
-fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string) -> number ![io] {
+fn _clang_link(ll_path: string, out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> number ![io] {
     // Default link used by `build` and `run` for single-module programs.
-    return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", "build/sailfin", binary_dir);
+    let resolved_cache_dir = _resolve_sailfin_cache_dir(cache_dir);
+    return _clang_link_with_opt(ll_path, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir);
 }
 
-fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string) -> number ![io] {
+fn _clang_link_multi(ll_paths: string[], out_path: string, runtime_root: string, runtime_capsules: RuntimeCapsuleArtifacts[], binary_dir: string, cache_dir: string) -> number ![io] {
     // Default link used by `build` and `run` for multi-module programs
-    // (main source + capsule dependency modules).
-    return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, runtime_capsules, "-O2", "build/sailfin", binary_dir);
+    // (main source + capsule dependency modules). `cache_dir` is the
+    // sailfin-side scratch root (`build/sailfin` for legacy in-tree
+    // builds, `<work_dir>/sailfin` when `sfn build --work-dir <root>`
+    // virtualizes the layout).
+    let resolved_cache_dir = _resolve_sailfin_cache_dir(cache_dir);
+    return _clang_link_multi_with_opt(ll_paths, out_path, runtime_root, runtime_capsules, "-O2", resolved_cache_dir, binary_dir);
+}
+
+// Resolve the sailfin-side cache scratch root. Empty input is the
+// legacy default (`build/sailfin`); a non-empty string is treated
+// as already-virtualized and passed through verbatim.
+fn _resolve_sailfin_cache_dir(cache_dir: string) -> string {
+    if cache_dir.length == 0 { return "build/sailfin"; }
+    return cache_dir;
+}
+
+// Resolve the sailfin cache root for a given `--work-dir` value.
+// Empty `work_dir` keeps the legacy `build/sailfin` path; a
+// non-empty `work_dir` rebases under `<work_dir>/sailfin` so a
+// `sfn build --work-dir <root>` invocation writes nothing under
+// `./build/`.
+fn _resolve_sailfin_cache_dir_for_work(work_dir: string) -> string {
+    if work_dir.length == 0 { return "build/sailfin"; }
+    return work_dir + "/sailfin";
 }
 
 struct _CapsuleBuildSpec {
@@ -1073,7 +1099,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
                     let llvm = compile_to_llvm_with_module_timed(source, module_name);
                     _write_llvm_text(out_path, llvm);
                 } else {
-                    let ok = compile_to_llvm_file_with_module(source, module_name, out_path);
+                    let ok = compile_to_llvm_file_with_module(source, module_name, out_path, "");
                     if !ok { return 1; }
                 }
             } else {
@@ -1109,7 +1135,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
 
     if is_build {
         // build [-o OUTPUT] [--no-cache] [--clean] [--cache-trace] [--json]
-        //       (file | -p <capsule-path>)
+        //       [--work-dir DIR] (file | -p <capsule-path>)
         let mut out_path: string = "";
         let mut input_path: string = "";
         let mut capsule_path: string = "";
@@ -1117,6 +1143,16 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         let mut clean_flag: boolean = false;
         let mut cache_trace_flag: boolean = false;
         let mut json_flag: boolean = false;
+        // `--work-dir DIR` virtualizes the build's intermediate
+        // artifacts (`<DIR>/native/import-context/`, `<DIR>/sailfin/`,
+        // and the default `<DIR>/native/sailfin` output) instead of
+        // the CWD-relative `./build/...` layout. Empty preserves the
+        // legacy paths byte-for-byte. This is the driver-side
+        // equivalent of `scripts/build.sh`'s `WORK_DIR` /
+        // `SEED_CWD` derivation, so `make check`'s stage2/stage3
+        // fixed-point can move off the chdir-based shell flow
+        // (#344-step-2).
+        let mut work_dir: string = "";
 
         // Parse args: support -o OUTPUT and -p PATH in any combination.
         let mut bi: number = 1;
@@ -1161,6 +1197,22 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
                 bi += 1;
                 continue;
             }
+            if strings_equal(a, "--work-dir") {
+                if bi + 1 >= args.length {
+                    print(_usage());
+                    return 2;
+                }
+                work_dir = args[bi + 1];
+                bi += 2;
+                continue;
+            }
+            let mut is_help_flag: boolean = false;
+            if strings_equal(a, "--help") { is_help_flag = true; }
+            if strings_equal(a, "-h") { is_help_flag = true; }
+            if is_help_flag {
+                print(_usage());
+                return 0;
+            }
             // Positional argument: the source file.
             if input_path.length > 0 {
                 print(_usage());
@@ -1169,6 +1221,10 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             input_path = a;
             bi += 1;
         }
+        // Resolved scratch / staging roots for this build. With
+        // `--work-dir` unset both fall back to the legacy in-tree
+        // paths so the default invocation is byte-for-byte identical.
+        let sailfin_cache_dir = _resolve_sailfin_cache_dir_for_work(work_dir);
         let cache_config = resolve_build_cache_config(no_cache_flag, cache_trace_flag, clean_flag);
 
         // -p resolves the entry path + build kind from the capsule's
@@ -1258,34 +1314,50 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         }
 
         if out_path.length == 0 {
-            // Stage C2b: when `-p` is used and `-o` was NOT given,
-            // default to the canonical per-capsule layout
-            // (`build/capsules/<scope>/<name>/{obj/mod.o, bin/<name>}`)
-            // from proposal §4.4. Positional builds and explicit
-            // `-o` paths still use their pre-existing locations —
-            // user override is sacred. Unsafe / non-scope-form
-            // capsule names fall back to the legacy paths so a
-            // malformed `[capsule].name` can never escape the
-            // build root.
-            let mut canonical_set: boolean = false;
-            if consumer.scope.length > 0 {
-                let cap_dir = capsule_artifact_dir(consumer.scope, consumer.name);
-                if no_link {
-                    _ensure_dir(cap_dir + "/obj");
-                    out_path = capsule_artifact_obj_path(consumer.scope, consumer.name);
-                    canonical_set = true;
-                } else {
-                    let bin_name = capsule_default_bin_name(consumer.name);
-                    if bin_name.length > 0 {
-                        _ensure_dir(cap_dir + "/bin");
-                        out_path = capsule_artifact_bin_path(consumer.scope, consumer.name, bin_name);
+            // `--work-dir <root>` overrides the canonical
+            // per-capsule layout: when set, the default output is
+            // `<root>/native/sailfin` for binary builds (matching
+            // `scripts/build.sh`'s `OUT="$WORK_DIR/.../native/sailfin"`
+            // shape) or `<root>/sailfin/program.o` for libraries.
+            // The work-dir form is meant for build orchestration
+            // (parity with `build.sh` for `make check`'s
+            // stage2/stage3 fixed-point comparison), so it
+            // explicitly takes precedence over the scoped
+            // `build/capsules/...` layout.
+            if work_dir.length > 0 {
+                if no_link { out_path = sailfin_cache_dir + "/program.o"; } else {
+                    out_path = work_dir + "/native/sailfin";
+                }
+            } else {
+                // Stage C2b: when `-p` is used and `-o` was NOT
+                // given, default to the canonical per-capsule
+                // layout (`build/capsules/<scope>/<name>/{obj/mod.o,
+                // bin/<name>}`) from proposal §4.4. Positional builds
+                // and explicit `-o` paths still use their pre-
+                // existing locations — user override is sacred.
+                // Unsafe / non-scope-form capsule names fall back to
+                // the legacy paths so a malformed `[capsule].name`
+                // can never escape the build root.
+                let mut canonical_set: boolean = false;
+                if consumer.scope.length > 0 {
+                    let cap_dir = capsule_artifact_dir(consumer.scope, consumer.name);
+                    if no_link {
+                        _ensure_dir(cap_dir + "/obj");
+                        out_path = capsule_artifact_obj_path(consumer.scope, consumer.name);
                         canonical_set = true;
+                    } else {
+                        let bin_name = capsule_default_bin_name(consumer.name);
+                        if bin_name.length > 0 {
+                            _ensure_dir(cap_dir + "/bin");
+                            out_path = capsule_artifact_bin_path(consumer.scope, consumer.name, bin_name);
+                            canonical_set = true;
+                        }
                     }
                 }
-            }
-            if !canonical_set {
-                if no_link { out_path = "build/sailfin/program.o"; } else {
-                    out_path = "build/sailfin/program";
+                if !canonical_set {
+                    if no_link { out_path = "build/sailfin/program.o"; } else {
+                        out_path = "build/sailfin/program";
+                    }
                 }
             }
         }
@@ -1296,12 +1368,25 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             return 1;
         }
 
-        _ensure_dir("build");
-        _ensure_dir("build/sailfin");
+        if work_dir.length == 0 { _ensure_dir("build"); } else {
+            _ensure_dir(work_dir);
+        }
+        _ensure_dir(sailfin_cache_dir);
+        // Make sure the parent dir of the resolved `out_path` exists
+        // before clang writes the binary / object. With
+        // `--work-dir <DIR>` the default binary lands at
+        // `<DIR>/native/sailfin`, but the only call site that creates
+        // `<DIR>/native/` is `stage_capsule_imports` — which
+        // `prepare_project_capsules` skips when the project has no
+        // capsule deps. Ensure unconditionally so positional builds
+        // (no deps) also succeed.
+        let out_parent = _dirname(out_path);
+        if out_parent.length > 0 { _ensure_dir(out_parent); }
 
         // Resolve and compile any capsule deps declared in the project's
         // capsule.toml before compiling the main source. stage_capsule_imports
-        // writes .sfn-asm + .layout-manifest into build/native/import-context/
+        // writes .sfn-asm + .layout-manifest into <work_dir>/native/import-context/
+        // (or build/native/import-context/ when `--work-dir` is unset)
         // where the main module's lowering will find them.
         //
         // Stage D PR3: subprocess-per-module compile is gated on
@@ -1318,13 +1403,13 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         if walk_src {
             if binary_dir.length > 0 { sailfin_exe = binary_dir + "/sailfin"; }
         }
-        let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe);
+        let capsule_result = prepare_project_capsules(input_path, cache_config, consumer, sailfin_exe, work_dir);
         let capsule_lls = capsule_result.ll_paths;
 
-        let ll_path = "build/sailfin/program.ll";
+        let ll_path = sailfin_cache_dir + "/program.ll";
         let source = fs.readFile(input_path);
         let module_name = module_name_from_path(input_path);
-        let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
+        let ok = compile_to_llvm_file_with_module(source, module_name, ll_path, work_dir);
         if !ok {
             print("failed to compile LLVM for: " + input_path);
 
@@ -1366,7 +1451,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             all_lls.push(capsule_lls[cli]);
             cli += 1;
         }
-        let rc = _clang_link_multi(all_lls, exe_path, runtime_root, capsule_result.runtime_capsules, binary_dir);
+        let rc = _clang_link_multi(all_lls, exe_path, runtime_root, capsule_result.runtime_capsules, binary_dir, sailfin_cache_dir);
         if rc != 0 {
             if !json_flag {
                 print("link failed (clang exit=" + number_to_string(rc) + ")");
@@ -1458,12 +1543,12 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // builds only (see the `walk_src` branch above for the
         // rationale) — `sfn run` doesn't take `-p` yet, and its
         // typical use case is small fixtures that fit in-process.
-        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), "");
+        let run_capsule_result = prepare_project_capsules(input_path, run_cache_config, empty_resolver_consumer(), "", "");
         let capsule_lls = run_capsule_result.ll_paths;
 
         let source = fs.readFile(input_path);
         let module_name = module_name_from_path(input_path);
-        let ok = compile_to_llvm_file_with_module(source, module_name, ll_path);
+        let ok = compile_to_llvm_file_with_module(source, module_name, ll_path, "");
         if !ok {
             print("failed to compile LLVM for: " + input_path);
 
@@ -1477,7 +1562,7 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             all_lls.push(capsule_lls[rli]);
             rli += 1;
         }
-        let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root, run_capsule_result.runtime_capsules, binary_dir);
+        let link_rc = _clang_link_multi(all_lls, exe_path, runtime_root, run_capsule_result.runtime_capsules, binary_dir, "");
         if link_rc != 0 {
             print("link failed (clang exit=" + number_to_string(link_rc) + ")");
             print("run: native link failed; attempting seed fallback via `sfn run`");

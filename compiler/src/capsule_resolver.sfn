@@ -352,6 +352,20 @@ fn _cr_ensure_dir(path: string) -> void ![io] {
     if !fs.exists(path) { process.run(["mkdir", "-p", path]); }
 }
 
+// Resolve the import-context root (`.sfn-asm` + `.layout-manifest`
+// staging area). When `work_dir` is empty (the default `sfn build`
+// path with no `--work-dir`), this is the legacy `build/native/import-context`
+// directory that `llvm/imports.sfn:_resolve_layout_manifest_path_for_slug`
+// scans. When `work_dir` is non-empty (`sfn build --work-dir <root>`),
+// the staging area moves under `<root>/native/import-context` so the
+// build can be redirected away from CWD-relative `build/` — the
+// driver-side equivalent of `scripts/build.sh`'s `IMPORT_CACHE`
+// derivation (`SEED_CWD/build/native/import-context`).
+fn _cr_import_context_root(work_dir: string) -> string {
+    if work_dir.length == 0 { return "build/native/import-context"; }
+    return work_dir + "/native/import-context";
+}
+
 // Shell single-quote a string so it can be embedded safely in a
 // `sh -c '...'` invocation. Escapes embedded single-quotes via the
 // classic `'\''` dance. Inlined here rather than imported from
@@ -969,10 +983,10 @@ fn enumerate_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
 // back to the in-process path that's worked since Stage B; the
 // fallback is what `sfn check` and tests with small dep sets
 // continue to use.
-fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string) -> boolean ![io] {
-    let asm_path = "build/native/import-context/" + src.slug + ".sfn-asm";
-    let manifest_path = "build/native/import-context/" + src.slug
-        + ".layout-manifest";
+fn _cr_stage_one(src: CapsuleSource, sailfin_exe: string, work_dir: string) -> boolean ![io] {
+    let context_root = _cr_import_context_root(work_dir);
+    let asm_path = context_root + "/" + src.slug + ".sfn-asm";
+    let manifest_path = context_root + "/" + src.slug + ".layout-manifest";
     let asm_dir = _cr_dirname(asm_path);
     _cr_ensure_dir(asm_dir);
 
@@ -1066,10 +1080,13 @@ fn _cr_extract_layout_manifest(asm_path: string, manifest_path: string) ![io] {
 // Empty `sailfin_exe` (`sfn check`, `sfn test`) keeps the in-process
 // stage path that's load-bearing for callers that don't yet plumb
 // `binary_dir` through.
-fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string) -> boolean ![io] {
-    _cr_ensure_dir("build");
-    _cr_ensure_dir("build/native");
-    _cr_ensure_dir("build/native/import-context");
+fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string, work_dir: string) -> boolean ![io] {
+    let context_root = _cr_import_context_root(work_dir);
+    if work_dir.length == 0 {
+        _cr_ensure_dir("build");
+        _cr_ensure_dir("build/native");
+    }
+    _cr_ensure_dir(context_root);
 
     if sources.length == 0 { return true; }
 
@@ -1081,7 +1098,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string) -> boole
         let mut si: number = 0;
         loop {
             if si >= sources.length { break; }
-            let ok = _cr_stage_one(sources[si], sailfin_exe);
+            let ok = _cr_stage_one(sources[si], sailfin_exe, work_dir);
             if !ok { return false; }
             si += 1;
         }
@@ -1095,7 +1112,7 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string) -> boole
         let mut si: number = 0;
         loop {
             if si >= sources.length { break; }
-            let ok = _cr_stage_one(sources[si], sailfin_exe);
+            let ok = _cr_stage_one(sources[si], sailfin_exe, work_dir);
             if !ok { return false; }
             si += 1;
         }
@@ -1115,9 +1132,8 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string) -> boole
     loop {
         if si >= sources.length { break; }
         let src = sources[si];
-        let asm_path = "build/native/import-context/" + src.slug + ".sfn-asm";
-        let manifest_path = "build/native/import-context/" + src.slug
-            + ".layout-manifest";
+        let asm_path = context_root + "/" + src.slug + ".sfn-asm";
+        let manifest_path = context_root + "/" + src.slug + ".layout-manifest";
         let asm_dir = _cr_dirname(asm_path);
         _cr_ensure_dir(asm_dir);
         let mut cache_hit: boolean = false;
@@ -1152,9 +1168,8 @@ fn stage_capsule_imports(sources: CapsuleSource[], sailfin_exe: string) -> boole
             if ei >= emit_indices.length { break; }
             let src_idx = emit_indices[ei];
             let src = sources[src_idx];
-            let asm_path = "build/native/import-context/" + src.slug
-                + ".sfn-asm";
-            let manifest_path = "build/native/import-context/" + src.slug
+            let asm_path = context_root + "/" + src.slug + ".sfn-asm";
+            let manifest_path = context_root + "/" + src.slug
                 + ".layout-manifest";
             _cr_extract_layout_manifest(asm_path, manifest_path);
             ei += 1;
@@ -1290,7 +1305,8 @@ fn _cr_direct_import_slugs_for(src: CapsuleSource, sources: CapsuleSource[]) -> 
 // For each source, compute the manifest paths of its direct imports.
 // Result is a parallel array — index i is the dep manifest list for
 // `sources[i]`.
-fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[]) -> string[][] ![io] {
+fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[], work_dir: string) -> string[][] ![io] {
+    let context_root = _cr_import_context_root(work_dir);
     let mut out: string[][] = [];
     let mut i: number = 0;
     loop {
@@ -1300,8 +1316,7 @@ fn _cr_collect_per_source_dep_manifests(sources: CapsuleSource[]) -> string[][] 
         let mut j: number = 0;
         loop {
             if j >= dep_slugs.length { break; }
-            paths.push("build/native/import-context/" + dep_slugs[j]
-                + ".layout-manifest");
+            paths.push(context_root + "/" + dep_slugs[j] + ".layout-manifest");
             j += 1;
         }
         out.push(paths);
@@ -1372,7 +1387,7 @@ fn _cr_module_cache_event_failure(slug: string) -> ModuleCacheEvent {
 // don't yet have `binary_dir` plumbed) keep their existing path;
 // their typical capsule dep counts are well under the in-process
 // budget.
-fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string) -> ModuleCacheEvent ![io] {
+fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path: string, config: BuildCacheConfig, compiler_version: string, flags_canonical: string, sailfin_exe: string, work_dir: string) -> ModuleCacheEvent ![io] {
     if !fs.exists(src.source_path) {
         print.err("capsule-resolver: missing source file: " + src.source_path);
         return _cr_module_cache_event_failure(src.slug);
@@ -1521,7 +1536,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
         }
     } else {
         let source = fs.readFile(src.source_path);
-        ok = compile_to_llvm_file_with_module(source, src.slug, src.ll_path);
+        ok = compile_to_llvm_file_with_module(source, src.slug, src.ll_path, work_dir);
     }
     if !ok {
         print.err("capsule-resolver: failed to lower " + src.slug
@@ -1571,7 +1586,7 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
 // env-driven behaviour. Honours `config.clean` by wiping the cache
 // root before any per-module work — done once per build, not per
 // module, so a single `--clean` run can't double-wipe.
-fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string) -> CompileCapsuleResult ![io] {
+fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, sailfin_exe: string, work_dir: string) -> CompileCapsuleResult ![io] {
     let scratch_root = _cr_scratch_root();
     _cr_ensure_dir(scratch_root);
     _cr_ensure_dir(scratch_root + "/capsules");
@@ -1583,7 +1598,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
     // source plus a few linear scans; for the typical N≈30-130 the
     // total is dominated by the per-module compile path the cache
     // would otherwise trigger.
-    let per_source_dep_manifests = _cr_collect_per_source_dep_manifests(sources);
+    let per_source_dep_manifests = _cr_collect_per_source_dep_manifests(sources, work_dir);
     let cache_root_path = cache_root();
     if config.clean {
         // `--clean` is a destructive opt-in. If the wipe fails
@@ -1801,7 +1816,7 @@ fn compile_capsule_modules(sources: CapsuleSource[], config: BuildCacheConfig, s
     let mut i: number = 0;
     loop {
         if i >= sources.length { break; }
-        let evt = _cr_compile_one(sources[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe);
+        let evt = _cr_compile_one(sources[i], per_source_dep_manifests[i], cache_root_path, config, compiler_version, flags_canonical, sailfin_exe, work_dir);
         if !evt.success {
             // Stage C2c: even on the bail path we surface the
             // events accumulated so far. Sidecar emission is
@@ -3198,7 +3213,7 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
 // missing-symbol follow-up downstream. Inspect `stats` (and any
 // `print.err` output the helpers emitted) for setup failures vs.
 // genuinely-empty dep graphs.
-fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string) -> ProjectCapsuleResult ![io] {
+fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consumer: ResolverConsumer, sailfin_exe: string, work_dir: string) -> ProjectCapsuleResult ![io] {
     let empty_paths: string[] = [];
     let empty_events: ModuleCacheEvent[] = [];
     let empty_runtime_capsules: RuntimeCapsuleArtifacts[] = [];
@@ -3235,7 +3250,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         };
     }
 
-    let staged = stage_capsule_imports(resolved.sources, sailfin_exe);
+    let staged = stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return ProjectCapsuleResult {
@@ -3268,7 +3283,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
             entry_src.push(CapsuleSource {
                 spec: "", source_path: entry_path, slug: entry_slug, ll_path: ""
             });
-            let entry_staged = stage_capsule_imports(entry_src, sailfin_exe);
+            let entry_staged = stage_capsule_imports(entry_src, sailfin_exe, work_dir);
             if !entry_staged {
                 print.err("capsule-resolver: failed to stage entry import-context for "
                     + entry_path);
@@ -3282,7 +3297,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
         }
     }
 
-    let result = compile_capsule_modules(resolved.sources, config, sailfin_exe);
+    let result = compile_capsule_modules(resolved.sources, config, sailfin_exe, work_dir);
     if !result.success {
         return ProjectCapsuleResult {
             ll_paths: empty_paths,
@@ -3322,7 +3337,7 @@ fn prepare_project_capsules(input_path: string, config: BuildCacheConfig, consum
 //   - Standalone files outside any capsule.toml are valid input and
 //     return an empty resolution (no error) — relative-import walking
 //     still happens via `enumerate_relative_sources`.
-fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer) -> CheckCapsuleResolution ![io] {
+fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverConsumer, work_dir: string) -> CheckCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
     // Phase F: surface the manifest's capability surface even on
@@ -3353,7 +3368,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
     // files or small dirs — fits in-process; subprocess overhead
     // would dominate. When `sfn check -p` lands, this becomes a
     // one-line update mirroring `sfn build`.
-    let staged = stage_capsule_imports(resolved.sources, "");
+    let staged = stage_capsule_imports(resolved.sources, "", work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return CheckCapsuleResolution {
@@ -3364,11 +3379,12 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
         };
     }
 
+    let check_context_root = _cr_import_context_root(work_dir);
     let mut asm_paths: string[] = [];
     let mut ai: number = 0;
     loop {
         if ai >= resolved.sources.length { break; }
-        asm_paths.push("build/native/import-context/" + resolved.sources[ai].slug
+        asm_paths.push(check_context_root + "/" + resolved.sources[ai].slug
             + ".sfn-asm");
         ai += 1;
     }
@@ -3406,7 +3422,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
 //     own compile path still runs, and any relative-import walking
 //     happens inside the per-entry `enumerate_relative_sources`
 //     branch of `_cr_resolve_and_dedupe`.
-fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string) -> TestCapsuleResolution ![io] {
+fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverConsumer, sailfin_exe: string, work_dir: string) -> TestCapsuleResolution ![io] {
     let empty_paths: string[] = [];
     let resolved = _cr_resolve_and_dedupe(entry_paths, consumer);
     // Phase F: thread `capabilities_required` through every exit
@@ -3437,7 +3453,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // imports too. `handle_test_command` currently passes "",
     // so this falls back to the in-process path — matches the
     // PR3 baseline behavior for tests.
-    let staged = stage_capsule_imports(resolved.sources, sailfin_exe);
+    let staged = stage_capsule_imports(resolved.sources, sailfin_exe, work_dir);
     if !staged {
         print.err("capsule-resolver: failed to stage import-context for project capsules");
         return TestCapsuleResolution {
@@ -3449,11 +3465,12 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
         };
     }
 
+    let test_context_root = _cr_import_context_root(work_dir);
     let mut asm_paths: string[] = [];
     let mut ai: number = 0;
     loop {
         if ai >= resolved.sources.length { break; }
-        asm_paths.push("build/native/import-context/" + resolved.sources[ai].slug
+        asm_paths.push(test_context_root + "/" + resolved.sources[ai].slug
             + ".sfn-asm");
         ai += 1;
     }
@@ -3462,7 +3479,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     // env-driven default. When the test runner grows `--no-cache`
     // / `--clean`, thread the resolved config in here.
     let test_config = empty_build_cache_config();
-    let result = compile_capsule_modules(resolved.sources, test_config, sailfin_exe);
+    let result = compile_capsule_modules(resolved.sources, test_config, sailfin_exe, work_dir);
     // Surface a compile failure as `staging_failed = true` so the
     // test runner exits 2 instead of trying to link against
     // missing helper objects. (The PR1c stats are dropped on this
