@@ -176,18 +176,25 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
 // =============================================================================
 // Imported Function Declarations
 // =============================================================================
-fn render_imported_function_declarations(imported_functions: NativeFunction[], local_functions: NativeFunction[], context: TypeContext) -> string[] {
+fn render_imported_function_declarations(imported_functions: NativeFunction[], local_functions: NativeFunction[], context: TypeContext, runtime_helpers: string[]) -> string[] {
     if imported_functions.length == 0 { return []; }
-    // Get all runtime helper symbols to avoid duplicates
+    // Collect runtime helper symbols to avoid duplicate declares — but only
+    // for descriptors whose target was actually emitted by
+    // render_runtime_helper_declarations (i.e. listed in runtime_helpers).
+    // Otherwise an imported function aliasing an unused descriptor would be
+    // silently dropped from both paths and vanish from the preamble.
     let helper_descriptors = runtime_helper_descriptors();
     let mut helper_symbols: string[] = [];
     let mut helper_index: number = 0;
     loop {
         if helper_index >= helper_descriptors.length { break; }
-        helper_symbols.push(helper_descriptors[helper_index].symbol);
-        let helper_target = sanitize_symbol(helper_descriptors[helper_index].target);
-        if !string_array_contains(helper_symbols, helper_target) {
-            helper_symbols.push(helper_target);
+        let descriptor = helper_descriptors[helper_index];
+        if string_array_contains(runtime_helpers, descriptor.target) {
+            helper_symbols.push(descriptor.symbol);
+            let helper_target = sanitize_symbol(descriptor.target);
+            if !string_array_contains(helper_symbols, helper_target) {
+                helper_symbols.push(helper_target);
+            }
         }
         helper_index += 1;
     }
