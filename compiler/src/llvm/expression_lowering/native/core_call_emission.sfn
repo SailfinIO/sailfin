@@ -431,7 +431,21 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
             + trimmed_target);
     }
     let mut call_symbol = sanitize_symbol(trimmed_target);
-    if helper_descriptor != null { call_symbol = helper_descriptor.symbol; }
+    if helper_descriptor != null {
+        // M2 helper migration: when `native_signature` is set, the helper
+        // has been flipped from the C ABI (`sailfin_runtime_*`) to its
+        // Sailfin-native counterpart (`sfn_*`). Prefer it over the C
+        // symbol so individual helpers can migrate without rewriting
+        // their `parameter_types` / `return_type`. See issue #392.
+        let mut _native_sig: string? = helper_descriptor.native_signature;
+        let mut _have_native: boolean = false;
+        if _native_sig != null {
+            if _native_sig.length > 0 { _have_native = true; }
+        }
+        if _have_native { call_symbol = _native_sig; } else {
+            call_symbol = helper_descriptor.symbol;
+        }
+    }
     // When concat resolves with no helper_descriptor (common for method
     // dispatch paths that set helper_descriptor: null), fall back to the
     // canonical runtime symbol so we don't emit a bare @concat.

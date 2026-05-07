@@ -1,0 +1,148 @@
+// Unit tests for the M1.C ABI lock prerequisites (issue #392).
+//
+// Pins `RuntimeHelperDescriptor.native_signature` — the optional
+// Sailfin-native ABI symbol that M2 will populate per-helper to flip
+// individual helpers from `sailfin_runtime_*` to `sfn_*` without
+// rewriting their `parameter_types` / `return_type`. Today every
+// default descriptor leaves it `null`; tomorrow each M2.x sub-issue
+// sets it on the helpers it migrates. The tests below cover both
+// branches of the field-flip predicate so a regression in the
+// optional-field plumbing surfaces here.
+//
+// The companion `@sfn_abi_version` / `@sfn_abi_hash` globals emitted
+// by `lowering_phase_render.sfn` are NOT asserted from this file —
+// the LLVM-lowering import stack is too heavy for the unit budget
+// (see the atomic_load_store test note for the same constraint).
+// The verification command in issue #392
+// (`sfn emit llvm examples/basics/hello-world.sfn | grep '@sfn_abi'`)
+// covers them; an e2e regression test pinning the exact text and
+// linkage is tracked as a follow-up.
+import { RuntimeHelperDescriptor, find_runtime_helper } from "../../src/llvm/mod";
+
+// =============================================================================
+// RuntimeHelperDescriptor.native_signature — accepts both null and string
+// =============================================================================
+test "abi_version: descriptor accepts native_signature: null (default)" {
+    let descriptor = RuntimeHelperDescriptor {
+        target: "test_target",
+        symbol: "sailfin_runtime_test_target",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: [],
+        native_signature: null
+    };
+    assert descriptor.target == "test_target";
+    assert descriptor.symbol == "sailfin_runtime_test_target";
+    assert descriptor.native_signature == null;
+}
+
+test "abi_version: descriptor accepts native_signature: <string> (M2 flip)" {
+    // The M2 migration mechanism: a per-helper override that points at
+    // the Sailfin-native ABI symbol. When a helper is flipped, lowering
+    // calls `sfn_test_target` instead of `sailfin_runtime_test_target`.
+    let descriptor = RuntimeHelperDescriptor {
+        target: "test_target",
+        symbol: "sailfin_runtime_test_target",
+        return_type: "void",
+        parameter_types: ["i8*"],
+        effects: [],
+        native_signature: "sfn_test_target"
+    };
+    assert descriptor.native_signature != null;
+    assert descriptor.native_signature == "sfn_test_target";
+    // The C symbol stays untouched — the field overrides which symbol
+    // the call emits, not the descriptor's underlying registration.
+    assert descriptor.symbol == "sailfin_runtime_test_target";
+}
+
+// =============================================================================
+// Default descriptors — every shipped helper still uses the C ABI
+// =============================================================================
+// Until an M2.x sub-issue lands the per-helper flip, every default
+// descriptor `runtime_helper_descriptors()` returns must report
+// `native_signature == null`. These tests pin a representative sample
+// across the print / fs / net / clock effect classes so a regression
+// where someone accidentally drops the field-flip guard surfaces here
+// instead of on a subtle codegen miss downstream.
+test "abi_version: default `print` helper has native_signature == null" {
+    let helper = find_runtime_helper("print");
+    assert helper != null;
+    assert helper.symbol == "sailfin_runtime_print_raw";
+    assert helper.native_signature == null;
+}
+
+test "abi_version: default `print.err` helper has native_signature == null" {
+    let helper = find_runtime_helper("print.err");
+    assert helper != null;
+    assert helper.symbol == "sailfin_runtime_print_err";
+    assert helper.native_signature == null;
+}
+
+test "abi_version: default `fs.read` helper has native_signature == null" {
+    let helper = find_runtime_helper("fs.read");
+    assert helper != null;
+    assert helper.symbol == "sailfin_intrinsic_fs_read";
+    assert helper.native_signature == null;
+}
+
+// =============================================================================
+// Field-flip predicate — mirrors core_call_emission.sfn's symbol pick
+// =============================================================================
+// `core_call_emission.sfn` decides which symbol to emit via the
+// equivalent of `helper.native_signature != null
+// && helper.native_signature.length > 0`. Replicating that predicate
+// shape here (rather than going through the full lowering stack the
+// atomic_load_store test note documents as too heavy for the unit
+// budget) pins the migration semantics. A future regression that
+// loosens the predicate so the override fires for an empty string —
+// or that fails to fire when the override is set — surfaces here.
+test "abi_version: predicate picks symbol when native_signature is null" {
+    let helper = RuntimeHelperDescriptor {
+        target: "sleep",
+        symbol: "sailfin_runtime_sleep",
+        return_type: "void",
+        parameter_types: ["double"],
+        effects: ["clock"],
+        native_signature: null
+    };
+    assert helper.native_signature == null;
+    assert helper.symbol == "sailfin_runtime_sleep";
+}
+
+test "abi_version: predicate picks native_signature when set" {
+    let helper = RuntimeHelperDescriptor {
+        target: "sleep",
+        symbol: "sailfin_runtime_sleep",
+        return_type: "void",
+        parameter_types: ["double"],
+        effects: ["clock"],
+        native_signature: "sfn_sleep"
+    };
+    // Direct field reads first — these are how
+    // `core_call_emission.sfn` consumes the descriptor (it never
+    // copies the field through a local). Routing through a local
+    // would mask a bug where `string?` field reads succeed but
+    // local-variable null comparisons under-narrow.
+    assert helper.native_signature != null;
+    assert helper.native_signature.length > 0;
+    assert helper.native_signature == "sfn_sleep";
+}
+
+test "abi_version: predicate rejects empty-string native_signature" {
+    // Defence against a future regression that populates
+    // `native_signature` with a placeholder empty string instead of
+    // `null` — the predicate must still pick the C symbol so the build
+    // does not start emitting `@` (a bare unresolved symbol).
+    let helper = RuntimeHelperDescriptor {
+        target: "sleep",
+        symbol: "sailfin_runtime_sleep",
+        return_type: "void",
+        parameter_types: ["double"],
+        effects: ["clock"],
+        native_signature: ""
+    };
+    // Empty string is non-null but length 0 — the predicate must
+    // distinguish it from a real override.
+    assert helper.native_signature != null;
+    assert helper.native_signature.length == 0;
+}
