@@ -18,6 +18,7 @@ let runtime_spawn_fn = runtime.spawn;
 let runtime_log_execution_fn = runtime.logExecution;
 let runtime_to_debug_string_fn = runtime.to_debug_string;
 let runtime_raise_value_error_fn = runtime.raise_value_error;
+let runtime_assert_fail_fn = runtime.assert_fail;
 let runtime_is_string_fn = runtime.is_string;
 let runtime_is_number_fn = runtime.is_number;
 let runtime_is_boolean_fn = runtime.is_boolean;

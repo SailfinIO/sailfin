@@ -1196,6 +1196,33 @@ fn parse_try_statement(parser: Parser) -> BlockStatementParseResult {
     };
 }
 
+// Integer-to-string for non-negative values, used to embed line/col
+// in the desugared assert call site. Local copy to avoid widening
+// the parser's import surface; the value is always a token's
+// `line` / `column` (small positive number). Sailfin's `/`
+// operator is float division so we extract digits via repeated
+// subtraction — same shape as `compiler/src/main.sfn:number_to_string`.
+fn _assert_int_to_string(value: number) -> string {
+    if value <= 0 { return "0"; }
+    let digits = "0123456789";
+    let mut remaining: number = value;
+    let mut output: string = "";
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    return output;
+}
+
 fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
     let original = parser;
     let mut current = skip_trivia(parser);
@@ -1206,6 +1233,15 @@ fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
             success: false
         };
     }
+
+    // Stash the assert keyword's source location so the desugared
+    // failure call can carry it as i64-shaped (lowered to LLVM
+    // `double`) line/col arguments. The test runner reads the
+    // typed record `sailfin_assert_fail` writes and surfaces the
+    // file:line:col attribution without any stdout grep.
+    let assert_token = parser_peek_raw(current);
+    let assert_line = assert_token.line;
+    let assert_col = assert_token.column;
 
     let mut statement_tokens: Token[] = [];
     statement_tokens = append_token(statement_tokens, parser_peek_raw(current));
@@ -1243,12 +1279,22 @@ fn parse_assert_statement(parser: Parser) -> BlockStatementParseResult {
 
     let condition = expression_from_tokens(trimmed);
 
+    // Issue #364: route through the structured-failure helper so the
+    // test runner can read a typed AssertFailure record instead of
+    // grep'ping stdout. The runtime function clamps double→i64,
+    // writes a record to fd 3 / `${SAILFIN_TEST_SCRATCH}/fail.bin`,
+    // then takes the same abort path as the legacy raise helper —
+    // so non-test callers see no behavior change.
     let fail_call = Expression.Call {
         callee: Expression.Identifier {
-            name: "runtime_raise_value_error_fn",
+            name: "runtime_assert_fail_fn",
             span: null
         },
-        arguments: [Expression.StringLiteral { value: "assertion failed" }],
+        arguments: [Expression.StringLiteral { value: "" }, Expression.NumberLiteral {
+            value: _assert_int_to_string(assert_line)
+        }, Expression.NumberLiteral {
+            value: _assert_int_to_string(assert_col)
+        }, Expression.StringLiteral { value: "assertion failed" }],
         span: null
     };
     let fail_statement = Statement.ExpressionStatement {

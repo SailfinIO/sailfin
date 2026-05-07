@@ -48,6 +48,7 @@ import {
     number_to_string
 } from "./main";
 import { LayoutManifest } from "./native_ir";
+import { split_lines } from "./native_ir_utils_text";
 import { substring } from "./string_utils";
 import { enter_test_runner_mode, exit_test_runner_mode } from "./test_runner_state";
 import {
@@ -256,6 +257,130 @@ fn _clean_lowering_state(dir: string) -> number ![io] {
         fs.deleteFile(full);
     }
     return 0;
+}
+
+// Issue #364: typed assertion-failure record. Replaces the
+// stdout-grep heuristic in scripts/run_native_test.sh.
+//
+// `sailfin_assert_fail` (runtime/native/src/sailfin_runtime.c)
+// writes a newline-delimited key:value record (magic "SFAF",
+// version, file, line, col, msg) to ${SAILFIN_TEST_SCRATCH}/fail.bin
+// when an `assert e;` failure fires inside a test process. The
+// runner reads the file after the child exits, parses it into
+// AssertFailure, and surfaces typed file:line:col attribution to
+// the caller — no regex, no false positives from the literal word
+// "panic" landing in test stdout.
+//
+// `present` is the source-of-truth gate: a missing or unparseable
+// file leaves it false and the runner falls back to the previous
+// "exit code != 0 means failed" path. The struct is intentionally
+// shared with P3 / 1.1 / 1.5 (per issue #364's notes); keep its
+// shape stable.
+struct AssertFailure {
+    present: boolean;
+    file: string;
+    line: number;
+    col: number;
+    message: string;
+}
+
+fn _empty_assert_failure() -> AssertFailure {
+    return AssertFailure {
+        present: false,
+        file: "",
+        line: 0,
+        col: 0,
+        message: ""
+    };
+}
+
+// Decimal parser used only for the `line:` / `col:` fields of the
+// assert-fail record. Defensive: any non-digit char (including a
+// stray '\r' from a CRLF round-trip on Windows) falls back to 0
+// rather than aborting the runner.
+fn _af_parse_decimal(text: string) -> number {
+    if text.length == 0 { return 0; }
+    let mut value: number = 0;
+    let mut index: number = 0;
+    let mut negative: boolean = false;
+    if text[0] == "-" {
+        negative = true;
+        index = 1;
+    }
+    loop {
+        if index >= text.length { break; }
+        let ch = text[index];
+        if ch == "0" { value = value * 10; } else if ch == "1" {
+            value = value * 10 + 1;
+        } else if ch == "2" { value = value * 10 + 2; } else if ch == "3" {
+            value = value * 10 + 3;
+        } else if ch == "4" { value = value * 10 + 4; } else if ch == "5" {
+            value = value * 10 + 5;
+        } else if ch == "6" { value = value * 10 + 6; } else if ch == "7" {
+            value = value * 10 + 7;
+        } else if ch == "8" { value = value * 10 + 8; } else if ch == "9" {
+            value = value * 10 + 9;
+        } else { break; }
+        index += 1;
+    }
+    if negative { value = 0 - value; }
+    return value;
+}
+
+// Strip a leading "key:" from `line` and return the value, or "" if
+// the prefix doesn't match. Avoids importing `starts_with` here.
+fn _af_strip_prefix(line: string, prefix: string) -> string {
+    if line.length < prefix.length { return ""; }
+    let head = substring(line, 0, prefix.length);
+    if !strings_equal(head, prefix) { return ""; }
+    return substring(line, prefix.length, line.length);
+}
+
+// Parse the contents of fail.bin into an AssertFailure. Returns an
+// `_empty_assert_failure()` (present=false) when the bytes don't
+// match the SFAF v:1 shape — that case is treated by the caller as
+// "no structured failure info" and the runner falls back to
+// exit-code-only reporting.
+fn _parse_assert_failure_record(bytes: string) -> AssertFailure {
+    let mut out = _empty_assert_failure();
+    if bytes.length < 5 { return out; }
+    let lines = split_lines(bytes);
+    if lines.length < 6 { return out; }
+    if !strings_equal(lines[0], "SFAF") { return out; }
+    if !strings_equal(lines[1], "v:1") { return out; }
+    out.file = _af_strip_prefix(lines[2], "file:");
+    let line_text = _af_strip_prefix(lines[3], "line:");
+    let col_text = _af_strip_prefix(lines[4], "col:");
+    out.line = _af_parse_decimal(line_text);
+    out.col = _af_parse_decimal(col_text);
+    out.message = _af_strip_prefix(lines[5], "msg:");
+    out.present = true;
+    return out;
+}
+
+// Read + clear the per-test fail.bin record. Always called after
+// `process.run` returns; deletes the file so the next iteration
+// starts from a clean slate (multiple tests share one scratch_root
+// across the loop). Returns an empty failure when the file is
+// missing — the common pass case.
+fn _consume_assert_failure_record(scratch_root: string) -> AssertFailure ![io] {
+    let path = scratch_root + "/fail.bin";
+    if !fs.exists(path) { return _empty_assert_failure(); }
+    let bytes = fs.readFile(path);
+    fs.deleteFile(path);
+    return _parse_assert_failure_record(bytes);
+}
+
+// Format an AssertFailure for human-readable test runner output.
+// Matches the shape `path:line:col: message` so editors / CI
+// log-renderers can hyperlink the location.
+fn _format_assert_failure(test_path: string, failure: AssertFailure) -> string {
+    let mut location = test_path;
+    if failure.file.length > 0 { location = failure.file; }
+    return location + ":" + number_to_string(failure.line) + ":"
+        + number_to_string(failure.col)
+        + ": "
+        + failure.message;
 }
 
 // One distinct `(project_root, workspace_root)` resolution group for
@@ -486,14 +611,29 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io] {
             exit_test_runner_mode();
             return link_rc;
         }
+        // Issue #364: clear any leftover assert-fail record from the
+        // previous iteration before spawning. The record is keyed
+        // off SAILFIN_TEST_SCRATCH on the C-runtime side, so we
+        // wire scratch_root through `env` rather than `process.run`
+        // directly — this works whether or not the parent shell
+        // (e.g. run_native_test.sh) already exported the env var.
+        let fail_record_path = scratch_root + "/fail.bin";
+        if fs.exists(fail_record_path) { fs.deleteFile(fail_record_path); }
+
         if trace_runner { print.err("test runner: exec start"); }
-        let run_rc = process.run([exe_path]);
+        let run_rc = process.run(["env", "SAILFIN_TEST_SCRATCH=" + scratch_root, exe_path]);
         if trace_runner {
             print.err("test runner: exec done (exit=" + number_to_string(run_rc)
                 + ")");
         }
+        // Always consume the record (deletes fail.bin if present)
+        // so a stale record from a previous iteration can't leak
+        // into the next pass. `present=false` is the pass case.
+        let failure = _consume_assert_failure_record(scratch_root);
         if run_rc != 0 {
-            print("test failed: " + path);
+            if failure.present {
+                print("test failed: " + _format_assert_failure(path, failure));
+            } else { print("test failed: " + path); }
             exit_test_runner_mode();
             return run_rc;
         }
