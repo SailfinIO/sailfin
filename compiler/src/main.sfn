@@ -539,10 +539,14 @@ fn _looks_like_llvm_text(text: string) -> boolean {
 // Emits native text in memory and passes it straight into the lowering
 // pipeline — no intra-call IPC file between emit and lower, so the function
 // is safe to invoke from parallel workers.
-fn compile_to_llvm_file_with_module(source: string, module_name: string, out_path: string) -> boolean ![io] {
+fn compile_to_llvm_file_with_module(source: string, module_name: string, out_path: string, work_dir: string) -> boolean ![io] {
     let program: Program = parse_program(source);
+    let mut skip_typecheck_probe: string = "build/sailfin/.skip_typecheck";
+    if work_dir.length > 0 {
+        skip_typecheck_probe = work_dir + "/sailfin/.skip_typecheck";
+    }
     let skip_typecheck = _env_flag("SAILFIN_SKIP_TYPECHECK")
-        || _legacy_flag_file("build/sailfin/.skip_typecheck");
+        || _legacy_flag_file(skip_typecheck_probe);
     if !skip_typecheck {
         if typecheck_has_errors(program) {
             let diagnostics = typecheck_diagnostics(program);
