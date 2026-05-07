@@ -251,6 +251,21 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
         + ", i32 0, i32 1");
     current_lines.push("  store i64 " + total_length + ", i64* " + new_len_field);
 
+    // M1.B (#393): cap == len for the freshly concatenated buffer. The
+    // backing store is sized exactly to total_length so any subsequent
+    // push past this point will trigger an in-place grow via the v2
+    // helpers.
+    let new_cap_field = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + new_cap_field + " = getelementptr "
+        + array_struct_type
+        + ", "
+        + array_struct_type
+        + "* "
+        + new_struct_ptr
+        + ", i32 0, i32 2");
+    current_lines.push("  store i64 " + total_length + ", i64* " + new_cap_field);
+
     let result_operand = LLVMOperand {
         llvm_type: lhs.llvm_type,
         value: new_struct_ptr
@@ -279,14 +294,14 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
         };
     }
 
-    // IMPORTANT: `i8*` arrays are the runtime's "string array" ABI and are
-    // backed by `SailfinPtrArray` helpers that carry a hidden capacity header.
-    // Do not route these through the generic `array_push_slot` path, which uses
-    // a different header layout and can break subsequent `append_string` calls.
+    // IMPORTANT: `i8*` arrays are the runtime's "string array" ABI. M1.B
+    // (#393) routes these through the v2 entrypoint which understands the
+    // 3-field {i8**, i64, i64} struct layout and grows in place via
+    // realloc — no hidden capacity header.
     if element_type == "i8*" {
         // M1.A: SfnString aggregate operands (literals after the M1.A
         // flip) must shed the length prefix before reaching the
-        // `(_, i8*)` ABI of `sailfin_runtime_append_string`. The
+        // `(_, i8*)` ABI of `sailfin_runtime_append_string_v2`. The
         // legacy `i8*` operand path passes through unchanged.
         let mut value_at_string = value.value;
         if value.llvm_type == "{i8*, i64}" {
@@ -303,7 +318,7 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
         // NOTE: Do not embed `{ ... }` literally in Sailfin strings; braces are
         // treated as interpolation markers. Use `array.llvm_type` instead.
         current_lines.push("  " + pushed + " = call " + array.llvm_type
-            + " @sailfin_runtime_append_string("
+            + " @sailfin_runtime_append_string_v2("
             + array.llvm_type
             + " "
             + array.value
@@ -358,6 +373,17 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
         + " "
         + array.value
         + ", i32 0, i32 1");
+    // M1.B (#393): cap pointer (offset 2) threads through the v2
+    // push helper so realloc-induced cap bumps land back in the
+    // struct in lockstep with the new len.
+    let cap_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    current_lines.push("  " + cap_ptr + " = getelementptr " + array_struct_type
+        + ", "
+        + array.llvm_type
+        + " "
+        + array.value
+        + ", i32 0, i32 2");
     // Compute element size in bytes.
     let element_size_ptr = format_temp_name(current_temp);
     current_temp += 1;
@@ -387,10 +413,12 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
     let slot_i8 = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + slot_i8
-        + " = call i8* @sailfin_runtime_array_push_slot(i8** "
+        + " = call i8* @sailfin_runtime_array_push_slot_v2(i8** "
         + data_ptr_i8
         + ", i64* "
         + len_ptr
+        + ", i64* "
+        + cap_ptr
         + ", i64 "
         + element_size_value
         + ")");

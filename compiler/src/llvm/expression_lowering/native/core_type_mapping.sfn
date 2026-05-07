@@ -158,7 +158,9 @@ fn map_array_pointer_type(context: TypeContext, annotation: string) -> string {
             }
         }
     }
-    return "{ " + element_type + "*, i64 }*";
+    // M1.B (#393): array shape gains an explicit cap field. Mirrors
+    // `array_pointer_type_for_element` in compiler/src/llvm/type_mapping.sfn.
+    return "{ " + element_type + "*, i64, i64 }*";
 }
 
 fn unwrap_move_wrapper(annotation: string) -> string {

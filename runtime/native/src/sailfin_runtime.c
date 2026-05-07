@@ -6516,3 +6516,319 @@ double sailfin_enum_tag_from_instruction_array(void *arr_ptr, double idx)
         (struct SailfnNativeInstruction *)hdr->data + i;
     return (double)elem->tag;
 }
+
+/* =====================================================================
+ * M1.B v2 array helpers — accept the SfnArray ABI (`{T*, i64, i64}*`)
+ * and use only plain malloc/realloc for backing storage. The legacy
+ * `_alloc_array` / `_array_check_canary` / hidden-header path stays
+ * exclusively bound to the `SailfinPtrArray` entrypoints above; v2
+ * callers (post-#393 compiler IR) never touch it. The bodies are
+ * intentionally simple — once the legacy entrypoints retire (M3 per
+ * docs/runtime_architecture.md §2.3), these can absorb any growth-
+ * amortization heuristics that the hidden-header path used to
+ * provide. For now linear copy on concat / doubling on push is
+ * sufficient for the workloads new-compiler IR exercises.
+ * ===================================================================== */
+
+static SfnArray *_sfn_array_alloc_v2(int64_t initial_cap, size_t elem_size)
+{
+    SfnArray *out = (SfnArray *)_rt_malloc(sizeof(SfnArray));
+    if (!out)
+    {
+        return NULL;
+    }
+    out->data = NULL;
+    out->len = 0;
+    out->cap = 0;
+    if (initial_cap > 0)
+    {
+        size_t bytes = (size_t)initial_cap * elem_size;
+        if (elem_size != 0 && bytes / elem_size != (size_t)initial_cap)
+        {
+            /* multiplication overflow — free the struct so malloc-mode
+             * doesn't leak. `_rt_free` is a no-op under arena mode. */
+            _rt_free(out);
+            return NULL;
+        }
+        out->data = _rt_calloc((size_t)initial_cap, elem_size);
+        if (!out->data)
+        {
+            _rt_free(out);
+            return NULL;
+        }
+        out->cap = initial_cap;
+    }
+    return out;
+}
+
+SfnArray *sailfin_runtime_concat_v2(SfnArray *a, SfnArray *b)
+{
+    int64_t alen = (a && a->len > 0) ? a->len : 0;
+    int64_t blen = (b && b->len > 0) ? b->len : 0;
+    int64_t total = alen + blen;
+    SfnArray *out = _sfn_array_alloc_v2(total, sizeof(char *));
+    if (!out)
+    {
+        return NULL;
+    }
+    out->len = total;
+    char **buf = (char **)out->data;
+    if (buf)
+    {
+        if (a && a->data)
+        {
+            char **adata = (char **)a->data;
+            for (int64_t i = 0; i < alen; i++)
+            {
+                buf[i] = adata[i];
+            }
+        }
+        if (b && b->data)
+        {
+            char **bdata = (char **)b->data;
+            for (int64_t j = 0; j < blen; j++)
+            {
+                buf[alen + j] = bdata[j];
+            }
+        }
+    }
+    return out;
+}
+
+SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text)
+{
+    if (!a)
+    {
+        a = _sfn_array_alloc_v2(0, sizeof(char *));
+        if (!a)
+        {
+            return NULL;
+        }
+    }
+    int64_t len = a->len < 0 ? 0 : a->len;
+    int64_t cap = a->cap < 0 ? 0 : a->cap;
+    if (len >= cap)
+    {
+        /* Take `max(cap*2, len+1, 8)` so a corrupted `len > cap` state
+         * (e.g., ABI mismatch) can't realloc to a too-small buffer
+         * and then write past the new tail. The doubling overflow
+         * guard catches `cap * 2` wrapping past INT64_MAX. */
+        int64_t doubled = cap < 8 ? 8 : cap * 2;
+        if (doubled < cap)
+        {
+            return NULL;
+        }
+        int64_t need = len + 1;
+        int64_t new_cap = doubled > need ? doubled : need;
+        if (new_cap < 0 || (size_t)new_cap > SIZE_MAX / sizeof(char *))
+        {
+            return NULL; /* multiplication overflow */
+        }
+        size_t old_bytes = (size_t)cap * sizeof(char *);
+        size_t new_bytes = (size_t)new_cap * sizeof(char *);
+        void *new_data = _rt_realloc(a->data, old_bytes, new_bytes);
+        if (!new_data)
+        {
+            return NULL;
+        }
+        /* Zero the freshly grown tail so unused slots read as NULL. */
+        memset((char *)new_data + old_bytes, 0, new_bytes - old_bytes);
+        a->data = new_data;
+        a->cap = new_cap;
+    }
+    ((char **)a->data)[len] = text;
+    a->len = len + 1;
+    return a;
+}
+
+char *sailfin_runtime_array_push_slot_v2(void **data_ptr, int64_t *len_ptr,
+                                         int64_t *cap_ptr, int64_t elem_size)
+{
+    if (!data_ptr || !len_ptr || !cap_ptr)
+    {
+        return NULL;
+    }
+    if (elem_size <= 0 || elem_size > (int64_t)(1024 * 1024))
+    {
+        return NULL;
+    }
+    int64_t len = *len_ptr;
+    int64_t cap = *cap_ptr;
+    if (len < 0)
+    {
+        len = 0;
+        *len_ptr = 0;
+    }
+    if (cap < 0)
+    {
+        cap = 0;
+        *cap_ptr = 0;
+    }
+    if (len >= cap)
+    {
+        /* Take `max(cap*2, len+1, 8)`. `len > cap` shouldn't happen
+         * under normal compiler emission, but a corrupted struct
+         * (uninitialized cap, ABI mismatch with seed-compiled IR)
+         * would otherwise let the slot at `[len]` land past the
+         * realloc'd buffer's end. The grow rule guarantees
+         * `new_cap >= len + 1` so the write below is in-bounds. */
+        int64_t doubled = cap < 8 ? 8 : cap * 2;
+        if (doubled < cap)
+        {
+            return NULL;
+        }
+        int64_t need = len + 1;
+        int64_t new_cap = doubled > need ? doubled : need;
+        if (new_cap < 0 || (size_t)new_cap > SIZE_MAX / (size_t)elem_size)
+        {
+            return NULL; /* multiplication overflow */
+        }
+        size_t old_bytes = (size_t)cap * (size_t)elem_size;
+        size_t new_bytes = (size_t)new_cap * (size_t)elem_size;
+        void *new_data = _rt_realloc(*data_ptr, old_bytes, new_bytes);
+        if (!new_data)
+        {
+            return NULL;
+        }
+        memset((char *)new_data + old_bytes, 0, new_bytes - old_bytes);
+        *data_ptr = new_data;
+        *cap_ptr = new_cap;
+        cap = new_cap;
+    }
+    char *base = (char *)(*data_ptr);
+    char *slot = base + (size_t)len * (size_t)elem_size;
+    *len_ptr = len + 1;
+    return slot;
+}
+
+double sailfin_runtime_process_run_v2(SfnArray *argv)
+{
+    /* The legacy body reads `data` / `len` only — no hidden-header
+     * lookups, no canary checks. Stack-temp a SailfinPtrArray that
+     * mirrors the SfnArray's data pointer and length so we can reuse
+     * the legacy implementation without duplicating the fork/exec
+     * logic. The temp lives only on this frame; we never let the
+     * legacy body grow or reallocate it. */
+    if (!argv)
+    {
+        return 127.0;
+    }
+    SailfinPtrArray temp;
+    temp.data = (char **)argv->data;
+    temp.len = argv->len;
+    return sailfin_runtime_process_run(&temp);
+}
+
+void sailfin_adapter_fs_write_lines_v2(void *path, SfnArray *lines)
+{
+    /* Same shim strategy as `process_run_v2` — legacy body only reads
+     * data/len, stack-temp a SailfinPtrArray and forward. */
+    if (!lines)
+    {
+        return;
+    }
+    SailfinPtrArray temp;
+    temp.data = (char **)lines->data;
+    temp.len = lines->len;
+    sailfin_adapter_fs_write_lines(path, &temp);
+}
+
+SfnArray *sailfin_adapter_fs_list_directory_v2(void *path)
+{
+    /* Production path: build the SfnArray fresh with malloc-backed
+     * storage. Mirrors the legacy `sailfin_adapter_fs_list_directory`
+     * behaviour (sorted entry names, omits "." and "..") but never
+     * routes through `_alloc_array` / hidden header / canary slots. */
+    const char *path_str = (const char *)path;
+    if (!path_str || path_str[0] == '\0')
+    {
+        path_str = ".";
+    }
+
+    DIR *dir = opendir(path_str);
+    if (!dir)
+    {
+        return _sfn_array_alloc_v2(0, sizeof(char *));
+    }
+
+    size_t cap = 32;
+    size_t len = 0;
+    char **names = (char **)calloc(cap, sizeof(char *));
+    if (!names)
+    {
+        closedir(dir);
+        return NULL;
+    }
+
+    struct dirent *entry = NULL;
+    while ((entry = readdir(dir)) != NULL)
+    {
+        const char *name = entry->d_name;
+        if (!name)
+        {
+            continue;
+        }
+        if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
+        {
+            continue;
+        }
+        if (len >= cap)
+        {
+            size_t next_cap = cap * 2;
+            char **next = (char **)realloc(names, next_cap * sizeof(char *));
+            if (!next)
+            {
+                for (size_t i = 0; i < len; i++)
+                {
+                    free(names[i]);
+                }
+                free(names);
+                closedir(dir);
+                return NULL;
+            }
+            memset(next + cap, 0, (next_cap - cap) * sizeof(char *));
+            names = next;
+            cap = next_cap;
+        }
+        char *copy = strdup(name);
+        if (!copy)
+        {
+            for (size_t i = 0; i < len; i++)
+            {
+                free(names[i]);
+            }
+            free(names);
+            closedir(dir);
+            return NULL;
+        }
+        names[len++] = copy;
+    }
+    closedir(dir);
+
+    if (len > 1)
+    {
+        qsort(names, len, sizeof(char *), _cmp_cstr_ptr);
+    }
+
+    SfnArray *out = _sfn_array_alloc_v2((int64_t)len, sizeof(char *));
+    if (!out)
+    {
+        for (size_t i = 0; i < len; i++)
+        {
+            free(names[i]);
+        }
+        free(names);
+        return NULL;
+    }
+    char **out_data = (char **)out->data;
+    for (size_t i = 0; i < len; i++)
+    {
+        if (out_data)
+        {
+            out_data[i] = names[i];
+        }
+    }
+    out->len = (int64_t)len;
+    free(names);
+    return out;
+}

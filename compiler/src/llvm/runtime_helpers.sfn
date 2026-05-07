@@ -207,8 +207,13 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     // Process helpers
+    // M1.B (#393): SfnArray ABI — heap-boxed `{ T*, i64, i64 }*` with
+    // explicit cap. Routes through `_v2` C entrypoints that read/write
+    // cap directly (no hidden header). Legacy entrypoints stay
+    // exported for seed-compiled IR; the registry only points the
+    // new compiler at v2.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "process.run", symbol: "sailfin_runtime_process_run", return_type: "double", parameter_types: ["{ i8**, i64 }*"], effects: ["io"]
+        target: "process.run", symbol: "sailfin_runtime_process_run_v2", return_type: "double", parameter_types: ["{ i8**, i64, i64 }*"], effects: ["io"]
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "process.exit", symbol: "sailfin_runtime_process_exit", return_type: "void", parameter_types: ["double"], effects: ["io"]
@@ -234,16 +239,16 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "fs.appendFile", symbol: "sailfin_adapter_fs_append_file", return_type: "void", parameter_types: ["i8*", "i8*"], effects: ["io"]
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_write_lines", symbol: "sailfin_adapter_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64 }*"], effects: ["io"]
+        target: "fs_write_lines", symbol: "sailfin_adapter_fs_write_lines_v2", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io"]
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.writeLines", symbol: "sailfin_adapter_fs_write_lines", return_type: "void", parameter_types: ["i8*", "{ i8**, i64 }*"], effects: ["io"]
+        target: "fs.writeLines", symbol: "sailfin_adapter_fs_write_lines_v2", return_type: "void", parameter_types: ["i8*", "{ i8**, i64, i64 }*"], effects: ["io"]
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs_list_directory", symbol: "sailfin_adapter_fs_list_directory", return_type: "{ i8**, i64 }*", parameter_types: ["i8*"], effects: ["io"]
+        target: "fs_list_directory", symbol: "sailfin_adapter_fs_list_directory_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io"]
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "fs.listDirectory", symbol: "sailfin_adapter_fs_list_directory", return_type: "{ i8**, i64 }*", parameter_types: ["i8*"], effects: ["io"]
+        target: "fs.listDirectory", symbol: "sailfin_adapter_fs_list_directory_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["i8*"], effects: ["io"]
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "fs_delete_file", symbol: "sailfin_adapter_fs_delete_file", return_type: "i1", parameter_types: ["i8*"], effects: ["io"]
@@ -370,19 +375,28 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "is_alpha_char", symbol: "sailfin_runtime_is_alpha_char", return_type: "i1", parameter_types: ["i8"], effects: []
     });
 
-    // Array/collection helpers (generic using i8* for element type)
+    // Array/collection helpers (generic using i8* for element type).
+    // M1.B (#393): SfnArray ABI — `{ T*, i64, i64 }*` with explicit cap.
+    // Routes through `_v2` C entrypoints. Legacy `sailfin_runtime_concat`
+    // / `_append_string` / `_array_push_slot` stay exported so the seed-
+    // compiled first-pass IR (which still uses the 2-field shape) keeps
+    // linking; once the floor seed bumps to a release that emits the
+    // 3-field shape, the legacy symbols can retire.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "append_string", symbol: "sailfin_runtime_append_string", return_type: "{ i8**, i64 }*", parameter_types: ["{ i8**, i64 }*", "i8*"], effects: []
+        target: "append_string", symbol: "sailfin_runtime_append_string_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "i8*"], effects: []
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "concat", symbol: "sailfin_runtime_concat", return_type: "{ i8**, i64 }*", parameter_types: ["{ i8**, i64 }*", "{ i8**, i64 }*"], effects: []
+        target: "concat", symbol: "sailfin_runtime_concat_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: []
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "copy_bytes", symbol: "sailfin_runtime_copy_bytes", return_type: "void", parameter_types: ["i8*", "i8*", "i64"], effects: []
     });
 
+    // M1.B v2 byte-wise push: takes data, len, cap pointers + elem_size.
+    // Cap moves into the struct, so the registry signature gains an
+    // `i64*` (cap pointer) compared to the legacy 3-arg form.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "array_push_slot", symbol: "sailfin_runtime_array_push_slot", return_type: "i8*", parameter_types: ["i8**", "i64*", "i64"], effects: []
+        target: "array_push_slot", symbol: "sailfin_runtime_array_push_slot_v2", return_type: "i8*", parameter_types: ["i8**", "i64*", "i64*", "i64"], effects: []
     });
 
     // Generic field accessor for opaque imported types

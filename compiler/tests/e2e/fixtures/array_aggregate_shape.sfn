@@ -1,0 +1,16 @@
+// Fixture for compiler/tests/e2e/test_array_aggregate_shape.sh.
+//
+// Pins the M1.B array-literal ABI shape: every array literal lowers to
+// an `{ T*, i64, i64 }*` aggregate (data, len, cap), the `.length` field
+// resolves to a GEP+load of slot 1, and the cap field at slot 2 is
+// initialized to len for a fresh literal so callers that grow the
+// buffer via the v2 push helpers see the right starting capacity.
+// String arrays go through the `_v2` runtime entrypoints; the legacy
+// `sailfin_runtime_concat` / `_append_string` / `_array_push_slot`
+// symbols stay exported for seed-compiled IR.
+fn main() ![io] {
+    let xs = [1, 2, 3];
+    let len = xs.length;
+    let words = ["one", "two"];
+    print.info(words[0]);
+}

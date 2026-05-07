@@ -30,6 +30,32 @@ extern "C"
         int64_t len;
     } SfnString;
 
+    // Matches LLVM `{ T*, i64, i64 }` — the M1 ABI shape for SfnArray
+    // (data pointer + element count + capacity). See
+    // docs/runtime_architecture.md §2.3.1. M1.B (#393) locks the call-
+    // boundary shape; the legacy SailfinPtrArray with hidden 2-word /
+    // canary header stays exported for seed-compiled IR. New compiler
+    // output routes through `_v2` entrypoints that read/write `cap`
+    // directly from the struct, so the hidden-header logic in
+    // `_alloc_array` becomes dead code on the new call paths.
+    //
+    // `data` is `void*` here so the same struct can carry pointer-
+    // typed elements (`char**` for string arrays — i.e., LLVM
+    // `{i8**, i64, i64}`) or value-typed elements (`int64_t*` for
+    // `{i64*, i64, i64}`, etc.). Each v2 entrypoint that consumes
+    // an `SfnArray` interprets `data` according to the Sailfin
+    // call site that emitted the call — a string-array helper
+    // treats `data` as `char**`, an `i64`-array helper treats it
+    // as `int64_t*`, and the polymorphic byte-wise helpers
+    // (`array_push_slot_v2`) expose `data` to the caller as
+    // `void**` so the caller can keep its element type.
+    typedef struct SfnArray
+    {
+        void *data;
+        int64_t len;
+        int64_t cap;
+    } SfnArray;
+
     // ---- Core helpers (minimal set) ----
 
     void sailfin_runtime_mark_persistent(char *ptr);
@@ -131,15 +157,40 @@ extern "C"
 
     // ---- Array helpers ----
 
-    // For `{ i8**, i64 }*` concatenation, native IR uses `@sailfin_runtime_concat({i8**,i64}*,{i8**,i64}*)`.
+    // Legacy (M1 pre-cap) entrypoints. Kept exported so seed-compiled IR
+    // (which still emits `{ i8**, i64 }*` array shapes) keeps linking
+    // through the 2-pass self-host build. New compiler output (post #393)
+    // routes through the `_v2` family below — those bodies read/write
+    // capacity directly from the SfnArray struct's `cap` field instead
+    // of the hidden 2-word + canary header that `_alloc_array` plants
+    // in the legacy buffers.
     SailfinPtrArray *sailfin_runtime_concat(SailfinPtrArray *a, SailfinPtrArray *b);
     SailfinPtrArray *sailfin_runtime_append_string(SailfinPtrArray *a, char *text);
     SailfinPtrArray *sailfin_runtime_array_push(SailfinPtrArray *array, char *value);
+
+    // M1.B v2 array helpers — accept the SfnArray struct (heap-boxed) by
+    // pointer, with `cap` exposed inline. Bodies allocate plain malloc'd
+    // backing storage (no hidden header / canary slots) and grow via
+    // realloc when `len == cap`. Legacy entrypoints above remain the
+    // first-pass / seed-compiled IR's link target.
+    SfnArray *sailfin_runtime_concat_v2(SfnArray *a, SfnArray *b);
+    SfnArray *sailfin_runtime_append_string_v2(SfnArray *a, char *text);
 
     // Generic (byte-wise) array push for non-pointer element types.
     // Mutates the backing buffer to ensure capacity and returns a pointer to the
     // newly appended slot (caller writes the element bytes there).
     char *sailfin_runtime_array_push_slot(char **data_ptr_ptr, int64_t *len_ptr, int64_t elem_size);
+
+    // M1.B v2 byte-wise push: takes an explicit cap pointer. Grows by
+    // realloc when `*len_ptr == *cap_ptr` (doubling cap, minimum 8) and
+    // writes the new buffer back through `*data_ptr` and the new
+    // capacity through `*cap_ptr`. Returns a pointer to the slot for
+    // the just-incremented length so the caller can store the new
+    // element. No hidden header, no canary slots.
+    char *sailfin_runtime_array_push_slot_v2(void **data_ptr,
+                                             int64_t *len_ptr,
+                                             int64_t *cap_ptr,
+                                             int64_t elem_size);
 
     // ---- Byte helpers ----
 
@@ -151,6 +202,11 @@ extern "C"
     // ---- Process helpers ----
     // Execute a command (argv[0] is program). Returns the exit code.
     double sailfin_runtime_process_run(SailfinPtrArray *argv);
+
+    // M1.B v2: same contract as `sailfin_runtime_process_run`, but
+    // accepts the SfnArray ABI (cap-bearing) for argv. Body decomposes
+    // and forwards to the legacy implementation pathway.
+    double sailfin_runtime_process_run_v2(SfnArray *argv);
 
     // Terminate the process with the given exit code. Never returns.
     void sailfin_runtime_process_exit(double code);
@@ -247,6 +303,10 @@ extern "C"
     void sailfin_adapter_fs_write_file(void *path, void *contents);
     void sailfin_adapter_fs_append_file(void *path, void *contents);
     SailfinPtrArray *sailfin_adapter_fs_list_directory(void *path);
+
+    // M1.B v2 fs adapters — SfnArray-shaped string arrays.
+    void sailfin_adapter_fs_write_lines_v2(void *path, SfnArray *lines);
+    SfnArray *sailfin_adapter_fs_list_directory_v2(void *path);
     bool sailfin_adapter_fs_delete_file(void *path);
     bool sailfin_adapter_fs_create_directory(void *path, bool recursive);
     bool sailfin_intrinsic_fs_exists(void *path);

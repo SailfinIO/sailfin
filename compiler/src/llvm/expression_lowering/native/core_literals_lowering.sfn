@@ -602,6 +602,21 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     current_lines.push("  store i64 " + length_text + ", i64* "
         + length_field_pointer);
 
+    // M1.B (#393): cap field at offset 2 — for a literal `[a, b, c]`,
+    // cap == len. The runtime's v2 push helpers will grow the backing
+    // buffer (and update cap) when callers append past this point.
+    let cap_field_pointer = format_temp_name(current_temp);
+    current_lines.push("  " + cap_field_pointer + " = getelementptr "
+        + struct_type
+        + ", "
+        + struct_type
+        + "* "
+        + struct_pointer
+        + ", i32 0, i32 2");
+    current_temp += 1;
+    current_lines.push("  store i64 " + length_text + ", i64* "
+        + cap_field_pointer);
+
     let operand = LLVMOperand {
         llvm_type: struct_type + "*",
         value: struct_pointer
