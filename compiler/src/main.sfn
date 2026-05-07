@@ -29,7 +29,6 @@ import {
 import { lower_to_llvm_for_tests } from "./llvm/lowering/entrypoints_tests";
 import { write_llvm_ir_for_tests_from_text_with_context } from "./llvm/lowering/entrypoints_tests_writer";
 import { LayoutManifest } from "./native_ir";
-import { split_lines } from "./native_ir_utils_text";
 import { parse_program } from "./parser/mod";
 import { substring } from "./string_utils";
 import { test_runner_trace } from "./test_runner_state";
@@ -473,68 +472,6 @@ fn write_native_text_file_with_module(source: string, module_name: string, out_p
     return emit_native_text_to_file_with_module_name(program, module_name, out_path);
 }
 
-fn _has_prefix(value: string, prefix: string) -> boolean {
-    if prefix.length > value.length { return false; }
-    let mut index: number = 0;
-    loop {
-        if index >= prefix.length { break; }
-        if value[index] != prefix[index] { return false; }
-        index += 1;
-    }
-    return true;
-}
-
-fn _find_first_nonblank_line(text: string) -> string {
-    let lines = split_lines(text);
-    let mut index: number = 0;
-    loop {
-        let mut _if348: boolean = false;
-        if index >= lines.length { _if348 = true; }
-        if index >= 128 { _if348 = true; }
-        if _if348 { break; }
-        let line = lines[index];
-        if line.length > 0 { return line; }
-        index += 1;
-    }
-    return "";
-}
-
-fn _looks_like_llvm_text(text: string) -> boolean {
-    if text.length < 16 { return false; }
-    let lines = split_lines(text);
-    let mut index: number = 0;
-    loop {
-        let mut _if349: boolean = false;
-        if index >= lines.length { _if349 = true; }
-        if index >= 128 { _if349 = true; }
-        if _if349 { break; }
-        let line = lines[index];
-        if line.length == 0 {
-            index += 1;
-            continue;
-        }
-        let mut _if350: boolean = false;
-        if line[0] == " " { _if350 = true; }
-        if line[0] == "\t" { _if350 = true; }
-        if _if350 { return false; }
-        if _has_prefix(line, "source_filename =") { return true; }
-        if _has_prefix(line, "; ModuleID =") { return true; }
-        let mut _if351: boolean = false;
-        if _has_prefix(line, "target ") { _if351 = true; }
-        if _has_prefix(line, "declare ") { _if351 = true; }
-        if _has_prefix(line, "define ") { _if351 = true; }
-        if _if351 { return true; }
-        let mut _if352: boolean = false;
-        if line[0] == "%" { _if352 = true; }
-        if line[0] == "@" { _if352 = true; }
-        if line[0] == "!" { _if352 = true; }
-        if line[0] == ";" { _if352 = true; }
-        if _if352 { return true; }
-        return false;
-    }
-    return false;
-}
-
 // Compile and write LLVM IR directly, avoiding large return values.
 // Emits native text in memory and passes it straight into the lowering
 // pipeline — no intra-call IPC file between emit and lower, so the function
@@ -565,90 +502,10 @@ fn compile_to_llvm_file_with_module(source: string, module_name: string, out_pat
     if native_text.length == 0 {
         print.err("emit-llvm-file: empty native output for module "
             + module_name);
-        let cached_native_path = "build/native/import-context/" + module_name
-            + ".sfn-asm";
-        if fs.exists(cached_native_path) {
-            let cached_text = fs.readFile(cached_native_path);
-            let cached_ok = write_llvm_ir_from_native_text(cached_text, module_name, out_path);
-            if cached_ok {
-                if fs.exists(out_path) {
-                    let cached_contents = fs.readFile(out_path);
-                    if _looks_like_llvm_text(cached_contents) {
-                        print.err("emit-llvm-file: used cached native artifact fallback for module "
-                            + module_name);
-                        return true;
-                    }
-                }
-            }
-        }
-        let native_result = emit_native_with_module_name(program, module_name);
-        let fallback_ok = write_llvm_ir(native_result.module, out_path);
-        if fallback_ok {
-            if fs.exists(out_path) {
-                let contents = fs.readFile(out_path);
-                if _looks_like_llvm_text(contents) { return true; }
-            }
-        }
         return false;
     }
     if fs.exists(out_path) { fs.deleteFile(out_path); }
-    let ok = write_llvm_ir_from_native_text(native_text, module_name, out_path);
-    let mut output_valid: boolean = false;
-    // Check file content regardless of return value — the boolean return from
-    // cross-module calls can be corrupted by ABI issues in the seed compiler.
-    let _file_exists = fs.exists(out_path);
-    if _file_exists {
-        let written = fs.readFile(out_path);
-        // _looks_like_llvm_text may be miscompiled by the seed (loop/string
-        // comparison bugs).  Trust write_llvm_ir_from_native_text: if the
-        // file exists and has reasonable length it is valid LLVM IR produced
-        // by the lowering pipeline.
-        if written.length > 64 { output_valid = true; }
-        if !output_valid {
-            // Check if the content starts with a valid LLVM entity (just missing header).
-            // If it starts with garbage (e.g. mid-instruction due to array offset corruption),
-            // do NOT prepend a header — let the selfhost script's recovery handle it.
-            let _first_nonblank = _find_first_nonblank_line(written);
-            let mut _if353: boolean = false;
-            if _first_nonblank.length > 0 {
-                let mut _if355: boolean = false;
-                if _first_nonblank[0] == "%" { _if355 = true; }
-                if _first_nonblank[0] == "@" { _if355 = true; }
-                if _has_prefix(_first_nonblank, "declare ") { _if355 = true; }
-                if _has_prefix(_first_nonblank, "define ") { _if355 = true; }
-                if _has_prefix(_first_nonblank, "target ") { _if355 = true; }
-                if _if355 { _if353 = true; }
-            }
-            if _if353 {
-                let header = "source_filename = \"" + module_name + ".sfn\"\n\n";
-                fs.writeFile(out_path, header + written);
-                output_valid = true;
-                print.err("emit-llvm-file: prepended header for module "
-                    + module_name);
-            }
-        }
-        if !output_valid {
-            print.err("emit-llvm-file: malformed llvm output for module "
-                + module_name
-                + "; falling back");
-        }
-    }
-    if !output_valid {
-        if !ok {
-            print.err("emit-llvm-file: empty llvm output for module "
-                + module_name);
-        }
-        let native_result = emit_native_with_module_name(program, module_name);
-        let fallback_ok = write_llvm_ir(native_result.module, out_path);
-        if fallback_ok {
-            if fs.exists(out_path) {
-                let contents = fs.readFile(out_path);
-                if _looks_like_llvm_text(contents) { return true; }
-            }
-        }
-        return false;
-    }
-    return true;
+    return write_llvm_ir_from_native_text(native_text, module_name, out_path);
 }
 
 // Build-path typecheck diagnostic emission. Every `compile_to_*`
