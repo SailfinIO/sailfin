@@ -1,0 +1,47 @@
+// Fixture for compiler/tests/e2e/test_drop_emission_mid_exit.sh.
+//
+// Exercises the M1.5.3 (issue #327) mid-function-exit drop seam. Each
+// function below is shaped so that M1.5.5 escape promotion flips a
+// heap-typed local to `kind == "rc"` and the M1.5.3 mid-exit hooks
+// emit a `call void @sfn_rc_release(i8* ...)` at every terminator
+// reached from a non-consumed rc local.
+//
+// What we're verifying end-to-end:
+//   - Multiple `return` statements in the same function each get their
+//     own release-call site (no `%lN.drop` collisions; the temp suffix
+//     guarantees uniqueness).
+//   - A `return` nested inside an `if` branch emits a release before
+//     the `ret` line.
+//   - A function with a single tail return still emits a release at
+//     its terminator (the function-body seam in `emit_llvm_function`
+//     is bypassed by an explicit return — the M1.5.3 path takes over).
+//   - The runtime ABI declare line is still emitted unconditionally.
+//
+// No `main` — the harness drives `sfn emit llvm` directly.
+// One explicit tail return. Drops fire at the explicit return because
+// the function-body seam is bypassed (the body is terminated).
+fn tail_return() -> string {
+    let s = "tail";
+    return s;
+}
+
+// Two explicit returns of the same heap-typed local. Each terminator
+// produces an independent release call; the per-call temp suffix keeps
+// the LLVM IR free of duplicate `%l0.drop` definitions.
+fn two_returns(flag: bool) -> string {
+    let s = "two";
+    if flag { return s; }
+    return s;
+}
+
+// `return` inside a nested `if-then` block. Walks the scope chain
+// inner-to-outer (then-scope, then function root) and emits a release
+// for each rc local in scope.
+fn nested_if_return(flag: bool) -> string {
+    let s = "nested";
+    if flag {
+        let inner = s;
+        return s;
+    }
+    return s;
+}

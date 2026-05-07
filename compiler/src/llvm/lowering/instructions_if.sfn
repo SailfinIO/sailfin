@@ -44,6 +44,7 @@ import {
 import {
     _parse_int_from_string,
     clone_local_bindings,
+    emit_scope_drops,
     extend_lifetime_regions,
     extend_mutations,
     insert_lines_before_index
@@ -287,6 +288,17 @@ fn lower_if_instruction(function: NativeFunction, start_index: number, llvm_retu
     let then_terminated = then_result.terminated;
     let mut then_merge_insert_index: number = -1;
     if !then_terminated {
+        // M1.5.3 (issue #327): drop owned RC values declared in the
+        // `then` block before falling through to the merge join. Nested
+        // scopes inside the block already emitted their own drops.
+        let _then_close_result = emit_scope_drops(then_result.locals, then_scope_id, current_temp);
+        let mut _tcd_i: number = 0;
+        loop {
+            if _tcd_i >= _then_close_result.lines.length { break; }
+            current_lines.push(_then_close_result.lines[_tcd_i]);
+            _tcd_i += 1;
+        }
+        current_temp = _then_close_result.next_temp;
         let merge_branch_index = current_lines.length;
         current_lines.push("  br label %" + merge_label);
         then_merge_insert_index = merge_branch_index;
@@ -324,6 +336,16 @@ fn lower_if_instruction(function: NativeFunction, start_index: number, llvm_retu
         collected_mutations = extend_mutations(collected_mutations, else_mutations);
         collected_string_constants = merge_string_constants(collected_string_constants, else_result.string_constants);
         if !else_terminated {
+            // M1.5.3 (issue #327): drop owned RC values declared in the
+            // `else` block before falling through to the merge join.
+            let _else_close_result = emit_scope_drops(else_result.locals, else_scope_id, current_temp);
+            let mut _ecd_i: number = 0;
+            loop {
+                if _ecd_i >= _else_close_result.lines.length { break; }
+                current_lines.push(_else_close_result.lines[_ecd_i]);
+                _ecd_i += 1;
+            }
+            current_temp = _else_close_result.next_temp;
             let merge_branch_index = current_lines.length;
             current_lines.push("  br label %" + merge_label);
             else_merge_insert_index = merge_branch_index;

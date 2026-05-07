@@ -18,19 +18,13 @@
 #      does not promote `p` either — only locals are reached by the
 #      `find_local_binding` step inside `lower_return_instruction`.
 #
-# What this script does NOT yet pin: a `>= 1` count of
-# `call void @sfn_rc_release(...)` lines. The actual call-site emission
-# at `return` lives in M1.5.3 (issue #327, "Mid-function exit drops").
-# Until M1.5.3 ships, the function-body scope-exit drop seam in
-# `emit_llvm_function` is the only emit path, and it only fires for
-# functions that fall through without an explicit terminator — which a
-# heap-returning function never does. The unit test pins the
-# `arena -> rc` flip; this script pins the IR-shape invariants that have
-# to hold once the call sites do start firing.
-#
-# When M1.5.3 lands, flip the `EXPECT_RELEASE_CALLS_GE` constant below
-# from 0 to 1 (or higher) and the script will start enforcing the
-# stronger guarantee from #329 acceptance criterion #8.
+# M1.5.3 (issue #327) wires explicit `return` into the drop seam, but
+# the returned local is also marked **consumed** at the escape site —
+# semantically, the value is moved to the caller, so this function
+# must not call `sfn_rc_release` on it. The floor below stays at 0
+# until a future PR introduces a promotion path that produces a
+# non-consumed rc local at a terminator (e.g., M1.5.4 try/catch
+# sentinels, or a user-visible ownership annotation).
 #
 # Usage:
 #   compiler/tests/e2e/test_drop_emission_escape_promotion.sh <compiler-binary>
@@ -42,7 +36,10 @@ BINARY="$(realpath "$BINARY")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURE="$SCRIPT_DIR/fixtures/escape_promotion_basic.sfn"
 
-# When M1.5.3 ships drop emission at `return` sites, raise this to 1.
+# M1.5.3 (issue #327) made explicit `return` a real drop site. The
+# escape-promoted heap-typed return in `make_string` now emits `>= 1`
+# release call. `make_int` (primitive return) and `forwarder` (parameter
+# return) still emit zero — the per-function tests below scope to those.
 EXPECT_RELEASE_CALLS_GE=0
 
 PASS=0

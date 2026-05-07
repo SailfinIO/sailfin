@@ -349,6 +349,18 @@ struct HeapBoxResult {
     diagnostics: string[];
 }
 
+// M1.5.3 (issue #327): result of `emit_scope_drops` /
+// `emit_drops_for_scope_chain`. Threading the temp counter through the
+// drop helper guarantees unique drop temp names when the same scope is
+// closed at multiple terminator points (e.g., two `return`s in a
+// function — both drop the function root scope, but each gets its own
+// `%<slot>.drop.<n>` to satisfy LLVM's "unique value name per
+// function" rule).
+struct ScopeDropResult {
+    lines: string[];
+    next_temp: number;
+}
+
 // =============================================================================
 // Literal Parsing
 // =============================================================================
@@ -511,6 +523,11 @@ struct IfStructure {
 struct LoopContext {
     break_label: string;
     continue_label: string;
+    // Scope id enclosing the loop. M1.5.3 (issue #327) uses this so
+    // `break` / `continue` can drop every scope from the current
+    // scope up to (but not including) the loop's enclosing scope —
+    // those scopes outlive the loop and must not be dropped here.
+    outer_scope_id: string;
 }
 
 struct LoopStructure {

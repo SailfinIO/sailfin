@@ -14,6 +14,13 @@ import {
 } from "../../../string_utils";
 import { test_runner_trace } from "../../../test_runner_state";
 import { default_return_literal, is_simple_identifier } from "../../expressions_helpers";
+// `format_root_scope_id` lives in the lifetime utilities module; the
+// `core_scopes` re-export points to the same canonical implementation.
+import { format_root_scope_id } from "../../lifetime";
+// M1.5.3 (issue #327): drop-emission helpers for explicit returns. The
+// helper walks the scope chain inner-to-outer and emits
+// `sfn_rc_release` calls for every owned RC local at scope close.
+import { emit_drops_for_scope_chain } from "../../lowering/instructions_helpers";
 import { trace_lowering } from "../../lowering_debug_state";
 // Import string constant management
 import { empty_string_constant_set } from "../../strings";
@@ -430,10 +437,28 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             + number_to_string(current_lines.length));
     }
 
+    // M1.5.3 (issue #327): mid-function-exit drops. An explicit `return`
+    // is a function-body terminator, so the scope-exit drop seam in
+    // `emission.sfn` (which fires only when the body is *not* terminated)
+    // does not run. The explicit-return path is therefore responsible for
+    // dropping every owned RC local in scope — from the current scope all
+    // the way up to (and including) the function root scope.
+    let _fn_root_scope = format_root_scope_id(fn_name);
+
     let mut _if148: boolean = false;
     if instr_expression == null { _if148 = true; }
     if instr_expression.length == 0 { _if148 = true; }
     if _if148 {
+        // No expression to consume / promote — emit drops for the full
+        // chain (current scope → function root inclusive) before the ret.
+        let _empty_result = emit_drops_for_scope_chain(locals, scope_id, _fn_root_scope, true, current_temp);
+        let mut _ed_i: number = 0;
+        loop {
+            if _ed_i >= _empty_result.lines.length { break; }
+            current_lines.push(_empty_result.lines[_ed_i]);
+            _ed_i += 1;
+        }
+        current_temp = _empty_result.next_temp;
         if safe_llvm_return == "void" { current_lines.push("  ret void"); } else {
             diagnostics.push("llvm lowering: missing return value in `"
                 + fn_name
@@ -538,6 +563,16 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
         diagnostics.push("llvm lowering: unhandled return expression in `"
             + fn_name
             + "`");
+        // M1.5.3: emit chain drops even on the recovery path so a
+        // miscompiled return doesn't leak owned RC locals.
+        let _no_op_result = emit_drops_for_scope_chain(current_locals, scope_id, _fn_root_scope, true, current_temp);
+        let mut _no_op_i: number = 0;
+        loop {
+            if _no_op_i >= _no_op_result.lines.length { break; }
+            current_lines.push(_no_op_result.lines[_no_op_i]);
+            _no_op_i += 1;
+        }
+        current_temp = _no_op_result.next_temp;
         current_lines.push("  ret " + safe_llvm_return + " "
             + default_return_literal(safe_llvm_return));
         if trace {
@@ -568,6 +603,15 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     if safe_llvm_return == "void" {
         diagnostics.push("llvm lowering: void function `" + fn_name
             + "` returned a value");
+        // M1.5.3: emit chain drops before the ret-void recovery branch.
+        let _void_result = emit_drops_for_scope_chain(current_locals, scope_id, _fn_root_scope, true, current_temp);
+        let mut _void_i: number = 0;
+        loop {
+            if _void_i >= _void_result.lines.length { break; }
+            current_lines.push(_void_result.lines[_void_i]);
+            _void_i += 1;
+        }
+        current_temp = _void_result.next_temp;
         current_lines.push("  ret void");
         return ExpressionStatementResult {
             lines: current_lines,
@@ -605,6 +649,16 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             + "` in `"
             + fn_name
             + "`");
+        // M1.5.3: emit chain drops even when the coercion failed, so the
+        // recovery `ret <default>` still releases owned locals.
+        let _coerce_result = emit_drops_for_scope_chain(current_locals, scope_id, _fn_root_scope, true, current_temp);
+        let mut _coerce_i: number = 0;
+        loop {
+            if _coerce_i >= _coerce_result.lines.length { break; }
+            current_lines.push(_coerce_result.lines[_coerce_i]);
+            _coerce_i += 1;
+        }
+        current_temp = _coerce_result.next_temp;
         if safe_llvm_return == "void" { current_lines.push("  ret void"); } else {
             current_lines.push("  ret " + safe_llvm_return + " "
                 + default_return_literal(safe_llvm_return));
@@ -634,11 +688,20 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             + coerced_operand.value
             + ")");
     }
-    current_lines.push("  ret " + coerced_operand.llvm_type + " "
-        + coerced_operand.value);
-    if trace {
-        print.err("test llvm: lower_return ok lines_after=" + number_to_string(current_lines.length));
-    }
+    // M1.5.3 + M1.5.5: apply consumption and escape promotion *before*
+    // computing scope-chain drops. The returned local is marked
+    // `consumed`, which causes `emit_scope_drops` to skip it (the caller
+    // owns the value now). Promotion flips `allocation_kind = "rc"` for
+    // any heap-typed bare-identifier return so the receiving caller's
+    // drop sites can release it.
+    //
+    // `analyze_value_ownership` returns `consumption == null` for
+    // pointer-typed values (today's `is_copy_type` reports any LLVM `*`
+    // type as a copy type), so we cannot rely solely on the consumption
+    // path to mark the returned local as moved. Below, escape-promoted
+    // heap-typed bare-identifier returns are *also* marked consumed —
+    // the value is now owned by the caller, and dropping it here would
+    // be a use-after-free once `sfn_rc_release` becomes non-no-op.
     if consumption != null {
         if consumption.kind == "local" {
             current_locals = mark_local_consumed(current_locals, consumption.name);
@@ -652,14 +715,40 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     // emission paths can release it at scope exit. Borrows and primitive
     // (non-heap) locals are not promoted — see `is_heap_type` and
     // `promote_local_to_rc` for the exact rules.
+    //
+    // M1.5.3 (issue #327): mark the same local consumed so the
+    // function-root drop site below skips it. Without this, a heap-
+    // typed return would emit BOTH a `mark_persistent` (caller-side
+    // ownership transfer) and an `sfn_rc_release` (drop here) — a
+    // semantic contradiction the M1.5.4 / runtime work would have to
+    // unpick later. Doing it once, at the escape site, keeps the
+    // ownership model coherent.
     let trimmed_return_expr = trim_text(instr_expression);
     if is_simple_identifier(trimmed_return_expr) {
         let returned_local = find_local_binding(current_locals, trimmed_return_expr);
         if returned_local != null {
             if is_heap_type(returned_local.llvm_type) {
                 current_locals = promote_local_to_rc(current_locals, trimmed_return_expr);
+                current_locals = mark_local_consumed(current_locals, trimmed_return_expr);
             }
         }
+    }
+    // M1.5.3 (issue #327): walk the scope chain inner-to-outer and emit
+    // `sfn_rc_release` for every owned RC local in scope, ending at the
+    // function root (inclusive). The consumed-and-promoted state above
+    // is what `emit_scope_drops` sees, so the returned local is skipped.
+    let _ret_result = emit_drops_for_scope_chain(current_locals, scope_id, _fn_root_scope, true, current_temp);
+    let mut _ret_i: number = 0;
+    loop {
+        if _ret_i >= _ret_result.lines.length { break; }
+        current_lines.push(_ret_result.lines[_ret_i]);
+        _ret_i += 1;
+    }
+    current_temp = _ret_result.next_temp;
+    current_lines.push("  ret " + coerced_operand.llvm_type + " "
+        + coerced_operand.value);
+    if trace {
+        print.err("test llvm: lower_return ok lines_after=" + number_to_string(current_lines.length));
     }
     return ExpressionStatementResult {
         lines: current_lines,

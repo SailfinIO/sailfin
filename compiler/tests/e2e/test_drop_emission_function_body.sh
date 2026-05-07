@@ -5,10 +5,12 @@
 #   1. Always emit `declare void @sfn_rc_release(i8*)` in the module
 #      preamble so the runtime ABI is visible to downstream linkers
 #      regardless of whether any local has `allocation_kind == "rc"`.
-#   2. Emit zero `call void @sfn_rc_release(...)` lines today, because
-#      M1.5.5 escape promotion has not yet populated `allocation_kind`
-#      for any real binding — the seam is in place but the call sites
-#      are inert until the promotion rule flips at least one local.
+#   2. Emit zero `call void @sfn_rc_release(...)` lines for THIS
+#      fixture: the functions have only primitive arena locals, so
+#      neither the function-body seam nor the M1.5.3 mid-exit hooks
+#      have anything to drop. (M1.5.5 escape promotion only flips
+#      heap-typed locals that escape via `return`; nothing in this
+#      fixture matches.)
 #
 # The unit test (compiler/tests/unit/emit_scope_drops_test.sfn) is the
 # load-bearing piece for the helper's per-binding decision logic; this
@@ -58,8 +60,8 @@ test_declare_line_present() {
     return 0
 }
 
-# ---- (2) zero call sites today (M1.5.2 ships the seam, not the calls) ----
-test_zero_call_sites_until_m1_5_5() {
+# ---- (2) zero call sites for the all-primitive fixture ----
+test_zero_call_sites_for_primitive_fixture() {
     local ll="$SCRATCH/drop_emission_calls.ll"
     if ! "$BINARY" emit -o "$ll" llvm "$FIXTURE" > /dev/null 2>&1; then
         echo "[test]   sfn emit llvm failed for zero-call-sites case"
@@ -68,9 +70,9 @@ test_zero_call_sites_until_m1_5_5() {
     local hits
     hits="$(grep -cE 'call void @sfn_rc_release' "$ll" || true)"
     if [ "${hits:-0}" -ne 0 ]; then
-        echo "[test]   expected 0 'call void @sfn_rc_release' lines, got $hits"
-        echo "         (no local binding has allocation_kind == \"rc\" yet — "
-        echo "          M1.5.5 will be the first PR that flips this)"
+        echo "[test]   expected 0 'call void @sfn_rc_release' lines for the "
+        echo "         primitive-locals fixture, got $hits — M1.5.5 escape "
+        echo "         promotion must skip primitives via is_heap_type."
         return 1
     fi
     return 0
@@ -100,8 +102,8 @@ test_hello_world_smoke() {
 
 run_test "compiler emits declare void @sfn_rc_release(i8*) for the fixture" \
     test_declare_line_present
-run_test "compiler emits zero 'call void @sfn_rc_release' until M1.5.5" \
-    test_zero_call_sites_until_m1_5_5
+run_test "compiler emits zero 'call void @sfn_rc_release' for the primitive-locals fixture" \
+    test_zero_call_sites_for_primitive_fixture
 run_test "hello-world.sfn smoke-test exposes the runtime ABI declare" \
     test_hello_world_smoke
 

@@ -1,21 +1,22 @@
-// Round-trip pin for `emit_scope_drops` (issue #326, M1.5.2).
+// Round-trip pin for `emit_scope_drops` and `emit_drops_for_scope_chain`.
 //
-// The helper emits the load + (optional) bitcast + `call void
-// @sfn_rc_release(i8* ...)` sequence for every owned RC local in the
-// named scope at scope close. The function-body terminator path in
-// `emit_llvm_function` calls this helper before the implicit `ret`.
-// Today no real call site has `allocation_kind == "rc"` (M1.5.5 escape
-// promotion is not yet shipped), so the helper returns `[]` for every
-// real call and the IR diff against main is zero outside the new
-// `declare void @sfn_rc_release(i8*)` line.
+// Coverage:
+//   - M1.5.2 (issue #326) — function-body scope close: a single drop
+//     site per function. Validates owner-only emission, the i8* and
+//     non-i8* shapes, and skip rules (borrow / consumed / wrong scope).
+//   - M1.5.3 (issue #327) — mid-function-exit drops: `return` mid-body,
+//     `break` / `continue`, loop-body close, match-arm close, and
+//     bare-block close. Validates the inner-to-outer scope chain walk
+//     plus per-call temp-name uniqueness.
 //
 // `LocalBinding.pointer` is the alloca slot (e.g. `%l5`) — the slot
-// itself has type `<llvm_type>*`. The helper must load the value out
-// of the slot and bitcast it to `i8*` (when needed) before calling
+// itself has type `<llvm_type>*`. The helper loads the value out of the
+// slot and bitcasts to `i8*` (when needed) before calling
 // `sfn_rc_release`. The synthetic bindings below mirror the real
-// representation so M1.5.5 (the first call site that flips a binding
-// to "rc") can land without regressing the seam.
-import { emit_scope_drops } from "../../src/llvm/lowering/instructions_helpers";
+// representation. Drop temp names are slot-prefixed and counter-suffixed
+// (`%l5.drop.<n>`) so the same scope can close at multiple terminator
+// points without producing duplicate `%l5.drop` definitions.
+import { emit_drops_for_scope_chain, emit_scope_drops } from "../../src/llvm/lowering/instructions_helpers";
 import { LocalBinding, OwnershipInfo } from "../../src/llvm/types";
 
 fn _make_binding(name: string, slot: string, llvm_type: string, kind: string, consumed: boolean, scope_id: string, ownership: OwnershipInfo?) -> LocalBinding {
@@ -42,57 +43,165 @@ fn _borrow_ownership() -> OwnershipInfo {
     };
 }
 
+// =============================================================================
+// emit_scope_drops: per-scope drop emission
+// =============================================================================
 test "emit_scope_drops: arena-only locals emit zero drop lines" {
     let bindings: LocalBinding[] = [_make_binding("a", "%l1", "i8*", "arena", false, "fn:foo", null), _make_binding("b", "%l2", "i8*", "arena", false, "fn:foo", null)];
-    let lines = emit_scope_drops(bindings, "fn:foo");
-    assert lines.length == 0;
+    let result = emit_scope_drops(bindings, "fn:foo", 0);
+    assert result.lines.length == 0;
+    assert result.next_temp == 0;
 }
 
 test "emit_scope_drops: a single i8* rc local emits load + call (no bitcast)" {
     let bindings: LocalBinding[] = [_make_binding("a", "%l1", "i8*", "arena", false, "fn:foo", null), _make_binding("b", "%l2", "i8*", "rc", false, "fn:foo", null)];
-    let lines = emit_scope_drops(bindings, "fn:foo");
-    assert lines.length == 2;
-    assert lines[0] == "  %l2.drop = load i8*, i8** %l2";
-    assert lines[1] == "  call void @sfn_rc_release(i8* %l2.drop)";
+    let result = emit_scope_drops(bindings, "fn:foo", 7);
+    assert result.lines.length == 2;
+    assert result.lines[0] == "  %l2.drop.7 = load i8*, i8** %l2";
+    assert result.lines[1] == "  call void @sfn_rc_release(i8* %l2.drop.7)";
+    assert result.next_temp == 8;
 }
 
 test "emit_scope_drops: a non-i8* rc local emits load + bitcast + call" {
     let bindings: LocalBinding[] = [_make_binding("box", "%l3", "%MyStruct*", "rc", false, "fn:foo", null)];
-    let lines = emit_scope_drops(bindings, "fn:foo");
-    assert lines.length == 3;
-    assert lines[0] == "  %l3.drop_raw = load %MyStruct*, %MyStruct** %l3";
-    assert lines[1] == "  %l3.drop = bitcast %MyStruct* %l3.drop_raw to i8*";
-    assert lines[2] == "  call void @sfn_rc_release(i8* %l3.drop)";
+    let result = emit_scope_drops(bindings, "fn:foo", 12);
+    assert result.lines.length == 3;
+    assert result.lines[0] == "  %l3.drop_raw.12 = load %MyStruct*, %MyStruct** %l3";
+    assert result.lines[1] == "  %l3.drop.12 = bitcast %MyStruct* %l3.drop_raw.12 to i8*";
+    assert result.lines[2] == "  call void @sfn_rc_release(i8* %l3.drop.12)";
+    assert result.next_temp == 13;
 }
 
 test "emit_scope_drops: borrowed rc locals are skipped" {
     let bindings: LocalBinding[] = [_make_binding("borrowed", "%l1", "i8*", "rc", false, "fn:foo", _borrow_ownership())];
-    let lines = emit_scope_drops(bindings, "fn:foo");
-    assert lines.length == 0;
+    let result = emit_scope_drops(bindings, "fn:foo", 0);
+    assert result.lines.length == 0;
+    assert result.next_temp == 0;
 }
 
 test "emit_scope_drops: consumed rc locals are skipped" {
     let bindings: LocalBinding[] = [_make_binding("moved", "%l1", "i8*", "rc", true, "fn:foo", null)];
-    let lines = emit_scope_drops(bindings, "fn:foo");
-    assert lines.length == 0;
+    let result = emit_scope_drops(bindings, "fn:foo", 0);
+    assert result.lines.length == 0;
+    assert result.next_temp == 0;
 }
 
 test "emit_scope_drops: locals from a different scope are skipped" {
-    let bindings: LocalBinding[] = [_make_binding("outer", "%l1", "i8*", "rc", false, "fn:foo", null), _make_binding("inner", "%l2", "i8*", "rc", false, "fn:foo:block:1", null)];
-    let lines = emit_scope_drops(bindings, "fn:foo");
-    assert lines.length == 2;
-    assert lines[0] == "  %l1.drop = load i8*, i8** %l1";
-    assert lines[1] == "  call void @sfn_rc_release(i8* %l1.drop)";
+    let bindings: LocalBinding[] = [_make_binding("outer", "%l1", "i8*", "rc", false, "fn:foo", null), _make_binding("inner", "%l2", "i8*", "rc", false, "fn:foo__block__1", null)];
+    let result = emit_scope_drops(bindings, "fn:foo", 0);
+    assert result.lines.length == 2;
+    assert result.lines[0] == "  %l1.drop.0 = load i8*, i8** %l1";
+    assert result.lines[1] == "  call void @sfn_rc_release(i8* %l1.drop.0)";
+    assert result.next_temp == 1;
 }
 
 test "emit_scope_drops: emits drops in insertion order (no sort)" {
     let bindings: LocalBinding[] = [_make_binding("c", "%l3", "i8*", "rc", false, "fn:foo", null), _make_binding("a", "%l1", "i8*", "rc", false, "fn:foo", null), _make_binding("b", "%l2", "i8*", "rc", false, "fn:foo", null)];
-    let lines = emit_scope_drops(bindings, "fn:foo");
-    assert lines.length == 6;
-    assert lines[0] == "  %l3.drop = load i8*, i8** %l3";
-    assert lines[1] == "  call void @sfn_rc_release(i8* %l3.drop)";
-    assert lines[2] == "  %l1.drop = load i8*, i8** %l1";
-    assert lines[3] == "  call void @sfn_rc_release(i8* %l1.drop)";
-    assert lines[4] == "  %l2.drop = load i8*, i8** %l2";
-    assert lines[5] == "  call void @sfn_rc_release(i8* %l2.drop)";
+    let result = emit_scope_drops(bindings, "fn:foo", 0);
+    assert result.lines.length == 6;
+    assert result.lines[0] == "  %l3.drop.0 = load i8*, i8** %l3";
+    assert result.lines[1] == "  call void @sfn_rc_release(i8* %l3.drop.0)";
+    assert result.lines[2] == "  %l1.drop.1 = load i8*, i8** %l1";
+    assert result.lines[3] == "  call void @sfn_rc_release(i8* %l1.drop.1)";
+    assert result.lines[4] == "  %l2.drop.2 = load i8*, i8** %l2";
+    assert result.lines[5] == "  call void @sfn_rc_release(i8* %l2.drop.2)";
+    assert result.next_temp == 3;
+}
+
+test "emit_scope_drops: same scope at two terminator points produces unique temp names" {
+    // Simulates two `return` statements in the same function root scope:
+    // each call produces a fresh suffix so the resulting IR has no
+    // duplicate `%l1.drop` definitions.
+    let bindings: LocalBinding[] = [_make_binding("a", "%l1", "i8*", "rc", false, "fn:foo", null)];
+    let first = emit_scope_drops(bindings, "fn:foo", 5);
+    let second = emit_scope_drops(bindings, "fn:foo", first.next_temp);
+    assert first.lines[0] == "  %l1.drop.5 = load i8*, i8** %l1";
+    assert second.lines[0] == "  %l1.drop.6 = load i8*, i8** %l1";
+    assert first.next_temp == 6;
+    assert second.next_temp == 7;
+}
+
+// =============================================================================
+// emit_drops_for_scope_chain: M1.5.3 inner-to-outer chain walk
+// =============================================================================
+test "emit_drops_for_scope_chain: return mid-body walks every nested scope inclusive of root" {
+    // Mirrors a `return` inside `fn:foo__then__1__inner`. Drops are
+    // emitted innermost-first, ending at the function root.
+    let inner_local = _make_binding("inner", "%l3", "i8*", "rc", false, "fn:foo__then__1__inner", null);
+    let middle_local = _make_binding("middle", "%l2", "i8*", "rc", false, "fn:foo__then__1", null);
+    let root_local = _make_binding("outer", "%l1", "i8*", "rc", false, "fn:foo", null);
+    let bindings: LocalBinding[] = [root_local, middle_local, inner_local];
+    let result = emit_drops_for_scope_chain(bindings, "fn:foo__then__1__inner", "fn:foo", true, 0);
+    assert result.lines.length == 6;
+    // Inner first.
+    assert result.lines[0] == "  %l3.drop.0 = load i8*, i8** %l3";
+    // Middle next.
+    assert result.lines[2] == "  %l2.drop.1 = load i8*, i8** %l2";
+    // Function root last.
+    assert result.lines[4] == "  %l1.drop.2 = load i8*, i8** %l1";
+    assert result.next_temp == 3;
+}
+
+test "emit_drops_for_scope_chain: break/continue stops before the loop's enclosing scope" {
+    // Mirrors a `break` inside `fn:foo__loopbody__1`. The loop's outer
+    // scope (`fn:foo`) outlives the loop and must NOT be dropped here.
+    let body_local = _make_binding("inside", "%l2", "i8*", "rc", false, "fn:foo__loopbody__1", null);
+    let outer_local = _make_binding("outside", "%l1", "i8*", "rc", false, "fn:foo", null);
+    let bindings: LocalBinding[] = [outer_local, body_local];
+    let result = emit_drops_for_scope_chain(bindings, "fn:foo__loopbody__1", "fn:foo", false, 0);
+    assert result.lines.length == 2;
+    assert result.lines[0] == "  %l2.drop.0 = load i8*, i8** %l2";
+    assert result.lines[1] == "  call void @sfn_rc_release(i8* %l2.drop.0)";
+    assert result.next_temp == 1;
+}
+
+test "emit_drops_for_scope_chain: nested-block break drops every scope down to (excluding) the loop outer scope" {
+    // `break` inside `fn:foo__loopbody__1__then__1` exits the enclosing
+    // loop. Drops the then-scope and the loop body scope; preserves
+    // `fn:foo`.
+    let then_local = _make_binding("then_local", "%l3", "i8*", "rc", false, "fn:foo__loopbody__1__then__1", null);
+    let body_local = _make_binding("body_local", "%l2", "i8*", "rc", false, "fn:foo__loopbody__1", null);
+    let outer_local = _make_binding("outer_local", "%l1", "i8*", "rc", false, "fn:foo", null);
+    let bindings: LocalBinding[] = [outer_local, body_local, then_local];
+    let result = emit_drops_for_scope_chain(bindings, "fn:foo__loopbody__1__then__1", "fn:foo", false, 10);
+    assert result.lines.length == 4;
+    assert result.lines[0] == "  %l3.drop.10 = load i8*, i8** %l3";
+    assert result.lines[2] == "  %l2.drop.11 = load i8*, i8** %l2";
+    assert result.next_temp == 12;
+}
+
+test "emit_drops_for_scope_chain: arm body close drops only the arm scope" {
+    // Match arm body close: walk one scope (the arm) and stop at its
+    // parent (the match's enclosing scope) without dropping it.
+    let arm_local = _make_binding("arm_local", "%l2", "i8*", "rc", false, "fn:foo__matcharm__1", null);
+    let outer_local = _make_binding("outer_local", "%l1", "i8*", "rc", false, "fn:foo", null);
+    let bindings: LocalBinding[] = [outer_local, arm_local];
+    let result = emit_drops_for_scope_chain(bindings, "fn:foo__matcharm__1", "fn:foo", false, 3);
+    assert result.lines.length == 2;
+    assert result.lines[0] == "  %l2.drop.3 = load i8*, i8** %l2";
+    assert result.next_temp == 4;
+}
+
+test "emit_drops_for_scope_chain: bare block close drops the block scope only" {
+    // Bare `{ ... }` block close (e.g., `then` arm of an `if` with no
+    // else): drop the block scope, leave the function root for the
+    // enclosing path.
+    let block_local = _make_binding("block_local", "%l2", "i8*", "rc", false, "fn:foo__then__1", null);
+    let root_local = _make_binding("root_local", "%l1", "i8*", "rc", false, "fn:foo", null);
+    let bindings: LocalBinding[] = [root_local, block_local];
+    let result = emit_drops_for_scope_chain(bindings, "fn:foo__then__1", "fn:foo", false, 0);
+    assert result.lines.length == 2;
+    assert result.lines[0] == "  %l2.drop.0 = load i8*, i8** %l2";
+    assert result.next_temp == 1;
+}
+
+test "emit_drops_for_scope_chain: chain walk does not double-drop ancestor scopes when from_scope is the target" {
+    // Edge case: caller passes the target scope itself as `from_scope`
+    // with `include_target = false`. The walk emits no drops and
+    // returns `next_temp` unchanged.
+    let root_local = _make_binding("root_local", "%l1", "i8*", "rc", false, "fn:foo", null);
+    let bindings: LocalBinding[] = [root_local];
+    let result = emit_drops_for_scope_chain(bindings, "fn:foo", "fn:foo", false, 5);
+    assert result.lines.length == 0;
+    assert result.next_temp == 5;
 }
