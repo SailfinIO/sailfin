@@ -178,6 +178,16 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     lines.push("@runtime = external global i8**");
     lines.push("");
 
+    // ABI version globals (issue #392 / M1.C). Every emitted module
+    // declares these so the runtime can detect ABI mismatches at
+    // load time. `linkonce_odr` linkage coalesces duplicate
+    // definitions when multiple modules link together. The hash is
+    // a stable 8-byte tag tracking struct-layout changes; today
+    // it's hardcoded to `v0000001` (M2 derives it from layout).
+    lines.push("@sfn_abi_version = linkonce_odr constant i32 1");
+    lines.push("@sfn_abi_hash = linkonce_odr constant [8 x i8] c\"v0000001\"");
+    lines.push("");
+
     return lines;
 }
 

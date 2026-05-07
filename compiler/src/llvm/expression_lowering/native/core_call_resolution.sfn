@@ -138,7 +138,8 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                     symbol: "",
                                     return_type: receiver_operand.llvm_type,
                                     parameter_types: [receiver_operand.llvm_type, receiver_operand.llvm_type],
-                                    effects: []
+                                    effects: [],
+                                    native_signature: null
                                 };
                             }
                         }
@@ -302,7 +303,8 @@ fn resolve_call_method_target(trimmed_target: string, arguments: string[], bindi
                                                     symbol: "",
                                                     return_type: _pre_am_type,
                                                     parameter_types: [_pre_am_type, _pre_am_type],
-                                                    effects: []
+                                                    effects: [],
+                                                    native_signature: null
                                                 };
                                             }
                                         }
@@ -420,7 +422,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                 symbol: "",
                                 return_type: base_operand.llvm_type,
                                 parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                effects: []
+                                effects: [],
+                                native_signature: null
                             };
                         }
                     } else {
@@ -434,7 +437,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                             symbol: "",
                             return_type: base_operand.llvm_type,
                             parameter_types: [base_operand.llvm_type, array_element_type],
-                            effects: []
+                            effects: [],
+                            native_signature: null
                         };
                     }
                 }
@@ -681,7 +685,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                     symbol: "",
                                     return_type: base_operand.llvm_type,
                                     parameter_types: [base_operand.llvm_type, base_operand.llvm_type],
-                                    effects: []
+                                    effects: [],
+                                    native_signature: null
                                 };
                             }
                         } else {
@@ -703,7 +708,8 @@ fn resolve_parsed_method_dispatch(result_target: string, arguments: string[], bi
                                     symbol: "",
                                     return_type: base_operand.llvm_type,
                                     parameter_types: [base_operand.llvm_type, array_element_type],
-                                    effects: []
+                                    effects: [],
+                                    native_signature: null
                                 };
                             }
                         }

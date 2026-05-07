@@ -74,6 +74,100 @@ static _Thread_local char *_sailfin_exception_message = NULL;
 // Forward declaration — defined near the concat reuse globals below.
 static inline void _runtime_enter(void);
 
+// =============================================================================
+// ABI version check (issue #392 / M1.C)
+// =============================================================================
+// Every emitted Sailfin LLVM module defines `@sfn_abi_version` and
+// `@sfn_abi_hash` with linkonce_odr linkage. At process startup
+// `_runtime_init` reads the version and aborts with a diagnostic if it
+// does not match the value the runtime was built against. The hash is
+// hardcoded to `v0000001` today; M2 will replace it with a value derived
+// from struct layouts so this check starts catching real layout drifts.
+//
+// The symbols are declared `weak` so a binary that links the C runtime
+// without any emitted Sailfin LLVM module (e.g. a runtime-only smoke
+// test) does not fail to link — when unresolved the address is NULL and
+// the check is skipped.
+#define SAILFIN_ABI_VERSION_EXPECTED 1
+#define SAILFIN_ABI_HASH_EXPECTED "v0000001"
+#define SAILFIN_ABI_HASH_LEN 8
+
+extern int32_t sfn_abi_version __attribute__((weak));
+extern const char sfn_abi_hash[SAILFIN_ABI_HASH_LEN] __attribute__((weak));
+
+static void _runtime_init(void) __attribute__((constructor));
+static void _runtime_init(void)
+{
+    // Indirection through a volatile pointer prevents the compiler from
+    // assuming a weak symbol's address is non-null at -O2+.
+    int32_t *const volatile version_ptr = &sfn_abi_version;
+    const char *const volatile hash_ptr = sfn_abi_hash;
+
+    // SAILFIN_ABI_FORCE_MISMATCH lets the unit-test harness drive the
+    // failure path without rebuilding the runtime. Setting it to "version"
+    // forces a version mismatch; "hash" forces a hash mismatch. Empty or
+    // unset → real symbol is consulted. Production binaries leave it unset.
+    const char *force = getenv("SAILFIN_ABI_FORCE_MISMATCH");
+    int force_version = 0;
+    int force_hash = 0;
+    if (force && force[0] != '\0' && force[0] != '0')
+    {
+        if (strcmp(force, "hash") == 0)
+        {
+            force_hash = 1;
+        }
+        else
+        {
+            force_version = 1;
+        }
+    }
+
+    int32_t observed_version = SAILFIN_ABI_VERSION_EXPECTED;
+    if (version_ptr)
+    {
+        observed_version = *version_ptr;
+    }
+    if (force_version)
+    {
+        observed_version = SAILFIN_ABI_VERSION_EXPECTED + 1;
+    }
+    if (observed_version != SAILFIN_ABI_VERSION_EXPECTED)
+    {
+        fprintf(stderr,
+                "[sailfin] ABI version mismatch: runtime expects %d but "
+                "linked module reports %d. Rebuild the compiler "
+                "(`make rebuild`) so the runtime and emitted IR agree.\n",
+                SAILFIN_ABI_VERSION_EXPECTED, observed_version);
+        fflush(stderr);
+        _exit(70);
+    }
+
+    if (hash_ptr || force_hash)
+    {
+        char observed[SAILFIN_ABI_HASH_LEN + 1];
+        if (force_hash)
+        {
+            memcpy(observed, "vBADBAD0", SAILFIN_ABI_HASH_LEN);
+        }
+        else
+        {
+            memcpy(observed, hash_ptr, SAILFIN_ABI_HASH_LEN);
+        }
+        observed[SAILFIN_ABI_HASH_LEN] = '\0';
+        if (memcmp(observed, SAILFIN_ABI_HASH_EXPECTED,
+                   SAILFIN_ABI_HASH_LEN) != 0)
+        {
+            fprintf(stderr,
+                    "[sailfin] ABI hash mismatch: runtime expects '%s' but "
+                    "linked module reports '%s'. Layout drift detected — "
+                    "rebuild the compiler.\n",
+                    SAILFIN_ABI_HASH_EXPECTED, observed);
+            fflush(stderr);
+            _exit(70);
+        }
+    }
+}
+
 double sailfin_runtime_monotonic_millis(void)
 {
 #if defined(__APPLE__)
