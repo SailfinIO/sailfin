@@ -4,7 +4,9 @@
 // lower_instruction_range occupies position 1 in its module -- within
 // the v0.1.1 seed's per-module streaming emission limit.
 import { char_code, grapheme_at, substring } from "../../string_utils";
+import { is_scope_descendant } from "../lifetime";
 import {
+    GuardedDropResult,
     LifetimeRegionMetadata,
     LocalBinding,
     LocalMutation,
@@ -98,6 +100,47 @@ fn insert_lines_before_index(lines: string[], index: number, insert_lines: strin
 //     %l5.drop_raw.7 = load %MyStruct*, %MyStruct** %l5
 //     %l5.drop.7 = bitcast %MyStruct* %l5.drop_raw.7 to i8*
 //     call void @sfn_rc_release(i8* %l5.drop.7)
+// Shared rc-drop eligibility predicate (M1.5.4, issue #328). Both
+// `emit_scope_drops` (normal scope-exit drops, M1.5.2/3) and
+// `emit_guarded_scope_drops` (catch-entry guarded drops, M1.5.4) use this
+// predicate so they always agree on which bindings are owner-drop
+// candidates. A binding is rc-drop-eligible when it is `allocation_kind ==
+// "rc"`, has not been consumed (move-out semantics), and is not a borrow
+// (the borrow base owns the resource).
+fn is_rc_drop_eligible(binding: LocalBinding) -> boolean {
+    if binding.allocation_kind != "rc" { return false; }
+    if binding.consumed { return false; }
+    if binding.ownership != null {
+        if binding.ownership.variant == "Borrow" { return false; }
+    }
+    return true;
+}
+
+// Emit the load + (optional bitcast) + `call @sfn_rc_release(i8* %t)`
+// triplet for a single rc-eligible local. Factored out so
+// `emit_scope_drops` and `emit_guarded_scope_drops` produce
+// byte-identical release IR (only the wrapping changes — guarded drops
+// add a sentinel branch around this triplet).
+fn _emit_rc_release_triplet(binding: LocalBinding, suffix: string) -> string[] {
+    let mut lines: string[] = [];
+    let drop_temp = binding.pointer + ".drop" + suffix;
+    if binding.llvm_type == "i8*" {
+        lines.push("  " + drop_temp + " = load i8*, i8** " + binding.pointer);
+        lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
+    } else {
+        let raw_temp = binding.pointer + ".drop_raw" + suffix;
+        lines.push("  " + raw_temp + " = load " + binding.llvm_type + ", "
+            + binding.llvm_type
+            + "* "
+            + binding.pointer);
+        lines.push("  " + drop_temp + " = bitcast " + binding.llvm_type + " "
+            + raw_temp
+            + " to i8*");
+        lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
+    }
+    return lines;
+}
+
 fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: number) -> ScopeDropResult {
     let mut lines: string[] = [];
     let mut current_temp: number = temp_index;
@@ -107,31 +150,149 @@ fn emit_scope_drops(locals: LocalBinding[], scope_id: string, temp_index: number
         let binding = locals[index];
         index += 1;
         if binding.scope_id != scope_id { continue; }
-        if binding.allocation_kind != "rc" { continue; }
-        if binding.consumed { continue; }
-        if binding.ownership != null {
-            if binding.ownership.variant == "Borrow" { continue; }
-        }
+        if !is_rc_drop_eligible(binding) { continue; }
         let suffix = "." + number_to_string(current_temp);
         current_temp += 1;
-        let drop_temp = binding.pointer + ".drop" + suffix;
-        if binding.llvm_type == "i8*" {
-            lines.push("  " + drop_temp + " = load i8*, i8** " + binding.pointer);
-            lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
-        } else {
-            let raw_temp = binding.pointer + ".drop_raw" + suffix;
-            lines.push("  " + raw_temp + " = load " + binding.llvm_type + ", "
-                + binding.llvm_type
-                + "* "
-                + binding.pointer);
-            lines.push("  " + drop_temp + " = bitcast " + binding.llvm_type
-                + " "
-                + raw_temp
-                + " to i8*");
-            lines.push("  call void @sfn_rc_release(i8* " + drop_temp + ")");
-        }
+        lines = extend_string_array(lines, _emit_rc_release_triplet(binding, suffix));
     }
     return ScopeDropResult { lines: lines, next_temp: current_temp };
+}
+
+// Emit guarded drop calls for every owned rc local descended from
+// `try_scope_id`, gated by each binding's `init_sentinel` flag (M1.5.4,
+// issue #328). Used at catch-block entry: when an exception fires
+// mid-try, any rc local declared in the try body (or a nested block
+// inside it) may or may not have been initialized before the throw, so
+// a naive `call @sfn_rc_release` would dereference an uninitialized
+// alloca. The init sentinel is an `i1` flag allocated at function entry
+// (initialized to `false`), set to `true` immediately after the let's
+// value store, and loaded here to decide whether the release fires.
+//
+// IR shape (per binding):
+//
+//     %<sentinel>.load.<n> = load i1, i1* %<sentinel>
+//     br i1 %<sentinel>.load.<n>, label %<drop>.<n>, label %<skip>.<n>
+//   <drop>.<n>:
+//     ; ... `_emit_rc_release_triplet` body ...
+//     br label %<skip>.<n>
+//   <skip>.<n>:
+//
+// Iteration order matches insertion order — `emit_scope_drops` does the
+// same. Bindings without a sentinel are skipped (e.g., catch variables,
+// for-loop iterators); they are not let-initialized and therefore not
+// the responsibility of this helper.
+//
+// The walk uses `is_scope_descendant`, so nested scopes inside the try
+// body are covered (e.g., `try { if x { let y = ... } }` — if the throw
+// fires inside the if-body, `y` is dropped here). Only the predicate
+// shared with `emit_scope_drops` (`is_rc_drop_eligible`) decides
+// owner-drop status; this helper does not duplicate the rc / consumed /
+// borrow filters.
+fn emit_guarded_scope_drops(locals: LocalBinding[], try_scope_id: string, temp_index: number, block_counter: number) -> GuardedDropResult {
+    let mut lines: string[] = [];
+    let mut current_temp: number = temp_index;
+    let mut current_counter: number = block_counter;
+    let mut final_label: string = "";
+    let mut index: number = 0;
+    loop {
+        if index >= locals.length { break; }
+        let binding = locals[index];
+        index += 1;
+        if !is_scope_descendant(try_scope_id, binding.scope_id) { continue; }
+        if !is_rc_drop_eligible(binding) { continue; }
+        if binding.init_sentinel.length == 0 { continue; }
+        let counter_str = number_to_string(current_counter);
+        current_counter += 1;
+        let drop_label = "drop" + counter_str;
+        let skip_label = "skip" + counter_str;
+        let sentinel_temp = binding.init_sentinel + ".load." + counter_str;
+        lines.push("  " + sentinel_temp + " = load i1, i1* " + binding.init_sentinel);
+        lines.push("  br i1 " + sentinel_temp + ", label %" + drop_label
+            + ", label %"
+            + skip_label);
+        lines.push(drop_label + ":");
+        let suffix = "." + number_to_string(current_temp);
+        current_temp += 1;
+        lines = extend_string_array(lines, _emit_rc_release_triplet(binding, suffix));
+        lines.push("  br label %" + skip_label);
+        lines.push(skip_label + ":");
+        final_label = skip_label;
+    }
+    return GuardedDropResult {
+        lines: lines,
+        next_temp: current_temp,
+        next_block_counter: current_counter,
+        final_label: final_label
+    };
+}
+
+// Detect whether a scope id's chain contains a try-body scope. Returns
+// true when any `__`-separated segment matches `try` followed by digits
+// (the literal output of `allocate_block_label("try", N)`). False on
+// the function root (`fn:foo`) or when only non-try labels appear
+// (e.g., `then0`, `forbody1`, `catch2`, `finally3`).
+//
+// Used by `lower_let_instruction` (M1.5.4) to decide whether to
+// allocate an init sentinel for the let's binding. Other label
+// prefixes (`then`, `else`, `loop`, `for`, `forbody`, `match`, `catch`,
+// `finally`, `merge`) are not try bodies and never need a sentinel for
+// the immediately-enclosing scope; if a let happens to live inside a
+// nested scope inside a try body, the walk still finds the outer
+// `try<N>` segment and returns true.
+//
+// Catch variables and finally-body lets do not get sentinels: the
+// catch / finally label scopes are descendants of the *outer* function
+// root, not of the try-body scope. The corresponding scope id has no
+// `try<N>` segment, so this helper correctly returns false.
+fn scope_id_inside_try_body(scope_id: string) -> boolean {
+    let len = scope_id.length;
+    if len < 4 { return false; }
+    let mut segment_start: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i + 1 >= len { break; }
+        let ch = grapheme_at(scope_id, i);
+        if ch == "_" {
+            let next_ch = grapheme_at(scope_id, i + 1);
+            if next_ch == "_" {
+                if _segment_is_try_label(scope_id, segment_start, i) {
+                    return true;
+                }
+                segment_start = i + 2;
+                i += 2;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return _segment_is_try_label(scope_id, segment_start, len);
+}
+
+// Returns true when `scope_id[from..to]` is a `try<digits>` label as
+// produced by `allocate_block_label("try", N)`. The substring check is
+// strict: `try` prefix, at least one digit, no other chars. This rules
+// out `try.propagate` / `try.continue` (which are sanitized to
+// `trypropagate` / `trycontinue` and never become scope ids anyway),
+// and also rules out user-defined identifiers that happen to start with
+// `try` (sanitize_symbol preserves user input verbatim aside from
+// stripping non-`[A-Za-z0-9_]`, but make_child_scope_id is only ever
+// passed compiler-generated block labels in the LLVM lowering passes —
+// see the `parent_scope_id` separator caveat).
+fn _segment_is_try_label(text: string, from: number, to: number) -> boolean {
+    if to - from < 4 { return false; }
+    if grapheme_at(text, from) != "t" { return false; }
+    if grapheme_at(text, from + 1) != "r" { return false; }
+    if grapheme_at(text, from + 2) != "y" { return false; }
+    let mut i: number = from + 3;
+    loop {
+        if i >= to { break; }
+        let ch = grapheme_at(text, i);
+        let code = char_code(ch);
+        if code < 48 { return false; }
+        if code > 57 { return false; }
+        i += 1;
+    }
+    return true;
 }
 
 // Strip the rightmost `__<segment>` from `scope_id`, returning the

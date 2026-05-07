@@ -5,6 +5,7 @@ import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../nativ
 import { analyze_value_ownership, detect_borrow_conflicts, lower_expression } from "../expression_lowering/native/core";
 import { coerce_operand_to_type } from "../expression_lowering/native/core_operands";
 import { append_local_binding } from "../expression_lowering/native/core_scopes";
+import { is_heap_type } from "../expression_lowering/native/core_type_mapping";
 import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
 import { map_local_type } from "../expression_lowering/native/statement_type_mapping";
 import { find_local_binding, mark_local_consumed, mark_parameter_consumed } from "../expressions_bindings";
@@ -43,6 +44,7 @@ import {
     number_to_string,
     trim_text
 } from "../utils";
+import { scope_id_inside_try_body } from "./instructions_helpers";
 
 // Extract the leading function-call target identifier from a let initializer
 // expression. Returns the identifier when the expression is shaped like
@@ -338,6 +340,26 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
     let pointer = format_local_pointer_name(next_local_id);
     current_allocas.push("  " + pointer + " = alloca " + llvm_type);
 
+    // Init sentinel for try/catch unwind cleanup (M1.5.4, issue #328).
+    // Allocated unconditionally for any heap-typed let inside a try
+    // body — at let time we cannot yet tell whether escape promotion
+    // (M1.5.5) will flip this binding's `allocation_kind` to "rc". The
+    // catch handler's `emit_guarded_scope_drops` only emits the guard
+    // when the binding is rc-eligible at catch-emission time, so an
+    // unused sentinel is just a dead `i1` alloca + store pair that
+    // LLVM will remove. Restricting to heap-typed bindings (the only
+    // ones M1.5.5 ever promotes) avoids emitting sentinels for `let n
+    // = 1` and similar non-pointer locals where the sentinel would
+    // never be read.
+    let mut init_sentinel: string = "";
+    if scope_id_inside_try_body(scope_id) {
+        if is_heap_type(llvm_type) {
+            init_sentinel = pointer + ".init";
+            current_allocas.push("  " + init_sentinel + " = alloca i1");
+            current_allocas.push("  store i1 0, i1* " + init_sentinel);
+        }
+    }
+
     let mut stored_value: string = default_return_literal(llvm_type);
     if operand != null {
         if operand.llvm_type == llvm_type {
@@ -394,6 +416,18 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
             + pointer);
     }
 
+    // Mark the binding as initialized for catch-entry unwind cleanup
+    // (M1.5.4). The sentinel was zeroed at function entry; flipping it
+    // here — *after* the value store — guarantees that if a throw fires
+    // before this point in the try body, the catch handler's guarded
+    // drop sees `i1 0` and skips the release on this slot. If the
+    // initializer's lowering itself throws (e.g., the rhs is a fallible
+    // call), the sentinel is still false at catch entry, so the slot's
+    // potentially-uninitialized contents are never released.
+    if init_sentinel.length > 0 {
+        current_lines.push("  store i1 1, i1* " + init_sentinel);
+    }
+
     // For locals that hold async futures, store the underlying return type
     // as type_annotation so the await handler can unbox structs. The callee is
     // the leading identifier of the initializer (the writer only ever fired
@@ -417,7 +451,7 @@ fn lower_let_instruction(function: NativeFunction, instruction: NativeInstructio
         }
     }
     current_locals = append_local_binding(current_locals, LocalBinding {
-        name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: local_type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth, allocation_kind: "arena"
+        name: instruction.name, pointer: pointer, llvm_type: llvm_type, type_annotation: local_type_annotation, ownership: ownership, consumed: false, scope_id: scope_id, scope_depth: scope_depth, allocation_kind: "arena", init_sentinel: init_sentinel
     });
 
     let mutation = LocalMutation {

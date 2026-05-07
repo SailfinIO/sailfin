@@ -35,7 +35,11 @@ import {
 } from "../utils";
 import { lower_instruction_range } from "./instructions";
 import { allocate_block_label } from "./instructions_condition";
-import { _parse_int_from_string, extend_lifetime_regions } from "./instructions_helpers";
+import {
+    _parse_int_from_string,
+    emit_guarded_scope_drops,
+    extend_lifetime_regions
+} from "./instructions_helpers";
 import { get_instruction_tag } from "./lowering_native_helpers";
 
 fn collect_try_structure(instructions: NativeInstruction[], start_index: number, end: number, function_name: string) -> TryStructure {
@@ -281,6 +285,25 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
         current_lines.push("  " + exception_temp
             + " = call i8* @sailfin_runtime_take_exception()");
 
+        // Catch-entry guarded drops (M1.5.4, issue #328). For every
+        // owned rc local descended from the try scope, emit a
+        // sentinel-gated `call void @sfn_rc_release(i8* %t)` so locals
+        // that may have been initialized before the throw fired are
+        // still released. The walk uses `try_result.locals` (post-try-
+        // body lowering) so M1.5.5 escape-promotion flips to "rc" are
+        // visible here. When no rc-eligible bindings exist the helper
+        // emits zero lines and the catch label remains the active
+        // block; otherwise the helper terminates on a fresh `skipN`
+        // block which becomes the catch body's active label.
+        let _guarded = emit_guarded_scope_drops(try_result.locals, try_scope_id, current_temp, current_block_counter);
+        current_lines = extend_string_array(current_lines, _guarded.lines);
+        current_temp = _guarded.next_temp;
+        current_block_counter = _guarded.next_block_counter;
+        let mut catch_active_label: string = catch_label;
+        if _guarded.final_label.length > 0 {
+            catch_active_label = _guarded.final_label;
+        }
+
         let mut catch_locals: LocalBinding[] = current_locals;
         let trimmed_name = trim_text(structure.catch_name);
         if trimmed_name.length > 0 {
@@ -293,13 +316,13 @@ fn lower_try_instruction(function: NativeFunction, start_index: number, llvm_ret
                     + err_slot);
                 catch_locals = append_local_binding(catch_locals, LocalBinding {
                     name: trimmed_name, pointer: err_slot, llvm_type: "i8*", type_annotation: "string", ownership: null, consumed: false, scope_id: catch_scope_id, scope_depth: scope_depth
-                        + 1, allocation_kind: "arena"
+                        + 1, allocation_kind: "arena", init_sentinel: ""
                 });
             }
         }
 
         let catch_result = lower_instruction_range(function, structure.catch_start, structure.catch_end, llvm_return, current_bindings, catch_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, loop_stack, context, catch_scope_id, scope_depth
-            + 1, catch_label);
+            + 1, catch_active_label);
         let mut _ci4: number = 0;
         loop {
             if _ci4 >= catch_result.diagnostics.length { break; }

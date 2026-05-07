@@ -14,11 +14,7 @@
 // Why these matter: M1.5.5 (escape promotion) flips the kind to "rc" for
 // values that escape. If the field doesn't survive the standard
 // add/lookup helpers today, every downstream user of the field reads "".
-import {
-    append_local_binding,
-    default_allocation_kind,
-    find_local_binding
-} from "../../src/llvm/expression_lowering/native/core_scopes";
+import { append_local_binding, default_allocation_kind, find_local_binding } from "../../src/llvm/expression_lowering/native/core_scopes";
 import { LocalBinding } from "../../src/llvm/types";
 
 fn _make_binding(name: string, kind: string) -> LocalBinding {
@@ -31,7 +27,8 @@ fn _make_binding(name: string, kind: string) -> LocalBinding {
         consumed: false,
         scope_id: "fn:test",
         scope_depth: 0,
-        allocation_kind: kind
+        allocation_kind: kind,
+        init_sentinel: ""
     };
 }
 

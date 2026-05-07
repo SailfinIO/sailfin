@@ -1,0 +1,256 @@
+// Round-trip pin for `emit_guarded_scope_drops` and the supporting
+// `scope_id_inside_try_body` helper.
+//
+// Coverage: M1.5.4 (issue #328) — try/catch unwind cleanup. The catch
+// handler emits a sentinel-gated `call void @sfn_rc_release` for every
+// rc-eligible local descended from the try-body scope. The sentinel is
+// an `i1` flag allocated at function entry, zeroed before the let, and
+// set immediately after the let's value store (see
+// `instructions_let.sfn`).
+//
+// Each guarded drop expands into:
+//
+//     %<sentinel>.load.<n> = load i1, i1* %<sentinel>
+//     br i1 %<sentinel>.load.<n>, label %drop<n>, label %skip<n>
+//   drop<n>:
+//     %<slot>.drop.<m> = load <type>, <type>* %<slot>
+//     ; (bitcast when llvm_type != i8*)
+//     call void @sfn_rc_release(i8* %<slot>.drop.<m>)
+//     br label %skip<n>
+//   skip<n>:
+//
+// Iteration order matches insertion order. Borrowed / consumed / non-rc
+// locals are skipped (predicate shared with `emit_scope_drops`).
+// Bindings outside the try scope chain are skipped. Bindings without a
+// sentinel (e.g., catch variables, for-loop iterators) are skipped.
+import { emit_guarded_scope_drops, scope_id_inside_try_body } from "../../src/llvm/lowering/instructions_helpers";
+import { LocalBinding, OwnershipInfo } from "../../src/llvm/types";
+
+fn _make_binding(name: string, slot: string, llvm_type: string, kind: string, consumed: boolean, scope_id: string, ownership: OwnershipInfo?, sentinel: string) -> LocalBinding {
+    return LocalBinding {
+        name: name,
+        pointer: slot,
+        llvm_type: llvm_type,
+        type_annotation: "string",
+        ownership: ownership,
+        consumed: consumed,
+        scope_id: scope_id,
+        scope_depth: 0,
+        allocation_kind: kind,
+        init_sentinel: sentinel
+    };
+}
+
+fn _borrow_ownership() -> OwnershipInfo {
+    return OwnershipInfo {
+        variant: "Borrow",
+        base: "x",
+        mutable: false,
+        span: null,
+        region_id: -1
+    };
+}
+
+// =============================================================================
+// scope_id_inside_try_body: detection helper used at let time
+// =============================================================================
+test "scope_id_inside_try_body: function root returns false" {
+    assert scope_id_inside_try_body("fn:foo") == false;
+}
+
+test "scope_id_inside_try_body: try-body scope returns true" {
+    assert scope_id_inside_try_body("fn:foo__try0") == true;
+}
+
+test "scope_id_inside_try_body: nested scope inside try body returns true" {
+    assert scope_id_inside_try_body("fn:foo__try0__then1") == true;
+    assert scope_id_inside_try_body("fn:foo__try0__forbody1__then2") == true;
+}
+
+test "scope_id_inside_try_body: catch scope returns false" {
+    // The catch body lives under `fn:foo__catch1`, not the try body.
+    // Lets inside the catch should not get a sentinel.
+    assert scope_id_inside_try_body("fn:foo__catch1") == false;
+    assert scope_id_inside_try_body("fn:foo__catch1__then2") == false;
+}
+
+test "scope_id_inside_try_body: finally scope returns false" {
+    assert scope_id_inside_try_body("fn:foo__finally2") == false;
+}
+
+test "scope_id_inside_try_body: non-try labels return false" {
+    assert scope_id_inside_try_body("fn:foo__loopbody1") == false;
+    assert scope_id_inside_try_body("fn:foo__then0__else1") == false;
+    assert scope_id_inside_try_body("fn:foo__matcharm0") == false;
+}
+
+test "scope_id_inside_try_body: 'try' without trailing digits is not a try label" {
+    // Defensive: a user identifier sanitized to `try` (no digits) is
+    // not a compiler-generated try label. The helper rejects it.
+    assert scope_id_inside_try_body("fn:foo__try") == false;
+    assert scope_id_inside_try_body("fn:foo__tryout") == false;
+}
+
+// =============================================================================
+// emit_guarded_scope_drops: catch-entry guarded drop emission
+// =============================================================================
+test "emit_guarded_scope_drops: rc local fully initialized at catch entry emits guarded release" {
+    // Single rc local with a sentinel; expect 7 lines total:
+    //   load i1 → br → drop label → load value → release → br skip → skip label.
+    let local = _make_binding("a", "%l1", "i8*", "rc", false, "fn:foo__try0", null, "%l1.init");
+    let bindings: LocalBinding[] = [local];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 5, 7);
+    assert result.lines.length == 7;
+    assert result.lines[0] == "  %l1.init.load.7 = load i1, i1* %l1.init";
+    assert result.lines[1] == "  br i1 %l1.init.load.7, label %drop7, label %skip7";
+    assert result.lines[2] == "drop7:";
+    assert result.lines[3] == "  %l1.drop.5 = load i8*, i8** %l1";
+    assert result.lines[4] == "  call void @sfn_rc_release(i8* %l1.drop.5)";
+    assert result.lines[5] == "  br label %skip7";
+    assert result.lines[6] == "skip7:";
+    assert result.next_temp == 6;
+    assert result.next_block_counter == 8;
+    assert result.final_label == "skip7";
+}
+
+test "emit_guarded_scope_drops: non-i8* rc local emits load + bitcast under the guard" {
+    // Mirrors the bitcast shape `emit_scope_drops` uses for struct-
+    // pointer rc bindings; the only delta is the surrounding guard.
+    let local = _make_binding("box", "%l3", "%MyStruct*", "rc", false, "fn:foo__try0", null, "%l3.init");
+    let bindings: LocalBinding[] = [local];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 12, 0);
+    assert result.lines.length == 8;
+    assert result.lines[0] == "  %l3.init.load.0 = load i1, i1* %l3.init";
+    assert result.lines[1] == "  br i1 %l3.init.load.0, label %drop0, label %skip0";
+    assert result.lines[2] == "drop0:";
+    assert result.lines[3] == "  %l3.drop_raw.12 = load %MyStruct*, %MyStruct** %l3";
+    assert result.lines[4] == "  %l3.drop.12 = bitcast %MyStruct* %l3.drop_raw.12 to i8*";
+    assert result.lines[5] == "  call void @sfn_rc_release(i8* %l3.drop.12)";
+    assert result.lines[6] == "  br label %skip0";
+    assert result.lines[7] == "skip0:";
+    assert result.next_temp == 13;
+    assert result.next_block_counter == 1;
+}
+
+test "emit_guarded_scope_drops: rc local possibly-uninitialized pin (sentinel still loaded)" {
+    // A let that fires inside the try body but possibly throws BEFORE
+    // its store completes. The sentinel is still allocated and zeroed
+    // at function entry, so the `i1 0` it holds means the guard takes
+    // the skip path and the release is bypassed. The IR shape is
+    // identical to the fully-initialized case — what differs is the
+    // runtime value of the sentinel, not the emission. This test pins
+    // the IR shape so a future refactor cannot accidentally drop the
+    // load + branch.
+    let local = _make_binding("partial", "%l2", "i8*", "rc", false, "fn:foo__try0", null, "%l2.init");
+    let bindings: LocalBinding[] = [local];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 0, 0);
+    assert result.lines.length == 7;
+    assert result.lines[0] == "  %l2.init.load.0 = load i1, i1* %l2.init";
+    assert result.lines[1] == "  br i1 %l2.init.load.0, label %drop0, label %skip0";
+    // Drop block is unreachable at runtime when the sentinel is false,
+    // but the compiler still emits it so the CFG is well-formed.
+    assert result.lines[2] == "drop0:";
+    assert result.lines[3] == "  %l2.drop.0 = load i8*, i8** %l2";
+    assert result.lines[4] == "  call void @sfn_rc_release(i8* %l2.drop.0)";
+}
+
+test "emit_guarded_scope_drops: mixed rc + borrow in same try scope drops only owner" {
+    // Two locals in the try scope: an owned rc local and a borrowed rc
+    // local. The borrow base owns the resource, so the borrow is
+    // skipped — only the owner emits a guarded release. The line count
+    // pins this: 7 lines for one binding, not 14 for two.
+    let owner = _make_binding("owner", "%l1", "i8*", "rc", false, "fn:foo__try0", null, "%l1.init");
+    let borrow = _make_binding("borrow", "%l2", "i8*", "rc", false, "fn:foo__try0", _borrow_ownership(), "%l2.init");
+    let bindings: LocalBinding[] = [owner, borrow];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 0, 0);
+    assert result.lines.length == 7;
+    assert result.lines[0] == "  %l1.init.load.0 = load i1, i1* %l1.init";
+    assert result.lines[3] == "  %l1.drop.0 = load i8*, i8** %l1";
+    assert result.lines[4] == "  call void @sfn_rc_release(i8* %l1.drop.0)";
+    assert result.next_block_counter == 1;
+    assert result.final_label == "skip0";
+}
+
+test "emit_guarded_scope_drops: arena / static / stack kinds are skipped" {
+    // Only `allocation_kind == "rc"` triggers a release. The let's
+    // arena allocation owns nothing the runtime can free, so the
+    // catch handler emits zero IR for it.
+    let arena = _make_binding("a", "%l1", "i8*", "arena", false, "fn:foo__try0", null, "%l1.init");
+    let stack = _make_binding("b", "%l2", "i8*", "stack", false, "fn:foo__try0", null, "%l2.init");
+    let bindings: LocalBinding[] = [arena, stack];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 0, 0);
+    assert result.lines.length == 0;
+    assert result.next_temp == 0;
+    assert result.next_block_counter == 0;
+    assert result.final_label == "";
+}
+
+test "emit_guarded_scope_drops: bindings without a sentinel are skipped" {
+    // Pre-existing rc-eligible bindings (e.g., for-loop iterators,
+    // catch variables) live at the catch scope's parent or the catch
+    // scope itself, but they were NOT introduced by `let` in a try
+    // body, so they have no sentinel. The helper must not emit a guard
+    // for them.
+    let no_sentinel = _make_binding("loopvar", "%l4", "i8*", "rc", false, "fn:foo__try0", null, "");
+    let bindings: LocalBinding[] = [no_sentinel];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 0, 0);
+    assert result.lines.length == 0;
+    assert result.final_label == "";
+}
+
+test "emit_guarded_scope_drops: locals outside the try scope chain are skipped" {
+    // Outer-scope locals (siblings of the try block, or in the outer
+    // function root) are not the responsibility of the catch handler —
+    // their drops are emitted at their own scope close (M1.5.2/3).
+    let outer = _make_binding("outer", "%l1", "i8*", "rc", false, "fn:foo", null, "%l1.init");
+    let try_local = _make_binding("inner", "%l2", "i8*", "rc", false, "fn:foo__try0", null, "%l2.init");
+    let bindings: LocalBinding[] = [outer, try_local];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 0, 0);
+    // Only the try-scope local is dropped (7 lines for one binding).
+    assert result.lines.length == 7;
+    assert result.lines[3] == "  %l2.drop.0 = load i8*, i8** %l2";
+    assert result.lines[4] == "  call void @sfn_rc_release(i8* %l2.drop.0)";
+}
+
+test "emit_guarded_scope_drops: nested scope inside try body is included" {
+    // A let inside a nested block (e.g. `try { if x { let y = ... } }`)
+    // must still be dropped at catch entry — the throw could fire from
+    // the if-body before its scope-close drop ran. The walk uses
+    // `is_scope_descendant`, so any scope chained from the try scope
+    // counts.
+    let nested = _make_binding("nested", "%l3", "i8*", "rc", false, "fn:foo__try0__then1", null, "%l3.init");
+    let bindings: LocalBinding[] = [nested];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 0, 0);
+    assert result.lines.length == 7;
+    assert result.lines[3] == "  %l3.drop.0 = load i8*, i8** %l3";
+    assert result.lines[4] == "  call void @sfn_rc_release(i8* %l3.drop.0)";
+}
+
+test "emit_guarded_scope_drops: empty bindings emits zero lines and empty final_label" {
+    let bindings: LocalBinding[] = [];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 3, 11);
+    assert result.lines.length == 0;
+    assert result.next_temp == 3;
+    assert result.next_block_counter == 11;
+    assert result.final_label == "";
+}
+
+test "emit_guarded_scope_drops: two rc locals in the same try scope emit two guarded drops in insertion order" {
+    let first = _make_binding("first", "%l1", "i8*", "rc", false, "fn:foo__try0", null, "%l1.init");
+    let second = _make_binding("second", "%l2", "i8*", "rc", false, "fn:foo__try0", null, "%l2.init");
+    let bindings: LocalBinding[] = [first, second];
+    let result = emit_guarded_scope_drops(bindings, "fn:foo__try0", 0, 0);
+    // 14 lines: 7 per binding, distinct counters per drop block.
+    assert result.lines.length == 14;
+    // First binding: counter 0.
+    assert result.lines[0] == "  %l1.init.load.0 = load i1, i1* %l1.init";
+    assert result.lines[2] == "drop0:";
+    assert result.lines[6] == "skip0:";
+    // Second binding: counter 1.
+    assert result.lines[7] == "  %l2.init.load.1 = load i1, i1* %l2.init";
+    assert result.lines[9] == "drop1:";
+    assert result.lines[13] == "skip1:";
+    assert result.next_temp == 2;
+    assert result.next_block_counter == 2;
+    assert result.final_label == "skip1";
+}

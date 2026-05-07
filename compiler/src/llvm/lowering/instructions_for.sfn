@@ -209,7 +209,8 @@ fn lower_for_array(function: NativeFunction, structure: LoopStructure, raw_targe
         consumed: false,
         scope_id: element_loop_scope_id,
         scope_depth: scope_depth + 1,
-        allocation_kind: "arena"
+        allocation_kind: "arena",
+        init_sentinel: ""
     };
     let body_locals = append_local_binding(current_locals, iteration_binding);
     let body_result = lower_instruction_range(function, structure.body_start, structure.body_end, llvm_return, current_bindings, body_locals, current_allocas, [], current_temp, current_block_counter, current_next_local, current_next_region, functions, stacked, context, element_loop_scope_id, scope_depth
