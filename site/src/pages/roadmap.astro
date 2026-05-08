@@ -16,6 +16,8 @@ interface RoadmapCategory {
   url?: string;
   open?: number;
   closed?: number;
+  epicsLoadFailed?: boolean;
+  state?: "open" | "closed";
 }
 
 // GitHub API types
@@ -54,7 +56,7 @@ if (import.meta.env.GITHUB_TOKEN) {
 async function fetchMilestones(): Promise<ApiMilestone[]> {
   try {
     const res = await fetch(
-      `https://api.github.com/repos/${REPO}/milestones?state=open&per_page=100`,
+      `https://api.github.com/repos/${REPO}/milestones?state=all&per_page=100`,
       { headers: ghHeaders },
     );
     if (!res.ok) throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
@@ -65,7 +67,9 @@ async function fetchMilestones(): Promise<ApiMilestone[]> {
   }
 }
 
-async function fetchEpicsForMilestone(milestoneNumber: number): Promise<ApiIssue[]> {
+// Returns null on fetch failure so the UI can distinguish "no epics yet"
+// from "could not load epics" — empty array is the former.
+async function fetchEpicsForMilestone(milestoneNumber: number): Promise<ApiIssue[] | null> {
   try {
     const res = await fetch(
       `https://api.github.com/repos/${REPO}/issues?milestone=${milestoneNumber}&labels=epic&state=all&per_page=100`,
@@ -76,7 +80,7 @@ async function fetchEpicsForMilestone(milestoneNumber: number): Promise<ApiIssue
     return data.filter((i) => !i.pull_request);
   } catch (err) {
     console.warn(`[roadmap] epic fetch failed for milestone ${milestoneNumber}:`, err);
-    return [];
+    return null;
   }
 }
 
@@ -93,12 +97,18 @@ function cleanEpicTitle(title: string): string {
 const apiMilestones = await fetchMilestones();
 const apiAvailable = apiMilestones.length > 0;
 
+// Hide milestones with no items at all (open_issues + closed_issues == 0).
+// These are usually retired placeholders and contribute no signal.
+const populatedMilestones = apiMilestones.filter(
+  (m) => m.open_issues + m.closed_issues > 0,
+);
+
 // Order: explicit DISPLAY_ORDER first, then any remaining milestones by number.
 const ordered: ApiMilestone[] = [
   ...DISPLAY_ORDER
-    .map((n) => apiMilestones.find((m) => m.number === n))
+    .map((n) => populatedMilestones.find((m) => m.number === n))
     .filter((m): m is ApiMilestone => Boolean(m)),
-  ...apiMilestones
+  ...populatedMilestones
     .filter((m) => !DISPLAY_ORDER.includes(m.number))
     .sort((a, b) => a.number - b.number),
 ];
@@ -108,7 +118,9 @@ const epicsByMilestone = await Promise.all(
 );
 
 const v1Categories: RoadmapCategory[] = ordered.map((m, idx) => {
-  const epics = epicsByMilestone[idx] ?? [];
+  const epicResult = epicsByMilestone[idx];
+  const epicsLoadFailed = epicResult === null;
+  const epics = epicResult ?? [];
   const items: RoadmapItem[] = epics.map((e) => ({
     label: cleanEpicTitle(e.title),
     status: epicStatus(e),
@@ -121,13 +133,17 @@ const v1Categories: RoadmapCategory[] = ordered.map((m, idx) => {
     url: m.html_url,
     open: m.open_issues,
     closed: m.closed_issues,
+    epicsLoadFailed,
+    state: m.state,
   };
 });
 
-// Aggregate progress across all v1 milestones (issue-level, not milestone-level).
-const v1IssuesOpen = v1Categories.reduce((s, c) => s + (c.open ?? 0), 0);
-const v1IssuesClosed = v1Categories.reduce((s, c) => s + (c.closed ?? 0), 0);
-const v1IssuesTotal = v1IssuesOpen + v1IssuesClosed;
+// Aggregate progress across all v1 milestones. Note: open_issues / closed_issues
+// from the milestone API counts both issues *and* PRs attached to the milestone,
+// so the UI labels these as "items" rather than "issues".
+const v1ItemsOpen = v1Categories.reduce((s, c) => s + (c.open ?? 0), 0);
+const v1ItemsClosed = v1Categories.reduce((s, c) => s + (c.closed ?? 0), 0);
+const v1ItemsTotal = v1ItemsOpen + v1ItemsClosed;
 
 const postV1Ai: RoadmapCategory = {
   title: "Enterprise Hardening & AI Integration",
@@ -171,7 +187,7 @@ function percent(done: number, total: number) {
   return total === 0 ? 0 : Math.round((done / total) * 100);
 }
 
-const v1Percent = percent(v1IssuesClosed, v1IssuesTotal);
+const v1Percent = percent(v1ItemsClosed, v1ItemsTotal);
 
 const statusLabel = (s: Status) =>
   s === "done" ? "Done" : s === "in-progress" ? "In progress" : "Planned";
@@ -194,7 +210,7 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
           Sailfin's path from alpha to a stable 1.0 release and beyond.
         </p>
         <p class="meta">
-          Live data from <a href={`https://github.com/${REPO}/milestones`}>GitHub milestones</a>. Built {lastUpdated}.
+          Built {lastUpdated} from <a href={`https://github.com/${REPO}/milestones`}>GitHub milestones</a> at deploy time.
         </p>
       </header>
 
@@ -217,15 +233,15 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
         <section class="v1-overview">
           <div class="v1-overview-header">
             <h2>Release 1.0</h2>
-            <span class="v1-stat">{v1IssuesClosed} of {v1IssuesTotal} issues closed across {v1Categories.length} milestones</span>
+            <span class="v1-stat">{v1ItemsClosed} of {v1ItemsTotal} items closed across {v1Categories.length} milestones</span>
           </div>
           <div
             class="progress-bar-track"
             role="progressbar"
-            aria-valuenow={v1IssuesClosed}
+            aria-valuenow={v1ItemsClosed}
             aria-valuemin={0}
-            aria-valuemax={v1IssuesTotal}
-            aria-label={`Release 1.0 progress: ${v1IssuesClosed} of ${v1IssuesTotal} issues closed`}
+            aria-valuemax={v1ItemsTotal}
+            aria-label={`Release 1.0 progress: ${v1ItemsClosed} of ${v1ItemsTotal} items closed`}
           >
             <div class="progress-bar-fill" style={`width: ${v1Percent}%`}></div>
           </div>
@@ -255,14 +271,18 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
                 aria-valuenow={closed}
                 aria-valuemin={0}
                 aria-valuemax={total}
-                aria-label={`${cat.title} progress: ${closed} of ${total} issues closed`}
+                aria-label={`${cat.title} progress: ${closed} of ${total} items closed`}
               >
                 <div
                   class:list={["progress-bar-fill", { empty: pct === 0 }]}
                   style={`width: ${Math.max(pct, 0)}%`}
                 ></div>
               </div>
-              {cat.items.length > 0 ? (
+              {cat.epicsLoadFailed ? (
+                <p class="empty-note epics-error">
+                  Could not load epics for this milestone. {cat.url && <a href={cat.url}>View milestone on GitHub</a>}
+                </p>
+              ) : cat.items.length > 0 ? (
                 <ul class="item-list">
                   {cat.items.map((item) => (
                     <li class:list={["item", item.status]}>
@@ -544,6 +564,12 @@ const lastUpdated = new Date().toLocaleDateString("en-US", {
     color: var(--color-text-tertiary);
     margin: 0;
     padding: 0.4rem 0;
+  }
+
+  .empty-note.epics-error {
+    color: var(--color-text-secondary);
+    border-left: 2px solid var(--color-primary);
+    padding-left: 0.6rem;
   }
 
   /* Item lists */
