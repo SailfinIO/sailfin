@@ -22,6 +22,7 @@ import {
 } from "../rendering_helpers";
 import { TraitMetadata, TypeContext } from "../types";
 import { number_to_string, starts_with } from "../utils";
+import { sfn_abi_hash_decimal } from "./abi_hash";
 import { extend_string_lines, module_source_filename } from "./lowering_io";
 
 // Render the LLVM IR preamble: source filename, trait metadata,
@@ -178,14 +179,21 @@ fn render_llvm_preamble(module_name: string, type_context: TypeContext, trait_me
     lines.push("@runtime = external global i8**");
     lines.push("");
 
-    // ABI version globals (issue #392 / M1.C). Every emitted module
-    // declares these so the runtime can detect ABI mismatches at
-    // load time. `linkonce_odr` linkage coalesces duplicate
-    // definitions when multiple modules link together. The hash is
-    // a stable 8-byte tag tracking struct-layout changes; today
-    // it's hardcoded to `v0000001` (M2 derives it from layout).
+    // ABI version globals (issue #392 / M1.C; issue #462). Every
+    // emitted module declares these so the runtime can detect ABI
+    // mismatches at load time. `linkonce_odr` linkage coalesces
+    // duplicate definitions when multiple modules link together.
+    //
+    // `@sfn_abi_hash` is an FNV-1a 64-bit hash over a stable
+    // rendering of the locked SfnString and SfnArray aggregate
+    // layouts (see `abi_hash.sfn`). Hand-perturbing either layout
+    // produces a different hash, so the runtime's mismatch check
+    // catches real layout drift. Compiler and runtime run in the
+    // same address space, so the i64 is read as `uint64_t` directly
+    // without endianness handling.
     lines.push("@sfn_abi_version = linkonce_odr constant i32 1");
-    lines.push("@sfn_abi_hash = linkonce_odr constant [8 x i8] c\"v0000001\"");
+    lines.push("@sfn_abi_hash = linkonce_odr constant i64 "
+        + sfn_abi_hash_decimal());
     lines.push("");
 
     return lines;

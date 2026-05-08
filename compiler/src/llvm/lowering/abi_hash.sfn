@@ -1,0 +1,314 @@
+// compiler/src/llvm/lowering/abi_hash.sfn
+//
+// Computes `@sfn_abi_hash` (issue #462) as an FNV-1a 64-bit hash over a
+// stable rendering of the locked Sailfin aggregate ABI layouts. The
+// compiler emits the result as an `i64` constant; `runtime/native/src/`
+// `sailfin_runtime.c` reads it as `uint64_t` and aborts on mismatch.
+// Both run in the same address space, so endianness is not a concern.
+//
+// Locked layouts (M1.A — #392, M1.B — #393):
+//   - SfnString = { i8*, i64 }              (data, length)
+//   - SfnArray  = { T*, i64, i64 }          (data, length, capacity)
+//
+// The hash is held as four 16-bit limbs (h0 lowest .. h3 highest). FNV-1a:
+//   hash = 0xcbf29ce484222325
+//   for each byte b:
+//       hash = (hash XOR b) * 0x100000001b3   (mod 2^64)
+//
+// Implementation runs in pure Sailfin: no `extern fn`, no bitwise
+// builtins. XOR and limb arithmetic are open-coded against `number`
+// (f64). Every intermediate stays well below 2^53 so f64 arithmetic
+// is exact.
+import { char_code, substring } from "runtime/prelude";
+
+struct AbiHashLimbs {
+    h0: number;
+    h1: number;
+    h2: number;
+    h3: number;
+}
+
+struct _AbiSplitU33 {
+    hi: number;
+    lo: number;
+}
+
+struct _AbiSplitU16 {
+    hi: number;
+    lo: number;
+}
+
+struct _AbiBitSplit {
+    bit: number;
+    rest: number;
+}
+
+// Stable textual rendering of the locked aggregate layouts. Hand-
+// perturbing this string (or the layouts it describes) changes the
+// derived hash. The format is `Name{f<i>:<llvm_type>@<align>;...}`,
+// joined with `;`. SfnArray's element type is rendered as `i8**` —
+// the canonical erased form used by every runtime helper signature
+// in `compiler/src/llvm/runtime_helpers.sfn` (M1.B).
+fn sfn_abi_locked_layout_string() -> string {
+    return "SfnString{f0:i8*@8;f1:i64@8};SfnArray{f0:i8**@8;f1:i64@8;f2:i64@8}";
+}
+
+// Returns the canonical decimal string for `i64 <value>` in LLVM IR.
+// The value is the FNV-1a 64-bit hash over the locked layout string.
+// The decimal form is unsigned (matches the bit pattern the C runtime
+// reads as `uint64_t`).
+fn sfn_abi_hash_decimal() -> string {
+    let limbs = fnv1a_64_hash(sfn_abi_locked_layout_string());
+    return _limbs_to_unsigned_decimal(limbs);
+}
+
+// FNV-1a 64-bit over the input bytes.
+fn fnv1a_64_hash(input: string) -> AbiHashLimbs {
+    // FNV offset basis = 0xcbf2_9ce4_8422_2325
+    let mut state = AbiHashLimbs {
+        h0: 8997,
+        h1: 33826,
+        h2: 40164,
+        h3: 52210
+    };
+    let mut i: number = 0;
+    loop {
+        if i >= input.length { break; }
+        let byte = char_code(substring(input, i, i + 1));
+        // XOR the input byte into the low byte of h0 (other limbs untouched).
+        let split = _u16_split_by_byte(state.h0);
+        let new_low = _xor_byte(split.lo, byte);
+        state = AbiHashLimbs {
+            h0: split.hi * 256 + new_low,
+            h1: state.h1,
+            h2: state.h2,
+            h3: state.h3
+        };
+        // Multiply by the FNV-1a 64 prime (mod 2^64).
+        state = _mul_prime(state);
+        i += 1;
+    }
+    return state;
+}
+
+// state * 0x100000001b3 (mod 2^64), returned as four 16-bit limbs.
+// The prime has only two non-zero 16-bit positions: p0=0x01b3, p2=0x0100.
+fn _mul_prime(state: AbiHashLimbs) -> AbiHashLimbs {
+    let p0: number = 435;
+    let p2: number = 256;
+
+    // Column sums for `state * prime mod 2^64`. Each fits well under
+    // 2^33: 2 * 65535 * 65535 is about 8.6e9 < 2^34.
+    let s0 = state.h0 * p0;
+    let s1 = state.h1 * p0;
+    let s2 = state.h0 * p2 + state.h2 * p0;
+    let s3 = state.h1 * p2 + state.h3 * p0;
+
+    // Propagate carries through the four 16-bit limbs. Carry from the
+    // top limb is discarded (mod 2^64).
+    let split0 = _u33_split_by_word(s0);
+    let split1 = _u33_split_by_word(s1 + split0.hi);
+    let split2 = _u33_split_by_word(s2 + split1.hi);
+    let split3 = _u33_split_by_word(s3 + split2.hi);
+
+    return AbiHashLimbs {
+        h0: split0.lo,
+        h1: split1.lo,
+        h2: split2.lo,
+        h3: split3.lo
+    };
+}
+
+// Splits `value` (in [0, 2^33)) into (hi = value >> 16, lo = value & 0xFFFF).
+// Implemented as a 17-step binary long division. Each `p`/`q` value is a
+// power of two, so f64 halving is exact.
+fn _u33_split_by_word(value: number) -> _AbiSplitU33 {
+    let mut hi: number = 0;
+    let mut rem: number = value;
+    let mut p: number = 4294967296;
+    let mut q: number = 65536;
+    loop {
+        if q < 1 { break; }
+        if rem >= p {
+            rem -= p;
+            hi += q;
+        }
+        p = p / 2;
+        q = q / 2;
+    }
+    return _AbiSplitU33 { hi: hi, lo: rem };
+}
+
+// Splits `value` (in [0, 2^16)) into (hi = value >> 8, lo = value & 0xFF).
+fn _u16_split_by_byte(value: number) -> _AbiSplitU16 {
+    let mut hi: number = 0;
+    let mut rem: number = value;
+    let mut p: number = 32768;
+    let mut q: number = 128;
+    loop {
+        if q < 1 { break; }
+        if rem >= p {
+            rem -= p;
+            hi += q;
+        }
+        p = p / 2;
+        q = q / 2;
+    }
+    return _AbiSplitU16 { hi: hi, lo: rem };
+}
+
+// 8-bit XOR. Inputs are in [0, 255]; result is in [0, 255].
+fn _xor_byte(a: number, b: number) -> number {
+    let mut result: number = 0;
+    let mut bit_value: number = 1;
+    let mut a_rem: number = a;
+    let mut b_rem: number = b;
+    let mut i: number = 0;
+    loop {
+        if i >= 8 { break; }
+        let a_split = _split_low_bit(a_rem);
+        let b_split = _split_low_bit(b_rem);
+        if a_split.bit != b_split.bit { result += bit_value; }
+        a_rem = a_split.rest;
+        b_rem = b_split.rest;
+        bit_value *= 2;
+        i += 1;
+    }
+    return result;
+}
+
+// Extracts the low bit of `value` (in [0, 2^16)) and returns
+// (bit, rest = floor(value / 2)).
+fn _split_low_bit(value: number) -> _AbiBitSplit {
+    let mut rest: number = 0;
+    let mut rem: number = value;
+    let mut p: number = 32768;
+    let mut q: number = 16384;
+    loop {
+        if q < 1 { break; }
+        if rem >= p {
+            rem -= p;
+            rest += q;
+        }
+        p = p / 2;
+        q = q / 2;
+    }
+    return _AbiBitSplit { bit: rem, rest: rest };
+}
+
+// Converts four 16-bit limbs (low to high) to an unsigned decimal
+// string suitable for LLVM IR `i64 <value>`. LLVM accepts any decimal
+// in [0, 2^64) for an i64 constant; the bit pattern is preserved when
+// the runtime reads the symbol as `uint64_t`.
+fn _limbs_to_unsigned_decimal(limbs: AbiHashLimbs) -> string {
+    let mut zero: boolean = true;
+    if limbs.h0 != 0 { zero = false; }
+    if limbs.h1 != 0 { zero = false; }
+    if limbs.h2 != 0 { zero = false; }
+    if limbs.h3 != 0 { zero = false; }
+    if zero { return "0"; }
+
+    let mut a0 = limbs.h0;
+    let mut a1 = limbs.h1;
+    let mut a2 = limbs.h2;
+    let mut a3 = limbs.h3;
+    let mut output: string = "";
+
+    loop {
+        let mut all_zero: boolean = true;
+        if a0 != 0 { all_zero = false; }
+        if a1 != 0 { all_zero = false; }
+        if a2 != 0 { all_zero = false; }
+        if a3 != 0 { all_zero = false; }
+        if all_zero { break; }
+
+        // Long-divide the four-limb integer by 10000 from the top down.
+        // Carry passes between limbs as `carry * 65536 + limb`, which is
+        // always < 10000 * 65536 + 65535 ≈ 6.55e8 — well within f64's
+        // exact integer range.
+        let r3 = _div_mod_small(a3, 0, 10000);
+        let r2 = _div_mod_small(a2, r3.r, 10000);
+        let r1 = _div_mod_small(a1, r2.r, 10000);
+        let r0 = _div_mod_small(a0, r1.r, 10000);
+
+        a3 = r3.q;
+        a2 = r2.q;
+        a1 = r1.q;
+        a0 = r0.q;
+
+        // After the divide, decide whether this is the top chunk so we
+        // know whether to zero-pad to 4 digits.
+        let mut next_zero: boolean = true;
+        if a0 != 0 { next_zero = false; }
+        if a1 != 0 { next_zero = false; }
+        if a2 != 0 { next_zero = false; }
+        if a3 != 0 { next_zero = false; }
+
+        let chunk_text = _decimal_string(r0.r);
+        let mut chunk_padded = chunk_text;
+        if !next_zero {
+            loop {
+                if chunk_padded.length >= 4 { break; }
+                chunk_padded = "0" + chunk_padded;
+            }
+        }
+        output = chunk_padded + output;
+    }
+    return output;
+}
+
+struct _AbiDivMod {
+    q: number;
+    r: number;
+}
+
+// Computes (carry * 65536 + limb) divmod divisor, where divisor <= 10000
+// and the dividend is < 10000 * 65536 + 65536 ≈ 6.55e8. Implemented as
+// a 17-step binary long division so every intermediate is a power-of-2
+// scaling of the divisor (exact in f64).
+fn _div_mod_small(limb: number, carry: number, divisor: number) -> _AbiDivMod {
+    let dividend = carry * 65536 + limb;
+    let mut q: number = 0;
+    let mut rem: number = dividend;
+    let mut delta: number = 65536;
+    loop {
+        if delta < 1 { break; }
+        let p = divisor * delta;
+        if rem >= p {
+            rem -= p;
+            q += delta;
+        }
+        delta = delta / 2;
+    }
+    return _AbiDivMod { q: q, r: rem };
+}
+
+// Small-value decimal formatter (value < 10000 in practice; safe up to
+// the f64 exact-integer limit).
+fn _decimal_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let digits = "0123456789";
+    let mut output: string = "";
+    let mut remaining: number = value;
+    loop {
+        if remaining <= 0 { break; }
+        let mut temp: number = remaining;
+        let mut quotient: number = 0;
+        loop {
+            if temp < 10 { break; }
+            temp -= 10;
+            quotient += 1;
+        }
+        let ch = substring(digits, temp, temp + 1);
+        output = ch + output;
+        remaining = quotient;
+    }
+    return output;
+}
+
+export {
+    AbiHashLimbs,
+    sfn_abi_locked_layout_string,
+    sfn_abi_hash_decimal,
+    fnv1a_64_hash
+};
