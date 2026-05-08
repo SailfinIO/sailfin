@@ -109,8 +109,10 @@ option_id() {
 
 PRIORITY_FIELD_ID=$(field_id "Priority")
 SIZE_FIELD_ID=$(field_id "Size")
+STATUS_FIELD_ID=$(field_id "Status")
 [[ -n "$PRIORITY_FIELD_ID" ]] || { echo "::error::Priority field not found" >&2; exit 1; }
 [[ -n "$SIZE_FIELD_ID"     ]] || { echo "::error::Size field not found"     >&2; exit 1; }
+[[ -n "$STATUS_FIELD_ID"   ]] || { echo "::error::Status field not found"   >&2; exit 1; }
 
 # label name -> option name
 priority_option_for_label() {
@@ -121,6 +123,44 @@ priority_option_for_label() {
     priority:low)      echo "Low" ;;
     *) echo "" ;;
   esac
+}
+
+# Resolve Status from issue state + labels (label-driven; matches the rest of
+# the agentic pipeline, which is label-driven). Precedence (first match wins):
+#   closed                                       → Done
+#   in-progress                                  → In progress
+#   blocked                                      → Blocked
+#   claude-ready                                 → Ready
+#   needs-grooming / needs-design / design-approved → Backlog
+#   else                                         → (empty — keep current value;
+#                                                   don't bounce items back to
+#                                                   To triage on every event)
+#
+# "In review" is intentionally not auto-set: an issue with `in-progress` keeps
+# that status across the PR-open → review → merge → close transitions; the PR
+# board (not the issue board) tracks review state.
+status_for_issue() {
+  local state="$1"; shift
+  local labels=("$@")
+  # Treat any non-OPEN state as Done. gh returns CLOSED for issues and MERGED
+  # for PRs (gh issue view silently falls back to PR data on PR numbers).
+  [[ "$state" != "OPEN" ]] && { echo "Done"; return; }
+  local l
+  for l in "${labels[@]}"; do
+    [[ "$l" == "in-progress" ]] && { echo "In progress"; return; }
+  done
+  for l in "${labels[@]}"; do
+    [[ "$l" == "blocked" ]] && { echo "Blocked"; return; }
+  done
+  for l in "${labels[@]}"; do
+    [[ "$l" == "claude-ready" ]] && { echo "Ready"; return; }
+  done
+  for l in "${labels[@]}"; do
+    case "$l" in
+      needs-grooming|needs-design|design-approved) echo "Backlog"; return ;;
+    esac
+  done
+  echo ""  # no signal — leave Status alone
 }
 size_option_for_label() {
   case "$1" in
@@ -136,16 +176,21 @@ sync_one() {
   local num="$1"
   local node_id labels item_id
 
-  local issue_json
+  local issue_json state
   issue_json=$(gh issue view "$num" --repo "$GH_REPO" --json number,id,labels,state 2>/dev/null) || {
     echo "::warning::issue #$num not found in $GH_REPO; skipping" >&2
     return 0
   }
   node_id=$(jq -r '.id' <<<"$issue_json")
   labels=$(jq -r '[.labels[].name] | join(",")' <<<"$issue_json")
+  state=$(jq -r '.state' <<<"$issue_json")
+
+  IFS=',' read -ra LBLS <<<"$labels"
+  local status_opt
+  status_opt=$(status_for_issue "$state" "${LBLS[@]}")
 
   if [[ "$DRY_RUN" -eq 1 ]]; then
-    echo "would sync #$num (labels: $labels)"
+    echo "would sync #$num (state: $state, labels: $labels, status: ${status_opt:-<leave alone>})"
     return 0
   fi
 
@@ -167,7 +212,6 @@ sync_one() {
 
   # Resolve which option each field should be (empty string => clear)
   local priority_opt="" size_opt=""
-  IFS=',' read -ra LBLS <<<"$labels"
   for l in "${LBLS[@]}"; do
     local p s
     p=$(priority_option_for_label "$l")
@@ -212,6 +256,13 @@ sync_one() {
 
   set_or_clear "$PRIORITY_FIELD_ID" "Priority" "$priority_opt"
   set_or_clear "$SIZE_FIELD_ID"     "Size"     "$size_opt"
+
+  # Status: only set when we have a signal — never clear, since a maintainer
+  # may have manually placed an item in To triage / Backlog and we shouldn't
+  # bounce it on every label edit.
+  if [[ -n "$status_opt" ]]; then
+    set_or_clear "$STATUS_FIELD_ID" "Status" "$status_opt"
+  fi
 }
 
 # ---- 3) Drive ----------------------------------------------------------
