@@ -1,0 +1,82 @@
+// Slice E.1 (#488): pin the typecheck-shape contract for the new
+// default — bare unsuffixed integer literals lower to `int` (i64)
+// and `number`/`float` continue to alias `double`. The LLVM-level
+// IR assertions (`add i64`, `fadd double`) live in
+// `compiler/tests/e2e/test_numeric_int_default.sh`; this file
+// pins the front-end shape (parse → typecheck → native IR) so
+// regressions in the parser/typecheck surface here rather than
+// only at IR-emit time.
+import { emit_native_text_with_module_name } from "../../src/emit_native";
+import { parse_program } from "../../src/parser/mod";
+import { index_of } from "../../src/string_utils";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _emit(source: string) -> string {
+    let program = parse_program(source);
+    return emit_native_text_with_module_name(program, "numeric_int_default_test");
+}
+
+fn _diagnostics(source: string) -> Diagnostic[] {
+    let program = parse_program(source);
+    return typecheck_diagnostics(program);
+}
+
+// ── Bare integer literal: no annotation needed ────────────────
+test "numeric: bare integer literal needs no annotation" {
+    // The parser/typecheck must accept this without the
+    // `let x: number = 1` workaround that the pre-E.1 default
+    // forced on every untyped integer.
+    let diagnostics = _diagnostics("fn main() { let a = 1; let b = a + 2; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: bare integer addition reaches the emitter" {
+    // Native IR carries the expression through; LLVM lowering then
+    // produces `add i64` (covered in the e2e test). The unit test
+    // pins that the emitter sees both the assignment and the binop
+    // without additional annotations.
+    let asm = _emit("fn main() { let a = 1; let b = a + 2; }");
+    assert index_of(asm, "let a") >= 0;
+    assert index_of(asm, "let b") >= 0;
+}
+
+// ── `: number` alias preserved ────────────────────────────────
+test "numeric: ': number = 42' typechecks (alias-as-float)" {
+    // Existing `: number` annotations across the compiler source
+    // stay valid through this slice; E.2/E.3 migrate them to
+    // `: int` / `: float`.
+    let diagnostics = _diagnostics("fn main() { let x: number = 42; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: ': float = 42' typechecks" {
+    // `float` is the new spelling and must accept integer literals
+    // (which then widen to `double` via the literal-coercion path).
+    let diagnostics = _diagnostics("fn main() { let x: float = 42; }");
+    assert diagnostics.length == 0;
+}
+
+test "numeric: ': int = 42' typechecks" {
+    // `int` is the new spelling for `i64` integers.
+    let diagnostics = _diagnostics("fn main() { let x: int = 42; }");
+    assert diagnostics.length == 0;
+}
+
+// ── Mixed integer/decimal in same scope still typechecks ──────
+test "numeric: bare integer and decimal in same scope typecheck" {
+    let diagnostics = _diagnostics("fn main() { let a = 1; let b = 3.14; let c = b + 0.5; }");
+    assert diagnostics.length == 0;
+}
+
+// ── extern fn surface unchanged ───────────────────────────────
+test "numeric: extern fn with int + float parameter typechecks" {
+    // Closing the existing accept-list (covered in
+    // numeric_int_float_test.sfn) is a prerequisite for this
+    // slice; pin it here so a regression in the type-mapping
+    // seams (`float` newly added in this slice at
+    // core_type_mapping.sfn:51 + module_globals.sfn:89) is
+    // surfaced by the unit suite.
+    let diagnostics = _diagnostics("extern fn scale(value: int, factor: float) -> float;");
+    assert diagnostics.length == 0;
+}

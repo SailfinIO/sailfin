@@ -88,11 +88,11 @@ fn _process_one_binding(binding: NativeBinding, context: TypeContext, scope_id: 
     // Fast-path common primitive types
     if type_annotation == "string" { llvm_type = "i8*"; } else if type_annotation == "number" {
         llvm_type = "double";
-    } else if type_annotation == "boolean" { llvm_type = "i1"; } else if type_annotation == "bool" {
+    } else if type_annotation == "float" { llvm_type = "double"; } else if type_annotation == "boolean" {
         llvm_type = "i1";
-    } else if type_annotation == "i64" { llvm_type = "i64"; } else if type_annotation == "i32" {
-        llvm_type = "i32";
-    } else if type_annotation.length > 0 {
+    } else if type_annotation == "bool" { llvm_type = "i1"; } else if type_annotation == "i64" {
+        llvm_type = "i64";
+    } else if type_annotation == "i32" { llvm_type = "i32"; } else if type_annotation.length > 0 {
         llvm_type = map_local_type(context, type_annotation);
     }
     if llvm_type.length == 0 { llvm_type = "double"; }

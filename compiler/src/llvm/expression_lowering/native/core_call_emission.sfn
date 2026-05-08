@@ -149,7 +149,34 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
     if is_array_push {
         if array_push_element_type.length > 0 {
             if final_operands.length >= 2 {
-                let push_result = lower_array_push_in_place(final_operands[0], final_operands[1], array_push_element_type, result_lines, result_temp);
+                // Slice E.1 (#488): coerce the push value to the array's
+                // element type before delegating to `lower_array_push_in_place`.
+                // Pre-E.1 the bare-integer-literal default was `double`, so
+                // `arr.push(10)` against a `double[]` (== `number[]`) array
+                // produced a matching `value.llvm_type == "double"` operand
+                // that flowed through the in-place store unchanged. After E.1
+                // the same literal lowers to `i64`, and the in-place store
+                // emits invalid `store double 10, double*` IR unless we coerce
+                // here. `coerce_operand_to_type` is a no-op when the operand
+                // already matches; for integer-literal-vs-double mixes it
+                // routes through the `sitofp` widening path that Slice D
+                // wired up, preserving the pre-E.1 semantics.
+                let push_value_coerced = coerce_operand_to_type(final_operands[1], array_push_element_type, result_temp, result_lines);
+                let mut _ci_apc: number = 0;
+                loop {
+                    if _ci_apc >= push_value_coerced.diagnostics.length {
+                        break;
+                    }
+                    result_diagnostics.push(push_value_coerced.diagnostics[_ci_apc]);
+                    _ci_apc += 1;
+                }
+                result_lines = push_value_coerced.lines;
+                result_temp = push_value_coerced.temp_index;
+                let mut push_value_operand: LLVMOperand = final_operands[1];
+                if push_value_coerced.operand != null {
+                    push_value_operand = push_value_coerced.operand;
+                }
+                let push_result = lower_array_push_in_place(final_operands[0], push_value_operand, array_push_element_type, result_lines, result_temp);
                 let mut _ci8: number = 0;
                 loop {
                     if _ci8 >= push_result.diagnostics.length { break; }

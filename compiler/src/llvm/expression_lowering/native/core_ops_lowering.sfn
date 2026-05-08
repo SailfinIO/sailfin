@@ -270,15 +270,22 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
 
     // Slice B (2026-05-02): propagate the LHS's LLVM type to the
     // RHS so a bare integer literal (e.g. `2` in `x << 2`) takes
-    // the integer-literal short-circuit at `core.sfn:460-491`
+    // the integer-literal short-circuit at `core.sfn:465-505`
     // rather than defaulting to `double`. Without this hint the
     // RHS literal would be typed `double`, then `dominant_type`
     // would coerce both sides to `double`, and bitwise/shift
-    // would silently produce broken IR. Pre-existing arithmetic
-    // (`+`, `-`, `*`, etc.) on `int + double` mixes still
-    // funnels through `dominant_type`'s silent widening (L2 in
-    // `docs/runtime_architecture.md` §3.7) — Slice D's `as`
-    // casts close that hole properly.
+    // would silently produce broken IR.
+    //
+    // Slice E.1 (2026-05-08, #488): bare integer literals now
+    // default to `i64` even without LHS pressure, so the hint
+    // here mostly steers the explicit-`double` (`: float`) path.
+    // Pre-existing arithmetic (`+`, `-`, `*`, etc.) on `int +
+    // double` mixes still funnels through `dominant_type`'s
+    // silent widening (L2 in `docs/runtime_architecture.md`
+    // §3.7) — the rejection rides on Slice E.3 (#296) after
+    // every `: number` site in the compiler source has migrated
+    // to `: int`/`: float`. Slice D's `as` casts let authors
+    // spell the conversion explicitly today.
     let mut _right_expected: string = "";
     if left_result.operand != null {
         _right_expected = left_result.operand.llvm_type;

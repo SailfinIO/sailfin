@@ -1631,14 +1631,18 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
 // LIMITATION (numeric types L2/L3 — see docs/runtime_architecture.md
 // §3.7 + tracked in issue #296): when one operand is integer (i64)
 // and the other is float (double), the rule below silently widens
-// the integer side to double. Closing this depends on Slice E
-// (bare-literal defaulting + `number` retirement) shipping first
-// — without it, every comparison that mixes a runtime helper's
-// i64 return against a `: number` (= double) local hits the
-// tightened path and breaks user code (`for i in 0..arr.length`
-// is the canonical case). Slice D shipped the `as` cast lowering
-// matrix so authors can spell the conversion explicitly today;
-// the silent-widening rejection rides on Slice E (#296).
+// the integer side to double. Slice E.1 (#488) flipped the bare
+// integer-literal default to `i64`, so the LHS-driven `expected_type`
+// hint in `lower_binary_operation` now keeps RHS literals on the
+// correct side of int-vs-float for every same-kind expression.
+// Mixed `i64 + double` expressions still funnel through this rule
+// and silently widen — the rejection rides on E.3 once every
+// `: number` site in the compiler source has been migrated to
+// `: int`/`: float`, at which point the literal-typing seam below
+// can refuse the coercion without breaking the runtime helper
+// helpers and `for i in 0..arr.length` patterns. Slice D shipped
+// the `as` cast lowering matrix so authors can spell the conversion
+// explicitly today.
 fn dominant_type(first: string, second: string) -> string {
     if first.length == 0 { return second; }
     if second.length == 0 { return first; }

@@ -82,8 +82,26 @@
 >   pre-existing single-char assumption that broke `<<` and `>>`) and to
 >   propagate the LHS type into the RHS literal so `x << 2` keeps the
 >   operands as `i64`. L4 in the limitations table is now closed for the
->   integer side. Slices D (`as` casts) and E (bare-literal defaulting
->   + `number` retirement) remain sequenced follow-ups.
+>   integer side. Slice D (`as` casts) and E.1 (bare-literal defaulting +
+>   `number` aliasing) shipped as follow-ups; E.2/E.3 (source migration
+>   + silent-widening rejection) remain sequenced behind E.1.
+> - **Numeric Slice E.1 — bare-literal default + `number` alias:
+>   shipped 2026-05-08 (#488).** Bare unsuffixed integer literals
+>   default to `int` (i64) in LLVM lowering: `let x = 42; x + 1`
+>   lowers to `alloca i64`, `add i64`. Decimal/exponent literals
+>   stay on the `double` path. `: number` and `: float` are both
+>   registered as primitive aliases for `double` in every
+>   type-mapping seam (`type_mapping.sfn`, `core_type_mapping.sfn`,
+>   `statement_type_mapping.sfn`, `module_globals.sfn`), so
+>   existing `: number` annotations across the compiler source
+>   continue to lower as `double`. Verified by
+>   `compiler/tests/e2e/test_numeric_int_default.sh` and
+>   `compiler/tests/unit/numeric_int_default_test.sfn`. Closes L1
+>   in §3.7. E.2 (source migration of every `: number` →
+>   `: int`/`: float`) and E.3 (silent-widening rejection, #296)
+>   remain sequenced follow-ups; the rejection cannot land before
+>   the source migration because the lowered compiler/runtime
+>   code currently mixes i64 and double everywhere via the alias.
 > - Other M0 items (`Result<T, E>` + `?`, closures with capture, atomic
 >   intrinsics) remain planned.
 > - **Drop emission promoted to its own milestone: M1.5.** The 2026-05-06
@@ -1358,7 +1376,7 @@ diagnostics. Coverage:
 
 ### 3.7 Numeric Types (`int` / `float`)
 
-**Status (2026-05-03): Slices A–D shipped.** Annotated locals,
+**Status (2026-05-08): Slices A–D + E.1 shipped.** Annotated locals,
 parameters, and return types of type `int` and `float` lower
 correctly through the LLVM backend (Slice A). Bitwise / shift
 operators on integer-annotated operands lower to `and`/`or`/`xor`/
@@ -1367,14 +1385,19 @@ operators on integer-annotated operands lower to `and`/`or`/`xor`/
 boundary (Slice C). `expr as Type` parses, type-checks, renders
 through native IR, and lowers to LLVM `sitofp`/`fptosi`/`sext`/
 `zext`/`trunc`/`fpext`/`fptrunc`; `as bool` is rejected with a
-fix-it suggesting `x != 0` (Slice D). The L2/L3 silent-widening
-rejection ride on Slice E (retire `number`); the lowered
-compiler/runtime code legitimately mixes i64 and double
-everywhere via the `number = double` alias, so tightening
-`dominant_type` before Slice E breaks user code (canonical
-case: `for i in 0..arr.length` mixes a `: number` counter with
-the i64 length helper). Slice E remains the next sequenced
-follow-up.
+fix-it suggesting `x != 0` (Slice D). **Slice E.1 (#488):** bare
+unsuffixed integer literals default to `int` (i64); `: number`
+becomes a deprecated alias for `: float` (both lower to `double`)
+in every primitive type-mapping seam. `let x = 42; x + 1` lowers
+to `alloca i64`, `add i64`. The L2/L3 silent-widening rejection
+still rides on Slice E.3, which lands after E.2 migrates every
+`: number` annotation in `compiler/src/*.sfn` and
+`runtime/prelude.sfn` to the explicit `: int`/`: float` form;
+the lowered compiler/runtime code currently mixes i64 and double
+everywhere via the alias, so tightening `dominant_type` before
+the source migration breaks user code (canonical case:
+`for i in 0..arr.length` mixes a `: number` counter with the
+i64 length helper).
 
 **What ships in Slice A:**
 
@@ -1420,7 +1443,7 @@ follow-up.
 
 | # | Limitation | Consequence | Slice |
 |---|---|---|---|
-| L1 | Bare numeric literals default to `number` (i.e. `double`) | `let x = 42` produces `alloca double`, not `alloca i64` | E |
+| L1 | ✅ **Closed by Slice E.1 (2026-05-08, #488).** Bare unsuffixed integer literals now default to `int` (i64). `let x = 42` produces `alloca i64`, `store i64 42`. Decimal/exponent literals stay on the `double` path; `: number` and `: float` annotations both map to `double` as deprecated and primary spellings of the floating-point type. Verified by `compiler/tests/e2e/test_numeric_int_default.sh` and `compiler/tests/unit/numeric_int_default_test.sfn`. The compiler source still uses `: number` everywhere; E.2/E.3 migrate the source. | E (closed) |
 | L2 | Mixed `int` + `float` silently coerces to `double` | `let x: int = 1; let y: float = 2.0; x + y` lowers to `fadd double` after silent fpext on the integer side. Truncates above 2^53. **Slice D ships the `as` cast escape valve so authors can spell the conversion explicitly today**; the silent-widening rejection itself rides on Slice E (without it, the lowered code mixes i64↔double everywhere — every `string.length` returns i64, every `: number` local is double — and the tightened `dominant_type` would break user code like `for i in 0..arr.length`). | E |
 | L3 | Comparison with un-annotated literal coerces to `double` | `let x: int = 42; x > 0` lowers to `fcmp ogt double` because `0` defaults to `double` and `dominant_type` widens both sides. **Slice D mitigation: spell the literal explicitly with `x > (0 as int)`**; the tightening that closes this implicitly rides on Slice E. | E |
 | L4 | ✅ **Closed by Slice B (2026-05-02).** Bitwise operators (`&`, `|`, `^`, `<<`, `>>`) on integer-annotated operands lower to LLVM `and`/`or`/`xor`/`shl`/`ashr i64`. The pure-Sailfin SHA-256/Base64/flag manipulation paths can leave the C runtime in a follow-up M3 PR. Bitwise on `float`/`number` operands is still a footgun — `operation_name_for_symbol` returns empty when `llvm_type == "double"`, but the typecheck does not yet pre-reject it. Closing that gap rides on Slice E's broader int↔float disambiguation. | B (closed) |
@@ -1501,12 +1524,27 @@ follow-up.
   cycle passes after this slice ships, the `number` keyword and
   every supporting branch in `map_primitive_type` /
   `dominant_type` / etc. can be deleted. Migration order:
-    1. Add `int` as the bare-literal default.
-    2. Audit-and-migrate every `: number` annotation in
-       `compiler/src/*.sfn` and `runtime/prelude.sfn` to
-       `: int` or `: float` based on actual usage.
-    3. Cut a release.
-    4. Delete `number` everywhere.
+    1. ✅ **E.1 (2026-05-08, #488):** Add `int` as the bare-literal
+       default; treat `number` as alias for `float`. Bare integer
+       literals lower to `i64`; decimal/exponent stays on `double`;
+       `: number` and `: float` both map to `double`. Compiler
+       source still uses `: number` everywhere — alias-as-float
+       preserves all existing semantics so the slice ships in
+       isolation. Verified by `make compile && make test-{unit,
+       integration,e2e}` and the new
+       `compiler/tests/e2e/test_numeric_int_default.sh` /
+       `compiler/tests/unit/numeric_int_default_test.sfn`. Closes L1.
+    2. **E.2 (next):** Audit-and-migrate every `: number`
+       annotation in `compiler/src/*.sfn` and
+       `runtime/prelude.sfn` to `: int` or `: float` based on
+       actual usage. The migration is purely mechanical because
+       E.1's alias-as-float keeps every `: number` site lowering
+       as `double`.
+    3. **E.3:** Reapply #296 (`dominant_type` rejection of silent
+       int/float coercion). The rejection lands once both sides
+       of every site agree on int-vs-float, which only holds
+       after E.2. Closes L2/L3.
+    4. **E.4:** Cut a release; delete `number` everywhere.
 
 **Self-hosting safety (Slice A):** The compiler source uses
 `number` throughout; nothing in `compiler/src/*.sfn` uses `: float`
