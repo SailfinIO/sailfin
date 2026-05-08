@@ -145,7 +145,15 @@ test_user_emission_is_flipped() {
         return 1
     fi
     local found=0
-    for sym in sailfin_runtime_string_length sailfin_runtime_substring strings_equal; do
+    # Legacy descriptor symbols match `runtime_helpers.sfn` exactly:
+    # `string.length` → `sailfin_runtime_string_length`, `substring`
+    # → `substring`, `substring_unchecked` → `substring_unchecked`,
+    # `strings_equal` → `strings_equal`. `\b` treats `_` as a word
+    # char, so `@substring\b` matches the bare symbol but not
+    # `@substring_unchecked` (no boundary between `g` and `_`),
+    # which means each entry below is a tight, non-overlapping
+    # regression target.
+    for sym in sailfin_runtime_string_length substring substring_unchecked strings_equal; do
         if grep -qE "@${sym}\b" "$ll"; then
             echo "[test]   user emission still references @${sym} (expected the sfn_str_* flip)"
             grep -nE "@${sym}\b" "$ll" | head -3
@@ -210,7 +218,7 @@ run_test "sfn fmt --check runtime/sfn/string.sfn is canonical" test_fmt_clean
 run_test "sfn emit llvm produces define for every sfn_str_sfn_* export" test_emit_define_shape
 run_test "sfn emit llvm does not collide with C trampoline sfn_str_* names" test_no_bare_sfn_str_define
 run_test "sfn emit llvm declares memcmp and memchr trampolines" test_emit_libc_declares
-run_test "user emission no longer calls @sailfin_runtime_string_length / @substring / @strings_equal" test_user_emission_is_flipped
+run_test "user emission no longer calls @sailfin_runtime_string_length / @substring / @substring_unchecked / @strings_equal" test_user_emission_is_flipped
 run_test "compiler binary exports defined sfn_str_* and sfn_str_sfn_* symbols" test_compiler_binary_exports_sfn_str
 run_test "runtime/native/capsule.toml sfn-sources lists the string module" test_manifest_lists_string
 run_test "scripts/build.sh RUNTIME_SFN_ALLOW lists the string module" test_build_allowlist_lists_string

@@ -66,14 +66,22 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
                 if !left_is_null {
                     if !right_is_null {
                         // M2.4a (#396): the call routes to
-                        // `@sfn_str_eq` (defined in
-                        // `runtime/sfn/string.sfn`) instead of the
-                        // legacy `@strings_equal` C entrypoint. Both
+                        // `@sfn_str_eq` instead of the legacy
+                        // `@strings_equal` C entrypoint. During the
+                        // M2.4a coexistence period the canonical
+                        // `sfn_str_eq` symbol is provided by the C
+                        // trampoline in
+                        // `runtime/native/src/sailfin_runtime.c`;
+                        // the Sailfin proof-of-life module
+                        // `runtime/sfn/string.sfn` exports
+                        // `sfn_str_sfn_eq` alongside it. M2.4b
+                        // retires the trampoline and the Sailfin
+                        // export takes over the bare name. Both
                         // exports are still backed by the same
                         // NUL-terminated `i8*` ABI for now — the
-                        // aggregate-by-value rewrite lands with M2.4b
-                        // — so the operand-extraction shim below is
-                        // unchanged from the M1.A landing.
+                        // aggregate-by-value rewrite lands with
+                        // M2.4b — so the operand-extraction shim
+                        // below is unchanged from the M1.A landing.
                         let mut next_index = temp_index;
                         let mut left_ptr_value = left_operand.value;
                         if left_operand.llvm_type == "{i8*, i64}" {

@@ -308,15 +308,21 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     //
     // M2.4a (#396): the four string descriptors below carry a
     // `native_signature` populated with the matching `sfn_str_*`
-    // export from `runtime/sfn/string.sfn`. The migration mechanism
+    // canonical name. During the M2.4a coexistence period those
+    // bare canonical symbols are *defined by C trampolines* in
+    // `runtime/native/src/sailfin_runtime.c`; the proof-of-life
+    // Sailfin module `runtime/sfn/string.sfn` ships the same
+    // five operations under the `sfn_str_sfn_*` infix to avoid a
+    // link-time collision (mirrors the arena module's
+    // `sfn_arena_sfn_*` namespace). M2.4b retires the C
+    // trampolines and renames the Sailfin exports to the bare
+    // form. The migration mechanism
     // (`render_runtime_helper_declarations` in `rendering.sfn` and
     // `coerce_and_emit_call` in `core_call_emission.sfn`) prefers
-    // the Sailfin-native symbol over `symbol` whenever it is set,
-    // so freshly-emitted IR reaches the new exports while seed-
-    // built IR (which still carries the C symbol names) keeps
-    // linking through the legacy bodies during the cutover. The
-    // C symbols below stay live in `runtime/native/src/sailfin_runtime.c`
-    // until `make compile`'s seed bumps past this PR.
+    // the `native_signature` over `symbol` whenever it is set, so
+    // freshly-emitted IR reaches the new exports while seed-built
+    // IR (which still carries the legacy `symbol` names) keeps
+    // linking through the legacy bodies during the cutover.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "substring", symbol: "substring", return_type: "i8*", parameter_types: ["i8*", "double", "double"], effects: [], native_signature: "sfn_str_slice"
     });

@@ -2116,7 +2116,12 @@ bool sfn_str_eq(const char *a, const char *b)
 
 char *sfn_str_slice(const char *text, double start, double end)
 {
-    return sailfin_runtime_substring_unchecked((char *)text, (int64_t)start, (int64_t)end);
+    /* Route through `_clamp_to_i64` (defined later in this file,
+     * forward-declared at the top) so NaN / out-of-range doubles
+     * produce defined results — matches `substring_unchecked`'s
+     * own double→i64 discipline. A direct `(int64_t)` cast would
+     * be UB for those inputs. */
+    return sailfin_runtime_substring_unchecked((char *)text, _clamp_to_i64(start), _clamp_to_i64(end));
 }
 
 /* `sfn_str_to_cstr` / `sfn_str_from_cstr` are pure ABI bridges in
