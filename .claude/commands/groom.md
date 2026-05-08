@@ -63,7 +63,15 @@ Wait for user approval. The user may:
 
 ## Phase 4: CREATE ISSUES
 
-For each approved issue, create it via `gh`:
+For each approved issue, create it via `gh`. Titles follow
+`docs/conventions/issue-naming.md`:
+
+- Sub-tasks: `<type>(<scope>): <imperative verb phrase>` (Conventional Commit shape).
+- Epics: `Epic: <track-id>: <noun phrase>` — also apply the `epic` label.
+- Tracking issues: `Tracking: <topic> (<YYYY-MM-DD>)` — also apply the `tracking` label.
+
+Labels come from `.github/labels.yml` (canonical registry). Use lowercase
+prefixes (`type:bug` not `bug`, `size:m` not `medium`).
 
 ```bash
 gh issue create \
@@ -135,5 +143,7 @@ Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
 - **Never create L-sized issues.** If the architect can't break work into XS/S/M, the work is not yet ready.
 - **Never create issues without acceptance criteria.** The criteria are the contract.
 - **Always set the `claude-ready` label** on issues that are ready to pick up. Use `needs-grooming` for issues that exist as placeholders but need refinement.
-- **Always set the `type:*` and `size:*` labels** so `/pickup` can filter correctly.
+- **Always set the `type:*` and `size:*` labels** so `/pickup` can filter correctly. Apply `area:*` labels when the touched subsystem is unambiguous.
+- **Use only labels defined in `.github/labels.yml`** — never invent new ones in this command. If you think a new label is warranted, edit `labels.yml` in a separate PR first.
+- **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for sub-tasks, `Epic:` prefix for epics, `Tracking:` for trackers.
 - **Don't create issues for work that's already in progress** — check `gh issue list` first to avoid duplicates.

@@ -71,7 +71,7 @@ architect-approved issue, within a budget gate.
 ### Tier 2 — Engineering (Engineer)
 
 - **Workflow:** `.github/workflows/engineer.md`
-- **Cadence:** on `issues: labeled` with `design-approved` or `bug`
+- **Cadence:** on `issues: labeled` with `design-approved` or `type:bug`
 - **Budget gate:** before any work, count open PRs with label `agent-authored`. If the count is ≥ 2, call `noop`. Budget is set in `.github/AGENTS.md` and updated there only.
 - **Reads:** issue + architect review, source, tests
 - **Writes:** exactly ONE PR per issue. PR must have label `agent-authored` and body `Closes #<issue>`.
@@ -149,7 +149,7 @@ Some workflows trigger on event types that fire often but only do work for
 specific labels. Those use `skip-if-no-match` to exit at the workflow level
 before booting the agent — saves the first-turn cost of writing a noop:
 
-- `engineer.md`: `skip-if-no-match: 'label:design-approved OR label:bug'`
+- `engineer.md`: `skip-if-no-match: 'label:design-approved,type:bug'`
 - `architect-review.md`: `skip-if-no-match: 'label:needs-design'`
 
 The agent's preconditions still re-validate; this is purely an early exit.
@@ -167,6 +167,14 @@ add `tools.repo-memory` with a unique `id` per agent.
 
 ## Labels (canonical)
 
+The canonical label registry is **`.github/labels.yml`**. Edits to that file
+are auto-reconciled with the live repo by the `Sync Labels` workflow on every
+push to `main`; maintainers can also run `scripts/setup-github-labels.sh`
+manually. Naming conventions and the lifecycle diagram live in
+`docs/conventions/issue-naming.md`.
+
+The labels the agentic pipeline depends on:
+
 | Label | Applied by | Meaning |
 |---|---|---|
 | `focus:proposed` | Planner | Weekly focus issue awaiting human approval |
@@ -178,11 +186,14 @@ add `tools.repo-memory` with a unique `id` per agent.
 | `agent-authored` | Engineer | PR originated from an autonomous workflow; counts against budget |
 | `needs-changes` | Reviewers | PR needs author rework before merge |
 | `needs-review` | Engineer | Changes pushed; please re-review |
+| `approved` | QC | All review agents approved; safe for human merge |
+| `security` | Security | Security-relevant issue or PR |
 | `blocked` | Triage | Waiting on another issue to close |
 
-Labels `focus:proposed`, `focus:approved`, `focus:stale`, and `agent-authored`
-must exist in the repository. Create them once with `gh label create` (see
-`scripts/setup-agent-labels.sh` if present).
+Type / size / priority / area labels follow the prefix scheme (`type:bug`,
+`size:m`, `priority:high`, `area:runtime`, …). Bare aliases (`bug`, `runtime`,
+`medium`, …) are retired by the `aliases:` list in `.github/labels.yml`; do
+not reintroduce them in workflows or templates.
 
 ## Focus artifact
 

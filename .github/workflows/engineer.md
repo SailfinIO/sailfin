@@ -1,16 +1,16 @@
 ---
 description: |
   Implements features and fixes bugs for the Sailfin compiler and runtime.
-  Triggered on issues labeled 'design-approved' or 'bug'. Creates a branch,
-  implements changes in Sailfin (.sfn), adds tests, and opens a PR.
+  Triggered on issues labeled 'design-approved' or 'type:bug'. Creates a
+  branch, implements changes in Sailfin (.sfn), adds tests, and opens a PR.
 
 on:
   issues:
     types: [labeled]
   # Short-circuit before booting the agent: the only labels that should ever
-  # trigger work here are design-approved or bug. Anything else, exit at the
-  # workflow level — saves the first-turn cost of writing a noop.
-  skip-if-no-match: 'label:design-approved,bug'
+  # trigger work here are design-approved or type:bug. Anything else, exit at
+  # the workflow level — saves the first-turn cost of writing a noop.
+  skip-if-no-match: 'label:design-approved,type:bug'
 
 imports:
   - shared/build-mcp-server.md
@@ -63,9 +63,9 @@ conflicts.
 ## Preconditions (all must pass)
 
 **1. Label gate.** Issue #${{ github.event.issue.number }} must have the
-`design-approved` label OR the `bug` label (without `needs-design`). If
+`design-approved` label OR the `type:bug` label (without `needs-design`). If
 neither, call `noop`:
-`{"noop": {"message": "label gate: issue does not have design-approved or clean bug label"}}`
+`{"noop": {"message": "label gate: issue does not have design-approved or clean type:bug label"}}`
 
 **2. Budget gate.** Count open PRs with the `agent-authored` label via
 `list_pull_requests` (`state=open`, `labels=agent-authored`). If the count

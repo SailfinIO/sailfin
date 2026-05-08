@@ -1,17 +1,28 @@
 ---
 name: Claude Task
 about: A session-sized work item that Claude (or a human) can complete in one focused session
-title: ""
-labels: ["claude-ready", "needs-grooming"]
+title: "<type>(<scope>): <verb phrase>"
+labels: ["needs-grooming"]
 assignees: []
 ---
 
 <!--
 This template defines the contract between issue authors and Claude.
+
 A well-groomed issue is one Claude can complete in a single session and
 produce a mergeable PR. If you can't fill in every section concretely,
-the issue is too big or too vague — break it down further or remove the
-`claude-ready` label until it can be groomed.
+the issue is too big or too vague — break it down further.
+
+Title format (see docs/conventions/issue-naming.md):
+  - Sub-tasks:  <type>(<scope>): <imperative verb phrase>
+                e.g.  feat(typecheck): register extern fn declarations
+  - Epics:      Epic: <track-id>: <noun phrase>          + apply `epic` label
+  - Trackers:   Tracking: <topic> (<YYYY-MM-DD>)         + apply `tracking` label
+
+Labels come from .github/labels.yml — never invent new ones here. The
+template defaults to `needs-grooming`. Once scope, criteria, and files
+are filled in, swap it for `claude-ready` (and add `type:*`, `size:*`,
+optional `area:*`).
 -->
 
 ## Goal

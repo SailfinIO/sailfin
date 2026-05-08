@@ -95,7 +95,7 @@ one `needs-design` issue that follows the handoff contract. Stop.
 
 4. **Generate ONE issue.** Use the handoff contract from `.github/AGENTS.md`:
 
-   - **Title:** `<type>(<scope>): <verb phrase>` — e.g. `feat(typecheck): register extern fn declarations`. Follow Conventional Commit shape so the PR title inherits cleanly.
+   - **Title:** `<type>(<scope>): <verb phrase>` — e.g. `feat(typecheck): register extern fn declarations`. Follow Conventional Commit shape so the PR title inherits cleanly. See `docs/conventions/issue-naming.md` for the full title taxonomy (epics, tracking issues, sub-tasks).
    - **Body** must contain every section below, in this order. Missing any section means the architect will bounce it back:
 
    ```markdown
@@ -151,9 +151,11 @@ one `needs-design` issue that follows the handoff contract. Stop.
    None   <!-- or: #NNN (link) -->
    ```
 
-5. **Apply labels** on the new issue: `needs-design` plus one of
-   `type:feature`, `type:bug`, `type:perf`, `type:refactor`, plus a size label
-   `size:xs`, `size:s`, or `size:m`.
+5. **Apply labels** on the new issue: `needs-design` plus one `type:*` label
+   (`type:feature`, `type:bug`, `type:perf`, `type:refactor`, `type:tech-debt`,
+   or `type:docs`), plus a size label (`size:xs`, `size:s`, or `size:m`),
+   and any relevant `area:*` label. The canonical label registry is
+   `.github/labels.yml`; do not invent new labels.
 
 ## Sizing heuristics
 

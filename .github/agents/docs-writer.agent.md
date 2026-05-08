@@ -67,8 +67,8 @@ make compile && build/native/sailfin run examples/<category>/<file>.sfn
 ## Issue Reporting
 
 When you find documentation that's out of sync with the codebase, you may open a GitHub issue:
-- **Title:** `docs: <what's inaccurate>`
-- **Labels:** `documentation`
+- **Title:** `docs(<scope>): <what's inaccurate>` — Conventional Commit shape; see `docs/conventions/issue-naming.md`
+- **Labels:** `type:docs`, `area:docs`, plus a `size:*` label
 - **Body:** What the docs say vs. what the code actually does, with file references
 
 ## Orchestration & Handoff

@@ -77,7 +77,7 @@ When reviewing issues, assess:
 
 - **User impact** — How many developers hit this? Is there a workaround?
 - **First-impression risk** — Will this turn away someone trying Sailfin for the first time?
-- **Labels** — Suggest: `dx` (developer experience), `ergonomics`, `diagnostics`, `examples`, `documentation`
+- **Labels** — Suggest from the canonical set in `.github/labels.yml`. For DX/ergonomics issues use `area:dx`; for documentation issues use `type:docs` + `area:docs`. Do not invent ad-hoc labels (`ergonomics`, `examples`, …) — propose adding them to `labels.yml` first.
 
 ## Orchestration & Handoff
 
@@ -94,7 +94,7 @@ You are part of an automated agent pipeline. You review PRs for developer experi
 #### DX needs improvement:
 - Add the `needs-changes` label if issues are significant (confusing error messages, unintuitive syntax, broken examples)
 - Comment with specific before/after suggestions the Engineer can act on
-- Label with `dx` for tracking
+- Label with `area:dx` for tracking
 
 #### Release-facing changes:
 - Draft changelog entry text in your review comment for any user-visible changes
