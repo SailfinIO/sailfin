@@ -6,10 +6,26 @@
 # (now retired) recipe used the prior `scripts/build.sh`:
 #   (historical, since retired) SANITIZE=asan,ubsan bash scripts/build.sh --out build/native/sailfin-asan --work-dir build/selfhost/native-asan
 #   (historical, since retired) SANITIZE=msan       bash scripts/build.sh --out build/native/sailfin-msan --work-dir build/selfhost/native-msan
-# Since Stage E PR7 (#383) the prior build script is gone; sanitizer-
-# instrumented selfhost runs are now expected to use
-# `<seed> build -p compiler --work-dir` with `CFLAGS`/`LDFLAGS` set to
-# the sanitizer flags.
+# Since Stage E PR7 (#383) the prior build script is gone. The driver
+# (`<seed> build -p compiler`) hard-codes `clang` as a literal argv
+# element and does NOT consult `CC` / `CFLAGS` / `LDFLAGS`, so
+# rebuilding under a sanitizer requires a `clang` wrapper script on
+# PATH that injects the sanitizer flags before exec'ing the real
+# compiler. Recipe sketch:
+#
+#   cat >/tmp/sanitized-clang/clang <<'WRAPPER'
+#   #!/usr/bin/env bash
+#   exec /usr/bin/clang-18 -fsanitize=address,undefined -fno-omit-frame-pointer "$@"
+#   WRAPPER
+#   chmod +x /tmp/sanitized-clang/clang
+#   PATH="/tmp/sanitized-clang:$PATH" \
+#     <seed> build --no-cache -p compiler \
+#       --work-dir build/selfhost/native-asan \
+#       -o build/native/sailfin-asan
+#
+# A driver-side `--cflags` / `--ldflags` pass-through is tracked as a
+# follow-up (so this PATH-shim dance can retire); see #344's
+# Track 4 / EMIT_RETRIES cutover for the broader driver-flag work.
 #
 # Usage:
 #   scripts/diag_sanitizer_sweep.sh --seed build/native/sailfin-asan --sanitizer asan [--jobs N] [--iters N]

@@ -252,7 +252,9 @@ feature availability.
     transitional one-line bridge to skip the `sfn/runtime-native`
     dep when iterating `[dependencies]` (it lived at
     `runtime/native/`, not `capsules/sfn/runtime-native/`). The
-    script retired outright in Stage D PR4 / Stage E PR5; this
+    script retired as a load-bearing path in Stage D PR4 (when
+    `make compile` flipped over to `<seed> build -p compiler`)
+    and was deleted from the tree in Stage E PR7 (#383); this
     entry is preserved as historical context.
   - **Verification gap intentional.** `sfn build -p compiler`
     runs through every new code path and produces a partial
@@ -386,8 +388,8 @@ feature availability.
   in-tree for `make check`'s stage2/stage3 fixed-point
   comparison (which still needed `WORK_DIR` control the driver
   didn't yet expose) and as an emergency seed-bootstrap escape
-  hatch; both consumers retired in Stage E PR3 (#382) and the
-  script itself was deleted in Stage E PR5 (#383).
+  hatch; both consumers retired in Stage E PR6 (#382) and the
+  script itself was deleted in Stage E PR7 (#383).
 - **Stage E PR3 (#278, shipped).** Parallel-emit fan-out.
   `_cr_run_parallel_emit` writes three newline-delimited lines
   per task (`slug`, `output`, `source`) to a `mktemp`-allocated

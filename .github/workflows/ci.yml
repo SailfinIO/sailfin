@@ -219,6 +219,17 @@ jobs:
           # second-pass build does not clobber the first-pass set.
           # `--no-cache` forces a fresh emit on each pass so the byte
           # comparison is meaningful.
+          #
+          # `stage_capsule_imports` treats existing
+          # `<work-dir>/native/import-context/*.sfn-asm` +
+          # `.layout-manifest` files as cache hits based only on
+          # presence (mtime / `--no-cache` are not consulted for that
+          # short-circuit), so a restored workflow cache or stale
+          # workspace could otherwise produce a vacuous fixed-point
+          # comparison. Wipe both work dirs and their scratch roots
+          # before each build, mirroring `make check`'s targeted-find
+          # cleanup at Makefile:455-460/495-500.
+          rm -rf build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
           mkdir -p build/selfhost/native-selfhost1 build/selfhost/native-selfhost2
           SAILFIN_TEST_SCRATCH="build/selfhost/native-selfhost1/scratch" \
             build/native/sailfin build --no-cache -p compiler \
