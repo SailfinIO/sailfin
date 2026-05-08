@@ -12,13 +12,14 @@
 // runtime/sfn/* link path:
 //
 //   - `runtime/sfn/memory/arena.sfn` compiles to a `.o` and
-//     links into the compiler binary via `scripts/build.sh`'s
-//     allowlist (and via `_compile_runtime_sfn_sources` in
-//     `compiler/src/cli_main.sfn:521` once `make compile`
-//     migrates to `sfn build` at Stage D PR4 — that's why
-//     `runtime/native/capsule.toml`'s `sfn-sources` is also
-//     populated with this file: it keeps the two source-of-truth
-//     paths honest about the same module list).
+//     links into the compiler binary via
+//     `_compile_runtime_sfn_sources` in
+//     `compiler/src/cli_main.sfn:521`. Historically (before
+//     Stage E PR7 / #383) the prior `scripts/build.sh`'s
+//     `RUNTIME_SFN_ALLOW` allowlist was a second source of truth
+//     kept in lockstep with `runtime/native/capsule.toml`'s
+//     `sfn-sources`; with build.sh retired, the manifest is the
+//     sole list.
 //   - The Sailfin-emitted `sfn_arena_sfn_*` symbol family
 //     coexists with the C arena's matching `sfn_arena_*` exports
 //     (no link-time collision). Both arenas are linked into

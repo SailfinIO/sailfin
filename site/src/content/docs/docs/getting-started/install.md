@@ -275,9 +275,10 @@ You can also run the binary directly without installing:
 build/native/sailfin --version
 ```
 
-> **Note:** `make compile` runs `scripts/build.sh` (pure shell, no Python
-> or Conda required) and requires `bash`, `clang`, and LLVM tools including
-> `llvm-link`. `make fetch-seed` also requires `jq`.
+> **Note:** `make compile` routes through `<seed> build -p compiler` — the
+> Sailfin-native driver — and requires `bash`, `clang`, and LLVM tools
+> including `llvm-link`. `make fetch-seed` also requires `jq`. (The prior
+> `scripts/build.sh` orchestrator was retired in Stage E PR7 / #383.)
 
 ---
 

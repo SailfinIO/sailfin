@@ -192,7 +192,7 @@ test_compiler_binary_exports_sfn_str() {
     return "$missing"
 }
 
-# ---- Test: capsule.toml + build.sh stay in lockstep on the new module ----
+# ---- Test: capsule.toml lists the new module ----
 test_manifest_lists_string() {
     local manifest="$REPO_ROOT/runtime/native/capsule.toml"
     if ! grep -qE '^sfn-sources = \[.*"\.\./sfn/string\.sfn".*\]' "$manifest"; then
@@ -203,15 +203,11 @@ test_manifest_lists_string() {
     return 0
 }
 
-test_build_allowlist_lists_string() {
-    local build_script="$REPO_ROOT/scripts/build.sh"
-    if ! grep -qE '^\s*"\$RUNTIME_SRC/sfn/string\.sfn"' "$build_script"; then
-        echo "[test]   RUNTIME_SFN_ALLOW does not list runtime/sfn/string.sfn:"
-        grep -nE 'RUNTIME_SFN_ALLOW' "$build_script" || true
-        return 1
-    fi
-    return 0
-}
+# (Historical: the prior `scripts/build.sh`'s `RUNTIME_SFN_ALLOW`
+# allowlist was a second source of truth kept in lockstep with the
+# manifest. With the script retired in Stage E PR7 / #383, the
+# manifest is the sole source of truth and the allowlist drift-
+# check is gone.)
 
 run_test "sfn check runtime/sfn/string.sfn passes" test_check_clean
 run_test "sfn fmt --check runtime/sfn/string.sfn is canonical" test_fmt_clean
@@ -221,7 +217,6 @@ run_test "sfn emit llvm declares memcmp and memchr trampolines" test_emit_libc_d
 run_test "user emission no longer calls @sailfin_runtime_string_length / @substring / @substring_unchecked / @strings_equal" test_user_emission_is_flipped
 run_test "compiler binary exports defined sfn_str_* and sfn_str_sfn_* symbols" test_compiler_binary_exports_sfn_str
 run_test "runtime/native/capsule.toml sfn-sources lists the string module" test_manifest_lists_string
-run_test "scripts/build.sh RUNTIME_SFN_ALLOW lists the string module" test_build_allowlist_lists_string
 
 echo "[summary] $PASS passed, $FAIL failed"
 if [ "$FAIL" -gt 0 ]; then

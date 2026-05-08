@@ -1771,8 +1771,9 @@ doesn't reinvent it.
   its outputs, doesn't modify it.
 - The `SAILFIN_EFFECT_ENFORCE` env-var contract — the JSON envelope
   reflects whatever severity the gate produced.
-- The build script (`scripts/build.sh`) — pure orchestration stays
-  pure. CI gains `check-fast` as a pre-step in B6, but the build
+- The prior build script (`scripts/build.sh`, since retired in
+  Stage E PR7 / #383; pure orchestration historically stayed pure
+  there). CI gains `check-fast` as a pre-step in B6, but the build
   flow is unchanged.
 
 #### Sequencing rationale

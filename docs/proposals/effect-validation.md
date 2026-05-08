@@ -139,7 +139,7 @@ draws a normal caret-bearing diagnostic.
   file-output variant `make compile` consumes).
 - `compile_tests_to_llvm_file_with_module_imports` in
   `compiler/src/main.sfn` (test compilation; called by `sfn test`).
-- The build pipeline orchestrated by `scripts/build.sh`.
+- The build pipeline historically orchestrated by `scripts/build.sh` (since retired in Stage E PR7 / #383; orchestration now lives in the driver's resolver).
 
 This means: every `make compile` run, every `build/native/sailfin run foo.sfn`
 invocation, every CI run that doesn't explicitly call `sfn check` ships with

@@ -50,7 +50,7 @@ For changes to `compiler/src/llvm/`:
 - `CamelCase` for types/models/capsules, `snake_case` for functions/locals
 - Effects declared minimally and ordered by impact
 - No pipeline operator (`|>`) — use function calls
-- No changes to `scripts/build.sh` to work around compiler bugs — fix the compiler source
+- No changes to the build driver (formerly the now-retired prior `scripts/build.sh`; today the same rule applies to `compiler/src/cli_main.sfn` + `compiler/src/capsule_resolver.sfn`) to work around compiler bugs — fix the compiler source
 - No unnecessary refactoring of surrounding code
 
 ### 7. Test Coverage

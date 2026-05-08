@@ -262,10 +262,11 @@ static void _init_arena_enabled(void)
      * when the arena is active) — without it the in-process multi-
      * module loop hits the unfreed-allocations wall documented in
      * `docs/build-performance.md` Root Cause 5 and SIGSEGVs at
-     * scale. `make compile` already exported `SAILFIN_USE_ARENA=1`
-     * in `scripts/build.sh`; this flip extends the same default to
-     * installed binaries so end users don't have to set the env
-     * var themselves.
+     * scale. `make compile` historically exported
+     * `SAILFIN_USE_ARENA=1` via the prior `scripts/build.sh` (since
+     * retired in Stage E PR7 / #383); this flip extends the same
+     * default to installed binaries so end users don't have to set
+     * the env var themselves.
      *
      * Opt-out: `SAILFIN_USE_ARENA=0` (or `""` or `"false"`) disables
      * the arena and the runtime falls back to the malloc/owned-string-

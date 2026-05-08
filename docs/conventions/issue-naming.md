@@ -98,7 +98,7 @@ fix(lowering): emit valid LLVM for empty struct literal
 perf(ci): cache compiler binary across CI jobs
 refactor(emit): split emit_native_ops into ops/ submodule
 docs(spec): document Result and ? operator semantics
-chore(build): retire scripts/build.sh post --work-dir cutover
+chore(build): delete prior scripts/build.sh now retired post --work-dir cutover
 ```
 
 The `<type>` prefix and the `type:<type>` label MUST agree:

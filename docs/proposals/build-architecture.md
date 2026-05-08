@@ -1,5 +1,11 @@
 # Proposal: Unified Build Architecture for Sailfin
 
+> **Note (2026-05-08).** The prior `scripts/build.sh` orchestrator was
+> retired in Stage E PR7 (#383). Every reference to `scripts/build.sh`
+> below describes the formerly-load-bearing historical state and is
+> preserved for context. Fresh-clone bootstrap is now
+> `install.sh && sfn build -p compiler` per Stage D exit criteria.
+
 Status: Stages A and B fully shipped. **Stage C cache milestone shipped (PR1–1f / #254–#259 / 2026-04-28).** Stage C broader items (C2 artifact layout / C3 stdlib CI gate / C4 `sfn package` / C5 `sfn bench` + `sfn bootstrap`) and Stages D–G remain.
 Date: 2026-04-17 (drafted) · 2026-04-25 (status refreshed) · 2026-04-25 (Stage B PR1 landed) · 2026-04-25 (PR2/A1 typecheck hookup landed) · 2026-04-25 (PR2/A2 resolver wiring landed) · 2026-04-26 (PR2 `sfn test` migration + A4 deletion landed) · 2026-04-28 (PR3 `llvm-objcopy --weaken` retired via path-norm fix; libextract decoupled) · 2026-04-28 (Stage C cache milestone PR1–1f shipped)
 Authors: Core Team
@@ -150,8 +156,9 @@ Unchanged from the original plan (Part 5):
 
 - **Stage C** — In-process driver for user capsules; content-addressed
   cache; `sfn package` and `sfn bench` subsume the shell scripts.
-- **Stage D** — Compiler builds itself via `sfn build`; delete
-  `scripts/build.sh` and the Makefile.
+- **Stage D** — Compiler builds itself via `sfn build`; delete the
+  prior `scripts/build.sh` (since retired in Stage E PR7) and the
+  Makefile.
 - **Stage E** — Long-lived process, arena, incremental builds; hit the
   <5 min build target.
 - **Stage F** — Sailfin runtime rewrite; `sfn/runtime-native` retires.
@@ -166,22 +173,26 @@ Unchanged from the original plan (Part 5):
   `docs/proposals/check-architecture.md`). Provides the parser /
   typecheck / effect surface the unified driver reuses.
 
-### Build-script fixups still load-bearing (unchanged)
+### Build-script fixups historically load-bearing (now retired)
 
-- `EMIT_RETRIES=3` (`scripts/build.sh:51`) — Stage 4 attempted
+- `EMIT_RETRIES=3` (formerly at `scripts/build.sh:51`, since retired
+  alongside the script in Stage E PR7 / #383) — Stage 4 attempted
   `EMIT_RETRIES=1` and reverted on April 25 because `instructions.sfn`
-  flakes. Stage D is when this can finally retire.
+  flaked. The retry knob now lives only in the driver (Track 4 M3
+  cutover gated).
 - The fallback paths in `compile_to_llvm_file_with_module`
-  (`compiler/src/main.sfn:480`) are also still live.
+  (formerly `compiler/src/main.sfn:480`) were retired in #380 (Stage E
+  PR3 cascade deletion).
 
 ## Summary
 
 Sailfin today has two largely independent build pipelines:
 
-1. **`scripts/build.sh`** — a ~970-line bash orchestrator that self-hosts the
-   compiler from a released seed. It discovers sources, spawns the seed once
-   per module, stages an import-context directory, validates the emitted LLVM
-   IR with retries, then llvm-link-merges and clang-links the result.
+1. **`scripts/build.sh`** (since retired in Stage E PR7 / #383) — historically
+   a ~970-line bash orchestrator that self-hosted the compiler from a released
+   seed. It discovered sources, spawned the seed once per module, staged an
+   import-context directory, validated the emitted LLVM IR with retries, then
+   llvm-link-merged and clang-linked the result.
 2. **`sfn build` / `sfn run` / `sfn test`** — a single-file CLI in
    `compiler/src/cli_main.sfn` that compiles one `.sfn` file to LLVM IR, then
    clang-links it against a pre-built runtime bundle. `sfn run` and `sfn test`
@@ -208,9 +219,11 @@ architecture must land first so the runtime rewrite can consume it.
 
 ### 1.1 Building the compiler (`make compile`)
 
-`make compile` delegates to `scripts/build.sh`, which is the actual build
-driver. The Makefile mainly handles seed fetching, output-directory plumbing,
-and re-running the script with the right environment.
+Historically `make compile` delegated to the prior `scripts/build.sh`
+(since retired in Stage E PR7 / #383), which was the actual build driver.
+The Makefile mainly handled seed fetching, output-directory plumbing, and
+re-running the script with the right environment. The driver
+(`<seed> build -p compiler`) now plays both roles.
 
 Flow:
 
@@ -225,9 +238,11 @@ Flow:
    compiler + runtime sources are used.
 3. **Import-context staging.** For every source, the seed runs
    `seed emit native <file>` once to produce a `.sfn-asm` textual IR.
-   `scripts/build.sh` then derives the corresponding `.layout-manifest`
-   by `grep`-extracting `.layout` lines from the emitted `.sfn-asm`
-   (the seed does not produce the manifest as an independent output).
+   The prior (now retired) `scripts/build.sh` historically derived
+   the corresponding `.layout-manifest` by `grep`-extracting
+   `.layout` lines from the emitted `.sfn-asm` (the seed does not
+   produce the manifest as an independent output); this work now
+   happens inside the driver's resolver.
    Together these staged artifacts form the cross-module interface the
    second-pass emit depends on. They are written under
    `build/selfhost/native/seed_cwd/build/native/import-context/`.
@@ -328,10 +343,11 @@ after `sfn add` downloads a `.sfnpkg` from the configured registry
 
 ### 2.1 Two build systems
 
-The compiler's build graph is resolved by `scripts/build.sh` (bash,
-capsule-aware, produces real per-module `.ll` artifacts). A user program's
-build graph is resolved by `inline_imports_for_source` (Sailfin, textually
-inlines everything into one synthetic source). The two disagree on most
+Historically the compiler's build graph was resolved by the prior
+`scripts/build.sh` (since retired in Stage E PR7) — bash, capsule-aware,
+producing real per-module `.ll` artifacts. A user program's build graph
+was resolved by `inline_imports_for_source` (Sailfin, textually inlining
+everything into one synthetic source). The two disagreed on most
 things that matter:
 
 | Concern | `build.sh` | `sfn build` / `run` |
@@ -412,9 +428,11 @@ and `obj/prelude.o`. `sfn test`'s `_clang_link_test_cmd` has a broader
 coupling — it additionally pulls in `src/sailfin_sha256.c` and
 `src/sailfin_base64.c` (every `.c` under `src/` except `native_driver.c`,
 which supplies the binary's `main` and is excluded in the test path).
-The compiler's own self-host build (`scripts/build.sh`) links every
-runtime source including `native_driver.c`. So the runtime bundle is
-three different shapes depending on which code path consumes it.
+The compiler's own self-host build (formerly the now-retired
+prior `scripts/build.sh`; now via the driver's
+`_clang_link_multi_with_opt`) links every runtime source including
+`native_driver.c`. So the runtime bundle was historically three
+different shapes depending on which code path consumed it.
 
 The installer copies these assets to `runtime/native/` next to the
 binary and resolves at runtime by probing six candidate paths in
@@ -558,9 +576,10 @@ it from day one.
 The future system should satisfy the following, in priority order:
 
 1. **One build driver.** `sfn build` is the only code path that turns
-   sources into artifacts. `scripts/build.sh` is deleted, not shrunk.
-   The bootstrap is a Makefile target (or `sfn bootstrap` subcommand)
-   that fetches a seed and invokes `seed sfn build -p compiler`.
+   sources into artifacts. The prior `scripts/build.sh` was deleted in
+   Stage E PR7 (#383), not shrunk; it is retired. The bootstrap is a
+   Makefile target (or `sfn bootstrap` subcommand) that fetches a seed
+   and invokes `seed sfn build -p compiler`.
 2. **No orchestration layer above `sfn`.** The Makefile retires in
    parallel with `build.sh`. Anything `make X` does today becomes either
    a `sfn X` subcommand or a one-line convenience wrapper. Steady-state
@@ -1090,7 +1109,7 @@ Its only job is to put the schema on disk so Stage B can lean on it.
 - `inline_imports_for_source` stays as the fallback in `cli_main.sfn:590`.
 - `sfn build -p <path>` is not added.
 - The `llvm-objcopy --weaken` path stays.
-- No changes to `scripts/build.sh` or the Makefile.
+- No changes to the prior `scripts/build.sh` (since retired in Stage E PR7) or the Makefile.
 - Do not move `runtime/prelude.sfn` on disk yet (the manifest's `entry`
   can point at the existing path with `..`). Moving it is a Stage B
   concern because every consumer's slug changes.
@@ -1425,16 +1444,19 @@ with `build.sh`, CI cache-hit floor) still stand and break down as:
   and `tarball` fields beyond what `tools/package.sh` emitted.
 - **C5 — `sfn bench` + `sfn bootstrap`.** Replace
   `scripts/bench_compile.sh` and (for upgrade users) `install.sh`.
-  After this, `scripts/build.sh` is the only build-related shell
-  script remaining — Stage D retires it.
+  After this, the prior `scripts/build.sh` was the only
+  build-related shell script remaining — Stage D / Stage E PR7
+  retired it.
 
-`scripts/build.sh` continues to build the compiler through Stage
-C; Stage D is the cutover.
+The prior `scripts/build.sh` (since retired in Stage E PR7 / #383)
+historically continued to build the compiler through Stage C; Stage
+D was the cutover that began to retire it (with PR7 completing the
+deletion).
 
 **Exit criteria (unchanged):** Every stdlib capsule in `capsules/sfn/*`
-builds with `sfn build -p <path>`, matches `build.sh` output
-byte-for-byte (or close enough that any drift is documented), and
-is covered by cache-hit assertions in CI.
+builds with `sfn build -p <path>`, matches the historical (now retired)
+`build.sh` output byte-for-byte (or close enough that any drift is
+documented), and is covered by cache-hit assertions in CI.
 
 ### Stage D — Compiler builds itself; `build.sh` and the Makefile retire
 
@@ -1442,25 +1464,28 @@ is covered by cache-hit assertions in CI.
 
 - Teach the driver to handle `kind = "binary"` capsules that depend on
   `kind = "runtime"` capsules (C runtime + Sailfin prelude).
-- Port the llvm-link + C runtime + final link steps out of `build.sh`
-  into the driver's link phase.
+- Port the llvm-link + C runtime + final link steps out of the
+  prior `build.sh` (since retired) into the driver's link phase.
 - Cross-compile lands via `sfn build --target=<triple>` reading
   `[targets.*]` from the manifest. The `ci-cross-windows` Makefile
   target is deleted; CI calls `sfn build --target=x86_64-w64-mingw32`.
-- `scripts/build.sh` is **deleted**.
+- `scripts/build.sh` is **deleted** (retired in Stage E PR7 / #383).
 - The Makefile is **deleted** (or shrunk to a 5-line convenience wrapper
   for contributors who prefer `make` muscle memory). `make compile` →
   `sfn build -p compiler`. `make test` → `sfn test`. `make check` →
   `sfn build --check-determinism`. `make package` → `sfn package`.
 - The bootstrap sequence is now: `install.sh` (or `sfn bootstrap`)
   fetches a seed, then `sfn build -p compiler`.
-- Retry/validation logic from `build.sh` survives only as
-  `sfn build --isolate-modules` (opt-in, diagnostic only). Default path
-  is single-process, no retries. If the compiler emits bad IR, the
-  build fails loudly and the bad IR is dumped for inspection.
+- Retry/validation logic from the prior (retired) `build.sh` survives
+  only as `sfn build --isolate-modules` (opt-in, diagnostic only).
+  Default path is single-process, no retries. If the compiler emits
+  bad IR, the build fails loudly and the bad IR is dumped for
+  inspection.
 
-**Exit criteria:** `scripts/build.sh` and the Makefile no longer exist.
-Fresh-clone bootstrap works with `install.sh && sfn build -p compiler`.
+**Exit criteria:** The prior `scripts/build.sh` and the Makefile
+(legacy orchestration) no longer exist (build.sh retired in Stage E
+PR7 / #383; Makefile retirement deferred to a later PR). Fresh-clone
+bootstrap works with `install.sh && sfn build -p compiler`.
 `compile_to_llvm_file_with_module`'s fallback paths are gone — the
 structured pipeline either succeeds or fails.
 

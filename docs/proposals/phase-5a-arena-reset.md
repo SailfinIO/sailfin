@@ -21,8 +21,11 @@ only reclaimed at process exit.
   `runtime/native/src/sailfin_arena.c:80` and zeroes `page->used` on
   every page in microseconds. No backing pages are freed; they are
   reused on the next allocation burst.
-- The arena is **default-on for selfhost** via
-  `scripts/build.sh:130 (export SAILFIN_USE_ARENA="${SAILFIN_USE_ARENA:-1}")`.
+- The arena is **default-on for selfhost** via the runtime-side
+  `_init_arena_enabled` default (#324). Historically the prior
+  `scripts/build.sh:130` (since retired in Stage E PR7 / #383)
+  set `export SAILFIN_USE_ARENA="${SAILFIN_USE_ARENA:-1}"` for
+  this purpose; the runtime default supersedes that export.
   It is **not** default-on for installed binaries — end users running
   `sfn check` get malloc unless they export the env var. (The
   "default does not set the flag" prose at
@@ -226,8 +229,10 @@ RSS <2 GB, exit code matches a shell loop over the same files.
 ## 10. Recommendation: ship Phase 5a, do not pull Phase 5 forward
 
 Pulling Phase 5 (long-lived `make compile`) forward is 2-4 weeks
-touching `scripts/build.sh`, the per-module entry point, and
-parallel-build assumptions. Phase 5a is 1-2 days, ships the same
+touching the prior `scripts/build.sh` (since retired in Stage E PR7;
+the equivalent driver work lives in the resolver), the per-module
+entry point, and parallel-build assumptions. Phase 5a is 1-2 days,
+ships the same
 correctness story for `sfn check` / `sfn test` / `sfn lsp`, and the
 mark/rewind primitive is exactly what Phase 5 will need anyway. No
 work is wasted.

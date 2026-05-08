@@ -1148,10 +1148,10 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         // and the default `<DIR>/native/sailfin` output) instead of
         // the CWD-relative `./build/...` layout. Empty preserves the
         // legacy paths byte-for-byte. This is the driver-side
-        // equivalent of `scripts/build.sh`'s `WORK_DIR` /
-        // `SEED_CWD` derivation, so `make check`'s stage2/stage3
-        // fixed-point can move off the chdir-based shell flow
-        // (#344-step-2).
+        // equivalent of the prior `scripts/build.sh`'s `WORK_DIR` /
+        // `SEED_CWD` derivation (the script was retired in Stage E
+        // PR7 / #383); `make check`'s stage2/stage3 fixed-point now
+        // routes through this flag.
         let mut work_dir: string = "";
 
         // Parse args: support -o OUTPUT and -p PATH in any combination.
@@ -1317,13 +1317,15 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
             // `--work-dir <root>` overrides the canonical
             // per-capsule layout: when set, the default output is
             // `<root>/native/sailfin` for binary builds (matching
-            // `scripts/build.sh`'s `OUT="$WORK_DIR/.../native/sailfin"`
-            // shape) or `<root>/sailfin/program.o` for libraries.
-            // The work-dir form is meant for build orchestration
-            // (parity with `build.sh` for `make check`'s
-            // stage2/stage3 fixed-point comparison), so it
-            // explicitly takes precedence over the scoped
-            // `build/capsules/...` layout.
+            // the prior `scripts/build.sh`'s historical
+            // `OUT="$WORK_DIR/.../native/sailfin"` shape; the
+            // script was retired in Stage E PR7 / #383) or
+            // `<root>/sailfin/program.o` for libraries. The
+            // work-dir form is meant for build orchestration
+            // (now exclusively `make check`'s stage2/stage3
+            // fixed-point comparison; formerly also the prior
+            // build.sh), so it explicitly takes precedence over
+            // the scoped `build/capsules/...` layout.
             if work_dir.length > 0 {
                 if no_link { out_path = sailfin_cache_dir + "/program.o"; } else {
                     out_path = work_dir + "/native/sailfin";
