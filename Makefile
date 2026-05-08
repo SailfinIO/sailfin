@@ -440,6 +440,23 @@ check:
 	@# level for stage2/stage3 are silently ignored under the
 	@# driver path until the driver grows an `--opt` flag.
 	@mkdir -p build/selfhost/native-seedcheck
+	@# Wipe stale import-context + scratch artifacts so the
+	@# stage_capsule_imports cache-hit short-circuit (treats existing
+	@# `.sfn-asm` + `.layout-manifest` as authoritative without source-
+	@# change invalidation) cannot serve a previous run's IR.
+	@# Mirrors `make rebuild`'s `build/native/import-context` wipe at
+	@# Makefile:654-656; without it, a re-run after a source change
+	@# could compile against stale staged modules and silently
+	@# undermine the fixed-point hash-diff. Per-stage, narrow to the
+	@# two file shapes that matter (rather than `rm -rf` the whole
+	@# work-dir) so the directory mtime survives for incremental
+	@# tooling that watches it.
+	@if [ -d build/selfhost/native-seedcheck/native/import-context ]; then \
+		find build/selfhost/native-seedcheck/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
+	fi
+	@if [ -d build/selfhost/native-seedcheck/scratch/capsules ]; then \
+		find build/selfhost/native-seedcheck/scratch/capsules -type f -name '*.ll' -delete; \
+	fi
 	@SAILFIN_TEST_SCRATCH="build/selfhost/native-seedcheck/scratch" \
 		build/native/sailfin build --no-cache -p compiler \
 			--work-dir build/selfhost/native-seedcheck \
@@ -470,6 +487,17 @@ check:
 	@# stage2 (or `make compile`) populated. See the stage2
 	@# block above for the rationale.
 	@mkdir -p build/selfhost/native-stage3
+	@# Same wipe as stage2 — stage_capsule_imports's cache-hit
+	@# probe ignores source mtime, so stale staged modules from a
+	@# prior `make check` run would invisibly satisfy stage3 and
+	@# defeat the fixed-point comparison. See the stage2 block
+	@# above for the rationale.
+	@if [ -d build/selfhost/native-stage3/native/import-context ]; then \
+		find build/selfhost/native-stage3/native/import-context -type f \( -name '*.sfn-asm' -o -name '*.layout-manifest' \) -delete; \
+	fi
+	@if [ -d build/selfhost/native-stage3/scratch/capsules ]; then \
+		find build/selfhost/native-stage3/scratch/capsules -type f -name '*.ll' -delete; \
+	fi
 	@SAILFIN_TEST_SCRATCH="build/selfhost/native-stage3/scratch" \
 		build/native/sailfin-seedcheck build --no-cache -p compiler \
 			--work-dir build/selfhost/native-stage3 \
