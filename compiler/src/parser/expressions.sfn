@@ -4,6 +4,7 @@
 // literals, binary/unary operators, member access, calls, lambdas, and more.
 import {
     Block,
+    Capture,
     Expression,
     ObjectField,
     Parameter,
@@ -995,12 +996,14 @@ fn parse_lambda_expression(state: ExpressionTokens) -> ExpressionParseResult {
     let parsed_block = parse_block_for_lambda(block_parser);
     let body = parsed_block.block;
 
+    let empty_captures: Capture[] = [];
     return ExpressionParseResult {
         state: current,
         expression: Expression.Lambda {
             parameters: parameters,
             body: body,
-            return_type: return_type
+            return_type: return_type,
+            captures: empty_captures
         },
         success: true
     };

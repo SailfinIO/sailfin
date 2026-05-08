@@ -32,6 +32,25 @@ struct SourceSpan {
     end_column: number;
 }
 
+// Inferred lambda capture descriptor populated by the typechecker's
+// free-variable walk (issue #458, A1 of #450 M1.5). One entry per
+// distinct enclosing-scope name referenced from the lambda body, in
+// first-use order — deterministic so stage A2 (env-struct emit) and
+// stage A3 (call-site dispatch) can index by position. `type_text`
+// echoes the enclosing binding's annotation when available
+// (parameters and `let x: T = ...`); empty otherwise. `by_value`
+// flips false for non-primitive type annotations so the LLVM lowering
+// in stage A2 knows to emit a heap-pointer slot. `mutable` records
+// whether the enclosing binding was declared `let mut`, so a future
+// mutating-capture pass can reject writes to immutable bindings.
+struct Capture {
+    name: string;
+    type_text: string;
+    by_value: boolean;
+    mutable: boolean;
+    span: SourceSpan?;
+}
+
 enum Expression {
     // Per-expression source spans land on the variants the effect
     // checker needs for call-site attribution (B1, see
@@ -59,7 +78,12 @@ enum Expression {
     Lambda {
         parameters: Parameter[],
         body: Block,
-        return_type: TypeAnnotation?
+        return_type: TypeAnnotation?,
+        // Captures are appended last so the seed compiler's positional
+        // GEP indexing for the existing fields stays stable. The parser
+        // emits an empty list; the typechecker populates the inferred
+        // set via `analyze_lambda_captures` in `typecheck_captures`.
+        captures: Capture[]
     },
     Range { start: Expression, end: Expression },
     Cast { operand: Expression, target_type: TypeAnnotation },
