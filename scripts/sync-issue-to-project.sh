@@ -60,8 +60,10 @@ if [[ -z "${GH_TOKEN:-}" ]]; then
 fi
 
 run_query() {
-  # $1 = jq-style query for variables, $2 = graphql query
-  # Reads stdin as variables JSON.
+  # $1 = GraphQL query string. Variables JSON is read from stdin and merged
+  # into the request body. Returns the raw `gh api` response on stdout —
+  # callers must check `.errors` and `.data.*` themselves; this helper does
+  # not classify failures.
   local query="$1"
   gh api graphql --input - <<EOF
 {
@@ -71,12 +73,35 @@ run_query() {
 EOF
 }
 
+# Run a GraphQL mutation and abort the script if the response carries
+# `errors[]` or is missing the expected payload key. Echoes a short diagnostic
+# to stderr and returns non-zero so callers (and CI) see the failure.
+#   $1 = GraphQL query string
+#   $2 = jq path to the expected non-null field (e.g. ".data.foo.bar.id")
+#   $3 = human label for log output
+# Reads variables JSON from stdin.
+run_mutation() {
+  local query="$1" expect="$2" label="$3"
+  local resp
+  resp=$(run_query "$query")
+  if jq -e '.errors? // empty | length > 0' <<<"$resp" >/dev/null; then
+    echo "::error::$label failed: $(jq -c '.errors' <<<"$resp")" >&2
+    return 1
+  fi
+  if ! jq -e "$expect // empty | length > 0" <<<"$resp" >/dev/null; then
+    echo "::error::$label returned no $expect: $(jq -c '.' <<<"$resp")" >&2
+    return 1
+  fi
+  return 0
+}
+
 # ---- 1) Resolve project metadata once ----------------------------------
 PROJECT_META_QUERY='query($owner: String!, $number: Int!) {
   organization(login: $owner) {
     projectV2(number: $number) {
       id
-      fields(first: 50) {
+      fields(first: 100) {
+        pageInfo { hasNextPage }
         nodes {
           ... on ProjectV2SingleSelectField { id name options { id name } }
         }
@@ -87,6 +112,14 @@ PROJECT_META_QUERY='query($owner: String!, $number: Int!) {
 
 PROJECT_META=$(jq -n --arg owner "$PROJECT_OWNER" --argjson number "$PROJECT_NUMBER" \
   '{owner: $owner, number: $number}' | run_query "$PROJECT_META_QUERY")
+
+# Guard against a future where the project has more than 100 fields and the
+# ones we need fall outside the first page. Cheaper to fail loud than silently
+# skip the sync.
+if [[ "$(echo "$PROJECT_META" | jq -r '.data.organization.projectV2.fields.pageInfo.hasNextPage // false')" == "true" ]]; then
+  echo "::error::project has >100 fields; bump fields(first:) and re-run" >&2
+  exit 1
+fi
 
 PROJECT_ID=$(echo "$PROJECT_META" | jq -r '.data.organization.projectV2.id // empty')
 if [[ -z "$PROJECT_ID" ]]; then
@@ -203,10 +236,13 @@ sync_one() {
   local add_resp
   add_resp=$(jq -n --arg projectId "$PROJECT_ID" --arg contentId "$node_id" \
     '{projectId: $projectId, contentId: $contentId}' | run_query "$add_query")
+  if jq -e '.errors? // empty | length > 0' <<<"$add_resp" >/dev/null; then
+    echo "::error::add-to-project failed for #$num: $(jq -c '.errors' <<<"$add_resp")" >&2
+    return 1
+  fi
   item_id=$(jq -r '.data.addProjectV2ItemById.item.id // empty' <<<"$add_resp")
   if [[ -z "$item_id" ]]; then
-    echo "::warning::add-to-project failed for #$num" >&2
-    echo "$add_resp" >&2
+    echo "::error::add-to-project returned no item id for #$num: $(jq -c '.' <<<"$add_resp")" >&2
     return 1
   fi
 
@@ -239,7 +275,8 @@ sync_one() {
       jq -n --arg projectId "$PROJECT_ID" --arg itemId "$item_id" \
             --arg fieldId "$field_id" --arg optionId "$opt_id" \
         '{projectId: $projectId, itemId: $itemId, fieldId: $fieldId, optionId: $optionId}' \
-        | run_query "$set_query" >/dev/null
+        | run_mutation "$set_query" '.data.updateProjectV2ItemFieldValue.projectV2Item.id' \
+            "set $field_name=$opt_name on #$num" || return 1
       echo "  → #$num $field_name=$opt_name"
     else
       local clear_query='mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!) {
@@ -249,7 +286,8 @@ sync_one() {
       }'
       jq -n --arg projectId "$PROJECT_ID" --arg itemId "$item_id" --arg fieldId "$field_id" \
         '{projectId: $projectId, itemId: $itemId, fieldId: $fieldId}' \
-        | run_query "$clear_query" >/dev/null
+        | run_mutation "$clear_query" '.data.clearProjectV2ItemFieldValue.projectV2Item.id' \
+            "clear $field_name on #$num" || return 1
       echo "  → #$num $field_name=(cleared)"
     fi
   }
