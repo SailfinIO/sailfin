@@ -467,15 +467,15 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
         // Slice E.1 (#488): default unsuffixed integer literals to `i64`.
         // The integer-literal short-circuit fires when the literal has
         // no decimal point and the typing pressure is either empty
-        // (no annotation), `int`, the deprecated `number` alias, or an
-        // explicit narrow integer LLVM type (`i64`/`i32`/`i16`/`i8`).
-        // Decimal/fractional literals and explicit `double`/`float`
-        // pressure still fall through to the `double` path below.
+        // (no annotation), `int`, or an explicit narrow integer LLVM
+        // type (`i64`/`i32`/`i16`/`i8`). Decimal/fractional literals
+        // and explicit `double`/`float` pressure (which is what the
+        // deprecated `: number` alias maps to once `map_primitive_type`
+        // runs) fall through to the `double` path below.
         if is_integer_literal(stripped) {
             let mut integer_target: string = "";
             if trimmed_expected.length == 0 { integer_target = "i64"; }
             if trimmed_expected == "int" { integer_target = "i64"; }
-            if trimmed_expected == "number" { integer_target = "i64"; }
             if trimmed_expected == "i64" { integer_target = "i64"; }
             if trimmed_expected == "i32" { integer_target = "i32"; }
             if trimmed_expected == "i16" { integer_target = "i16"; }
