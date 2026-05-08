@@ -56,6 +56,9 @@ safe-outputs:
   add-labels:
     max: 5
   submit-pull-request-review:
+  # Roll workflow-failure reports up under a single `[aw] Failed runs`
+  # parent issue instead of opening a fresh issue per failure.
+  group-reports: true
 
 timeout-minutes: 20
 ---

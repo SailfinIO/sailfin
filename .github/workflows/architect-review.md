@@ -42,6 +42,9 @@ safe-outputs:
   remove-labels:
     max: 2
   add-comment:
+  # Roll workflow-failure reports up under a single `[aw] Failed runs`
+  # parent issue instead of opening a fresh issue per failure.
+  group-reports: true
 
 timeout-minutes: 15
 ---
