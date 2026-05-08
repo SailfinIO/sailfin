@@ -3,7 +3,8 @@
 # binaries.
 #
 # Until this issue, only selfhost builds (`make compile`/`make check`/
-# `make test`) got the arena via `scripts/build.sh`'s
+# `make test`) got the arena via the prior (now retired)
+# `scripts/build.sh`'s historical
 # `SAILFIN_USE_ARENA=${SAILFIN_USE_ARENA:-1}` export. End-user
 # installations (e.g. `sfn check` after `make install`) ran on the
 # malloc path unless the user manually opted in.

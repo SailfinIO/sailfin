@@ -9,12 +9,16 @@
 # `_compile_runtime_sfn_sources` against a synthetic workspace.
 # This test instead pins the production link path: when
 # `runtime/native/capsule.toml` declares
-# `sfn-sources = ["../sfn/memory/arena.sfn"]` and
-# `scripts/build.sh`'s `RUNTIME_SFN_ALLOW` allowlist contains
-# the same file, the resulting `build/native/sailfin` binary
-# exports five `sfn_arena_sfn_*` symbols sourced from Sailfin
-# emission — coexisting with the C arena's matching
-# `sfn_arena_*` exports.
+# `sfn-sources = ["../sfn/memory/arena.sfn"]`, the resulting
+# `build/native/sailfin` binary exports five `sfn_arena_sfn_*`
+# symbols sourced from Sailfin emission — coexisting with the C
+# arena's matching `sfn_arena_*` exports.
+#
+# Historical note: the prior `scripts/build.sh`'s
+# `RUNTIME_SFN_ALLOW` allowlist (since retired in Stage E PR7 /
+# #383) was a second source of truth kept in lockstep with the
+# manifest. With build.sh retired, the manifest is the sole
+# source of truth and the allowlist drift-check below is gone.
 #
 # The test asserts both the new (Sailfin) and the old (C)
 # symbol families are present. The C arena assertion guards
@@ -54,27 +58,6 @@ test_manifest_lists_arena() {
     if ! grep -qE '^sfn-sources = \[.*"\.\./sfn/memory/arena\.sfn".*\]' "$manifest"; then
         echo "[test]   sfn-sources does not list ../sfn/memory/arena.sfn:"
         grep -nE 'sfn-sources' "$manifest" || true
-        return 1
-    fi
-    return 0
-}
-
-# ---- Test: build.sh allowlist enumerates the same arena module ----
-test_build_allowlist_lists_arena() {
-    local build_script="$REPO_ROOT/scripts/build.sh"
-    if [ ! -f "$build_script" ]; then
-        echo "[test]   missing build script: $build_script"
-        return 1
-    fi
-    # The two sources of truth (`sfn-sources` in capsule.toml and
-    # `RUNTIME_SFN_ALLOW` in build.sh) must remain in lockstep so
-    # `make compile` and `sfn build -p compiler` produce
-    # byte-identical bitcode. Drift here is the trip-wire for the
-    # determinism-via-coexistence invariant called out in the
-    # capsule.toml comment.
-    if ! grep -qE '^\s*"\$RUNTIME_SRC/sfn/memory/arena\.sfn"' "$build_script"; then
-        echo "[test]   RUNTIME_SFN_ALLOW does not list runtime/sfn/memory/arena.sfn:"
-        grep -nE 'RUNTIME_SFN_ALLOW' "$build_script" || true
         return 1
     fi
     return 0
@@ -155,7 +138,6 @@ test_nm_grep_sfn_arena_spec_names() {
 }
 
 run_test "runtime/native/capsule.toml sfn-sources lists the arena module" test_manifest_lists_arena
-run_test "scripts/build.sh RUNTIME_SFN_ALLOW lists the arena module" test_build_allowlist_lists_arena
 run_test "compiler binary exports five sfn_arena_sfn_* Sailfin symbols" test_compiler_binary_exports_sfn_arena_sfn
 run_test "compiler binary still exports five sfn_arena_* C arena symbols" test_compiler_binary_keeps_c_arena_exports
 run_test "nm | grep sfn_arena_alloc matches at least one symbol (#394 spec)" test_nm_grep_sfn_arena_spec_names

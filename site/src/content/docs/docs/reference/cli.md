@@ -391,7 +391,7 @@ The repository Makefile provides higher-level build orchestration for the self-h
 | Target | Description |
 |---|---|
 | `make compile` | Build the native compiler binary from a released seed, using the self-hosting pipeline. Skips rebuild if the binary is up to date. |
-| `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler` (the self-hosting driver path); `scripts/build.sh` is no longer involved unless invoked manually for `make check`'s stage2/stage3 fixed-point comparison. |
+| `make rebuild` | Force a rebuild from a released seed regardless of timestamps. Routes through `<seed> build -p compiler` (the self-hosting driver path); the prior `scripts/build.sh` orchestrator was retired in Stage E PR7 (#383) and is no longer in-tree. |
 | `make install` | Install the built compiler binary into `$(BINDIR)` (default: `~/.local/bin`). Requires `make compile` to have run first. |
 | `make check` | Compile (if needed), build a `sailfin-seedcheck` binary, verify it can run `hello-world.sfn`, then run the full test suite against it. This is the authoritative CI gate. |
 | `make test` | Run the full Sailfin-native test suite (unit + integration + e2e). Requires `make compile` first. |
@@ -409,9 +409,7 @@ The repository Makefile provides higher-level build orchestration for the self-h
 
 ### Parallelism
 
-`<seed> build -p compiler` (the path `make rebuild` now routes through, as of Stage E PR2) currently runs `stage_capsule_imports` and `compile_capsule_modules` in tight sequential loops — `BUILD_JOBS` no longer plumbs through. Cold builds take ~6 min as a result, vs. `bash scripts/build.sh`'s historical ~2 min with `--jobs 4`. Closing the gap is Stage E PR3 scope: the resolver will fan its per-module subprocess emits across `nproc` workers and pick up the parallelism build.sh used to provide.
-
-For now, if you specifically need a parallel cold build (e.g., for a regression bisect under tight CI time budgets), invoke `bash scripts/build.sh` directly — it stays in-tree and still honours `BUILD_JOBS` / `--jobs N`.
+`<seed> build -p compiler` (the path `make rebuild` now routes through, as of Stage E PR2) runs `stage_capsule_imports` and `compile_capsule_modules` in parallel via the resolver's xargs fan-out (Stage E PR3 / #278). Cold builds measure **~2m27s** on a 4-core box with the parallel resolver — matching the historical ~2 min with `--jobs 4` that the prior (now retired) `bash scripts/build.sh` used to provide. Parallelism is controlled by `SAILFIN_BUILD_JOBS` (default: `nproc`, clamped to `[1, 8]`); `SAILFIN_BUILD_JOBS=1` keeps the pre-PR3 sequential path available as a regression-bisect escape hatch. The formerly-load-bearing `scripts/build.sh` was deleted in Stage E PR7 (#383); there is no longer a parallel-build escape hatch outside the driver.
 
 The `~2 GB-per-job` divisor reflects the per-module peak RSS documented in `docs/build-performance.md` → Phase 6 (heaviest module ~1.76 GB after the `lowering_core.sfn` decomposition). With 2 jobs running the heaviest pair concurrently, peak concurrent memory is ~3.5 GB — fits the macOS 7 GB ceiling with OS + Actions agent overhead. Hosts with more RAM are still capped by `nproc` first.
 

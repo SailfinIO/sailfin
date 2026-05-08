@@ -6,8 +6,7 @@
 # segfault during `sfn build -p compiler`. Plain dash on Ubuntu has been
 # observed to crash the seed reproducibly via Make even though direct
 # bash invocations of the same command succeed; switching the recipe
-# shell to bash sidesteps the issue and matches what `scripts/build.sh`
-# (`#!/usr/bin/env bash`) already assumed.
+# shell to bash sidesteps the issue.
 SHELL := /bin/bash
 
 # Silence noisy clang warning when compiling embedded-IR modules that carry a
@@ -57,7 +56,7 @@ TIMEOUT_CMD ?= timeout
 endif
 
 # Parallelism for the compiler build orchestrator's per-module emit + clang
-# compile (passed through to scripts/build.sh as JOBS).
+# compile.
 #
 # Default: auto-detected from CPU count and total RAM via
 # scripts/detect_build_jobs.sh, with a per-job budget of 5 GB (heaviest module
@@ -65,9 +64,11 @@ endif
 # caps at 2 because the M1 GitHub runner has only 7 GB total RAM. Windows / hosts
 # we cannot probe fall back to 1.
 #
-# Override explicitly with `BUILD_JOBS=N` (or the legacy `make rebuild
-# BUILD_JOBS=4`); empty / unset uses auto-detect. See docs/build-performance.md
-# → Phase 6 for the rollout plan and the per-job budget rationale.
+# Override explicitly with `BUILD_JOBS=N`; empty / unset uses auto-detect. The
+# driver (`sfn build -p compiler`) parallelises subprocess emits internally —
+# `BUILD_JOBS` only affects callers that still spawn module compiles directly.
+# See docs/build-performance.md → Phase 6 for the rollout history and the
+# per-job budget rationale.
 ifeq ($(strip $(BUILD_JOBS)),)
 BUILD_JOBS := $(shell bash scripts/detect_build_jobs.sh 2>/dev/null || echo 1)
 endif
@@ -417,28 +418,22 @@ check:
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin
 	@echo "[check] first-pass tests passed — proceeding to seedcheck build..."
 	@echo "[check] verifying seed selfhost (stage2)..."
-	@# Stage E PR3: stage2 routes through `sfn build -p compiler
-	@# --work-dir <DIR>` (the same path `make rebuild` uses for the
-	@# first-pass binary), replacing the legacy
-	@# `bash scripts/build.sh` invocation. The driver virtualises
-	@# `<DIR>/native/import-context/` and the default
-	@# `<DIR>/native/sailfin` output, but the per-module `.ll`
+	@# Stage2 routes through `sfn build -p compiler --work-dir <DIR>`
+	@# (the same path `make rebuild` uses for the first-pass binary).
+	@# The driver virtualises `<DIR>/native/import-context/` and the
+	@# default `<DIR>/native/sailfin` output, but the per-module `.ll`
 	@# scratch root is still the legacy `build/sailfin/capsules/`
-	@# unless `SAILFIN_TEST_SCRATCH` is set (see
-	@# `_cr_scratch_root` in `compiler/src/capsule_resolver.sfn`);
-	@# without that override, stage3 would clobber stage2's
-	@# `.ll` files and the fixed-point hash-diff below would be
-	@# vacuous. `--no-cache` keeps stage2 and stage3 truly
-	@# independent (they're built by different compiler
-	@# binaries with potentially identical version stamps, so a
-	@# shared cache would let one stage's IR satisfy the
-	@# other's lookup and silently bypass the fresh emit). The
-	@# `OPT="$(NATIVE_OPT)"` parameter no longer plumbs through:
-	@# the driver hardcodes `-O2` per `Makefile:619-620`. The
-	@# default `NATIVE_OPT` is also `-O2`, so most callers see
-	@# no behavioural change; CI overrides that lower the opt
-	@# level for stage2/stage3 are silently ignored under the
-	@# driver path until the driver grows an `--opt` flag.
+	@# unless `SAILFIN_TEST_SCRATCH` is set (see `_cr_scratch_root`
+	@# in `compiler/src/capsule_resolver.sfn`); without that override
+	@# stage3 would clobber stage2's `.ll` files and the fixed-point
+	@# hash-diff below would be vacuous. `--no-cache` keeps stage2
+	@# and stage3 truly independent (they're built by different
+	@# compiler binaries with potentially identical version stamps,
+	@# so a shared cache would let one stage's IR satisfy the
+	@# other's lookup and silently bypass the fresh emit). The driver
+	@# hardcodes `-O2` for the link step, so CI overrides of
+	@# `NATIVE_OPT` that lower the opt level for stage2/stage3 are
+	@# silently ignored until the driver grows an `--opt` flag.
 	@mkdir -p build/selfhost/native-seedcheck
 	@# Wipe stale import-context + scratch artifacts so the
 	@# stage_capsule_imports cache-hit short-circuit (treats existing
@@ -480,12 +475,12 @@ check:
 	@$(MAKE) test NATIVE_BIN=build/native/sailfin-seedcheck
 	@echo ""
 	@echo "[check] stage2 tests passed — building stage3 for fixed-point comparison..."
-	@# Stage E PR3: same flip as stage2 — driver `--work-dir`
-	@# with `SAILFIN_TEST_SCRATCH` per-stage isolation and
-	@# `--no-cache` so stage3's IR is freshly emitted by the
-	@# stage2 binary rather than served from a cache that
-	@# stage2 (or `make compile`) populated. See the stage2
-	@# block above for the rationale.
+	@# Same shape as stage2 — driver `--work-dir` with
+	@# `SAILFIN_TEST_SCRATCH` per-stage isolation and `--no-cache`
+	@# so stage3's IR is freshly emitted by the stage2 binary
+	@# rather than served from a cache that stage2 (or
+	@# `make compile`) populated. See the stage2 block above for
+	@# the rationale.
 	@mkdir -p build/selfhost/native-stage3
 	@# Same wipe as stage2 — stage_capsule_imports's cache-hit
 	@# probe ignores source mtime, so stale staged modules from a
@@ -591,10 +586,8 @@ package: compile
 # (import-context + runtime prelude object) are present at their
 # canonical locations.
 #
-# Stage E PR4: now that `make rebuild` is the only path to producing
-# `build/native/sailfin` (the build.sh fallback retired in PR2 and
-# build.sh itself only survives for `make check`'s stage2/stage3
-# fixed-point comparison), the artifacts are guaranteed to land at
+# `make rebuild` is the only path to producing `build/native/sailfin`,
+# so the artifacts are guaranteed to land at
 # `build/native/import-context/` and `build/native/obj/runtime/prelude.o`
 # directly. The legacy `build/selfhost/native/...` fallback paths
 # this target used to copy from are dead in the rebuild flow — so
@@ -648,28 +641,14 @@ ci-package-installer:
 # Output:
 #   build/native/sailfin
 #
-# Stage D PR4 (cutover) → PR5 (cleanup) → Stage E PR2 (this PR,
-# fallback retirement): routes through `<seed> build -p compiler`
-# as the only path. The 0.5.10-alpha.6 seed pinned in
-# `.seed-version` ships the cumulative source-side fixes:
-#   - PR3: binary-capsule `src/` walker + subprocess-per-module
-#     compile (each compile gets a fresh arena);
-#   - PR4: entry `.sfn-asm` staging + `llvm-as`/`clang -c
-#     -emit-llvm` validator cascade;
-#   - PR1 of Stage E: subprocess-stage import-context (each
-#     `write_native_text_file_with_module` runs in a fresh
-#     subprocess too).
-# The cumulative effect: cold builds of the 138-module compiler
-# fit in the 8 GB virtual-memory cap that CI runners and
-# `compiler-safety.md` enforce, no `bash scripts/build.sh`
-# fallback needed. The fallback that survived through PR5
-# retires here.
-#
-# `scripts/build.sh` itself stays in-tree for `make check`'s
-# stage2/stage3 fixed-point comparison (which still needs
-# `WORK_DIR` control the driver doesn't expose) and for emergency
-# manual seed bootstrapping. Stage E PR3+ retires the script
-# outright once `make check` migrates.
+# Routes through `<seed> build -p compiler` as the only path. The
+# pinned seed (`.seed-version`) ships the cumulative source-side
+# fixes that keep cold builds of the 138-module compiler inside
+# the 8 GB virtual-memory cap that CI runners and
+# `compiler-safety.md` enforce: binary-capsule `src/` walker +
+# subprocess-per-module compile, entry `.sfn-asm` staging + a
+# `llvm-as` / `clang -c -emit-llvm` validator cascade, and
+# subprocess-stage import-context.
 #
 # Notes:
 # - Pass extra flags via BUILD_ARGS (driver-level, e.g.
@@ -677,10 +656,7 @@ ci-package-installer:
 # - The driver parallelises subprocess emits internally; BUILD_JOBS
 #   no longer plumbs through.
 # - NATIVE_OPT / SELFHOST1_OPT are no longer honoured here — the
-#   driver hardcodes `-O2` for the link step. `make check`'s
-#   stage2/stage3 invocations still go through `bash scripts/build.sh`
-#   directly until the fixed-point comparison machinery moves into
-#   the driver.
+#   driver hardcodes `-O2` for the link step.
 rebuild:
 	@mkdir -p build
 	@seed="$${SEED_NATIVE:-$(SEED)}"; \
@@ -732,7 +708,7 @@ rebuild:
 	if [ "$$build_rc" -ne 0 ] || [ ! -f build/sailfin/program ]; then \
 		echo "[rebuild][error] sfn build failed (exit=$$build_rc) or did not produce build/sailfin/program" >&2; \
 		echo "[rebuild][error] expected the alpha.6+ seed's subprocess-stage path to keep the cold build under the 8 GB ulimit" >&2; \
-		echo "[rebuild][error] if this is a regression, run 'bash scripts/build.sh' manually to bisect" >&2; \
+		echo "[rebuild][error] if this is a regression, rerun with BUILD_ARGS='--cache-trace' to bisect, or fall back to the prior seed via .seed-version" >&2; \
 		exit 1; \
 	fi
 	@mkdir -p build/native

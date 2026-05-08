@@ -18,7 +18,7 @@ The script applies `ulimit -v 8388608` for every compiler invocation, writes a t
 
 ## Interpreting failures
 
-If the script exits non-zero, the compiler itself has a bug — do NOT patch `scripts/build.sh` to work around it. Read the log, identify the failing pipeline stage, and either:
+If the script exits non-zero, the compiler itself has a bug — do NOT patch the build driver (or — historically — the now-retired prior `scripts/build.sh`) to work around it. Read the log, identify the failing pipeline stage, and either:
 
 - fix the compiler source (`compiler/src/*.sfn`), or
 - spawn the `seed-stabilizer` agent if the root cause isn't obvious.

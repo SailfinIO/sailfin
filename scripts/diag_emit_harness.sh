@@ -3,8 +3,10 @@
 # record per-iteration outcome (exit, sha256, size, llvm-as parse status, byte
 # positions of any non-ASCII bytes).
 #
-# Replicates the isolation pattern in scripts/build.sh:build_module (staged
-# import-context, self-artifact removed, clean build/sailfin IPC dir per run).
+# Replicates the isolation pattern that the prior `scripts/build.sh:build_module`
+# (since retired in Stage E PR7 / #383) historically used: staged import-context,
+# self-artifact removed, clean build/sailfin IPC dir per run. The driver's
+# resolver applies the same shape per-module today.
 #
 # Usage:
 #   scripts/diag_emit_harness.sh <src-relative-to-repo> <module-name> [iterations] [--seed PATH]

@@ -2,9 +2,14 @@
 # diag_sanitizer_sweep.sh — Parallel sweep using an ASan/MSan-instrumented seed.
 # Combines the ASan and MSan sweep workflows into one script.
 #
-# Prerequisites: build the sanitized seed first:
-#   SANITIZE=asan,ubsan bash scripts/build.sh --out build/native/sailfin-asan --work-dir build/selfhost/native-asan
-#   SANITIZE=msan       bash scripts/build.sh --out build/native/sailfin-msan --work-dir build/selfhost/native-msan
+# Prerequisites: build the sanitized seed first. The historical
+# (now retired) recipe used the prior `scripts/build.sh`:
+#   (historical, since retired) SANITIZE=asan,ubsan bash scripts/build.sh --out build/native/sailfin-asan --work-dir build/selfhost/native-asan
+#   (historical, since retired) SANITIZE=msan       bash scripts/build.sh --out build/native/sailfin-msan --work-dir build/selfhost/native-msan
+# Since Stage E PR7 (#383) the prior build script is gone; sanitizer-
+# instrumented selfhost runs are now expected to use
+# `<seed> build -p compiler --work-dir` with `CFLAGS`/`LDFLAGS` set to
+# the sanitizer flags.
 #
 # Usage:
 #   scripts/diag_sanitizer_sweep.sh --seed build/native/sailfin-asan --sanitizer asan [--jobs N] [--iters N]

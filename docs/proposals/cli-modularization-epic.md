@@ -800,10 +800,12 @@ Each issue follows the pattern:
 
 ### R1 — Self-host break when adding sfn/cli as a compiler dep
 **Severity:** high. The compiler currently imports nothing from
-`capsules/sfn/*`. The build script (`scripts/build.sh:400-562`) does
-route `sfn/*` deps through `capsules/<scope>/<name>/src/` slugs, but
-that path has only ever been exercised for runtime-side deps, not
-self-hosted compiler imports.
+`capsules/sfn/*`. The prior build script (`scripts/build.sh:400-562`,
+since retired in Stage E PR7 / #383; the equivalent driver path
+lives in `capsule_resolver.sfn`) historically did route `sfn/*` deps
+through `capsules/<scope>/<name>/src/` slugs, but that path has only
+ever been exercised for runtime-side deps, not self-hosted compiler
+imports.
 **Detect:** `make clean-build && make compile` immediately after
 Issue 2.1 lands. The first failure mode shows up as a missing-symbol
 error at link time (`sfn__cli__mod__parse` not found).

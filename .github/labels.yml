@@ -139,7 +139,7 @@ labels:
     description: "Integer/float/number type system work"
   - name: area:build
     color: "c5def5"
-    description: "Makefile, scripts/build.sh, seed handling, build pipeline"
+    description: "Makefile, build driver / capsule resolver, seed handling, build pipeline"
   - name: area:agents
     color: "c5def5"
     description: ".github/workflows, .claude/agents, agentic pipeline"

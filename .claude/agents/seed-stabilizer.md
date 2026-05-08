@@ -10,7 +10,7 @@ You are a Sailfin compiler stabilization specialist. Your job is to diagnose and
 
 ## Context
 
-The Sailfin compiler self-hosts from a released seed binary using `scripts/build.sh` — a pure shell orchestrator with **zero fixup passes**. All bugs must be fixed in the compiler source itself.
+The Sailfin compiler self-hosts from a released seed binary using `<seed> build -p compiler` — the unified Sailfin-native driver. Like the prior (now-retired) `scripts/build.sh`, the driver has **zero fixup passes**. All bugs must be fixed in the compiler source itself.
 
 The build flow is:
 1. Seed compiler emits `.sfn-asm` IR + `.layout-manifest` per module
@@ -70,7 +70,7 @@ See `docs/build-performance.md` for the full root cause analysis and optimizatio
 
 | File | Role |
 |---|---|
-| `scripts/build.sh` | Shell build driver (orchestration only, no fixups) |
+| `compiler/src/cli_main.sfn`, `compiler/src/capsule_resolver.sfn` | Sailfin-native build driver (orchestration only, no fixups; replaces the prior — now retired — `scripts/build.sh`) |
 | `compiler/src/emit_native.sfn` | `.sfn-asm` IR emitter |
 | `compiler/src/llvm/lowering/entrypoints.sfn` | LLVM lowering entry point |
 | `compiler/src/llvm/lowering/emission.sfn` | Function/module emission |

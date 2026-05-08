@@ -40,7 +40,7 @@ ulimit -v 8388608 2>/dev/null || true
 # macOS doesn't ship `timeout(1)`; coreutils provides `gtimeout`. Pick
 # whichever is available and fall back to "no timeout" if neither
 # exists, matching the convention in `scripts/run_native_test.sh` and
-# `scripts/build.sh`.
+# (formerly) the now-retired prior `scripts/build.sh`.
 if command -v timeout >/dev/null 2>&1; then
     TIMEOUT_CMD="timeout"
 elif command -v gtimeout >/dev/null 2>&1; then

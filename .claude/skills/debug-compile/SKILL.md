@@ -69,6 +69,6 @@ Spawn `test-runner` for the full suite. Confirm:
 ## Constraints
 
 - Always use `ulimit -v 8388608`; the `PreToolUse` hook will block compiler invocations without it.
-- Fix the compiler, never `scripts/build.sh`.
+- Fix the compiler, never the build driver. (The prior `scripts/build.sh` was retired in Stage E PR7 / #383; the same rule applies to the driver in `compiler/src/cli_main.sfn` + `compiler/src/capsule_resolver.sfn`.)
 - Do not add workarounds — find and fix the root cause.
 - If the fix is structural, run `make clean-build` before rebuilding.

@@ -1,6 +1,6 @@
 # Status
 
-Updated: May 1, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR3 shipped; Stage E PR4 ci-cross-windows modernization in flight — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278; seed pinned to v0.5.10-alpha.7)
+Updated: May 8, 2026 (Stage C complete through C4 migration; Stage D PR1–PR5 shipped; Stage E PR1–PR7 shipped — PR1–1f / #254–#259, C2a / #261, C2b1 / #262, C2b2 / #263, C2c / #264, C4 v1 / #265, C4b / #266, C4 migration / #267, D PR1 / #268, D PR2 / #269, D PR3 / #271, D PR4 / #272, D PR5 / #273, E PR1 / #274, E PR2 / #277, E PR3 / #278, E PR4 / #280, E PR5 / #378, E PR6 / #382, E PR7 / #383; seed pinned to v0.5.10-alpha.7)
 
 This document tracks what works today and what is in progress. It is the source
 of truth — consult it before editing docs, examples, or making claims about
@@ -8,10 +8,15 @@ feature availability.
 
 ## Build Pipeline (Current)
 
-- `scripts/build.sh` is the sole build driver for the compiler's self-build —
-  pure shell, no fixups. It stages in-tree capsule sources
-  (`capsules/<scope>/<name>/src/`) as import-context artifacts so the seed can
-  resolve imports like `from "sfn/cli"` during the bootstrap.
+- `<seed> build -p compiler` is the sole build driver for the compiler's
+  self-build. The Sailfin-native driver (in `compiler/src/cli_main.sfn` +
+  `compiler/src/capsule_resolver.sfn`) walks the binary capsule's
+  `src/`, stages every transitive import as an
+  `.sfn-asm` artifact, and invokes per-module emit subprocesses against
+  the resolver's parallel xargs fan-out. The prior `scripts/build.sh`
+  orchestrator was retired in Stage E PR7 (#383) — fresh-clone
+  bootstrap is now `install.sh && sfn build -p compiler` per
+  `docs/proposals/build-architecture.md` Stage D exit criteria.
 - End-user `sfn build` and `sfn run` resolve every dependency through one
   unified resolver in `compiler/src/capsule_resolver.sfn`
   (`prepare_project_capsules`). The resolver combines three paths in one
@@ -243,22 +248,24 @@ feature availability.
     workspace members so the legacy `_cr_locate_capsule_src`
     lookup doesn't false-positive on runtime capsule names
     and emit "could not locate source" diagnostics.
-  - `scripts/build.sh` gets a transitional one-line bridge to
-    skip the `sfn/runtime-native` dep when iterating
-    `[dependencies]` (it lives at `runtime/native/`, not
-    `capsules/sfn/runtime-native/`). The script retires in
-    Stage D PR4.
+  - The (since-retired) `scripts/build.sh` orchestrator gained a
+    transitional one-line bridge to skip the `sfn/runtime-native`
+    dep when iterating `[dependencies]` (it lived at
+    `runtime/native/`, not `capsules/sfn/runtime-native/`). The
+    script retired outright in Stage D PR4 / Stage E PR5; this
+    entry is preserved as historical context.
   - **Verification gap intentional.** `sfn build -p compiler`
     runs through every new code path and produces a partial
     binary, but the link line is missing the compiler's CLI
     modules (cli_main.sfn, capsule_resolver.sfn, etc.) because
     `compiler/src/main.sfn`'s transitive import graph doesn't
-    cover them — `scripts/build.sh` walks
-    `compiler/src/**/*.sfn` directly, while the resolver only
-    walks reachable imports. Closing this gap (a binary-capsule
-    `src/` walker for `kind = "binary"` projects) is the
-    Stage D PR3 scope. `make compile` (build.sh path) is
-    unchanged and remains the active bootstrap.
+    cover them — the formerly-load-bearing `scripts/build.sh`
+    walked `compiler/src/**/*.sfn` directly, while the resolver
+    only walks reachable imports. Closing this gap (a
+    binary-capsule `src/` walker for `kind = "binary"` projects)
+    is the Stage D PR3 scope. `make compile` (then on the
+    retired build.sh path, historical) was unchanged for the
+    duration of Stage D PR2 and remained the active bootstrap.
 - **Stage D PR3 (#271, shipped).** `sfn build -p compiler`
   produces a working compiler binary. Two changes work together:
   - **Binary-capsule `src/` walker.** `ResolverConsumer` gains
@@ -271,8 +278,9 @@ feature availability.
     `[build] entry` doesn't transitively import. Slugs come
     from `_cr_relative_slug` so any module the entry DOES reach
     dedupe-collapses cleanly with the relative-import walker.
-  - **Subprocess-per-module compile (mirrors `scripts/build.sh`).**
-    Without isolation the resolver's in-process compile loop
+  - **Subprocess-per-module compile (mirrors the historical
+    `scripts/build.sh` shape, since retired).** Without
+    isolation the resolver's in-process compile loop
     (138 modules in one arena) OOMed around the 135th module on
     8 GB. `_cr_compile_one` now shells out to `<sailfin_exe>
     emit --module-name <slug> -o <ll> llvm <src>` when
@@ -285,10 +293,10 @@ feature availability.
     `sfn test` (which don't yet plumb `binary_dir`) keep their
     existing behavior.
   - **Result.** Cold-start `sfn build --clean -p compiler`
-    succeeds in ~6.5 minutes (sequential subprocess; build.sh
-    parallelizes with `--jobs 4` so the ~2-minute target lands
-    once Stage D PR4 flips `make compile` over and the resolver
-    grows job parallelism). The produced binary runs
+    succeeds in ~6.5 minutes (sequential subprocess; the
+    historical `build.sh` parallelized with `--jobs 4` so the
+    ~2-minute target lands once Stage D PR4 flips `make compile`
+    over and the resolver grows job parallelism). The produced binary runs
     `examples/basics/hello-world.sfn` and self-builds again
     (cache hits = 135/136 on the second pass).
   - **Test coverage.** New `test_binary_capsule_walker.sh`
@@ -303,18 +311,20 @@ feature availability.
   `0.5.10-alpha.4` (the first release shipping PR1–PR3, so the
   fetched seed is itself capable of building the compiler via
   `sfn build -p compiler`). The Makefile's `rebuild` target
-  drops `bash scripts/build.sh` from the default path in favour
-  of `<seed> build -p compiler`, then copies
-  `build/sailfin/program` to `build/native/sailfin` and writes
-  `build/native/.build-stamp` with the same
-  `<version>+dev.<hash>[.dirty]` shape build.sh produced.
-  Behaviour notes: (a) `BUILD_JOBS` no longer plumbs through
-  the driver — the driver parallelises subprocess emits
+  drops the formerly-load-bearing `bash scripts/build.sh` from
+  the default path in favour of `<seed> build -p compiler`, then
+  copies `build/sailfin/program` to `build/native/sailfin` and
+  writes `build/native/.build-stamp` with the same
+  `<version>+dev.<hash>[.dirty]` shape the prior build.sh
+  produced. Behaviour notes: (a) `BUILD_JOBS` no longer plumbs
+  through the driver — the driver parallelises subprocess emits
   internally; (b) `NATIVE_OPT` / `SELFHOST1_OPT` no longer
   affect `make rebuild` — the driver hardcodes `-O2`.
-  `make check`'s stage2/stage3 invocations still use build.sh
-  and still honour `OPT`, so the fixed-point comparison stays
-  apples-to-apples. Two transitional workarounds shipped
+  At this point in history `make check`'s stage2/stage3
+  invocations still used the prior build.sh and still honoured
+  `OPT`, so the fixed-point comparison stayed apples-to-apples;
+  Stage E PR3 later flipped them onto the driver's `--work-dir`
+  flag. Two transitional workarounds shipped
   alongside the cutover (kept until alpha.5 makes them
   redundant): pre-staging `main.sfn-asm` outside the resolver
   because alpha.4's binary-capsule walker excluded the entry,
@@ -335,17 +345,17 @@ feature availability.
     interface declarations. Was missing in alpha.4.
   With both fixes in the seed itself, the Makefile's PR4
   workarounds (the llvm-as shim + the entry pre-stage step)
-  retire. The `bash scripts/build.sh` fallback survives — cold
-  builds of the 138-module compiler still peak above 8 GB
+  retire. At this historical point the formerly-load-bearing
+  prior `bash scripts/build.sh` fallback still survived —
+  cold builds of the 138-module compiler still peaked above 8 GB
   virtual-memory at the resolver level (the parent process's
-  in-process state plus per-module subprocess overhead exceed
-  budget on the 8 GB ulimit CI uses), so when the seed bails
+  in-process state plus per-module subprocess overhead exceeded
+  budget on the 8 GB ulimit CI used), so when the seed bailed
   silently before producing `build/sailfin/program`, the
-  fallback runs `bash scripts/build.sh` to keep CI green.
-  build.sh retires on its own once the resolver pass becomes
-  memory-bounded enough for cold builds to fit in 8 GB —
-  tracked alongside Stage E (long-lived process, arena reset
-  between modules) in `docs/proposals/build-architecture.md`.
+  fallback historically ran the prior build.sh to keep CI
+  green. The fallback retired in Stage E PR2 once the
+  subprocess-stage import-context (Stage E PR1) brought peak
+  memory under budget.
 - **Stage E PR1 (#274, shipped).** Subprocess-stage import-
   context. `_cr_stage_one` and `stage_capsule_imports` gain a
   `sailfin_exe` parameter that, when non-empty, shells the heavy
@@ -355,27 +365,29 @@ feature availability.
   emit parser). Mirrors the PR3 subprocess-per-module compile
   shape. The parent's arena no longer accumulates 138 modules'
   worth of AST + IR text — verified by self-hosting the new
-  compiler under the 8 GB ulimit, which previously needed to
-  fall back to `bash scripts/build.sh`. Empty `sailfin_exe`
-  preserves the in-process path that `sfn check` and `sfn test`
-  callers use; `prepare_project_capsules` (the build/run path)
-  threads the resolved binary path through. The Makefile's
-  `bash scripts/build.sh` fallback survived alongside this PR
-  until alpha.6 cut.
+  compiler under the 8 GB ulimit, which prior to this PR had to
+  fall back to the historical `bash scripts/build.sh`. Empty
+  `sailfin_exe` preserves the in-process path that `sfn check`
+  and `sfn test` callers use; `prepare_project_capsules` (the
+  build/run path) threads the resolved binary path through. The
+  Makefile's prior `bash scripts/build.sh` fallback survived
+  alongside this PR until alpha.6 cut.
 - **Stage E PR2 (#277, shipped).** Pin alpha.6 + retire the
-  build.sh fallback. `.seed-version` bumped to
+  prior build.sh fallback. `.seed-version` bumped to
   `0.5.10-alpha.6`, the first release including PR1's
   subprocess-stage import-context. With that fix in the seed
   itself, cold builds of the 138-module compiler fit in the
   8 GB virtual-memory cap that CI runners and
   `compiler-safety.md` enforce. The fallback block in `make
-  rebuild` (which dropped to `bash scripts/build.sh` when
-  `<seed> build -p compiler` bailed silently) is gone —
+  rebuild` (which historically dropped to `bash scripts/build.sh`
+  when `<seed> build -p compiler` bailed silently) is gone —
   `<seed> build -p compiler` is the only path now.
-  `scripts/build.sh` itself stays in-tree for `make check`'s
-  stage2/stage3 fixed-point comparison (which still needs
-  `WORK_DIR` control the driver doesn't expose) and as an
-  emergency seed-bootstrap escape hatch.
+  At this historical point `scripts/build.sh` itself stayed
+  in-tree for `make check`'s stage2/stage3 fixed-point
+  comparison (which still needed `WORK_DIR` control the driver
+  didn't yet expose) and as an emergency seed-bootstrap escape
+  hatch; both consumers retired in Stage E PR3 (#382) and the
+  script itself was deleted in Stage E PR5 (#383).
 - **Stage E PR3 (#278, shipped).** Parallel-emit fan-out.
   `_cr_run_parallel_emit` writes three newline-delimited lines
   per task (`slug`, `output`, `source`) to a `mktemp`-allocated
@@ -400,14 +412,17 @@ feature availability.
   partition into cache-hit and needs-emit subsets in a
   sequential pass, batch the needs-emit set into one xargs
   run, then sequentially extract layout manifests / store
-  cache entries. Mirrors `scripts/build.sh`'s
-  `xargs -P "$JOBS"` pattern (`build.sh:819` for staging,
-  `build.sh:853` for compile) so end users see the same
-  parallelism shape build.sh historically gave them.
+  cache entries. Mirrors the historical `scripts/build.sh`'s
+  `xargs -P "$JOBS"` pattern (formerly at `build.sh:819` for
+  staging, formerly at `build.sh:853` for compile) so end users
+  see the same parallelism shape that prior build.sh
+  historically gave
+  them.
   Performance: cold `sfn build -p compiler` measured at
   **2m27s** with the new parallel resolver on a 4-core box,
   down from **6m07s** sequential. That's a 2.5× speedup,
-  matching `scripts/build.sh --jobs 4`'s historical wall time.
+  matching the prior `scripts/build.sh --jobs 4`'s historical
+  wall time.
   The 8 GB ulimit still holds *per worker process* — each
   subprocess gets its own arena, so any one worker stays
   bounded and the parent's own peak memory doesn't materially
@@ -420,22 +435,43 @@ feature availability.
   in-process emit path; parallelism only engages when the
   caller threads `binary_dir` through. Single-source builds
   also stay sequential — the xargs overhead would dominate.
-- **Stage E PR4 (in flight, this PR).** `ci-cross-windows`
-  modernization. With the build.sh fallback retired in PR2 +
-  the alpha.7 seed pinned with the parallel resolver, the
+- **Stage E PR4 (#280, shipped).** `ci-cross-windows`
+  modernization. With the prior build.sh fallback retired in
+  PR2 + the alpha.7 seed pinned with the parallel resolver, the
   legacy `build/selfhost/native/raw/` and
   `build/selfhost/native/seed_cwd/` paths in
-  `ci-prepare-test-artifacts` and `ci-cross-windows` are dead
-  on the rebuild flow. Both targets collapse to the single
+  `ci-prepare-test-artifacts` and `ci-cross-windows` were dead
+  on the rebuild flow. Both targets collapsed to the single
   sfn-build layout: `ci-prepare-test-artifacts` reduces to a
   presence check on `build/native/import-context/` +
   `build/native/obj/runtime/prelude.o`, and
   `ci-cross-windows` reads exclusively from
   `build/native/raw/` (mirrored by `make rebuild` so the test
-  suite can't clobber it). `.seed-version` bumps to
-  `0.5.10-alpha.7`. `scripts/build.sh` itself stays in-tree
-  for `make check`'s stage2/stage3 fixed-point comparison
-  until the driver grows multi-output WORK_DIR control.
+  suite can't clobber it). `.seed-version` bumped to
+  `0.5.10-alpha.7`. At this historical point `scripts/build.sh`
+  was the last surviving consumer in-tree, kept only for
+  `make check`'s stage2/stage3 fixed-point comparison while the
+  driver lacked multi-output WORK_DIR control.
+- **Stage E PR5 — Driver `--work-dir` flag (#378, shipped).**
+  Adds `sfn build --work-dir <DIR>`, virtualising
+  `<DIR>/native/import-context/` and the default
+  `<DIR>/native/sailfin` output. This is the prerequisite for
+  the `make check` cutover.
+- **Stage E PR6 — `make check` stage2/stage3 driver flip (#382,
+  shipped).** Replaces the historical `bash scripts/build.sh`
+  invocations in `make check` with `sfn build -p compiler
+  --work-dir build/selfhost/native-{seedcheck,stage3}` calls
+  using `SAILFIN_TEST_SCRATCH` per-stage isolation +
+  `--no-cache`. The fixed-point hash-diff stays load-bearing.
+- **Stage E PR7 — prior build.sh orchestrator retired (#383,
+  this PR).** Deleted the retired `scripts/build.sh`. With
+  both consumers retired (rebuild fallback in PR2, `make check`
+  in PR6), the
+  script was deleted outright and every Makefile / status /
+  build-performance reference was updated to mark the file as
+  retired. Fresh-clone bootstrap is now
+  `install.sh && sfn build -p compiler` per
+  `docs/proposals/build-architecture.md` Stage D exit criteria.
 - `make compile` builds the compiler from a released seed. `make check`
   validates the seedcheck binary can run `hello-world.sfn` and pass the test suite.
 - **Deterministic self-hosting**: the compiler is a verified fixed point —
@@ -705,7 +741,7 @@ The runtime rewrite depends on compiler features that must ship first. The
 | Sleep unit semantics — milliseconds end-to-end (issue #307) | **Shipped 2026-05-05**. Pre-existing semantic bug surfaced (but not introduced) by the sleep migration: the prelude advertised `sleep(milliseconds: number)` while `sailfin_runtime_sleep(double seconds)` interpreted its input as seconds (multiplied by 1000 for `Sleep` ms / 1e6 for `usleep` µs). `sleep(500)` actually slept for 500 seconds. **Resolution:** locked the unit to **milliseconds** across all four layers — public `sleep(ms)` surface (prelude + `sfn/time` capsule, already correct), the Sailfin wrapper `sfn_sleep(milliseconds: float)` in `runtime/sfn/clock.sfn`, the imported extern declaration `sailfin_runtime_sleep(milliseconds: float)` in `runtime/sfn/platform/libc.sfn`, and the C entrypoint signature `void sailfin_runtime_sleep(double milliseconds)` + trampoline `void sfn_sleep(double milliseconds)`. POSIX implementation upgraded from deprecated `usleep` to `nanosleep` with EINTR-resume so long durations and signal interruption are handled correctly (also matches the architect's PR 2 destination — `extern fn nanosleep` in `platform/posix.sfn`). Pinned end-to-end by `compiler/tests/e2e/test_sleep_unit_semantics.sh`, which brackets `sleep(75)` between two `monotonic_millis()` reads inside the user program (isolating the sleep from compile/link/start overhead) and asserts the elapsed window falls between 50 ms (lower bound for `nanosleep` floor + scheduler jitter) and 30 s (upper bound — ~3 orders of magnitude below the 75 s the seconds-bug would produce). | Aligns with public spec (`effects.md`, `standard-library.md`) and the `sfn_sleep(ms)` destination in `docs/runtime_architecture.md` §2.7.4; also unblocks PR 2 of the sleep migration (the libc-direct `nanosleep` rewrite can now lock the units intentionally) |
 | `kind = "runtime"` capsule schema: `sfn-sources` field (dormant) | **Shipped 2026-05-04** as scaffolding for PR 2 of the sleep migration. TOML getter `toml_get_sfn_sources`, the `RuntimeCapsuleArtifacts.sfn_sources` field on `compiler/src/runtime_capsule_resolver.sfn`, and `_rcr_normalize_path` for canonical workspace-rooted path output. **No consumer is wired up yet** — the active `runtime/native/capsule.toml` does not populate the field. PR 2 will introduce the link-time compile loop that consumes it (gated on issue #308's IPC-isolation track). Schema unit tests in `compiler/tests/unit/runtime_capsule_resolver_test.sfn` regression-test the dormant scaffolding. | Future runtime modules (process, memory, …) will ship by adding manifest entries — no per-module Makefile staging once the link-time compile lands |
 | Runtime `sfn-sources` link-time consumer (dormant) + compiler-toggle env-var migration | **Shipped (issue #308)**. `_compile_runtime_sfn_sources` in `compiler/src/cli_main.sfn` wires `RuntimeCapsuleArtifacts.sfn_sources` into `_clang_link_multi_with_opt`: per source, spawns `<self> emit --module-name <slug> -o <ll> llvm <src>` wrapped in `sh -c "SAILFIN_TRACE_EMIT= SAILFIN_SKIP_TYPECHECK= SAILFIN_TRACE_TEST_RUNNER= SAILFIN_DUMP_TEST_SOURCES= …"` so the child compiler does NOT inherit the parent's debug-toggle env. Toggle migration: the user-facing `build/sailfin/.skip_typecheck`, `.trace_emit`, `.trace_test_runner`, `.dump_test_sources` flag-file probes now read `SAILFIN_*` env vars first, with a one-release file-probe back-compat shim via `_legacy_flag_file` in `compiler/src/cli_commands_utils.sfn`. Rollback gate `SAILFIN_DISABLE_RUNTIME_SFN_SOURCES=1` skips the new link-time loop entirely. The consumer is **dormant** until PR B of the sleep migration populates `runtime/native/capsule.toml`'s `sfn-sources`. Pinned by `compiler/tests/e2e/test_subprocess_emit_clean_env.sh`. **Issue #311 follow-up shipped 2026-05-05:** the deferred `.test_runner_active` marker (10+ hot lowering reads + 6 paired `.trace_test_runner` reads) was migrated to in-process state in `compiler/src/test_runner_state.sfn` rather than env-var + cache. The marker was intra-process all along — the test orchestrator (`handle_test_command`) and every lowering consumer run in the same Sailfin process — so no env-var, `setenv` extern, per-process cache, or back-compat shim was needed. `enter_test_runner_mode(trace)` / `exit_test_runner_mode()` bracket the orchestrator; `test_runner_active()` / `test_runner_trace()` are pure module-level boolean reads. Pinned by `compiler/tests/e2e/test_runner_state_marker.sh`. **Issue #312 follow-up shipped 2026-05-05:** retired the trailing internal-diagnostic flag-file probes (`build/sailfin/.trace_lowering` ×11 hot sites, `.trace_call_lowering` ×2 hot sites, `.skip_module_globals` ×1 cold site, `.trace_argv` ×1 cold site) in favour of `SAILFIN_TRACE_LOWERING` / `SAILFIN_TRACE_CALL_LOWERING` / `SAILFIN_SKIP_MODULE_GLOBALS` / `SAILFIN_TRACE_ARGV` env vars. The three lowering flags read through lazy-init dual-boolean caches in `compiler/src/llvm/lowering_debug_state.sfn` (`_X_initialized` + `_X_value`, the same shape `test_runner_state.sfn` settled on for #311) so the per-statement hot path is two `load i1` reads + a `br i1` with no float widening; `.trace_argv` reads `_env_flag` directly at CLI entry. Same one-release `_legacy_flag_file` shim as #308. The `.phase_*_diagnostics` and `.skip_test_inlining` probes mentioned in #312's original inventory were already gone (replaced with in-memory diagnostics or removed entirely) when the audit ran, so #312 closed the file-IPC removal campaign with `grep -rnE 'fs.exists\\("build/sailfin/\\.(phase\|skip\|trace\|dump)_' compiler/src/` returning zero outside the new helper's header comment. Pinned by `compiler/tests/e2e/test_compiler_debug_toggle_env_vars.sh`. | Unblocks PR B of the sleep migration (and every future C→Sailfin runtime port — `clock`, `io`, `memory`, …) by replacing the file-IPC race with explicit env-var control of the child compiler's environment |
-| First Sailfin-native runtime module linked into the compiler binary (M2.1+M2.2, issue #394) | **Shipped 2026-05-07**. `runtime/sfn/memory/arena.sfn` exports five `sfn_arena_sfn_*` symbols (`create` / `alloc` / `reset` / `destroy` / `realloc`) backed by libc `malloc` / `free` / `realloc` stubs; `runtime/native/capsule.toml`'s `sfn-sources` field now lists this file, waking up `_compile_runtime_sfn_sources` (the dormant consumer from #308) for `make compile`'s `sfn build -p compiler` invocation. The Sailfin module's exports use the `_sfn_` infix to coexist with the C arena (`runtime/native/src/sailfin_arena.c`)'s `sfn_arena_*` exports — both arenas link side-by-side until M3 retires the C source per `docs/runtime_architecture.md` §2.1.1. `scripts/build.sh`'s `RUNTIME_SFN_ALLOW` allowlist mirrors the manifest entry so `make check`'s stage2/stage3 fixed-point comparison binaries link the same module set; the allowlist retires once `make check` migrates to `sfn build` (Stage E PR3+). M3 replaces the libc-wrapper stubs with a real page-chain bump allocator. Pinned by `compiler/tests/e2e/test_runtime_memory_arena.sh` (typecheck + fmt + LLVM `define` shape per export) and `compiler/tests/e2e/test_runtime_sfn_sources_active.sh` (compiler-binary `nm` audit + manifest/allowlist drift check). | First proof-of-life for the runtime rewrite from C to Sailfin; establishes the manifest-and-allowlist pattern every M2 follow-up (rc, string, array, exception, io, process, type_meta, prelude) reuses |
+| First Sailfin-native runtime module linked into the compiler binary (M2.1+M2.2, issue #394) | **Shipped 2026-05-07**. `runtime/sfn/memory/arena.sfn` exports five `sfn_arena_sfn_*` symbols (`create` / `alloc` / `reset` / `destroy` / `realloc`) backed by libc `malloc` / `free` / `realloc` stubs; `runtime/native/capsule.toml`'s `sfn-sources` field now lists this file, waking up `_compile_runtime_sfn_sources` (the dormant consumer from #308) for `make compile`'s `sfn build -p compiler` invocation. The Sailfin module's exports use the `_sfn_` infix to coexist with the C arena (`runtime/native/src/sailfin_arena.c`)'s `sfn_arena_*` exports — both arenas link side-by-side until M3 retires the C source per `docs/runtime_architecture.md` §2.1.1. The prior `scripts/build.sh`'s `RUNTIME_SFN_ALLOW` allowlist (now retired alongside the script itself in Stage E PR7 / #383) historically mirrored the manifest entry so `make check`'s stage2/stage3 fixed-point comparison binaries linked the same module set; once `make check` migrated to `sfn build` (Stage E PR6 / #382) the allowlist became dead and was retired with the rest of build.sh. M3 replaces the libc-wrapper stubs with a real page-chain bump allocator. Pinned by `compiler/tests/e2e/test_runtime_memory_arena.sh` (typecheck + fmt + LLVM `define` shape per export) and `compiler/tests/e2e/test_runtime_sfn_sources_active.sh` (compiler-binary `nm` audit + manifest/allowlist drift check). | First proof-of-life for the runtime rewrite from C to Sailfin; establishes the manifest-and-allowlist pattern every M2 follow-up (rc, string, array, exception, io, process, type_meta, prelude) reuses |
 | Extern call return-type defaulting hardened (issue #306, Phase A) | **Shipped 2026-05-06**. The LLVM lowering pipeline used to silently default `llvm_return = "i8*"` in `compiler/src/llvm/expression_lowering/native/core_call_resolution.sfn:716` whenever the call resolver could not determine the callee's signature (no runtime-helper descriptor, no entry in `imported_functions`, and not a recognised trait dispatch). With the result discarded, that produced structurally-invalid IR — `call i8* @sailfin_runtime_sleep(double …)` against `declare void @sailfin_runtime_sleep(double)`. Clang accepted the mismatch only because the result was unused, and the bug self-fed: the synthesized `declare` line was extracted from the same malformed `call`, keeping declare and call locally consistent while both diverged from the real function's ABI. The `sailfin_runtime_sleep` repro from the issue body was masked on 2026-05-04 by a per-symbol `RuntimeHelperDescriptor` (`compiler/src/llvm/runtime_helpers.sfn:113-127`); the underlying default was unchanged. **Resolution:** killed the silent default. `resolve_call_signature` now initialises `llvm_return = ""` and only assigns when the descriptor table, `imported_functions` lookup, or trait-dispatch interface signature succeeds. `coerce_and_emit_call` gates emission on `llvm_return.length > 0`; an empty value triggers a hard-fail diagnostic ("llvm lowering: cannot resolve return type for call to `<symbol>` — callee signature is not known to the compiler") printed to `print.err` and pushed into the diagnostic stream, with no `call` line emitted. The diagnostic surfaces structural lowering bugs immediately instead of leaking malformed IR downstream. Pinned by the tightened `compiler/tests/e2e/test_runtime_clock_skeleton.sh` — the call-shape grep now requires the typed `call void @sailfin_runtime_sleep(` form (formerly `call .* @sailfin_runtime_sleep(` would have matched the broken `call i8*` shape) and explicitly forbids the `call i8*` regression. The matching update to `compiler/tests/e2e/test_runner_state_marker.sh` (its assertion 3) replaces the now-impossible IR-call-shape signal with the post-mangle `import_subs >= 1` trace observation, which directly verifies the import-stripping gate (`is_test_module=false`) without depending on the pre-fix feedback loop. **Phase B + Phase C deferred:** the architect's plan calls for a typecheck-level `imported_externs` channel (Phase B) so `sfn check` can resolve calls to imported externs end-to-end (closes "general typecheck call-site resolution deferred" caveat in the row above), then retiring the per-symbol `sailfin_runtime_sleep` `RuntimeHelperDescriptor` workaround (Phase C). Both follow-ups need their own issues; not in this PR. | The call lowering pipeline can no longer mask declare/call ABI mismatches — every future `runtime/sfn/*.sfn` adapter that wraps a libc function for its side effect (logging, fire-and-forget I/O, the upcoming `nanosleep` rewrite of `sfn_sleep` in PR 2 of the sleep migration) emits structurally-correct IR or fails loud with a typed diagnostic |
 | Three further `runtime/sfn/platform/*.sfn` skeletons (`pthread.sfn` 11 decls, `posix.sfn` 4 decls, `net.sfn` 9 decls) | **Shipped 2026-05-02** (typecheck + fmt + LLVM `declare` emission verified per file by `compiler/tests/e2e/test_runtime_{pthread,posix,net}_skeleton.sh`); not yet imported by any module. Function-pointer parameters degrade to `* u8` due to a `sfn fmt` / `is_c_abi_function_pointer` interaction documented in the `pthread.sfn` header | Validates the extern pipeline on richer C-ABI shapes (pointer-to-pointer, primitive-pointer out-parameters, multi-family opaque-struct pointers); seed for `runtime/sfn/scheduler.sfn` + `runtime/sfn/channel.sfn` (M4), `runtime/sfn/process.sfn` + `runtime/sfn/adapters/clock.sfn` (M2), and `runtime/sfn/adapters/http.sfn` (M3) |
 | `int` / `float` numeric types | **Slices A + B + C + D shipped (A/B/C 2026-05-02, D 2026-05-03)**. Slice A: annotated locals/params/returns lower to `i64` / `double`; extern accept-list admits `int` / `float`; integer/float arithmetic & comparison dispatch verified by `compiler/tests/e2e/test_numeric_int_float.sh`. Slice B: `&`, `|`, `^`, `<<`, `>>` lex/parse/lower to LLVM `and`/`or`/`xor`/`shl`/`ashr i64`, verified by `compiler/tests/e2e/test_numeric_bitwise.sh`. Slice C: extern accept-list expanded to `i16`/`u16`/`u32`/`u64`/`isize`/`f32`. **Slice D — `as` cast LLVM lowering matrix:** parser/AST/native-IR rendering (PR #289) plus the LLVM lowering matrix in `lower_cast_expression` (`compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn`) — `int → float` lowers to `sitofp`, `float → int` to `fptosi`, integer widening to `sext` (or `zext` for `i1`), narrowing to `trunc`, `f32 → double` to `fpext`, `double → f32` to `fptrunc`, and `as bool` is rejected with a fix-it pointing at `x != 0`. Verified by `compiler/tests/unit/numeric_cast_test.sfn` (extended) and `compiler/tests/e2e/test_numeric_cast.sh` (new — 8 LLVM-shape pinning cases). The matrix opens with a no-op `coerce_operand_to_type(lowered.operand, lowered.operand.llvm_type, …)` keepalive call to defeat an alpha.8 seed dead-code pass that would otherwise elide `let operand = lowered.operand` and prevent the matrix from firing — `lower_return_instruction` in `statement.sfn` works around the same DCE quirk by passing `operand` to `coerce_operand_to_type` immediately after binding. **L2/L3 silent-widening rejection deferred to Slice E:** the architect's plan called for `dominant_type` to refuse silent int↔float coercion in the same slice, but the lowered compiler/runtime code mixes i64 (from `string.length`-style helpers) and double (`number` alias) pervasively, so the rejection breaks `for i in 0..arr.length`-style code with no semantically meaningful fix-it. Closing L2/L3 properly requires Slice E (retire `number`, default integer literals to `int`); Slice D ships the `as` cast escape valve so authors can spell the conversion explicitly today. Tracked: seed-DCE workaround in issue #295, L2/L3 closure follow-up in issue #296. | Sizes/indices, bitwise ops, numeric `as` casts — all shipped; silent-widening rejection + bare-literal precision defer to Slice E (see issues #295, #296) |

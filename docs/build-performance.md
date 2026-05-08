@@ -80,7 +80,7 @@ The C runtime (`runtime/native/src/sailfin_runtime.c`) has fundamental memory ma
 
 3. **Arrays are never freed.** No `array_drop` or array lifecycle management exists. Every `string[]` or `NativeFunction[]` allocated during compilation leaks.
 
-4. **No GC, no RC; arena allocator shipped, default-on for selfhost builds and installed binaries.** The runtime tracks owned strings in a hash table for safe freeing, but this is opt-in and disabled. There is no generational GC or reference counting. The M0.5 bump-allocator arena landed in PR #174 (`runtime/native/src/sailfin_arena.c`) and is wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`. `scripts/build.sh` exports `SAILFIN_USE_ARENA=1` for the selfhost build (April 19 flip), and the runtime-side `_init_arena_enabled` default flipped to `1` on May 6 (#324) so installed binaries also get the arena without surfacing an env-var contract. End users opt out with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) — kept as the regression-bisect escape hatch for at least one release. The M0.5 fast-fail criteria (per-module RAM < 512 MB, `make check` passes with arena on) have not yet been formally validated in CI.
+4. **No GC, no RC; arena allocator shipped, default-on for selfhost builds and installed binaries.** The runtime tracks owned strings in a hash table for safe freeing, but this is opt-in and disabled. There is no generational GC or reference counting. The M0.5 bump-allocator arena landed in PR #174 (`runtime/native/src/sailfin_arena.c`) and is wired through `_rt_malloc` / `_rt_calloc` / `_rt_realloc` / `_rt_free`. The prior `scripts/build.sh` (now retired) historically exported `SAILFIN_USE_ARENA=1` for the selfhost build (April 19 flip), and the runtime-side `_init_arena_enabled` default flipped to `1` on May 6 (#324) so installed binaries also get the arena without surfacing an env-var contract. End users opt out with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) — kept as the regression-bisect escape hatch for at least one release. The M0.5 fast-fail criteria (per-module RAM < 512 MB, `make check` passes with arena on) have not yet been formally validated in CI.
 
 ### The consequence
 
@@ -168,7 +168,7 @@ Other copying functions may exist but weren't catalogued in the `d2d0bf1` sweep 
 
 `collect_imported_module_context_for_module` in `llvm/imports.sfn:25-165` implements BFS import traversal with no cross-call or cross-process cache. A `seen[]` array deduplicates within a single BFS call, but:
 
-- Each module spawns a separate compiler process (`build.sh` runs one `seed emit` per module)
+- Each module spawns a separate compiler process (the prior `build.sh`, now retired, historically ran one `seed emit` per module; the driver has the same shape)
 - Each process independently calls `fs.readFile` + `parse_layout_manifest` for every dependency
 - Popular base modules (e.g., `ast`, `native_ir`, `token`) are parsed 10-50× per full build
 - Transitive imports are walked to depth 3, reading `.sfn-asm` text at depth 0 and scanning for deeper imports at depths 1-2
@@ -205,7 +205,7 @@ The owned-string hash table and persistent-pointer set add per-allocation bookke
 
 ## Root Cause 6: Per-Module Process Isolation Overhead
 
-`build.sh` spawns a separate compiler process for each of 121 modules. Each process:
+The historical (retired) `build.sh` spawned a separate compiler process for each of 121 modules; the current driver retains the same per-module-process model. Each process:
 
 1. Creates an isolated `seed_cwd` directory
 2. Copies the full import-context directory (all `.sfn-asm` + `.layout-manifest` files)
@@ -310,7 +310,7 @@ With `.async_inner_return_type` gone, every cross-statement / cross-phase Phase 
 **Priority:** Medium — **Expected:** 5-15% time reduction
 **No dependency on Phases 0-2** — can proceed in parallel
 
-The BFS in `collect_imported_module_context_for_module` (`llvm/imports.sfn:37`) already dedupes within a single process via `seen[]`. Under the per-module-process build model (`scripts/build.sh` spawns one `seed emit llvm` per module), the biggest remaining wins live across process boundaries — either pre-parsed sidecar artifacts or a persistent compiler process (Phase 5).
+The BFS in `collect_imported_module_context_for_module` (`llvm/imports.sfn:37`) already dedupes within a single process via `seen[]`. Under the per-module-process build model (the prior, now-retired `scripts/build.sh` historically spawned one `seed emit llvm` per module; the driver's resolver now does the same), the biggest remaining wins live across process boundaries — either pre-parsed sidecar artifacts or a persistent compiler process (Phase 5).
 
 **Subtasks:**
 
@@ -363,7 +363,7 @@ Headline measurement:
 | `sfn check` 60 files                | 98 s SIGSEGV               | ~80 s clean                         |
 | `sfn check compiler/src/` (132 files)| 120 s SIGSEGV             | 130 s clean (rc=1, 2 errors found)  |
 
-Open follow-up: **resolved May 6 via #324.** `_init_arena_enabled` now defaults `1` for installed binaries, with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) as the opt-out kept for at least one release. `sfn check` and `sfn test` for end users get the arena without surfacing an env-var contract; `scripts/build.sh` keeps its explicit `SAILFIN_USE_ARENA=${SAILFIN_USE_ARENA:-1}` export and CI keeps `SAILFIN_USE_ARENA: "1"` in `.github/workflows/ci.yml` as belt-and-suspenders. Pinned by `compiler/tests/e2e/test_arena_default_on.sh`.
+Open follow-up: **resolved May 6 via #324.** `_init_arena_enabled` now defaults `1` for installed binaries, with `SAILFIN_USE_ARENA=0` (or `""` / `"false"`) as the opt-out kept for at least one release. `sfn check` and `sfn test` for end users get the arena without surfacing an env-var contract; the prior (now retired) `scripts/build.sh` historically kept its explicit `SAILFIN_USE_ARENA=${SAILFIN_USE_ARENA:-1}` export and CI keeps `SAILFIN_USE_ARENA: "1"` in `.github/workflows/ci.yml` as belt-and-suspenders. Pinned by `compiler/tests/e2e/test_arena_default_on.sh`.
 
 ### Phase 5: Long-Lived Compiler Process (Future)
 
@@ -383,7 +383,7 @@ This requires the compiler to support a "compile module" entry point that takes 
 **Priority:** Highest. **Stages 1+2 shipped April 24/25; measured 2.4× speedup on Linux CI.** Stages 3–4 remain queued.
 **Depends on:** Phase 0 (arena default-on, shipped) and Phase 2 (IPC removal, shipped). Both prerequisites are met.
 
-The xargs-based parallel emit path in `build_module` (`scripts/build.sh`) has been mature for weeks. Each parallel worker runs `bash scripts/build.sh --_build_module_worker` in an isolated `seed_cwd`, copies the import-context, runs the seed, and appends one line to a shared `MODULES_LIST` (atomic for sub-PIPE_BUF lines). The list is `LC_ALL=C sort`ed before `llvm-link` consumption so link order is deterministic regardless of completion order. The same pattern now applies to `stage_import_context` via the new `--_stage_import_worker` entry.
+The xargs-based parallel emit path in `build_module` (formerly in the prior `scripts/build.sh`, now retired in favour of the driver's `_cr_run_parallel_emit`) was mature for weeks before the cutover. Each parallel worker historically ran `bash scripts/build.sh --_build_module_worker` in an isolated `seed_cwd`, copied the import-context, ran the seed, and appended one line to a shared `MODULES_LIST` (atomic for sub-PIPE_BUF lines). The list was `LC_ALL=C sort`ed before `llvm-link` consumption so link order was deterministic regardless of completion order. The same pattern now applies to `stage_import_context` via the driver's resolver (and previously the legacy `--_stage_import_worker` entry).
 
 The reason it never went default before April 25 was per-job memory: with the arena default-on, `lowering_core` (the heaviest module) peaks at ~4.7 GB RSS. With `BUILD_JOBS=4`, worst-case concurrent peak is ~18.8 GB. That fits ubuntu-24.04 GitHub runners (22 GB) but overcommits `macos-latest` (M1, 7 GB) — which is exactly why the Stage 2 heuristic caps macOS at `BUILD_JOBS=1`.
 
@@ -453,7 +453,7 @@ This channel was the first concrete source proven responsible for silent LLVM IR
 
 The three large modules that previously flaked are now fully deterministic. The residual 1/20 flake on `parser/statements.sfn` is driven by other scratch channels still active (call-result, struct-info, instr-fn-name) and will be eliminated as subsequent Phase 2 channels are removed.
 
-Concurrently, the `build.sh` retry loop went from 3 `invalid_ir` retries per full build (`core_operands`, `core_parsing`, `instructions_helpers`) down to 1 (`cli_commands`), another signal that real non-determinism volume dropped materially.
+Concurrently, the prior (now retired) `build.sh` retry loop went from 3 `invalid_ir` retries per full build (`core_operands`, `core_parsing`, `instructions_helpers`) down to 1 (`cli_commands`), another signal that real non-determinism volume dropped materially.
 
 **Scope of change:**
 
@@ -518,7 +518,7 @@ The default-on flip is tracked as its own entry below.
 
 ### Arena Allocator Default-On (April 19)
 
-**Status: Implemented.** The arena allocator is now default-on for selfhost builds. `scripts/build.sh` exports `SAILFIN_USE_ARENA="${SAILFIN_USE_ARENA:-1}"` before staging import-context or invoking the seed for per-module LLVM emit; `SAILFIN_USE_ARENA=0` in the caller's environment preserves the malloc path for diagnostics / regression triage. The CI workflow (`.github/workflows/ci.yml`) pins `SAILFIN_USE_ARENA: "1"` at the workflow `env` block as a belt-and-suspenders guard against future drift in the `build.sh` default.
+**Status: Implemented.** The arena allocator is now default-on for selfhost builds. The prior (now retired) `scripts/build.sh` historically exported `SAILFIN_USE_ARENA="${SAILFIN_USE_ARENA:-1}"` before staging import-context or invoking the seed for per-module LLVM emit; the runtime-side default flipped to `1` on May 6 (#324) so the export is no longer load-bearing. `SAILFIN_USE_ARENA=0` in the caller's environment preserves the malloc path for diagnostics / regression triage. The CI workflow (`.github/workflows/ci.yml`) pins `SAILFIN_USE_ARENA: "1"` at the workflow `env` block as a belt-and-suspenders guard against future drift in the runtime default (formerly: in the prior `build.sh` default).
 
 **Measured on `compiler/src/llvm/lowering/lowering_core.sfn` (the heaviest module in the compiler), seed 0.5.7, Linux x86_64, isolated emit-only run (no parallelism, no timeout):**
 
@@ -549,7 +549,7 @@ Criterion (2) is the only unmet gate, and its failure is **not arena-induced** �
 
 **Scope of change:**
 
-- `scripts/build.sh`: 1 export added (`SAILFIN_USE_ARENA="${SAILFIN_USE_ARENA:-1}"`) with a comment block explaining the contract.
+- `scripts/build.sh` (since retired): 1 export historically added (`SAILFIN_USE_ARENA="${SAILFIN_USE_ARENA:-1}"`) with a comment block explaining the contract; now load-bearing only via the runtime default.
 - `.github/workflows/ci.yml`: 1 env var pinned at workflow level (`SAILFIN_USE_ARENA: "1"`).
 - No compiler or runtime source changes.
 

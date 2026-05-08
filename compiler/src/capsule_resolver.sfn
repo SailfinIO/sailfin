@@ -359,8 +359,9 @@ fn _cr_ensure_dir(path: string) -> void ![io] {
 // scans. When `work_dir` is non-empty (`sfn build --work-dir <root>`),
 // the staging area moves under `<root>/native/import-context` so the
 // build can be redirected away from CWD-relative `build/` — the
-// driver-side equivalent of `scripts/build.sh`'s `IMPORT_CACHE`
-// derivation (`SEED_CWD/build/native/import-context`).
+// driver-side equivalent of the prior `scripts/build.sh`'s
+// `IMPORT_CACHE` derivation (`SEED_CWD/build/native/import-context`;
+// the script itself was retired in Stage E PR7 / #383).
 fn _cr_import_context_root(work_dir: string) -> string {
     if work_dir.length == 0 { return "build/native/import-context"; }
     return work_dir + "/native/import-context";
@@ -395,7 +396,8 @@ fn _cr_shell_quote(value: string) -> string {
 // Stage E PR3: `_cr_run_parallel_emit` honours this. The architect's
 // plan is to default to `nproc`, with `SAILFIN_BUILD_JOBS=1`
 // available as a regression-bisect escape hatch (mirrors the
-// `BUILD_JOBS=1` knob `scripts/build.sh` exposed).
+// `BUILD_JOBS=1` knob the prior `scripts/build.sh` historically
+// exposed; the script was retired in Stage E PR7 / #383).
 fn _cr_resolve_jobs() -> number ![io] {
     let env_jobs = _cr_shell_read("printf '%s' \"$SAILFIN_BUILD_JOBS\"");
     if env_jobs.length > 0 {
@@ -512,9 +514,11 @@ struct ParallelEmitTask {
 // on the first failure).
 //
 // Stage E PR3: this is the helper that closes the parallelism
-// gap with `scripts/build.sh`'s `xargs -P "$JOBS"` pattern
-// (build.sh:819, 853). With `jobs == 1`, the helper
-// sequentialises to keep the regression-bisect path simple.
+// gap with the prior `scripts/build.sh`'s historical
+// `xargs -P "$JOBS"` pattern (formerly at build.sh:819, 853;
+// the script was retired in Stage E PR7 / #383). With
+// `jobs == 1`, the helper sequentialises to keep the
+// regression-bisect path simple.
 fn _cr_run_parallel_emit(tasks: ParallelEmitTask[], mode: string, sailfin_exe: string, jobs: number) -> boolean ![io] {
     if tasks.length == 0 { return true; }
     let mut effective_jobs = jobs;
@@ -1378,8 +1382,10 @@ fn _cr_module_cache_event_failure(slug: string) -> ModuleCacheEvent {
 // Stage D PR3: when `sailfin_exe.length > 0`, every fresh compile
 // shells out to `<sailfin_exe> emit --module-name <slug> -o <ll>
 // llvm <src>` instead of calling `compile_to_llvm_file_with_module`
-// in-process. That mirrors `scripts/build.sh`'s subprocess-per-
-// module pattern (line 650) and gives each compile a fresh arena —
+// in-process. That mirrors the prior `scripts/build.sh`'s
+// historical subprocess-per-module pattern (formerly at line 650;
+// the script was retired in Stage E PR7 / #383) and gives each
+// compile a fresh arena —
 // without it, a 138-module self-build accumulates ~7+ GB of
 // arena state in a single process and OOMs around the 135th
 // module. Empty `sailfin_exe` falls back to in-process compile so
@@ -1447,9 +1453,11 @@ fn _cr_compile_one(src: CapsuleSource, dep_manifests: string[], cache_root_path:
         // mid-body (e.g. `define void 嘆name()`), which clang
         // rejects at link time as "expected function name". The
         // failure is non-deterministic and a simple re-emit
-        // typically produces clean output. `scripts/build.sh`
-        // applies the same retry shape (`EMIT_RETRIES=3`) for
-        // exactly this reason. Validation runs `llvm-as` on the
+        // typically produces clean output. The prior
+        // `scripts/build.sh` (since retired in Stage E PR7 / #383)
+        // historically applied the same retry shape
+        // (`EMIT_RETRIES=3`) for exactly this reason; the driver
+        // inherits that contract. Validation runs `llvm-as` on the
         // emitted file as a cheap mid-file IR check; the empty-
         // file probe survives as a fast pre-`llvm-as` filter so
         // we don't pay parser cost on an obviously-broken output.
@@ -2461,9 +2469,10 @@ fn enumerate_relative_sources(entry_path: string) -> CapsuleSource[] ![io] {
 // driver) or any of the CLI subcommand modules, so an entry-driven
 // build leaves ~100 source files out of the link and clang
 // surfaces the gap as a wall of undefined references. Directory-
-// level enumeration mirrors what `scripts/build.sh` already does
-// — every `.sfn` under `compiler/src/` is fed into the build,
-// regardless of whether anything imports it.
+// level enumeration mirrors what the prior `scripts/build.sh`
+// historically did (since retired in Stage E PR7 / #383): every
+// `.sfn` under `compiler/src/` is fed into the build, regardless
+// of whether anything imports it.
 //
 // Slugs come from the same `_cr_relative_slug` helper the
 // relative-import walker uses, which delegates to

@@ -68,11 +68,11 @@
 >   exports `sfn_arena_sfn_*` symbols that coexist with the C
 >   arena's `sfn_arena_*` exports — both link side-by-side until
 >   M3 retires `runtime/native/src/sailfin_arena.c`.
->   `scripts/build.sh`'s `RUNTIME_SFN_ALLOW` allowlist mirrors
->   the manifest entry so `make check`'s stage2/stage3 fixed-
->   point binaries link the same module set; that allowlist
->   retires when `make check` migrates to `sfn build` (Stage E
->   PR3+). Pinned by
+>   The prior (now retired) `scripts/build.sh`'s
+>   `RUNTIME_SFN_ALLOW` allowlist historically mirrored the
+>   manifest entry so `make check`'s stage2/stage3 fixed-point
+>   binaries linked the same module set; the allowlist retired
+>   alongside the script in Stage E PR7 (#383). Pinned by
 >   `compiler/tests/e2e/test_runtime_sfn_sources_link_consumer.sh`
 >   (synthetic-workspace consumer-fires test, dormant-era
 >   regression),

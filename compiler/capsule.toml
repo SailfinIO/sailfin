@@ -10,12 +10,14 @@ description = "The Sailfin compiler — self-hosted, targeting LLVM via .sfn-asm
 # (`compiler/src/runtime_capsule_resolver.sfn`). The driver
 # iterates every declared runtime capsule's `c-sources` /
 # `ll-sources` / `include-dirs` / `link-libs` and feeds them into
-# the link phase. `make compile` (which routes through
-# `scripts/build.sh`) is unaffected — that script walks
-# `runtime/native/src/*.c` directly. Stage D PR4 is when
-# `make compile` flips to `sfn build -p compiler` and this line
-# becomes the load-bearing pointer to the bootstrap's runtime
-# sources.
+# the link phase. `make compile` now routes through
+# `<seed> build -p compiler`, so this line is the load-bearing
+# pointer to the bootstrap's runtime sources. Historically
+# `make compile` delegated to the prior `scripts/build.sh` (since
+# retired in Stage E PR7 / #383), which walked
+# `runtime/native/src/*.c` directly; Stage D PR4 flipped
+# `make compile` to the driver, and Stage E PR7 deleted the
+# script outright.
 "sfn/runtime-native" = "*"
 
 [capabilities]

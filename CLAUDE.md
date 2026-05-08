@@ -335,34 +335,34 @@ The project is marching toward a 1.0 release with a **pure Sailfin toolchain** �
 
 ### Seed Strategy
 
-The compiler self-hosts from a released seed binary using `scripts/build.sh` (pure shell, no fixups). The current seed (0.5.0-alpha.22+) produces clean LLVM IR — no Python post-processing required.
+The compiler self-hosts from a released seed binary using `<seed> build -p compiler` — the unified Sailfin-native driver. The current seed (0.5.10-alpha.6+) produces clean LLVM IR — no Python post-processing required. The prior `scripts/build.sh` orchestrator was retired in Stage E PR7 (#383).
 
 **Build flow:**
 1. Fetch a released seed: `make fetch-seed`
-2. Build the compiler from the seed: `make compile` (uses `build.sh`)
+2. Build the compiler from the seed: `make compile` (routes through `<seed> build -p compiler`)
 3. Run tests: `make test`
 4. Validate self-hosting: `make check` (builds seedcheck from first-pass binary, runs tests on it)
 
 ### Build Driver Configuration
 
 ```bash
-make compile                    # Build from seed (uses scripts/build.sh)
+make compile                    # Build from seed (routes through `<seed> build -p compiler`)
 make rebuild                    # Force rebuild from seed
 ```
 
 ### Development Principles
 
-- **Fix the compiler, not the build script.** All compiler improvements go into `compiler/src/*.sfn`. The build script (`scripts/build.sh`) is pure orchestration — no fixups, no post-processing.
+- **Fix the compiler, not the build script.** All compiler improvements go into `compiler/src/*.sfn`. The driver (`compiler/src/cli_main.sfn` + `compiler/src/capsule_resolver.sfn`) is pure orchestration — no fixups, no post-processing. The historical (now retired) `scripts/build.sh` followed the same rule.
 - **The seedcheck binary must be a fully functional standalone compiler.** `make check` validates that it can run `hello-world.sfn` and pass the test suite directly.
 - **Build must be fast and deterministic.** Current: ~13 min. Target: under 5 minutes. See `docs/build-performance.md` for the optimization plan.
-- **Reduce complexity, don't add it.** The build uses `scripts/build.sh` (pure shell, no fixups).
+- **Reduce complexity, don't add it.** The build uses `<seed> build -p compiler` (the formerly-load-bearing `scripts/build.sh` is retired).
 
 ### `make check` Validation
 
 `make check` does:
-1. Builds the compiler from the seed using `build.sh`
+1. Builds the compiler from the seed via `<seed> build -p compiler`
 2. Runs the full test suite on the first-pass binary (early gate)
-3. Builds seedcheck from the first-pass binary using `build.sh`
+3. Builds seedcheck from the first-pass binary via `sailfin build -p compiler --work-dir build/selfhost/native-seedcheck`
 4. Validates the seedcheck can actually run `examples/basics/hello-world.sfn`
 5. Runs the full test suite using the seedcheck binary directly
 

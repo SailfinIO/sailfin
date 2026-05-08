@@ -2028,7 +2028,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 - `runtime/sfn/io.sfn` (started — `sfn_write_fd` over `platform/libc.write`)
 - `runtime/prelude.sfn` (rewrite delegates)
 - `Makefile` (link Sailfin-native runtime instead of C runtime)
-- `scripts/build.sh` (compile runtime modules alongside compiler)
+- `compiler/src/capsule_resolver.sfn` (compile runtime modules alongside compiler — formerly the now-retired `scripts/build.sh`)
 
 ### M3 (Adapters + Delete C Runtime)
 - `runtime/sfn/adapters/` (new adapter files)
@@ -2050,7 +2050,7 @@ The following are explicitly **not** in scope for the 1.0 runtime:
 - `runtime/native/src/native_driver.c` (delete)
 - `runtime/native/ir/runtime_globals.ll` (delete)
 - `compiler/src/cli_main.sfn` (becomes the true entrypoint)
-- `scripts/build.sh` (remove C driver compilation step)
+- `compiler/src/cli_main.sfn` C-driver compile step (remove — formerly the now-retired prior `scripts/build.sh`)
 
 ---
 
