@@ -1,0 +1,94 @@
+name: Sync Project
+
+# Keeps the Sailfin Tracker (org project #4) in lockstep with issue labels.
+#
+# - On `issues.opened` / `issues.reopened` — add the issue to the project.
+# - On `issues.labeled` / `issues.unlabeled` — recompute Priority / Size
+#   single-select fields from the issue's labels.
+# - `workflow_dispatch` — backfill all open issues (idempotent).
+#
+# Labels are the source of truth (.github/labels.yml). Project fields are
+# derived; views can group / filter on them without re-deriving from labels.
+#
+# This is a regular Actions workflow, not a gh-aw agent: deterministic shell,
+# no LLM, no API key. The work is delegated to scripts/sync-issue-to-project.sh
+# so it's runnable locally.
+#
+# Auth: org-scoped Project V2 cannot be modified with the default GITHUB_TOKEN.
+# Provide a PAT (or fine-grained token) with `project` and `read:org` scopes
+# as `PROJECT_SYNC_TOKEN`. Falls back to `RELEASE_PAT`. If neither is set the
+# job logs a warning and exits 0 — labels remain canonical, the project just
+# gets out of sync until the secret is added.
+
+on:
+  issues:
+    types: [opened, reopened, labeled, unlabeled, edited]
+  workflow_dispatch:
+    inputs:
+      backfill:
+        description: 'Re-sync every open issue (idempotent)'
+        type: boolean
+        default: false
+      issue:
+        description: 'Sync a specific issue number (ignored if backfill is true)'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  # Serialize per-issue. Backfill / dispatch runs share a single slot.
+  group: sync-project-${{ github.event.issue.number || inputs.issue || 'backfill' }}
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve token
+        id: tok
+        env:
+          PROJECT_SYNC_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN }}
+          RELEASE_PAT: ${{ secrets.RELEASE_PAT }}
+        run: |
+          if [[ -n "${PROJECT_SYNC_TOKEN:-}" ]]; then
+            echo "source=PROJECT_SYNC_TOKEN" >> "$GITHUB_OUTPUT"
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          elif [[ -n "${RELEASE_PAT:-}" ]]; then
+            echo "source=RELEASE_PAT" >> "$GITHUB_OUTPUT"
+            echo "have=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::no PROJECT_SYNC_TOKEN or RELEASE_PAT secret available; skipping project sync"
+            echo "have=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync (single issue)
+        if: ${{ steps.tok.outputs.have == 'true' && github.event_name == 'issues' }}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN || secrets.RELEASE_PAT }}
+          GH_REPO: ${{ github.repository }}
+          PROJECT_OWNER: SailfinIO
+          PROJECT_NUMBER: '4'
+        run: scripts/sync-issue-to-project.sh "${{ github.event.issue.number }}"
+
+      - name: Sync (workflow_dispatch — single issue)
+        if: ${{ steps.tok.outputs.have == 'true' && github.event_name == 'workflow_dispatch' && inputs.backfill != true && inputs.issue != '' }}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN || secrets.RELEASE_PAT }}
+          GH_REPO: ${{ github.repository }}
+          PROJECT_OWNER: SailfinIO
+          PROJECT_NUMBER: '4'
+        run: scripts/sync-issue-to-project.sh "${{ inputs.issue }}"
+
+      - name: Sync (workflow_dispatch — backfill all open)
+        if: ${{ steps.tok.outputs.have == 'true' && github.event_name == 'workflow_dispatch' && inputs.backfill == true }}
+        env:
+          GH_TOKEN: ${{ secrets.PROJECT_SYNC_TOKEN || secrets.RELEASE_PAT }}
+          GH_REPO: ${{ github.repository }}
+          PROJECT_OWNER: SailfinIO
+          PROJECT_NUMBER: '4'
+        run: scripts/sync-issue-to-project.sh --all-open

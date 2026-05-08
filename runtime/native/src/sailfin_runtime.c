@@ -2071,6 +2071,76 @@ void sfn_sleep(double milliseconds)
     sailfin_runtime_sleep(milliseconds);
 }
 
+/* M2.4a (#396): SfnString migration trampolines. After the
+ * runtime-helper registry flip in compiler/src/llvm/runtime_helpers.sfn,
+ * fresh compiler emission lowers `s.length`, `a == b` (string),
+ * `substring(...)`, and the `i8*` to `{i8*, i64}` length-recovery
+ * shim in core_operands.sfn to `@sfn_str_*` calls instead of the
+ * legacy `@sailfin_runtime_string_length` / `@strings_equal` /
+ * `@substring_unchecked` C entrypoints. These four trampolines
+ * provide the new symbol surface against the existing C bodies so
+ * test binaries (scripts/run_native_test.sh only links the
+ * runtime/native/src C sources) and the compiler binary itself
+ * resolve at link time without depending on a Sailfin-side
+ * definition that lives outside the test linker's reach.
+ *
+ * The Sailfin definition site is runtime/sfn/string.sfn, which
+ * exports the same five operations under the `sfn_str_sfn_*`
+ * infix to coexist (mirrors runtime/sfn/memory/arena.sfn's
+ * `sfn_arena_sfn_*` parallel namespace). M2.4b retires these
+ * trampolines once the aggregate-by-value parameter flip
+ * (M1.A.2) lands and the Sailfin bodies become the sole
+ * definition site — at that point the `_sfn_` infix is removed
+ * in a single rollback-safe PR.
+ *
+ * sfn_str_eq routes through `_strings_equal_fast` (this file)
+ * rather than `strings_equal` (defined in runtime/prelude.sfn)
+ * to keep the C trampoline link-self-sufficient: every test
+ * binary links sailfin_runtime.o, but the prelude .o does not
+ * always reach the link line on every code path (e.g. the
+ * standalone `sfn test <project>` flow assembles the link from
+ * the project's CWD without a guaranteed prelude.o probe). */
+int64_t sailfin_runtime_string_length(char *text);
+
+char *sailfin_runtime_substring_unchecked(char *text, int64_t start, int64_t end);
+
+int64_t sfn_str_len(const char *s)
+{
+    return sailfin_runtime_string_length((char *)s);
+}
+
+bool sfn_str_eq(const char *a, const char *b)
+{
+    return _strings_equal_fast(a, b);
+}
+
+char *sfn_str_slice(const char *text, double start, double end)
+{
+    /* Route through `_clamp_to_i64` (defined later in this file,
+     * forward-declared at the top) so NaN / out-of-range doubles
+     * produce defined results — matches `substring_unchecked`'s
+     * own double→i64 discipline. A direct `(int64_t)` cast would
+     * be UB for those inputs. */
+    return sailfin_runtime_substring_unchecked((char *)text, _clamp_to_i64(start), _clamp_to_i64(end));
+}
+
+/* `sfn_str_to_cstr` / `sfn_str_from_cstr` are pure ABI bridges in
+ * the M2.4a wave: the legacy `i8*` ABI's data pointer is itself
+ * NUL-terminated (the literal lowering in `core_strings.sfn`
+ * always writes a trailing 0 past the byte payload), so the
+ * boundary is the identity function. M2.4b replaces these with
+ * arena-routed copies once SfnString stops carrying its
+ * NUL-termination guarantee. */
+const char *sfn_str_to_cstr(const char *s)
+{
+    return s;
+}
+
+const char *sfn_str_from_cstr(const char *s)
+{
+    return s;
+}
+
 /* Check if a string pointer looks like a corrupted double-encoded value.
    On macOS ARM64, valid user-space pointers are < 0x800000000000.
    Double-encoded pointers (via ptrtoint→sitofp→double→bitcast back) produce
