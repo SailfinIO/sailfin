@@ -4,6 +4,10 @@ updates:
     directory: "/"
     schedule:
       interval: "daily"
+    ignore:
+      # Owned by gh-aw — bumping these in `*.lock.yml` desyncs the embedded
+      # manifest from the runtime image pins. Updates land via `gh aw compile`.
+      - dependency-name: "github/gh-aw-actions/*"
   - package-ecosystem: "npm"
     directory: "/site"
     schedule:
