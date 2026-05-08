@@ -61,18 +61,17 @@ extern fn sailfin_runtime_array_push_slot_v2(data_ptr: * * u8, len_ptr: * i64, c
 // canary path, allocate `{T*, i64, i64}` plus `cap * elem_size` bytes
 // of element storage from the arena.
 //
-// Status: stub. The first compiler-emitted callers will land in M2.7
-// when the lowering for array literals flips from `_alloc_array` to
-// the new `sfn_array_create` path. Today's array literal emission
-// inlines a `sailfin_runtime_alloc_struct` call in
-// `compiler/src/llvm/expression_lowering/arrays.sfn::lower_struct_array_concat`,
-// so this body is a stub that returns the arena pointer unchanged —
-// callers that grab the returned pointer would see a NULL SfnArray
-// (the arena passed in for proof-of-life is `null` today). The body
-// becomes real once arena threading reaches the array allocator (M3
-// per §2.1.1) and the compiler stops inlining alloc_struct.
+// Status: stub returning `null`. Matches the C stub
+// (`sfn_array_create` in `runtime/native/src/sailfin_runtime.c`) so
+// accidental callers fail fast at the next push/concat with a
+// consistent surface across both the Sailfin and C definitions. The
+// first compiler-emitted callers land in M2.7 when array-literal
+// lowering flips from `_alloc_array` to the new `sfn_array_create`
+// path — until then both stubs document the spec ABI and the body
+// rewrites in-place once arena threading reaches the array
+// allocator (M3 per §2.1.1).
 fn sfn_array_sfn_create(cap: i64, elem_size: i64, arena: * u8) -> * u8 {
-    return arena;
+    return null;
 }
 
 // `sfn_array_sfn_push(arr, elem_ptr, elem_size, arena)` — append an

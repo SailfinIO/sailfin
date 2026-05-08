@@ -6885,18 +6885,22 @@ char *sailfin_runtime_array_push_slot_v2(void **data_ptr, int64_t *len_ptr,
  * bare canonical form in a single rollback-safe PR.
  * ===================================================================== */
 
-SfnArray *sfn_array_concat(SfnArray *a, SfnArray *b, int64_t elem_size,
-                           void *arena)
+SfnArray *sfn_array_concat(SfnArray *a, SfnArray *b)
 {
-    /* The architect spec (`docs/runtime_architecture.md` §2.3) takes
-     * `(elem_size, *Arena)` so growth allocates from the arena and the
-     * future generic-element body honours the per-type stride. Today's
-     * trampoline forwards to `sailfin_runtime_concat_v2` which is
-     * hard-coded to `sizeof(char *)` strides; `elem_size` and `arena`
-     * are accepted to lock the spec ABI but ignored until the M3
-     * arena-backed body lights up. */
-    (void)elem_size;
-    (void)arena;
+    /* Today's compiler-emitted call is 2-arg (matches the M1.B `_v2`
+     * shape pre-#399); the registry's `parameter_types` for `concat`
+     * still emits `declare ... @sfn_array_concat({...}*, {...}*)`,
+     * so this trampoline keeps the 2-arg contract to avoid the UB
+     * that would otherwise arise from a 2-arg call landing on a
+     * 4-arg definition. The architect spec's
+     * `(elem_size, *Arena)` shape (§2.3) belongs on a future
+     * `sfn_array_concat_v3` (or the M3 in-place rewrite) once the
+     * compiler threads arena pointers through array-allocation
+     * sites. The Sailfin proof-of-life surface in
+     * `runtime/sfn/array.sfn::sfn_array_sfn_concat` keeps the 4-arg
+     * spec signature so the migration unit stays visible at the
+     * Sailfin layer; that body retires alongside this trampoline
+     * when the spec form lights up. */
     return sailfin_runtime_concat_v2(a, b);
 }
 
