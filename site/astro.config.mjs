@@ -39,11 +39,11 @@ export default defineConfig({
       sidebar: [
         {
           label: "Getting Started",
-          autogenerate: { directory: "docs/getting-started" },
+          items: [{ autogenerate: { directory: "docs/getting-started" } }],
         },
         {
           label: "Learning Sailfin",
-          autogenerate: { directory: "docs/learn" },
+          items: [{ autogenerate: { directory: "docs/learn" } }],
         },
         {
           label: "Reference",
@@ -52,12 +52,12 @@ export default defineConfig({
             {
               label: "Language Spec",
               collapsed: false,
-              autogenerate: { directory: "docs/reference/spec" },
+              items: [{ autogenerate: { directory: "docs/reference/spec" } }],
             },
             {
               label: "Design Preview",
               collapsed: true,
-              autogenerate: { directory: "docs/reference/preview" },
+              items: [{ autogenerate: { directory: "docs/reference/preview" } }],
             },
             { label: "Grammar (EBNF)", link: "/docs/reference/grammar" },
             { label: "Keywords", link: "/docs/reference/keywords" },
@@ -69,11 +69,11 @@ export default defineConfig({
         },
         {
           label: "Advanced",
-          autogenerate: { directory: "docs/advanced" },
+          items: [{ autogenerate: { directory: "docs/advanced" } }],
         },
         {
           label: "Contributing",
-          autogenerate: { directory: "docs/contributing" },
+          items: [{ autogenerate: { directory: "docs/contributing" } }],
         },
       ],
       pagefind: true,
