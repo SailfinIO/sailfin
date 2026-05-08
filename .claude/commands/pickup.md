@@ -46,15 +46,23 @@ If no pickable issue exists, report: "No claude-ready issues available. Run `/tr
 
 ## Phase 2: CLAIM AND BRANCH
 
-Mark the issue as in-progress and create a branch:
+Mark the issue as in-progress, sync the project board, and create a branch:
 
 ```bash
 # Claim it
 gh issue edit <N> --add-label "in-progress" --remove-label "claude-ready"
 
+# Move the card on the Sailfin Tracker (Project #4) to match.
+# The helper derives the column from the current labels; with the edit
+# above that resolves to "In progress".
+.claude/scripts/sync-project-status.sh <N> --from-labels
+
 # Branch name: claude/<N>-<slugified-title>
 git checkout -b claude/<N>-<slug>
 ```
+
+If the project sync exits non-zero, do not abort the pickup — note the drift
+and surface it in the Phase 6 report so a human can reconcile.
 
 Read the full issue body to extract:
 - Goal
@@ -83,7 +91,15 @@ Based on the issue's `type:*` label, follow the appropriate workflow. Use the is
 gh issue comment <N> --body "Scope adjustment needed: <reason>. Pausing for human input."
 ```
 
-Then mark the issue with `needs-grooming` and remove `in-progress`. Do not silently expand scope.
+Then mark the issue with `needs-grooming`, remove `in-progress`, and resync the
+board so the card moves out of the "In progress" column:
+
+```bash
+gh issue edit <N> --add-label "needs-grooming" --remove-label "in-progress"
+.claude/scripts/sync-project-status.sh <N> --from-labels
+```
+
+Do not silently expand scope.
 
 ---
 
@@ -173,3 +189,7 @@ If anything was deferred or scope was adjusted mid-flight, surface it explicitly
 - **Always link the issue in the PR.** `Closes #N` ensures auto-close on merge.
 - **Always apply `ulimit -v 8388608`** before running the compiler.
 - **One issue per session.** Don't try to bundle multiple issues — they were sized to be standalone.
+- **Every label flip must be paired with a board sync.** Run
+  `.claude/scripts/sync-project-status.sh <N> --from-labels` after any
+  `gh issue edit ... --add-label/--remove-label` so the Sailfin Tracker
+  board (Project #4) stays in sync with the labels.

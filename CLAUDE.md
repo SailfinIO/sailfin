@@ -247,6 +247,14 @@ diagram live in **`docs/conventions/issue-naming.md`**. Quick orientation:
 | `area:compiler` / `area:runtime` / `area:lowering` / `area:build` / `area:agents` / … | Subsystem the issue touches |
 | `epic` / `tracking` | Parent or coordination issue (not directly implementable) |
 
+Labels are mirrored to the **Sailfin Tracker** project board (org project
+SailfinIO/4) Status field. Slash commands that flip labels MUST follow the
+edit with `.claude/scripts/sync-project-status.sh <N> --from-labels` so the
+card moves to the matching column. Mapping (with strict precedence):
+`in-progress` > `blocked` > `needs-grooming` > `claude-ready` →
+`In progress` / `Blocked` / `To triage` / `Ready`. Closed issues land in
+`Done` automatically.
+
 ### When to use what
 
 | Situation | Command |
