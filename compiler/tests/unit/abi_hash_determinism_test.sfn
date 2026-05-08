@@ -1,0 +1,98 @@
+// Unit tests for the FNV-1a 64-bit ABI-hash builder (issue #462).
+//
+// The compiler emits `@sfn_abi_hash` as an i64 derived from a stable
+// rendering of the locked SfnString/SfnArray layouts. The C runtime
+// (`runtime/native/src/sailfin_runtime.c`) reads the symbol as
+// `uint64_t` and aborts on mismatch. These tests pin the three
+// invariants that keep that round-trip honest:
+//
+//   1. The hash is deterministic — recomputing it yields the same
+//      decimal string, byte for byte.
+//   2. Hand-perturbing the layout rendering changes the hash. If the
+//      hash function ever degenerates into a constant (or the layout
+//      string passes through unhashed) this test fails immediately.
+//   3. The decimal representation matches the FNV-1a 64-bit value the
+//      C runtime expects (`SAILFIN_ABI_HASH_EXPECTED`). A drift on
+//      either side surfaces here before `make check` exercises the
+//      runtime constructor.
+//
+// The hash itself runs in pure Sailfin — `compiler/src/llvm/lowering/`
+// `abi_hash.sfn` only imports `char_code` and `substring` from the
+// runtime prelude, so the unit-test budget stays small (no LLVM-
+// lowering subsystem pulled in).
+import { fnv1a_64_hash, sfn_abi_hash_decimal, sfn_abi_locked_layout_string } from "../../src/llvm/lowering/abi_hash";
+
+test "abi_hash: layout string pins SfnString and SfnArray shapes" {
+    let layout = sfn_abi_locked_layout_string();
+    // Hand-encoded rendering — see abi_hash.sfn for the format.
+    assert layout == "SfnString{f0:i8*@8;f1:i64@8};SfnArray{f0:i8**@8;f1:i64@8;f2:i64@8}";
+}
+
+test "abi_hash: decimal is deterministic across calls" {
+    let first = sfn_abi_hash_decimal();
+    let second = sfn_abi_hash_decimal();
+    assert first == second;
+    assert first.length > 0;
+    assert first != "0";
+}
+
+test "abi_hash: decimal pins the expected FNV-1a value" {
+    // Pinned to the FNV-1a 64-bit hash of the locked layout string.
+    // If a future PR changes the layouts, recompute via
+    //   python3 -c 'def f(s):\n h=0xcbf29ce484222325\n for c in s.encode():\n  h^=c; h=(h*0x100000001b3)&0xFFFFFFFFFFFFFFFF\n return h\nprint(f("..."))'
+    // and update both this test and SAILFIN_ABI_HASH_EXPECTED in
+    // runtime/native/src/sailfin_runtime.c in the same commit.
+    let actual = sfn_abi_hash_decimal();
+    assert actual == "13458649150685806382";
+}
+
+test "abi_hash: empty input collapses to the offset basis" {
+    // FNV-1a offset basis = 0xcbf29ce484222325 = 14695981039346656037.
+    // Hashing an empty string returns the basis unchanged.
+    let limbs = fnv1a_64_hash("");
+    assert limbs.h0 == 8997;
+    assert limbs.h1 == 33826;
+    assert limbs.h2 == 40164;
+    assert limbs.h3 == 52210;
+}
+
+test "abi_hash: single-byte input matches reference implementation" {
+    // FNV-1a("a") = 0xaf63dc4c8601ec8c. Limbs (low to high):
+    //   h0 = 0xec8c = 60556
+    //   h1 = 0x8601 = 34305
+    //   h2 = 0xdc4c = 56396
+    //   h3 = 0xaf63 = 44899
+    let limbs = fnv1a_64_hash("a");
+    assert limbs.h0 == 60556;
+    assert limbs.h1 == 34305;
+    assert limbs.h2 == 56396;
+    assert limbs.h3 == 44899;
+}
+
+test "abi_hash: perturbed layout string changes the hash" {
+    // Drop a single character from the locked layout. If the hash
+    // collapsed to a constant or short-circuited the input bytes, this
+    // would still match the canonical hash and the test would fail.
+    let canonical = sfn_abi_locked_layout_string();
+    let perturbed = "SfnString{f0:i8*@8;f1:i64@8};SfnArray{f0:i8**@8;f1:i64@8;f2:i64@4}";
+    let hash_canonical = fnv1a_64_hash(canonical);
+    let hash_perturbed = fnv1a_64_hash(perturbed);
+    let mut differs: boolean = false;
+    if hash_canonical.h0 != hash_perturbed.h0 { differs = true; }
+    if hash_canonical.h1 != hash_perturbed.h1 { differs = true; }
+    if hash_canonical.h2 != hash_perturbed.h2 { differs = true; }
+    if hash_canonical.h3 != hash_perturbed.h3 { differs = true; }
+    assert differs;
+}
+
+test "abi_hash: distinct one-byte inputs produce distinct hashes" {
+    // Avalanche check on the smallest possible perturbation.
+    let h_a = fnv1a_64_hash("a");
+    let h_b = fnv1a_64_hash("b");
+    let mut differs: boolean = false;
+    if h_a.h0 != h_b.h0 { differs = true; }
+    if h_a.h1 != h_b.h1 { differs = true; }
+    if h_a.h2 != h_b.h2 { differs = true; }
+    if h_a.h3 != h_b.h3 { differs = true; }
+    assert differs;
+}

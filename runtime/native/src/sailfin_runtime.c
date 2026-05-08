@@ -75,14 +75,21 @@ static _Thread_local char *_sailfin_exception_message = NULL;
 static inline void _runtime_enter(void);
 
 // =============================================================================
-// ABI version check (issue #392 / M1.C)
+// ABI version check (issue #392 / M1.C; issue #462)
 // =============================================================================
 // Every emitted Sailfin LLVM module defines `@sfn_abi_version` and
 // `@sfn_abi_hash` with `linkonce_odr` linkage. At process startup
 // `_runtime_init` reads the version and aborts with a diagnostic if it
-// does not match the value the runtime was built against. The hash is
-// hardcoded to `v0000001` today; M2 will replace it with a value derived
-// from struct layouts so this check starts catching real layout drifts.
+// does not match the value the runtime was built against.
+//
+// `@sfn_abi_hash` is an FNV-1a 64-bit digest over a stable rendering of
+// the locked SfnString / SfnArray aggregate layouts (see
+// `compiler/src/llvm/lowering/abi_hash.sfn`). Compiler and runtime run
+// in the same address space, so the `i64` symbol is read as `uint64_t`
+// directly — no endianness handling is required today. If we ever need
+// to ship a precompiled artifact across architectures, the hash would
+// have to be re-encoded as a byte sequence; that's an out-of-scope
+// change for #462.
 //
 // The C runtime also provides weak fallback definitions of both
 // symbols. Mach-O's static linker (unlike ELF ld) errors on
@@ -95,17 +102,20 @@ static inline void _runtime_enter(void);
 //     picks one and both carry the same value, so the check passes.
 //   - When only the C definition exists (runtime-only smoke test),
 //     the fallback is used and the check passes.
-//   - When the LLVM-emitted hash diverges (layout drift in M2), the
+//   - When the LLVM-emitted hash diverges (layout drift), the
 //     LLVM `weak_def_can_be_hidden` definition outranks the C
 //     `weak` fallback so the diagnostic fires.
 #define SAILFIN_ABI_VERSION_EXPECTED 1
-#define SAILFIN_ABI_HASH_EXPECTED "v0000001"
-#define SAILFIN_ABI_HASH_LEN 8
+// FNV-1a 64-bit of `sfn_abi_locked_layout_string()`. Recompute via
+//   build/native/sailfin emit llvm examples/basics/hello-world.sfn \
+//     | grep '@sfn_abi_hash'
+// after touching the locked layouts (or run the FNV-1a algorithm
+// against the layout string directly). The current value pins
+// `SfnString{f0:i8*@8;f1:i64@8};SfnArray{f0:i8**@8;f1:i64@8;f2:i64@8}`.
+#define SAILFIN_ABI_HASH_EXPECTED UINT64_C(13458649150685806382)
 
 __attribute__((weak)) const int32_t sfn_abi_version = SAILFIN_ABI_VERSION_EXPECTED;
-__attribute__((weak)) const char sfn_abi_hash[SAILFIN_ABI_HASH_LEN] = {
-    'v', '0', '0', '0', '0', '0', '0', '1'
-};
+__attribute__((weak)) const uint64_t sfn_abi_hash = SAILFIN_ABI_HASH_EXPECTED;
 
 static void _runtime_init(void) __attribute__((constructor));
 static void _runtime_init(void)
@@ -145,23 +155,23 @@ static void _runtime_init(void)
         _exit(70);
     }
 
-    char observed[SAILFIN_ABI_HASH_LEN + 1];
+    uint64_t observed_hash;
     if (force_hash)
     {
-        memcpy(observed, "vBADBAD0", SAILFIN_ABI_HASH_LEN);
+        observed_hash = SAILFIN_ABI_HASH_EXPECTED ^ UINT64_C(0xDEADBEEFCAFEBABE);
     }
     else
     {
-        memcpy(observed, sfn_abi_hash, SAILFIN_ABI_HASH_LEN);
+        observed_hash = sfn_abi_hash;
     }
-    observed[SAILFIN_ABI_HASH_LEN] = '\0';
-    if (memcmp(observed, SAILFIN_ABI_HASH_EXPECTED, SAILFIN_ABI_HASH_LEN) != 0)
+    if (observed_hash != SAILFIN_ABI_HASH_EXPECTED)
     {
         fprintf(stderr,
-                "[sailfin] ABI hash mismatch: runtime expects '%s' but "
-                "linked module reports '%s'. Layout drift detected — "
-                "rebuild the compiler.\n",
-                SAILFIN_ABI_HASH_EXPECTED, observed);
+                "[sailfin] ABI hash mismatch: runtime expects 0x%016llx "
+                "but linked module reports 0x%016llx. Layout drift "
+                "detected — rebuild the compiler.\n",
+                (unsigned long long)SAILFIN_ABI_HASH_EXPECTED,
+                (unsigned long long)observed_hash);
         fflush(stderr);
         _exit(70);
     }
