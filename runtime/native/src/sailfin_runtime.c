@@ -2141,6 +2141,20 @@ const char *sfn_str_from_cstr(const char *s)
     return s;
 }
 
+/* M1.2 (#461): SfnString migration trampoline for string concatenation.
+ * Mirrors the M2.4a wave-1 trampolines above (`sfn_str_len`, `sfn_str_eq`,
+ * `sfn_str_slice`). The compiler's runtime_helpers.sfn registry now
+ * carries `native_signature: "sfn_str_concat"` for `string.concat`, and
+ * the hardcoded direct-emission sites in
+ * `expression_lowering/native/{core_ops_lowering,core_strings}.sfn`
+ * call `@sfn_str_concat` for fresh emission. Seed-built IR that still
+ * targets `@sailfin_runtime_string_concat_v2` keeps linking through
+ * the legacy entrypoint defined later in this file. */
+char *sfn_str_concat(SfnString a, SfnString b)
+{
+    return sailfin_runtime_string_concat_v2(a, b);
+}
+
 /* Check if a string pointer looks like a corrupted double-encoded value.
    On macOS ARM64, valid user-space pointers are < 0x800000000000.
    Double-encoded pointers (via ptrtoint→sitofp→double→bitcast back) produce
