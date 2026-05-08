@@ -58,7 +58,7 @@ ll-sources = ["ir/runtime_globals.ll"]
 #      breaking byte-identical determinism.
 #
 # Single-line array per the parser limitation noted above.
-sfn-sources = ["../sfn/memory/arena.sfn"]
+sfn-sources = ["../sfn/memory/arena.sfn", "../sfn/string.sfn"]
 include-dirs = ["include"]
 link-libs = ["-lm"]
 

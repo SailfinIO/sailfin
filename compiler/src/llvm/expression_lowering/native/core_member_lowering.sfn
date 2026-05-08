@@ -693,9 +693,13 @@ fn lower_member_access(parse: MemberAccessParse, bindings: ParameterBinding[], l
             };
         }
         if base_operand.llvm_type == "i8*" {
+            // M2.4a (#396): legacy `i8*` `s.length` lowers to the
+            // Sailfin-native `@sfn_str_len` (`runtime/sfn/string.sfn`)
+            // instead of the C `@sailfin_runtime_string_length`. The
+            // aggregate fast path above (extractvalue) is unchanged.
             let length_temp = format_temp_name(current_temp);
             current_lines.push("  " + length_temp
-                + " = call i64 @sailfin_runtime_string_length(i8* "
+                + " = call i64 @sfn_str_len(i8* "
                 + base_operand.value
                 + ")");
             current_temp += 1;

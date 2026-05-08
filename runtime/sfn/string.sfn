@@ -1,0 +1,109 @@
+// runtime/sfn/string.sfn
+//
+// First wave of Sailfin-native `SfnString` operations (M2.4a, #396).
+// The module pins the future shape of the five non-allocating
+// `sfn_str_*` helpers — `len`, `eq`, `slice`, `to_cstr`,
+// `from_cstr` — and ships into the compiler binary alongside the
+// C runtime so the migration footprint is visible at link time.
+//
+// Status: trampoline bodies. The architect plan in
+// `docs/runtime_architecture.md` §2.2 specifies these helpers
+// against the SfnString aggregate (`{i8*, i64}` by value) so
+// `sfn_str_len` is a single field load and `sfn_str_eq` is a length
+// compare + `memcmp`. Today's Sailfin frontend lowers `string` to
+// `i8*` for parameters/locals (M1.A only locked the literal/aggregate
+// shape, not the type-mapping flip slated for M1.A.2), so these
+// bodies still bridge through the legacy NUL-terminated C
+// entrypoints. The function *names* are the migration unit — once
+// M1.A.2 lands the bodies can be rewritten in-place over the
+// aggregate shape without touching any caller.
+//
+// Naming: every export uses the `sfn_str_sfn_*` infix so the
+// Sailfin module coexists with the C runtime's matching
+// `sfn_str_*` exports without a link-time collision (mirrors the
+// arena module's `sfn_arena_sfn_*` infix; see
+// `runtime/sfn/memory/arena.sfn` for the same rationale). The
+// canonical user-facing names — the ones the new compiler emits
+// `call`s against — are `sfn_str_*` (no infix), provided by the C
+// trampolines in `runtime/native/src/sailfin_runtime.c`. This
+// module's exports are presence-only proof of life today and the
+// migration unit for M2.4b: when the aggregate-typed parameter
+// flip lands, the C trampolines retire and these `_sfn_` names
+// rename to the bare canonical form in a single rollback-safe PR.
+//
+// Effects: none. String primitives live below the I/O layer (same
+// discipline as `runtime/sfn/memory/arena.sfn`). The `![io]`
+// annotations attach to *adapters* that wrap these primitives,
+// never to the primitives themselves.
+//
+// Why inline the libc externs? The same reason `arena.sfn` does:
+// the released seed compiler snapshots `runtime/sfn/platform/libc.sfn`
+// at build time. Inlining keeps this module self-contained for
+// every seed, regardless of which libc declarations have shipped.
+// Once the seed catches up, a follow-up PR can flip these to a
+// cross-module import without touching the bodies.
+extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
+
+extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
+
+// Trampolines into the legacy C runtime. M2.4b (the concat/append
+// wave gated on #328 drop emission) replaces these with native
+// arena-backed Sailfin bodies; until then the C bodies do the
+// allocation work and these wrappers exist only to give this
+// module a legal Sailfin call surface for its proof-of-life
+// emission.
+extern fn sailfin_runtime_string_length(s: * u8) -> i64;
+
+extern fn strings_equal(a: * u8, b: * u8) -> bool;
+
+extern fn substring_unchecked(text: * u8, start: f64, end: f64) -> * u8;
+
+// `sfn_str_sfn_len(s)` — Sailfin-side length recovery for the
+// SfnString aggregate. Architect spec
+// (`runtime_architecture.md` §2.2): direct field access on the
+// aggregate's `len` slot, no runtime call. Today's bodies still
+// trampoline through the C scanner because the aggregate-typed
+// parameter flip (M1.A.2) hasn't landed yet; the legacy `i8*`
+// fallback path on the compiler side keeps consuming
+// NUL-terminated buffers.
+fn sfn_str_sfn_len(s: * u8) -> i64 {
+    return sailfin_runtime_string_length(s);
+}
+
+// `sfn_str_sfn_eq(a, b)` — byte-for-byte equality for two
+// SfnStrings. Architect spec: `len` compare followed by
+// `memcmp(a.data, b.data, a.len)`. Today's body delegates to the
+// C `strings_equal` entrypoint to avoid a second comparison
+// strategy until the aggregate flip lands.
+fn sfn_str_sfn_eq(a: * u8, b: * u8) -> bool { return strings_equal(a, b); }
+
+// `sfn_str_sfn_slice(text, start, end)` — non-owning view over
+// `text[start..end]`. Architect spec returns
+// `SfnSlice { data: text.data + start, len: end - start }`,
+// strictly non-allocating. Today's body still allocates a fresh
+// NUL-terminated buffer in the runtime arena (delegating to the
+// legacy `substring_unchecked` C entrypoint) because the rest of
+// the compiler hasn't grown an `SfnSlice` operand type yet. The
+// `f64` start/end shape mirrors the registry signature so call-
+// site arguments don't need a coercion shim during the flip.
+fn sfn_str_sfn_slice(text: * u8, start: f64, end: f64) -> * u8 {
+    return substring_unchecked(text, start, end);
+}
+
+// `sfn_str_sfn_to_cstr(s)` — NUL-terminated C string view of `s`.
+// Today's strings already carry a trailing NUL (the literal
+// lowering in `core_strings.sfn::lower_string_literal` writes one
+// past the byte payload), so the boundary is the identity
+// function. M2.4b reworks the body once the aggregate carries
+// arbitrary (potentially non-terminated) byte ranges and an arena
+// must be threaded for the copy.
+fn sfn_str_sfn_to_cstr(s: * u8) -> * u8 { return s; }
+
+// `sfn_str_sfn_from_cstr(s)` — adopt a NUL-terminated C buffer as
+// an SfnString. The architect spec scans for the NUL terminator
+// with `memchr` to recover the byte length and constructs the
+// aggregate `{s, len}` view; today's body still hands back the
+// bare `i8*` because there's no SfnString slot to populate.
+// `memchr` is declared above so the M2.4b body rewrite (over the
+// aggregate shape) doesn't need to add it then.
+fn sfn_str_sfn_from_cstr(s: * u8) -> * u8 { return s; }

@@ -65,13 +65,15 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
             if right_is_string {
                 if !left_is_null {
                     if !right_is_null {
-                        // M1.A: `strings_equal` is still on the legacy
-                        // `i8*` ABI in this PR, so an aggregate operand
-                        // here needs its data pointer extracted before
-                        // the call. The slow `strlen`-based comparison
-                        // path remains correct because the aggregate's
-                        // data pointer is NUL-terminated by the literal
-                        // lowering.
+                        // M2.4a (#396): the call routes to
+                        // `@sfn_str_eq` (defined in
+                        // `runtime/sfn/string.sfn`) instead of the
+                        // legacy `@strings_equal` C entrypoint. Both
+                        // exports are still backed by the same
+                        // NUL-terminated `i8*` ABI for now — the
+                        // aggregate-by-value rewrite lands with M2.4b
+                        // — so the operand-extraction shim below is
+                        // unchanged from the M1.A landing.
                         let mut next_index = temp_index;
                         let mut left_ptr_value = left_operand.value;
                         if left_operand.llvm_type == "{i8*, i64}" {
@@ -95,7 +97,7 @@ fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_
                         }
                         let compare_temp = format_temp_name(next_index);
                         current_lines.push("  " + compare_temp
-                            + " = call i1 @strings_equal(i8* "
+                            + " = call i1 @sfn_str_eq(i8* "
                             + left_ptr_value
                             + ", i8* "
                             + right_ptr_value
@@ -760,9 +762,15 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
     }
     if operand_type == "i8*" {
         if target == "{i8*, i64}" {
+            // M2.4a (#396): length recovery for the legacy `i8*` →
+            // `{i8*, i64}` shim routes through `@sfn_str_len`
+            // (`runtime/sfn/string.sfn`) instead of the C
+            // `@sailfin_runtime_string_length` entrypoint. The body
+            // still trampolines through the C scanner until the
+            // aggregate-typed locals flip lands; the symbol swap
+            // is the migration unit.
             let len_temp = format_temp_name(temp_index);
-            current_lines.push("  " + len_temp
-                + " = call i64 @sailfin_runtime_string_length(i8* "
+            current_lines.push("  " + len_temp + " = call i64 @sfn_str_len(i8* "
                 + operand.value
                 + ")");
             let agg0 = format_temp_name(temp_index + 1);

@@ -470,6 +470,7 @@ if [[ "$IS_WORKER" -eq 0 ]]; then
     # imports only from files already in the list.
     RUNTIME_SFN_ALLOW=(
         "$RUNTIME_SRC/sfn/memory/arena.sfn"
+        "$RUNTIME_SRC/sfn/string.sfn"
     )
     while IFS= read -r -d '' f; do
         case "$f" in
