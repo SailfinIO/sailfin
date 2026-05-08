@@ -10,7 +10,9 @@ sidebar:
 
 | Type | Description | FFI C equivalent |
 |------|-------------|-----------------|
-| `number` | 64-bit float (primary numeric type) | `double` |
+| `int` | 64-bit signed integer (default for unsuffixed integer literals) | `int64_t` |
+| `float` | 64-bit IEEE-754 float (default for decimal literals) | `double` |
+| `number` | Deprecated alias for `float` (kept for migration) | `double` |
 | `string` | UTF-8 string | — |
 | `boolean` | Boolean | `_Bool` |
 | `void` | No return value | `void` |
@@ -19,8 +21,11 @@ sidebar:
 **Integer and float types** (for FFI and low-level use):
 `i8`, `i16`, `i32`, `i64`, `u8`, `u16`, `u32`, `u64`, `usize`, `f32`, `f64`
 
-> `int` (i64) and `float` (f64) will replace the single `number` type in a
-> future release — tracked on the [roadmap](/roadmap).
+> Bare unsuffixed integer literals default to `int` (i64); decimal or
+> exponent literals default to `float` (f64). The `number` keyword is a
+> deprecated alias for `float` and will be removed once the compiler
+> source completes its migration to the explicit `int` / `float`
+> spellings — tracked on the [roadmap](/roadmap).
 
 **Composite types**: structs, enums, arrays (`T[]`)
 

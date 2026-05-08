@@ -248,6 +248,17 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             inferred_element_type = expected_element_type;
         }
     }
+    // Slice E.1 (#488): bare integer literals default to `int` (i64) at
+    // scalar context, but unannotated array literals keep the pre-E.1
+    // `double` element default so the existing `: number[]` corpus
+    // (compiler source, runtime/prelude.sfn, and every test fixture
+    // that types arrays as `: number[]`) lowers without churn.
+    // Once E.2 migrates every `: number` site to `: int`/`: float`,
+    // this fallback flips to `i64` (or, more cleanly, the array
+    // literal grows a real type-inference pass that reads the
+    // typecheck-derived binding type).
+    let mut element_expected_type: string = inferred_element_type;
+    if element_expected_type.length == 0 { element_expected_type = "double"; }
     let mut index: number = metadata.start_index;
     loop {
         if index >= elements.length { break; }
@@ -257,7 +268,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
             index += 1;
             continue;
         }
-        let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, "");
+        let lowered = lower_expression(element_text, bindings, locals, current_temp, current_lines, functions, context, element_expected_type);
         diagnostics = extend_string_array(diagnostics, lowered.diagnostics);
         collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
         current_lines = lowered.lines;
