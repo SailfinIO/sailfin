@@ -1,0 +1,188 @@
+// Unit tests for `fn main` signature validation in
+// `compiler/src/typecheck.sfn` (issue #469, M5.3 prerequisite).
+//
+// The lowering pass at `compiler/src/llvm/lowering/emission.sfn:319`
+// already detects `fn_name == "main"` and emits a C-compatible
+// `main(argc, argv)` wrapper. These tests pin the typecheck-level
+// validation that flags signatures the wrapper can't honour, so users
+// see a Sailfin diagnostic (E0010 / E0011) instead of an `lld` link
+// error after M5.3 emits the real argv-parsing prologue.
+import { parse_program } from "../../src/parser/mod";
+import { typecheck_diagnostics } from "../../src/typecheck";
+import { Diagnostic } from "../../src/typecheck_types";
+
+fn _has_code(diagnostics: Diagnostic[], code: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn _count_code(diagnostics: Diagnostic[], code: string) -> number {
+    let mut count: number = 0;
+    let mut i: number = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        if strings_equal(diagnostics[i].code, code) { count += 1; }
+        i += 1;
+    }
+    return count;
+}
+
+fn _index_of(haystack: string, needle: string) -> number {
+    if needle.length == 0 { return 0; }
+    if haystack.length < needle.length { return -1; }
+    let mut i: number = 0;
+    let limit = haystack.length - needle.length;
+    loop {
+        if i > limit { break; }
+        let mut j: number = 0;
+        let mut matches: boolean = true;
+        loop {
+            if j >= needle.length { break; }
+            if haystack[i + j] != needle[j] {
+                matches = false;
+                break;
+            }
+            j += 1;
+        }
+        if matches { return i; }
+        i += 1;
+    }
+    return -1;
+}
+
+fn _contains(haystack: string, needle: string) -> boolean {
+    return _index_of(haystack, needle) >= 0;
+}
+
+// -------------------------------------------------------------------
+// Accept path — every form on the v0 entry-point accept-list must
+// produce zero main-signature diagnostics (E0010 / E0011).
+// -------------------------------------------------------------------
+test "main: accepts fn main() {} (zero parameters, no return type)" {
+    let source = "fn main() {}";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0010");
+    assert ! _has_code(diagnostics, "E0011");
+}
+
+test "main: accepts fn main(argv: string[]) -> number ![io]" {
+    let source = "fn main(argv: string[]) -> number ![io] { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0010");
+    assert ! _has_code(diagnostics, "E0011");
+}
+
+test "main: accepts fn main() ![io] (effect declared, zero params)" {
+    // The most common entry-point shape used across `examples/`. Lock
+    // it in so a future tightening of the validator doesn't regress
+    // the existing example fleet.
+    let source = "fn main() ![io] { print.info(\"hi\"); }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0010");
+    assert ! _has_code(diagnostics, "E0011");
+}
+
+test "main: accepts fn main() -> number (return type only)" {
+    let source = "fn main() -> number { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0010");
+    assert ! _has_code(diagnostics, "E0011");
+}
+
+// -------------------------------------------------------------------
+// Reject path — wrong parameter shape produces a Sailfin diagnostic
+// rather than a downstream `lld` error.
+// -------------------------------------------------------------------
+test "main: rejects fn main(argv: number) -> number (E0011 wrong argv type)" {
+    let source = "fn main(argv: number) -> number { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    // Issue #469 acceptance: the diagnostic must point at the parameter,
+    // surfacing what to retype. E0011 is the parameter-type code.
+    assert _has_code(diagnostics, "E0011");
+}
+
+test "main: rejects fn main(argv: string[], extra: number) (E0010 extra param)" {
+    let source = "fn main(argv: string[], extra: number) -> number { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    // E0010 is the parameter-count code. The wrapper passes only argv,
+    // so any second slot is silently ignored today (and will mismatch at
+    // link time after M5.3); flagging at typecheck surfaces the issue
+    // with a Sailfin message instead.
+    assert _has_code(diagnostics, "E0010");
+}
+
+test "main: E0011 message includes the offending type text" {
+    // The user-facing message must reference both the expected
+    // `string[]` shape and the actual `number` annotation so the user
+    // has enough context to fix without consulting the spec. Assert
+    // both substrings explicitly — a length-only check would miss a
+    // regression that drops the actual-vs-expected detail.
+    let source = "fn main(argv: number) -> number { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    let mut found_message: boolean = false;
+    let mut found_expected: boolean = false;
+    let mut found_actual: boolean = false;
+    let mut found_param_name: boolean = false;
+    let mut i: number = 0;
+    loop {
+        if i >= diagnostics.length { break; }
+        let d = diagnostics[i];
+        if strings_equal(d.code, "E0011") {
+            found_message = true;
+            if _contains(d.message, "string[]") { found_expected = true; }
+            if _contains(d.message, "number") { found_actual = true; }
+            if _contains(d.message, "argv") { found_param_name = true; }
+        }
+        i += 1;
+    }
+    assert found_message;
+    assert found_expected;
+    assert found_actual;
+    assert found_param_name;
+}
+
+test "main: only one E0011 for a single bad parameter" {
+    // Duplicate diagnostics for the same slot would be noisy. The
+    // validator must emit at most one E0011 per offending parameter.
+    let source = "fn main(argv: number) -> number { return 0; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert _count_code(diagnostics, "E0011") == 1;
+}
+
+// -------------------------------------------------------------------
+// Non-main routines must remain unaffected — the validator gates only
+// when the function's name is exactly "main" so internal compiler
+// helpers like `sailfin_cli_main` and `native_cli_main` (which take
+// custom parameter shapes) keep their freedom.
+// -------------------------------------------------------------------
+test "main: non-main fn with arbitrary params produces no E0010/E0011" {
+    let source = "fn handle_request(req: number) -> number { return req; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0010");
+    assert ! _has_code(diagnostics, "E0011");
+}
+
+test "main: function literally named `mainframe` is not gated" {
+    // The validator must use exact name matching, not a prefix/suffix
+    // check, so identifiers like `mainframe`, `main_loop`, or
+    // `entrypoint_main` keep their original signature freedom.
+    let source = "fn mainframe(argv: number) -> number { return argv; }";
+    let program = parse_program(source);
+    let diagnostics = typecheck_diagnostics(program);
+    assert ! _has_code(diagnostics, "E0010");
+    assert ! _has_code(diagnostics, "E0011");
+}

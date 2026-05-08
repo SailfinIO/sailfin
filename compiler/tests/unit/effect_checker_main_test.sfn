@@ -1,0 +1,163 @@
+// Unit tests for `fn main` ambient effect handling in
+// `compiler/src/effect_checker.sfn` (issue #469, M5.3 prerequisite).
+//
+// `fn main` is the program entry point — there is no Sailfin caller
+// demanding effects from it. The effect-checker treats main's
+// declared `![…]` set as ambient: the user's declared effects are
+// granted to the body, and the body's used-vs-declared check still
+// gates operations (so `fn main()` without `![io]` cannot call
+// `print.info`). These tests pin that contract.
+import {
+    Block,
+    Decorator,
+    Expression,
+    FunctionSignature,
+    Program,
+    SourceSpan,
+    Statement
+} from "../../src/ast";
+import { EffectViolation, is_program_entry_point, validate_effects } from "../../src/effect_checker";
+
+// -------------------------------------------------------------------
+// Builder helpers — local copies of the shape used in
+// `effect_checker_test.sfn` so this file stays self-contained.
+// -------------------------------------------------------------------
+fn _span(line: number, column: number) -> SourceSpan {
+    return SourceSpan {
+        start_line: line,
+        start_column: column,
+        end_line: line,
+        end_column: column + 1
+    };
+}
+
+fn _signature(name: string, effects: string[], span: SourceSpan?) -> FunctionSignature {
+    return FunctionSignature {
+        name: name,
+        is_async: false,
+        parameters: [],
+        return_type: null,
+        effects: effects,
+        type_parameters: [],
+        name_span: span
+    };
+}
+
+// Build a `fn main` declaration with a body that calls `print.info`,
+// which requires `![io]`. The body uses an AST `Member`-call so the
+// effect-checker walks the parsed-AST path (not the text-pattern
+// fallback), matching what the real parser produces for routines.
+fn _build_main_routine(declared_effects: string[]) -> Statement {
+    let span = _span(1, 4);
+    let object_span = _span(2, 5);
+    let member_span = _span(2, 11);
+    let object = Expression.Identifier { name: "print", span: object_span };
+    let member_expr = Expression.Member {
+        object: object,
+        member: "info",
+        span: member_span
+    };
+    let arg = Expression.StringLiteral { value: "x" };
+    let mut args: Expression[] = [];
+    args.push(arg);
+    let call_expr = Expression.Call {
+        callee: member_expr,
+        arguments: args,
+        span: null
+    };
+    let body_stmt = Statement.ExpressionStatement {
+        expression: call_expr,
+        span: null
+    };
+    let body_block = Block {
+        tokens: [],
+        text: "",
+        statements: [body_stmt]
+    };
+    let mut empty_decorators: Decorator[] = [];
+    return Statement.FunctionDeclaration {
+        signature: _signature("main", declared_effects, span),
+        body: body_block,
+        decorators: empty_decorators
+    };
+}
+
+// -------------------------------------------------------------------
+// is_program_entry_point — predicate contract
+// -------------------------------------------------------------------
+test "is_program_entry_point: returns true for `fn main`" {
+    let sig = _signature("main", [], _span(1, 4));
+    assert is_program_entry_point(sig);
+}
+
+test "is_program_entry_point: returns false for non-main functions" {
+    // The compiler's own `sailfin_cli_main` and `native_cli_main` are
+    // not the program entry point; the predicate must use exact name
+    // matching so prefix/suffix collisions don't accidentally grant
+    // ambient status.
+    let sig_a = _signature("sailfin_cli_main", [], _span(1, 4));
+    let sig_b = _signature("mainframe", [], _span(1, 4));
+    let sig_c = _signature("entrypoint", [], _span(1, 4));
+    assert ! is_program_entry_point(sig_a);
+    assert ! is_program_entry_point(sig_b);
+    assert ! is_program_entry_point(sig_c);
+}
+
+// -------------------------------------------------------------------
+// Ambient effect grant — `fn main` declaring `![io]` covers a
+// `print.info(…)` call without producing a missing-effect diagnostic.
+// -------------------------------------------------------------------
+test "effect violation: fn main() ![io] { print.info(...) } produces zero violations" {
+    // Issue #469 acceptance: the entry point must accept whatever
+    // effect set the user declares without requiring a caller. The
+    // body's used effects are still gated by the declared set —
+    // `![io]` here covers the `print.info` call.
+    let mut declared: string[] = [];
+    declared.push("io");
+    let stmt = _build_main_routine(declared);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+test "effect violation: fn main() ![io, clock] declared on entry point" {
+    // The CLI's eventual entry point will declare the union of effects
+    // it needs. Lock in that the checker treats a multi-effect
+    // declaration on main as accepted ambient grants — the body's
+    // used effects (just `io` here) are a subset of declared, so no
+    // violation fires.
+    let mut declared: string[] = [];
+    declared.push("io");
+    declared.push("clock");
+    let stmt = _build_main_routine(declared);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 0;
+}
+
+// -------------------------------------------------------------------
+// Ambient is NOT a free pass — `fn main()` without `![io]` cannot
+// call `print.info`. The checker must still produce a missing-effect
+// diagnostic when the body uses an effect outside the declared set.
+// -------------------------------------------------------------------
+test "effect violation: fn main() without ![io] still flags print.info" {
+    // The "ambient" grant is bounded by the declared set. A bare
+    // `fn main()` declaring no effects must still fail when its body
+    // calls `print.info` — otherwise `main` would be a hole in the
+    // capability surface. Lock the gate behaviour in.
+    let mut empty_effects: string[] = [];
+    let stmt = _build_main_routine(empty_effects);
+    let program = Program { statements: [stmt] };
+    let violations = validate_effects(program);
+    assert violations.length == 1;
+    let v = violations[0];
+    assert v.routine_name == "main";
+    let mut found_io: boolean = false;
+    let mut i: number = 0;
+    loop {
+        if i >= v.missing_effects.length { break; }
+        if v.missing_effects[i] == "io" { found_io = true; }
+        i += 1;
+    }
+    assert found_io;
+}
