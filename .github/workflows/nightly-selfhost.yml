@@ -53,7 +53,7 @@ jobs:
             clang: clang
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v6
 
       - name: Resolve seed version (input override → .seed-version)
         id: seed
