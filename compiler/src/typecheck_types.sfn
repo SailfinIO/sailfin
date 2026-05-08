@@ -1158,3 +1158,82 @@ fn make_missing_interface_member_diagnostic(struct_name: string, interface_name:
         suggestion: null
     };
 }
+
+// E0010 — `fn main` declared with too many parameters. The Sailfin
+// entry point accepts at most one argument: the argv slice. The
+// lowering pass (`compiler/src/llvm/lowering/emission.sfn`) emits a
+// C-compatible `main(argc, argv)` wrapper for any top-level `fn main`,
+// so any extra parameters would either be silently ignored today or
+// (after M5.3) manifest as an LLVM-link mismatch. Validate at typecheck
+// to surface a Sailfin diagnostic instead of an `lld` error. The
+// diagnostic carets at the first extraneous parameter so the user can
+// see exactly what to delete.
+fn make_main_signature_param_count_diagnostic(param_count: number, parameter_name: string, span: SourceSpan?) -> Diagnostic {
+    return Diagnostic {
+        code: "E0010",
+        severity: "error",
+        message: "`fn main` accepts at most one parameter (`argv: string[]`),"
+            + " got "
+            + number_to_string(param_count)
+            + ". Drop the extra parameters; values that vary per-run live in"
+            + " environment variables, configuration files, or argv itself.",
+        file_path: "",
+        primary: token_from_name(parameter_name, span),
+        suggestion: null
+    };
+}
+
+// E0011 — `fn main`'s sole parameter must be the argv slice. The
+// lowering wrapper passes argv as a `string[]`; any other type (including
+// the legacy `number` alias) would produce a type-mismatch crash inside
+// the wrapper or — once M5.3 emits a real argv-parsing prologue — at
+// LLVM-link time. The fix-it tells the user to switch to `string[]` and
+// to parse any structured arguments inside the body. The diagnostic
+// carets at the parameter so the user can see exactly which slot to
+// retype.
+fn make_main_signature_param_type_diagnostic(parameter_name: string, actual_type: string, span: SourceSpan?) -> Diagnostic {
+    let mut shown: string = actual_type;
+    if shown.length == 0 { shown = "<missing>"; }
+    return Diagnostic {
+        code: "E0011",
+        severity: "error",
+        message: "`fn main` parameter `" + parameter_name
+            + "` must be typed `string[]` (the argv slice), got `"
+            + shown
+            + "`. The lowering pass passes argv as `string[]`; parse"
+            + " structured arguments inside the body.",
+        file_path: "",
+        primary: token_from_name(parameter_name, span),
+        suggestion: null
+    };
+}
+
+fn number_to_string(value: number) -> string {
+    if value == 0 { return "0"; }
+    let mut n = value;
+    let mut negative: boolean = false;
+    if n < 0 {
+        negative = true;
+        n = -n;
+    }
+    let mut digits: string = "";
+    loop {
+        if n == 0 { break; }
+        let digit = n - ((n / 10) * 10);
+        let mut ch: string = "";
+        if digit == 0 { ch = "0"; }
+        if digit == 1 { ch = "1"; }
+        if digit == 2 { ch = "2"; }
+        if digit == 3 { ch = "3"; }
+        if digit == 4 { ch = "4"; }
+        if digit == 5 { ch = "5"; }
+        if digit == 6 { ch = "6"; }
+        if digit == 7 { ch = "7"; }
+        if digit == 8 { ch = "8"; }
+        if digit == 9 { ch = "9"; }
+        digits = ch + digits;
+        n = n / 10;
+    }
+    if negative { return "-" + digits; }
+    return digits;
+}

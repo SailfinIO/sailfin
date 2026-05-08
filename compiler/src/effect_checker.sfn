@@ -351,6 +351,24 @@ fn analyze_statement(statement: Statement, imports: ImportSymbolTable) -> Effect
     return [];
 }
 
+// `fn main` is the program entry point: the lowering pass at
+// `compiler/src/llvm/lowering/emission.sfn:319` emits a C-compatible
+// `main(argc, argv)` wrapper, so there is no Sailfin caller demanding
+// effects from main. The effect-checker treats main's declared effect
+// set as ambient: whatever the user writes on `![…]` is granted to the
+// body, and the body's used-vs-declared check still gates operations
+// (i.e. `fn main()` with no `![io]` cannot call `print.info`).
+//
+// The implementation needs no special-case branch — `analyze_routine`
+// already reads the declared set from `signature.effects` and accepts
+// any effect listed there. This predicate exists to document the
+// invariant and to give future capability-cross-check code (E0403) a
+// hook for the "main is the program boundary" exemption if it ever
+// needs one.
+fn is_program_entry_point(signature: FunctionSignature) -> boolean {
+    return signature.name == "main";
+}
+
 fn analyze_routine(signature: FunctionSignature, body: Block, decorators: Decorator[], name: string, imports: ImportSymbolTable) -> EffectViolation[] {
     let names = decorator_names(decorators);
     let mut declared: string[] = [];

@@ -32,6 +32,8 @@ import {
     clone_bindings,
     detect_removed_ai_keyword,
     detect_unsupported_statement_keyword,
+    make_main_signature_param_count_diagnostic,
+    make_main_signature_param_type_diagnostic,
     make_removed_keyword_diagnostic,
     make_unsupported_statement_keyword_diagnostic,
     register_local_symbol,
@@ -186,6 +188,13 @@ fn check_statement(statement: Statement, bindings: SymbolEntry[], interfaces: St
             if _ci >= _sig_diags.length { break; }
             diagnostics.push(_sig_diags[_ci]);
             _ci += 1;
+        }
+        let _main_diags = _validate_main_signature(statement.signature);
+        let mut _cim: number = 0;
+        loop {
+            if _cim >= _main_diags.length { break; }
+            diagnostics.push(_main_diags[_cim]);
+            _cim += 1;
         }
         let function_diagnostics = check_function_body(statement.signature, statement.body, interfaces);
         let mut _ci2: number = 0;
@@ -464,4 +473,103 @@ fn check_block(block: Block, parent_bindings: SymbolEntry[], interfaces: Stateme
     }
 
     return diagnostics;
+}
+
+// `fn main` is the program entry point: the lowering pass at
+// `compiler/src/llvm/lowering/emission.sfn:319` already detects
+// `fn_name == "main"` and emits a C-compatible `main(argc, argv)`
+// wrapper. This validator pins the signature shape the wrapper expects
+// so users get a Sailfin diagnostic — not an `lld` link error — when
+// they declare an entry point with the wrong parameter shape.
+//
+// Accepted signatures:
+//
+//   - `fn main()` — wrapper-only, argv is discarded
+//   - `fn main(argv: string[])` — argv is forwarded as a Sailfin slice
+//
+// Trailing return type and effect set are intentionally not validated
+// here. Existing examples and tests use a mix (`-> number`, `-> void`,
+// no return type, `![io]`, `![net]`, `![unsafe, io]`, …) and the
+// effect-checker already gates body operations against the declared
+// set. Restricting the return type or the effect taxonomy here would
+// break working code without a corresponding lowering benefit until the
+// M5.3 argv-parsing prologue lands.
+//
+// Caller-side duplicate detection (two top-level `fn main`s in the
+// same program) is already covered by `register_top_level_symbol`,
+// which routes through `register_symbol` and emits the `E0001`
+// duplicate-symbol diagnostic. Cross-module duplicate detection waits
+// for the import loader to surface non-interface symbols (no test in
+// the queue exercises that yet).
+fn _validate_main_signature(signature: FunctionSignature) -> Diagnostic[] {
+    if signature.name != "main" { return []; }
+    let mut diagnostics: Diagnostic[] = [];
+
+    let parameter_count = signature.parameters.length;
+    if parameter_count > 1 {
+        // Caret at the first extra parameter so the user can see exactly
+        // which slot to delete. The wrapper passes argv as the sole
+        // forwarded argument; everything beyond slot 0 is silently
+        // discarded today and will mismatch at link time post-M5.3.
+        let extra = signature.parameters[1];
+        diagnostics.push(make_main_signature_param_count_diagnostic(parameter_count, extra.name, extra.span));
+    }
+
+    if parameter_count >= 1 {
+        let argv = signature.parameters[0];
+        let mut text: string = "";
+        if argv.type_annotation != null {
+            text = _trim_main_type_text(argv.type_annotation.text);
+        }
+        if text != "string[]" {
+            diagnostics.push(make_main_signature_param_type_diagnostic(argv.name, text, argv.span));
+        }
+    }
+
+    return diagnostics;
+}
+
+// Trim leading/trailing ASCII whitespace from a parameter-type
+// annotation. The parser already calls `trim_text` on captured type
+// tokens, but tests construct `TypeAnnotation { text: ... }` literals
+// directly and synthesized routines (parser-recovery, fixtures) can
+// land non-trimmed strings here. Keep the trim local so this module
+// doesn't need a `string_utils` round-trip — `trim_text` is module-
+// private across the compiler today.
+fn _trim_main_type_text(text: string) -> string {
+    let mut start: number = 0;
+    let mut end = text.length;
+    loop {
+        if start >= end { break; }
+        let ch = text[start];
+        let mut is_space: boolean = false;
+        if ch == " " { is_space = true; }
+        if ch == "\t" { is_space = true; }
+        if ch == "\n" { is_space = true; }
+        if ch == "\r" { is_space = true; }
+        if !is_space { break; }
+        start += 1;
+    }
+    loop {
+        if end <= start { break; }
+        let ch = text[end - 1];
+        let mut is_space: boolean = false;
+        if ch == " " { is_space = true; }
+        if ch == "\t" { is_space = true; }
+        if ch == "\n" { is_space = true; }
+        if ch == "\r" { is_space = true; }
+        if !is_space { break; }
+        end -= 1;
+    }
+    if start == 0 {
+        if end == text.length { return text; }
+    }
+    let mut result: string = "";
+    let mut i = start;
+    loop {
+        if i >= end { break; }
+        result = result + text[i];
+        i += 1;
+    }
+    return result;
 }
