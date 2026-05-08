@@ -124,6 +124,35 @@ gh issue edit <N> --add-label "blocked"
 # (and reference the blocker in the body — the gh CLI doesn't have native dependency support)
 ```
 
+### Attach issues to the parent epic as native sub-issues
+
+If the grooming target was an **existing epic issue** (e.g. `/groom 450`), every
+created issue must be attached as a GitHub-native sub-issue of that epic — body
+references alone do not populate the parent's "Sub-issues" panel and break the
+roadmap UI. Use the REST API (the `gh` CLI has no first-class command yet):
+
+```bash
+# Look up the parent's internal node id (NOT the issue number) once:
+PARENT=450
+PARENT_ID=$(gh api repos/SailfinIO/sailfin/issues/$PARENT --jq '.id')
+
+# For each created sub-issue, look up its id and attach it. The
+# sub_issue_id field MUST be passed with -F (typed integer); -f sends a
+# string and the API rejects it with a 422.
+for n in 458 459 460 461 462 463; do
+  child_id=$(gh api repos/SailfinIO/sailfin/issues/$n --jq '.id')
+  gh api -X POST /repos/SailfinIO/sailfin/issues/$PARENT/sub_issues \
+    -F sub_issue_id=$child_id --jq '.number'
+done
+
+# Verify the parent now lists every child:
+gh api /repos/SailfinIO/sailfin/issues/$PARENT/sub_issues \
+  --jq '.[] | "#\(.number) \(.title)"'
+```
+
+Skip this step only when the grooming target was a roadmap section, a free-form
+prompt, or a document — i.e. when no parent epic issue exists.
+
 ---
 
 ## Phase 5: REPORT
@@ -147,3 +176,4 @@ Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
 - **Use only labels defined in `.github/labels.yml`** — never invent new ones in this command. If you think a new label is warranted, edit `labels.yml` in a separate PR first.
 - **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for sub-tasks, `Epic:` prefix for epics, `Tracking:` for trackers.
 - **Don't create issues for work that's already in progress** — check `gh issue list` first to avoid duplicates.
+- **When grooming an existing epic issue, attach every created issue as a native sub-issue of that epic** via the REST `/sub_issues` endpoint. Body cross-references do not populate the parent's Sub-issues panel and leave the roadmap UI incomplete. Use `-F sub_issue_id=<int>` (not `-f`) — the field must be typed.
