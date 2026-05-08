@@ -13,11 +13,13 @@
 #   aliases:
 #     - from:        legacy label name to retire
 #       to:          canonical label that replaces it
-#       # The setup script applies `to` to every issue/PR carrying `from`,
-#       # then removes `from` from those issues/PRs, then deletes `from`
-#       # from the repository. If `to` does not yet exist GitHub renames
-#       # `from` -> `to` (preserving all associations); otherwise the
-#       # script does a migrate-then-delete.
+#       # The setup script always migrate-then-deletes (regardless of
+#       # whether `to` already existed): it adds `to` to every issue/PR
+#       # carrying `from`, removes `from` from those issues/PRs, then
+#       # deletes `from` from the repository. The GitHub REST rename
+#       # endpoint exists, but we don't use it because most of our
+#       # aliases target labels already in active use, and migrate-then-
+#       # delete works uniformly across both cases.
 #   delete:
 #     - name:        label to remove outright (no replacement)
 #

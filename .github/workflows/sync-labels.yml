@@ -38,11 +38,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install yq
+      - name: Install yq (pinned)
+        env:
+          # Pinned for determinism. Bump deliberately; CI must stay
+          # reproducible across upstream yq releases.
+          YQ_VERSION: "v4.44.3"
         run: |
-          sudo wget -qO /usr/local/bin/yq \
-            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
+          set -euo pipefail
+          tmpdir="$(mktemp -d)"
+          curl -fsSL -o "$tmpdir/yq" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_amd64"
+          # Verify against upstream's published checksums for the same tag.
+          # `checksums` is a single text file shipped with every yq release;
+          # it covers every published artifact name -> sha256. We grep our
+          # binary out of it and run `sha256sum --check`.
+          curl -fsSL -o "$tmpdir/checksums" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/checksums"
+          curl -fsSL -o "$tmpdir/checksums_hashes_order" \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/checksums_hashes_order"
+          # checksums_hashes_order tells us which column is sha256.
+          col="$(grep -nx 'SHA-256' "$tmpdir/checksums_hashes_order" | cut -d: -f1)"
+          [[ -n "$col" ]] || { echo "::error::SHA-256 column not found in checksums_hashes_order"; exit 1; }
+          want="$(awk -v f="yq_linux_amd64" -v c="$col" '$1==f { print $(c+1) }' "$tmpdir/checksums")"
+          [[ -n "$want" ]] || { echo "::error::no sha256 for yq_linux_amd64 in checksums"; exit 1; }
+          got="$(sha256sum "$tmpdir/yq" | awk '{ print $1 }')"
+          [[ "$want" == "$got" ]] || {
+            echo "::error::yq checksum mismatch for ${YQ_VERSION}: want=$want got=$got"
+            exit 1
+          }
+          sudo install -m 0755 "$tmpdir/yq" /usr/local/bin/yq
           yq --version
 
       - name: Sync labels

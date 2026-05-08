@@ -60,8 +60,12 @@ run() {
 # ---------------------------------------------------------------------------
 # Load existing labels into a JSON map keyed by name.
 # ---------------------------------------------------------------------------
-existing_json="$(gh api -X GET "repos/$REPO/labels" --paginate \
-  | jq -s 'add | map({(.name): {color: .color, description: (.description // "")}}) | add // {}')"
+refresh_labels() {
+  existing_json="$(gh api -X GET "repos/$REPO/labels" --paginate \
+    | jq -s 'add | map({(.name): {color: .color, description: (.description // "")}}) | add // {}')"
+}
+
+refresh_labels
 
 label_exists() {
   echo "$existing_json" | jq -e --arg n "$1" 'has($n)' >/dev/null
@@ -69,6 +73,14 @@ label_exists() {
 
 label_attr() {
   echo "$existing_json" | jq -r --arg n "$1" --arg k "$2" '.[$n][$k] // ""'
+}
+
+# Detect whether a number is a PR or an issue. The two share a number space
+# but only PRs have a `pull_request` field on the GET-issue endpoint.
+is_pull_request() {
+  local n="$1"
+  gh api "repos/$REPO/issues/$n" --jq '.pull_request != null' 2>/dev/null \
+    | grep -qx true
 }
 
 # ---------------------------------------------------------------------------
@@ -101,6 +113,13 @@ for ((i=0; i<label_count; i++)); do
   fi
 done
 
+# Phase 1 may have created new canonical labels (e.g. `type:tech-debt`) that
+# are also alias targets in Phase 2. Refresh the map so `label_exists` sees
+# them. Skip the refresh in dry-run because no labels were actually created.
+if [[ $DRY_RUN -eq 0 ]]; then
+  refresh_labels
+fi
+
 if [[ $SKIP_ALIASES -eq 1 ]]; then
   echo
   echo "==> --skip-aliases set; not processing aliases or deletes"
@@ -108,12 +127,15 @@ if [[ $SKIP_ALIASES -eq 1 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Phase 2: aliases. For each `from -> to`:
-#   - if `to` did not pre-exist canonically (Phase 1 just created it AND
-#     `from` exists with the same id), GitHub doesn't expose label rename via
-#     the REST API, so we always do the migrate-then-delete dance for safety.
-#   - otherwise: add `to` to every issue/PR carrying `from`, remove `from`,
-#     then delete the `from` label.
+# Phase 2: aliases. For each `from -> to` we always migrate-then-delete:
+# add `to` to every issue/PR carrying `from`, remove `from`, then delete
+# the `from` label.
+#
+# The GitHub REST API does support `PATCH /repos/.../labels/{name}` with a
+# `new_name` field for rename — we deliberately don't use it because rename
+# fails when `to` already exists, and most of our aliases (e.g. `bug` ->
+# `type:bug`) target labels that are already in active use. Migrate-then-
+# delete is uniform across both pre-existing and newly-created targets.
 # ---------------------------------------------------------------------------
 echo
 echo "==> Phase 2: legacy aliases"
@@ -140,8 +162,14 @@ for ((i=0; i<alias_count; i++)); do
             | jq -r '.items[]?.number')"
 
   for n in $numbers; do
-    run gh issue edit "$n" --repo "$REPO" --add-label "$to" --remove-label "$from" >/dev/null \
-      || run gh pr   edit "$n" --repo "$REPO" --add-label "$to" --remove-label "$from" >/dev/null
+    # Decide issue-vs-PR up front so dry-run echoes the right command and
+    # we don't depend on a `||` fallback (which doesn't fire under dry-run
+    # because `run` returns success).
+    if is_pull_request "$n"; then
+      run gh pr edit "$n" --repo "$REPO" --add-label "$to" --remove-label "$from"
+    else
+      run gh issue edit "$n" --repo "$REPO" --add-label "$to" --remove-label "$from"
+    fi
   done
 
   echo "    delete legacy label: $from"
