@@ -116,13 +116,23 @@ EOF
 )"
 ```
 
-Capture the issue numbers. After each `gh issue create`, sync the board so
-the new card lands in the column matching its starting labels (typically
-"Ready" because the issue body carries `claude-ready`):
+Capture the issue numbers. After each `gh issue create`:
 
+1. Sync the board so the new card lands in the correct column:
 ```bash
 .claude/scripts/sync-project-status.sh <new-issue-number> --from-labels
 ```
+
+2. Set the GitHub native Type field to match the `type:*` label:
+```bash
+# Derive from the label: type:feature → Feature, type:bug → Bug, everything else → Task
+.claude/scripts/set-issue-type.sh <new-issue-number> <Feature|Task|Bug>
+```
+
+The mapping from `type:*` label to GitHub Type:
+- `type:feature` → `Feature`
+- `type:bug` → `Bug`
+- `type:refactor`, `type:perf`, `type:docs`, `type:tech-debt`, epics, tracking → `Task`
 
 Then set up dependencies. For any issue that depends on a sibling that
 hasn't merged yet, add the `blocked` label and resync — the helper will
@@ -195,3 +205,7 @@ Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
   `.claude/scripts/sync-project-status.sh <N> --from-labels` after each
   `gh issue create` and after any follow-up `gh issue edit` that adds
   `blocked`. The Sailfin Tracker (Project #4) must reflect the labels.
+- **Every created issue must have its GitHub native Type field set.** Run
+  `.claude/scripts/set-issue-type.sh <N> <Feature|Task|Bug>` immediately after
+  the board sync. Derive the type from the `type:*` label: `type:feature` →
+  `Feature`, `type:bug` → `Bug`, everything else → `Task`.
