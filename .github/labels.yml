@@ -1,0 +1,216 @@
+# Canonical GitHub label registry for sailfinio/sailfin.
+#
+# This file is the single source of truth. Sync it to GitHub via:
+#   - `scripts/setup-github-labels.sh` (manual/local), or
+#   - the `Sync Labels` workflow that auto-runs on push to `main`
+#     when this file changes.
+#
+# Schema:
+#   labels:
+#     - name:        canonical label name (kebab-case; `prefix:value` for namespaced)
+#       color:       6-char hex, no leading #
+#       description: <= 100 chars, displayed on hover
+#   aliases:
+#     - from:        legacy label name to retire
+#       to:          canonical label that replaces it
+#       # The setup script applies `to` to every issue/PR carrying `from`,
+#       # then removes `from` from those issues/PRs, then deletes `from`
+#       # from the repository. If `to` does not yet exist GitHub renames
+#       # `from` -> `to` (preserving all associations); otherwise the
+#       # script does a migrate-then-delete.
+#   delete:
+#     - name:        label to remove outright (no replacement)
+#
+# When you add or edit a label here, update any agent/workflow/slash-command
+# that references it. See `docs/conventions/issue-naming.md` for naming
+# conventions and the lifecycle diagram.
+
+labels:
+  # --- Issue lifecycle (state machine) ---------------------------------
+  - name: needs-grooming
+    color: "fbca04"
+    description: "Placeholder issue: scope, criteria, or files-affected still missing"
+  - name: needs-design
+    color: "fbca04"
+    description: "Awaiting Architect review of the design proposal"
+  - name: needs-discussion
+    color: "d93f0b"
+    description: "Design blocked pending human input"
+  - name: design-approved
+    color: "0e8a16"
+    description: "Architect approved; Engineer may begin implementation"
+  - name: claude-ready
+    color: "0e8a16"
+    description: "Fully groomed and unblocked; eligible for /pickup"
+  - name: in-progress
+    color: "1d76db"
+    description: "Currently being worked; do not pick up"
+  - name: blocked
+    color: "b60205"
+    description: "Has open dependencies; recheck after blocker closes"
+
+  # --- PR lifecycle ----------------------------------------------------
+  - name: needs-review
+    color: "fbca04"
+    description: "PR ready for re-review after changes pushed"
+  - name: needs-changes
+    color: "d93f0b"
+    description: "PR blocked: author rework required before merge"
+  - name: approved
+    color: "0e8a16"
+    description: "All review agents approved; safe for human merge"
+  - name: agent-authored
+    color: "5319e7"
+    description: "PR opened by an autonomous agent; counts toward the budget gate"
+  - name: security
+    color: "d93f0b"
+    description: "Security-relevant issue or PR; requires Security review"
+
+  # --- Focus (planner cycle) -------------------------------------------
+  - name: focus:proposed
+    color: "a371f7"
+    description: "Weekly focus issue awaiting human approval"
+  - name: focus:approved
+    color: "0e8a16"
+    description: "Weekly focus is live; downstream agents may act on it"
+  - name: focus:stale
+    color: "cccccc"
+    description: "Superseded by a newer focus issue; ignore for grooming"
+
+  # --- Type taxonomy (mirror Conventional Commit prefixes) -------------
+  - name: type:feature
+    color: "1d76db"
+    description: "New language construct or capability (Conventional: feat)"
+  - name: type:bug
+    color: "d73a4a"
+    description: "Defect or incorrect behaviour (Conventional: fix)"
+  - name: type:perf
+    color: "1d76db"
+    description: "Speed or memory improvement (Conventional: perf)"
+  - name: type:refactor
+    color: "1d76db"
+    description: "Structural change with no user-visible behaviour change"
+  - name: type:tech-debt
+    color: "bfd4f2"
+    description: "Latent quality or cleanup work (Conventional: chore)"
+  - name: type:docs
+    color: "0075ca"
+    description: "Documentation-only change (Conventional: docs)"
+
+  # --- Size (effort estimate) ------------------------------------------
+  - name: size:xs
+    color: "c2e0c6"
+    description: "<1 hour, single file"
+  - name: size:s
+    color: "c2e0c6"
+    description: "1-3 hours, few files"
+  - name: size:m
+    color: "c2e0c6"
+    description: "3-6 hours, multi-file. Larger items must be groomed into smaller issues."
+
+  # --- Priority --------------------------------------------------------
+  - name: priority:critical
+    color: "b60205"
+    description: "Blocks self-hosting or release; drop everything"
+  - name: priority:high
+    color: "d93f0b"
+    description: "Should land this week"
+  - name: priority:medium
+    color: "fbca04"
+    description: "Should land this milestone"
+  - name: priority:low
+    color: "fef2c0"
+    description: "Nice to have; pick when nothing else is ready"
+
+  # --- Area (subsystem) ------------------------------------------------
+  - name: area:compiler
+    color: "c5def5"
+    description: "compiler/src/* — lexer, parser, typecheck, effects, emit"
+  - name: area:lowering
+    color: "c5def5"
+    description: "compiler/src/llvm/* — LLVM IR generation"
+  - name: area:runtime
+    color: "c5def5"
+    description: "runtime/* — prelude, native runtime, Sailfin runtime port"
+  - name: area:numeric
+    color: "c5def5"
+    description: "Integer/float/number type system work"
+  - name: area:build
+    color: "c5def5"
+    description: "Makefile, scripts/build.sh, seed handling, build pipeline"
+  - name: area:agents
+    color: "c5def5"
+    description: ".github/workflows, .claude/agents, agentic pipeline"
+  - name: area:architecture
+    color: "c5def5"
+    description: "Cross-cutting design or proposals; not bound to one subsystem"
+  - name: area:docs
+    color: "c5def5"
+    description: "docs/*, site/src/content/docs/*, README, CLAUDE.md"
+  - name: area:dx
+    color: "c5def5"
+    description: "Diagnostics, error messages, ergonomics, tooling UX"
+
+  # --- Special markers -------------------------------------------------
+  - name: epic
+    color: "d4c5f9"
+    description: "Roadmap-scale parent ticket; tracks child issues"
+  - name: tracking
+    color: "a371f7"
+    description: "Cross-cutting tracker (status, sequencing); not directly implementable"
+  - name: seed-blocker
+    color: "b60205"
+    description: "Must close before the next seed binary is cut"
+
+  # --- GitHub defaults we keep -----------------------------------------
+  - name: good first issue
+    color: "7057ff"
+    description: "Good for first-time contributors"
+  - name: help wanted
+    color: "008672"
+    description: "Extra attention is needed"
+  - name: dependencies
+    color: "0366d6"
+    description: "Pull requests that update a dependency file (Dependabot)"
+  - name: duplicate
+    color: "cfd3d7"
+    description: "This issue or pull request already exists"
+  - name: question
+    color: "d876e3"
+    description: "Further information is requested"
+  - name: wontfix
+    color: "ffffff"
+    description: "This will not be worked on"
+  - name: invalid
+    color: "e4e669"
+    description: "Spam, malformed, or otherwise non-actionable"
+
+# Legacy labels to migrate to their canonical replacement, then delete.
+aliases:
+  - from: bug
+    to: type:bug
+  - from: perf
+    to: type:perf
+  - from: tech-debt
+    to: type:tech-debt
+  - from: documentation
+    to: type:docs
+  - from: medium
+    to: size:m
+  - from: blocker
+    to: blocked
+  - from: runtime
+    to: area:runtime
+  - from: compiler
+    to: area:compiler
+  - from: build
+    to: area:build
+  - from: architecture
+    to: area:architecture
+  - from: agentic-workflows
+    to: area:agents
+
+# Labels to delete outright (no canonical replacement).
+delete:
+  - name: enhancement
+    reason: "GitHub default never adopted; type:feature is canonical"

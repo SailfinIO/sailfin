@@ -1,0 +1,57 @@
+name: Sync Labels
+
+# Reconciles repository labels with the canonical scheme defined in
+# .github/labels.yml. Auto-runs on push to main when the spec or the
+# setup script changes. Maintainers can also trigger it manually
+# (workflow_dispatch) to re-apply after a manual edit on github.com.
+#
+# This is a regular Actions workflow, not a gh-aw agent: no LLM, no API
+# key, deterministic shell script. Drift can never compound because every
+# merge to main re-runs it.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/labels.yml'
+      - 'scripts/setup-github-labels.sh'
+      - '.github/workflows/sync-labels.yml'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Preview changes without writing'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: sync-labels
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Sync labels
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            scripts/setup-github-labels.sh --dry-run --repo "$GH_REPO"
+          else
+            scripts/setup-github-labels.sh --repo "$GH_REPO"
+          fi

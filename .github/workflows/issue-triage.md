@@ -69,23 +69,23 @@ Key terminology: capsule (package), fleet (workspace), generation card (model pr
    - Search for similar open issues using `search_issues`
    - Check recent issues to avoid duplicates
 
-4. **Classify the issue** by analyzing the title, description, and any code snippets:
+4. **Classify the issue** by analyzing the title, description, and any code snippets. Apply exactly one `type:*` label, plus area labels as appropriate. The canonical label set is defined in `.github/labels.yml` — never invent new labels here.
 
    | Type | Labels to apply | Routing |
    |------|----------------|---------|
-   | New feature / language design | `feature`, `needs-design` | Architect will review |
-   | Bug report | `bug` | Engineer will pick up |
-   | Compiler bug (parser, typecheck, effects, LLVM) | `bug`, `compiler` | Engineer will pick up |
-   | Runtime bug | `bug`, `runtime` | Engineer will pick up |
-   | Documentation issue | `documentation` | Docs writer will pick up |
-   | Developer experience (error messages, ergonomics) | `dx` | Product will review |
+   | New feature / language design | `type:feature`, `needs-design` | Architect will review |
+   | Bug report | `type:bug` | Engineer will pick up |
+   | Compiler bug (parser, typecheck, effects, LLVM) | `type:bug`, `area:compiler` (and `area:lowering` if LLVM) | Engineer will pick up |
+   | Runtime bug | `type:bug`, `area:runtime` | Engineer will pick up |
+   | Documentation issue | `type:docs`, `area:docs` | Docs writer will pick up |
+   | Developer experience (error messages, ergonomics) | `area:dx` | Product will review |
    | Security concern | `security` | Security reviewer will assess |
    | Question / discussion | `question` | |
 
 5. **Assess priority** based on:
-   - Does it block self-hosting? (`make compile` broken) -> `priority: critical`
-   - Does it affect first impressions? (broken examples, confusing errors) -> `priority: high`
-   - Is there a workaround? -> `priority: medium` or `priority: low`
+   - Does it block self-hosting? (`make compile` broken) -> `priority:critical`
+   - Does it affect first impressions? (broken examples, confusing errors) -> `priority:high`
+   - Is there a workaround? -> `priority:medium` or `priority:low`
 
 6. **Check for duplicates**: Search open issues for similar problems. If you find a match, add a `duplicate` label and reference the original issue.
 

@@ -72,11 +72,12 @@ gh issue edit <N> --remove-label "in-progress" --add-label "claude-ready"
 gh issue comment <N> --body "Auto-triage: in-progress label was set but no active branch found. Releasing back to queue."
 ```
 
-For `L` sized issues that snuck through:
+For `L` sized issues that snuck through (no `size:l` label exists in the
+canonical scheme — anything that would be L gets `epic` instead):
 
 ```bash
-gh issue edit <N> --remove-label "claude-ready,size:L" --add-label "needs-grooming,epic"
-gh issue comment <N> --body "Auto-triage: L-sized issues must be broken down. Run \`/groom #<N>\` to decompose into XS/S/M issues."
+gh issue edit <N> --remove-label "claude-ready" --add-label "needs-grooming,epic"
+gh issue comment <N> --body "Auto-triage: this issue is L-sized; the canonical scheme has no \`size:l\`. Marking as \`epic\` + \`needs-grooming\`. Run \`/groom #<N>\` to decompose into XS/S/M children."
 ```
 
 ---

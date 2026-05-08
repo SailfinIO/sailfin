@@ -231,15 +231,21 @@ If any section is missing or vague, the issue is not pickable.
 
 ### Labels
 
+The canonical label registry is **`.github/labels.yml`** (auto-synced to
+GitHub by the `Sync Labels` workflow). Naming conventions and the lifecycle
+diagram live in **`docs/conventions/issue-naming.md`**. Quick orientation:
+
 | Label | Meaning |
 |---|---|
 | `claude-ready` | Fully groomed, no blockers, ready for `/pickup` |
 | `needs-grooming` | Exists as a placeholder; needs scope/criteria filled in |
 | `in-progress` | Currently being worked; do not pick up |
 | `blocked` | Has open dependencies; recheck after blocker closes |
-| `type:feature` / `type:bug` / `type:perf` / `type:refactor` | Determines pickup workflow |
-| `size:xs` / `size:s` / `size:m` | Effort estimate (no `size:l` — L items must be groomed down) |
-| `priority:critical` / `priority:high` | Pickup priority overrides |
+| `type:feature` / `type:bug` / `type:perf` / `type:refactor` / `type:tech-debt` / `type:docs` | Determines pickup workflow |
+| `size:xs` / `size:s` / `size:m` | Effort estimate (no `size:l` — L items must be groomed down into an `epic`) |
+| `priority:critical` / `priority:high` / `priority:medium` / `priority:low` | Pickup priority overrides |
+| `area:compiler` / `area:runtime` / `area:lowering` / `area:build` / `area:agents` / … | Subsystem the issue touches |
+| `epic` / `tracking` | Parent or coordination issue (not directly implementable) |
 
 ### When to use what
 

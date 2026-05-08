@@ -78,7 +78,7 @@ over creating a new one.
 2. **Status** — `docs/status.md`. What ships today vs. what's partial vs. what's deferred.
 3. **Build performance** — `docs/build-performance.md`. Current vs. target build times.
 4. **Runtime audit** — `docs/runtime_audit.md`. Python/C → Sailfin migration tracker.
-5. **Issue queue** — open issues grouped by label (`priority:critical`, `priority:high`, `needs-design`, `design-approved`, `blocked`, `bug`).
+5. **Issue queue** — open issues grouped by label (`priority:critical`, `priority:high`, `needs-design`, `design-approved`, `blocked`, `type:bug`).
 6. **Recent merges** — PRs merged in the last 7 days. Use the titles + PR bodies to infer what's progressed.
 7. **Previous focus** — the most recent `focus:approved` or `focus:proposed` issue. Continuity matters; don't redirect the ship every week.
 
