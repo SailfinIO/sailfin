@@ -394,17 +394,31 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     // Array/collection helpers (generic using i8* for element type).
-    // M1.B (#393): SfnArray ABI — `{ T*, i64, i64 }*` with explicit cap.
-    // Routes through `_v2` C entrypoints. Legacy `sailfin_runtime_concat`
-    // / `_append_string` / `_array_push_slot` stay exported so the seed-
-    // compiled first-pass IR (which still uses the 2-field shape) keeps
-    // linking; once the floor seed bumps to a release that emits the
-    // 3-field shape, the legacy symbols can retire.
+    // M2.6 (#399): the three array descriptors below carry a
+    // `native_signature` populated with the matching `sfn_array_*`
+    // canonical name. The Sailfin module `runtime/sfn/array.sfn`
+    // ships those exports as trampolines into the legacy
+    // `sailfin_runtime_*_v2` C entrypoints; user emission
+    // (`render_runtime_helper_declarations` + the direct emission
+    // sites in `expression_lowering/arrays.sfn`) routes through the
+    // `sfn_array_*` names so the legacy `sailfin_runtime_concat` /
+    // `_append_string` / `_array_push_slot` C symbols become
+    // unreferenced in fresh IR. The `symbol` field stays pointed at
+    // the legacy `_v2` name only as archeology — every consumer
+    // prefers `native_signature` when set.
+    //
+    // M1.B (#393): SfnArray ABI — `{ T*, i64, i64 }*` with explicit
+    // cap. The aggregate-pointer parameter types stay the same here
+    // because the compiler-emitted call sites still type the SfnArray
+    // pointer that way; the runtime module's defines accept the
+    // pointer as `i8*` (Sailfin `* u8`) which is ABI-compatible at
+    // the System V x86_64 register level (linker resolves by symbol
+    // name only).
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "append_string", symbol: "sailfin_runtime_append_string_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "i8*"], effects: [], native_signature: null
+        target: "append_string", symbol: "sailfin_runtime_append_string_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "i8*"], effects: [], native_signature: "sfn_array_push_string"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "concat", symbol: "sailfin_runtime_concat_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: [], native_signature: null
+        target: "concat", symbol: "sailfin_runtime_concat_v2", return_type: "{ i8**, i64, i64 }*", parameter_types: ["{ i8**, i64, i64 }*", "{ i8**, i64, i64 }*"], effects: [], native_signature: "sfn_array_concat"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "copy_bytes", symbol: "sailfin_runtime_copy_bytes", return_type: "void", parameter_types: ["i8*", "i8*", "i64"], effects: [], native_signature: null
@@ -412,9 +426,12 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
 
     // M1.B v2 byte-wise push: takes data, len, cap pointers + elem_size.
     // Cap moves into the struct, so the registry signature gains an
-    // `i64*` (cap pointer) compared to the legacy 3-arg form.
+    // `i64*` (cap pointer) compared to the legacy 3-arg form. M2.6
+    // flips the `native_signature` to `sfn_array_push_slot` —
+    // implemented in `runtime/sfn/array.sfn` as a trampoline through
+    // the legacy `_v2` C entrypoint.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "array_push_slot", symbol: "sailfin_runtime_array_push_slot_v2", return_type: "i8*", parameter_types: ["i8**", "i64*", "i64*", "i64"], effects: [], native_signature: null
+        target: "array_push_slot", symbol: "sailfin_runtime_array_push_slot_v2", return_type: "i8*", parameter_types: ["i8**", "i64*", "i64*", "i64"], effects: [], native_signature: "sfn_array_push_slot"
     });
 
     // Generic field accessor for opaque imported types

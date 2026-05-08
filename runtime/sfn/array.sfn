@@ -1,0 +1,160 @@
+// runtime/sfn/array.sfn
+//
+// Sailfin-native unified array primitive (M2.6, #399). Per
+// `docs/runtime_architecture.md` §2.3, the production `SfnArray<T>`
+// layout is `{ data: T*, len: i64, cap: i64 }` — one shape for every
+// element type, replacing both the legacy `SailfinPtrArray` (with the
+// hidden 2-word header that backed `_recent_array_*` ring-buffer
+// tracking and the canary slots in
+// `runtime/native/src/sailfin_runtime.c`) and the byte-addressed array
+// header.
+//
+// Status: trampoline bodies under the `sfn_array_sfn_*` infix.
+// Mirrors the M2.4a string proof-of-life (`runtime/sfn/string.sfn`)
+// and the M2.1 arena module (`runtime/sfn/memory/arena.sfn`): the
+// canonical `sfn_array_*` symbols (without infix) are defined as C
+// trampolines in `runtime/native/src/sailfin_runtime.c` so user
+// emission's `@sfn_array_*` calls resolve at link time without
+// pulling the runtime/sfn/* `.o` files into every test binary
+// (`scripts/run_native_test.sh` doesn't link those today). This
+// module's `sfn_array_sfn_*` exports are the migration unit — when M3
+// retires the C trampolines and replaces the bodies here with
+// arena-backed implementations, these symbols rename to the bare
+// canonical form in a single rollback-safe PR.
+//
+// Naming: the `_sfn_` infix distinguishes this module's exports from
+// the C trampolines' canonical names. The C runtime's
+// `sfn_array_concat` / `sfn_array_push_string` / `sfn_array_push_slot`
+// are the link targets the compiler emits against today. The bodies
+// below are the future-shape: same arity, same return types,
+// `sfn_array_sfn_*` namespace.
+//
+// Effects: none. Array primitives live below the I/O layer (same
+// discipline as `runtime/sfn/memory/arena.sfn`,
+// `runtime/sfn/string.sfn`). The `![io]` annotations attach to
+// *adapters* that wrap these primitives, never to the primitives
+// themselves.
+//
+// Why inline the legacy externs? The same reason `arena.sfn` and
+// `string.sfn` do: the released seed compiler snapshots
+// `runtime/sfn/platform/libc.sfn` at build time. Inlining keeps this
+// module self-contained for every seed, regardless of which
+// declarations have shipped on the cross-module path.
+// Trampolines into the M1.B `_v2` C entrypoints in
+// `runtime/native/src/sailfin_runtime.c`. The `* u8` parameter spelling
+// stands in for `SfnArray*` — at the LLVM IR level `* u8` lowers to
+// `i8*` and the `_v2` entrypoints accept the SfnArray pointer as an
+// opaque pointer ABI. The compiler-emitted call sites continue to
+// type the SfnArray pointer as `{ i8**, i64, i64 }*`; both spellings
+// are pointer-ABI-compatible at the System V x86_64 register level
+// (the linker resolves by symbol name only). The bodies below will
+// be rewritten in-place once M3 retires the legacy entrypoints in
+// favor of arena-backed allocation per §2.1.1.
+extern fn sailfin_runtime_concat_v2(a: * u8, b: * u8) -> * u8;
+
+extern fn sailfin_runtime_append_string_v2(a: * u8, text: * u8) -> * u8;
+
+extern fn sailfin_runtime_array_push_slot_v2(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_size: i64) -> * u8;
+
+// `sfn_array_sfn_create(cap, elem_size, arena)` — allocate initial
+// capacity. Architect spec (§2.3): drop the legacy hidden-header /
+// canary path, allocate `{T*, i64, i64}` plus `cap * elem_size` bytes
+// of element storage from the arena.
+//
+// Status: stub. The first compiler-emitted callers will land in M2.7
+// when the lowering for array literals flips from `_alloc_array` to
+// the new `sfn_array_create` path. Today's array literal emission
+// inlines a `sailfin_runtime_alloc_struct` call in
+// `compiler/src/llvm/expression_lowering/arrays.sfn::lower_struct_array_concat`,
+// so this body is a stub that returns the arena pointer unchanged —
+// callers that grab the returned pointer would see a NULL SfnArray
+// (the arena passed in for proof-of-life is `null` today). The body
+// becomes real once arena threading reaches the array allocator (M3
+// per §2.1.1) and the compiler stops inlining alloc_struct.
+fn sfn_array_sfn_create(cap: i64, elem_size: i64, arena: * u8) -> * u8 {
+    return arena;
+}
+
+// `sfn_array_sfn_push(arr, elem_ptr, elem_size, arena)` — append an
+// element, growing if needed. Architect spec (§2.3) takes the element
+// by value (`elem: T`); without generics the v0 implementation
+// type-erases through a pointer so a single `sfn_array_sfn_push` body
+// handles every element type. Growth policy: double up to 1024
+// elements, then 25% — same as the C runtime's empirically-validated
+// schedule.
+//
+// Status: stub. The compiler emission today routes through the C
+// trampoline `sfn_array_push_slot` (the slot-returning helper
+// preserved for the in-place `arrays.sfn::lower_array_push_in_place`
+// fast path). When the spec-aligned `sfn_array_sfn_push` body lights
+// up, callers migrate one site at a time.
+fn sfn_array_sfn_push(arr: * u8, elem_ptr: * u8, elem_size: i64, arena: * u8) -> void { }
+
+// `sfn_array_sfn_concat(a, b, elem_size, arena)` — allocate a new
+// array containing both. Architect spec (§2.3): allocate `(a.len +
+// b.len) * elem_size` bytes in the arena, copy both spans, return the
+// new SfnArray. Today's body trampolines to the legacy `_v2`
+// entrypoint, which assumes `char*` elements (`elem_size ==
+// sizeof(void*)`); the `elem_size` and `arena` parameters are
+// accepted to lock the spec ABI but ignored until M3 ships the
+// arena-backed body.
+fn sfn_array_sfn_concat(a: * u8, b: * u8, elem_size: i64, arena: * u8) -> * u8 {
+    return sailfin_runtime_concat_v2(a, b);
+}
+
+// `sfn_array_sfn_slice(arr, start, end)` — non-allocating view per
+// §2.3. Architect spec returns `SfnSlice { data: arr.data + start,
+// len: end - start }`. Today's body is a stub returning the input
+// pointer untouched — call sites that want a slice continue to
+// materialize one inline (e.g. via `lower_struct_array_concat`'s
+// field GEPs). The body becomes real once `SfnSlice` lands as a
+// Sailfin operand type.
+fn sfn_array_sfn_slice(arr: * u8, start: i64, end: i64) -> * u8 { return arr; }
+
+// Compiler-emission helpers under the `_sfn_` infix. The C
+// trampolines (`sfn_array_push_string`, `sfn_array_push_slot` in
+// `runtime/native/src/sailfin_runtime.c`) carry the bare names that
+// `compiler/src/llvm/expression_lowering/arrays.sfn` emits against;
+// these proof-of-life Sailfin exports preserve the same ABIs so the
+// migration to arena-backed bodies stays a single PR — rename
+// `sfn_array_sfn_*` → `sfn_array_*` and delete the C trampolines in
+// the same change.
+// `sfn_array_sfn_push_string(arr, text)` — append a `char*` to a
+// string array. ABI mirrors the C trampoline `sfn_array_push_string`
+// (which itself forwards to `sailfin_runtime_append_string_v2`); used
+// by `lower_array_push_in_place` for the `i8*`-element fast path.
+// Same realloc + grow contract as the legacy entrypoint
+// (`sailfin_runtime.c:6761`), with the same `max(cap*2, len+1, 8)`
+// growth schedule.
+fn sfn_array_sfn_push_string(arr: * u8, text: * u8) -> * u8 {
+    return sailfin_runtime_append_string_v2(arr, text);
+}
+
+// `sfn_array_sfn_push_slot(data_ptr, len_ptr, cap_ptr, elem_size)` —
+// grow the backing buffer if needed and return a pointer to the next
+// writable slot. ABI mirrors the C trampoline `sfn_array_push_slot`;
+// used by `lower_array_push_in_place` for typed-element pushes (every
+// non-`i8*` element type, e.g. `Token` during lexing). The caller
+// stores into the returned slot directly — keeps the per-push cost at
+// "function call + bounds check + amortized realloc" rather than the
+// generic spec `sfn_array_push`'s "function call + by-pointer copy".
+// When `sfn_array_sfn_push` grows a real body (M3), this wrapper
+// retires.
+fn sfn_array_sfn_push_slot(data_ptr: * * u8, len_ptr: * i64, cap_ptr: * i64, elem_size: i64) -> * u8 {
+    return sailfin_runtime_array_push_slot_v2(data_ptr, len_ptr, cap_ptr, elem_size);
+}
+
+// `sfn_array_sfn_map(arr) -> arr` — placeholder per §2.3.3. Real
+// bodies require closures-with-capture (roadmap §0 item 5) plus
+// generic constraints (roadmap §2). Tracked as part of M2 epic #389;
+// a follow-up issue will land once the closure-capture milestone has
+// a concrete plan. Today the prelude's `array.map`/`filter`/`reduce`
+// stubs continue to forward to the C `sailfin_runtime_array_map`
+// trampoline (which itself returns the input array unchanged), so
+// this stub matches that observable behavior — preserve it byte-for-
+// byte until the spec body lights up.
+fn sfn_array_sfn_map(arr: * u8) -> * u8 { return arr; }
+
+fn sfn_array_sfn_filter(arr: * u8) -> * u8 { return arr; }
+
+fn sfn_array_sfn_reduce(arr: * u8, init: * u8) -> * u8 { return init; }

@@ -154,40 +154,53 @@ test_length_reads_slot_one() {
     return 0
 }
 
-# B7 — Runtime helpers route through their `_v2` symbols with the new
-# 3-field signature. Legacy `sailfin_runtime_concat(i8**, i64)` /
-# `_append_string(i8**, i64)` / `_array_push_slot(i8**, i64*, i64)`
-# decls must not appear in new compiler output. (The C runtime keeps
-# them exported for seed-compiled IR; this test only inspects the IR
-# emitted by the *new* compiler.)
-test_v2_runtime_helpers_in_registry() {
+# B7 — Runtime helpers route through the canonical `sfn_array_*`
+# names per M2.6 (#399). The registry's `native_signature` flip points
+# every consumer at `sfn_array_concat` / `sfn_array_push_string` /
+# `sfn_array_push_slot`; the legacy `sailfin_runtime_concat_v2` /
+# `sailfin_runtime_append_string_v2` / `sailfin_runtime_array_push_slot_v2`
+# C entrypoints stay exported (the new trampolines forward to them
+# until M3 ships arena-backed bodies), but they MUST NOT appear in the
+# IR `declare` lines emitted by the new compiler. The seed-compiled
+# first-pass binary may still emit them; this test only inspects the
+# fresh emit.
+test_canonical_runtime_helpers_in_registry() {
     emit_ir_once || return 1
-    local concat_v2
-    concat_v2="$(grep -cE '^declare \{ i8\*\*, i64, i64 \}\* @sailfin_runtime_concat_v2' "$LL" || true)"
-    local append_v2
-    append_v2="$(grep -cE '^declare \{ i8\*\*, i64, i64 \}\* @sailfin_runtime_append_string_v2' "$LL" || true)"
-    if [ "${concat_v2:-0}" -lt 1 ] || [ "${append_v2:-0}" -lt 1 ]; then
-        echo "[test]   expected v2 declares for concat and append_string"
-        echo "[test]     concat_v2=${concat_v2}, append_v2=${append_v2}"
+    local concat_decl
+    concat_decl="$(grep -cE '^declare \{ i8\*\*, i64, i64 \}\* @sfn_array_concat' "$LL" || true)"
+    local append_decl
+    append_decl="$(grep -cE '^declare \{ i8\*\*, i64, i64 \}\* @sfn_array_push_string' "$LL" || true)"
+    if [ "${concat_decl:-0}" -lt 1 ] || [ "${append_decl:-0}" -lt 1 ]; then
+        echo "[test]   expected sfn_array_* declares for concat and append_string"
+        echo "[test]     concat=${concat_decl}, push_string=${append_decl}"
         return 1
     fi
-    local legacy_concat
-    legacy_concat="$(grep -cE '^declare \{ i8\*\*, i64 \}\* @sailfin_runtime_concat\(' "$LL" || true)"
-    if [ "${legacy_concat:-0}" -ne 0 ]; then
-        echo "[test]   regression: legacy 2-field concat declare emitted"
+    # The legacy `_v2` and bare-name v1 declares must both be absent
+    # from new emission — the issue's verification command grep gates
+    # this in the runtime/sfn/array.sfn e2e test, but we double-check
+    # here so a regression is caught alongside the rest of the
+    # aggregate-shape assertions.
+    local legacy_v2
+    legacy_v2="$(grep -cE '^declare .* @sailfin_runtime_(concat|append_string|array_push_slot)(_v2)?\(' "$LL" || true)"
+    if [ "${legacy_v2:-0}" -ne 0 ]; then
+        echo "[test]   regression: legacy sailfin_runtime_(concat|append_string|array_push_slot)* declare survived into new IR"
+        grep -E '^declare .* @sailfin_runtime_(concat|append_string|array_push_slot)' "$LL" | head -5 | sed 's/^/[test]     /'
         return 1
     fi
     return 0
 }
 
-# B8 — `array_push_slot_v2` declare carries the cap pointer parameter
-# (the legacy 3-arg form gains an `i64*` for cap).
-test_array_push_slot_v2_signature() {
+# B8 — `sfn_array_push_slot` declare carries the cap pointer parameter
+# (the M1.B 3-arg form gained an `i64*` for cap; M2.6 #399 flipped the
+# symbol name from `sailfin_runtime_array_push_slot_v2` to the
+# canonical `sfn_array_push_slot` while keeping the parameter shape
+# byte-identical).
+test_canonical_array_push_slot_signature() {
     emit_ir_once || return 1
     local hits
-    hits="$(grep -cE '^declare i8\* @sailfin_runtime_array_push_slot_v2\(i8\*\*, i64\*, i64\*, i64\)' "$LL" || true)"
+    hits="$(grep -cE '^declare i8\* @sfn_array_push_slot\(i8\*\*, i64\*, i64\*, i64\)' "$LL" || true)"
     if [ "${hits:-0}" -lt 1 ]; then
-        echo "[test]   expected array_push_slot_v2 declare with (i8**, i64*, i64*, i64) signature"
+        echo "[test]   expected sfn_array_push_slot declare with (i8**, i64*, i64*, i64) signature"
         return 1
     fi
     return 0
@@ -224,10 +237,10 @@ run_test 'cap slot stores i64 3 for a 3-element literal' \
     test_literal_cap_value_matches_length
 run_test 'xs.length reads slot 1 of the array struct' \
     test_length_reads_slot_one
-run_test 'runtime helpers route through their _v2 symbols' \
-    test_v2_runtime_helpers_in_registry
-run_test 'array_push_slot_v2 declare carries the cap pointer parameter' \
-    test_array_push_slot_v2_signature
+run_test 'runtime helpers route through canonical sfn_array_* symbols (M2.6)' \
+    test_canonical_runtime_helpers_in_registry
+run_test 'sfn_array_push_slot declare carries the cap pointer parameter' \
+    test_canonical_array_push_slot_signature
 run_test 'no legacy { T*, i64 } 2-field array shape leaks into new IR' \
     test_no_legacy_two_field_array_shape
 
