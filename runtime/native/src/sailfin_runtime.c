@@ -6864,6 +6864,117 @@ char *sailfin_runtime_array_push_slot_v2(void **data_ptr, int64_t *len_ptr,
     return slot;
 }
 
+/* =====================================================================
+ * M2.6 (#399) — `sfn_array_*` C trampolines.
+ *
+ * The compiler's `runtime_helpers.sfn` registry and the direct emission
+ * sites in `compiler/src/llvm/expression_lowering/arrays.sfn` flipped
+ * from `sailfin_runtime_(concat|append_string|array_push_slot)_v2` to
+ * the canonical `sfn_array_*` names. These trampolines are the link
+ * targets — every test binary already pulls
+ * `runtime/native/src/<star>.c` via `_clang_link_test_cmd_with_deps`,
+ * so placing the bare names here makes them resolvable everywhere
+ * without wiring the runtime/sfn/<star>.o files into the test linker
+ * (a separate Stage D workstream). They mirror the M2.4a string
+ * trampolines in this same file (`sfn_str_len` / `sfn_str_eq` /
+ * `sfn_str_slice` at lines 2107-2120) which the M2.4a string-module
+ * proof-of-life under `runtime/sfn/string.sfn` shadows under
+ * `sfn_str_sfn_*`. The Sailfin side at `runtime/sfn/array.sfn`
+ * carries the same bodies under `sfn_array_sfn_*` — when M3 retires
+ * these trampolines, the Sailfin module's exports rename to the
+ * bare canonical form in a single rollback-safe PR.
+ * ===================================================================== */
+
+SfnArray *sfn_array_concat(SfnArray *a, SfnArray *b)
+{
+    /* Today's compiler-emitted call is 2-arg (matches the M1.B `_v2`
+     * shape pre-#399); the registry's `parameter_types` for `concat`
+     * still emits `declare ... @sfn_array_concat({...}*, {...}*)`,
+     * so this trampoline keeps the 2-arg contract to avoid the UB
+     * that would otherwise arise from a 2-arg call landing on a
+     * 4-arg definition. The architect spec's
+     * `(elem_size, *Arena)` shape (§2.3) belongs on a future
+     * `sfn_array_concat_v3` (or the M3 in-place rewrite) once the
+     * compiler threads arena pointers through array-allocation
+     * sites. The Sailfin proof-of-life surface in
+     * `runtime/sfn/array.sfn::sfn_array_sfn_concat` keeps the 4-arg
+     * spec signature so the migration unit stays visible at the
+     * Sailfin layer; that body retires alongside this trampoline
+     * when the spec form lights up. */
+    return sailfin_runtime_concat_v2(a, b);
+}
+
+SfnArray *sfn_array_push_string(SfnArray *a, char *text)
+{
+    /* Drop-in replacement for `sailfin_runtime_append_string_v2`;
+     * emitted by `lower_array_push_in_place` for the `i8*`-element
+     * fast path. */
+    return sailfin_runtime_append_string_v2(a, text);
+}
+
+char *sfn_array_push_slot(void **data_ptr, int64_t *len_ptr,
+                          int64_t *cap_ptr, int64_t elem_size)
+{
+    /* Drop-in replacement for `sailfin_runtime_array_push_slot_v2`;
+     * emitted by `lower_array_push_in_place` for typed-element pushes
+     * (every non-`i8*` element type, e.g. `Token` during lexing). */
+    return sailfin_runtime_array_push_slot_v2(data_ptr, len_ptr,
+                                              cap_ptr, elem_size);
+}
+
+SfnArray *sfn_array_create(int64_t cap, int64_t elem_size, void *arena)
+{
+    /* Stub matching the spec ABI. The first compiler-emitted callers
+     * land in M2.7 when array-literal lowering flips from
+     * `sailfin_runtime_alloc_struct` to this path. Today it returns
+     * NULL — calling it from user code surfaces immediately at the
+     * next push/concat. */
+    (void)cap;
+    (void)elem_size;
+    (void)arena;
+    return NULL;
+}
+
+void sfn_array_push(SfnArray *arr, void *elem_ptr, int64_t elem_size,
+                    void *arena)
+{
+    /* Stub. Compiler emission today routes through `sfn_array_push_slot`
+     * (the slot-returning helper above); the spec-aligned by-value
+     * push lights up post-closures-with-capture. */
+    (void)arr;
+    (void)elem_ptr;
+    (void)elem_size;
+    (void)arena;
+}
+
+void *sfn_array_slice(SfnArray *arr, int64_t start, int64_t end)
+{
+    /* Stub returning the input pointer untouched. Real slice
+     * materialisation happens once `SfnSlice` lands as a Sailfin
+     * operand type. */
+    (void)start;
+    (void)end;
+    return arr;
+}
+
+SfnArray *sfn_array_map(SfnArray *arr)
+{
+    /* Closure-gated per §2.3.3. Matches the prelude's existing
+     * `array.map` behaviour (returns input unchanged) until
+     * closures-with-capture lights up real bodies. */
+    return arr;
+}
+
+SfnArray *sfn_array_filter(SfnArray *arr) { return arr; }
+
+void *sfn_array_reduce(SfnArray *arr, void *init)
+{
+    /* Closure-gated. Returns `init` to match the prelude's existing
+     * `array.reduce` shape. */
+    (void)arr;
+    return init;
+}
+
 double sailfin_runtime_process_run_v2(SfnArray *argv)
 {
     /* The legacy body reads `data` / `len` only — no hidden-header

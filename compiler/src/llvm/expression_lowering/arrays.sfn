@@ -317,8 +317,16 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
         current_temp += 1;
         // NOTE: Do not embed `{ ... }` literally in Sailfin strings; braces are
         // treated as interpolation markers. Use `array.llvm_type` instead.
+        // M2.6 (#399): the call symbol flips from
+        // `sailfin_runtime_append_string_v2` to the canonical
+        // `sfn_array_push_string` — the link target is the C
+        // trampoline in `runtime/native/src/sailfin_runtime.c` which
+        // forwards to `sailfin_runtime_append_string_v2`. The Sailfin
+        // proof-of-life module ships a matching
+        // `sfn_array_sfn_push_string` under the `_sfn_` infix. Same
+        // call shape, same growth contract.
         current_lines.push("  " + pushed + " = call " + array.llvm_type
-            + " @sailfin_runtime_append_string_v2("
+            + " @sfn_array_push_string("
             + array.llvm_type
             + " "
             + array.value
@@ -410,10 +418,16 @@ fn lower_array_push_in_place(array: LLVMOperand, value: LLVMOperand, element_typ
         + data_ptr_gep
         + " to i8**");
 
+    // M2.6 (#399): call symbol flips from
+    // `sailfin_runtime_array_push_slot_v2` to the canonical
+    // `sfn_array_push_slot` — the link target is the C trampoline in
+    // `runtime/native/src/sailfin_runtime.c` which forwards to
+    // `sailfin_runtime_array_push_slot_v2`. The Sailfin proof-of-life
+    // module ships a matching `sfn_array_sfn_push_slot` under the
+    // `_sfn_` infix. Same 4-arg ABI, same realloc contract.
     let slot_i8 = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + slot_i8
-        + " = call i8* @sailfin_runtime_array_push_slot_v2(i8** "
+    current_lines.push("  " + slot_i8 + " = call i8* @sfn_array_push_slot(i8** "
         + data_ptr_i8
         + ", i64* "
         + len_ptr
