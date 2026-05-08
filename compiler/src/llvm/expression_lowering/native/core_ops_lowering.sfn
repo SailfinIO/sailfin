@@ -414,7 +414,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             let concat_name = format_temp_name(current_temp);
             current_temp += 1;
             current_lines.push("  " + concat_name
-                + " = call i8* @sailfin_runtime_string_concat_v2({i8*, i64} "
+                + " = call i8* @sfn_str_concat({i8*, i64} "
                 + lhs_agg.operand.value
                 + ", {i8*, i64} "
                 + rhs_agg.operand.value
@@ -633,7 +633,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             }
             let temp_name = format_temp_name(current_temp);
             let line = "  " + temp_name
-                + " = call i8* @sailfin_runtime_string_concat_v2({i8*, i64} "
+                + " = call i8* @sfn_str_concat({i8*, i64} "
                 + lhs_agg.operand.value
                 + ", {i8*, i64} "
                 + rhs_agg.operand.value

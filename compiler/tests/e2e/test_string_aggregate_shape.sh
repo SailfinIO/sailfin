@@ -1,16 +1,18 @@
 #!/usr/bin/env bash
-# End-to-end test for the M1.A string-literal ABI lock (issue #391).
+# End-to-end test for the M1.A string-literal ABI lock (issue #391)
+# and the M1.2 `sfn_str_concat` registry flip (issue #461).
 #
 # Pins the emitted LLVM IR contract for string literals:
 #   - Literals lower to `{i8*, i64}` aggregates (data ptr + byte length).
 #   - `s.length` resolves to a direct `extractvalue ..., 1` (no
 #     `sailfin_runtime_string_length` call).
 #   - `+` on strings emits
-#     `call i8* @sailfin_runtime_string_concat_v2({i8*, i64} ..., {i8*, i64} ...)`.
-#     The `_v2` suffix is a transition aid: the legacy
+#     `call i8* @sfn_str_concat({i8*, i64} ..., {i8*, i64} ...)`.
+#     The `sfn_str_concat` C trampoline forwards to
+#     `sailfin_runtime_string_concat_v2` (kept link-stable for seed-
+#     compiled IR until the floor seed bumps); the legacy
 #     `sailfin_runtime_string_concat(char*, char*)` entrypoint stays
-#     link-stable for seed-compiled IR until the floor seed embeds the
-#     new ABI, then both can retire together.
+#     exported so seed-compiled IR with the legacy ABI links too.
 #   - No consumer re-extracts a literal as `[N x i8]` (regression guard
 #     against the legacy `bitcast i8* to [N x i8]*` consumer pattern).
 #
@@ -132,28 +134,30 @@ test_no_array_consumer_pattern() {
 }
 
 # A6 — `string.concat` declared with aggregate parameter shape and called
-# the same way. The new compiler routes through
-# `sailfin_runtime_string_concat_v2` (SfnString-by-value); the legacy
-# `sailfin_runtime_string_concat(char*, char*)` entrypoint is kept link-
-# stable for seed-compiled IR until the floor seed bumps.
+# the same way. The new compiler routes through `sfn_str_concat` (the
+# canonical Sailfin-native name from the M1.2 registry flip, #461),
+# whose C trampoline forwards to `sailfin_runtime_string_concat_v2`
+# (SfnString-by-value). The legacy `sailfin_runtime_string_concat_v2`
+# symbol stays exported so seed-compiled IR keeps linking until the
+# floor seed bumps and both retire together.
 test_string_concat_uses_aggregate_abi() {
     emit_ir_once || return 1
     local declared
-    declared="$(grep -cE '^declare i8\* @sailfin_runtime_string_concat_v2\(\{i8\*, i64\}, \{i8\*, i64\}\)' "$LL" || true)"
+    declared="$(grep -cE '^declare i8\* @sfn_str_concat\(\{i8\*, i64\}, \{i8\*, i64\}\)' "$LL" || true)"
     if [ "${declared:-0}" -ne 1 ]; then
-        echo "[test]   expected exactly one aggregate-shape declare for sailfin_runtime_string_concat_v2, got ${declared:-0}"
+        echo "[test]   expected exactly one aggregate-shape declare for sfn_str_concat, got ${declared:-0}"
         return 1
     fi
     local called
-    called="$(grep -cE 'call i8\* @sailfin_runtime_string_concat_v2\(\{i8\*, i64\} ' "$LL" || true)"
+    called="$(grep -cE 'call i8\* @sfn_str_concat\(\{i8\*, i64\} ' "$LL" || true)"
     if [ "${called:-0}" -lt 1 ]; then
-        echo "[test]   expected at least one aggregate-shape call to sailfin_runtime_string_concat_v2, got ${called:-0}"
+        echo "[test]   expected at least one aggregate-shape call to sfn_str_concat, got ${called:-0}"
         return 1
     fi
     local legacy_v2_called
-    legacy_v2_called="$(grep -cE 'call i8\* @sailfin_runtime_string_concat_v2\(i8\* ' "$LL" || true)"
+    legacy_v2_called="$(grep -cE 'call i8\* @sailfin_runtime_string_concat_v2\(' "$LL" || true)"
     if [ "${legacy_v2_called:-0}" -ne 0 ]; then
-        echo "[test]   regression: legacy i8*-shaped call to sailfin_runtime_string_concat_v2 emitted"
+        echo "[test]   regression: fresh emission still calls sailfin_runtime_string_concat_v2 directly"
         return 1
     fi
     return 0

@@ -2,6 +2,78 @@
 //
 // Runtime helper descriptor definitions for LLVM lowering. These describe
 // the external C runtime functions that Sailfin code can call.
+//
+// =============================================================================
+// `native_signature` Rollout Plan (issue #461 / Epic #450 — M1)
+// =============================================================================
+//
+// Each `RuntimeHelperDescriptor` carries an optional `native_signature`
+// field (#392). When populated, the LLVM lowering emits calls to that
+// canonical Sailfin-native symbol (`sfn_*`) instead of the legacy C
+// entrypoint (`symbol`, typically `sailfin_runtime_*`). This is the
+// per-helper hand-off that lets the M2.4a / M2.6 string and array
+// migrations land one descriptor at a time, with `null` entries
+// continuing to route through the legacy C bodies until their pilot
+// PR lands.
+//
+// **Naming scheme** — the canonical name uses the `sfn_<domain>_<op>`
+// shape, mirroring the populated entries already in this file:
+//   - `sfn_str_*`   — string ops      (e.g. `sfn_str_len`, `sfn_str_eq`,
+//                     `sfn_str_slice`, `sfn_str_concat`,
+//                     `sfn_str_starts_with`, `sfn_str_ends_with`,
+//                     `sfn_str_contains`, `sfn_str_repeat`)
+//   - `sfn_array_*` — array/collection ops (e.g. `sfn_array_concat`,
+//                     `sfn_array_push_string`, `sfn_array_push_slot`)
+//   - `sfn_fs_*`    — filesystem ops  (next wave; `fs.*` descriptors)
+//   - `sfn_net_*`   — network ops     (after fs)
+//   - `sfn_clock_*` — clock/time ops  (last; mostly already routed
+//                     through `sfn_sleep` via direct emission)
+//
+// **Prioritization order** for the remaining ~107 descriptors, picked
+// to surface ABI hazards earliest in cheap pilots and defer the
+// effect-bearing surfaces (which need capability wiring on the
+// runtime side) to the back of the queue:
+//   1. **string** — smallest ABI surface, no effects, exercised by
+//      every test. Wave 1 (M2.4a, #430): `sfn_str_len`, `sfn_str_eq`,
+//      `sfn_str_slice`, `sfn_str_to_cstr`, `sfn_str_from_cstr`.
+//      Wave 1b (this PR, #461): `sfn_str_concat` + four method
+//      registrations (`starts_with`, `ends_with`, `contains`,
+//      `repeat`) staged for follow-up.
+//   2. **array** — landed in M2.6 (#466): `sfn_array_concat`,
+//      `sfn_array_push_string`, `sfn_array_push_slot`. Remaining
+//      array helpers (map / filter / reduce / runtime_array_*_fn)
+//      are next.
+//   3. **fs** — `fs.read`, `fs.write`, `fs.exists`, … require
+//      bridging the `![io]` capability before flipping their
+//      descriptors; descriptor metadata can land first, the
+//      `symbol`→`native_signature` flip lands once the capability
+//      bridge ships.
+//   4. **net** — `http.get`, `http.post`, websocket bridges. Same
+//      capability-first ordering as fs.
+//   5. **clock** — `sleep`, `monotonic_millis`. Mostly already
+//      routed through `sfn_sleep` via direct emission; the
+//      descriptor flip is the cleanup step.
+//
+// **Rollout checklist** for the remaining ~107 descriptors —
+// follow-up PRs slot underneath this comment as additional waves
+// land. Each wave should:
+//   * Pick a small batch (5–10 helpers, single domain).
+//   * For each helper that has hardcoded LLVM call sites in
+//     `compiler/src/llvm/expression_lowering/native/*`, mirror
+//     the M2.4a / M2.6 pattern: add a C trampoline in
+//     `runtime/native/src/sailfin_runtime.c` that forwards to the
+//     legacy `sailfin_runtime_*` body, update the hardcoded
+//     `@sailfin_runtime_*` sites to call `@sfn_<domain>_<op>`,
+//     then populate the descriptor's `native_signature`.
+//   * For descriptors with no callers yet (pre-registered method
+//     entries), populate `native_signature` directly — they are
+//     pure metadata until consumer code starts looking them up.
+//   * Run `make compile && make test` per batch.
+//   * Update the prioritization list above as waves land.
+//
+// See `docs/runtime_audit.md` for the C→Sailfin migration tracker
+// and Epic #450 for the milestone-level sequencing.
+//
 import { RuntimeHelperDescriptor } from "./types";
 import { trim_text } from "./utils";
 
@@ -342,8 +414,20 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     // through the legacy entrypoint while the new compiler routes here.
     // Return type stays `i8*` because string-typed locals don't flip to
     // aggregate until M1.A.2.
+    //
+    // M1.2 (#461): `native_signature` flipped to `sfn_str_concat` —
+    // the canonical Sailfin-native name. The C trampoline lives in
+    // `runtime/native/src/sailfin_runtime.c` (alongside the M2.4a
+    // wave-1 trampolines `sfn_str_len` / `sfn_str_eq` /
+    // `sfn_str_slice`) and forwards to `sailfin_runtime_string_concat_v2`.
+    // The hardcoded direct-emission sites in
+    // `expression_lowering/native/{core_ops_lowering,core_strings}.sfn`
+    // were updated to call `@sfn_str_concat` so seed-built IR (which
+    // still emits `@sailfin_runtime_string_concat_v2`) keeps linking
+    // through the legacy entrypoint while fresh emission lands on the
+    // canonical name.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.concat", symbol: "sailfin_runtime_string_concat_v2", return_type: "i8*", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: null
+        target: "string.concat", symbol: "sailfin_runtime_string_concat_v2", return_type: "i8*", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: "sfn_str_concat"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "string.append", symbol: "sailfin_runtime_string_append", return_type: "i8*", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null
@@ -391,6 +475,30 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "is_alpha_char", symbol: "sailfin_runtime_is_alpha_char", return_type: "i1", parameter_types: ["i8"], effects: [], native_signature: null
+    });
+
+    // M1.2 (#461): SfnString method descriptors registered with their
+    // canonical `sfn_str_*` `native_signature` populated up front. None
+    // of these are in `seed_default_runtime_helpers` and no compiler
+    // emission site currently looks them up, so the entries are pure
+    // metadata until a follow-up PR wires the method-dispatch path
+    // through `find_runtime_helper`. The shape mirrors the populated
+    // wave-1 trampolines (`sfn_str_len` / `sfn_str_eq` / `sfn_str_slice`)
+    // so the consumer code (`coerce_and_emit_call`,
+    // `render_runtime_helper_declarations`) routes uniformly once a
+    // caller is connected. `parameter_types` use the SfnString aggregate
+    // shape (`{i8*, i64}`) — matches the M1.A lock-in for fresh emission.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.starts_with", symbol: "sfn_str_starts_with", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: "sfn_str_starts_with"
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.ends_with", symbol: "sfn_str_ends_with", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: "sfn_str_ends_with"
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.contains", symbol: "sfn_str_contains", return_type: "i1", parameter_types: ["{i8*, i64}", "{i8*, i64}"], effects: [], native_signature: "sfn_str_contains"
+    });
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "string.repeat", symbol: "sfn_str_repeat", return_type: "i8*", parameter_types: ["{i8*, i64}", "i64"], effects: [], native_signature: "sfn_str_repeat"
     });
 
     // Array/collection helpers (generic using i8* for element type).
