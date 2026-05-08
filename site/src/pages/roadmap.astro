@@ -6,140 +6,128 @@ type Status = "done" | "in-progress" | "planned";
 interface RoadmapItem {
   label: string;
   status: Status;
+  url?: string;
 }
 
 interface RoadmapCategory {
   title: string;
   description?: string;
   items: RoadmapItem[];
+  url?: string;
+  open?: number;
+  closed?: number;
 }
 
-const v1Categories: RoadmapCategory[] = [
-  {
-    title: "Phase 1: Runtime Enablement — Systems Primitives",
-    description: "Language features that unblock the pure Sailfin runtime rewrite. Nothing in the runtime can be ported without these.",
-    items: [
-      { label: "extern fn with typed linker-resolved symbols (parser ✓, type-checker registration ✓ with E0801–E0805 C-ABI validation, native-IR emitter ✓, LLVM declare lowering ✓; cross-module call-site resolution deferred to the follow-up call-resolver workstream)", status: "done" },
-      { label: "int (i64) and float (f64) numeric types — Slices A + B + C shipped: annotated locals/params/returns lower correctly, extern accept-list admits int/float plus i16/u16/u32/u64/isize/f32, arithmetic/comparison dispatch verified, and bitwise/shift operators (& | ^ << >>) lower to LLVM and/or/xor/shl/ashr. Slices D (as casts + tighten dominant_type) and E (bare-literal defaulting + number retirement) tracked in docs/runtime_architecture.md §3.7", status: "in-progress" },
-      { label: "Raw pointer types (*T, *const T, *mut T) — enforced, not just parsed", status: "planned" },
-      { label: "Result<T, E> type and ? error propagation operator", status: "planned" },
-      { label: "Bitwise operators on integer types (&, |, ^, >>, <<) — shipped 2026-05-02 as numeric Slice B; lex/parse/lower to LLVM and/or/xor/shl/ashr i64", status: "done" },
-      { label: "${} string interpolation replacing {{ }}", status: "planned" },
-    ],
-  },
-  {
-    title: "Phase 2: Runtime Enablement — Containers & Resources",
-    description: "Higher-level features needed to express typed containers, resource handles, and higher-order operations in the runtime.",
-    items: [
-      { label: "Closures with captured variables (not just non-capturing lambdas)", status: "planned" },
-      { label: "Generic type constraints (fn sort<T: Comparable>(arr: Array<T>))", status: "planned" },
-      { label: "Deterministic drop emission — compiler emits scope-exit drop calls for owned values", status: "planned" },
-      { label: "Complete generic type inference", status: "planned" },
-      { label: "Interface conformance validation with variance checks", status: "planned" },
-    ],
-  },
-  {
-    title: "Phase 3: Sailfin-Native Runtime",
-    description: "Replace the C runtime with pure Sailfin. Depends on Phase 1 and 2 compiler features being shipped.",
-    items: [
-      { label: "Core memory management — arena allocator, string/array allocation in Sailfin", status: "planned" },
-      { label: "String subsystem — {ptr, len, cap} layout, concat, append, substring, grapheme ops", status: "planned" },
-      { label: "Array/collection subsystem — typed Array<T>, Slice<T>, push, concat, map/filter/reduce", status: "planned" },
-      { label: "File I/O subsystem — fs.read, fs.write, fs.exists, directory ops via extern fn", status: "planned" },
-      { label: "Process execution — posix_spawnp/CreateProcessA via extern fn", status: "planned" },
-      { label: "Exception subsystem — replace TLS-flag polling or migrate to Result<T, E> internally", status: "planned" },
-      { label: "Time/clock subsystem — clock_gettime/mach_absolute_time via extern fn", status: "planned" },
-      { label: "Crypto subsystem — SHA-256, Base64 in pure Sailfin (bitwise int ops)", status: "planned" },
-      { label: "Native CLI driver — replace native_driver.c with Sailfin entry point", status: "planned" },
-      { label: "Remove the C runtime once parity and performance gates are met", status: "planned" },
-    ],
-  },
-  {
-    title: "Phase 4: Structured Concurrency",
-    description: "Concurrency primitives with capability tracking. Requires Phase 1-2 features plus atomic intrinsics.",
-    items: [
-      { label: "Atomic intrinsics (atomic_add, atomic_cas, memory fences)", status: "planned" },
-      { label: "await expression parsing and lowering", status: "planned" },
-      { label: "routine { } block parsing and lowering", status: "planned" },
-      { label: "channel() as the core concurrency primitive", status: "planned" },
-      { label: "spawn expression", status: "planned" },
-      { label: "Runtime task scheduler and work queue", status: "planned" },
-    ],
-  },
-  {
-    title: "Effect System Hardening",
-    description: "Make the effect system world-class — Sailfin's core differentiator. Can progress in parallel with runtime work.",
-    items: [
-      { label: "Wire effect checker into compilation gate — violations block compilation, not just diagnostics", status: "planned" },
-      { label: "Hierarchical effect enforcement (io.fs, net.http, etc.)", status: "planned" },
-      { label: "Effect polymorphism for generics (fn map<T, E>(f: Fn ![E]) ![E])", status: "planned" },
-      { label: "Transitive call-graph enforcement (if A calls B ![net], A needs ![net])", status: "planned" },
-      { label: "--fix workflow for automatically inserting missing effect annotations", status: "planned" },
-      { label: "gpu and rand effect enforcement", status: "planned" },
-      { label: "Capsule-level capability enforcement via capsule.toml", status: "planned" },
-    ],
-  },
-  {
-    title: "Compiler Stabilization",
-    description: "Build pipeline and LLVM backend correctness.",
-    items: [
-      { label: "Eliminate the Python fixup script", status: "done" },
-      { label: "Make build.sh the sole clean build path with no post-processing", status: "done" },
-      { label: "Pass make check with no fallbacks", status: "done" },
-      { label: "Deterministic self-hosting — stage2 == stage3 fixed-point verified", status: "done" },
-      { label: "Stabilize control-flow LLVM lowering (loop/if/break headers)", status: "planned" },
-      { label: "Richer diagnostics Phase 1 — severity, file_path, structured load warnings (W01xx)", status: "done" },
-      { label: "Richer diagnostics Phase 2 — multi-span, fix-it hints, source-location labels", status: "planned" },
-    ],
-  },
-  {
-    title: "Tooling & Developer Workflow",
-    description: "CLI tools and build toolchain modernization.",
-    items: [
-      { label: "sfn fmt — code formatter (token-stream, one style, CI-enforced)", status: "done" },
-      { label: "sfn check — fast type and effect analysis", status: "done" },
-      { label: "Unified capsule resolver across sfn build / sfn run / sfn check / sfn test (Stage B PR1+PR2 — textual import inliner deleted)", status: "done" },
-      { label: "Retired llvm-objcopy --weaken in sfn test (Stage B PR3 — path-norm fix; libextract reframed as Stage G)", status: "done" },
-      { label: "Content-addressed build cache for sfn build / sfn run (Stage C PR1–PR1f — content keying + per-source dep manifests + --no-cache/--clean/--cache-trace flags + sfn build --json schema-versioned report)", status: "done" },
-      { label: "Standard per-capsule artifact layout (Stage C2 — build/capsules/<scope>/<name>/{manifest.json, ir/, obj/, bin/})", status: "in-progress" },
-      { label: "sfn package replaces tools/package.sh (Stage C4)", status: "planned" },
-      { label: "sfn bench + sfn bootstrap replace shell scripts (Stage C5)", status: "planned" },
-      { label: "sfn vet — static analyzer", status: "planned" },
-      { label: "sfn audit — dependency capability surface analysis", status: "planned" },
-      { label: "Replace the sfn shell wrapper with a Sailfin-native CLI binary", status: "planned" },
-      { label: "Remove Python tooling and scripts from the release pipeline", status: "planned" },
-      { label: "Remove Python runtime shims", status: "done" },
-    ],
-  },
-  {
-    title: "LLM & Agent Adoption",
-    description: "Make Sailfin the language agents reach for when they need verifiable code. Structured tooling and training-data presence.",
-    items: [
-      { label: "llms.txt — canonical single-file language reference for LLM context windows", status: "in-progress" },
-      { label: "Structured diagnostics (sfn check --json) — machine-readable error output", status: "planned" },
-      { label: "MCP server wrapping the compiler for agentic compile-check-fix loops", status: "planned" },
-      { label: "50+ Rosetta Code / classic algorithm ports as training-data corpus", status: "planned" },
-    ],
-  },
-  {
-    title: "Release Pipeline Hardening",
-    description: "Supply-chain security and reproducible builds.",
-    items: [
-      { label: "Signed checksums and provenance metadata with release artifacts", status: "planned" },
-      { label: "Installer CI that validates install.sh against staging artifacts", status: "planned" },
-      { label: "Only self-hosted compiler artifacts in build and release workflows", status: "planned" },
-    ],
-  },
-  {
-    title: "Documentation",
-    description: "Docs, spec, and examples aligned with compiler reality.",
-    items: [
-      { label: "Align README, status, roadmap, and spec with compiler reality", status: "done" },
-      { label: "Expand site docs to production-quality coverage", status: "in-progress" },
-      { label: "Remove legacy compiler-stage references from docs and examples", status: "planned" },
-    ],
-  },
+// GitHub API types
+interface ApiMilestone {
+  number: number;
+  title: string;
+  description: string | null;
+  open_issues: number;
+  closed_issues: number;
+  state: "open" | "closed";
+  html_url: string;
+  updated_at: string;
+}
+
+interface ApiIssue {
+  number: number;
+  title: string;
+  state: "open" | "closed";
+  labels: { name: string }[];
+  html_url: string;
+  pull_request?: unknown;
+}
+
+const REPO = "SailfinIO/sailfin";
+// Logical roadmap order (milestone numbers). Anything not in this list is appended.
+const DISPLAY_ORDER: number[] = [8, 7, 10, 6];
+
+const ghHeaders: Record<string, string> = {
+  "User-Agent": "sailfin-roadmap-builder",
+  Accept: "application/vnd.github+json",
+};
+if (import.meta.env.GITHUB_TOKEN) {
+  ghHeaders.Authorization = `Bearer ${import.meta.env.GITHUB_TOKEN}`;
+}
+
+async function fetchMilestones(): Promise<ApiMilestone[]> {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${REPO}/milestones?state=open&per_page=100`,
+      { headers: ghHeaders },
+    );
+    if (!res.ok) throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    return (await res.json()) as ApiMilestone[];
+  } catch (err) {
+    console.warn("[roadmap] milestone fetch failed:", err);
+    return [];
+  }
+}
+
+async function fetchEpicsForMilestone(milestoneNumber: number): Promise<ApiIssue[]> {
+  try {
+    const res = await fetch(
+      `https://api.github.com/repos/${REPO}/issues?milestone=${milestoneNumber}&labels=epic&state=all&per_page=100`,
+      { headers: ghHeaders },
+    );
+    if (!res.ok) throw new Error(`GitHub API ${res.status}: ${res.statusText}`);
+    const data = (await res.json()) as ApiIssue[];
+    return data.filter((i) => !i.pull_request);
+  } catch (err) {
+    console.warn(`[roadmap] epic fetch failed for milestone ${milestoneNumber}:`, err);
+    return [];
+  }
+}
+
+function epicStatus(issue: ApiIssue): Status {
+  if (issue.state === "closed") return "done";
+  if (issue.labels.some((l) => l.name === "in-progress")) return "in-progress";
+  return "planned";
+}
+
+function cleanEpicTitle(title: string): string {
+  return title.replace(/^Epic:\s*/i, "");
+}
+
+const apiMilestones = await fetchMilestones();
+const apiAvailable = apiMilestones.length > 0;
+
+// Order: explicit DISPLAY_ORDER first, then any remaining milestones by number.
+const ordered: ApiMilestone[] = [
+  ...DISPLAY_ORDER
+    .map((n) => apiMilestones.find((m) => m.number === n))
+    .filter((m): m is ApiMilestone => Boolean(m)),
+  ...apiMilestones
+    .filter((m) => !DISPLAY_ORDER.includes(m.number))
+    .sort((a, b) => a.number - b.number),
 ];
+
+const epicsByMilestone = await Promise.all(
+  ordered.map((m) => fetchEpicsForMilestone(m.number)),
+);
+
+const v1Categories: RoadmapCategory[] = ordered.map((m, idx) => {
+  const epics = epicsByMilestone[idx] ?? [];
+  const items: RoadmapItem[] = epics.map((e) => ({
+    label: cleanEpicTitle(e.title),
+    status: epicStatus(e),
+    url: e.html_url,
+  }));
+  return {
+    title: m.title,
+    description: m.description ?? undefined,
+    items,
+    url: m.html_url,
+    open: m.open_issues,
+    closed: m.closed_issues,
+  };
+});
+
+// Aggregate progress across all v1 milestones (issue-level, not milestone-level).
+const v1IssuesOpen = v1Categories.reduce((s, c) => s + (c.open ?? 0), 0);
+const v1IssuesClosed = v1Categories.reduce((s, c) => s + (c.closed ?? 0), 0);
+const v1IssuesTotal = v1IssuesOpen + v1IssuesClosed;
 
 const postV1Ai: RoadmapCategory = {
   title: "Enterprise Hardening & AI Integration",
@@ -167,32 +155,32 @@ const postV1Platform: RoadmapCategory = {
 };
 
 const exploration: RoadmapItem[] = [
+  { label: "Structured concurrency — atomics, await, routine, channel, spawn, scheduler", status: "planned" },
+  { label: "Effect system hardening — wire validate_effects() into compilation gate, hierarchical effects, polymorphism", status: "planned" },
+  { label: "Phase 2 containers — closures with capture, generic constraints, drop emission", status: "planned" },
+  { label: "Documentation expansion — production-quality site coverage, remove legacy stage references", status: "planned" },
+  { label: "LLM adoption levers — llms.txt, sfn check --json, MCP server, Rosetta Code corpus", status: "planned" },
+  { label: "Release pipeline hardening — signed checksums, installer CI, self-hosted-only artifacts", status: "planned" },
   { label: "unsafe capability enforcement", status: "planned" },
   { label: "Currency literals ($0.05) and time literals (1s, 150ms)", status: "planned" },
   { label: "Notebook and interactive tooling", status: "planned" },
   { label: "Effect handlers (algebraic effect semantics)", status: "planned" },
-  { label: "Capability-scoped sandboxing for capsule execution", status: "planned" },
 ];
-
-// Helpers
-function countByStatus(items: RoadmapItem[]) {
-  const done = items.filter(i => i.status === "done").length;
-  const inProgress = items.filter(i => i.status === "in-progress").length;
-  const planned = items.filter(i => i.status === "planned").length;
-  return { done, inProgress, planned, total: items.length };
-}
 
 function percent(done: number, total: number) {
   return total === 0 ? 0 : Math.round((done / total) * 100);
 }
 
-// Aggregate 1.0 stats
-const allV1Items = v1Categories.flatMap(c => c.items);
-const v1Stats = countByStatus(allV1Items);
-const v1Percent = percent(v1Stats.done, v1Stats.total);
+const v1Percent = percent(v1IssuesClosed, v1IssuesTotal);
 
 const statusLabel = (s: Status) =>
   s === "done" ? "Done" : s === "in-progress" ? "In progress" : "Planned";
+
+const lastUpdated = new Date().toLocaleDateString("en-US", {
+  year: "numeric",
+  month: "long",
+  day: "numeric",
+});
 ---
 
 <BaseLayout title="Roadmap" description="Sailfin's development roadmap toward 1.0 and beyond.">
@@ -206,7 +194,7 @@ const statusLabel = (s: Status) =>
           Sailfin's path from alpha to a stable 1.0 release and beyond.
         </p>
         <p class="meta">
-          Last updated April 16, 2026
+          Live data from <a href={`https://github.com/${REPO}/milestones`}>GitHub milestones</a>. Built {lastUpdated}.
         </p>
       </header>
 
@@ -217,45 +205,79 @@ const statusLabel = (s: Status) =>
         <span class="legend-item"><span class="status-dot planned" aria-hidden="true"></span> Planned</span>
       </div>
 
+      {!apiAvailable && (
+        <div class="api-warning">
+          Could not load milestone data from GitHub at build time. View the live state directly on
+          <a href={`https://github.com/${REPO}/milestones`}>GitHub milestones</a>.
+        </div>
+      )}
+
       <!-- 1.0 Overview -->
-      <section class="v1-overview">
-        <div class="v1-overview-header">
-          <h2>Release 1.0</h2>
-          <span class="v1-stat">{v1Stats.done} of {v1Stats.total} milestones complete</span>
-        </div>
-        <div class="progress-bar-track" role="progressbar" aria-valuenow={v1Stats.done} aria-valuemin={0} aria-valuemax={v1Stats.total} aria-label={`Release 1.0 progress: ${v1Stats.done} of ${v1Stats.total} milestones complete`}>
-          <div class="progress-bar-fill" style={`width: ${v1Percent}%`}></div>
-        </div>
-      </section>
+      {apiAvailable && (
+        <section class="v1-overview">
+          <div class="v1-overview-header">
+            <h2>Release 1.0</h2>
+            <span class="v1-stat">{v1IssuesClosed} of {v1IssuesTotal} issues closed across {v1Categories.length} milestones</span>
+          </div>
+          <div
+            class="progress-bar-track"
+            role="progressbar"
+            aria-valuenow={v1IssuesClosed}
+            aria-valuemin={0}
+            aria-valuemax={v1IssuesTotal}
+            aria-label={`Release 1.0 progress: ${v1IssuesClosed} of ${v1IssuesTotal} issues closed`}
+          >
+            <div class="progress-bar-fill" style={`width: ${v1Percent}%`}></div>
+          </div>
+        </section>
+      )}
 
       <!-- 1.0 Categories -->
       <div class="categories">
         {v1Categories.map((cat) => {
-          const stats = countByStatus(cat.items);
-          const pct = percent(stats.done, stats.total);
+          const total = (cat.open ?? 0) + (cat.closed ?? 0);
+          const closed = cat.closed ?? 0;
+          const pct = percent(closed, total);
           return (
             <section class="category-card">
               <div class="category-header">
                 <div>
-                  <h3>{cat.title}</h3>
+                  <h3>
+                    {cat.url ? <a href={cat.url} class="category-link">{cat.title}</a> : cat.title}
+                  </h3>
                   {cat.description && <p class="category-desc">{cat.description}</p>}
                 </div>
-                <span class="category-count">{stats.done}/{stats.total}</span>
+                <span class="category-count">{closed}/{total}</span>
               </div>
-              <div class="progress-bar-track small" role="progressbar" aria-valuenow={stats.done} aria-valuemin={0} aria-valuemax={stats.total} aria-label={`${cat.title} progress: ${stats.done} of ${stats.total} complete`}>
+              <div
+                class="progress-bar-track small"
+                role="progressbar"
+                aria-valuenow={closed}
+                aria-valuemin={0}
+                aria-valuemax={total}
+                aria-label={`${cat.title} progress: ${closed} of ${total} issues closed`}
+              >
                 <div
                   class:list={["progress-bar-fill", { empty: pct === 0 }]}
                   style={`width: ${Math.max(pct, 0)}%`}
                 ></div>
               </div>
-              <ul class="item-list">
-                {cat.items.map((item) => (
-                  <li class:list={["item", item.status]}>
-                    <span class={`status-dot ${item.status}`} aria-label={statusLabel(item.status)}></span>
-                    <span class="item-label">{item.label}</span>
-                  </li>
-                ))}
-              </ul>
+              {cat.items.length > 0 ? (
+                <ul class="item-list">
+                  {cat.items.map((item) => (
+                    <li class:list={["item", item.status]}>
+                      <span class={`status-dot ${item.status}`} aria-label={statusLabel(item.status)}></span>
+                      {item.url
+                        ? <a class="item-label item-link" href={item.url}>{item.label}</a>
+                        : <span class="item-label">{item.label}</span>}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p class="empty-note">
+                  No epics yet. {cat.url && <a href={cat.url}>View milestone on GitHub</a>}
+                </p>
+              )}
             </section>
           );
         })}
@@ -291,8 +313,10 @@ const statusLabel = (s: Status) =>
 
       <!-- Exploration Backlog -->
       <section class="exploration">
-        <h2>Exploration Backlog</h2>
-        <p class="section-desc">Under consideration with no committed milestone.</p>
+        <h2>Backlog & Exploration</h2>
+        <p class="section-desc">
+          Workstreams without architected GitHub milestones yet. Some will graduate into milestones once design work lands; others stay exploratory.
+        </p>
         <ul class="item-list exploration-list">
           {exploration.map((item) => (
             <li class:list={["item", item.status]}>
@@ -312,7 +336,7 @@ const statusLabel = (s: Status) =>
           or ABI should reference a written proposal in <code>docs/proposals/</code> before implementation begins.
         </p>
         <div class="contribute-actions">
-          <a href="https://github.com/SailfinIO/sailfin/issues" class="btn btn-primary">Open an Issue</a>
+          <a href={`https://github.com/${REPO}/issues`} class="btn btn-primary">Open an Issue</a>
           <a href="/docs/contributing/guide" class="btn btn-secondary">Contributor Guide</a>
         </div>
       </section>
@@ -368,6 +392,18 @@ const statusLabel = (s: Status) =>
     gap: 0.4rem;
     font-size: 0.85rem;
     color: var(--color-text-secondary);
+  }
+
+  /* API warning */
+  .api-warning {
+    padding: 0.75rem 1rem;
+    margin-bottom: 1.5rem;
+    border: 1px solid var(--color-border);
+    border-left: 3px solid var(--color-primary);
+    border-radius: 4px;
+    background: var(--color-bg-alt);
+    color: var(--color-text-secondary);
+    font-size: 0.9rem;
   }
 
   /* Status dots */
@@ -475,6 +511,16 @@ const statusLabel = (s: Status) =>
     color: var(--color-text);
   }
 
+  .category-link {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .category-link:hover {
+    color: var(--color-primary);
+    text-decoration: underline;
+  }
+
   .category-desc {
     font-size: 0.825rem;
     color: var(--color-text-tertiary);
@@ -491,6 +537,13 @@ const statusLabel = (s: Status) =>
     border-radius: 10px;
     white-space: nowrap;
     flex-shrink: 0;
+  }
+
+  .empty-note {
+    font-size: 0.85rem;
+    color: var(--color-text-tertiary);
+    margin: 0;
+    padding: 0.4rem 0;
   }
 
   /* Item lists */
@@ -520,6 +573,16 @@ const statusLabel = (s: Status) =>
 
   .item.planned .item-label {
     color: var(--color-text-secondary);
+  }
+
+  .item-link {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  .item-link:hover {
+    color: var(--color-primary);
+    text-decoration: underline;
   }
 
   /* Post-1.0 */
