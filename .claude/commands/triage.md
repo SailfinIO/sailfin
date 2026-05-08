@@ -46,6 +46,16 @@ For each issue, check:
 
 ## Phase 3: APPLY ACTIONS
 
+Every label flip in this phase MUST be followed by a board sync so the card
+moves to the matching column on the Sailfin Tracker (Project #4). Use:
+
+```bash
+.claude/scripts/sync-project-status.sh <N> --from-labels
+```
+
+The helper derives the column from the post-edit labels with strict
+precedence: `in-progress` > `blocked` > `needs-grooming` > `claude-ready`.
+
 For each issue with hygiene failures:
 
 ```bash
@@ -55,6 +65,9 @@ gh issue comment <N> --body "Auto-triage: missing the following sections require
 - <list of failed checks>
 
 Run \`/groom\` to flesh this out, or close if no longer relevant."
+
+# Move the card to "To triage" so the board reflects the new state
+.claude/scripts/sync-project-status.sh <N> --from-labels
 ```
 
 For state issues:
@@ -63,13 +76,15 @@ For state issues:
 # Blocker resolved — clear the blocked label
 gh issue edit <N> --remove-label "blocked" --add-label "claude-ready"
 gh issue comment <N> --body "Auto-triage: blocking issue #<M> is closed. Marking ready for pickup."
+.claude/scripts/sync-project-status.sh <N> --from-labels   # → Ready
 
-# Stale claude-ready — flag for review
+# Stale claude-ready — flag for review (no label change, no board move)
 gh issue comment <N> --body "Auto-triage: this issue has been claude-ready for 30+ days without pickup. Likely stale — review priority or close."
 
 # Orphaned in-progress — release back to the queue
 gh issue edit <N> --remove-label "in-progress" --add-label "claude-ready"
 gh issue comment <N> --body "Auto-triage: in-progress label was set but no active branch found. Releasing back to queue."
+.claude/scripts/sync-project-status.sh <N> --from-labels   # → Ready
 ```
 
 For `L` sized issues that snuck through (no `size:l` label exists in the
@@ -78,7 +93,12 @@ canonical scheme — anything that would be L gets `epic` instead):
 ```bash
 gh issue edit <N> --remove-label "claude-ready" --add-label "needs-grooming,epic"
 gh issue comment <N> --body "Auto-triage: this issue is L-sized; the canonical scheme has no \`size:l\`. Marking as \`epic\` + \`needs-grooming\`. Run \`/groom #<N>\` to decompose into XS/S/M children."
+.claude/scripts/sync-project-status.sh <N> --from-labels   # → To triage
 ```
+
+If a sync call exits non-zero, capture the issue number and surface it under
+"Concerns" in the Phase 4 report — the label flip stands but the board is
+out of sync and a human should reconcile it.
 
 ---
 
@@ -124,3 +144,6 @@ Concerns:
 - **Don't modify issue bodies.** Only labels and comments.
 - **Be conservative on staleness.** 30 days is the floor — never mark something stale at <30 days.
 - **If you change a label, leave a comment explaining why.** Future-you needs to understand the audit trail.
+- **Every label flip must be paired with a board sync.** Run
+  `.claude/scripts/sync-project-status.sh <N> --from-labels` after every
+  `gh issue edit` so Project #4 (Sailfin Tracker) keeps tracking the labels.

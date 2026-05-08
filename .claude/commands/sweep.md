@@ -96,8 +96,14 @@ For each issue in the `blocked` pool:
    ```bash
    gh issue edit <N> --remove-label blocked --add-label claude-ready
    gh issue comment <N> --body "Auto-sweep: blocker(s) resolved — <list resolved #N references>. Marking ready for pickup."
+
+   # Move the card on the Sailfin Tracker (Project #4) out of the
+   # Blocked column. The helper derives the new column from the
+   # post-edit labels — here that resolves to "Ready".
+   .claude/scripts/sync-project-status.sh <N> --from-labels
    ```
-5. If `--dry-run` is set: do not edit or comment. Record the intended flip in the report.
+5. If `--dry-run` is set: do not edit, comment, or sync. Record the intended
+   flip (label change AND target column) in the report.
 
 ---
 
@@ -209,7 +215,11 @@ Dry run: changes <previewed | applied>
 - **Don't modify issue bodies.** Only labels and comments.
 - **Be conservative with prose blockers.** Anything not a hard `#N` reference stays blocked until a human confirms.
 - **Always leave a comment when flipping a label.** Future-you needs the audit trail.
-- **In `--dry-run` mode, make zero writes.** No labels, no comments. Print intended actions only.
+- **Every label flip must be paired with a board sync** via
+  `.claude/scripts/sync-project-status.sh <N> --from-labels`. Surface any
+  non-zero exit under "Concerns" so a human can reconcile the column.
+- **In `--dry-run` mode, make zero writes.** No labels, no comments, no
+  board syncs. Print intended actions only.
 - **Read `.github/AGENTS.md` for cap context.** Default budget = 2 matches the autonomous-pipeline cap; `--greedy` raises it for human-coordinated parallel sessions.
 
 ---

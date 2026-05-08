@@ -116,13 +116,27 @@ EOF
 )"
 ```
 
-Capture the issue numbers. After all are created, set up dependencies:
+Capture the issue numbers. After each `gh issue create`, sync the board so
+the new card lands in the column matching its starting labels (typically
+"Ready" because the issue body carries `claude-ready`):
+
+```bash
+.claude/scripts/sync-project-status.sh <new-issue-number> --from-labels
+```
+
+Then set up dependencies. For any issue that depends on a sibling that
+hasn't merged yet, add the `blocked` label and resync — the helper will
+move that card from "Ready" into the "Blocked" column:
 
 ```bash
 # For each issue blocked by an earlier one:
 gh issue edit <N> --add-label "blocked"
 # (and reference the blocker in the body — the gh CLI doesn't have native dependency support)
+.claude/scripts/sync-project-status.sh <N> --from-labels   # → Blocked
 ```
+
+If a sync call exits non-zero, capture the issue number and surface it in
+the Phase 5 report so the human knows the board is out of sync.
 
 ### Attach issues to the parent epic as native sub-issues
 
@@ -177,3 +191,7 @@ Suggest: `/pickup` to start working the queue, or `/triage` to verify hygiene.
 - **Title format follows `docs/conventions/issue-naming.md`** — Conventional Commit shape for sub-tasks, `Epic:` prefix for epics, `Tracking:` for trackers.
 - **Don't create issues for work that's already in progress** — check `gh issue list` first to avoid duplicates.
 - **When grooming an existing epic issue, attach every created issue as a native sub-issue of that epic** via the REST `/sub_issues` endpoint. Body cross-references do not populate the parent's Sub-issues panel and leave the roadmap UI incomplete. Use `-F sub_issue_id=<int>` (not `-f`) — the field must be typed.
+- **Every created or relabeled issue must end Phase 4 with a board sync.** Run
+  `.claude/scripts/sync-project-status.sh <N> --from-labels` after each
+  `gh issue create` and after any follow-up `gh issue edit` that adds
+  `blocked`. The Sailfin Tracker (Project #4) must reflect the labels.
