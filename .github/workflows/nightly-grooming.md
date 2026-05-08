@@ -8,8 +8,11 @@ description: |
   autonomously from a hardcoded priority list. Grooming produces issues only.
   Engineering never runs without an architect-approved, focus-referenced issue.
 
+# DISABLED 2026-05-08: gh-aw workflows are paused due to runaway cost.
+# Manual dispatch only — no scheduled runs. Re-enable by restoring the
+# original `on:` triggers (`schedule: daily` + `workflow_dispatch:`) and
+# recompiling the lock file with `gh aw compile`.
 on:
-  schedule: daily
   workflow_dispatch:
 
 imports:

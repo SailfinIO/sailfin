@@ -5,9 +5,12 @@ description: |
   initial analysis notes. Routes feature requests to architect review and
   fast-tracks bugs to engineering.
 
+# DISABLED 2026-05-08: gh-aw workflows are paused due to runaway cost.
+# Manual dispatch only — no event triggers. Re-enable by restoring the
+# original `issues: [opened, reopened]` trigger and recompiling the lock
+# file with `gh aw compile`.
 on:
-  issues:
-    types: [opened, reopened]
+  workflow_dispatch:
 
 imports:
   - shared/build-mcp-server.md

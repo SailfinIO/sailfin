@@ -9,8 +9,11 @@ description: |
   human must apply the `focus:approved` label before grooming and engineering
   will act on the focus.
 
+# DISABLED 2026-05-08: gh-aw workflows are paused due to runaway cost.
+# Manual dispatch only — no scheduled runs. Re-enable by restoring the
+# original `on:` triggers (`schedule: weekly on monday` + `workflow_dispatch:`)
+# and recompiling the lock file with `gh aw compile`.
 on:
-  schedule: weekly on monday
   workflow_dispatch:
 
 imports:

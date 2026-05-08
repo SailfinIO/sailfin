@@ -4,13 +4,12 @@ description: |
   Triggered on issues labeled 'design-approved' or 'type:bug'. Creates a
   branch, implements changes in Sailfin (.sfn), adds tests, and opens a PR.
 
+# DISABLED 2026-05-08: gh-aw workflows are paused due to runaway cost.
+# Manual dispatch only — no event triggers. Re-enable by restoring the
+# original `issues: [labeled]` trigger + skip-if-no-match clause and
+# recompiling the lock file with `gh aw compile`.
 on:
-  issues:
-    types: [labeled]
-  # Short-circuit before booting the agent: the only labels that should ever
-  # trigger work here are design-approved or type:bug. Anything else, exit at
-  # the workflow level — saves the first-turn cost of writing a noop.
-  skip-if-no-match: 'label:design-approved,type:bug'
+  workflow_dispatch:
 
 imports:
   - shared/build-mcp-server.md

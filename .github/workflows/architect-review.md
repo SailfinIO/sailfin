@@ -5,11 +5,12 @@ description: |
   pipeline, and pre-1.0 stabilization goals. Approves designs or requests
   discussion before implementation begins.
 
+# DISABLED 2026-05-08: gh-aw workflows are paused due to runaway cost.
+# Manual dispatch only — no event triggers. Re-enable by restoring the
+# original `issues: [labeled]` trigger + skip-if-no-match clause and
+# recompiling the lock file with `gh aw compile`.
 on:
-  issues:
-    types: [labeled]
-  # Only fire on the label that matters; skip the boot for any other label event.
-  skip-if-no-match: 'label:needs-design'
+  workflow_dispatch:
 
 imports:
   - shared/build-mcp-server.md
