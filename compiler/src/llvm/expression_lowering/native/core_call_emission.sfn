@@ -172,10 +172,27 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 }
                 result_lines = push_value_coerced.lines;
                 result_temp = push_value_coerced.temp_index;
-                let mut push_value_operand: LLVMOperand = final_operands[1];
-                if push_value_coerced.operand != null {
-                    push_value_operand = push_value_coerced.operand;
+                if push_value_coerced.operand == null {
+                    // Coercion failed — bail out instead of forwarding
+                    // the original mismatched operand into
+                    // `lower_array_push_in_place`, which would emit a
+                    // malformed `store <element_type> <value>` line.
+                    // The diagnostics from `coerce_operand_to_type`
+                    // (already propagated above) describe the failure.
+                    result_diagnostics.push("llvm lowering: unable to coerce push argument to `"
+                        + array_push_element_type
+                        + "` for `"
+                        + trimmed_target
+                        + "`");
+                    return ExpressionResult {
+                        lines: result_lines,
+                        temp_index: result_temp,
+                        operand: null,
+                        diagnostics: result_diagnostics,
+                        string_constants: collected_string_constants
+                    };
                 }
+                let push_value_operand = push_value_coerced.operand;
                 let push_result = lower_array_push_in_place(final_operands[0], push_value_operand, array_push_element_type, result_lines, result_temp);
                 let mut _ci8: number = 0;
                 loop {

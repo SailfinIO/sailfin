@@ -161,10 +161,15 @@ EOF
     main_body="$(extract_main_body "$ll")"
     # The integer literal `42` lowers as `double` because the
     # `: number` annotation pulls it onto the float path. Accept
-    # the canonical IEEE-754 spellings the LLVM frontend may emit:
-    # `42.0`, `42`, `4.2e+01`, `4.200000e+01`, etc.
-    if ! echo "$main_body" | grep -qE "store double 4?2(\.0+)?(e\+01)?,"; then
-        echo "[test]   missing 'store double 42.0...' for '\: number = 42'"
+    # every IEEE-754 spelling the LLVM frontend might emit:
+    #   - `42`
+    #   - `42.0` / `42.00...0`
+    #   - `4.2e+01` / `4.2E+01`
+    #   - `4.200000e+01` / `4.20000000e+01`
+    # Two alternations cover the decimal forms (`42`/`42.0...`) and
+    # the scientific forms (`4.2e+01`/`4.2000...e+01`).
+    if ! echo "$main_body" | grep -qE "store double (42(\.0+)?|4\.2(0+)?[eE]\+0*1),"; then
+        echo "[test]   missing 'store double 42(.0)|4.2e+01' for '\: number = 42'"
         echo "[test]   main body:"
         echo "$main_body" | sed 's/^/[test]     /' | head -20
         return 1
