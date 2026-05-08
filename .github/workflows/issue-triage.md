@@ -40,6 +40,12 @@ safe-outputs:
     max: 5
   add-comment:
   update-issue:
+  # Skip the `[aw] No-Op Runs` tracker issue — noop messages already
+  # surface in the workflow run summary, and gh-aw's tracker-by-label
+  # lookup collides with the `agentic-workflows -> area:agents` alias in
+  # `.github/labels.yml`, which churns out a fresh tracker every run.
+  noop:
+    report-as-issue: false
   # Roll workflow-failure reports up under a single `[aw] Failed runs`
   # parent issue instead of opening a fresh issue per failure.
   group-reports: true
