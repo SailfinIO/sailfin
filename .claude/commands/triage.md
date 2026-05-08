@@ -35,6 +35,8 @@ For each issue, check:
 - [ ] Has `## Verification` with a runnable command
 - [ ] Has a `size:*` label (XS/S/M — never L)
 - [ ] Has a `type:*` label (feature/bug/perf/refactor)
+- [ ] Has the GitHub native **Type** field set (Feature / Task / Bug) — check via
+  `gh api graphql -f query='query{repository(owner:"SailfinIO",name:"sailfin"){issue(number:<N>){issueType{name}}}}'`
 
 ### State checks
 - Is it `claude-ready` but actually stale (no update in 30+ days)?
@@ -96,6 +98,17 @@ gh issue comment <N> --body "Auto-triage: this issue is L-sized; the canonical s
 .claude/scripts/sync-project-status.sh <N> --from-labels   # → To triage
 ```
 
+For issues whose GitHub native **Type** field is `null`:
+
+```bash
+# Derive from type:* label; set silently (no board sync needed — Type is not a label)
+# type:feature → Feature, type:bug → Bug, everything else → Task
+.claude/scripts/set-issue-type.sh <N> <Feature|Task|Bug>
+```
+
+This is a **silent fix** — no label edit, no comment, no board sync required.
+Apply it to all issues with a null type regardless of other state.
+
 If a sync call exits non-zero, capture the issue number and surface it under
 "Concerns" in the Phase 4 report — the label flip stands but the board is
 out of sync and a human should reconcile it.
@@ -147,3 +160,6 @@ Concerns:
 - **Every label flip must be paired with a board sync.** Run
   `.claude/scripts/sync-project-status.sh <N> --from-labels` after every
   `gh issue edit` so Project #4 (Sailfin Tracker) keeps tracking the labels.
+- **Always fix a null GitHub Type field** — run
+  `.claude/scripts/set-issue-type.sh <N> <Feature|Task|Bug>` for any issue
+  whose `issueType` is null. No board sync or comment needed for this fix.
