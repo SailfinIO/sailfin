@@ -1,0 +1,85 @@
+// compiler/tests/unit/runtime_call_dispatch_test.sfn
+//
+// Byte-identical IR fixtures for the descriptor-driven dispatch entry
+// point introduced in M1.7.1 (issue #495). Each test feeds a runtime
+// helper through `emit_runtime_call` and pins the rendered IR line(s)
+// against today's hand-spelled emission from `coerce_and_emit_call`
+// in `core_call_emission.sfn`. When follow-up migration issues
+// (M1.7.2a/b/c, .3, .4) flip individual call sites onto this entry
+// point, these fixtures detect any drift in the canonical render —
+// symbol resolution, parameter-type coercion, void/non-void shape.
+//
+// Coverage matrix:
+//   - `string.concat`        — i8* return, SfnString aggregate args,
+//                              `native_signature` flip to `sfn_str_concat`
+//   - `mark_persistent`      — void return, single i8* arg, no
+//                              `native_signature` (uses `descriptor.symbol`)
+//   - `runtime.bounds_check` — void return, two i64 args
+//   - `string.length`        — i64 return, single i8* arg,
+//                              `native_signature` flip to `sfn_str_len`
+import {
+    RuntimeCallOverrides,
+    emit_runtime_call,
+    empty_runtime_call_overrides
+} from "../../src/llvm/expression_lowering/native/runtime_call";
+import { LLVMOperand } from "../../src/llvm/types";
+
+// SfnString aggregate — `string.concat` parameter type per the M1.A
+// lock-in (see `runtime_helpers.sfn` lines 407-431).
+fn _sfn_string_operand(value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: "{i8*, i64}", value: value };
+}
+
+fn _i8ptr_operand(value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: "i8*", value: value };
+}
+
+fn _i64_operand(value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: "i64", value: value };
+}
+
+test "emit_runtime_call: string.concat renders SfnString-aggregate call to sfn_str_concat" ![io] {
+    let lhs = _sfn_string_operand("%a");
+    let rhs = _sfn_string_operand("%b");
+    let operands: LLVMOperand[] = [lhs, rhs];
+    let result = emit_runtime_call("string.concat", operands, empty_runtime_call_overrides(), 0, []);
+    assert result.lines.length == 1;
+    assert result.lines[0] == "  %t0 = call i8* @sfn_str_concat({i8*, i64} %a, {i8*, i64} %b)";
+    assert result.temp_index == 1;
+    assert result.operand != null;
+    assert result.diagnostics.length == 0;
+}
+
+test "emit_runtime_call: mark_persistent renders void call with i8* arg" ![io] {
+    let ptr = _i8ptr_operand("%ptr");
+    let operands: LLVMOperand[] = [ptr];
+    let result = emit_runtime_call("mark_persistent", operands, empty_runtime_call_overrides(), 0, []);
+    assert result.lines.length == 1;
+    assert result.lines[0] == "  call void @sailfin_runtime_mark_persistent(i8* %ptr)";
+    assert result.temp_index == 0;
+    assert result.operand == null;
+    assert result.diagnostics.length == 0;
+}
+
+test "emit_runtime_call: runtime.bounds_check renders void call with two i64 args" ![io] {
+    let idx = _i64_operand("%idx");
+    let len = _i64_operand("%len");
+    let operands: LLVMOperand[] = [idx, len];
+    let result = emit_runtime_call("runtime.bounds_check", operands, empty_runtime_call_overrides(), 0, []);
+    assert result.lines.length == 1;
+    assert result.lines[0] == "  call void @sailfin_runtime_bounds_check(i64 %idx, i64 %len)";
+    assert result.temp_index == 0;
+    assert result.operand == null;
+    assert result.diagnostics.length == 0;
+}
+
+test "emit_runtime_call: string.length renders i64-return call to sfn_str_len" ![io] {
+    let s = _i8ptr_operand("%s");
+    let operands: LLVMOperand[] = [s];
+    let result = emit_runtime_call("string.length", operands, empty_runtime_call_overrides(), 0, []);
+    assert result.lines.length == 1;
+    assert result.lines[0] == "  %t0 = call i64 @sfn_str_len(i8* %s)";
+    assert result.temp_index == 1;
+    assert result.operand != null;
+    assert result.diagnostics.length == 0;
+}

@@ -1,0 +1,247 @@
+// compiler/src/llvm/expression_lowering/native/runtime_call.sfn
+//
+// Descriptor-driven dispatch for runtime helper calls (M1.7.1, issue
+// #495). Single entry point that every runtime helper call site can
+// migrate to in follow-up issues (M1.7.2a/b/c, .3, .4). Until those
+// land, this file is dead code: no existing emitter calls
+// `emit_runtime_call`, the seed continues to compile through
+// `coerce_and_emit_call` in `core_call_emission.sfn`, and
+// `seed_default_runtime_helpers` is left untouched (deferred to
+// M1.7.5a).
+//
+// The canonical render mirrors `core_call_emission.sfn`'s tail:
+//   - void:      `  call void @<symbol>(<args>)`
+//   - non-void:  `  %t<N> = call <ret> @<symbol>(<args>)`
+// Symbol resolution prefers `descriptor.native_signature` over
+// `descriptor.symbol` (consistent with `coerce_and_emit_call`'s
+// M2.4a / M2.6 hand-off rule). The per-arg coercion walk mirrors
+// `core_call_emission.sfn:55-92` (sans the trait-dispatch carve-out
+// — runtime helpers do not carry self-typed first args).
+//
+// `RuntimeCallOverrides` lets a migrating call site override the
+// descriptor-derived symbol / return type / parameter types without
+// editing the descriptor schema (epic #494 explicitly forbids that).
+// Variadic helpers such as `alloc_struct` (whose parameter types
+// depend on the struct being allocated) populate
+// `parameter_types` at the call site; helpers whose source-level
+// target name does not match a descriptor key populate `symbol`.
+//
+// Diagnostic-and-fallback path: when no descriptor exists *and* the
+// caller has not supplied a return-type override, the function emits
+// a `print.err` describing the missing dispatch metadata and returns
+// an `ExpressionResult` carrying the diagnostic. Migration call
+// sites that hit this path haven't populated overrides — surfacing
+// the gap keeps malformed IR from leaking into emission. See epic
+// #494 for the M1.7 architecture and migration sequencing.
+import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
+import { find_runtime_helper } from "../../runtime_helpers";
+import {
+    ExpressionResult,
+    LLVMOperand,
+    RuntimeHelperDescriptor,
+    StringConstant
+} from "../../types";
+import { extend_string_array, join_with_separator, number_to_string } from "../../utils";
+import { coerce_operand_to_type } from "./core_operands";
+
+// Per-call-site overrides for `emit_runtime_call`. Empty fields fall
+// back to the descriptor returned by `find_runtime_helper(target)`.
+//
+// - `parameter_types`: when non-empty, replaces the descriptor's
+//   `parameter_types` for the operand-coercion walk. Variadic helpers
+//   (e.g., `alloc_struct`) whose parameter types depend on call-site
+//   context populate this directly.
+// - `return_type`: when non-empty, replaces the descriptor's
+//   `return_type`. Also serves as the fallback return type when no
+//   descriptor exists for `target`.
+// - `symbol`: when non-empty, replaces the effective symbol that
+//   would otherwise be `descriptor.native_signature ?? descriptor.symbol`.
+//   Used during migrations whose source-level target name does not
+//   resolve to a descriptor key.
+struct RuntimeCallOverrides {
+    parameter_types: string[];
+    return_type: string;
+    symbol: string;
+}
+
+// Convenience constructor for the common "no overrides" case.
+fn empty_runtime_call_overrides() -> RuntimeCallOverrides {
+    return RuntimeCallOverrides {
+        parameter_types: [],
+        return_type: "",
+        symbol: ""
+    };
+}
+
+// Resolve the effective LLVM symbol. Precedence:
+//   1. `overrides.symbol` (when non-empty)
+//   2. `descriptor.native_signature` (when non-null and non-empty)
+//   3. `descriptor.symbol`
+//   4. raw `target` (no descriptor, no override — diagnostic path)
+fn _resolve_call_symbol(overrides: RuntimeCallOverrides, descriptor: RuntimeHelperDescriptor?, target: string) -> string {
+    if overrides.symbol.length > 0 { return overrides.symbol; }
+    if descriptor != null {
+        let mut native_sig: string? = descriptor.native_signature;
+        let mut have_native: boolean = false;
+        if native_sig != null {
+            if native_sig.length > 0 { have_native = true; }
+        }
+        if have_native { return native_sig; }
+        return descriptor.symbol;
+    }
+    return target;
+}
+
+// Resolve the effective LLVM return type. Empty result signals
+// "unresolvable" — callers must surface a diagnostic.
+fn _resolve_call_return_type(overrides: RuntimeCallOverrides, descriptor: RuntimeHelperDescriptor?) -> string {
+    if overrides.return_type.length > 0 { return overrides.return_type; }
+    if descriptor != null { return descriptor.return_type; }
+    return "";
+}
+
+// Resolve the effective parameter-type list. Empty result is valid
+// (zero-arg helpers); coercion walk handles it.
+fn _resolve_call_parameter_types(overrides: RuntimeCallOverrides, descriptor: RuntimeHelperDescriptor?) -> string[] {
+    if overrides.parameter_types.length > 0 {
+        return overrides.parameter_types;
+    }
+    if descriptor != null { return descriptor.parameter_types; }
+    return [];
+}
+
+// Single descriptor-driven entry point for runtime helper calls.
+// See file header for the resolution precedence and render shape.
+fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: RuntimeCallOverrides, temp_index: number, lines: string[]) -> ExpressionResult ![io] {
+    let descriptor = find_runtime_helper(target);
+    let call_symbol = _resolve_call_symbol(overrides, descriptor, target);
+    let return_type = _resolve_call_return_type(overrides, descriptor);
+    let parameter_types = _resolve_call_parameter_types(overrides, descriptor);
+
+    let mut result_lines: string[] = lines;
+    let mut result_temp: number = temp_index;
+    let mut result_diagnostics: string[] = [];
+    let empty_constants: StringConstant[] = [];
+
+    // Diagnostic-and-fallback when no descriptor exists and no
+    // return-type override is supplied. Migration call sites that
+    // hit this path have not populated `overrides` — surface the
+    // gap rather than silently emitting malformed IR.
+    if descriptor == null {
+        if overrides.return_type.length == 0 {
+            let missing_diag = "llvm lowering [fatal]: emit_runtime_call: no descriptor for `"
+                + target
+                + "` and no return-type override supplied";
+            print.err(missing_diag);
+            result_diagnostics.push(missing_diag);
+            return ExpressionResult {
+                lines: result_lines,
+                temp_index: result_temp,
+                operand: null,
+                diagnostics: result_diagnostics,
+                string_constants: empty_constants
+            };
+        }
+    }
+
+    // Per-arg coercion walk. Mirrors core_call_emission.sfn:55-92
+    // sans the trait-dispatch carve-out (runtime helpers do not
+    // carry self-typed first args).
+    let mut coerced_operands: LLVMOperand[] = [];
+    let mut index: number = 0;
+    loop {
+        if index >= operands.length { break; }
+        let operand = operands[index];
+        let mut target_type: string = "";
+        if parameter_types.length > index {
+            target_type = parameter_types[index];
+        }
+        if target_type.length == 0 { coerced_operands.push(operand); } else {
+            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines);
+            result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
+            result_lines = coerced.lines;
+            result_temp = coerced.temp_index;
+            if coerced.operand == null {
+                result_diagnostics.push("llvm lowering: emit_runtime_call: unable to coerce argument "
+                    + number_to_string(index)
+                    + " for call to `"
+                    + target
+                    + "`: passing original operand");
+                coerced_operands.push(operand);
+            } else { coerced_operands.push(coerced.operand); }
+        }
+        index += 1;
+    }
+
+    // Argument-count sanity check (mirrors the same gate in
+    // core_call_emission.sfn:260-268). Diagnostic only — caller
+    // decides whether to abort.
+    if parameter_types.length != coerced_operands.length {
+        result_diagnostics.push("llvm lowering: emit_runtime_call: call to `"
+            + target
+            + "` expected "
+            + number_to_string(parameter_types.length)
+            + " arguments but received "
+            + number_to_string(coerced_operands.length));
+    }
+
+    let mut rendered_args: string[] = [];
+    let mut render_index: number = 0;
+    loop {
+        if render_index >= coerced_operands.length { break; }
+        rendered_args.push(format_typed_operand(coerced_operands[render_index]));
+        render_index += 1;
+    }
+    let argument_text = join_with_separator(rendered_args, ", ");
+
+    if return_type.length == 0 {
+        let unresolved = "llvm lowering [fatal]: emit_runtime_call: cannot resolve return type for call to `"
+            + target
+            + "`";
+        print.err(unresolved);
+        result_diagnostics.push(unresolved);
+        return ExpressionResult {
+            lines: result_lines,
+            temp_index: result_temp,
+            operand: null,
+            diagnostics: result_diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    if return_type == "void" {
+        result_lines.push("  call void @" + call_symbol + "(" + argument_text
+            + ")");
+        return ExpressionResult {
+            lines: result_lines,
+            temp_index: result_temp,
+            operand: null,
+            diagnostics: result_diagnostics,
+            string_constants: empty_constants
+        };
+    }
+
+    let temp_name = format_temp_name(result_temp);
+    result_lines.push("  " + temp_name + " = call " + return_type + " @"
+        + call_symbol
+        + "("
+        + argument_text
+        + ")");
+    let result_operand = LLVMOperand {
+        llvm_type: return_type,
+        value: temp_name
+    };
+    return ExpressionResult {
+        lines: result_lines,
+        temp_index: result_temp + 1,
+        operand: result_operand,
+        diagnostics: result_diagnostics,
+        string_constants: empty_constants
+    };
+}
+
+export {
+    RuntimeCallOverrides,
+    emit_runtime_call,
+    empty_runtime_call_overrides
+};
