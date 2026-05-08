@@ -118,21 +118,35 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
         if index >= descriptors.length { break; }
         let descriptor = descriptors[index];
         if string_array_contains(used_targets, descriptor.target) {
+            // M1.C / M2.4a: when `native_signature` is populated the
+            // call-emission path (`coerce_and_emit_call` in
+            // `core_call_emission.sfn`) routes the call to that symbol
+            // instead of `descriptor.symbol`. The declare we emit here
+            // has to follow suit so the freshly-emitted call lands on
+            // a declared name the linker can resolve. The C body
+            // backing `descriptor.symbol` is intentionally left
+            // undeclared in this module — seed-built IR that still
+            // calls it carries its own declare line.
+            let mut effective_symbol = descriptor.symbol;
+            let mut _native_sig: string? = descriptor.native_signature;
+            if _native_sig != null {
+                if _native_sig.length > 0 { effective_symbol = _native_sig; }
+            }
             // Skip if this helper is actually defined locally (not just a runtime intrinsic)
-            if string_array_contains(local_symbols, descriptor.symbol) {
+            if string_array_contains(local_symbols, effective_symbol) {
                 index += 1;
                 continue;
             }
             // Some helper targets intentionally alias the same runtime symbol.
             // Avoid emitting duplicate declarations for the same symbol.
-            if string_array_contains(declared_symbols, descriptor.symbol) {
+            if string_array_contains(declared_symbols, effective_symbol) {
                 index += 1;
                 continue;
             }
             // Emit capability metadata comment if the intrinsic has effects
             if descriptor.effects.length > 0 {
                 let effects_text = join_with_separator(descriptor.effects, ", ");
-                lines.push("; intrinsic " + descriptor.symbol
+                lines.push("; intrinsic " + effective_symbol
                     + " requires capabilities: !["
                     + effects_text
                     + "]");
@@ -141,28 +155,46 @@ fn render_runtime_helper_declarations(used_targets: string[], local_functions: N
             if descriptor.parameter_types.length > 0 {
                 parameter_text = join_with_separator(descriptor.parameter_types, ", ");
             }
-            let line = "declare " + descriptor.return_type + " @" + descriptor.symbol
+            let line = "declare " + descriptor.return_type + " @"
+                + effective_symbol
                 + "("
                 + parameter_text
                 + ")";
             lines.push(line);
-            declared_symbols.push(descriptor.symbol);
-            // Also declare the target name if it differs from the symbol.
-            // This only satisfies IR validation (clang frontend); actual linking
-            // requires a runtime-side wrapper/alias for the target name.
-            if descriptor.target != descriptor.symbol {
-                let sanitized_target = sanitize_symbol(descriptor.target);
-                if sanitized_target != descriptor.symbol {
-                    if !string_array_contains(declared_symbols, sanitized_target) {
-                        if !string_array_contains(local_symbols, sanitized_target) {
-                            let alias_line = "declare " + descriptor.return_type
-                                + " @"
-                                + sanitized_target
-                                + "("
-                                + parameter_text
-                                + ")";
-                            lines.push(alias_line);
-                            declared_symbols.push(sanitized_target);
+            declared_symbols.push(effective_symbol);
+            // Also declare the target name if it differs from the effective
+            // symbol. This only satisfies IR validation (clang frontend);
+            // actual linking requires a runtime-side wrapper/alias for the
+            // target name.
+            //
+            // M2.4a (#396): when `native_signature` flipped the
+            // effective symbol, the descriptor's `symbol` field IS
+            // the legacy target name (e.g. `strings_equal`) — its
+            // only role now is to record what the C body used to be
+            // called for archeology. Emitting a `declare` for it
+            // would re-introduce the very dead reference the
+            // migration is trying to clear (acceptance criterion
+            // "the C symbols become unreferenced"). Skip the alias
+            // path whenever the symbol was flipped.
+            let mut emit_target_alias: boolean = true;
+            if effective_symbol != descriptor.symbol {
+                emit_target_alias = false;
+            }
+            if emit_target_alias {
+                if descriptor.target != effective_symbol {
+                    let sanitized_target = sanitize_symbol(descriptor.target);
+                    if sanitized_target != effective_symbol {
+                        if !string_array_contains(declared_symbols, sanitized_target) {
+                            if !string_array_contains(local_symbols, sanitized_target) {
+                                let alias_line = "declare " + descriptor.return_type
+                                    + " @"
+                                    + sanitized_target
+                                    + "("
+                                    + parameter_text
+                                    + ")";
+                                lines.push(alias_line);
+                                declared_symbols.push(sanitized_target);
+                            }
                         }
                     }
                 }
@@ -191,6 +223,18 @@ fn render_imported_function_declarations(imported_functions: NativeFunction[], l
         let descriptor = helper_descriptors[helper_index];
         if string_array_contains(runtime_helpers, descriptor.target) {
             helper_symbols.push(descriptor.symbol);
+            // M2.4a: a flipped descriptor's effective symbol is the
+            // `native_signature`, not `symbol` — treat both as
+            // already-declared so the imported-function pass below
+            // doesn't emit a stray `declare` for either name.
+            let mut _native_sig: string? = descriptor.native_signature;
+            if _native_sig != null {
+                if _native_sig.length > 0 {
+                    if !string_array_contains(helper_symbols, _native_sig) {
+                        helper_symbols.push(_native_sig);
+                    }
+                }
+            }
             let helper_target = sanitize_symbol(descriptor.target);
             if !string_array_contains(helper_symbols, helper_target) {
                 helper_symbols.push(helper_target);

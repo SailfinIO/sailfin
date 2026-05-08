@@ -305,14 +305,32 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
     });
 
     // String utility helpers
+    //
+    // M2.4a (#396): the four string descriptors below carry a
+    // `native_signature` populated with the matching `sfn_str_*`
+    // canonical name. During the M2.4a coexistence period those
+    // bare canonical symbols are *defined by C trampolines* in
+    // `runtime/native/src/sailfin_runtime.c`; the proof-of-life
+    // Sailfin module `runtime/sfn/string.sfn` ships the same
+    // five operations under the `sfn_str_sfn_*` infix to avoid a
+    // link-time collision (mirrors the arena module's
+    // `sfn_arena_sfn_*` namespace). M2.4b retires the C
+    // trampolines and renames the Sailfin exports to the bare
+    // form. The migration mechanism
+    // (`render_runtime_helper_declarations` in `rendering.sfn` and
+    // `coerce_and_emit_call` in `core_call_emission.sfn`) prefers
+    // the `native_signature` over `symbol` whenever it is set, so
+    // freshly-emitted IR reaches the new exports while seed-built
+    // IR (which still carries the legacy `symbol` names) keeps
+    // linking through the legacy bodies during the cutover.
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "substring", symbol: "substring", return_type: "i8*", parameter_types: ["i8*", "double", "double"], effects: [], native_signature: null
+        target: "substring", symbol: "substring", return_type: "i8*", parameter_types: ["i8*", "double", "double"], effects: [], native_signature: "sfn_str_slice"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "substring_unchecked", symbol: "substring_unchecked", return_type: "i8*", parameter_types: ["i8*", "double", "double"], effects: [], native_signature: null
+        target: "substring_unchecked", symbol: "substring_unchecked", return_type: "i8*", parameter_types: ["i8*", "double", "double"], effects: [], native_signature: "sfn_str_slice"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "string.length", symbol: "sailfin_runtime_string_length", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: null
+        target: "string.length", symbol: "sailfin_runtime_string_length", return_type: "i64", parameter_types: ["i8*"], effects: [], native_signature: "sfn_str_len"
     });
     // M1.A — string.concat parameters lock to the SfnString aggregate
     // ABI. The new symbol `sailfin_runtime_string_concat_v2` accepts
@@ -348,7 +366,7 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "string.to_number", symbol: "sailfin_runtime_string_to_number", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
-        target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: null
+        target: "strings_equal", symbol: "strings_equal", return_type: "i1", parameter_types: ["i8*", "i8*"], effects: [], native_signature: "sfn_str_eq"
     });
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "char_code", symbol: "char_code", return_type: "double", parameter_types: ["i8*"], effects: [], native_signature: null

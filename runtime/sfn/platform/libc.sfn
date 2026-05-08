@@ -47,6 +47,18 @@ extern fn memcpy(dst: * u8, src: * u8, n: usize) -> * u8;
 
 extern fn memcmp(a: * u8, b: * u8, n: usize) -> i32;
 
+// `memchr(s, c, n)` scans the first `n` bytes of `s` for the byte
+// `c`, returning a pointer to the match or `* u8` null when not
+// found. Declared here ahead of M2.4b: the planned aggregate-shape
+// body of `runtime/sfn/string.sfn::sfn_str_sfn_from_cstr` (renamed
+// to `sfn_str_from_cstr` once the C trampolines retire) uses
+// `memchr` to recover the byte length of a NUL-terminated buffer
+// without a libc `strlen` call. The current M2.4a body is a
+// proof-of-life identity wrapper and does not yet call this. The
+// libc prototype is `void *memchr(const void *s, int c, size_t n)`
+// — the `c` arg is `int` so callers pass `0..255` as `i32`.
+extern fn memchr(s: * u8, c: i32, n: usize) -> * u8;
+
 // ── Raw I/O (file-descriptor based) ───────────────────────────
 // `write`/`read` are POSIX, returning ssize_t (i64 on every
 // platform Sailfin currently targets). Negative returns signal
