@@ -165,6 +165,15 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
         // We read the native text at all traversal depths so we can
         // discover deeper imports, but only depth-0 texts are returned
         // for full LLVM lowering.
+        //
+        // Re-exports (`.export "path" { ... }`, kind="export") are part
+        // of the parent's public surface — consumers reach those symbols
+        // through the parent, but the actual function bodies live in the
+        // re-exported module. Enqueue them at the SAME depth as the
+        // parent, not depth+1, so the defining module's full native text
+        // is loaded into `native_texts` and downstream signature
+        // resolution + re-export shim emission (#508) work end-to-end.
+        // The `seen` dedup guards against cycles.
         if native_text_for_discovery.length > 0 {
             let transitive_imports = parse_native_imports_for_import(native_text_for_discovery);
             let mut ti: number = 0;
@@ -176,6 +185,11 @@ fn collect_imported_module_context_for_module(imports: NativeImport[], current_m
                     queue_paths.push(ti_entry.module);
                     queue_parent_slugs.push(slug);
                     queue_depths.push(next_depth);
+                }
+                if ti_entry.kind == "export" {
+                    queue_paths.push(ti_entry.module);
+                    queue_parent_slugs.push(slug);
+                    queue_depths.push(depth);
                 }
                 ti += 1;
             }
@@ -240,9 +254,18 @@ fn resolve_import_module_slug_for_module(module: string, current_module_slug: st
     let mut normalized = normalize_import_module_path(trimmed);
     let mut current_slug = normalize_import_module_path(current_module_slug);
     if current_slug.length > 0 {
-        let compiler_index = index_of(current_slug, "/compiler/");
-        if compiler_index >= 0 {
-            current_slug = substring(current_slug, compiler_index + 1, current_slug.length);
+        // Mirror `module_name_from_path`'s prefix policy: paths under
+        // `compiler/src/` and `runtime/` get rooted at those directories;
+        // everything else (test fixtures, external capsule sources, etc.)
+        // keeps its full path so the slug here matches the slug staging
+        // produced via `_cr_relative_slug`. Stripping at any `/compiler/`
+        // (the pre-#508 behavior) collapsed `compiler/tests/...` paths to
+        // `compiler/tests/...` while staging kept the leading prefix —
+        // every artifact lookup then missed and the lowering pass lost
+        // function signatures from any cross-file fixture.
+        let compiler_src_index = index_of(current_slug, "/compiler/src/");
+        if compiler_src_index >= 0 {
+            current_slug = substring(current_slug, compiler_src_index + 1, current_slug.length);
         } else {
             let runtime_index = index_of(current_slug, "/runtime/");
             if runtime_index >= 0 {

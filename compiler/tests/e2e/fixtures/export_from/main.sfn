@@ -1,0 +1,37 @@
+// compiler/tests/e2e/fixtures/export_from/main.sfn
+//
+// Consumer for the #508 regression test.  Imports the helpers via the
+// inline-re-export barrel `./middle` and uses them in shapes that
+// exercise both failure modes:
+//
+//   1. Boolean in an `if` condition — the dangerous case (`i1`
+//      return).  If the re-export shim is missing, the linker fails
+//      OR the i8* fallback drops the guard and we print "FAIL".
+//   2. String returned through the chain — the accidentally-OK case,
+//      but we still assert the value end-to-end so an unexpected
+//      shape change is loud.
+import { export_from_is_yes, export_from_strip_xyz } from "./middle";
+
+fn main() ![io] {
+    if export_from_is_yes("yes") { print("bool-yes-ok"); } else {
+        print("bool-yes-FAIL");
+    }
+    if export_from_is_yes("no") { print("bool-no-FAIL"); } else {
+        print("bool-no-ok");
+    }
+
+    let truthy = export_from_is_yes("yes");
+    let falsy = export_from_is_yes("no");
+    if truthy { print("let-truthy-ok"); } else { print("let-truthy-FAIL"); }
+    if falsy { print("let-falsy-FAIL"); } else { print("let-falsy-ok"); }
+
+    let stripped = export_from_strip_xyz("xyzabc");
+    if stripped == "abc" { print("string-strip-ok"); } else {
+        print("string-strip-FAIL");
+    }
+
+    let unchanged = export_from_strip_xyz("nope");
+    if unchanged == "nope" { print("string-unchanged-ok"); } else {
+        print("string-unchanged-FAIL");
+    }
+}

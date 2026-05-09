@@ -1,0 +1,15 @@
+// compiler/tests/e2e/fixtures/export_from/middle.sfn
+//
+// Barrel module for #508.  Uses the inline `export { X } from "path"`
+// form (NOT the bare `import; export {}` form covered by
+// docs/rca/2026-04-18-reexport-diagnostic-gep.md).  The inline form
+// was explicitly excluded from the 2026-04-18 RCA's diagnostic gate,
+// and the LLVM mangler skipped `.export` lines entirely — so the
+// barrel slug `..__middle` had no shim and consumers that imported
+// through the barrel hit "undefined reference at link time".
+//
+// With the #508 fix, `apply_module_symbol_mangling` synthesises a
+// shim `name__..__middle -> name__..__origin` for every inline
+// re-export, so the linker resolves consumer call sites against this
+// module just like it does for direct imports.
+export { export_from_is_yes, export_from_strip_xyz } from "./origin";
