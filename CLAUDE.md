@@ -567,7 +567,9 @@ The compiler must always compile itself. Breaking changes require:
 - **Release automation:** `.github/workflows/release.yml` — manually triggered via `workflow_dispatch`, pure bash, no Python dependencies
 - **Release notes:** `.github/workflows/release-notes.md` — agentic workflow that posts structured, categorized changelog comments on published releases (supplements the auto-generated notes from `gh release create`)
 - **Artifacts:** `dist/` is used for packaged artifacts; `release-tag.yml` builds and uploads platform binaries
-- **Claude skill:** Use `/release` to trigger a new release from Claude Code
+- **Claude skills:** `/release-plan vX.Y.Z` opens or syncs the per-cycle tracking issue and is idempotent. `/release` cuts the release and gates on the tracking issue + `release:*` labels for curated cuts. `/sweep` auto-ticks the tracking-issue checklist when a labeled issue closes via a merged PR. `/pin-seed [vX.Y.Z]` opens the one-line PR bumping `.seed-version` once a release's binary is uploaded.
+- **Release tracking:** Only `channel=alpha bump=prerelease` is uncurated — every other combo (any patch/minor/major bump, any non-alpha channel) consults the `release:*` label namespace and the per-cycle `Release: vX.Y.Z` tracking issue. See `docs/conventions/issue-naming.md` "Release tracking".
+- **Seed pinning is separate from release cutting.** `release.yml` deliberately doesn't touch `.seed-version`. The `seed-blocker` label tracks "must close before next seed bump" issues; `/release-plan` consults it; `/sweep` auto-ticks it; `/pin-seed` opens the bump PR once `release-tag.yml` finishes uploading binaries. See `docs/conventions/issue-naming.md` "Seed pinning".
 
 ### Triggering a Release
 

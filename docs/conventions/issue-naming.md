@@ -248,6 +248,125 @@ The workflow needs a PAT with `project` + `read:org` scopes, stored as
 available the workflow no-ops — labels stay correct, only the project
 view goes stale.
 
+## Release tracking
+
+Milestones group long-lived **themes** (and feed `site/src/pages/roadmap.astro`).
+They span many releases. To answer "what ships in version X" we use a separate
+axis: the **`release:*` label namespace** plus a **per-cycle tracking issue**.
+
+### When release tracking applies
+
+There is exactly one **uncurated** combination — it takes whatever is on
+`main` and skips the release-tracking gate entirely:
+
+- `channel=alpha bump=prerelease` (the routine daily alpha bump)
+
+**Every other combination is curated** and consults the `release:*` labels:
+
+- Any `bump=patch`, `bump=minor`, or `bump=major` (in any channel)
+- Any promotion to a non-alpha channel (`beta`, `rc`, `stable`)
+
+For curated cuts `/release` lists the open items under the matching
+`release:*` label and the tracking issue, and requires explicit
+confirmation before dispatching. The gate is advisory — the human always
+has the final call.
+
+### Labels
+
+| Label | Hard gate at | Soft signal at |
+|-------|--------------|----------------|
+| `release:next-minor` | `bump=minor` (next 0.X.0) | `bump=patch`, beta promotion |
+| `release:beta` | promotion to `channel=beta` | rc promotion |
+| `release:rc` | promotion to `channel=rc` | stable promotion |
+| `release:stable` | promotion to `channel=stable` | — |
+| `release:1.0` | `bump=major` to 1.0.0 | `bump=minor` |
+
+Multiple labels may co-exist on one issue (e.g. an item may gate both the
+beta promotion *and* the 1.0 GA). The labels are intent — they declare *when*
+something must ship, not *what theme it belongs to* (that's the milestone).
+"Hard gate" means `/release` lists every open issue holding the label and
+requires explicit override; "soft signal" means it's mentioned as context
+but doesn't block.
+
+`bump=patch` cuts have no hard label gate — they're curated only in the
+sense that `/release` confirms the user wants a new patch line (rather
+than another alpha prerelease).
+
+### Tracking issue (`Release: vX.Y.Z`)
+
+For each meaningful upcoming version, open one tracking issue titled exactly
+`Release: vX.Y.Z` (e.g. `Release: v0.6.0`, `Release: v1.0.0`). Apply the
+`tracking` label. Body is a checklist of "must close before cutting" items
+linking to the issues/PRs holding the corresponding `release:*` label.
+
+`/release` looks up the tracking issue by title when the bump/channel combo
+is curated, surfaces unfinished items, requires explicit confirmation if any
+are open, and posts a comment on the tracking issue after a successful
+dispatch.
+
+Don't open a tracking issue for routine alpha bumps. The cost is in the
+curation, not the issue.
+
+## Seed pinning
+
+The Sailfin compiler self-hosts from a released seed binary. The pin
+lives at `.seed-version` (single-line file at repo root) and is read by
+`make fetch-seed`, `ci.yml`, `nightly-selfhost.yml`, and
+`release-branches.yml`. **Bumping the pin is a separate concern from
+cutting a release** — `release.yml` deliberately doesn't touch
+`.seed-version` because the new binary doesn't exist at tag-creation
+time and most alpha releases shouldn't be pinned.
+
+### `seed-blocker` label
+
+Apply `seed-blocker` to any issue whose fix or feature must land
+**before the next seed bump**. Examples:
+
+- A miscompilation in the current seed that breaks downstream work.
+- A new compiler feature the next workstream depends on.
+- A test-runner / CI fix needed before nightly self-host can pass.
+
+`/release-plan` lists open `seed-blocker` issues alongside the
+release-gating set when opening a tracking issue. `/sweep` auto-ticks
+matching checklist items when a `seed-blocker` issue closes via a
+merged PR.
+
+### When to bump the pin
+
+Run `/pin-seed [vX.Y.Z]`:
+
+- A `seed-blocker` issue just closed and the fix shipped in the latest
+  alpha.
+- Downstream work needs a feature/fix that landed in a recent alpha.
+- A `bump=patch` was just cut (almost always implies a hotfix-pin).
+- Nightly self-host shows drift between the seed and trunk that the
+  build cache can't smooth over.
+
+### When NOT to bump the pin
+
+- A routine alpha that fixes nothing the current working set needs.
+- A `seed-blocker` issue is still open (unless deferring is intentional).
+- `release-tag.yml` is still running for the target — wait for the
+  binary upload.
+- The current pin is < 5 alphas behind and CI is green — the pin is
+  working; don't churn it.
+
+### Patch-a-seed flow (hotfix)
+
+When a current-seed bug breaks downstream work:
+
+1. Land the fix on `main` (regular PR + merge).
+2. `/release` with `channel=alpha bump=prerelease` to cut an alpha
+   containing the fix.
+3. Wait for `release-tag.yml` to upload the binary (a few minutes).
+4. `/pin-seed` to open the one-line bump PR.
+5. Merge the pin PR → CI/nightly/`make fetch-seed` start using it.
+6. Rebase the blocked branch onto `main`.
+
+The pin PR lives off `main` (never `claude/*`), is reviewed even though
+it's one line, and is never auto-merged — it cascades through every
+workflow that reads `.seed-version`.
+
 ## Milestones
 
 Milestones are phase markers, not calendar deadlines. Every `epic` issue
