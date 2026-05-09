@@ -32,6 +32,25 @@ struct SourceSpan {
     end_column: number;
 }
 
+// Inferred lambda capture descriptor populated by the typechecker's
+// free-variable walk (issue #458, A1 of #450 M1.5). One entry per
+// distinct enclosing-scope name referenced from the lambda body, in
+// first-use order — deterministic so stage A2 (env-struct emit) and
+// stage A3 (call-site dispatch) can index by position. `type_text`
+// echoes the enclosing binding's annotation when available
+// (parameters and `let x: T = ...`); empty otherwise. `by_value`
+// flips false for non-primitive type annotations so the LLVM lowering
+// in stage A2 knows to emit a heap-pointer slot. `mutable` records
+// whether the enclosing binding was declared `let mut`, so a future
+// mutating-capture pass can reject writes to immutable bindings.
+struct Capture {
+    name: string;
+    type_text: string;
+    by_value: boolean;
+    mutable: boolean;
+    span: SourceSpan?;
+}
+
 enum Expression {
     // Per-expression source spans land on the variants the effect
     // checker needs for call-site attribution (B1, see
@@ -59,7 +78,18 @@ enum Expression {
     Lambda {
         parameters: Parameter[],
         body: Block,
-        return_type: TypeAnnotation?
+        return_type: TypeAnnotation?,
+        // Captures are appended last so the seed compiler's positional
+        // GEP indexing for the existing fields stays stable. Today the
+        // parser always emits an empty list and the inferred capture
+        // sets live separately as `LambdaCaptureRecord[]` returned by
+        // `analyze_lambda_captures` in `typecheck_captures`. Records
+        // are keyed back to a specific Lambda node by the body's
+        // opening `{` token (`body.tokens[0]` line/column). A future
+        // pass can copy each record's `captures` onto the matching
+        // node so this field becomes the single source of truth; for
+        // now stage A2 / A3 should look up the record by body span.
+        captures: Capture[]
     },
     Range { start: Expression, end: Expression },
     Cast { operand: Expression, target_type: TypeAnnotation },

@@ -1,0 +1,661 @@
+// compiler/src/typecheck_captures.sfn
+//
+// Free-variable / capture-set inference for `Expression.Lambda`
+// nodes (issue #458; A1 of #450 M1.5 closures-with-capture). This
+// module is stage 1 of three: it produces deterministic, ordered
+// capture records the AST can carry forward; later stages emit
+// env structs (#A2) and call-site dispatch (#A3).
+//
+// The walk is purely analytical — it never mutates AST nodes. It
+// returns one `LambdaCaptureRecord` per `Expression.Lambda`
+// discovered, in pre-order (outer lambdas appear before nested
+// ones). Records are keyed by the lambda's parameter shape, which
+// is stable across the seed compiler's positional layout.
+//
+// Algorithm sketch:
+//   * `walk_block(scope, block)` walks statements left-to-right,
+//     collecting let-declared locals as it goes. Free names from
+//     each statement are subtracted by the locals already declared
+//     in the block before the statement.
+//   * `walk_expression(scope, expr)` returns the set of
+//     identifiers referenced in the expression that are NOT bound
+//     anywhere within the expression itself.
+//   * Hitting `Expression.Lambda` recurses via `analyze_lambda`,
+//     which walks the body with the lambda's parameters added to
+//     the inner scope, subtracts those parameters from the body's
+//     free names, and intersects with the outer scope to derive
+//     captures. Each free name resolved against the outer scope
+//     produces one `Capture` carrying the enclosing binding's
+//     declared type, mutability, and span — the metadata stage A2
+//     needs to size the env struct and pick by-value-vs-pointer
+//     copy semantics.
+import {
+    Block,
+    Capture,
+    ElseBranch,
+    Expression,
+    MatchCase,
+    MethodDeclaration,
+    Parameter,
+    Program,
+    SourceSpan,
+    Statement,
+    TypeAnnotation
+} from "./ast";
+import { parse_block } from "./parser/statements";
+import { Parser } from "./parser/types";
+import { strings_equal } from "./string_utils";
+
+// One scope-visible binding the walk has accumulated so far.
+// Mirrors the data the unit tests need to verify (`type_text`,
+// `mutable`) plus the by-value/by-pointer hint stage A2 will pick
+// up. `span` is the binding-site span — the parameter slot or the
+// `let`/`let mut` keyword location — and is propagated into the
+// final `Capture` so future diagnostics can underline the source
+// of the capture rather than the use site.
+struct LocalBinding {
+    name: string;
+    type_text: string;
+    by_value: boolean;
+    mutable: boolean;
+    span: SourceSpan?;
+}
+
+// One record per `Expression.Lambda` discovered during the walk.
+// Records are emitted in pre-order so a nested-lambda assertion
+// can index by `[0]` for the outer and `[1]` for the inner.
+//
+// Identification — `body_start_line` and `body_start_column` are
+// taken from the lambda body's opening `{` token. Two lambdas with
+// identical parameter shapes still differ on body start, so stage
+// A2 / A3 can map an `Expression.Lambda` AST node back to its
+// record by computing the same `(line, column)` from its
+// `body.tokens[0]`. `parameter_names` is kept alongside as a
+// human-readable hint for diagnostics and for tests to assert
+// against without depending on exact line/column numbers in source
+// fixtures.
+struct LambdaCaptureRecord {
+    parameter_names: string[];
+    captures: Capture[];
+    body_start_line: number;
+    body_start_column: number;
+}
+
+// Internal walk result. `free` is the set of identifier names
+// referenced in the walked subtree that are NOT bound by lets
+// inside the subtree. The caller subtracts its own bindings before
+// passing the result up, so by the time `free` reaches a lambda
+// boundary it reflects only names the lambda actually needs from
+// outside.
+struct CaptureWalkResult {
+    free: string[];
+    records: LambdaCaptureRecord[];
+}
+
+// Public entry point: walks every top-level statement in the
+// program and returns the inferred capture set for every lambda
+// reachable from the AST. Top-level `let` bindings are added to
+// the running scope so a lambda declared mid-file sees the
+// preceding bindings as candidates for capture.
+fn analyze_lambda_captures(program: Program) -> LambdaCaptureRecord[] {
+    let mut scope: LocalBinding[] = [];
+    let mut records: LambdaCaptureRecord[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= program.statements.length { break; }
+        let stmt = program.statements[i];
+        let result = walk_top_statement(scope, stmt);
+        records = append_records(records, result.records);
+        if stmt.variant == "VariableDeclaration" {
+            scope = append_binding(scope, binding_from_let(stmt));
+        }
+        i += 1;
+    }
+    return records;
+}
+
+fn walk_top_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
+    if stmt.variant == "FunctionDeclaration" {
+        let inner_scope = extend_with_parameters(scope, stmt.signature.parameters);
+        return walk_block(inner_scope, stmt.body);
+    }
+    if stmt.variant == "TestDeclaration" {
+        return walk_block(scope, stmt.body);
+    }
+    if stmt.variant == "VariableDeclaration" {
+        if stmt.initializer == null { return empty_walk_result(); }
+        return walk_expression(scope, stmt.initializer);
+    }
+    if stmt.variant == "StructDeclaration" {
+        let mut records: LambdaCaptureRecord[] = [];
+        let mut i: number = 0;
+        loop {
+            if i >= stmt.methods.length { break; }
+            let method = stmt.methods[i];
+            let inner_scope = extend_with_parameters(scope, method.signature.parameters);
+            let result = walk_block(inner_scope, method.body);
+            records = append_records(records, result.records);
+            i += 1;
+        }
+        return CaptureWalkResult { free: [], records: records };
+    }
+    return empty_walk_result();
+}
+
+// Walk the statements of a block, threading lets into a local
+// scope as they appear so subsequent statements (and their
+// expressions) see them. The block subtracts its own locals from
+// the free-name set bubbling up — names a let inside the block
+// satisfies are not free at the block boundary.
+fn walk_block(scope: LocalBinding[], block: Block) -> CaptureWalkResult {
+    let mut free: string[] = [];
+    let mut local: LocalBinding[] = [];
+    let mut records: LambdaCaptureRecord[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= block.statements.length { break; }
+        let stmt = block.statements[i];
+        let inner_scope = concat_bindings(scope, local);
+        let result = walk_statement(inner_scope, stmt);
+        let local_names = binding_names(local);
+        let stmt_free = subtract_names(result.free, local_names);
+        free = union_names(free, stmt_free);
+        records = append_records(records, result.records);
+        if stmt.variant == "VariableDeclaration" {
+            local = append_binding(local, binding_from_let(stmt));
+        }
+        i += 1;
+    }
+    return CaptureWalkResult { free: free, records: records };
+}
+
+fn walk_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
+    if stmt.variant == "VariableDeclaration" {
+        if stmt.initializer == null { return empty_walk_result(); }
+        return walk_expression(scope, stmt.initializer);
+    }
+    if stmt.variant == "ExpressionStatement" {
+        return walk_expression(scope, stmt.expression);
+    }
+    if stmt.variant == "ReturnStatement" {
+        if stmt.expression == null { return empty_walk_result(); }
+        return walk_expression(scope, stmt.expression);
+    }
+    if stmt.variant == "ThrowStatement" {
+        return walk_expression(scope, stmt.expression);
+    }
+    if stmt.variant == "BlockStatement" {
+        return walk_block(scope, stmt.body);
+    }
+    if stmt.variant == "IfStatement" {
+        let mut result = walk_expression(scope, stmt.condition);
+        result = merge_results(result, walk_block(scope, stmt.then_block));
+        if stmt.else_branch != null {
+            let branch = stmt.else_branch;
+            if branch.body != null {
+                result = merge_results(result, walk_block(scope, branch.body));
+            }
+            if branch.statement != null {
+                result = merge_results(result, walk_statement(scope, branch.statement));
+            }
+        }
+        return result;
+    }
+    if stmt.variant == "ForStatement" {
+        let mut result = walk_expression(scope, stmt.clause.iterable);
+        result = merge_results(result, walk_expression(scope, stmt.clause.target));
+        let inner_scope = extend_with_for_target(scope, stmt.clause.target);
+        result = merge_results(result, walk_block(inner_scope, stmt.body));
+        // The for-target binding is local to the loop body; subtract
+        // its name from the bubbled-up free set so the enclosing
+        // scope doesn't see it as a capture candidate.
+        let target_name = for_target_name(stmt.clause.target);
+        if target_name.length > 0 {
+            let mut excluded: string[] = [target_name];
+            return CaptureWalkResult {
+                free: subtract_names(result.free, excluded),
+                records: result.records
+            };
+        }
+        return result;
+    }
+    if stmt.variant == "LoopStatement" {
+        return walk_block(scope, stmt.body);
+    }
+    if stmt.variant == "MatchStatement" {
+        let mut result = walk_expression(scope, stmt.expression);
+        let mut i: number = 0;
+        loop {
+            if i >= stmt.cases.length { break; }
+            let case = stmt.cases[i];
+            result = merge_results(result, walk_expression(scope, case.pattern));
+            if case.guard != null {
+                result = merge_results(result, walk_expression(scope, case.guard));
+            }
+            result = merge_results(result, walk_block(scope, case.body));
+            i += 1;
+        }
+        return result;
+    }
+    if stmt.variant == "WithStatement" {
+        let mut result = walk_block(scope, stmt.body);
+        let mut i: number = 0;
+        loop {
+            if i >= stmt.clauses.length { break; }
+            result = merge_results(result, walk_expression(scope, stmt.clauses[i].expression));
+            i += 1;
+        }
+        return result;
+    }
+    if stmt.variant == "TryStatement" {
+        let mut result = walk_block(scope, stmt.try_block);
+        if stmt.catch_block != null {
+            // The `catch (name)` identifier is a fresh local binding
+            // visible only inside the catch block, so extend the
+            // scope with it and subtract its name from the bubbled
+            // free set — otherwise a lambda nested inside the catch
+            // would capture the catch variable as if it were an
+            // enclosing let-binding.
+            let catch_scope = extend_with_catch_name(scope, stmt.catch_name);
+            let catch_result = walk_block(catch_scope, stmt.catch_block);
+            let catch_local: string[] = catch_name_as_list(stmt.catch_name);
+            let catch_free = subtract_names(catch_result.free, catch_local);
+            result = merge_results(result, CaptureWalkResult {
+                free: catch_free, records: catch_result.records
+            });
+        }
+        if stmt.finally_block != null {
+            result = merge_results(result, walk_block(scope, stmt.finally_block));
+        }
+        return result;
+    }
+    if stmt.variant == "FunctionDeclaration" {
+        let inner_scope = extend_with_parameters(scope, stmt.signature.parameters);
+        return walk_block(inner_scope, stmt.body);
+    }
+    return empty_walk_result();
+}
+
+fn walk_expression(scope: LocalBinding[], expression: Expression?) -> CaptureWalkResult {
+    if expression == null { return empty_walk_result(); }
+    if expression.variant == "Identifier" {
+        let mut names: string[] = [];
+        names.push(expression.name);
+        return CaptureWalkResult { free: names, records: [] };
+    }
+    if expression.variant == "NumberLiteral" { return empty_walk_result(); }
+    if expression.variant == "StringLiteral" { return empty_walk_result(); }
+    if expression.variant == "BooleanLiteral" { return empty_walk_result(); }
+    if expression.variant == "NullLiteral" { return empty_walk_result(); }
+    if expression.variant == "Raw" { return empty_walk_result(); }
+    if expression.variant == "Unary" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "Binary" {
+        let left = walk_expression(scope, expression.left);
+        let right = walk_expression(scope, expression.right);
+        return merge_results(left, right);
+    }
+    if expression.variant == "Member" {
+        return walk_expression(scope, expression.object);
+    }
+    if expression.variant == "Index" {
+        let seq = walk_expression(scope, expression.sequence);
+        let idx = walk_expression(scope, expression.index);
+        return merge_results(seq, idx);
+    }
+    if expression.variant == "Range" {
+        let start = walk_expression(scope, expression.start);
+        let end = walk_expression(scope, expression.end);
+        return merge_results(start, end);
+    }
+    if expression.variant == "Cast" {
+        return walk_expression(scope, expression.operand);
+    }
+    if expression.variant == "Call" {
+        let mut result = walk_expression(scope, expression.callee);
+        let mut i: number = 0;
+        loop {
+            if i >= expression.arguments.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.arguments[i]));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Array" {
+        let mut result = empty_walk_result();
+        let mut i: number = 0;
+        loop {
+            if i >= expression.elements.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.elements[i]));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Object" {
+        let mut result = empty_walk_result();
+        let mut i: number = 0;
+        loop {
+            if i >= expression.fields.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.fields[i].value));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Struct" {
+        let mut result = empty_walk_result();
+        let mut i: number = 0;
+        loop {
+            if i >= expression.fields.length { break; }
+            result = merge_results(result, walk_expression(scope, expression.fields[i].value));
+            i += 1;
+        }
+        return result;
+    }
+    if expression.variant == "Lambda" {
+        return analyze_lambda(scope, expression);
+    }
+    return empty_walk_result();
+}
+
+// Compute one lambda's capture set and return the lambda's own
+// free-name contribution to the enclosing scope. The lambda's
+// record is appended ahead of any nested-lambda records so the
+// pre-order property holds.
+//
+// Lambda bodies arrive with `body.statements == []` because the
+// expression-side `parse_block_for_lambda` only collects raw tokens
+// (the comment in the parser says the structural pass "will be in
+// statements.sfn" — it never landed). Re-parse the body's tokens
+// through the real `parse_block` here so we can walk structured
+// statements; without this every lambda body would look empty and
+// every reference to an outer name would be invisible. Stage A2
+// will need the same shape and may eventually push this re-parse
+// into the parser, retiring the workaround.
+fn analyze_lambda(outer_scope: LocalBinding[], lambda: Expression) -> CaptureWalkResult {
+    let body_parser = Parser { tokens: lambda.body.tokens, index: 0 };
+    let parsed_block_result = parse_block(body_parser);
+    let parsed_body = parsed_block_result.block;
+
+    let inner_scope = extend_with_parameters(outer_scope, lambda.parameters);
+    let body_result = walk_block(inner_scope, parsed_body);
+
+    let param_names = parameter_names(lambda.parameters);
+    let lambda_free = subtract_names(body_result.free, param_names);
+    let captures = build_captures(outer_scope, lambda_free);
+    let body_line = body_start_line(lambda.body);
+    let body_column = body_start_column(lambda.body);
+
+    let mut records: LambdaCaptureRecord[] = [];
+    records.push(LambdaCaptureRecord {
+        parameter_names: param_names, captures: captures, body_start_line: body_line, body_start_column: body_column
+    });
+    records = append_records(records, body_result.records);
+    return CaptureWalkResult { free: lambda_free, records: records };
+}
+
+fn body_start_line(body: Block) -> number {
+    if body.tokens.length == 0 { return 0; }
+    return body.tokens[0].line;
+}
+
+fn body_start_column(body: Block) -> number {
+    if body.tokens.length == 0 { return 0; }
+    return body.tokens[0].column;
+}
+
+fn extend_with_catch_name(scope: LocalBinding[], catch_name: string?) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    if catch_name != null {
+        if catch_name.length > 0 {
+            out.push(LocalBinding {
+                name: catch_name, type_text: "", by_value: false, mutable: false, span: null
+            });
+        }
+    }
+    return out;
+}
+
+fn catch_name_as_list(catch_name: string?) -> string[] {
+    let mut out: string[] = [];
+    if catch_name != null {
+        if catch_name.length > 0 { out.push(catch_name); }
+    }
+    return out;
+}
+
+// ----- Capture construction & scope helpers -----
+fn build_captures(outer_scope: LocalBinding[], free_names: string[]) -> Capture[] {
+    let mut captures: Capture[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= free_names.length { break; }
+        let name = free_names[i];
+        let binding = find_binding(outer_scope, name);
+        if binding != null {
+            captures.push(Capture {
+                name: binding.name, type_text: binding.type_text, by_value: binding.by_value, mutable: binding.mutable, span: binding.span
+            });
+        }
+        i += 1;
+    }
+    return captures;
+}
+
+fn find_binding(scope: LocalBinding[], name: string) -> LocalBinding? {
+    let mut found: LocalBinding? = null;
+    let mut i: number = 0;
+    loop {
+        if i >= scope.length { break; }
+        if strings_equal(scope[i].name, name) { found = scope[i]; }
+        i += 1;
+    }
+    return found;
+}
+
+fn binding_from_parameter(p: Parameter) -> LocalBinding {
+    let type_text = type_annotation_text(p.type_annotation);
+    return LocalBinding {
+        name: p.name,
+        type_text: type_text,
+        by_value: is_primitive_type(type_text),
+        mutable: p.mutable,
+        span: p.span
+    };
+}
+
+fn binding_from_let(stmt: Statement) -> LocalBinding {
+    let type_text = type_annotation_text(stmt.type_annotation);
+    return LocalBinding {
+        name: stmt.name,
+        type_text: type_text,
+        by_value: is_primitive_type(type_text),
+        mutable: stmt.mutable,
+        span: stmt.span
+    };
+}
+
+fn extend_with_parameters(scope: LocalBinding[], parameters: Parameter[]) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    let mut j: number = 0;
+    loop {
+        if j >= parameters.length { break; }
+        out.push(binding_from_parameter(parameters[j]));
+        j += 1;
+    }
+    return out;
+}
+
+fn extend_with_for_target(scope: LocalBinding[], target: Expression) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    let target_name = for_target_name(target);
+    if target_name.length > 0 {
+        out.push(LocalBinding {
+            name: target_name, type_text: "", by_value: false, mutable: false, span: null
+        });
+    }
+    return out;
+}
+
+fn for_target_name(target: Expression) -> string {
+    if target.variant == "Identifier" { return target.name; }
+    return "";
+}
+
+fn append_binding(scope: LocalBinding[], binding: LocalBinding) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    out.push(binding);
+    return out;
+}
+
+fn concat_bindings(a: LocalBinding[], b: LocalBinding[]) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: number = 0;
+    loop {
+        if j >= b.length { break; }
+        out.push(b[j]);
+        j += 1;
+    }
+    return out;
+}
+
+fn binding_names(bindings: LocalBinding[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= bindings.length { break; }
+        out.push(bindings[i].name);
+        i += 1;
+    }
+    return out;
+}
+
+fn parameter_names(parameters: Parameter[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= parameters.length { break; }
+        out.push(parameters[i].name);
+        i += 1;
+    }
+    return out;
+}
+
+fn type_annotation_text(annotation: TypeAnnotation?) -> string {
+    if annotation == null { return ""; }
+    return annotation.text;
+}
+
+// Stage 1 heuristic for `by_value`: types we know are primitive
+// (and therefore safe to copy) emit `by_value: true`; everything
+// else (arrays, struct types, function types, unknowns) emits
+// `by_value: false` so stage A2 will reach for a heap-pointer
+// slot. The list deliberately includes `string` even though it
+// allocates — stage A2 will treat it as a copy-on-capture
+// reference; the unit test pinning the heuristic should be
+// updated alongside this list when stage A2 lands.
+fn is_primitive_type(type_text: string) -> boolean {
+    if strings_equal(type_text, "number") { return true; }
+    if strings_equal(type_text, "boolean") { return true; }
+    if strings_equal(type_text, "int") { return true; }
+    if strings_equal(type_text, "float") { return true; }
+    if strings_equal(type_text, "string") { return true; }
+    return false;
+}
+
+// ----- list / set helpers -----
+fn empty_walk_result() -> CaptureWalkResult {
+    return CaptureWalkResult { free: [], records: [] };
+}
+
+fn merge_results(a: CaptureWalkResult, b: CaptureWalkResult) -> CaptureWalkResult {
+    return CaptureWalkResult {
+        free: union_names(a.free, b.free),
+        records: append_records(a.records, b.records)
+    };
+}
+
+fn union_names(a: string[], b: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: number = 0;
+    loop {
+        if j >= b.length { break; }
+        if !contains_name(out, b[j]) { out.push(b[j]); }
+        j += 1;
+    }
+    return out;
+}
+
+fn subtract_names(names: string[], exclude: string[]) -> string[] {
+    let mut out: string[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= names.length { break; }
+        if !contains_name(exclude, names[i]) { out.push(names[i]); }
+        i += 1;
+    }
+    return out;
+}
+
+fn contains_name(names: string[], name: string) -> boolean {
+    let mut i: number = 0;
+    loop {
+        if i >= names.length { break; }
+        if strings_equal(names[i], name) { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+fn append_records(a: LambdaCaptureRecord[], b: LambdaCaptureRecord[]) -> LambdaCaptureRecord[] {
+    let mut out: LambdaCaptureRecord[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= a.length { break; }
+        out.push(a[i]);
+        i += 1;
+    }
+    let mut j: number = 0;
+    loop {
+        if j >= b.length { break; }
+        out.push(b[j]);
+        j += 1;
+    }
+    return out;
+}
