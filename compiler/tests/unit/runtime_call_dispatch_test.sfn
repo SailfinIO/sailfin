@@ -17,6 +17,15 @@
 //   - `runtime.bounds_check` — void return, two i64 args
 //   - `string.length`        — i64 return, single i8* arg,
 //                              `native_signature` flip to `sfn_str_len`
+//   - `alloc_struct`         — i8* return with `noalias` return-attribute
+//                              override (M1.7.2a, issue #496); pins the
+//                              `<temp> = call <attrs> <ret> @<sym>(<args>)`
+//                              render so allocator call-site migrations
+//                              don't drift in whitespace or attribute
+//                              placement.
+//   - `alloc_struct` (no attrs) — same descriptor without the override,
+//                              pins that the empty `return_attributes`
+//                              path stays attribute-free (no stray space).
 import {
     RuntimeCallOverrides,
     emit_runtime_call,
@@ -79,6 +88,34 @@ test "emit_runtime_call: string.length renders i64-return call to sfn_str_len" !
     let result = emit_runtime_call("string.length", operands, empty_runtime_call_overrides(), 0, []);
     assert result.lines.length == 1;
     assert result.lines[0] == "  %t0 = call i64 @sfn_str_len(i8* %s)";
+    assert result.temp_index == 1;
+    assert result.operand != null;
+    assert result.diagnostics.length == 0;
+}
+
+test "emit_runtime_call: alloc_struct with noalias return attribute renders attribute before return type" ![io] {
+    let size = _i64_operand("%size");
+    let operands: LLVMOperand[] = [size];
+    let overrides = RuntimeCallOverrides {
+        parameter_types: [],
+        return_type: "",
+        symbol: "",
+        return_attributes: "noalias"
+    };
+    let result = emit_runtime_call("alloc_struct", operands, overrides, 0, []);
+    assert result.lines.length == 1;
+    assert result.lines[0] == "  %t0 = call noalias i8* @sailfin_runtime_alloc_struct(i64 %size)";
+    assert result.temp_index == 1;
+    assert result.operand != null;
+    assert result.diagnostics.length == 0;
+}
+
+test "emit_runtime_call: alloc_struct without override renders no return attribute" ![io] {
+    let size = _i64_operand("%size");
+    let operands: LLVMOperand[] = [size];
+    let result = emit_runtime_call("alloc_struct", operands, empty_runtime_call_overrides(), 0, []);
+    assert result.lines.length == 1;
+    assert result.lines[0] == "  %t0 = call i8* @sailfin_runtime_alloc_struct(i64 %size)";
     assert result.temp_index == 1;
     assert result.operand != null;
     assert result.diagnostics.length == 0;
