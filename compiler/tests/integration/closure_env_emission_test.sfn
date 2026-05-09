@@ -1,0 +1,278 @@
+// compiler/tests/integration/closure_env_emission_test.sfn
+//
+// Golden IR fixtures for the closure env-struct emission helpers
+// introduced in stage A2 of #450 M1.5 (issue #459). Each test
+// feeds a synthetic `Capture[]` through the public API exported by
+// `compiler/src/llvm/closures.sfn` and pins the rendered LLVM IR
+// against the canonical shape documented in
+// `docs/runtime_architecture.md` §3.4 "Typed Closures".
+//
+// Coverage matrix (matches the acceptance criteria on #459):
+//   - empty captures            — no struct, no lines, no bindings
+//                                 (regression guard for non-capturing
+//                                 lambdas: behaviour is unchanged)
+//   - single i64 capture        — `%sfn_closure_env_<id>` shape +
+//                                 size-via-GEP-null + alloc + bitcast
+//                                 + per-field GEP+store + load prologue
+//   - multi-typed capture       — deterministic field order across
+//                                 `int`, `boolean`, `float`, `string`
+//                                 annotations, mapped through
+//                                 `map_type_annotation`
+//   - heap-pointer capture      — `*MyStruct` annotation lowers to a
+//                                 pointer field (no double-indirection)
+//   - missing operand           — `_field_zero_value` fallback emits
+//                                 `null` for pointer fields and `0`
+//                                 for primitives, so a wiring gap
+//                                 surfaces as a deterministic IR diff
+//                                 rather than malformed text
+//
+// Stage A3 (#460) wires the call-site dispatch that turns the
+// emitted env struct into a callable closure pair. Until then, the
+// emit pipeline never invokes these helpers — the tests pin the
+// API surface so A3 can rely on a settled IR shape.
+import { Capture } from "../../src/ast";
+import {
+    ClosureCaptureOperand,
+    closure_env_type_name,
+    closure_field_llvm_type,
+    emit_closure_env_alloc,
+    emit_closure_env_load_prologue,
+    synthesize_closure_env_struct
+} from "../../src/llvm/closures";
+
+fn _capture_int(name: string) -> Capture {
+    return Capture {
+        name: name,
+        type_text: "int",
+        by_value: true,
+        mutable: false,
+        span: null
+    };
+}
+
+fn _capture_bool(name: string) -> Capture {
+    return Capture {
+        name: name,
+        type_text: "boolean",
+        by_value: true,
+        mutable: false,
+        span: null
+    };
+}
+
+fn _capture_float(name: string) -> Capture {
+    return Capture {
+        name: name,
+        type_text: "float",
+        by_value: true,
+        mutable: false,
+        span: null
+    };
+}
+
+fn _capture_string(name: string) -> Capture {
+    return Capture {
+        name: name,
+        type_text: "string",
+        by_value: true,
+        mutable: false,
+        span: null
+    };
+}
+
+fn _capture_user_pointer(name: string, type_text: string) -> Capture {
+    return Capture {
+        name: name,
+        type_text: type_text,
+        by_value: false,
+        mutable: false,
+        span: null
+    };
+}
+
+fn _capture_untyped(name: string) -> Capture {
+    return Capture {
+        name: name,
+        type_text: "",
+        by_value: true,
+        mutable: false,
+        span: null
+    };
+}
+
+// ── Type-name helper ─────────────────────────────────────────────────
+test "closure_env: type_name renders sfn_closure_env_<id>" {
+    assert closure_env_type_name(0) == "%sfn_closure_env_0";
+    assert closure_env_type_name(7) == "%sfn_closure_env_7";
+    assert closure_env_type_name(42) == "%sfn_closure_env_42";
+}
+
+// ── Field-type mapping ───────────────────────────────────────────────
+test "closure_env: int / boolean / float captures map to scalar LLVM types" {
+    assert closure_field_llvm_type(_capture_int("x")) == "i64";
+    assert closure_field_llvm_type(_capture_bool("flag")) == "i1";
+    assert closure_field_llvm_type(_capture_float("ratio")) == "double";
+}
+
+test "closure_env: string capture maps to i8* opaque pointer" {
+    assert closure_field_llvm_type(_capture_string("name")) == "i8*";
+}
+
+test "closure_env: empty type_text falls back to i8*" {
+    assert closure_field_llvm_type(_capture_untyped("legacy")) == "i8*";
+}
+
+test "closure_env: user-type annotation lowers to %T* pointer field" {
+    let c = _capture_user_pointer("acc", "MyStruct");
+    assert closure_field_llvm_type(c) == "%MyStruct*";
+}
+
+// ── Empty-capture regression guard ───────────────────────────────────
+test "closure_env: empty captures produce an is_empty layout with no decl" {
+    let empty: Capture[] = [];
+    let layout = synthesize_closure_env_struct(empty, 0);
+    assert layout.is_empty;
+    assert layout.type_decl == "";
+    assert layout.fields.length == 0;
+    assert layout.type_name == "%sfn_closure_env_0";
+}
+
+test "closure_env: empty layout emits no alloc lines (non-capturing lambda guard)" {
+    let empty: Capture[] = [];
+    let layout = synthesize_closure_env_struct(empty, 3);
+    let no_operands: ClosureCaptureOperand[] = [];
+    let result = emit_closure_env_alloc(layout, no_operands, 0);
+    assert result.lines.length == 0;
+    assert result.env_raw_var == "";
+    assert result.env_typed_var == "";
+    assert result.next_temp == 0;
+}
+
+test "closure_env: empty layout emits no prologue (non-capturing lambda guard)" {
+    let empty: Capture[] = [];
+    let layout = synthesize_closure_env_struct(empty, 5);
+    let result = emit_closure_env_load_prologue(layout, "%env_raw", 0);
+    assert result.lines.length == 0;
+    assert result.bindings.length == 0;
+    assert result.next_temp == 0;
+}
+
+// ── Single-capture struct shape ──────────────────────────────────────
+test "closure_env: single-int capture renders %sfn_closure_env_0 = type { i64 }" {
+    let captures: Capture[] = [_capture_int("x")];
+    let layout = synthesize_closure_env_struct(captures, 0);
+    assert ! layout.is_empty;
+    assert layout.type_name == "%sfn_closure_env_0";
+    assert layout.type_decl == "%sfn_closure_env_0 = type { i64 }";
+    assert layout.fields.length == 1;
+    assert layout.fields[0].name == "x";
+    assert layout.fields[0].llvm_type == "i64";
+    assert layout.fields[0].index == 0;
+}
+
+// ── Multi-capture deterministic ordering ─────────────────────────────
+test "closure_env: multi-capture preserves capture-set order in the struct decl" {
+    let captures: Capture[] = [_capture_int("a"), _capture_bool("flag"), _capture_float("ratio"), _capture_string("label")];
+    let layout = synthesize_closure_env_struct(captures, 1);
+    assert layout.type_name == "%sfn_closure_env_1";
+    assert layout.type_decl == "%sfn_closure_env_1 = type { i64, i1, double, i8* }";
+    assert layout.fields.length == 4;
+    assert layout.fields[0].name == "a";
+    assert layout.fields[0].index == 0;
+    assert layout.fields[1].name == "flag";
+    assert layout.fields[1].index == 1;
+    assert layout.fields[2].name == "ratio";
+    assert layout.fields[2].index == 2;
+    assert layout.fields[3].name == "label";
+    assert layout.fields[3].index == 3;
+}
+
+test "closure_env: heap-pointer capture lowers to %T* in the struct decl" {
+    let captures: Capture[] = [_capture_int("count"), _capture_user_pointer("acc", "Buffer")];
+    let layout = synthesize_closure_env_struct(captures, 2);
+    assert layout.type_decl == "%sfn_closure_env_2 = type { i64, %Buffer* }";
+    assert layout.fields[1].llvm_type == "%Buffer*";
+    assert ! layout.fields[1].by_value;
+}
+
+// ── Env allocation walk at the lambda expression site ────────────────
+test "closure_env: single-capture alloc emits size-via-GEP-null + alloc + populate" {
+    let captures: Capture[] = [_capture_int("x")];
+    let layout = synthesize_closure_env_struct(captures, 0);
+    let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
+        name: "x", llvm_value: "%x_local"
+    }];
+    let result = emit_closure_env_alloc(layout, operands, 0);
+    assert result.lines.length == 6;
+    assert result.lines[0] == "  %t0 = getelementptr inbounds %sfn_closure_env_0, %sfn_closure_env_0* null, i32 1";
+    assert result.lines[1] == "  %t1 = ptrtoint %sfn_closure_env_0* %t0 to i64";
+    assert result.lines[2] == "  %t2 = call noalias i8* @sailfin_runtime_alloc_struct(i64 %t1)";
+    assert result.lines[3] == "  %t3 = bitcast i8* %t2 to %sfn_closure_env_0*";
+    assert result.lines[4] == "  %t4 = getelementptr inbounds %sfn_closure_env_0, %sfn_closure_env_0* %t3, i32 0, i32 0";
+    assert result.lines[5] == "  store i64 %x_local, i64* %t4";
+    assert result.env_raw_var == "%t2";
+    assert result.env_typed_var == "%t3";
+    assert result.next_temp == 5;
+}
+
+test "closure_env: multi-capture alloc populates each field in capture-set order" {
+    let captures: Capture[] = [_capture_int("a"), _capture_bool("flag")];
+    let layout = synthesize_closure_env_struct(captures, 4);
+    let operands: ClosureCaptureOperand[] = [ClosureCaptureOperand {
+        name: "a", llvm_value: "%a"
+    }, ClosureCaptureOperand { name: "flag", llvm_value: "%flag" }];
+    let result = emit_closure_env_alloc(layout, operands, 10);
+    // Walk produces: size_ptr, size_i64, env_raw, env_typed, then
+    // (gep, store) per field. With two fields that is 4 + 2 * 2 = 8
+    // lines and the temp index advances by 4 + 2 (only the GEP per
+    // field consumes a temp; `store` is void).
+    assert result.lines.length == 8;
+    assert result.lines[3] == "  %t13 = bitcast i8* %t12 to %sfn_closure_env_4*";
+    assert result.lines[4] == "  %t14 = getelementptr inbounds %sfn_closure_env_4, %sfn_closure_env_4* %t13, i32 0, i32 0";
+    assert result.lines[5] == "  store i64 %a, i64* %t14";
+    assert result.lines[6] == "  %t15 = getelementptr inbounds %sfn_closure_env_4, %sfn_closure_env_4* %t13, i32 0, i32 1";
+    assert result.lines[7] == "  store i1 %flag, i1* %t15";
+    assert result.next_temp == 16;
+}
+
+test "closure_env: missing operand falls back to deterministic zero-init store" {
+    let captures: Capture[] = [_capture_int("count"), _capture_user_pointer("acc", "Buffer")];
+    let layout = synthesize_closure_env_struct(captures, 6);
+    let operands: ClosureCaptureOperand[] = [];
+    let result = emit_closure_env_alloc(layout, operands, 0);
+    // count -> i64 zero, acc -> %Buffer* null
+    assert result.lines[5] == "  store i64 0, i64* %t4";
+    assert result.lines[7] == "  store %Buffer* null, %Buffer** %t5";
+}
+
+// ── Env-load prologue inside the lifted lambda body ──────────────────
+test "closure_env: prologue bitcasts env param then loads each capture" {
+    let captures: Capture[] = [_capture_int("x"), _capture_string("label")];
+    let layout = synthesize_closure_env_struct(captures, 0);
+    let result = emit_closure_env_load_prologue(layout, "%env_raw", 0);
+    // 1 bitcast + 2 fields * (gep + load) = 5 lines
+    assert result.lines.length == 5;
+    assert result.lines[0] == "  %t0 = bitcast i8* %env_raw to %sfn_closure_env_0*";
+    assert result.lines[1] == "  %t1 = getelementptr inbounds %sfn_closure_env_0, %sfn_closure_env_0* %t0, i32 0, i32 0";
+    assert result.lines[2] == "  %t2 = load i64, i64* %t1";
+    assert result.lines[3] == "  %t3 = getelementptr inbounds %sfn_closure_env_0, %sfn_closure_env_0* %t0, i32 0, i32 1";
+    assert result.lines[4] == "  %t4 = load i8*, i8** %t3";
+    assert result.next_temp == 5;
+    assert result.bindings.length == 2;
+    assert result.bindings[0].name == "x";
+    assert result.bindings[0].llvm_type == "i64";
+    assert result.bindings[0].llvm_name == "%t2";
+    assert result.bindings[1].name == "label";
+    assert result.bindings[1].llvm_type == "i8*";
+    assert result.bindings[1].llvm_name == "%t4";
+}
+
+test "closure_env: prologue threads custom env-param SSA name through bitcast" {
+    let captures: Capture[] = [_capture_int("counter")];
+    let layout = synthesize_closure_env_struct(captures, 9);
+    let result = emit_closure_env_load_prologue(layout, "%captures_ptr", 5);
+    assert result.lines[0] == "  %t5 = bitcast i8* %captures_ptr to %sfn_closure_env_9*";
+    assert result.lines[1] == "  %t6 = getelementptr inbounds %sfn_closure_env_9, %sfn_closure_env_9* %t5, i32 0, i32 0";
+    assert result.lines[2] == "  %t7 = load i64, i64* %t6";
+    assert result.next_temp == 8;
+}
