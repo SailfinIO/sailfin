@@ -1,0 +1,29 @@
+// compiler/tests/e2e/fixtures/export_from/origin.sfn
+//
+// Origin module for the inline-`export { X } from` regression test
+// (#508).  Defines two helpers:
+//
+//   - export_from_is_yes   — `i1` return; the dangerous shape that
+//                            broke when the barrel re-export emitted
+//                            no shim (linker undefined or i8* fallback
+//                            corruption).
+//   - export_from_strip_xyz — `i8*` return; the accidentally-OK shape.
+fn export_from_is_yes(value: string) -> boolean { return value == "yes"; }
+
+fn export_from_strip_xyz(value: string) -> string {
+    if value.length < 3 { return value; }
+    let head = value[0] + value[1] + value[2];
+    if head == "xyz" {
+        let mut rest: string = "";
+        let mut index: number = 3;
+        loop {
+            if index >= value.length { break; }
+            rest = rest + value[index];
+            index += 1;
+        }
+        return rest;
+    }
+    return value;
+}
+
+export { export_from_is_yes, export_from_strip_xyz };

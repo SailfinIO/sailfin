@@ -2060,6 +2060,12 @@ fn _cr_word_matches(source: string, index: number, word: string) -> boolean {
 // every spec string that begins with `./` or `../`. The walker is
 // string-, line-comment-, and block-comment-aware so it doesn't trip on
 // import-shaped strings inside comments or string literals.
+// Walks `import { ... } from "spec"` AND
+// `export { ... } from "spec"` — the latter is needed so barrel
+// modules' inline re-export targets get staged into the
+// import-context (#508). Bare `export { X };` produces an empty
+// spec, which the `if spec.length > 0` guard inside silently drops,
+// matching pre-#508 behavior.
 fn collect_relative_import_specs(source: string) -> string[] {
     let mut out: string[] = [];
     let source_len = source.length;
@@ -2133,7 +2139,10 @@ fn collect_relative_import_specs(source: string) -> string[] {
             i += 1;
             continue;
         }
-        if _cr_word_matches(source, i, "import") {
+        let mut _is_dep_keyword: boolean = false;
+        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if _is_dep_keyword {
             let mut j: number = i;
             let mut s_in_string: boolean = false;
             let mut s_escaping: boolean = false;
@@ -2640,7 +2649,10 @@ fn collect_scoped_import_specs(source: string) -> string[] {
             i += 1;
             continue;
         }
-        if _cr_word_matches(source, i, "import") {
+        let mut _is_dep_keyword: boolean = false;
+        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if _is_dep_keyword {
             let mut j: number = i;
             let mut s_in_string: boolean = false;
             let mut s_escaping: boolean = false;

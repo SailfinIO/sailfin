@@ -152,8 +152,19 @@ fn module_name_from_path(source_path: string) -> string {
     if dot_index >= 0 { end = dot_index; }
 
     if end <= start { return "main"; }
-    let base = substring(normalized, start, end);
+    let mut base = substring(normalized, start, end);
     if base.length == 0 { return "main"; }
+    // Strip a leading slash so absolute-path slugs (test fixtures, ad-hoc
+    // builds outside compiler/src or runtime) round-trip through
+    // `sanitize_module_suffix` consistently. Without this, the mangled
+    // module suffix grew an extra `__` at the front, and a consumer's
+    // re-resolved slug (which goes through the relative-path normalizer
+    // and drops the leading empty segment) ended up with one fewer `__`
+    // than the producer module's own self-mangle — a #508 manifestation
+    // that masquerades as a missing shim.
+    if base.length > 0 {
+        if base[0] == "/" { base = substring(base, 1, base.length); }
+    }
     return base;
 }
 

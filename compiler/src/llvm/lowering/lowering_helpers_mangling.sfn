@@ -105,10 +105,24 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     // and generate re-export shims so downstream modules can import symbols
     // from this module even if they're transitively provided.
     //
+    // We process two directive shapes identically:
+    //
+    //   .import "path" { syms }   — symbols this module calls; rewrite
+    //                                 call sites and emit a re-export shim
+    //                                 so consumers can target this slug.
+    //   .export "path" { syms }   — symbols this module re-exports via
+    //                                 `export { ... } from "path";`. The
+    //                                 module never calls them, but
+    //                                 consumers that import from THIS slug
+    //                                 will mangle their calls to
+    //                                 `sym__<this_slug>`. Without a shim
+    //                                 here those references go undefined
+    //                                 at link time (#508).
+    //
     // The v0.1.1 seed miscompiles NativeImport struct returns: the `kind`
     // field becomes "named" instead of "import" and the specifiers array is
-    // empty.  To work around this, we re-parse .import lines directly from
-    // the raw .sfn-asm text using simple string operations.
+    // empty.  To work around this, we re-parse .import / .export lines
+    // directly from the raw .sfn-asm text using simple string operations.
     let mut import_olds: string[] = [];
     let mut import_news: string[] = [];
     let mut shim_exports: string[] = [];
@@ -122,7 +136,7 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
     }
 
     if native_text.length > 0 {
-        // Scan native text line-by-line for .import directives.
+        // Scan native text line-by-line for .import / .export directives.
         let mut scan_pos: number = 0;
         loop {
             if scan_pos >= native_text.length { break; }
@@ -137,7 +151,10 @@ fn apply_module_symbol_mangling(lines: string[], imports: NativeImport[], curren
             let line = trim_text(raw_line);
             scan_pos = line_end + 1;
 
-            if !starts_with(line, ".import ") { continue; }
+            let mut _is_directive: boolean = false;
+            if starts_with(line, ".import ") { _is_directive = true; }
+            if starts_with(line, ".export ") { _is_directive = true; }
+            if !_is_directive { continue; }
             // Extract module path between first pair of quotes.
             let q1 = index_of(line, "\"");
             if q1 < 0 { continue; }
