@@ -58,10 +58,19 @@ import { coerce_operand_to_type } from "./core_operands";
 //   would otherwise be `descriptor.native_signature ?? descriptor.symbol`.
 //   Used during migrations whose source-level target name does not
 //   resolve to a descriptor key.
+// - `return_attributes`: when non-empty, renders between `call` and
+//   the return type — for example `"noalias"` produces
+//   `<temp> = call noalias <ret> @<symbol>(...)`. The descriptor schema
+//   intentionally has no slot for call-site return attributes (epic
+//   #494 forbids extending it), so allocator-style helpers whose
+//   today's emission carries `noalias` (e.g., `alloc_struct`) preserve
+//   the attribute through this per-call-site override during M1.7
+//   migrations. Ignored when `return_type == "void"`.
 struct RuntimeCallOverrides {
     parameter_types: string[];
     return_type: string;
     symbol: string;
+    return_attributes: string;
 }
 
 // Convenience constructor for the common "no overrides" case.
@@ -69,7 +78,8 @@ fn empty_runtime_call_overrides() -> RuntimeCallOverrides {
     return RuntimeCallOverrides {
         parameter_types: [],
         return_type: "",
-        symbol: ""
+        symbol: "",
+        return_attributes: ""
     };
 }
 
@@ -233,7 +243,13 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     }
 
     let temp_name = format_temp_name(result_temp);
-    result_lines.push("  " + temp_name + " = call " + return_type + " @"
+    let mut return_decoration: string = "";
+    if overrides.return_attributes.length > 0 {
+        return_decoration = overrides.return_attributes + " ";
+    }
+    result_lines.push("  " + temp_name + " = call " + return_decoration
+        + return_type
+        + " @"
         + call_symbol
         + "("
         + argument_text

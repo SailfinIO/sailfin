@@ -561,6 +561,29 @@ fn runtime_helper_descriptors() -> RuntimeHelperDescriptor[] {
         target: "mark_persistent", symbol: "sailfin_runtime_mark_persistent", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null
     });
 
+    // M1.7.2a (issue #496): heap allocation primitive registered for
+    // `emit_runtime_call` dispatch. The seed already emits the matching
+    // `declare noalias i8* @sailfin_runtime_alloc_struct(i64)` line via
+    // `lowering_phase_render.sfn:164`, so adding this descriptor only
+    // unblocks the migration of the ~21 hand-spelled call sites — it
+    // does not introduce a new declare. The `noalias` return attribute
+    // is preserved at the call site through `RuntimeCallOverrides.return_attributes`
+    // because the descriptor schema deliberately has no slot for
+    // call-site attributes (epic #494 forbids extending it).
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "alloc_struct", symbol: "sailfin_runtime_alloc_struct", return_type: "i8*", parameter_types: ["i64"], effects: [], native_signature: null
+    });
+
+    // M1.7.2a (issue #496): arena-aware free for boxed return values.
+    // Today's only call site is `core.sfn:698`, where an awaited async
+    // result allocated through `sailfin_runtime_alloc_struct` is freed
+    // after the unboxing load. Plain `@free` corrupts arena chunk
+    // metadata; the runtime exposes the matching arena-aware entrypoint
+    // here. Already declared via `lowering_phase_render.sfn:167`.
+    descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
+        target: "runtime.free", symbol: "sailfin_runtime_free", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null
+    });
+
     // Exceptions (stage2-native minimal)
     descriptors = append_runtime_helper(descriptors, RuntimeHelperDescriptor {
         target: "set_exception", symbol: "sailfin_runtime_set_exception", return_type: "void", parameter_types: ["i8*"], effects: [], native_signature: null
