@@ -24,6 +24,7 @@ import {
 // Mutually recursive with core.sfn
 import { lower_expression } from "./core";
 import { coerce_operand_to_type } from "./core_operands";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext) -> ExpressionResult {
     let base_result = lower_expression(parse.base, bindings, locals, temp_index, lines, functions, context, "");
@@ -200,19 +201,24 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
             };
         }
 
-        let call_temp = format_temp_name(current_temp);
-        current_lines = append_string(current_lines, "  " + call_temp
-            + " = call i8* @sailfin_runtime_grapheme_at(i8* "
-            + effective_base_operand.value
-            + ", double "
-            + index_as_double.operand.value
-            + ")");
-        current_temp += 1;
-        let operand = LLVMOperand { llvm_type: "i8*", value: call_temp };
+        // M1.7.2c (#498): grapheme_at routes through descriptor-driven
+        // dispatch. The descriptor pins parameter_types=["i8*", "double"]
+        // and return_type="i8*", so the rendered call is byte-identical to
+        // the prior hand-spelled emission.
+        let grapheme_operands: LLVMOperand[] = [effective_base_operand, index_as_double.operand];
+        let grapheme_result = emit_runtime_call("grapheme_at", grapheme_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+        let mut _grapheme_di: number = 0;
+        loop {
+            if _grapheme_di >= grapheme_result.diagnostics.length { break; }
+            diagnostics.push(grapheme_result.diagnostics[_grapheme_di]);
+            _grapheme_di += 1;
+        }
+        current_lines = grapheme_result.lines;
+        current_temp = grapheme_result.temp_index;
         return ExpressionResult {
             lines: current_lines,
             temp_index: current_temp,
-            operand: operand,
+            operand: grapheme_result.operand,
             diagnostics: diagnostics,
             string_constants: collected_string_constants
         };
@@ -257,11 +263,29 @@ fn lower_index_expression(parse: IndexExpressionParse, bindings: ParameterBindin
         current_temp += 1;
         current_lines.push("  ; bounds check: " + bounds_check
             + " (if true, out of bounds)");
-        current_lines.push("  call void @sailfin_runtime_bounds_check(i64 "
-            + coerced_index.value
-            + ", i64 "
-            + length_value
-            + ")");
+        // M1.7.2c (#498): runtime.bounds_check routes through
+        // descriptor-driven dispatch. The descriptor pins
+        // parameter_types=["i64", "i64"] and return_type="void", so the
+        // rendered call is byte-identical to the prior hand-spelled
+        // emission.
+        let bc_index_operand = LLVMOperand {
+            llvm_type: "i64",
+            value: coerced_index.value
+        };
+        let bc_length_operand = LLVMOperand {
+            llvm_type: "i64",
+            value: length_value
+        };
+        let bc_operands: LLVMOperand[] = [bc_index_operand, bc_length_operand];
+        let bc_result = emit_runtime_call("runtime.bounds_check", bc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+        let mut _bc_di: number = 0;
+        loop {
+            if _bc_di >= bc_result.diagnostics.length { break; }
+            diagnostics.push(bc_result.diagnostics[_bc_di]);
+            _bc_di += 1;
+        }
+        current_lines = bc_result.lines;
+        current_temp = bc_result.temp_index;
 
         let element_ptr = format_temp_name(current_temp);
         current_lines.push("  " + element_ptr + " = getelementptr "
