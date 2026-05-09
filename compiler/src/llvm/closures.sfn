@@ -1,0 +1,392 @@
+// compiler/src/llvm/closures.sfn
+//
+// Closure environment-struct emission helpers (issue #459, A2 of
+// #450 M1.5 closures-with-capture). Stage 2 of three: A1 (#458)
+// inferred capture sets onto `Expression.Lambda.captures`; this
+// stage synthesises the LLVM env struct, the env allocation at the
+// lambda expression site, and the env-load prologue inside the
+// lifted lambda body. A3 (#460) wires call-site dispatch
+// (hidden env argument) so the `{fn_ptr, env*}` pair becomes
+// callable end-to-end.
+//
+// This module is dead code today — no existing emitter calls
+// `synthesize_closure_env_struct`, the live emit pipeline still
+// renders capturing lambdas via the `<lambda>` placeholder in
+// `emit_native_format.sfn`. The infrastructure lands here so A3
+// (and earlier integration once the wiring decision is made) can
+// import a settled API rather than negotiate the env-struct
+// shape mid-PR. This mirrors the M1.7.1 (#511) pattern, which
+// introduced `emit_runtime_call` ahead of any caller migration.
+//
+// Render shape (matches the documented closure ABI in
+// `docs/runtime_architecture.md` §3.4 "Typed Closures"):
+//
+//   ; type declaration — emitted once per (lambda_id, capture-shape)
+//   %sfn_closure_env_<id> = type { <field0>, <field1>, ... }
+//
+//   ; at the lambda expression site — alloc + populate
+//   %size_ptr = getelementptr %sfn_closure_env_<id>,
+//                              %sfn_closure_env_<id>* null, i32 1
+//   %size_i64 = ptrtoint %sfn_closure_env_<id>* %size_ptr to i64
+//   %env_raw  = call noalias i8* @sailfin_runtime_alloc_struct(i64 %size_i64)
+//   %env_ptr  = bitcast i8* %env_raw to %sfn_closure_env_<id>*
+//   %field0_ptr = getelementptr inbounds %sfn_closure_env_<id>,
+//                              %sfn_closure_env_<id>* %env_ptr,
+//                              i32 0, i32 0
+//   store <field0_type> <field0_value>, <field0_type>* %field0_ptr
+//   ; ... one GEP+store per field ...
+//
+//   ; inside the lifted lambda body — load each capture from env
+//   %env_ptr = bitcast i8* %env_raw to %sfn_closure_env_<id>*
+//   %field0_ptr = getelementptr inbounds %sfn_closure_env_<id>,
+//                              %sfn_closure_env_<id>* %env_ptr,
+//                              i32 0, i32 0
+//   %cap_<name> = load <field0_type>, <field0_type>* %field0_ptr
+//   ; ... one GEP+load per field ...
+//
+// Field ordering mirrors the input `Capture[]` order, which the A1
+// walk produces in first-use order. That order is deterministic
+// and stable across runs of the same source — A3 can index into
+// the env struct by capture index without re-deriving the layout.
+//
+// Empty-capture lambdas (`captures.length == 0`) return an
+// `is_empty == true` layout and every emit helper returns no
+// lines. Non-capturing lambdas keep their pre-change `<lambda>`
+// placeholder behaviour — a regression guard for issue #459's
+// acceptance criterion.
+import { Capture } from "../ast";
+import { format_temp_name } from "./expressions_helpers";
+import { ends_with_pointer_suffix, map_type_annotation } from "./type_mapping";
+import { join_with_separator, number_to_string, trim_text } from "./utils";
+
+// One env-struct field, materialised from a `Capture`. Index is
+// the position in `fields[]`; LLVM emits `getelementptr ... i32 0,
+// i32 <index>`. `llvm_type` is mapped through
+// `map_type_annotation`, falling back to `i8*` for empty
+// `type_text` (the seed's pre-#458 `Capture` records carried no
+// annotation; A1 captures inherit the binding's annotation when
+// available and are otherwise empty). `mutable` is propagated from
+// the source `Capture` so stage A3 (#460) can wire the
+// mutating-capture diagnostic against the field record without
+// re-running `analyze_lambda_captures` — A1's scope walk already
+// records whether the enclosing binding was declared `let mut`.
+struct ClosureEnvField {
+    name: string;
+    llvm_type: string;
+    index: number;
+    by_value: boolean;
+    mutable: boolean;
+}
+
+// Materialised env layout for one lambda. `is_empty` short-circuits
+// the emit helpers when the lambda has no captures — non-capturing
+// lambdas skip env-struct emission entirely (regression guard).
+struct ClosureEnvLayout {
+    lambda_id: number;
+    type_name: string;
+    type_decl: string;
+    fields: ClosureEnvField[];
+    is_empty: boolean;
+}
+
+// One captured operand passed at the lambda expression site. The
+// caller resolves the enclosing-scope binding to an LLVM SSA name
+// (or constant operand text) and threads it in via `llvm_value`.
+// `name` keys against `ClosureEnvLayout.fields[*].name` so the
+// alloc helper can stash each operand into the matching env slot
+// — out-of-order operands are tolerated and missing operands fall
+// back to a zero-init store (caught by tests so the gap can be
+// surfaced rather than silently skipped).
+struct ClosureCaptureOperand {
+    name: string;
+    llvm_value: string;
+}
+
+// Result of `emit_closure_env_alloc`. `env_raw_var` is the i8*
+// returned by `sailfin_runtime_alloc_struct` (handed to the
+// closure pair as the `env*` slot in A3). `env_typed_var` is the
+// bitcast `%sfn_closure_env_<id>*` used by the GEP+store walk.
+struct ClosureEnvAllocResult {
+    lines: string[];
+    env_raw_var: string;
+    env_typed_var: string;
+    next_temp: number;
+}
+
+// One loaded capture, ready to splice into the lambda body's
+// local-binding scope. `llvm_name` is the SSA temp the load
+// instruction wrote into; `llvm_type` matches the env field type.
+struct ClosureEnvLoadedBinding {
+    name: string;
+    llvm_type: string;
+    llvm_name: string;
+}
+
+// Result of `emit_closure_env_load_prologue`. The lifted lambda
+// body splices `bindings` into its `LocalBinding[]` so subsequent
+// expression lowering resolves capture names against the loaded
+// SSA temps rather than the (out-of-scope) enclosing locals.
+struct ClosureEnvPrologueResult {
+    lines: string[];
+    bindings: ClosureEnvLoadedBinding[];
+    next_temp: number;
+}
+
+// `%sfn_closure_env_<id>` — the LLVM type name for one lambda's
+// env struct. Stable across runs of the same source so A3 can
+// reference the same name from the call-site dispatch path.
+fn closure_env_type_name(lambda_id: number) -> string {
+    return "%sfn_closure_env_" + number_to_string(lambda_id);
+}
+
+// Map one `Capture` annotation to an LLVM field type. Empty
+// annotations fall back to `i8*` — the conservative "opaque
+// pointer" slot that any Sailfin runtime value can fit through.
+// Primitive annotations route through `map_type_annotation`
+// (`int` -> `i64`, `boolean` -> `i1`, etc.). Non-primitive user
+// types come back from `map_type_annotation` already in `%T*`
+// pointer form, so no extra indirection is added here.
+fn closure_field_llvm_type(capture: Capture) -> string {
+    let annotation = trim_text(capture.type_text);
+    if annotation.length == 0 { return "i8*"; }
+    let mapped = map_type_annotation(annotation);
+    if mapped.length == 0 { return "i8*"; }
+    if mapped == "void" { return "i8*"; }
+    return mapped;
+}
+
+// Build the env-struct layout for one lambda. Called once per
+// lambda during stage A2 emission. Empty captures produce a
+// sentinel layout (`is_empty == true`, `type_decl == ""`) so the
+// caller can short-circuit env emission entirely for non-capturing
+// lambdas.
+fn synthesize_closure_env_struct(captures: Capture[], lambda_id: number) -> ClosureEnvLayout {
+    let type_name = closure_env_type_name(lambda_id);
+    if captures.length == 0 {
+        let empty_fields: ClosureEnvField[] = [];
+        return ClosureEnvLayout {
+            lambda_id: lambda_id,
+            type_name: type_name,
+            type_decl: "",
+            fields: empty_fields,
+            is_empty: true
+        };
+    }
+
+    let mut fields: ClosureEnvField[] = [];
+    let mut field_types: string[] = [];
+    let mut index: number = 0;
+    loop {
+        if index >= captures.length { break; }
+        let capture = captures[index];
+        let llvm_type = closure_field_llvm_type(capture);
+        fields.push(ClosureEnvField {
+            name: capture.name, llvm_type: llvm_type, index: index, by_value: capture.by_value, mutable: capture.mutable
+        });
+        field_types.push(llvm_type);
+        index += 1;
+    }
+
+    let type_decl = type_name + " = type { " + join_with_separator(field_types, ", ")
+        + " }";
+    return ClosureEnvLayout {
+        lambda_id: lambda_id,
+        type_name: type_name,
+        type_decl: type_decl,
+        fields: fields,
+        is_empty: false
+    };
+}
+
+// Look up a capture operand by name. Returns the empty string
+// when the caller did not supply an operand for the field — the
+// alloc walk surfaces this as a `zeroinitializer`-equivalent
+// store via `_field_zero_value`.
+fn _find_operand(operands: ClosureCaptureOperand[], name: string) -> string {
+    let mut index: number = 0;
+    loop {
+        if index >= operands.length { break; }
+        if operands[index].name == name {
+            return operands[index].llvm_value;
+        }
+        index += 1;
+    }
+    return "";
+}
+
+// Default operand text when no caller-supplied value is present
+// for a field. Mirrors LLVM's `zeroinitializer` for primitives
+// and `null` for pointers — both forms are valid in a `store`.
+fn _field_zero_value(llvm_type: string) -> string {
+    let trimmed = trim_text(llvm_type);
+    if trimmed.length == 0 { return "zeroinitializer"; }
+    if ends_with_pointer_suffix(trimmed) { return "null"; }
+    if trimmed == "double" { return "0.0"; }
+    if trimmed == "float" { return "0.0"; }
+    return "0";
+}
+
+// Emit the env allocation + per-field store walk at the lambda
+// expression site. Returns the lines plus the SSA names of the
+// raw (`i8*`) and typed (`%sfn_closure_env_<id>*`) env pointers,
+// plus the next free temp index. Empty-capture layouts return no
+// lines (caller skips the alloc entirely).
+//
+// `temp_index` is the next available `%t<N>` index in the caller's
+// SSA scope. The walk advances this monotonically per emitted
+// instruction, mirroring `emission_async.sfn`'s context-struct
+// build-out.
+fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOperand[], temp_index: number) -> ClosureEnvAllocResult {
+    let mut lines: string[] = [];
+    let mut current_temp: number = temp_index;
+
+    if layout.is_empty {
+        return ClosureEnvAllocResult {
+            lines: lines,
+            env_raw_var: "",
+            env_typed_var: "",
+            next_temp: current_temp
+        };
+    }
+
+    let type_name = layout.type_name;
+    let typed_ptr = type_name + "*";
+
+    let size_ptr = format_temp_name(current_temp);
+    current_temp += 1;
+    // Drop `inbounds` on the null-base size GEP: per the LLVM
+    // language reference, `inbounds` requires the base pointer to
+    // be within an allocated object, which `null` is not. Plain
+    // `getelementptr ... null, i32 1` is the well-defined sizeof
+    // idiom — matches `core_operands.sfn`'s use of the same
+    // pattern. The follow-up GEPs below stay `inbounds` because
+    // they are rooted at the freshly-allocated env pointer.
+    lines.push("  " + size_ptr + " = getelementptr " + type_name + ", "
+        + typed_ptr
+        + " null, i32 1");
+
+    let size_i64 = format_temp_name(current_temp);
+    current_temp += 1;
+    lines.push("  " + size_i64 + " = ptrtoint " + typed_ptr + " " + size_ptr
+        + " to i64");
+
+    let env_raw = format_temp_name(current_temp);
+    current_temp += 1;
+    lines.push("  " + env_raw
+        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
+        + size_i64
+        + ")");
+
+    let env_typed = format_temp_name(current_temp);
+    current_temp += 1;
+    lines.push("  " + env_typed + " = bitcast i8* " + env_raw + " to "
+        + typed_ptr);
+
+    let mut field_index: number = 0;
+    loop {
+        if field_index >= layout.fields.length { break; }
+        let field = layout.fields[field_index];
+        let mut value = _find_operand(operands, field.name);
+        if value.length == 0 {
+            value = _field_zero_value(field.llvm_type);
+        }
+        let field_ptr = format_temp_name(current_temp);
+        current_temp += 1;
+        lines.push("  " + field_ptr + " = getelementptr inbounds " + type_name
+            + ", "
+            + typed_ptr
+            + " "
+            + env_typed
+            + ", i32 0, i32 "
+            + number_to_string(field.index));
+        lines.push("  store " + field.llvm_type + " " + value + ", " + field.llvm_type
+            + "* "
+            + field_ptr);
+        field_index += 1;
+    }
+
+    return ClosureEnvAllocResult {
+        lines: lines,
+        env_raw_var: env_raw,
+        env_typed_var: env_typed,
+        next_temp: current_temp
+    };
+}
+
+// Emit the env-load prologue at the start of the lifted lambda
+// body. The lambda's hidden first parameter is the `i8*` env
+// pointer (named by the caller via `env_param_name`); the
+// prologue bitcasts it to the typed pointer and loads each
+// captured field into a fresh SSA temp. Returned `bindings` map
+// each capture name to its loaded SSA temp so the lambda body's
+// expression lowering can resolve identifier references to
+// captures against the prologue temps.
+//
+// `env_param_name` is the LLVM SSA name of the env parameter
+// (e.g., `"%env_raw"`). Empty-capture layouts return no lines
+// and no bindings.
+fn emit_closure_env_load_prologue(layout: ClosureEnvLayout, env_param_name: string, temp_index: number) -> ClosureEnvPrologueResult {
+    let mut lines: string[] = [];
+    let mut bindings: ClosureEnvLoadedBinding[] = [];
+    let mut current_temp: number = temp_index;
+
+    if layout.is_empty {
+        return ClosureEnvPrologueResult {
+            lines: lines,
+            bindings: bindings,
+            next_temp: current_temp
+        };
+    }
+
+    let type_name = layout.type_name;
+    let typed_ptr = type_name + "*";
+
+    let env_typed = format_temp_name(current_temp);
+    current_temp += 1;
+    lines.push("  " + env_typed + " = bitcast i8* " + env_param_name + " to "
+        + typed_ptr);
+
+    let mut field_index: number = 0;
+    loop {
+        if field_index >= layout.fields.length { break; }
+        let field = layout.fields[field_index];
+        let field_ptr = format_temp_name(current_temp);
+        current_temp += 1;
+        lines.push("  " + field_ptr + " = getelementptr inbounds " + type_name
+            + ", "
+            + typed_ptr
+            + " "
+            + env_typed
+            + ", i32 0, i32 "
+            + number_to_string(field.index));
+        let loaded = format_temp_name(current_temp);
+        current_temp += 1;
+        lines.push("  " + loaded + " = load " + field.llvm_type + ", " + field.llvm_type
+            + "* "
+            + field_ptr);
+        bindings.push(ClosureEnvLoadedBinding {
+            name: field.name, llvm_type: field.llvm_type, llvm_name: loaded
+        });
+        field_index += 1;
+    }
+
+    return ClosureEnvPrologueResult {
+        lines: lines,
+        bindings: bindings,
+        next_temp: current_temp
+    };
+}
+
+export {
+    ClosureCaptureOperand,
+    ClosureEnvAllocResult,
+    ClosureEnvField,
+    ClosureEnvLayout,
+    ClosureEnvLoadedBinding,
+    ClosureEnvPrologueResult,
+    closure_env_type_name,
+    closure_field_llvm_type,
+    emit_closure_env_alloc,
+    emit_closure_env_load_prologue,
+    synthesize_closure_env_struct
+};
