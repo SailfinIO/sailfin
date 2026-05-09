@@ -256,25 +256,41 @@ axis: the **`release:*` label namespace** plus a **per-cycle tracking issue**.
 
 ### When release tracking applies
 
-- **Alpha→alpha prerelease bumps** (`channel=alpha bump=prerelease`) are
-  uncurated. They take whatever happens to be on `main`. Ignore release:* labels.
-- **Minor bumps** (`bump=minor`) and **channel promotions** (alpha→beta,
-  beta→rc, rc→stable, anything→stable) are curated. `/release` gates on the
-  matching `release:*` label set.
+There is exactly one **uncurated** combination — it takes whatever is on
+`main` and skips the release-tracking gate entirely:
+
+- `channel=alpha bump=prerelease` (the routine daily alpha bump)
+
+**Every other combination is curated** and consults the `release:*` labels:
+
+- Any `bump=patch`, `bump=minor`, or `bump=major` (in any channel)
+- Any promotion to a non-alpha channel (`beta`, `rc`, `stable`)
+
+For curated cuts `/release` lists the open items under the matching
+`release:*` label and the tracking issue, and requires explicit
+confirmation before dispatching. The gate is advisory — the human always
+has the final call.
 
 ### Labels
 
-| Label | Gate |
-|-------|------|
-| `release:next-minor` | Must close before the next `bump=minor` cut (the next 0.X.0). |
-| `release:beta` | Must close before the next promotion to `channel=beta`. |
-| `release:rc` | Must close before the next promotion to `channel=rc`. |
-| `release:stable` | Must close before the next promotion to `channel=stable`. |
-| `release:1.0` | Must close before 1.0 GA. Long-horizon. |
+| Label | Hard gate at | Soft signal at |
+|-------|--------------|----------------|
+| `release:next-minor` | `bump=minor` (next 0.X.0) | `bump=patch`, beta promotion |
+| `release:beta` | promotion to `channel=beta` | rc promotion |
+| `release:rc` | promotion to `channel=rc` | stable promotion |
+| `release:stable` | promotion to `channel=stable` | — |
+| `release:1.0` | `bump=major` to 1.0.0 | `bump=minor` |
 
 Multiple labels may co-exist on one issue (e.g. an item may gate both the
 beta promotion *and* the 1.0 GA). The labels are intent — they declare *when*
 something must ship, not *what theme it belongs to* (that's the milestone).
+"Hard gate" means `/release` lists every open issue holding the label and
+requires explicit override; "soft signal" means it's mentioned as context
+but doesn't block.
+
+`bump=patch` cuts have no hard label gate — they're curated only in the
+sense that `/release` confirms the user wants a new patch line (rather
+than another alpha prerelease).
 
 ### Tracking issue (`Release: vX.Y.Z`)
 

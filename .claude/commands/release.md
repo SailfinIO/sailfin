@@ -13,27 +13,34 @@ The workflow accepts two inputs:
 - **channel**: `alpha` | `beta` | `rc` | `stable`
 - **bump**: `prerelease` | `patch` | `minor` | `major`
 
-## Release tracking (curated cuts)
+## Release tracking (curated vs uncurated cuts)
 
-Some cuts are **uncurated** — they take whatever happens to be on `main`:
+Exactly one combination is **uncurated** — it takes whatever is on `main`
+without any pre-flight checks:
 
-- `channel=alpha bump=prerelease` (the routine daily bump)
+- `channel=alpha bump=prerelease` (the routine daily alpha bump)
 
-Some cuts are **curated** — they gate on `release:*` labels and a tracking issue:
+**Every other combination is curated.** That includes any `bump=patch`,
+`bump=minor`, `bump=major`, and any channel that isn't `alpha` (i.e. any
+promotion to `beta`, `rc`, or `stable`).
 
-- Any `bump=minor` or `bump=major`
-- Any channel promotion: `alpha → beta`, `beta → rc`, `rc → stable`, anything to `stable`
+For curated cuts, look up the tracking issue titled exactly
+`Release: vX.Y.Z` (e.g. `Release: v0.6.0`) and check the matching
+`release:*` label set:
 
-For curated cuts, look for a tracking issue titled exactly
-`Release: vX.Y.Z` (e.g. `Release: v0.6.0`) and the matching `release:*` label
-set:
+| Curated cut | Hard gate label | Soft gate (mention but don't block) |
+|---|---|---|
+| `bump=patch` (any channel) | (none — confirm intent) | open `release:next-minor` items will roll forward to the next patch |
+| `bump=minor` (any channel) | `release:next-minor` | open `release:1.0` items |
+| `bump=major` | `release:1.0` (when target is 1.0.0) | — |
+| Promotion to `channel=beta` | `release:beta` | open `release:next-minor` items |
+| Promotion to `channel=rc` | `release:rc` | open `release:beta` items |
+| Promotion to `channel=stable` | `release:stable` | open `release:rc` items |
 
-| Cut | Label that must be empty (no open issues) |
-|---|---|
-| `bump=minor` (any channel) | `release:next-minor` |
-| `channel=beta` promotion | `release:beta` |
-| `channel=rc` promotion | `release:rc` |
-| `channel=stable` promotion (or any stable cut) | `release:stable` |
+A "hard gate" means: list every open issue holding the label and require
+explicit override before dispatch. A "soft gate" means: mention as context
+but don't ask twice. The gate is always advisory — the human can always
+override.
 
 See `docs/conventions/issue-naming.md` "Release tracking" for the convention.
 
@@ -68,17 +75,17 @@ Next:    X.Y.Z-channel.M
 
 ### 4. Run the release-tracking gate (curated cuts only)
 
-If the cut is curated (per the table above), do all of these before
-dispatching:
+If the cut is curated (per the table above — i.e. anything other than
+`channel=alpha bump=prerelease`), do all of these before dispatching:
 
-a. **List open issues holding the gating label.** Use the GitHub MCP tools:
+a. **List open issues holding the hard-gate label.** Use the GitHub MCP tools:
 
    ```
    mcp__github__search_issues query="repo:SailfinIO/sailfin is:open label:release:<gate>"
    ```
 
-   where `<gate>` is `next-minor` | `beta` | `rc` | `stable`. For a stable
-   promotion, also check `release:rc`. For 1.0, also check `release:1.0`.
+   where `<gate>` is `next-minor` | `beta` | `rc` | `stable` | `1.0`. Also
+   list the soft-gate label as advisory context (per the table above).
 
 b. **Look up the tracking issue.** Search for the exact title:
 

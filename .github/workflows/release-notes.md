@@ -7,10 +7,17 @@ description: |
 # Re-enabled 2026-05-09: release notes only fire on release publish, which
 # is at most a few times a day. Cost is bounded — Haiku summarizing a
 # day's worth of commits per release is the cheapest of the gh-aw set.
+#
+# `roles: all` skips gh-aw's default team-membership pre-check. The
+# release-publish trigger already requires write access to fire (releases
+# can't be created from forks), and the empty token gh-aw hands the
+# pre_activation job under `permissions: {}` would otherwise make the
+# membership check fail open-False and silently no-op the workflow.
 on:
   release:
     types: [published]
   workflow_dispatch:
+  roles: all
 
 imports:
   - shared/build-mcp-server.md

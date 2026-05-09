@@ -165,12 +165,14 @@ labels:
     description: "Must close before the next seed binary is cut"
 
   # --- Release gating --------------------------------------------------
-  # Intent labels consumed by `/release`. Alpha→alpha prerelease bumps
-  # are uncurated and ignore these. The labels gate `bump=minor`
-  # cuts and any channel promotion (alpha→beta→rc→stable). One issue
-  # may carry multiple release:* labels (e.g. `release:beta` AND
-  # `release:1.0`). See docs/conventions/issue-naming.md "Release
-  # tracking".
+  # Intent labels consumed by `/release`. The single uncurated combo is
+  # `channel=alpha bump=prerelease` (the routine daily alpha) — every
+  # other combination is curated and consults these labels:
+  #   * any `bump=patch` / `bump=minor` / `bump=major`
+  #   * any promotion to channel=beta / rc / stable
+  # One issue may carry multiple release:* labels (e.g. `release:beta`
+  # AND `release:1.0`). See docs/conventions/issue-naming.md
+  # "Release tracking".
   - name: release:next-minor
     color: "0e8a16"
     description: "Must close before the next bump=minor cut (next 0.X.0)"
