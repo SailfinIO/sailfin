@@ -14,6 +14,7 @@ import { NativeFunction } from "../../native_ir";
 import { substring } from "../../string_utils";
 import { test_runner_trace } from "../../test_runner_state";
 import { make_string_constant_name_for_module } from "../expression_lowering/native/core_text";
+import { emit_runtime_call, empty_runtime_call_overrides } from "../expression_lowering/native/runtime_call";
 import { default_return_literal } from "../expressions_helpers";
 import { format_root_scope_id } from "../lifetime";
 import { trace_lowering } from "../lowering_debug_state";
@@ -25,6 +26,7 @@ import {
 } from "../strings";
 import { map_return_type } from "../type_mapping";
 import {
+    LLVMOperand,
     LifetimeRegionMetadata,
     LocalBinding,
     LoweredLLVMFunction,
@@ -396,6 +398,14 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
     }
     let decorators = function.decorators;
     let mut decorator_index: number = 0;
+    // M1.7.2c (#498): track temps consumed by decorator emission so the
+    // body lowering can start past them. Prior to descriptor-driven
+    // dispatch the decorator emitted `call i8*` without an LHS, so no
+    // temp slot was burned and the body could safely begin at %t0;
+    // routing through `emit_runtime_call` now assigns a discard temp,
+    // which we offset by seeding `lower_instruction_range` with the
+    // post-decorator counter below.
+    let mut decorator_temp_index: number = 0;
     loop {
         if decorator_index >= fn_decorator_count { break; }
         let decorator_name = decorators[decorator_index];
@@ -418,14 +428,33 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
             decorator_string_constants = append_string_constant(decorator_string_constants, constant);
             let array_length = content.length + 1;
             let array_type = "[" + number_to_string(array_length) + " x i8]";
-            let call_line = "  call i8* @sailfin_runtime_log_execution(i8* getelementptr inbounds ("
-                + array_type
-                + ", "
+            // M1.7.2c (#498): log_execution routes through descriptor-
+            // driven dispatch. The argument is an inline `getelementptr
+            // inbounds` constant expression; we wrap it in an `i8*`
+            // operand so `format_typed_operand` renders the existing
+            // `i8* getelementptr inbounds (...)` shape unchanged. The
+            // dispatch return value is discarded via a fresh temp slot
+            // (the prior emission used `call i8*` without an LHS); the
+            // body lowering picks up at the post-decorator counter.
+            let log_arg_value = "getelementptr inbounds (" + array_type + ", "
                 + array_type
                 + "* "
                 + constant_name
-                + ", i32 0, i32 0))";
-            lines = append_string(lines, call_line);
+                + ", i32 0, i32 0)";
+            let log_arg_operand = LLVMOperand {
+                llvm_type: "i8*",
+                value: log_arg_value
+            };
+            let log_operands: LLVMOperand[] = [log_arg_operand];
+            let log_result = emit_runtime_call("runtime_log_execution_fn", log_operands, empty_runtime_call_overrides(), decorator_temp_index, lines);
+            let mut _log_di: number = 0;
+            loop {
+                if _log_di >= log_result.diagnostics.length { break; }
+                diagnostics.push(log_result.diagnostics[_log_di]);
+                _log_di += 1;
+            }
+            lines = log_result.lines;
+            decorator_temp_index = log_result.temp_index;
         }
         decorator_index += 1;
     }
@@ -437,7 +466,7 @@ fn emit_llvm_function(function: NativeFunction, functions: NativeFunction[], eff
             + " fn_count="
             + number_to_string(functions.length));
     }
-    let _eb_result = lower_instruction_range(function, 0, fn_instr_count, llvm_return, preparation.bindings, module_globals, [], [], 0, 0, 0, 0, functions, [], context, format_root_scope_id(fn_name), 0, entry_label);
+    let _eb_result = lower_instruction_range(function, 0, fn_instr_count, llvm_return, preparation.bindings, module_globals, [], [], decorator_temp_index, 0, 0, 0, functions, [], context, format_root_scope_id(fn_name), 0, entry_label);
 
     let _eb_body_lines = _eb_result.lines;
     let _eb_allocas = _eb_result.allocas;

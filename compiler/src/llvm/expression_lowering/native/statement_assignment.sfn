@@ -50,6 +50,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "./core_scopes";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 // Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
 // when returned from cross-module calls. Scan lines for the highest %tN
@@ -411,11 +412,31 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                         current_lines.push("  " + length_loaded
                                             + " = load i64, i64* "
                                             + length_field_ptr);
-                                        current_lines.push("  call void @sailfin_runtime_bounds_check(i64 "
-                                            + coerced_index.operand.value
-                                            + ", i64 "
-                                            + length_loaded
-                                            + ")");
+                                        // M1.7.2c (#498): runtime.bounds_check
+                                        // routes through descriptor-driven
+                                        // dispatch. parameter_types=["i64",
+                                        // "i64"] / return_type="void" pin a
+                                        // byte-identical render.
+                                        let bc_assign_index_op = LLVMOperand {
+                                            llvm_type: "i64",
+                                            value: coerced_index.operand.value
+                                        };
+                                        let bc_assign_length_op = LLVMOperand {
+                                            llvm_type: "i64",
+                                            value: length_loaded
+                                        };
+                                        let bc_assign_operands: LLVMOperand[] = [bc_assign_index_op, bc_assign_length_op];
+                                        let bc_assign_result = emit_runtime_call("runtime.bounds_check", bc_assign_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+                                        let mut _bc_assign_di: number = 0;
+                                        loop {
+                                            if _bc_assign_di >= bc_assign_result.diagnostics.length {
+                                                break;
+                                            }
+                                            diagnostics.push(bc_assign_result.diagnostics[_bc_assign_di]);
+                                            _bc_assign_di += 1;
+                                        }
+                                        current_lines = bc_assign_result.lines;
+                                        current_temp = bc_assign_result.temp_index;
                                         let slot_ptr = format_temp_name(current_temp);
                                         current_temp += 1;
                                         current_lines.push("  " + slot_ptr
