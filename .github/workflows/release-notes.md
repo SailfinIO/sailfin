@@ -4,11 +4,12 @@ description: |
   published.  Analyzes all commits since the previous tag and posts a
   structured changelog as a comment on the release.
 
-# DISABLED 2026-05-08: gh-aw workflows are paused due to runaway cost.
-# Manual dispatch only — no event triggers. Re-enable by restoring the
-# original `release: [published]` trigger and recompiling the lock file
-# with `gh aw compile`.
+# Re-enabled 2026-05-09: release notes only fire on release publish, which
+# is at most a few times a day. Cost is bounded — Haiku summarizing a
+# day's worth of commits per release is the cheapest of the gh-aw set.
 on:
+  release:
+    types: [published]
   workflow_dispatch:
 
 imports:

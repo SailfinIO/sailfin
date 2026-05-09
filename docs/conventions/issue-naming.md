@@ -248,6 +248,49 @@ The workflow needs a PAT with `project` + `read:org` scopes, stored as
 available the workflow no-ops — labels stay correct, only the project
 view goes stale.
 
+## Release tracking
+
+Milestones group long-lived **themes** (and feed `site/src/pages/roadmap.astro`).
+They span many releases. To answer "what ships in version X" we use a separate
+axis: the **`release:*` label namespace** plus a **per-cycle tracking issue**.
+
+### When release tracking applies
+
+- **Alpha→alpha prerelease bumps** (`channel=alpha bump=prerelease`) are
+  uncurated. They take whatever happens to be on `main`. Ignore release:* labels.
+- **Minor bumps** (`bump=minor`) and **channel promotions** (alpha→beta,
+  beta→rc, rc→stable, anything→stable) are curated. `/release` gates on the
+  matching `release:*` label set.
+
+### Labels
+
+| Label | Gate |
+|-------|------|
+| `release:next-minor` | Must close before the next `bump=minor` cut (the next 0.X.0). |
+| `release:beta` | Must close before the next promotion to `channel=beta`. |
+| `release:rc` | Must close before the next promotion to `channel=rc`. |
+| `release:stable` | Must close before the next promotion to `channel=stable`. |
+| `release:1.0` | Must close before 1.0 GA. Long-horizon. |
+
+Multiple labels may co-exist on one issue (e.g. an item may gate both the
+beta promotion *and* the 1.0 GA). The labels are intent — they declare *when*
+something must ship, not *what theme it belongs to* (that's the milestone).
+
+### Tracking issue (`Release: vX.Y.Z`)
+
+For each meaningful upcoming version, open one tracking issue titled exactly
+`Release: vX.Y.Z` (e.g. `Release: v0.6.0`, `Release: v1.0.0`). Apply the
+`tracking` label. Body is a checklist of "must close before cutting" items
+linking to the issues/PRs holding the corresponding `release:*` label.
+
+`/release` looks up the tracking issue by title when the bump/channel combo
+is curated, surfaces unfinished items, requires explicit confirmation if any
+are open, and posts a comment on the tracking issue after a successful
+dispatch.
+
+Don't open a tracking issue for routine alpha bumps. The cost is in the
+curation, not the issue.
+
 ## Milestones
 
 Milestones are phase markers, not calendar deadlines. Every `epic` issue

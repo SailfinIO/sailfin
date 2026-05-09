@@ -568,6 +568,7 @@ The compiler must always compile itself. Breaking changes require:
 - **Release notes:** `.github/workflows/release-notes.md` — agentic workflow that posts structured, categorized changelog comments on published releases (supplements the auto-generated notes from `gh release create`)
 - **Artifacts:** `dist/` is used for packaged artifacts; `release-tag.yml` builds and uploads platform binaries
 - **Claude skill:** Use `/release` to trigger a new release from Claude Code
+- **Release tracking:** Alpha→alpha prerelease bumps are uncurated. Minor bumps and channel promotions (alpha→beta→rc→stable) gate on the `release:*` label namespace and a per-cycle tracking issue titled `Release: vX.Y.Z`. `/release` looks both up before dispatching. See `docs/conventions/issue-naming.md` "Release tracking".
 
 ### Triggering a Release
 

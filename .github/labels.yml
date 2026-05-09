@@ -164,6 +164,29 @@ labels:
     color: "b60205"
     description: "Must close before the next seed binary is cut"
 
+  # --- Release gating --------------------------------------------------
+  # Intent labels consumed by `/release`. Alpha→alpha prerelease bumps
+  # are uncurated and ignore these. The labels gate `bump=minor`
+  # cuts and any channel promotion (alpha→beta→rc→stable). One issue
+  # may carry multiple release:* labels (e.g. `release:beta` AND
+  # `release:1.0`). See docs/conventions/issue-naming.md "Release
+  # tracking".
+  - name: release:next-minor
+    color: "0e8a16"
+    description: "Must close before the next bump=minor cut (next 0.X.0)"
+  - name: release:beta
+    color: "0e8a16"
+    description: "Must close before the next promotion to channel=beta"
+  - name: release:rc
+    color: "0e8a16"
+    description: "Must close before the next promotion to channel=rc"
+  - name: release:stable
+    color: "0e8a16"
+    description: "Must close before the next promotion to channel=stable"
+  - name: release:1.0
+    color: "0e8a16"
+    description: "Must close before 1.0 GA (long-horizon gate)"
+
   # --- GitHub defaults we keep -----------------------------------------
   - name: good first issue
     color: "7057ff"
