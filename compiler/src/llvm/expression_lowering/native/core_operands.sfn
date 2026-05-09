@@ -29,6 +29,11 @@ import {
     parse_union_payload_types,
     trim_text
 } from "./core_text";
+import {
+    RuntimeCallOverrides,
+    emit_runtime_call,
+    empty_runtime_call_overrides
+} from "./runtime_call";
 
 fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: number, lines: string[]) -> ComparisonEmission {
     let mut diagnostics: string[] = [];
@@ -710,9 +715,30 @@ fn coerce_numeric_primitive(operand: LLVMOperand, operand_type: string, target: 
     }
     if target == "i8*" {
         if operand_type == "i8" {
+            // M1.7.2a (#496): char-to-cstring boxing routes through
+            // descriptor dispatch. The 2-byte allocation holds the char
+            // followed by a NUL terminator — preserves the `noalias`
+            // return attribute via per-call-site override.
             let malloc_temp = format_temp_name(temp_index);
-            current_lines.push("  " + malloc_temp
-                + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 2)");
+            let i8c_size_operand = LLVMOperand {
+                llvm_type: "i64",
+                value: "2"
+            };
+            let i8c_overrides = RuntimeCallOverrides {
+                parameter_types: [],
+                return_type: "",
+                symbol: "",
+                return_attributes: "noalias"
+            };
+            let i8c_operands: LLVMOperand[] = [i8c_size_operand];
+            let i8c_result = emit_runtime_call("alloc_struct", i8c_operands, i8c_overrides, temp_index, current_lines);
+            let mut _i8c_di: number = 0;
+            loop {
+                if _i8c_di >= i8c_result.diagnostics.length { break; }
+                diagnostics.push(i8c_result.diagnostics[_i8c_di]);
+                _i8c_di += 1;
+            }
+            current_lines = i8c_result.lines;
             let char_ptr = format_temp_name(temp_index + 1);
             current_lines.push("  " + char_ptr + " = getelementptr i8, i8* "
                 + malloc_temp
@@ -879,6 +905,10 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                 if starts_with(operand_type, "%") { _if75 = true; }
                 if starts_with(operand_type, "{") { _if75 = true; }
                 if _if75 {
+                    // M1.7.2a (#496): boxing pattern routes alloc_struct
+                    // and mark_persistent through `emit_runtime_call`. The
+                    // `noalias` return attribute is preserved through the
+                    // per-call-site override.
                     let size_ptr_temp = format_temp_name(temp_index);
                     let size_temp = format_temp_name(temp_index + 1);
                     let malloc_temp = format_temp_name(temp_index + 2);
@@ -894,10 +924,28 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                         + "* "
                         + size_ptr_temp
                         + " to i64");
-                    current_lines.push("  " + malloc_temp
-                        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-                        + size_temp
-                        + ")");
+                    let alloc_size_op_a = LLVMOperand {
+                        llvm_type: "i64",
+                        value: size_temp
+                    };
+                    let alloc_overrides_a = RuntimeCallOverrides {
+                        parameter_types: [],
+                        return_type: "",
+                        symbol: "",
+                        return_attributes: "noalias"
+                    };
+                    let alloc_operands_a: LLVMOperand[] = [alloc_size_op_a];
+                    let alloc_result_a = emit_runtime_call("alloc_struct", alloc_operands_a, alloc_overrides_a, temp_index
+                        + 2, current_lines);
+                    let mut _alloc_di_a: number = 0;
+                    loop {
+                        if _alloc_di_a >= alloc_result_a.diagnostics.length {
+                            break;
+                        }
+                        diagnostics.push(alloc_result_a.diagnostics[_alloc_di_a]);
+                        _alloc_di_a += 1;
+                    }
+                    current_lines = alloc_result_a.lines;
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
                         + malloc_temp
                         + " to "
@@ -908,9 +956,20 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
                         + operand_type
                         + "* "
                         + typed_ptr_temp);
-                    current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* "
-                        + malloc_temp
-                        + ")");
+                    let mp_op_a = LLVMOperand {
+                        llvm_type: "i8*",
+                        value: malloc_temp
+                    };
+                    let mp_operands_a: LLVMOperand[] = [mp_op_a];
+                    let mp_result_a = emit_runtime_call("mark_persistent", mp_operands_a, empty_runtime_call_overrides(), temp_index
+                        + 4, current_lines);
+                    let mut _mp_di_a: number = 0;
+                    loop {
+                        if _mp_di_a >= mp_result_a.diagnostics.length { break; }
+                        diagnostics.push(mp_result_a.diagnostics[_mp_di_a]);
+                        _mp_di_a += 1;
+                    }
+                    current_lines = mp_result_a.lines;
                     let boxed = LLVMOperand {
                         llvm_type: target,
                         value: typed_ptr_temp
@@ -962,6 +1021,8 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
         if _if83 { _if76 = true; }
     }
     if _if76 {
+        // M1.7.2a (#496): aggregate-to-i8* boxing routes alloc_struct
+        // and mark_persistent through `emit_runtime_call`.
         let size_ptr_temp = format_temp_name(temp_index);
         let size_temp = format_temp_name(temp_index + 1);
         let malloc_temp = format_temp_name(temp_index + 2);
@@ -975,10 +1036,26 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             + "* "
             + size_ptr_temp
             + " to i64");
-        current_lines.push("  " + malloc_temp
-            + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-            + size_temp
-            + ")");
+        let alloc_size_op_b = LLVMOperand {
+            llvm_type: "i64",
+            value: size_temp
+        };
+        let alloc_overrides_b = RuntimeCallOverrides {
+            parameter_types: [],
+            return_type: "",
+            symbol: "",
+            return_attributes: "noalias"
+        };
+        let alloc_operands_b: LLVMOperand[] = [alloc_size_op_b];
+        let alloc_result_b = emit_runtime_call("alloc_struct", alloc_operands_b, alloc_overrides_b, temp_index
+            + 2, current_lines);
+        let mut _alloc_di_b: number = 0;
+        loop {
+            if _alloc_di_b >= alloc_result_b.diagnostics.length { break; }
+            diagnostics.push(alloc_result_b.diagnostics[_alloc_di_b]);
+            _alloc_di_b += 1;
+        }
+        current_lines = alloc_result_b.lines;
         current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
             + malloc_temp
             + " to "
@@ -989,9 +1066,17 @@ fn coerce_pointer_or_struct(operand: LLVMOperand, operand_type: string, target: 
             + operand_type
             + "* "
             + typed_ptr_temp);
-        current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* "
-            + malloc_temp
-            + ")");
+        let mp_op_b = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
+        let mp_operands_b: LLVMOperand[] = [mp_op_b];
+        let mp_result_b = emit_runtime_call("mark_persistent", mp_operands_b, empty_runtime_call_overrides(), temp_index
+            + 4, current_lines);
+        let mut _mp_di_b: number = 0;
+        loop {
+            if _mp_di_b >= mp_result_b.diagnostics.length { break; }
+            diagnostics.push(mp_result_b.diagnostics[_mp_di_b]);
+            _mp_di_b += 1;
+        }
+        current_lines = mp_result_b.lines;
         let boxed = LLVMOperand { llvm_type: "i8*", value: malloc_temp };
         return CoercionResult {
             lines: current_lines,
@@ -1042,6 +1127,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 if starts_with(operand_type, "%") { _if85 = true; }
                 if starts_with(operand_type, "{") { _if85 = true; }
                 if _if85 {
+                    // M1.7.2a (#496): expected_value_type boxing routes
+                    // alloc_struct and mark_persistent through `emit_runtime_call`.
                     let size_ptr_temp = format_temp_name(temp_index);
                     let size_temp = format_temp_name(temp_index + 1);
                     let malloc_temp = format_temp_name(temp_index + 2);
@@ -1057,10 +1144,28 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                         + "* "
                         + size_ptr_temp
                         + " to i64");
-                    current_lines.push("  " + malloc_temp
-                        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-                        + size_temp
-                        + ")");
+                    let alloc_size_op_c = LLVMOperand {
+                        llvm_type: "i64",
+                        value: size_temp
+                    };
+                    let alloc_overrides_c = RuntimeCallOverrides {
+                        parameter_types: [],
+                        return_type: "",
+                        symbol: "",
+                        return_attributes: "noalias"
+                    };
+                    let alloc_operands_c: LLVMOperand[] = [alloc_size_op_c];
+                    let alloc_result_c = emit_runtime_call("alloc_struct", alloc_operands_c, alloc_overrides_c, temp_index
+                        + 2, current_lines);
+                    let mut _alloc_di_c: number = 0;
+                    loop {
+                        if _alloc_di_c >= alloc_result_c.diagnostics.length {
+                            break;
+                        }
+                        diagnostics.push(alloc_result_c.diagnostics[_alloc_di_c]);
+                        _alloc_di_c += 1;
+                    }
+                    current_lines = alloc_result_c.lines;
                     current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
                         + malloc_temp
                         + " to "
@@ -1071,9 +1176,20 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                         + operand_type
                         + "* "
                         + typed_ptr_temp);
-                    current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* "
-                        + malloc_temp
-                        + ")");
+                    let mp_op_c = LLVMOperand {
+                        llvm_type: "i8*",
+                        value: malloc_temp
+                    };
+                    let mp_operands_c: LLVMOperand[] = [mp_op_c];
+                    let mp_result_c = emit_runtime_call("mark_persistent", mp_operands_c, empty_runtime_call_overrides(), temp_index
+                        + 4, current_lines);
+                    let mut _mp_di_c: number = 0;
+                    loop {
+                        if _mp_di_c >= mp_result_c.diagnostics.length { break; }
+                        diagnostics.push(mp_result_c.diagnostics[_mp_di_c]);
+                        _mp_di_c += 1;
+                    }
+                    current_lines = mp_result_c.lines;
                     let boxed = LLVMOperand {
                         llvm_type: target,
                         value: typed_ptr_temp
@@ -1111,6 +1227,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                 if _elif78 {
                     let expected_value_type = strip_pointer_suffix(variant_type);
                     if expected_value_type == operand_type {
+                        // M1.7.2a (#496): union-variant boxing routes
+                        // alloc_struct and mark_persistent through `emit_runtime_call`.
                         let size_ptr_temp = format_temp_name(local_temp);
                         let size_temp = format_temp_name(local_temp + 1);
                         let malloc_temp = format_temp_name(local_temp + 2);
@@ -1126,10 +1244,28 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                             + "* "
                             + size_ptr_temp
                             + " to i64");
-                        local_lines.push("  " + malloc_temp
-                            + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-                            + size_temp
-                            + ")");
+                        let alloc_size_op_d = LLVMOperand {
+                            llvm_type: "i64",
+                            value: size_temp
+                        };
+                        let alloc_overrides_d = RuntimeCallOverrides {
+                            parameter_types: [],
+                            return_type: "",
+                            symbol: "",
+                            return_attributes: "noalias"
+                        };
+                        let alloc_operands_d: LLVMOperand[] = [alloc_size_op_d];
+                        let alloc_result_d = emit_runtime_call("alloc_struct", alloc_operands_d, alloc_overrides_d, local_temp
+                            + 2, local_lines);
+                        let mut _alloc_di_d: number = 0;
+                        loop {
+                            if _alloc_di_d >= alloc_result_d.diagnostics.length {
+                                break;
+                            }
+                            diagnostics.push(alloc_result_d.diagnostics[_alloc_di_d]);
+                            _alloc_di_d += 1;
+                        }
+                        local_lines = alloc_result_d.lines;
                         local_lines.push("  " + typed_ptr_temp
                             + " = bitcast i8* "
                             + malloc_temp
@@ -1142,9 +1278,22 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                             + operand_type
                             + "* "
                             + typed_ptr_temp);
-                        local_lines.push("  call void @sailfin_runtime_mark_persistent(i8* "
-                            + malloc_temp
-                            + ")");
+                        let mp_op_d = LLVMOperand {
+                            llvm_type: "i8*",
+                            value: malloc_temp
+                        };
+                        let mp_operands_d: LLVMOperand[] = [mp_op_d];
+                        let mp_result_d = emit_runtime_call("mark_persistent", mp_operands_d, empty_runtime_call_overrides(), local_temp
+                            + 4, local_lines);
+                        let mut _mp_di_d: number = 0;
+                        loop {
+                            if _mp_di_d >= mp_result_d.diagnostics.length {
+                                break;
+                            }
+                            diagnostics.push(mp_result_d.diagnostics[_mp_di_d]);
+                            _mp_di_d += 1;
+                        }
+                        local_lines = mp_result_d.lines;
                         has_value = true;
                         value_text = typed_ptr_temp;
                         local_temp += 4;
@@ -1161,6 +1310,9 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                         if starts_with(operand_type, "%") { _if89 = true; }
                         if starts_with(operand_type, "{") { _if89 = true; }
                         if _if89 {
+                            // M1.7.2a (#496): union-variant i8* boxing
+                            // routes alloc_struct and mark_persistent
+                            // through `emit_runtime_call`.
                             let size_ptr_temp = format_temp_name(local_temp);
                             let size_temp = format_temp_name(local_temp + 1);
                             let malloc_temp = format_temp_name(local_temp + 2);
@@ -1176,10 +1328,28 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                                 + "* "
                                 + size_ptr_temp
                                 + " to i64");
-                            local_lines.push("  " + malloc_temp
-                                + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-                                + size_temp
-                                + ")");
+                            let alloc_size_op_e = LLVMOperand {
+                                llvm_type: "i64",
+                                value: size_temp
+                            };
+                            let alloc_overrides_e = RuntimeCallOverrides {
+                                parameter_types: [],
+                                return_type: "",
+                                symbol: "",
+                                return_attributes: "noalias"
+                            };
+                            let alloc_operands_e: LLVMOperand[] = [alloc_size_op_e];
+                            let alloc_result_e = emit_runtime_call("alloc_struct", alloc_operands_e, alloc_overrides_e, local_temp
+                                + 2, local_lines);
+                            let mut _alloc_di_e: number = 0;
+                            loop {
+                                if _alloc_di_e >= alloc_result_e.diagnostics.length {
+                                    break;
+                                }
+                                diagnostics.push(alloc_result_e.diagnostics[_alloc_di_e]);
+                                _alloc_di_e += 1;
+                            }
+                            local_lines = alloc_result_e.lines;
                             local_lines.push("  " + typed_ptr_temp
                                 + " = bitcast i8* "
                                 + malloc_temp
@@ -1192,9 +1362,22 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                                 + operand_type
                                 + "* "
                                 + typed_ptr_temp);
-                            local_lines.push("  call void @sailfin_runtime_mark_persistent(i8* "
-                                + malloc_temp
-                                + ")");
+                            let mp_op_e = LLVMOperand {
+                                llvm_type: "i8*",
+                                value: malloc_temp
+                            };
+                            let mp_operands_e: LLVMOperand[] = [mp_op_e];
+                            let mp_result_e = emit_runtime_call("mark_persistent", mp_operands_e, empty_runtime_call_overrides(), local_temp
+                                + 4, local_lines);
+                            let mut _mp_di_e: number = 0;
+                            loop {
+                                if _mp_di_e >= mp_result_e.diagnostics.length {
+                                    break;
+                                }
+                                diagnostics.push(mp_result_e.diagnostics[_mp_di_e]);
+                                _mp_di_e += 1;
+                            }
+                            local_lines = mp_result_e.lines;
                             has_value = true;
                             value_text = malloc_temp;
                             local_temp += 4;
@@ -1321,6 +1504,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
             if starts_with(operand.llvm_type, "%") { _if88 = true; }
             if starts_with(operand.llvm_type, "{") { _if88 = true; }
             if _if88 {
+                // M1.7.2a (#496): general-fallback i8* boxing routes
+                // alloc_struct and mark_persistent through `emit_runtime_call`.
                 let size_ptr_temp = format_temp_name(temp_index);
                 let size_temp = format_temp_name(temp_index + 1);
                 let malloc_temp = format_temp_name(temp_index + 2);
@@ -1334,10 +1519,28 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     + "* "
                     + size_ptr_temp
                     + " to i64");
-                current_lines.push("  " + malloc_temp
-                    + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-                    + size_temp
-                    + ")");
+                let alloc_size_op_f = LLVMOperand {
+                    llvm_type: "i64",
+                    value: size_temp
+                };
+                let alloc_overrides_f = RuntimeCallOverrides {
+                    parameter_types: [],
+                    return_type: "",
+                    symbol: "",
+                    return_attributes: "noalias"
+                };
+                let alloc_operands_f: LLVMOperand[] = [alloc_size_op_f];
+                let alloc_result_f = emit_runtime_call("alloc_struct", alloc_operands_f, alloc_overrides_f, temp_index
+                    + 2, current_lines);
+                let mut _alloc_di_f: number = 0;
+                loop {
+                    if _alloc_di_f >= alloc_result_f.diagnostics.length {
+                        break;
+                    }
+                    diagnostics.push(alloc_result_f.diagnostics[_alloc_di_f]);
+                    _alloc_di_f += 1;
+                }
+                current_lines = alloc_result_f.lines;
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
                     + malloc_temp
                     + " to "
@@ -1349,9 +1552,20 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     + operand.llvm_type
                     + "* "
                     + typed_ptr_temp);
-                current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* "
-                    + malloc_temp
-                    + ")");
+                let mp_op_f = LLVMOperand {
+                    llvm_type: "i8*",
+                    value: malloc_temp
+                };
+                let mp_operands_f: LLVMOperand[] = [mp_op_f];
+                let mp_result_f = emit_runtime_call("mark_persistent", mp_operands_f, empty_runtime_call_overrides(), temp_index
+                    + 4, current_lines);
+                let mut _mp_di_f: number = 0;
+                loop {
+                    if _mp_di_f >= mp_result_f.diagnostics.length { break; }
+                    diagnostics.push(mp_result_f.diagnostics[_mp_di_f]);
+                    _mp_di_f += 1;
+                }
+                current_lines = mp_result_f.lines;
                 let coerced = LLVMOperand {
                     llvm_type: "i8*",
                     value: malloc_temp
@@ -1384,6 +1598,8 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
         if ends_with_pointer_suffix(target) {
             let expected_value_type = strip_pointer_suffix(target);
             if expected_value_type == operand.llvm_type {
+                // M1.7.2a (#496): typed-pointer boxing routes alloc_struct
+                // and mark_persistent through `emit_runtime_call`.
                 let size_ptr_temp = format_temp_name(temp_index);
                 let size_temp = format_temp_name(temp_index + 1);
                 let malloc_temp = format_temp_name(temp_index + 2);
@@ -1397,10 +1613,28 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     + "* "
                     + size_ptr_temp
                     + " to i64");
-                current_lines.push("  " + malloc_temp
-                    + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-                    + size_temp
-                    + ")");
+                let alloc_size_op_g = LLVMOperand {
+                    llvm_type: "i64",
+                    value: size_temp
+                };
+                let alloc_overrides_g = RuntimeCallOverrides {
+                    parameter_types: [],
+                    return_type: "",
+                    symbol: "",
+                    return_attributes: "noalias"
+                };
+                let alloc_operands_g: LLVMOperand[] = [alloc_size_op_g];
+                let alloc_result_g = emit_runtime_call("alloc_struct", alloc_operands_g, alloc_overrides_g, temp_index
+                    + 2, current_lines);
+                let mut _alloc_di_g: number = 0;
+                loop {
+                    if _alloc_di_g >= alloc_result_g.diagnostics.length {
+                        break;
+                    }
+                    diagnostics.push(alloc_result_g.diagnostics[_alloc_di_g]);
+                    _alloc_di_g += 1;
+                }
+                current_lines = alloc_result_g.lines;
                 current_lines.push("  " + typed_ptr_temp + " = bitcast i8* "
                     + malloc_temp
                     + " to "
@@ -1412,9 +1646,20 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
                     + operand.llvm_type
                     + "* "
                     + typed_ptr_temp);
-                current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* "
-                    + malloc_temp
-                    + ")");
+                let mp_op_g = LLVMOperand {
+                    llvm_type: "i8*",
+                    value: malloc_temp
+                };
+                let mp_operands_g: LLVMOperand[] = [mp_op_g];
+                let mp_result_g = emit_runtime_call("mark_persistent", mp_operands_g, empty_runtime_call_overrides(), temp_index
+                    + 4, current_lines);
+                let mut _mp_di_g: number = 0;
+                loop {
+                    if _mp_di_g >= mp_result_g.diagnostics.length { break; }
+                    diagnostics.push(mp_result_g.diagnostics[_mp_di_g]);
+                    _mp_di_g += 1;
+                }
+                current_lines = mp_result_g.lines;
                 let mut pointer_value: string = typed_ptr_temp;
                 let mut next_index: number = temp_index + 4;
                 let typed_pointer_type = operand.llvm_type + "*";

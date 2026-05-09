@@ -11,6 +11,11 @@ import { strip_pointer_suffix } from "../type_mapping";
 import { array_struct_type_for_element } from "../type_mapping";
 import { ExpressionResult, LLVMOperand } from "../types";
 import { append_string, ends_with, trim_text } from "../utils";
+import {
+    RuntimeCallOverrides,
+    emit_runtime_call,
+    empty_runtime_call_overrides
+} from "./native/runtime_call";
 
 fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: string, lines: string[], temp_index: number) -> ExpressionResult {
     let mut current_lines = lines;
@@ -127,12 +132,31 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
         + ", "
         + total_length);
 
+    // M1.7.2a (#496): concat target buffer alloc routes through
+    // descriptor dispatch. The `noalias` return attribute is preserved
+    // because the buffer is freshly allocated and known not to alias
+    // its inputs (which are then memcpy'd into it).
     let new_raw_buffer = format_temp_name(current_temp);
+    let buffer_size_operand = LLVMOperand {
+        llvm_type: "i64",
+        value: total_bytes
+    };
+    let buffer_overrides = RuntimeCallOverrides {
+        parameter_types: [],
+        return_type: "",
+        symbol: "",
+        return_attributes: "noalias"
+    };
+    let buffer_operands: LLVMOperand[] = [buffer_size_operand];
+    let buffer_result = emit_runtime_call("alloc_struct", buffer_operands, buffer_overrides, current_temp, current_lines);
+    let mut _buffer_di: number = 0;
+    loop {
+        if _buffer_di >= buffer_result.diagnostics.length { break; }
+        diagnostics.push(buffer_result.diagnostics[_buffer_di]);
+        _buffer_di += 1;
+    }
+    current_lines = buffer_result.lines;
     current_temp += 1;
-    current_lines.push("  " + new_raw_buffer
-        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-        + total_bytes
-        + ")");
     let new_data_ptr = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + new_data_ptr + " = bitcast i8* " + new_raw_buffer
@@ -213,12 +237,27 @@ fn lower_struct_array_concat(lhs: LLVMOperand, rhs: LLVMOperand, element_type: s
         + struct_size_ptr
         + " to i64");
 
+    // M1.7.2a (#496): concat result struct alloc routes through
+    // descriptor dispatch. No `noalias` here today — the original
+    // emission omitted the attribute and the IR diff is the
+    // correctness gate.
     let new_struct_raw = format_temp_name(current_temp);
+    let struct_concat_size_operand = LLVMOperand {
+        llvm_type: "i64",
+        value: struct_size_value
+    };
+    let struct_concat_operands: LLVMOperand[] = [struct_concat_size_operand];
+    let struct_concat_result = emit_runtime_call("alloc_struct", struct_concat_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+    let mut _struct_concat_di: number = 0;
+    loop {
+        if _struct_concat_di >= struct_concat_result.diagnostics.length {
+            break;
+        }
+        diagnostics.push(struct_concat_result.diagnostics[_struct_concat_di]);
+        _struct_concat_di += 1;
+    }
+    current_lines = struct_concat_result.lines;
     current_temp += 1;
-    current_lines.push("  " + new_struct_raw
-        + " = call i8* @sailfin_runtime_alloc_struct(i64 "
-        + struct_size_value
-        + ")");
     let new_struct_ptr = format_temp_name(current_temp);
     current_temp += 1;
     current_lines.push("  " + new_struct_ptr + " = bitcast i8* "

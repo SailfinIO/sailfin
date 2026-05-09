@@ -62,6 +62,11 @@ import {
     parse_interpolated_template,
     unescape_string_literal
 } from "./core_text";
+import {
+    RuntimeCallOverrides,
+    emit_runtime_call,
+    empty_runtime_call_overrides
+} from "./runtime_call";
 
 fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
@@ -514,11 +519,26 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         + array_bytes);
     current_temp += 1;
 
+    // M1.7.2a (#496): array data buffer alloc routes through descriptor
+    // dispatch. No `noalias` here today — the buffer is later wrapped
+    // by a struct that owns it, and the buffer pointer escapes via a
+    // store into that struct's `data` field, so we deliberately
+    // mirror the existing call shape (no return attribute) to keep
+    // the IR diff empty.
     let raw_array_ptr = format_temp_name(current_temp);
-    current_lines.push("  " + raw_array_ptr
-        + " = call i8* @sailfin_runtime_alloc_struct(i64 "
-        + adjusted_array_bytes
-        + ")");
+    let raw_array_size_operand = LLVMOperand {
+        llvm_type: "i64",
+        value: adjusted_array_bytes
+    };
+    let raw_array_operands: LLVMOperand[] = [raw_array_size_operand];
+    let raw_array_result = emit_runtime_call("alloc_struct", raw_array_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+    let mut _raw_array_di: number = 0;
+    loop {
+        if _raw_array_di >= raw_array_result.diagnostics.length { break; }
+        diagnostics.push(raw_array_result.diagnostics[_raw_array_di]);
+        _raw_array_di += 1;
+    }
+    current_lines = raw_array_result.lines;
     current_temp += 1;
 
     let data_pointer = format_temp_name(current_temp);
@@ -569,11 +589,22 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         + " to i64");
     current_temp += 1;
 
+    // M1.7.2a (#496): SfnArray struct alloc routes through descriptor
+    // dispatch. Same shape as the buffer alloc above (no `noalias`).
     let raw_struct_ptr = format_temp_name(current_temp);
-    current_lines.push("  " + raw_struct_ptr
-        + " = call i8* @sailfin_runtime_alloc_struct(i64 "
-        + struct_bytes
-        + ")");
+    let struct_size_operand = LLVMOperand {
+        llvm_type: "i64",
+        value: struct_bytes
+    };
+    let struct_alloc_operands: LLVMOperand[] = [struct_size_operand];
+    let struct_alloc_result = emit_runtime_call("alloc_struct", struct_alloc_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+    let mut _struct_alloc_di: number = 0;
+    loop {
+        if _struct_alloc_di >= struct_alloc_result.diagnostics.length { break; }
+        diagnostics.push(struct_alloc_result.diagnostics[_struct_alloc_di]);
+        _struct_alloc_di += 1;
+    }
+    current_lines = struct_alloc_result.lines;
     current_temp += 1;
 
     let struct_pointer = format_temp_name(current_temp);
@@ -863,12 +894,28 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
         + size_ptr_temp
         + " to i64");
 
+    // M1.7.2a (#496): boxed-aggregate alloc routes through descriptor
+    // dispatch. The `noalias` return attribute is preserved at the
+    // call site through `RuntimeCallOverrides.return_attributes` to
+    // keep IR identical with the seed.
     let malloc_temp = format_temp_name(current_temp);
     current_temp += 1;
-    current_lines.push("  " + malloc_temp
-        + " = call noalias i8* @sailfin_runtime_alloc_struct(i64 "
-        + size_temp
-        + ")");
+    let box_size_operand = LLVMOperand { llvm_type: "i64", value: size_temp };
+    let box_overrides = RuntimeCallOverrides {
+        parameter_types: [],
+        return_type: "",
+        symbol: "",
+        return_attributes: "noalias"
+    };
+    let box_operands: LLVMOperand[] = [box_size_operand];
+    let box_result = emit_runtime_call("alloc_struct", box_operands, box_overrides, current_temp - 1, current_lines);
+    let mut _box_di: number = 0;
+    loop {
+        if _box_di >= box_result.diagnostics.length { break; }
+        diagnostics.push(box_result.diagnostics[_box_di]);
+        _box_di += 1;
+    }
+    current_lines = box_result.lines;
 
     let typed_ptr_temp = format_temp_name(current_temp);
     current_temp += 1;

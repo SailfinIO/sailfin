@@ -27,6 +27,7 @@ import { empty_string_constant_set } from "../../strings";
 // Import types from modular structure
 import {
     ExpressionStatementResult,
+    LLVMOperand,
     LifetimeRegionMetadata,
     LifetimeReleaseEvent,
     LocalBinding,
@@ -68,6 +69,7 @@ import {
     promote_local_to_rc
 } from "./core_scopes";
 import { is_heap_type } from "./core_type_mapping";
+import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 import { lower_lvalue_assignment_stmt } from "./statement_assignment";
 // Submodules extracted from this file
 import { parse_assignment_expression, parse_inline_let_expression } from "./statement_parsing";
@@ -683,11 +685,19 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     }
 
     let coerced_operand = coerced.operand;
-    // STAGE2 FIX: Mark string pointers as persistent before returning
+    // STAGE2 FIX: Mark string pointers as persistent before returning.
+    // M1.7.2a (#496): routes through `emit_runtime_call` so the call
+    // shape is owned by the descriptor table rather than hand-spelled.
     if coerced_operand.llvm_type == "i8*" {
-        current_lines.push("  call void @sailfin_runtime_mark_persistent(i8* "
-            + coerced_operand.value
-            + ")");
+        let mp_operands: LLVMOperand[] = [coerced_operand];
+        let mp_result = emit_runtime_call("mark_persistent", mp_operands, empty_runtime_call_overrides(), current_temp, current_lines);
+        let mut _mp_di: number = 0;
+        loop {
+            if _mp_di >= mp_result.diagnostics.length { break; }
+            diagnostics.push(mp_result.diagnostics[_mp_di]);
+            _mp_di += 1;
+        }
+        current_lines = mp_result.lines;
     }
     // M1.5.3 + M1.5.5: apply consumption and escape promotion *before*
     // computing scope-chain drops. The returned local is marked
