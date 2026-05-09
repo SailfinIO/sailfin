@@ -174,15 +174,26 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
     }
 
     // Argument-count sanity check (mirrors the same gate in
-    // core_call_emission.sfn:260-268). Diagnostic only — caller
-    // decides whether to abort.
-    if parameter_types.length != coerced_operands.length {
-        result_diagnostics.push("llvm lowering: emit_runtime_call: call to `"
-            + target
-            + "` expected "
-            + number_to_string(parameter_types.length)
-            + " arguments but received "
-            + number_to_string(coerced_operands.length));
+    // core_call_emission.sfn:254-268). Only run when we have a
+    // known signature — either a descriptor, or caller-supplied
+    // `overrides.parameter_types`. The diagnostic-and-fallback
+    // path (no descriptor, only `overrides.return_type` set) has
+    // no parameter types to compare against, so an unconditional
+    // check would emit a misleading "expected 0 arguments but
+    // received N" against any caller that intentionally skipped
+    // them. Diagnostic only — caller decides whether to abort.
+    let mut signature_known: boolean = false;
+    if descriptor != null { signature_known = true; }
+    if overrides.parameter_types.length > 0 { signature_known = true; }
+    if signature_known {
+        if parameter_types.length != coerced_operands.length {
+            result_diagnostics.push("llvm lowering: emit_runtime_call: call to `"
+                + target
+                + "` expected "
+                + number_to_string(parameter_types.length)
+                + " arguments but received "
+                + number_to_string(coerced_operands.length));
+        }
     }
 
     let mut rendered_args: string[] = [];
