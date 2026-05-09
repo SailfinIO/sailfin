@@ -53,6 +53,7 @@ import {
     CapsuleArtifactLayout,
     capsule_artifact_layout_from_specs,
     ir_path_for_slug,
+    is_safe_scope_name,
     parse_scope_name
 } from "./capsule_artifact";
 import {
@@ -933,16 +934,17 @@ fn _cr_enumerate_host_capsule_sources(project_root: string) -> CapsuleSource[] !
     let manifest_text = fs.readFile(manifest_path);
     let capsule_name = toml_get_name(manifest_text);
     if capsule_name.length == 0 { return out; }
-    // Reject path-traversal / separator characters in the name. The
-    // helper is shared with `_cr_locate_capsule_src`'s scope/name
-    // gates; passing each segment through `_cr_is_safe_segment`
-    // mirrors what `parse_scope_name` + `is_safe_scope_name` would
-    // do for scope-form names, while also accepting single-segment
-    // names like `"my-app"` (which `parse_scope_name` rejects).
+    // Reject path-traversal / separator characters in the name.
+    // For scope-form names (`acme/router`, `acme/router/middleware/auth`),
+    // delegate to `is_safe_scope_name` so submodule capsule names with
+    // multi-segment `name` parts (the second `/` onward survives in
+    // `parts.name`) round-trip — `_cr_is_safe_segment` would reject
+    // any `/`. Single-segment names like `"my-app"` don't go through
+    // `parse_scope_name` (it returns empty for no-slash inputs) so
+    // those still need a direct safe-segment check.
     let parts = parse_scope_name(capsule_name);
     if parts.scope.length > 0 {
-        if !_cr_is_safe_segment(parts.scope) { return out; }
-        if !_cr_is_safe_segment(parts.name) { return out; }
+        if !is_safe_scope_name(parts.scope, parts.name) { return out; }
     } else {
         if !_cr_is_safe_segment(capsule_name) { return out; }
     }

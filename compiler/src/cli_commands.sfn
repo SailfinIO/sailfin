@@ -724,11 +724,17 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clo
         // the resolver into enumerating `<project_root>/src/` with
         // `<capsule_name>/<stem>` slugs, which matches what the
         // test source's import-path normalizer resolves the bare
-        // capsule name to. Standalone test files outside any
-        // capsule.toml (the compiler's own `compiler/tests/` suite
-        // is the canonical case) get an empty consumer that still
-        // walks workspace-implicit imports — matching the prior
-        // `empty_resolver_consumer()` behavior.
+        // capsule name to. Tests that don't import the host by
+        // name — the compiler's own `compiler/tests/` suite is the
+        // canonical case, since those tests reach `compiler/src/`
+        // exclusively via `../../src/X` relative imports — fail
+        // the in-resolver `_cr_any_entry_imports_host` gate, so
+        // host-enum stays a no-op and the resolver behaves the
+        // same as the prior `empty_resolver_consumer()` path.
+        // Standalone test files outside any `capsule.toml`
+        // (project_root empty) get a fully empty consumer for the
+        // same reason — there's no manifest, no `[capsule].name`,
+        // and so nothing for host-enum to walk.
         // Stage D PR3: `sfn test` runs from the legacy `make test`
         // path that does not thread `binary_dir` through, so pass
         // an empty `sailfin_exe`. The resolver falls back to the
