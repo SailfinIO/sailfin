@@ -1,0 +1,17 @@
+# P1 (#363) regression fixture: a single-segment capsule name (not
+# scope/name form) that the resolver must still surface to its own
+# tests by bare name. The user-style ergonomic case `sfn build` end
+# users hit when they declare `[capsule].name = "my-app"` rather than
+# `"acme/my-app"`.
+[capsule]
+name = "my-app"
+version = "0.1.0"
+
+[dependencies]
+
+[capabilities]
+required = []
+
+[build]
+entry = "src/mod.sfn"
+kind = "library"

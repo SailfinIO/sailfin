@@ -52,7 +52,8 @@ import {
 import {
     CapsuleArtifactLayout,
     capsule_artifact_layout_from_specs,
-    ir_path_for_slug
+    ir_path_for_slug,
+    parse_scope_name
 } from "./capsule_artifact";
 import {
     compile_to_llvm_file_with_module,
@@ -140,17 +141,28 @@ struct CapsuleSource {
 // files the link needs). Empty consumer / `walk_project_src=false`
 // preserves the legacy entry-driven enumeration, so end-user
 // builds and the existing self-host paths are unaffected.
+//
+// P1 (#363): `include_host_as_dep` opts the resolver into walking
+// the host capsule's `<project_root>/src/` as if it were a
+// manifest-declared dep. Set by `sfn test` so a test file in
+// `<project>/tests/` can `import { fn } from "<capsule_name>"` and
+// have the resolver stage + compile the host capsule under slug
+// `<capsule_name>/<stem>`. The build path (`sfn build`) keeps this
+// off — the host capsule's entry source is already compiled
+// directly, so re-enumerating it as a dep would double-emit.
 struct ResolverConsumer {
     scope: string;
     name: string;
     walk_project_src: boolean;
+    include_host_as_dep: boolean;
 }
 
 fn empty_resolver_consumer() -> ResolverConsumer {
     return ResolverConsumer {
         scope: "",
         name: "",
-        walk_project_src: false
+        walk_project_src: false,
+        include_host_as_dep: false
     };
 }
 
@@ -895,6 +907,48 @@ fn _cr_collect_capsule_sources(src_dir: string, spec: string) -> CapsuleSource[]
         }
     }
     return out;
+}
+
+// P1 (#363): enumerate every .sfn source under
+// `<project_root>/src/` and tag it with the host capsule's
+// `[capsule].name` as the spec, so a test file in `<project>/tests/`
+// can `import { fn } from "<capsule_name>"` and have the resolver
+// stage + compile the source under slug `<capsule_name>/<stem>`.
+// Returns empty when the manifest is missing, has no `[capsule].name`,
+// or the name is unsafe (path traversal) — callers fall through to
+// relative-import / workspace-implicit walks. Skipped when
+// `<project_root>/src/` doesn't exist.
+//
+// Slug shape mirrors `_cr_collect_capsule_sources(src_dir, spec)`:
+// for `[capsule].name = "my-app"` and `<project_root>/src/mod.sfn`
+// the resolver produces `slug = "my-app/mod"`. The test source's
+// `import { fn } from "my-app";` resolves to provider slug
+// `my-app/mod` via `resolve_import_artifact_slug`'s `<base>/mod`
+// fallback, which is what makes the link line resolve.
+fn _cr_enumerate_host_capsule_sources(project_root: string) -> CapsuleSource[] ![io] {
+    let mut out: CapsuleSource[] = [];
+    if project_root.length == 0 { return out; }
+    let manifest_path = _cr_path_join(project_root, "capsule.toml");
+    if !fs.exists(manifest_path) { return out; }
+    let manifest_text = fs.readFile(manifest_path);
+    let capsule_name = toml_get_name(manifest_text);
+    if capsule_name.length == 0 { return out; }
+    // Reject path-traversal / separator characters in the name. The
+    // helper is shared with `_cr_locate_capsule_src`'s scope/name
+    // gates; passing each segment through `_cr_is_safe_segment`
+    // mirrors what `parse_scope_name` + `is_safe_scope_name` would
+    // do for scope-form names, while also accepting single-segment
+    // names like `"my-app"` (which `parse_scope_name` rejects).
+    let parts = parse_scope_name(capsule_name);
+    if parts.scope.length > 0 {
+        if !_cr_is_safe_segment(parts.scope) { return out; }
+        if !_cr_is_safe_segment(parts.name) { return out; }
+    } else {
+        if !_cr_is_safe_segment(capsule_name) { return out; }
+    }
+    let src_dir = _cr_path_join(project_root, "src");
+    if !fs.exists(src_dir) { return out; }
+    return _cr_collect_capsule_sources(src_dir, capsule_name);
 }
 
 // Enumerate every .sfn source file for every dep declared in the project's
@@ -2812,6 +2866,266 @@ fn collect_scoped_import_specs(source: string) -> string[] {
     return out;
 }
 
+// P1 (#363): scan one source file for `import { ... } from "<spec>";`
+// (and the `export { ... } from "..."` re-export shape) and return
+// true if any spec equals `target` or starts with `target + "/"`. Used
+// by `_cr_resolve_and_dedupe` to decide whether the host-capsule
+// enumeration is needed. Cheap: collected specs go through the same
+// comment-aware scanner that `collect_scoped_import_specs` shares with
+// the existing relative-import / workspace-implicit walks; the only
+// difference here is the post-filter (the existing scanner drops bare-
+// name specs like `"my-app"` because those don't have a `/`).
+//
+// `target` should be the manifest's `[capsule].name`. `target/sub`
+// matches the same prefix-relationship the import resolver applies
+// when it canonicalises a scoped import down to its `scope/name`
+// slug, so an `import { ... } from "<host>/util"` also gates the
+// host enumeration on (a future submodule layout would land under
+// `<host>/util.sfn` or `<host>/util/mod.sfn`, both of which the host
+// walker captures).
+fn _cr_source_imports_host(source: string, target: string) -> boolean {
+    if target.length == 0 { return false; }
+    let source_len = source.length;
+    if source_len == 0 { return false; }
+    let mut steps: number = 0;
+    let max_steps = source_len * 6 + 1000;
+    let mut i: number = 0;
+    let mut in_string: boolean = false;
+    let mut escaping: boolean = false;
+    let mut in_line_comment: boolean = false;
+    let mut in_block_comment: boolean = false;
+    loop {
+        if i >= source_len { break; }
+        steps += 1;
+        if steps > max_steps { break; }
+        let ch = _cr_byte_at(source, i);
+        if in_line_comment {
+            if ch == "\n" { in_line_comment = false; }
+            i += 1;
+            continue;
+        }
+        if in_block_comment {
+            if ch == "*" {
+                if i + 1 < source_len {
+                    if _cr_byte_at(source, i + 1) == "/" {
+                        in_block_comment = false;
+                        i += 2;
+                        continue;
+                    }
+                }
+            }
+            i += 1;
+            continue;
+        }
+        if in_string {
+            if escaping {
+                escaping = false;
+                i += 1;
+                continue;
+            }
+            if ch == "\\" {
+                escaping = true;
+                i += 1;
+                continue;
+            }
+            if ch == "\"" {
+                in_string = false;
+                i += 1;
+                continue;
+            }
+            i += 1;
+            continue;
+        }
+        if ch == "/" {
+            if i + 1 < source_len {
+                let next = _cr_byte_at(source, i + 1);
+                if next == "/" {
+                    in_line_comment = true;
+                    i += 2;
+                    continue;
+                }
+                if next == "*" {
+                    in_block_comment = true;
+                    i += 2;
+                    continue;
+                }
+            }
+        }
+        if ch == "\"" {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        let mut _is_dep_keyword: boolean = false;
+        if _cr_word_matches(source, i, "import") { _is_dep_keyword = true; }
+        if _cr_word_matches(source, i, "export") { _is_dep_keyword = true; }
+        if _is_dep_keyword {
+            // Walk forward to the `from "..."` token and pull the spec.
+            // Mirrors `collect_scoped_import_specs`'s tokenising loop —
+            // duplicated here to avoid running the broader scanner
+            // (allocates a string array) when a single literal-match
+            // probe is all we need.
+            let mut j: number = i;
+            let mut s_in_string: boolean = false;
+            let mut s_escaping: boolean = false;
+            let mut s_in_line_comment: boolean = false;
+            let mut s_in_block_comment: boolean = false;
+            let mut spec: string = "";
+            let mut stmt_end: number = -1;
+            loop {
+                if j >= source_len { break; }
+                steps += 1;
+                if steps > max_steps { break; }
+                let cj = _cr_byte_at(source, j);
+                if s_in_line_comment {
+                    if cj == "\n" { s_in_line_comment = false; }
+                    j += 1;
+                    continue;
+                }
+                if s_in_block_comment {
+                    if cj == "*" {
+                        if j + 1 < source_len {
+                            if _cr_byte_at(source, j + 1) == "/" {
+                                s_in_block_comment = false;
+                                j += 2;
+                                continue;
+                            }
+                        }
+                    }
+                    j += 1;
+                    continue;
+                }
+                if s_in_string {
+                    if s_escaping {
+                        s_escaping = false;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\\" {
+                        s_escaping = true;
+                        j += 1;
+                        continue;
+                    }
+                    if cj == "\"" {
+                        s_in_string = false;
+                        j += 1;
+                        continue;
+                    }
+                    j += 1;
+                    continue;
+                }
+                if cj == "/" {
+                    if j + 1 < source_len {
+                        let nj = _cr_byte_at(source, j + 1);
+                        if nj == "/" {
+                            s_in_line_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                        if nj == "*" {
+                            s_in_block_comment = true;
+                            j += 2;
+                            continue;
+                        }
+                    }
+                }
+                if cj == "\"" {
+                    s_in_string = true;
+                    j += 1;
+                    continue;
+                }
+                if spec.length == 0 {
+                    if _cr_word_matches(source, j, "from") {
+                        let mut k = j + 4;
+                        loop {
+                            if k >= source_len { break; }
+                            let wk = _cr_byte_at(source, k);
+                            let mut ws: boolean = false;
+                            if wk == " " { ws = true; }
+                            if wk == "\t" { ws = true; }
+                            if wk == "\n" { ws = true; }
+                            if wk == "\r" { ws = true; }
+                            if !ws { break; }
+                            k += 1;
+                        }
+                        if k < source_len {
+                            if _cr_byte_at(source, k) == "\"" {
+                                k += 1;
+                                let start = k;
+                                let mut esc: boolean = false;
+                                loop {
+                                    if k >= source_len { break; }
+                                    let sk = _cr_byte_at(source, k);
+                                    if esc {
+                                        esc = false;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\\" {
+                                        esc = true;
+                                        k += 1;
+                                        continue;
+                                    }
+                                    if sk == "\"" {
+                                        spec = substring(source, start, k);
+                                        break;
+                                    }
+                                    k += 1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if cj == ";" {
+                    stmt_end = j + 1;
+                    break;
+                }
+                j += 1;
+            }
+            if stmt_end > 0 {
+                if spec.length > 0 {
+                    if strings_equal(spec, target) { return true; }
+                    if spec.length > target.length {
+                        if substring(spec, 0, target.length) == target {
+                            if substring(spec, target.length, target.length + 1) == "/" {
+                                return true;
+                            }
+                        }
+                    }
+                }
+                i = stmt_end;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    return false;
+}
+
+// P1 (#363): scan every test entry once and report whether any of
+// them imports the host capsule by its `[capsule].name`. The host-
+// capsule enumeration is gated on this so the resolver doesn't
+// stage extra `<name>/<rel>` slugs for capsules whose tests only
+// reach the host source via `../src/...` relative imports — those
+// already produce path-shaped slugs through the relative-import
+// walker, and shadowing them with `<name>/...` slugs would race
+// the build cache (which keys IR by source content + dep manifests
+// only, not by slug — see `cache_key_for`).
+fn _cr_any_entry_imports_host(entry_paths: string[], capsule_name: string) -> boolean ![io] {
+    if capsule_name.length == 0 { return false; }
+    let mut i: number = 0;
+    loop {
+        if i >= entry_paths.length { break; }
+        let entry = entry_paths[i];
+        if fs.exists(entry) {
+            let source = fs.readFile(entry);
+            if _cr_source_imports_host(source, capsule_name) { return true; }
+        }
+        i += 1;
+    }
+    return false;
+}
+
 // Look up a workspace member src dir from a scoped import spec like
 // "sfn/http". Submodule paths ("sfn/http/client") strip the trailing
 // segments down to the canonical "scope/name" before lookup so the spec
@@ -3092,6 +3406,57 @@ fn _cr_resolve_and_dedupe(entry_paths: string[], consumer: ResolverConsumer) -> 
             if di >= dep_sources.length { break; }
             sources.push(dep_sources[di]);
             di += 1;
+        }
+        // P1 (#363): when `consumer.include_host_as_dep` is set
+        // (currently `sfn test`) AND at least one test entry
+        // imports the host capsule by its `[capsule].name`,
+        // enumerate `<project_root>/src/` and tag each source with
+        // the manifest's name as the spec. Without this gate, a
+        // capsule whose tests only reach the host via `../src/...`
+        // (path-shaped slug) would still get a parallel
+        // `<name>/<rel>` enumeration, and `cache_key_for`'s
+        // slug-blind keying would race the two compiles on the same
+        // cache entry — every test in the resolver-driven `make
+        // test` suite then surfaces undefined references for the
+        // shape that lost the race. The build path keeps this off
+        // (`empty_resolver_consumer()`) because the host capsule's
+        // entry source is compiled directly via the single-file
+        // `compile_to_llvm_file_with_module` path, so re-
+        // enumerating it here would double-emit.
+        if consumer.include_host_as_dep {
+            let manifest_path = _cr_path_join(project_root, "capsule.toml");
+            if fs.exists(manifest_path) {
+                let manifest_text = fs.readFile(manifest_path);
+                let host_name = toml_get_name(manifest_text);
+                if host_name.length > 0 {
+                    if _cr_any_entry_imports_host(entry_paths, host_name) {
+                        let host_sources = _cr_enumerate_host_capsule_sources(project_root);
+                        let mut hi: number = 0;
+                        loop {
+                            if hi >= host_sources.length { break; }
+                            let candidate = host_sources[hi];
+                            // Filter by source_path — the relative-
+                            // import walker may have already emitted
+                            // the same source under a path-shaped
+                            // slug; the slug-collision detector
+                            // doesn't catch that case because the
+                            // slugs differ.
+                            let mut already_seen: boolean = false;
+                            let mut sj: number = 0;
+                            loop {
+                                if sj >= sources.length { break; }
+                                if strings_equal(sources[sj].source_path, candidate.source_path) {
+                                    already_seen = true;
+                                    break;
+                                }
+                                sj += 1;
+                            }
+                            if !already_seen { sources.push(candidate); }
+                            hi += 1;
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -1,0 +1,10 @@
+// P1 (#363) regression fixture: a user-style capsule whose tests
+// import the host capsule by its bare `[capsule].name`. Regresses
+// the gap where the runner's resolver pass used
+// `empty_resolver_consumer()`, which left the host capsule's
+// `src/` invisible to its own tests outside any workspace.toml.
+import { my_fn } from "my-app";
+
+test "my_fn adds one" { assert my_fn(2) == 3; }
+
+test "my_fn handles negatives" { assert my_fn(-1) == 0; }

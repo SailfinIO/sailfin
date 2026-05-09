@@ -6,10 +6,10 @@ import { AssertFailure, _empty_assert_failure, _parse_assert_failure_record } fr
 import { Program, Statement } from "./ast";
 import { is_safe_scope_name, parse_scope_name } from "./capsule_artifact";
 import {
+    ResolverConsumer,
     TestCapsuleResolution,
     discover_project_root,
     discover_workspace_root,
-    empty_resolver_consumer,
     prepare_project_capsules_for_test
 } from "./capsule_resolver";
 import {
@@ -29,6 +29,7 @@ import {
     _has_prefix_cmd,
     _legacy_flag_file,
     _looks_like_test_file_cmd,
+    _path_join_cmd,
     _resolve_capsule_name_cmd,
     _sanitize_filename_cmd,
     _sha256_of_file_cmd,
@@ -352,6 +353,74 @@ fn _test_group_key(file_path: string) -> string ![io] {
     return project_root + "::" + workspace_root;
 }
 
+// P1 (#363): build a `ResolverConsumer` for a test group. The
+// consumer is keyed off the host capsule's manifest so:
+//
+//   - intra-capsule `.ll` outputs route under
+//     `build/capsules/<scope>/<name>/ir/` when the manifest's
+//     `[capsule].name` is in `scope/name` form (matches what
+//     `sfn build -p <capsule>` does for production builds);
+//   - the resolver enumerates `<project_root>/src/` as if it were a
+//     manifest-declared dep (`include_host_as_dep = true`), so a
+//     test file in `<project>/tests/` can `import { fn } from
+//     "<capsule_name>"` and resolve to the host capsule's source.
+//
+// Standalone test files outside any capsule.toml (or any test where
+// the manifest has no `[capsule].name`) get an empty consumer with
+// `include_host_as_dep = true`. The host enumeration is a no-op
+// without a name, so the resolver falls back to the legacy
+// relative-import / workspace-implicit walks the test runner has
+// always relied on.
+fn _test_resolver_consumer_for_group(file_path: string) -> ResolverConsumer ![io] {
+    let dir = _dirname_cmd(file_path);
+    let project_root = discover_project_root(dir);
+    if project_root.length == 0 {
+        return ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: false,
+            include_host_as_dep: true
+        };
+    }
+    let manifest_path = _path_join_cmd(project_root, "capsule.toml");
+    if !fs.exists(manifest_path) {
+        return ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: false,
+            include_host_as_dep: true
+        };
+    }
+    let manifest_text = fs.readFile(manifest_path);
+    let capsule_name = toml_get_name(manifest_text);
+    if capsule_name.length == 0 {
+        return ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: false,
+            include_host_as_dep: true
+        };
+    }
+    let parts = parse_scope_name(capsule_name);
+    if !is_safe_scope_name(parts.scope, parts.name) {
+        // Single-segment / unsafe names route through the legacy
+        // flat layout but still get host enumeration so a manifest
+        // with `[capsule].name = "my-app"` can self-host its tests.
+        return ResolverConsumer {
+            scope: "",
+            name: "",
+            walk_project_src: false,
+            include_host_as_dep: true
+        };
+    }
+    return ResolverConsumer {
+        scope: parts.scope,
+        name: parts.name,
+        walk_project_src: false,
+        include_host_as_dep: true
+    };
+}
+
 fn _find_test_group(groups: TestGroup[], key: string) -> number {
     let mut i: number = 0;
     loop {
@@ -647,18 +716,27 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clo
                 + number_to_string(groups[gi].entry_paths.length)
                 + ")");
         }
-        // `sfn test` does not yet take `-p`, so the consumer is
-        // empty and per-capsule `.ll` routing falls back to the
-        // legacy flat layout (Stage C2b2). Test-time link continues
-        // to consume `build/sailfin/capsules/<mangled>.ll` until
-        // `sfn test -p` ships.
+        // P1 (#363): derive the resolver consumer from the host
+        // capsule's manifest so a test file in `<project>/tests/`
+        // can import the host capsule by its `[capsule].name` (e.g.
+        // `import { fn } from "my-app"`) — not just by relative
+        // path (`../src/mod`). `include_host_as_dep = true` opts
+        // the resolver into enumerating `<project_root>/src/` with
+        // `<capsule_name>/<stem>` slugs, which matches what the
+        // test source's import-path normalizer resolves the bare
+        // capsule name to. Standalone test files outside any
+        // capsule.toml (the compiler's own `compiler/tests/` suite
+        // is the canonical case) get an empty consumer that still
+        // walks workspace-implicit imports — matching the prior
+        // `empty_resolver_consumer()` behavior.
         // Stage D PR3: `sfn test` runs from the legacy `make test`
         // path that does not thread `binary_dir` through, so pass
         // an empty `sailfin_exe`. The resolver falls back to the
         // in-process compile path that has worked for tests since
         // Stage C2c — test fixtures stay well below the per-module
         // count where arena pressure becomes an issue.
-        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, empty_resolver_consumer(), "", "");
+        let consumer = _test_resolver_consumer_for_group(groups[gi].entry_paths[0]);
+        let resolution = prepare_project_capsules_for_test(groups[gi].entry_paths, consumer, "", "");
         if resolution.staging_failed {
             // Resolver already emitted a structured error to stderr
             // (slug collision, stage-write, or compile failure).
