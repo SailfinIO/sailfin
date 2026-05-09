@@ -50,6 +50,16 @@ fn _capture_int(name: string) -> Capture {
     };
 }
 
+fn _capture_int_mut(name: string) -> Capture {
+    return Capture {
+        name: name,
+        type_text: "int",
+        by_value: true,
+        mutable: true,
+        span: null
+    };
+}
+
 fn _capture_bool(name: string) -> Capture {
     return Capture {
         name: name,
@@ -193,6 +203,21 @@ test "closure_env: heap-pointer capture lowers to %T* in the struct decl" {
     assert layout.type_decl == "%sfn_closure_env_2 = type { i64, %Buffer* }";
     assert layout.fields[1].llvm_type == "%Buffer*";
     assert ! layout.fields[1].by_value;
+}
+
+// `Capture.mutable` flows through to `ClosureEnvField.mutable`
+// so stage A3 (#460) can wire the mutating-capture diagnostic
+// without re-running `analyze_lambda_captures`. Per the briefing
+// comment on #459, mutable is informational here — but losing it
+// would force A3 to re-derive scope information from the source
+// that A1 already walked.
+test "closure_env: Capture.mutable propagates onto the field record" {
+    let captures: Capture[] = [_capture_int("read_only"), _capture_int_mut("counter")];
+    let layout = synthesize_closure_env_struct(captures, 8);
+    assert layout.fields[0].name == "read_only";
+    assert ! layout.fields[0].mutable;
+    assert layout.fields[1].name == "counter";
+    assert layout.fields[1].mutable;
 }
 
 // ── Env allocation walk at the lambda expression site ────────────────

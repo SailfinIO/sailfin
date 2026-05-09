@@ -65,12 +65,17 @@ import { join_with_separator, number_to_string, trim_text } from "./utils";
 // `map_type_annotation`, falling back to `i8*` for empty
 // `type_text` (the seed's pre-#458 `Capture` records carried no
 // annotation; A1 captures inherit the binding's annotation when
-// available and are otherwise empty).
+// available and are otherwise empty). `mutable` is propagated from
+// the source `Capture` so stage A3 (#460) can wire the
+// mutating-capture diagnostic against the field record without
+// re-running `analyze_lambda_captures` — A1's scope walk already
+// records whether the enclosing binding was declared `let mut`.
 struct ClosureEnvField {
     name: string;
     llvm_type: string;
     index: number;
     by_value: boolean;
+    mutable: boolean;
 }
 
 // Materialised env layout for one lambda. `is_empty` short-circuits
@@ -176,7 +181,7 @@ fn synthesize_closure_env_struct(captures: Capture[], lambda_id: number) -> Clos
         let capture = captures[index];
         let llvm_type = closure_field_llvm_type(capture);
         fields.push(ClosureEnvField {
-            name: capture.name, llvm_type: llvm_type, index: index, by_value: capture.by_value
+            name: capture.name, llvm_type: llvm_type, index: index, by_value: capture.by_value, mutable: capture.mutable
         });
         field_types.push(llvm_type);
         index += 1;
