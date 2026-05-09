@@ -207,3 +207,74 @@ test "captures: capture order follows source-use order, not declaration order" {
     assert strings_equal(records[0].captures[0].name, "a");
     assert strings_equal(records[0].captures[1].name, "b");
 }
+
+// -------------------------------------------------------------------
+// Try / catch — the `catch (name)` identifier introduces a fresh
+// local binding visible only inside the catch block. A lambda
+// nested inside the catch must see the catch variable as locally
+// bound, not as a capture from the enclosing scope. Mirrors review
+// feedback on PR #512.
+// -------------------------------------------------------------------
+test "captures: catch-name shadows outer binding for lambdas inside catch" {
+    // Top-level `let err: number = 0` is in scope at the lambda
+    // site (annotated `: number`). The `catch (err) { ... }` handler
+    // re-binds `err` as a fresh local with no annotation. A lambda
+    // nested inside the catch must resolve its `err` reference
+    // against the catch handler — not the outer let — so the
+    // captured binding's `type_text` is empty (catch handlers don't
+    // carry type annotations) instead of `"number"` (which would
+    // signal the walk had punched through to the outer let).
+    let source = "let err: number = 0; fn run() -> number { try { return 0; } catch (err) { return fn() -> number { return err; }; } return 1; }";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    assert records[0].captures.length == 1;
+    assert strings_equal(records[0].captures[0].name, "err");
+    // Empty type_text proves the capture resolved to the catch
+    // handler, not the outer `let err: number`. Without the catch-
+    // scope extension, the walk would echo `"number"` here.
+    assert strings_equal(records[0].captures[0].type_text, "");
+}
+
+// -------------------------------------------------------------------
+// Body-span identification — every record must carry the body's
+// opening `{` line/column so stage A2 can map its own `Expression
+// .Lambda` walk back to the inferred record without depending on
+// pre-order indexing alone. Mirrors review feedback on PR #512.
+// -------------------------------------------------------------------
+test "captures: record carries the body's opening-brace line and column" {
+    let source = "let f = fn() -> number { return 0; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 1;
+    // Body span is taken from the lambda body's opening `{` token.
+    // Line/column are positive 1-based integers; the precise column
+    // depends on the lexer's column-numbering scheme, so pin
+    // line == 1 (single-line source) and column != 0 (token has a
+    // location). Stage A2 will compute the same span the same way.
+    assert records[0].body_start_line == 1;
+    assert records[0].body_start_column != 0;
+}
+
+test "captures: nested lambdas carry distinct body-span identifiers" {
+    // Two lambdas with identical parameter shapes (both 0-arity)
+    // must still be distinguishable via body span — that's the
+    // point of carrying the identifier alongside `parameter_names`.
+    let source = "let x: number = 1; let outer = fn() -> number { return fn() -> number { return x; }; };";
+    let program = parse_program(source);
+    let records = analyze_lambda_captures(program);
+    assert records.length == 2;
+    let mut same_line: boolean = false;
+    if records[0].body_start_line == records[1].body_start_line {
+        same_line = true;
+    }
+    let mut same_column: boolean = false;
+    if records[0].body_start_column == records[1].body_start_column {
+        same_column = true;
+    }
+    let mut both_match: boolean = false;
+    if same_line {
+        if same_column { both_match = true; }
+    }
+    assert ! both_match;
+}

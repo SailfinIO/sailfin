@@ -80,9 +80,15 @@ enum Expression {
         body: Block,
         return_type: TypeAnnotation?,
         // Captures are appended last so the seed compiler's positional
-        // GEP indexing for the existing fields stays stable. The parser
-        // emits an empty list; the typechecker populates the inferred
-        // set via `analyze_lambda_captures` in `typecheck_captures`.
+        // GEP indexing for the existing fields stays stable. Today the
+        // parser always emits an empty list and the inferred capture
+        // sets live separately as `LambdaCaptureRecord[]` returned by
+        // `analyze_lambda_captures` in `typecheck_captures`. Records
+        // are keyed back to a specific Lambda node by the body's
+        // opening `{` token (`body.tokens[0]` line/column). A future
+        // pass can copy each record's `captures` onto the matching
+        // node so this field becomes the single source of truth; for
+        // now stage A2 / A3 should look up the record by body span.
         captures: Capture[]
     },
     Range { start: Expression, end: Expression },

@@ -62,14 +62,23 @@ struct LocalBinding {
 }
 
 // One record per `Expression.Lambda` discovered during the walk.
-// `parameter_names` lets unit tests pin a record to a specific
-// lambda by parameter shape (lambdas don't carry per-node spans
-// today; once they do, tests can switch to span-based matching).
 // Records are emitted in pre-order so a nested-lambda assertion
 // can index by `[0]` for the outer and `[1]` for the inner.
+//
+// Identification — `body_start_line` and `body_start_column` are
+// taken from the lambda body's opening `{` token. Two lambdas with
+// identical parameter shapes still differ on body start, so stage
+// A2 / A3 can map an `Expression.Lambda` AST node back to its
+// record by computing the same `(line, column)` from its
+// `body.tokens[0]`. `parameter_names` is kept alongside as a
+// human-readable hint for diagnostics and for tests to assert
+// against without depending on exact line/column numbers in source
+// fixtures.
 struct LambdaCaptureRecord {
     parameter_names: string[];
     captures: Capture[];
+    body_start_line: number;
+    body_start_column: number;
 }
 
 // Internal walk result. `free` is the set of identifier names
@@ -241,7 +250,19 @@ fn walk_statement(scope: LocalBinding[], stmt: Statement) -> CaptureWalkResult {
     if stmt.variant == "TryStatement" {
         let mut result = walk_block(scope, stmt.try_block);
         if stmt.catch_block != null {
-            result = merge_results(result, walk_block(scope, stmt.catch_block));
+            // The `catch (name)` identifier is a fresh local binding
+            // visible only inside the catch block, so extend the
+            // scope with it and subtract its name from the bubbled
+            // free set — otherwise a lambda nested inside the catch
+            // would capture the catch variable as if it were an
+            // enclosing let-binding.
+            let catch_scope = extend_with_catch_name(scope, stmt.catch_name);
+            let catch_result = walk_block(catch_scope, stmt.catch_block);
+            let catch_local: string[] = catch_name_as_list(stmt.catch_name);
+            let catch_free = subtract_names(catch_result.free, catch_local);
+            result = merge_results(result, CaptureWalkResult {
+                free: catch_free, records: catch_result.records
+            });
         }
         if stmt.finally_block != null {
             result = merge_results(result, walk_block(scope, stmt.finally_block));
@@ -362,13 +383,51 @@ fn analyze_lambda(outer_scope: LocalBinding[], lambda: Expression) -> CaptureWal
     let param_names = parameter_names(lambda.parameters);
     let lambda_free = subtract_names(body_result.free, param_names);
     let captures = build_captures(outer_scope, lambda_free);
+    let body_line = body_start_line(lambda.body);
+    let body_column = body_start_column(lambda.body);
 
     let mut records: LambdaCaptureRecord[] = [];
     records.push(LambdaCaptureRecord {
-        parameter_names: param_names, captures: captures
+        parameter_names: param_names, captures: captures, body_start_line: body_line, body_start_column: body_column
     });
     records = append_records(records, body_result.records);
     return CaptureWalkResult { free: lambda_free, records: records };
+}
+
+fn body_start_line(body: Block) -> number {
+    if body.tokens.length == 0 { return 0; }
+    return body.tokens[0].line;
+}
+
+fn body_start_column(body: Block) -> number {
+    if body.tokens.length == 0 { return 0; }
+    return body.tokens[0].column;
+}
+
+fn extend_with_catch_name(scope: LocalBinding[], catch_name: string?) -> LocalBinding[] {
+    let mut out: LocalBinding[] = [];
+    let mut i: number = 0;
+    loop {
+        if i >= scope.length { break; }
+        out.push(scope[i]);
+        i += 1;
+    }
+    if catch_name != null {
+        if catch_name.length > 0 {
+            out.push(LocalBinding {
+                name: catch_name, type_text: "", by_value: false, mutable: false, span: null
+            });
+        }
+    }
+    return out;
+}
+
+fn catch_name_as_list(catch_name: string?) -> string[] {
+    let mut out: string[] = [];
+    if catch_name != null {
+        if catch_name.length > 0 { out.push(catch_name); }
+    }
+    return out;
 }
 
 // ----- Capture construction & scope helpers -----
