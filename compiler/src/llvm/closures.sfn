@@ -25,7 +25,7 @@
 //   %sfn_closure_env_<id> = type { <field0>, <field1>, ... }
 //
 //   ; at the lambda expression site — alloc + populate
-//   %size_ptr = getelementptr inbounds %sfn_closure_env_<id>,
+//   %size_ptr = getelementptr %sfn_closure_env_<id>,
 //                              %sfn_closure_env_<id>* null, i32 1
 //   %size_i64 = ptrtoint %sfn_closure_env_<id>* %size_ptr to i64
 //   %env_raw  = call noalias i8* @sailfin_runtime_alloc_struct(i64 %size_i64)
@@ -254,7 +254,14 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
 
     let size_ptr = format_temp_name(current_temp);
     current_temp += 1;
-    lines.push("  " + size_ptr + " = getelementptr inbounds " + type_name + ", "
+    // Drop `inbounds` on the null-base size GEP: per the LLVM
+    // language reference, `inbounds` requires the base pointer to
+    // be within an allocated object, which `null` is not. Plain
+    // `getelementptr ... null, i32 1` is the well-defined sizeof
+    // idiom — matches `core_operands.sfn`'s use of the same
+    // pattern. The follow-up GEPs below stay `inbounds` because
+    // they are rooted at the freshly-allocated env pointer.
+    lines.push("  " + size_ptr + " = getelementptr " + type_name + ", "
         + typed_ptr
         + " null, i32 1");
 
