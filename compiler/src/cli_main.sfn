@@ -1300,7 +1300,8 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
         let mut consumer = ResolverConsumer {
             scope: "",
             name: "",
-            walk_project_src: walk_src
+            walk_project_src: walk_src,
+            include_host_as_dep: false
         };
         if cap_capsule_name.length > 0 {
             let parts0 = parse_scope_name(cap_capsule_name);
@@ -1308,7 +1309,8 @@ fn sailfin_cli_main(argv: string[]) -> number ![io, clock] {
                 consumer = ResolverConsumer {
                     scope: parts0.scope,
                     name: parts0.name,
-                    walk_project_src: walk_src
+                    walk_project_src: walk_src,
+                    include_host_as_dep: false
                 };
             }
         }
