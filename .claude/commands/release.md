@@ -154,6 +154,29 @@ the user to consider closing the tracking issue once the release publishes
 successfully (the release-notes generator can do this in a follow-up; don't
 auto-close from the skill).
 
+### 7. Suggest `/pin-seed` if the cut warrants it
+
+After the dispatch summary, suggest running `/pin-seed` as a follow-up
+when **any** of these is true:
+
+- The cut is `bump=patch` (almost always implies a hotfix-pin).
+- A `seed-blocker` issue closed since the current `.seed-version` was
+  set:
+  ```bash
+  last_pin_at="$(git log -1 --format=%cI .seed-version)"
+  ```
+  ```
+  mcp__github__search_issues query='repo:SailfinIO/sailfin is:issue is:closed label:seed-blocker closed:>=<last_pin_at>'
+  ```
+- The cut is a non-alpha promotion (beta/rc/stable) — usually the
+  pin should advance to the promoted version.
+
+When suggesting, mention that `/pin-seed` should be run **after**
+`release-tag.yml` finishes uploading binaries (a few minutes), and
+that the pin is its own PR off `main` — not a piggyback on the cut
+commit. See `docs/conventions/issue-naming.md` "Seed pinning" for
+the convention.
+
 ## Version math reference
 
 Given current version `0.5.0-alpha.22`:

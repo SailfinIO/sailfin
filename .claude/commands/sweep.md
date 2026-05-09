@@ -110,15 +110,16 @@ For each issue in the `blocked` pool:
 ## Phase 2b: SYNC RELEASE TRACKING ISSUES
 
 If any of the issues newly closed by the anchor merges carries a
-`release:*` label, the corresponding `Release: vX.Y.Z` tracking issue
-needs its checklist updated. This is a passive sync — `/release-plan`
-is the active equivalent for cycle bookkeeping.
+`release:*` or `seed-blocker` label, the corresponding `Release: vX.Y.Z`
+tracking issue needs its checklist updated. This is a passive sync —
+`/release-plan` is the active equivalent for cycle bookkeeping.
 
 For each newly-closed issue:
 
 1. Get its labels:
    ```bash
-   gh issue view <N> --json labels --jq '.labels[].name' | grep '^release:'
+   gh issue view <N> --json labels --jq '.labels[].name' \
+     | grep -E '^(release:|seed-blocker$)'
    ```
 2. For each `release:<gate>` label found, locate the tracking issue:
    ```
@@ -127,19 +128,19 @@ For each newly-closed issue:
    Map `release:<gate>` to the matching tracking issue title — typically
    the one whose target version corresponds to the gate. If multiple
    match (e.g. an item gates both `release:beta` and `release:1.0`),
-   update each.
-3. Read the tracking issue body. In the `## Must close before cut`
-   section, find any `- [ ] #N — ...` line for the closed issue and
-   flip it to `- [x] #N — ...`. Leave everything else untouched.
+   update each. Tick the matching `## Must close before cut` line.
+3. For `seed-blocker`, tick the matching line in the `## Seed blockers`
+   section of the same tracking issue (if present). Also surface in
+   the report so the user knows a `/pin-seed` may be appropriate.
 4. Edit the body and post a one-line comment:
    ```
-   Auto-sweep: #<N> closed via PR #<M> — ticked.
+   Auto-sweep: #<N> closed via PR #<M> — ticked (release:<gate>, seed-blocker).
    ```
-5. If the closed issue isn't in the checklist, mention it in the report
+5. If the closed issue isn't in any checklist, mention it in the report
    under "Concerns" (likely means it was labeled after the tracking
    issue was created without `/release-plan` re-running).
 
-If no newly-closed issue carries a `release:*` label, skip this phase
+If no newly-closed issue carries either label, skip this phase
 entirely. **In `--dry-run`, make zero writes.**
 
 ---

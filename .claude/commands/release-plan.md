@@ -70,7 +70,14 @@ If no tracking issue exists for the target:
    mcp__github__search_issues query='repo:SailfinIO/sailfin is:open label:release:<gate>'
    ```
 
-2. Compose the issue body:
+2. Pull open `seed-blocker` issues — they often correlate with what
+   should ship in the same cycle:
+
+   ```
+   mcp__github__search_issues query='repo:SailfinIO/sailfin is:open label:seed-blocker'
+   ```
+
+3. Compose the issue body:
 
    ```markdown
    ## Goal
@@ -87,6 +94,11 @@ If no tracking issue exists for the target:
    - [ ] #<N> — <title>  (`release:<gate>`, size:_, priority:_)
    - [ ] ...
 
+   ## Seed blockers (must close before the next seed bump)
+
+   - [ ] #<N> — <title>  (`seed-blocker`)
+   - [ ] ...
+
    ## Cut gate
 
    This is a curated cut. `/release` will list every open item under
@@ -99,8 +111,10 @@ If no tracking issue exists for the target:
    ## Cross-references
 
    - Convention: `docs/conventions/issue-naming.md` "Release tracking"
+     and "Seed pinning"
    - Cut workflow: `.github/workflows/release.yml`
    - `/release` skill: `.claude/commands/release.md`
+   - `/pin-seed` skill: `.claude/commands/pin-seed.md`
    ```
 
 3. Create the issue:
@@ -117,20 +131,22 @@ If no tracking issue exists for the target:
 
 If the tracking issue already exists:
 
-1. Read the current body. Parse the `## Must close before cut` section.
-   Extract every `- [ ] #N` and `- [x] #N` line.
-2. Pull the current open + recently-closed labeled set:
+1. Read the current body. Parse both `## Must close before cut` and
+   `## Seed blockers` sections. Extract every `- [ ] #N` and `- [x] #N`
+   line in each.
+2. Pull the current sets:
 
    ```
    mcp__github__search_issues query='repo:SailfinIO/sailfin label:release:<gate>'
+   mcp__github__search_issues query='repo:SailfinIO/sailfin label:seed-blocker'
    ```
 
-3. Reconcile:
+3. Reconcile each section independently:
    - **In body, now closed** → flip `- [ ]` to `- [x]`. Keep the line.
    - **In body, no longer labeled, still open** → flag as drift, leave
      the line, mention in the report. Don't auto-remove (human decision).
    - **Newly labeled, missing from body** → append a new `- [ ]` line
-     under "Must close before cut".
+     under the matching section.
 
 4. If anything changed, edit the body and post a summary comment:
 
