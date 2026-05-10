@@ -42,7 +42,8 @@ PY
 
 needs_cap=0
 
-if [[ "$cmd" =~ (^|[[:space:];&|])(make)([[:space:]]+(compile|rebuild|check|test|test-unit|test-integration|bench|clean-build))?([[:space:];&|]|$) ]]; then
+make_re='(^|[;&|()`])[[:space:]]*make[[:space:]]+(compile|rebuild|check|test|test-unit|test-integration|test-e2e|bench|clean-build)([[:space:]]|$|[;&|])'
+if [[ "$cmd" =~ $make_re ]]; then
   needs_cap=1
 fi
 
