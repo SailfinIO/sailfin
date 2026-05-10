@@ -1827,18 +1827,29 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
 }
 
 // Slice E.1.5 (#528): `coerce_operand_to_type` is the single chokepoint for
-// numeric ABI shape decisions. When `allow_widen` is false (the default for
-// callsites that cross an ABI boundary — function call arguments, struct field
-// stores, deref/lvalue assignments) and the operand and target disagree on
-// `numeric_type_kind` (one is `int`, the other is `float`), the coercion
-// refuses with a hard diagnostic instead of silently emitting `sitofp` /
-// `fptosi`. Callers that legitimately widen across kinds today (arithmetic
-// harmonisation in `harmonise_operands`, the `arr.push(...)` value shape
-// adjust, the `@[abi_widen]`-annotated parameter opt-out wired up in Slice
-// E.2 by issues #489a–d) pass `allow_widen=true` to keep their existing
-// semantics. The reapply of `#296` in Slice E.3 generalises the rejection
-// to harmonisation as well, once every `: number` site in the compiler
-// source has been migrated to `: int`/`: float`.
+// numeric ABI shape decisions. `allow_widen` selects the slice's strict scope:
+//
+//   • `allow_widen = false` — the strict mode used by ABI-boundary callsites:
+//     function call arguments (`core_call_emission.sfn`), struct-field
+//     assignment (`statement_assignment.sfn`), and struct-literal field
+//     initialization (`core_literals_lowering.sfn`). When the operand and
+//     target disagree on `numeric_type_kind` along the asymmetric direction
+//     (operand=`float`, target=`int`), the coercion refuses with a `[fatal]`
+//     diagnostic instead of silently emitting `fptosi`.
+//
+//   • `allow_widen = true` — the permissive mode used by every other
+//     callsite, including arithmetic harmonisation (`harmonise_operands`),
+//     the `arr.push(...)` value-shape adjust, pointer-deref stores, lvalue
+//     assignments to locals, array-element stores, array-index → i64
+//     coercions, and the various `i1`/`i8*`/`{i8*, i64}` shape coerces.
+//     These keep today's silent widening so the existing tree continues to
+//     self-host. The `@[abi_widen]`-annotated parameter opt-out (Slice E.2,
+//     #489a–d) flips the call-arg site to permissive mode for the small set
+//     of legitimate i64 ↔ f64 widens during the partial migration.
+//
+// Slice E.3 (#490) re-applies #296 — once every `: number` site in the
+// compiler source has migrated to `: int`/`: float`, the symmetric rejection
+// generalises to the permissive sites above as well.
 fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[], allow_widen: boolean) -> CoercionResult ![io] {
     let debug_coerce = trace_lowering();
     if debug_coerce {

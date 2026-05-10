@@ -50,6 +50,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "./core_scopes";
+import { find_substring_from } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 // Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
@@ -514,6 +515,38 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
                         current_temp = _recover_assign_temp(current_lines, current_temp);
+                        // Slice E.1.5 (#528): location-aware follow-up so the
+                        // struct + field name is in the build log alongside
+                        // the type-shape detail emitted by `coerce_operand_to_type`.
+                        if coerced.operand == null {
+                            let mut _abi_match: boolean = false;
+                            let mut _abi_idx: number = 0;
+                            loop {
+                                if _abi_idx >= coerced.diagnostics.length {
+                                    break;
+                                }
+                                if find_substring_from(coerced.diagnostics[_abi_idx], "ABI primitive mismatch", 0) >= 0 {
+                                    _abi_match = true;
+                                }
+                                _abi_idx += 1;
+                            }
+                            let mut _field_diag_prefix: string = "llvm lowering: ";
+                            if _abi_match {
+                                _field_diag_prefix = "llvm lowering [fatal]: ";
+                            }
+                            let _field_diag = _field_diag_prefix
+                                + "unable to coerce value (got `"
+                                + lowered.operand.llvm_type
+                                + "`) into struct field `"
+                                + struct_info.name
+                                + "."
+                                + member_parse.field
+                                + "` (expected `"
+                                + field_info.llvm_type
+                                + "`)";
+                            if _abi_match { print.err(_field_diag); }
+                            diagnostics.push(_field_diag);
+                        }
                         if coerced.operand != null {
                             let field_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;

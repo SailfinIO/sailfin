@@ -34,7 +34,7 @@ import {
 import { coerce_operand_to_type } from "./core_operands";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding } from "./core_scopes";
-import { sanitize_symbol } from "./core_text";
+import { find_substring_from, sanitize_symbol } from "./core_text";
 
 // Slice E.1.5 (#528): per-parameter `@[abi_widen]` attribute lookup. The
 // attribute is plumbed from the AST through `NativeParameter.attributes`
@@ -49,6 +49,25 @@ fn parameter_has_attribute(parameter: NativeParameter, name: string) -> boolean 
         index += 1;
     }
     return false;
+}
+
+// Slice E.1.5 (#528): if the wrapped diagnostics list contains the ABI
+// primitive mismatch sentinel, return the `llvm lowering [fatal]: ` prefix
+// so the location-aware follow-up message also escalates to fatal (the
+// emit-level entrypoint scans for `[fatal]` and refuses to write IR).
+// Returns the plain `llvm lowering: ` prefix otherwise so non-ABI coercion
+// failures keep their existing tier.
+fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
+    let mut idx: number = 0;
+    loop {
+        if idx >= diagnostics.length { break; }
+        let diag = diagnostics[idx];
+        if find_substring_from(diag, "ABI primitive mismatch", 0) >= 0 {
+            return "llvm lowering [fatal]: ";
+        }
+        idx += 1;
+    }
+    return "llvm lowering: ";
 }
 
 // Coerce operands to expected types and emit the final call instruction.
@@ -110,11 +129,32 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
             if coerced.operand == null {
-                result_diagnostics.push("llvm lowering: unable to coerce argument "
+                // Slice E.1.5 (#528): if the underlying refusal was an ABI
+                // primitive mismatch, escalate the location-aware message
+                // to `[fatal]` too so partial-migration breakage is
+                // self-locating in the build log. The mismatch detail
+                // (callee/caller LLVM types + kinds) was already pushed by
+                // `coerce_operand_to_type`; this adds the callee symbol +
+                // argument index that only the call site can name.
+                let _arg_diagnostic_prefix = _abi_mismatch_diagnostic_prefix(coerced.diagnostics);
+                let _arg_diag = _arg_diagnostic_prefix
+                    + "unable to coerce argument "
                     + number_to_string(index)
-                    + " for call to `"
+                    + " (expected `"
+                    + target_type
+                    + "`, got `"
+                    + operand.llvm_type
+                    + "`) for call to `"
                     + trimmed_target
-                    + "`: passing original operand");
+                    + "`: passing original operand";
+                // Slice E.1.5 (#528): mirror the ABI-shape detail's stderr
+                // emission so the location-aware follow-up surfaces even
+                // when the build refuses to write IR (and the diagnostics
+                // list never reaches the renderer).
+                if _arg_diagnostic_prefix == "llvm lowering [fatal]: " {
+                    print.err(_arg_diag);
+                }
+                result_diagnostics.push(_arg_diag);
                 coerced_operands.push(operand);
             } else { coerced_operands.push(coerced.operand); }
         }
