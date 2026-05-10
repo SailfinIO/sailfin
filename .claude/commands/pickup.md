@@ -54,31 +54,58 @@ failure mode that broke the original #489 attempt.
 ```bash
 SEED_TAG="v$(cat .seed-version)"
 git fetch --tags origin "$SEED_TAG" 2>/dev/null || git fetch --tags origin
+
+# Verify the seed tag actually resolves before any merge-base check.
+# A typo in .seed-version or a missing remote tag should produce a
+# clear diagnostic, not a low-signal `git merge-base` error.
+if ! git rev-parse --verify "${SEED_TAG}^{commit}" >/dev/null 2>&1; then
+  echo "Seed tag $SEED_TAG does not exist locally or on origin."
+  echo "Verify .seed-version points at a valid published release tag."
+  exit 1
+fi
 ```
 
 Parse the issue body for the `## Required in pinned seed` section.
 Extract every `#N` reference. For each:
 
 ```bash
-# If #N is an issue number, find the merged PR that closed it:
-PR=$(gh issue view <N> --json closedByPullRequestsReferences \
-       --jq '.closedByPullRequestsReferences[]?
-             | select(.isCrossRepository | not)
-             | .number' \
-     | head -1)
+# Detect PR vs issue up front. `gh pr view <issue-number>` errors,
+# while `gh issue view <pr-number>` succeeds but returns null
+# closedByPullRequestsReferences. PR-first avoids both ambiguity
+# and a wasted issue lookup when the dependency is already a PR.
+if gh pr view "$N" --repo SailfinIO/sailfin --json number >/dev/null 2>&1; then
+  PRS="$N"
+else
+  # Issue: collect EVERY closing PR. If multiple PRs closed the issue
+  # (e.g. revert + reland, partial-fix sequence), the predecessor is
+  # in the seed iff *any* of them is an ancestor of the seed tag.
+  PRS=$(gh issue view "$N" --repo SailfinIO/sailfin \
+         --json closedByPullRequestsReferences \
+         --jq '.closedByPullRequestsReferences[]?
+               | select(.isCrossRepository | not)
+               | .number')
+fi
 
-# If #N is already a PR, use it directly:
-[ -z "$PR" ] && PR=<N>
-
-PR_MERGE=$(gh pr view "$PR" --json mergeCommit --jq '.mergeCommit.oid')
-
-if [ -z "$PR_MERGE" ]; then
-  echo "Predecessor #<N> has no merged PR — pickup blocked until it merges."
+if [ -z "$PRS" ]; then
+  echo "Predecessor #$N has no merged PR — pickup blocked until it merges."
   exit 1
 fi
 
-if ! git merge-base --is-ancestor "$PR_MERGE" "$SEED_TAG"; then
-  echo "Predecessor #<N> (merged at $PR_MERGE) is NOT in the pinned seed $SEED_TAG."
+ANCESTOR_FOUND=0
+LAST_MERGE=""
+for PR in $PRS; do
+  PR_MERGE=$(gh pr view "$PR" --repo SailfinIO/sailfin \
+              --json mergeCommit --jq '.mergeCommit.oid // empty')
+  [ -z "$PR_MERGE" ] && continue
+  LAST_MERGE="$PR_MERGE"
+  if git merge-base --is-ancestor "$PR_MERGE" "$SEED_TAG" 2>/dev/null; then
+    ANCESTOR_FOUND=1
+    break
+  fi
+done
+
+if [ "$ANCESTOR_FOUND" -eq 0 ]; then
+  echo "Predecessor #$N (last checked merge $LAST_MERGE) is NOT in the pinned seed $SEED_TAG."
   echo "Cut a fresh seed before pickup:"
   echo "  gh workflow run release.yml --repo SailfinIO/sailfin --ref main \\"
   echo "    -f channel=alpha -f bump=prerelease"
@@ -91,7 +118,12 @@ fi
 `## Required in pinned seed` section existed: if the issue does NOT
 have that section but its `## Files Affected` lists anything under
 `compiler/src/` or `runtime/prelude.sfn`, walk every `#N` in
-`## Blocked by` through the same `git merge-base --is-ancestor` check.
+`## Blocked by` through the same per-PR merge-base check above.
+
+The legacy fallback only triggers when the section is **missing
+entirely**. Issues groomed under the new contract include the
+section even when it's empty (see `/groom` body skeleton), and an
+empty section means "no seed dependency" — pickup proceeds.
 If any blocker's merge commit is not an ancestor of the seed tag,
 halt with the same diagnostic.
 

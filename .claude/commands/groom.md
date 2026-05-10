@@ -110,11 +110,20 @@ ulimit -v 8388608 && timeout 60 build/native/sailfin run path/to/example.sfn
 ## Blocked by
 <#N or "None">
 
+## Required in pinned seed
+<#N or "None" — see "Seed dependencies" below for when to populate this>
+
 ## Context
 <links to roadmap, code, prior PRs>
 EOF
 )"
 ```
+
+**Always emit the `## Required in pinned seed` section**, even when the
+value is `None`. `/pickup` Phase 1.5 treats a missing section as legacy
+and falls back to walking `## Blocked by` against the seed tag — which
+produces false-positive seed-cut requirements on routine work. An
+explicit `None` value is the contract that says "no seed dependency."
 
 Capture the issue numbers. After each `gh issue create`:
 
