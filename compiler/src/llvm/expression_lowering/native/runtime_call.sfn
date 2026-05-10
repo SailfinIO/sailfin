@@ -167,7 +167,7 @@ fn emit_runtime_call(target: string, operands: LLVMOperand[], overrides: Runtime
             target_type = parameter_types[index];
         }
         if target_type.length == 0 { coerced_operands.push(operand); } else {
-            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines);
+            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines, true);
             result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;

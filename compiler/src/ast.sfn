@@ -102,6 +102,13 @@ struct Parameter {
     default_value: Expression?;
     mutable: boolean;
     span: SourceSpan?;
+    // Slice E.1.5 (#528): per-parameter ABI attributes parsed from
+    // `@[name]` syntax (e.g. `@[abi_widen] mut x: int`). Each attribute
+    // is its bare identifier name; arguments aren't supported in this
+    // slice. Currently only `abi_widen` is recognised, used by the
+    // LLVM call-arg coerce site to opt out of the int↔float kind
+    // diagnostic during the Slice E.2 partial migration.
+    attributes: string[];
 }
 
 struct WithClause {

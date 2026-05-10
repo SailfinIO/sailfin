@@ -708,6 +708,27 @@ fn spawn_ctx_symbol_for_return_type(return_type: string) -> string {
 }
 
 // =============================================================================
+// ABI Primitive Kind Classification (Slice E.1.5 — issue #528)
+// =============================================================================
+// Returns "int", "float", or "other" for an LLVM primitive type. Used by
+// `coerce_operand_to_type` (and future `#296` reapply in Slice E.3) to refuse
+// silent int↔float bitcasts at call boundaries during the partial migration
+// from `: number` to `: int`/`: float`. Pointer and aggregate types return
+// "other" — this slice deliberately scopes the diagnostic to scalar
+// primitives so the partial-migration ABI hazard is caught loudly without
+// disturbing today's pointer/struct lowering.
+fn numeric_type_kind(llvm_type: string) -> string {
+    let trimmed = trim_text(llvm_type);
+    if trimmed == "i64" { return "int"; }
+    if trimmed == "i32" { return "int"; }
+    if trimmed == "i16" { return "int"; }
+    if trimmed == "i8" { return "int"; }
+    if trimmed == "double" { return "float"; }
+    if trimmed == "float" { return "float"; }
+    return "other";
+}
+
+// =============================================================================
 // Default Value Helpers
 // =============================================================================
 fn default_value_for_llvm_type(llvm_type: string) -> string {

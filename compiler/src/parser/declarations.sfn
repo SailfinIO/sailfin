@@ -464,6 +464,47 @@ fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
     let tokens_ref = parser.tokens;
     let start_index = parser.index;
 
+    // Slice E.1.5 (#528): parse leading `@[name]` parameter attributes.
+    // Multiple attributes can stack (`@[a] @[b] x: int`). The attribute name
+    // is stored on the Parameter and plumbed through `NativeParameter` to
+    // the LLVM call-arg coerce site. Currently only `abi_widen` is honoured;
+    // unknown names parse but have no semantic effect (a future slice will
+    // diagnose unknown names alongside `effect_checker.sfn`).
+    let mut attributes: string[] = [];
+    loop {
+        parser = skip_trivia(parser);
+        let attr_at_token = parser_peek_raw(parser);
+        if !symbol_matches(attr_at_token, "@") { break; }
+        let attr_save = parser;
+        let mut attr_parser = parser_advance_raw(parser);
+        attr_parser = skip_trivia(attr_parser);
+        let attr_open = parser_peek_raw(attr_parser);
+        if !symbol_matches(attr_open, "[") {
+            // Not an `@[...]` attribute — leave the `@` for whoever parses
+            // decorators next (e.g. statement-level decorator parsing).
+            parser = attr_save;
+            break;
+        }
+        attr_parser = parser_advance_raw(attr_parser);
+        attr_parser = skip_trivia(attr_parser);
+        let attr_name_token = parser_peek_raw(attr_parser);
+        if attr_name_token.kind.variant != "Identifier" {
+            parser = attr_save;
+            break;
+        }
+        let attr_name = identifier_text(attr_name_token);
+        attr_parser = parser_advance_raw(attr_parser);
+        attr_parser = skip_trivia(attr_parser);
+        let attr_close = parser_peek_raw(attr_parser);
+        if !symbol_matches(attr_close, "]") {
+            parser = attr_save;
+            break;
+        }
+        attr_parser = parser_advance_raw(attr_parser);
+        attributes.push(attr_name);
+        parser = attr_parser;
+    }
+
     let mut is_mutable = false;
     let token = parser_peek_raw(parser);
     if identifier_matches(token, "mut") {
@@ -512,7 +553,8 @@ fn parse_single_parameter(initial_parser: Parser) -> ParameterParseResult {
         type_annotation: type_annotation,
         default_value: default_value,
         mutable: is_mutable,
-        span: span
+        span: span,
+        attributes: attributes
     };
     return ParameterParseResult { parser: parser, parameter: parameter };
 }

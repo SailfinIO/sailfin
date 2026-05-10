@@ -129,7 +129,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
         };
     }
 
-    let start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines);
+    let start_coerced = coerce_operand_to_type(start_result.operand, "double", current_temp, current_lines, true);
     let mut _ci12: number = 0;
     loop {
         if _ci12 >= start_coerced.diagnostics.length { break; }
@@ -161,7 +161,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
     }
     let start_operand = start_coerced.operand;
 
-    let end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines);
+    let end_coerced = coerce_operand_to_type(end_result.operand, "double", current_temp, current_lines, true);
     let mut _ci13: number = 0;
     loop {
         if _ci13 >= end_coerced.diagnostics.length { break; }
@@ -231,7 +231,7 @@ fn lower_for_range(function: NativeFunction, structure: LoopStructure, raw_targe
             };
         }
 
-        let stride_coerced = coerce_operand_to_type(stride_result.operand, "double", current_temp, current_lines);
+        let stride_coerced = coerce_operand_to_type(stride_result.operand, "double", current_temp, current_lines, true);
         let mut _ci15: number = 0;
         loop {
             if _ci15 >= stride_coerced.diagnostics.length { break; }

@@ -50,6 +50,7 @@ import {
     infer_borrow_base_scope,
     make_lifetime_region_metadata
 } from "./core_scopes";
+import { find_substring_from } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
 
 // Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
@@ -211,7 +212,12 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             };
         }
         let element_type = strip_pointer_suffix(lowered_ptr.operand.llvm_type);
-        let coerced = coerce_operand_to_type(lowered_value.operand, element_type, current_temp, current_lines);
+        // Slice E.1.5 (#528): pointer-deref store is not in the slice's
+        // explicit ABI boundary list (call args + struct-field writes).
+        // Pass `allow_widen=true` to preserve today's silent int↔float
+        // coercion behaviour. The reapply of #296 in Slice E.3 (#490)
+        // generalises the rejection here too.
+        let coerced = coerce_operand_to_type(lowered_value.operand, element_type, current_temp, current_lines, true);
         let mut _ci2: number = 0;
         loop {
             if _ci2 >= coerced.diagnostics.length { break; }
@@ -363,7 +369,12 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 current_temp = index_result.temp_index;
                                 current_temp = _recover_assign_temp(current_lines, current_temp);
                                 if index_result.operand != null {
-                                    let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines);
+                                    // Slice E.1.5 (#528): array index coercion
+                                    // legitimately widens double → i64 today
+                                    // (`arr[index]` with `index: number` is
+                                    // common). Exempt from the ABI primitive
+                                    // kind diagnostic.
+                                    let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true);
                                     let mut _sci2: number = 0;
                                     loop {
                                         if _sci2 >= coerced_index.diagnostics.length {
@@ -488,7 +499,13 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             + "`");
                     } else {
                         let field_info = struct_info.fields[field_index];
-                        let coerced = coerce_operand_to_type(lowered.operand, field_info.llvm_type, current_temp, current_lines);
+                        // Slice E.1.5 (#528): struct-field writes are an
+                        // explicit ABI boundary in the issue's scope. Refuse
+                        // silent int↔float coercion so a future partial
+                        // migration that flips one struct field's type from
+                        // `: number` to `: int` while its writers still
+                        // produce doubles surfaces here loudly.
+                        let coerced = coerce_operand_to_type(lowered.operand, field_info.llvm_type, current_temp, current_lines, false);
                         let mut _ci5: number = 0;
                         loop {
                             if _ci5 >= coerced.diagnostics.length { break; }
@@ -498,6 +515,38 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
                         current_temp = _recover_assign_temp(current_lines, current_temp);
+                        // Slice E.1.5 (#528): location-aware follow-up so the
+                        // struct + field name is in the build log alongside
+                        // the type-shape detail emitted by `coerce_operand_to_type`.
+                        if coerced.operand == null {
+                            let mut _abi_match: boolean = false;
+                            let mut _abi_idx: number = 0;
+                            loop {
+                                if _abi_idx >= coerced.diagnostics.length {
+                                    break;
+                                }
+                                if find_substring_from(coerced.diagnostics[_abi_idx], "ABI primitive mismatch", 0) >= 0 {
+                                    _abi_match = true;
+                                }
+                                _abi_idx += 1;
+                            }
+                            let mut _field_diag_prefix: string = "llvm lowering: ";
+                            if _abi_match {
+                                _field_diag_prefix = "llvm lowering [fatal]: ";
+                            }
+                            let _field_diag = _field_diag_prefix
+                                + "unable to coerce value (got `"
+                                + lowered.operand.llvm_type
+                                + "`) into struct field `"
+                                + struct_info.name
+                                + "."
+                                + member_parse.field
+                                + "` (expected `"
+                                + field_info.llvm_type
+                                + "`)";
+                            if _abi_match { print.err(_field_diag); }
+                            diagnostics.push(_field_diag);
+                        }
                         if coerced.operand != null {
                             let field_ptr_temp = format_temp_name(current_temp);
                             current_temp += 1;
@@ -596,7 +645,12 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             + base_result.operand.llvm_type
                             + "`");
                     } else {
-                        let coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines);
+                        // Slice E.1.5 (#528): array-element store is not in
+                        // the slice's explicit ABI boundary list. Pass
+                        // `allow_widen=true` to preserve today's behaviour;
+                        // Slice E.3 (#490) tightens this once the migration
+                        // completes.
+                        let coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines, true);
                         let mut _ci9: number = 0;
                         loop {
                             if _ci9 >= coerced.diagnostics.length { break; }
@@ -607,7 +661,10 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         current_temp = coerced.temp_index;
                         current_temp = _recover_assign_temp(current_lines, current_temp);
                         if coerced.operand != null {
-                            let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines);
+                            // Slice E.1.5 (#528): array index coerce, exempt
+                            // (see comment at the subscripted-lvalue site
+                            // above).
+                            let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true);
                             let mut _ci10: number = 0;
                             loop {
                                 if _ci10 >= coerced_index.diagnostics.length {

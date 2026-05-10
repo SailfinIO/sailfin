@@ -452,7 +452,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 }
             }
         }
-        let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines);
+        // Slice E.1.5 (#528): array literal element coerce — exempt
+        // (array-element store is not in the slice's strict scope).
+        let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines, true);
         diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
@@ -756,7 +758,11 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             current_temp = lowered.temp_index;
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             if lowered.operand != null {
-                let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines);
+                // Slice E.1.5 (#528): struct literal field initialization is
+                // a struct-field write; strict ABI primitive kind check, with
+                // a location-aware follow-up so the failing struct + field
+                // is in the build log next to the type-shape detail.
+                let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines, false);
                 let mut _ci6: number = 0;
                 loop {
                     if _ci6 >= coerced.diagnostics.length { break; }
@@ -765,6 +771,38 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 }
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
+                if coerced.operand == null {
+                    let mut _abi_match: boolean = false;
+                    let mut _abi_idx: number = 0;
+                    loop {
+                        if _abi_idx >= coerced.diagnostics.length { break; }
+                        if find_substring_from(coerced.diagnostics[_abi_idx], "ABI primitive mismatch", 0) >= 0 {
+                            _abi_match = true;
+                        }
+                        _abi_idx += 1;
+                    }
+                    let mut _lit_diag_prefix: string = "llvm lowering: ";
+                    if _abi_match {
+                        _lit_diag_prefix = "llvm lowering [fatal]: ";
+                    }
+                    // Note: not stderr-flushed because `lower_struct_literal`
+                    // doesn't carry `![io]` and propagating it would touch
+                    // every caller. The detail (caller/callee types + kinds)
+                    // is already on stderr from `coerce_operand_to_type` —
+                    // this push enriches the diagnostic stream for future
+                    // renderers that surface non-fatal-yet-fatal-tagged
+                    // entries in the build report.
+                    diagnostics.push(_lit_diag_prefix
+                        + "unable to coerce value (got `"
+                        + lowered.operand.llvm_type
+                        + "`) into struct literal field `"
+                        + info.name
+                        + "."
+                        + expected.name
+                        + "` (expected `"
+                        + expected.llvm_type
+                        + "`)");
+                }
                 if coerced.operand != null {
                     value_operand = coerced.operand;
                 }
@@ -1109,7 +1147,12 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                             }
                         }
                     }
-                    let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines);
+                    // Slice E.1.5 (#528): struct literal field write (boxed
+                    // payload path) — strict ABI primitive kind check, with
+                    // a location-aware follow-up that names the enum +
+                    // variant + field so partial-migration breakage is
+                    // self-locating.
+                    let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines, false);
                     let mut _ci9: number = 0;
                     loop {
                         if _ci9 >= coerced.diagnostics.length { break; }
@@ -1118,6 +1161,38 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     }
                     current_lines = coerced.lines;
                     current_temp = coerced.temp_index;
+                    if coerced.operand == null {
+                        let mut _abi_match: boolean = false;
+                        let mut _abi_idx: number = 0;
+                        loop {
+                            if _abi_idx >= coerced.diagnostics.length { break; }
+                            if find_substring_from(coerced.diagnostics[_abi_idx], "ABI primitive mismatch", 0) >= 0 {
+                                _abi_match = true;
+                            }
+                            _abi_idx += 1;
+                        }
+                        let mut _payload_diag_prefix: string = "llvm lowering: ";
+                        if _abi_match {
+                            _payload_diag_prefix = "llvm lowering [fatal]: ";
+                        }
+                        // Same caveat as the struct-literal branch above:
+                        // `lower_enum_literal` lacks `![io]` so this enriches
+                        // the diagnostic stream rather than stderr. The
+                        // ABI-shape detail itself is already on stderr from
+                        // `coerce_operand_to_type`.
+                        diagnostics.push(_payload_diag_prefix
+                            + "unable to coerce value (got `"
+                            + field_operand.llvm_type
+                            + "`) into enum payload field `"
+                            + parse.enum_name
+                            + "."
+                            + parse.variant_name
+                            + "."
+                            + expected.name
+                            + "` (expected `"
+                            + expected.llvm_type
+                            + "`)");
+                    }
                     if coerced.operand != null {
                         if alloca_ptr != null {
                             let payload_ptr_temp = format_temp_name(current_temp);

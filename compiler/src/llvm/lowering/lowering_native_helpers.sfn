@@ -55,7 +55,8 @@ fn make_native_function_method(name: string, self_type: string, ret_type: string
         type_annotation: self_type,
         mutable: false,
         default_value: null,
-        span: null
+        span: null,
+        attributes: []
     };
     return NativeFunction {
         name: name,
@@ -75,7 +76,8 @@ fn make_native_parameter(pname: string, ptype: string) -> NativeParameter {
         type_annotation: ptype,
         mutable: false,
         default_value: null,
-        span: null
+        span: null,
+        attributes: []
     };
 }
 

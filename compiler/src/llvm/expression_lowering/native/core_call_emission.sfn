@@ -2,7 +2,7 @@
 //
 // Call emission extracted from core_call_lowering.sfn to keep
 // each function under ~500 .sfn-asm instructions (avoids seed OOM).
-import { NativeFunction } from "../../../native_ir";
+import { NativeFunction, NativeParameter } from "../../../native_ir";
 import { find_last_index_of_char, substring } from "../../../string_utils";
 import { format_temp_name, format_typed_operand } from "../../expressions_helpers";
 import { trace_lowering } from "../../lowering_debug_state";
@@ -34,7 +34,41 @@ import {
 import { coerce_operand_to_type } from "./core_operands";
 import { parse_member_access } from "./core_parse";
 import { find_local_binding } from "./core_scopes";
-import { sanitize_symbol } from "./core_text";
+import { find_substring_from, sanitize_symbol } from "./core_text";
+
+// Slice E.1.5 (#528): per-parameter `@[abi_widen]` attribute lookup. The
+// attribute is plumbed from the AST through `NativeParameter.attributes`
+// (see `compiler/src/native_ir.sfn`); call argument coercion checks for it
+// here to skip the ABI primitive kind diagnostic at parameters that
+// legitimately need int↔float widening during the Slice E.2 migration.
+fn parameter_has_attribute(parameter: NativeParameter, name: string) -> boolean {
+    let mut index: number = 0;
+    loop {
+        if index >= parameter.attributes.length { break; }
+        if parameter.attributes[index] == name { return true; }
+        index += 1;
+    }
+    return false;
+}
+
+// Slice E.1.5 (#528): if the wrapped diagnostics list contains the ABI
+// primitive mismatch sentinel, return the `llvm lowering [fatal]: ` prefix
+// so the location-aware follow-up message also escalates to fatal (the
+// emit-level entrypoint scans for `[fatal]` and refuses to write IR).
+// Returns the plain `llvm lowering: ` prefix otherwise so non-ABI coercion
+// failures keep their existing tier.
+fn _abi_mismatch_diagnostic_prefix(diagnostics: string[]) -> string {
+    let mut idx: number = 0;
+    loop {
+        if idx >= diagnostics.length { break; }
+        let diag = diagnostics[idx];
+        if find_substring_from(diag, "ABI primitive mismatch", 0) >= 0 {
+            return "llvm lowering [fatal]: ";
+        }
+        idx += 1;
+    }
+    return "llvm lowering: ";
+}
 
 // Coerce operands to expected types and emit the final call instruction.
 // Handles array concat/push, trait dispatch, and normal function calls.
@@ -75,16 +109,52 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
         if _if55 { coerced_operands.push(operand); } else if target_type.length == 0 {
             coerced_operands.push(operand);
         } else {
-            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines);
+            // Slice E.1.5 (#528): function call argument coercion is the
+            // primary ABI boundary. Default to strict (refuse silent
+            // int↔float widening). The `@[abi_widen]` parameter attribute
+            // (parsed by `parse_single_parameter`, plumbed through
+            // `NativeParameter.attributes`) is the per-parameter opt-out
+            // used by Slice E.2 (#489a–d) to bridge the small set of
+            // legitimate widens during the partial migration.
+            let mut _arg_allow_widen: boolean = false;
+            if function_entry != null {
+                if function_entry.parameters.length > index {
+                    if parameter_has_attribute(function_entry.parameters[index], "abi_widen") {
+                        _arg_allow_widen = true;
+                    }
+                }
+            }
+            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines, _arg_allow_widen);
             result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
             if coerced.operand == null {
-                result_diagnostics.push("llvm lowering: unable to coerce argument "
+                // Slice E.1.5 (#528): if the underlying refusal was an ABI
+                // primitive mismatch, escalate the location-aware message
+                // to `[fatal]` too so partial-migration breakage is
+                // self-locating in the build log. The mismatch detail
+                // (callee/caller LLVM types + kinds) was already pushed by
+                // `coerce_operand_to_type`; this adds the callee symbol +
+                // argument index that only the call site can name.
+                let _arg_diagnostic_prefix = _abi_mismatch_diagnostic_prefix(coerced.diagnostics);
+                let _arg_diag = _arg_diagnostic_prefix
+                    + "unable to coerce argument "
                     + number_to_string(index)
-                    + " for call to `"
+                    + " (expected `"
+                    + target_type
+                    + "`, got `"
+                    + operand.llvm_type
+                    + "`) for call to `"
                     + trimmed_target
-                    + "`: passing original operand");
+                    + "`: passing original operand";
+                // Slice E.1.5 (#528): mirror the ABI-shape detail's stderr
+                // emission so the location-aware follow-up surfaces even
+                // when the build refuses to write IR (and the diagnostics
+                // list never reaches the renderer).
+                if _arg_diagnostic_prefix == "llvm lowering [fatal]: " {
+                    print.err(_arg_diag);
+                }
+                result_diagnostics.push(_arg_diag);
                 coerced_operands.push(operand);
             } else { coerced_operands.push(coerced.operand); }
         }
@@ -161,7 +231,11 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 // already matches; for integer-literal-vs-double mixes it
                 // routes through the `sitofp` widening path that Slice D
                 // wired up, preserving the pre-E.1 semantics.
-                let push_value_coerced = coerce_operand_to_type(final_operands[1], array_push_element_type, result_temp, result_lines);
+                // `arr.push(...)` is a value-shape coercion that legitimately
+                // widens i64 literals to double[] receivers (see Slice E.1
+                // comment above). Slice E.1.5 (#528) leaves this site exempt
+                // from the ABI primitive kind check.
+                let push_value_coerced = coerce_operand_to_type(final_operands[1], array_push_element_type, result_temp, result_lines, true);
                 let mut _ci_apc: number = 0;
                 loop {
                     if _ci_apc >= push_value_coerced.diagnostics.length {
