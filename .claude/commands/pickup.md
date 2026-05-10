@@ -44,6 +44,72 @@ If no pickable issue exists, report: "No claude-ready issues available. Run `/tr
 
 ---
 
+## Phase 1.5: VERIFY SEED FRESHNESS
+
+Before claiming, verify every predecessor the issue lists in
+`## Required in pinned seed` is actually present in the binary that
+`make compile` will use. This catches the "merged but not seeded"
+failure mode that broke the original #489 attempt.
+
+```bash
+SEED_TAG="v$(cat .seed-version)"
+git fetch --tags origin "$SEED_TAG" 2>/dev/null || git fetch --tags origin
+```
+
+Parse the issue body for the `## Required in pinned seed` section.
+Extract every `#N` reference. For each:
+
+```bash
+# If #N is an issue number, find the merged PR that closed it:
+PR=$(gh issue view <N> --json closedByPullRequestsReferences \
+       --jq '.closedByPullRequestsReferences[]?
+             | select(.isCrossRepository | not)
+             | .number' \
+     | head -1)
+
+# If #N is already a PR, use it directly:
+[ -z "$PR" ] && PR=<N>
+
+PR_MERGE=$(gh pr view "$PR" --json mergeCommit --jq '.mergeCommit.oid')
+
+if [ -z "$PR_MERGE" ]; then
+  echo "Predecessor #<N> has no merged PR — pickup blocked until it merges."
+  exit 1
+fi
+
+if ! git merge-base --is-ancestor "$PR_MERGE" "$SEED_TAG"; then
+  echo "Predecessor #<N> (merged at $PR_MERGE) is NOT in the pinned seed $SEED_TAG."
+  echo "Cut a fresh seed before pickup:"
+  echo "  gh workflow run release.yml --repo SailfinIO/sailfin --ref main \\"
+  echo "    -f channel=alpha -f bump=prerelease"
+  echo "Then /pin-seed once release-tag.yml uploads the binary."
+  exit 1
+fi
+```
+
+**Legacy fallback** for issues groomed before the
+`## Required in pinned seed` section existed: if the issue does NOT
+have that section but its `## Files Affected` lists anything under
+`compiler/src/` or `runtime/prelude.sfn`, walk every `#N` in
+`## Blocked by` through the same `git merge-base --is-ancestor` check.
+If any blocker's merge commit is not an ancestor of the seed tag,
+halt with the same diagnostic.
+
+If the precheck fails, comment on the issue and stop — do NOT claim
+or branch:
+
+```bash
+gh issue comment <N> --body "Pickup paused — predecessor #<P> is merged but not in the pinned seed (\`$SEED_TAG\`). Cut a new alpha and \`/pin-seed\` before pickup. See \`.claude/commands/pickup.md\` Phase 1.5."
+```
+
+The issue stays `claude-ready`; another `/pickup` attempt after the
+seed is bumped will pass this gate.
+
+If the precheck passes (every required predecessor is in the seed),
+proceed to Phase 2.
+
+---
+
 ## Phase 2: CLAIM AND BRANCH
 
 Mark the issue as in-progress, sync the project board, and create a branch:
@@ -188,6 +254,7 @@ If anything was deferred or scope was adjusted mid-flight, surface it explicitly
 - **Never push to main directly.** Always work on the `claude/<N>-<slug>` branch and open a PR.
 - **Always link the issue in the PR.** `Closes #N` ensures auto-close on merge.
 - **Always apply `ulimit -v 8388608`** before running the compiler.
+- **Never skip Phase 1.5.** The `## Required in pinned seed` precheck (and its legacy fallback) prevents the failure mode that broke the original #489 attempt — a compiler-source migration picked up against a seed that predated its dependency. If the precheck fails, halt and comment; do not attempt to triple-bootstrap a workaround binary.
 - **One issue per session.** Don't try to bundle multiple issues — they were sized to be standalone.
 - **Every label flip must be paired with a board sync.** Run
   `.claude/scripts/sync-project-status.sh <N> --from-labels` after any

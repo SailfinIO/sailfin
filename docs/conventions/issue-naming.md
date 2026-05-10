@@ -331,6 +331,30 @@ release-gating set when opening a tracking issue. `/sweep` auto-ticks
 matching checklist items when a `seed-blocker` issue closes via a
 merged PR.
 
+### `## Required in pinned seed` issue section
+
+Sub-task issues that depend on a predecessor's compiler-source change
+being **in the seed binary** (not just merged on `main`) use a dedicated
+`## Required in pinned seed` body section, separate from `## Blocked by`.
+The contract:
+
+- `## Blocked by` means "must be closed/merged before pickup starts."
+- `## Required in pinned seed` means "the merged code must be present
+  in the binary that `make compile` uses."
+
+When grooming, populate `## Required in pinned seed` for any sub-task
+that touches `compiler/src/` or `runtime/prelude.sfn` and depends on
+a predecessor's compiler-source change. Apply `seed-blocker` to the
+**predecessor** issue. `/pickup` Phase 1.5 verifies the precondition
+via `git merge-base --is-ancestor <merge-sha> <seed-tag>` before
+claiming, and refuses to start if the predecessor is merged but not
+seeded. The previous Slice E.2 attempt (issue #489) failed because
+this gate was implicit instead of explicit.
+
+For issues groomed before this section existed, `/pickup` Phase 1.5
+falls back to checking every `## Blocked by` reference if the issue
+touches compiler-source files.
+
 ### When to bump the pin
 
 Run `/pin-seed [vX.Y.Z]`:

@@ -77,7 +77,34 @@ ulimit -v 8388608 && timeout 60 build/native/sailfin run path/to/example.sfn
 
 ## Blocked by
 
-<!-- List issue numbers that must close before this can start. Empty if unblocked. -->
+<!--
+List issue/PR numbers that must close before this can start. Empty if unblocked.
+
+If the dependency is a compiler-source change that this issue must
+self-host on (i.e. `make compile` will fail without it baked into
+the seed binary), use the "Required in pinned seed" section below
+*instead of or in addition to* this one — merging the PR is not enough.
+-->
+
+## Required in pinned seed
+
+<!--
+List issue/PR numbers whose merged code must be present in the binary
+that `.seed-version` points at. Common cases:
+  - This issue migrates compiler annotations that depend on a
+    syntax/lowering change shipped in a prior PR.
+  - This issue uses a new compiler intrinsic / diagnostic / IR shape
+    added by a prior PR.
+
+When this is non-empty, the predecessor's source issue MUST also be
+labeled `seed-blocker` so `/sweep` ticks the seed-pin checklist when
+it closes. `/pickup` refuses to claim this issue until every listed
+predecessor is an ancestor of the pinned seed tag (verified via
+`git merge-base --is-ancestor <merge-sha> <seed-tag>`).
+
+Empty if the issue does not depend on a fresh seed (most non-compiler
+work — docs, tests of already-shipped features, runtime experiments).
+-->
 
 ## Context / Background
 
