@@ -110,11 +110,20 @@ ulimit -v 8388608 && timeout 60 build/native/sailfin run path/to/example.sfn
 ## Blocked by
 <#N or "None">
 
+## Required in pinned seed
+<#N or "None" — see "Seed dependencies" below for when to populate this>
+
 ## Context
 <links to roadmap, code, prior PRs>
 EOF
 )"
 ```
+
+**Always emit the `## Required in pinned seed` section**, even when the
+value is `None`. `/pickup` Phase 1.5 treats a missing section as legacy
+and falls back to walking `## Blocked by` against the seed tag — which
+produces false-positive seed-cut requirements on routine work. An
+explicit `None` value is the contract that says "no seed dependency."
 
 Capture the issue numbers. After each `gh issue create`:
 
@@ -147,6 +156,51 @@ gh issue edit <N> --add-label "blocked"
 
 If a sync call exits non-zero, capture the issue number and surface it in
 the Phase 5 report so the human knows the board is out of sync.
+
+### Seed dependencies
+
+For each created issue, evaluate whether its predecessors must be **in the
+pinned seed binary**, not just merged on `main`. The two states are
+different — `make compile` runs against the binary at `.seed-version`, so
+a dependency that's merged but not seeded will fail to self-host.
+
+Apply this rule:
+
+- If the issue touches `compiler/src/` or `runtime/prelude.sfn` AND its
+  predecessor is a compiler-source change that affects the compiler
+  binary's behaviour (lowering, parsing, type-checking, intrinsics,
+  diagnostics, IR shape), the predecessor must be in the seed before
+  this issue can self-host.
+
+When that holds:
+
+1. Fill in the `## Required in pinned seed` section of the issue body
+   with the predecessor issue/PR number — separate from `## Blocked by`.
+2. Apply the `seed-blocker` label to the **predecessor issue** (the
+   one shipping the change, not the dependent one):
+
+```bash
+gh issue edit <predecessor> --add-label seed-blocker
+.claude/scripts/sync-project-status.sh <predecessor> --from-labels
+```
+
+3. Note in the Phase 5 report that a seed cut + `/pin-seed` will be
+   required between the predecessor's merge and pickup of this issue.
+
+Examples:
+- Slice E.2 (struct-field migration) requires Slice E.1 (`int`/`float`
+  aliases) to be in the seed because the migration emits LLVM IR that
+  relies on the new `int → i64` mapping. The previous E.2 attempt
+  (#489) failed precisely because this gate was implicit instead of
+  explicit.
+- A new effect-checker pass that emits diagnostics requires the
+  diagnostic-codes PR to be in the seed.
+- A pure docs/test/runtime issue typically does NOT require a seed cut.
+
+`/pickup` enforces the `## Required in pinned seed` contract via
+`git merge-base --is-ancestor`. Skipping the section here means the
+agent has decided the issue does not need a fresh seed; getting that
+wrong is the failure mode this gate exists to prevent.
 
 ### Attach issues to the parent epic as native sub-issues
 
