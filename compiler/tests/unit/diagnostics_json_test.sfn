@@ -142,7 +142,7 @@ test "envelope: encodes summary numbers" {
 // -------------------------------------------------------------------
 // B3: FixSuggestion / TextEdit encoder paths
 // -------------------------------------------------------------------
-fn _identifier_token(line: number, column: number, lexeme: string) -> Token {
+fn _identifier_token(line: int, column: int, lexeme: string) -> Token {
     return Token {
         kind: TokenKind.Identifier(),
         lexeme: lexeme,

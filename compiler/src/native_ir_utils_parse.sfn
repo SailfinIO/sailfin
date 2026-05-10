@@ -224,7 +224,7 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
         diagnostics.push("unable to parse interface header: " + header);
         return InterfaceParseResult {
             definition: null,
-            next_index: start_index + 1,
+            next_index: (start_index + 1) as int,
             diagnostics: diagnostics
         };
     }
@@ -240,7 +240,7 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
                     type_parameters: header_parse.type_parameters,
                     signatures: signatures
                 },
-                next_index: index,
+                next_index: index as int,
                 diagnostics: diagnostics
             };
         }
@@ -284,7 +284,7 @@ fn parse_interface_definition(lines: string[], start_index: number) -> Interface
             type_parameters: header_parse.type_parameters,
             signatures: signatures
         },
-        next_index: index,
+        next_index: index as int,
         diagnostics: diagnostics
     };
 }

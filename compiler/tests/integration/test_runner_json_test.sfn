@@ -32,7 +32,7 @@ fn _empty_effects() -> string[] {
     return out;
 }
 
-fn _failure(file: string, line: number, col: number, message: string) -> AssertFailure {
+fn _failure(file: string, line: int, col: int, message: string) -> AssertFailure {
     return AssertFailure {
         present: true,
         file: file,

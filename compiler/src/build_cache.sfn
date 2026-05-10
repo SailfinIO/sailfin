@@ -117,11 +117,11 @@ struct CacheEntryPaths {
 //     producer, but tracked separately so the operator can
 //     distinguish "cache was empty" from "cache was poisoned".
 struct CacheStats {
-    hits: number;
-    misses: number;
-    stores: number;
-    invalid_keys: number;
-    copy_failures: number;
+    hits: int;
+    misses: int;
+    stores: int;
+    invalid_keys: int;
+    copy_failures: int;
 }
 
 fn empty_cache_stats() -> CacheStats {

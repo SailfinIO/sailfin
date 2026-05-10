@@ -14,7 +14,7 @@ struct FmtToken {
     token: Token;
     leading_comments: Token[];
     trailing_comment: Token[];
-    blank_lines_before: number;
+    blank_lines_before: int;
     role: string;
 }
 
@@ -22,8 +22,8 @@ struct FmtToken {
 // Formatting context (state carried through the emit phase)
 // ═══════════════════════════════════════════════════════════════════
 struct FmtContext {
-    indent: number;
-    line_pos: number;
+    indent: int;
+    line_pos: int;
     last_emitted: string;
     in_import: boolean;
     in_effect_list: boolean;
@@ -181,8 +181,8 @@ fn _classify_role(token: Token, prev_lexeme: string, next_lexeme: string) -> str
 fn strip_and_classify(tokens: Token[]) -> FmtToken[] {
     let mut result: FmtToken[] = [];
     let mut pending_comments: Token[] = [];
-    let mut blank_lines: number = 0;
-    let mut last_structural_line: number = -1;
+    let mut blank_lines: int = 0;
+    let mut last_structural_line: int = -1;
 
     let mut i = 0;
     loop {
@@ -1015,10 +1015,10 @@ fn emit_formatted(fmt_tokens: FmtToken[]) -> string {
 // "import" to ";".  We collect these, extract the path, sort, and
 // rebuild the token list.
 struct ImportSpan {
-    start: number;
-    end: number;
+    start: int;
+    end: int;
     path: string;
-    group: number;
+    group: int;
 }
 
 fn _extract_import_path(fmt_tokens: FmtToken[], start: number, end: number) -> string {

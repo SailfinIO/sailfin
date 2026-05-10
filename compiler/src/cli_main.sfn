@@ -235,7 +235,7 @@ fn _emit_capsule_artifact_sidecar(spec_capsule_name: string, spec_version: strin
 // placement (end of the success path); machine-readable consumers
 // (`sfn lsp`, MCP, CI gates) read this single line and parse it
 // rather than scraping `built: ...` + `[cache] ...` from stderr.
-fn _emit_build_report(input_path: string, out_path: string, kind: string, exit_code: number, capsule_result: ProjectCapsuleResult, cache_config: BuildCacheConfig) ![io] {
+fn _emit_build_report(input_path: string, out_path: string, kind: string, exit_code: int, capsule_result: ProjectCapsuleResult, cache_config: BuildCacheConfig) ![io] {
     let mut report = empty_build_report();
     report.input = input_path;
     report.out = out_path;

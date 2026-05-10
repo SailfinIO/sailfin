@@ -27,10 +27,10 @@ import { Token, TokenKind } from "./token";
 // literal text to splice in. The shape mirrors LSP's `TextEdit` so
 // `sfn lsp` Phase 2 (B5+ workstream) can convert it 1:1.
 struct TextEdit {
-    start_line: number;
-    start_column: number;
-    end_line: number;
-    end_column: number;
+    start_line: int;
+    start_column: int;
+    end_line: int;
+    end_column: int;
     replacement: string;
 }
 

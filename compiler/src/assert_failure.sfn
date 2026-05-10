@@ -25,8 +25,8 @@ import { substring } from "./string_utils";
 struct AssertFailure {
     present: boolean;
     file: string;
-    line: number;
-    col: number;
+    line: int;
+    col: int;
     message: string;
 }
 
@@ -109,8 +109,8 @@ fn _parse_assert_failure_record(bytes: string) -> AssertFailure {
     out.file = _af_strip_prefix(lines[2], "file:");
     let line_text = _af_strip_prefix(lines[3], "line:");
     let col_text = _af_strip_prefix(lines[4], "col:");
-    out.line = _af_parse_decimal(line_text);
-    out.col = _af_parse_decimal(col_text);
+    out.line = _af_parse_decimal(line_text) as int;
+    out.col = _af_parse_decimal(col_text) as int;
     out.message = _af_strip_prefix(lines[5], "msg:");
     out.present = true;
     return out;

@@ -9,7 +9,7 @@ import { contains_string, ends_with, substring } from "./string_utils";
 // ── Data structures ──────────────────────────────────────────────────
 struct TextBuilder {
     lines: string[];
-    indent: number;
+    indent: int;
 }
 
 struct NativeState {

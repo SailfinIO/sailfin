@@ -26,10 +26,10 @@ struct Block {
 }
 
 struct SourceSpan {
-    start_line: number;
-    start_column: number;
-    end_line: number;
-    end_column: number;
+    start_line: int;
+    start_column: int;
+    end_line: int;
+    end_column: int;
 }
 
 // Inferred lambda capture descriptor populated by the typechecker's

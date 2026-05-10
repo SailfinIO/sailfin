@@ -22,25 +22,25 @@
 import { char_code, substring } from "runtime/prelude";
 
 struct AbiHashLimbs {
-    h0: number;
-    h1: number;
-    h2: number;
-    h3: number;
+    h0: int;
+    h1: int;
+    h2: int;
+    h3: int;
 }
 
 struct _AbiSplitU33 {
-    hi: number;
-    lo: number;
+    hi: int;
+    lo: int;
 }
 
 struct _AbiSplitU16 {
-    hi: number;
-    lo: number;
+    hi: int;
+    lo: int;
 }
 
 struct _AbiBitSplit {
-    bit: number;
-    rest: number;
+    bit: int;
+    rest: int;
 }
 
 // Stable textual rendering of the locked aggregate layouts. Hand-
@@ -79,7 +79,7 @@ fn fnv1a_64_hash(input: string) -> AbiHashLimbs {
         let split = _u16_split_by_byte(state.h0);
         let new_low = _xor_byte(split.lo, byte);
         state = AbiHashLimbs {
-            h0: split.hi * 256 + new_low,
+            h0: (split.hi * 256 + new_low) as int,
             h1: state.h1,
             h2: state.h2,
             h3: state.h3
@@ -136,7 +136,7 @@ fn _u33_split_by_word(value: number) -> _AbiSplitU33 {
         p = p / 2;
         q = q / 2;
     }
-    return _AbiSplitU33 { hi: hi, lo: rem };
+    return _AbiSplitU33 { hi: hi as int, lo: rem as int };
 }
 
 // Splits `value` (in [0, 2^16)) into (hi = value >> 8, lo = value & 0xFF).
@@ -154,7 +154,7 @@ fn _u16_split_by_byte(value: number) -> _AbiSplitU16 {
         p = p / 2;
         q = q / 2;
     }
-    return _AbiSplitU16 { hi: hi, lo: rem };
+    return _AbiSplitU16 { hi: hi as int, lo: rem as int };
 }
 
 // 8-bit XOR. Inputs are in [0, 255]; result is in [0, 255].
@@ -193,7 +193,7 @@ fn _split_low_bit(value: number) -> _AbiBitSplit {
         p = p / 2;
         q = q / 2;
     }
-    return _AbiBitSplit { bit: rem, rest: rest };
+    return _AbiBitSplit { bit: rem as int, rest: rest as int };
 }
 
 // Converts four 16-bit limbs (low to high) to an unsigned decimal
@@ -258,8 +258,8 @@ fn _limbs_to_unsigned_decimal(limbs: AbiHashLimbs) -> string {
 }
 
 struct _AbiDivMod {
-    q: number;
-    r: number;
+    q: int;
+    r: int;
 }
 
 // Computes (carry * 65536 + limb) divmod divisor, where divisor <= 10000
@@ -280,7 +280,7 @@ fn _div_mod_small(limb: number, carry: number, divisor: number) -> _AbiDivMod {
         }
         delta = delta / 2;
     }
-    return _AbiDivMod { q: q, r: rem };
+    return _AbiDivMod { q: q as int, r: rem as int };
 }
 
 // Small-value decimal formatter (value < 10000 in practice; safe up to

@@ -160,7 +160,7 @@ fn is_unary_prefix(lexeme: string, prev_role: string) -> boolean {
 }
 
 // Returns import group number for sorting: 0 = stdlib, 1 = relative
-fn import_group(path: string) -> number {
+fn import_group(path: string) -> int {
     if path.length >= 5 {
         if strings_equal(substring(path, 0, 5), "\"sfn/") { return 0; }
         if strings_equal(substring(path, 0, 5), "'sfn/") { return 0; }

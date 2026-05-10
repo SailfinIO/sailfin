@@ -73,7 +73,7 @@ struct NativeModule {
     module_name: string;
     artifacts: NativeArtifact[];
     entry_points: string[];
-    symbol_count: number;
+    symbol_count: int;
 }
 
 struct EmitNativeResult {
@@ -762,8 +762,8 @@ fn test_function_symbol(test_name: string) -> string {
     return "test:" + sanitize_test_name_for_symbol(test_name);
 }
 
-fn count_exported_symbols(program: Program) -> number {
-    let mut count: number = 0;
+fn count_exported_symbols(program: Program) -> int {
+    let mut count: int = 0;
     let mut index: number = 0;
     loop {
         if index >= program.statements.length { break; }

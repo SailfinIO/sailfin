@@ -454,12 +454,12 @@ fn _synthetic_assert_failure(file: string, message: string) -> AssertFailure {
 // re-entering the per-file branches.
 struct TestFileOutcome {
     kind: string;
-    failed_index: number;
+    failed_index: int;
     failure: AssertFailure;
-    elapsed_ms: number;
+    elapsed_ms: int;
 }
 
-fn _outcome_all_pass(elapsed_ms: number) -> TestFileOutcome {
+fn _outcome_all_pass(elapsed_ms: int) -> TestFileOutcome {
     return TestFileOutcome {
         kind: "pass",
         failed_index: -1,
@@ -468,7 +468,7 @@ fn _outcome_all_pass(elapsed_ms: number) -> TestFileOutcome {
     };
 }
 
-fn _outcome_failed_at(failed_index: number, failure: AssertFailure, elapsed_ms: number) -> TestFileOutcome {
+fn _outcome_failed_at(failed_index: int, failure: AssertFailure, elapsed_ms: int) -> TestFileOutcome {
     return TestFileOutcome {
         kind: "fail",
         failed_index: failed_index,
@@ -927,7 +927,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clo
                         + number_to_string(run_rc));
                 }
                 let failed_index = locate_failing_test(entries, effective);
-                let outcome = _outcome_failed_at(failed_index, effective, file_elapsed_ms);
+                let outcome = _outcome_failed_at(failed_index as int, effective, file_elapsed_ms as int);
                 let packed = _emit_file_test_events(entries, outcome);
                 total_passed += _trj_decode_passed(packed);
                 total_failed += _trj_decode_failed(packed);
@@ -944,7 +944,7 @@ fn handle_test_command(args: string[], runtime_root: string) -> number ![io, clo
             return run_rc;
         }
         if json_output {
-            let outcome = _outcome_all_pass(file_elapsed_ms);
+            let outcome = _outcome_all_pass(file_elapsed_ms as int);
             let packed = _emit_file_test_events(entries, outcome);
             total_passed += _trj_decode_passed(packed);
             total_failed += _trj_decode_failed(packed);
@@ -1900,10 +1900,10 @@ fn _package_user_capsule(target: string, out_dir: string, capsule_path: string) 
 // `path` is shell-quoted via `_shell_single_quote_arg` so paths
 // containing `'` (or other shell metacharacters) can't break out
 // of the `sh -c` interpolation in `_shell_read_cmd`.
-fn _package_size_of_file(path: string) -> number ![io] {
+fn _package_size_of_file(path: string) -> int ![io] {
     let raw = _shell_read_cmd("wc -c < " + _shell_single_quote_arg(path));
     if raw.length == 0 { return 0; }
-    let mut value: number = 0;
+    let mut value: int = 0;
     let mut i: number = 0;
     loop {
         if i >= raw.length { break; }

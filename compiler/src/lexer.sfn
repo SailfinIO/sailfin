@@ -9,17 +9,17 @@ import { Token, TokenKind, eof_token } from "./token";
 
 struct LexerState {
     source: string;
-    source_len: number;
-    index: number;
-    line: number;
-    column: number;
+    source_len: int;
+    index: int;
+    line: int;
+    column: int;
 }
 
 fn lex(source: string) -> Token[] ![io] {
     let length = source.length;
     let state: LexerState = LexerState {
         source: source,
-        source_len: length,
+        source_len: length as int,
         index: 0,
         line: 1,
         column: 1
@@ -74,8 +74,8 @@ fn lex(source: string) -> Token[] ![io] {
                     state.index += 2;
                     state.column += 2;
 
-                    let mut comment_end: number = state.source_len;
-                    let mut scan_index: number = state.index;
+                    let mut comment_end: int = state.source_len;
+                    let mut scan_index: int = state.index;
                     loop {
                         if scan_index >= state.source_len { break; }
                         let scan_character = byte_at(state.source, scan_index);
@@ -90,7 +90,7 @@ fn lex(source: string) -> Token[] ![io] {
                     }
 
                     let lexeme = slice(state.source, start_index, comment_end);
-                    let consumed_columns: number = comment_end - state.index;
+                    let consumed_columns: int = comment_end - state.index;
                     state.index = comment_end;
                     state.column += consumed_columns;
                     tokens = append(tokens, Token {

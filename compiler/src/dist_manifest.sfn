@@ -58,8 +58,8 @@ struct DistManifest {
     target: string;
     tarball: string;
     sha256: string;
-    binary_size: number;
-    tarball_size: number;
+    binary_size: int;
+    tarball_size: int;
     build_date: string;
 }
 

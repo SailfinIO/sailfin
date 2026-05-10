@@ -314,9 +314,9 @@ fn handle_check_command(args: string[]) -> number ![io] {
     //     accept the memory cost. Even so, only diagnostics survive
     //     into the envelope — `rendered[]` stays unused.
     let mut results: CheckResult[] = [];
-    let mut total_errors: number = 0;
-    let mut total_warnings: number = 0;
-    let mut files_checked: number = 0;
+    let mut total_errors: int = 0;
+    let mut total_warnings: int = 0;
+    let mut files_checked: int = 0;
 
     // Phase 5a (`docs/proposals/phase-5a-arena-reset.md`): take an
     // arena mark immediately before the per-file loop. Every value
@@ -462,8 +462,8 @@ fn _build_json_envelope(results: CheckResult[], load: ImportedInterfaceLoadResul
 
     // Roll W01xx warnings into the summary so consumers reading just
     // `summary.warnings` see the load-layer count without scanning.
-    let total_warnings = summary.total_warnings + load.missing_paths.length
-        + load.parse_failure_paths.length;
+    let total_warnings: int = summary.total_warnings + (load.missing_paths.length as int)
+        + (load.parse_failure_paths.length as int);
     let json_summary = CheckJsonSummary {
         files_checked: summary.files_checked,
         errors: summary.total_errors,

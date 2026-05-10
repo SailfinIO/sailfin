@@ -182,7 +182,7 @@ fn gather_instruction(lines: string[], start_index: number) -> InstructionGather
     }
 
     let mut combined: string = first_line;
-    let mut consumed: number = 0;
+    let mut consumed: int = 0;
     let mut index = start_index + 1;
     let mut last_nonempty = first_line;
     loop {
