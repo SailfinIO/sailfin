@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Codex PreToolUse hook: block make/compiler commands that omit Sailfin's 8GB
+# virtual-memory cap. The compiler can otherwise exhaust local WSL/IDE hosts.
+
+set -euo pipefail
+
+payload=$(cat || true)
+cmd=$(
+  PAYLOAD="$payload" python3 - <<'PY'
+import json
+import os
+
+payload = os.environ.get("PAYLOAD", "")
+try:
+    data = json.loads(payload) if payload.strip() else {}
+except json.JSONDecodeError:
+    data = {}
+
+candidates = []
+
+def collect(value):
+    if isinstance(value, str):
+        candidates.append(value)
+    elif isinstance(value, list):
+        candidates.extend(str(part) for part in value)
+    elif isinstance(value, dict):
+        for key in ("command", "cmd", "script", "input", "args"):
+            if key in value:
+                collect(value[key])
+
+collect(data)
+for key in ("tool_input", "toolInput", "params", "arguments"):
+    collect(data.get(key))
+
+print(" ".join(candidates))
+PY
+)
+
+# If Codex passes no structured payload for this version, do not block unknown
+# commands. The guidance still lives in AGENTS.md and the session-start hook.
+[[ -z "${cmd// }" ]] && exit 0
+
+needs_cap=0
+
+if [[ "$cmd" =~ (^|[[:space:];&|])(make)([[:space:]]+(compile|rebuild|check|test|test-unit|test-integration|bench|clean-build))?([[:space:];&|]|$) ]]; then
+  needs_cap=1
+fi
+
+if [[ "$cmd" =~ (^|[[:space:];&|])((\./)?build/native/sailfin(-seedcheck)?)([[:space:];&|]|$) ]]; then
+  needs_cap=1
+fi
+
+if [[ "$needs_cap" -eq 1 && ! "$cmd" =~ ulimit[[:space:]]+-v[[:space:]]+8388608 ]]; then
+  cat >&2 <<'MSG'
+Sailfin compiler invocations require an 8GB memory cap.
+Prepend `ulimit -v 8388608 && ` to the command and try again.
+MSG
+  exit 2
+fi
+
+exit 0

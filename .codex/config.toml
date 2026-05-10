@@ -1,0 +1,27 @@
+# Sailfin project-local Codex configuration.
+#
+# Codex reads AGENTS.md automatically. This file enables the repo-local
+# affordances that mirror the existing Claude Code setup where current Codex
+# builds support them.
+
+# Lifecycle hooks are intentionally small wrappers around scripts in
+# .codex/hooks/ so the behavior can be reviewed and tested outside Codex.
+hooks = ".codex/hooks.json"
+
+[features]
+# Preserve nested AGENTS.md scoping/precedence when future child AGENTS.md files
+# are added under compiler/, runtime/, docs/, or site/.
+child_agents_md = true
+# Enables the hook file above in CLI builds that still gate hooks behind a flag.
+codex_hooks = true
+# Useful for long-running web/CLI sessions that are driving an issue to PR.
+goals = true
+
+# Repo-local skills are intentionally duplicated from the Claude workflow at a
+# smaller granularity. If your Codex build does not auto-discover repo skills,
+# mention the relevant SKILL.md file explicitly in the prompt.
+[[skills.config]]
+path = ".codex/skills/sailfin-check/SKILL.md"
+
+[[skills.config]]
+path = ".codex/skills/sailfin-pickup/SKILL.md"
