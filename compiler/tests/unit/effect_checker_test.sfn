@@ -33,7 +33,7 @@ fn _empty_block() -> Block {
     return Block { tokens: [], text: "", statements: [] };
 }
 
-fn _span(line: number, column: number) -> SourceSpan {
+fn _span(line: int, column: int) -> SourceSpan {
     return SourceSpan {
         start_line: line,
         start_column: column,
@@ -60,7 +60,7 @@ fn _signature(name: string, effects: string[], span: SourceSpan?) -> FunctionSig
 // fallback `collect_effects_from_text` path picks it up — that's the
 // production path today and exactly what Phase A's signature-span
 // fix is supposed to attribute to the function declaration.
-fn _make_io_violating_routine(name: string, declared_effects: string[], span_line: number) -> Statement {
+fn _make_io_violating_routine(name: string, declared_effects: string[], span_line: int) -> Statement {
     let span = _span(span_line, 4);
     let body_text = "print.info(\"hello\");";
     let body_stmt = Statement.ExpressionStatement {
@@ -327,7 +327,7 @@ test "effect violation: TestDeclaration plumbs name_span" {
 // `collect_effects_from_expression`: `Member` (with `Identifier`
 // object, e.g. `fs.exists(...)`) and `Call` with `Identifier`
 // callee (e.g. `spawn(...)`).
-fn _routine_with_member_call(name: string, declared_effects: string[], sig_line: number, namespace: string, member: string, namespace_line: number, namespace_column: number) -> Statement {
+fn _routine_with_member_call(name: string, declared_effects: string[], sig_line: int, namespace: string, member: string, namespace_line: int, namespace_column: int) -> Statement {
     let sig_span = _span(sig_line, 4);
     let object_span = _span(namespace_line, namespace_column);
     let member_span = _span(namespace_line, namespace_column + namespace.length
@@ -361,7 +361,7 @@ fn _routine_with_member_call(name: string, declared_effects: string[], sig_line:
     };
 }
 
-fn _routine_with_bare_call(name: string, declared_effects: string[], sig_line: number, callee: string, call_line: number, call_column: number) -> Statement {
+fn _routine_with_bare_call(name: string, declared_effects: string[], sig_line: int, callee: string, call_line: int, call_column: int) -> Statement {
     let sig_span = _span(sig_line, 4);
     let call_span = _span(call_line, call_column);
     let callee_expr = Expression.Identifier { name: callee, span: call_span };
@@ -514,7 +514,7 @@ test "effect violation: AST trigger overrides signature fallback" {
 // to construct the structured `FixSuggestion` (insert `![effects] `
 // at the brace column). Tests below construct `Block { tokens: [...] }`
 // fixtures directly to exercise the brace-capture path.
-fn _brace_token(line: number, column: number) -> Token {
+fn _brace_token(line: int, column: int) -> Token {
     return Token {
         kind: TokenKind.Symbol(),
         lexeme: "{",
@@ -523,7 +523,7 @@ fn _brace_token(line: number, column: number) -> Token {
     };
 }
 
-fn _routine_with_brace(name: string, sig_line: number, brace_line: number, brace_column: number) -> Statement {
+fn _routine_with_brace(name: string, sig_line: int, brace_line: int, brace_column: int) -> Statement {
     let sig_span = _span(sig_line, 4);
     let body_text = "print.info(\"hello\");";
     let body_stmt = Statement.ExpressionStatement {

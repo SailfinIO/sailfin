@@ -73,7 +73,7 @@ struct BuildReport {
     input: string;
     out: string;
     kind: string;
-    exit_code: number;
+    exit_code: int;
     compiler_version: string;
     cache: CacheStats;
     cache_root: string;

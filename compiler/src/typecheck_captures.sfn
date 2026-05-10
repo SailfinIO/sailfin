@@ -77,8 +77,8 @@ struct LocalBinding {
 struct LambdaCaptureRecord {
     parameter_names: string[];
     captures: Capture[];
-    body_start_line: number;
-    body_start_column: number;
+    body_start_line: int;
+    body_start_column: int;
 }
 
 // Internal walk result. `free` is the set of identifier names
@@ -394,12 +394,12 @@ fn analyze_lambda(outer_scope: LocalBinding[], lambda: Expression) -> CaptureWal
     return CaptureWalkResult { free: lambda_free, records: records };
 }
 
-fn body_start_line(body: Block) -> number {
+fn body_start_line(body: Block) -> int {
     if body.tokens.length == 0 { return 0; }
     return body.tokens[0].line;
 }
 
-fn body_start_column(body: Block) -> number {
+fn body_start_column(body: Block) -> int {
     if body.tokens.length == 0 { return 0; }
     return body.tokens[0].column;
 }

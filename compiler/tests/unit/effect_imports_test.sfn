@@ -40,7 +40,7 @@ fn _empty_block() -> Block {
     return Block { tokens: [], text: "", statements: [] };
 }
 
-fn _span(line: number, column: number) -> SourceSpan {
+fn _span(line: int, column: int) -> SourceSpan {
     return SourceSpan {
         start_line: line,
         start_column: column,
@@ -74,7 +74,7 @@ fn _import_decl(name: string, alias: string?, source: string) -> Statement {
 // `ExpressionStatement` wrapping a `Call(Identifier(callee_name))`
 // so `collect_effects_from_expression` walks it through the
 // Phase E `_propagate_imported_callee_effects` path.
-fn _routine_calling(routine_name: string, callee_name: string, span_line: number) -> Statement {
+fn _routine_calling(routine_name: string, callee_name: string, span_line: int) -> Statement {
     let span = _span(span_line, 4);
     let callee = Expression.Identifier { name: callee_name, span: null };
     let no_args: Expression[] = [];

@@ -42,7 +42,7 @@ let TEST_RUNNER_JSON_SCHEMA_VERSION: number = 1;
 struct TestEntry {
     name: string;
     file: string;
-    line: number;
+    line: int;
     effects: string[];
 }
 
@@ -51,7 +51,7 @@ fn _trj_empty_effects() -> string[] {
     return out;
 }
 
-fn _trj_make_test_entry(name: string, file: string, line: number, effects: string[]) -> TestEntry {
+fn _trj_make_test_entry(name: string, file: string, line: int, effects: string[]) -> TestEntry {
     return TestEntry {
         name: name,
         file: file,
@@ -240,7 +240,7 @@ fn collect_test_entries(program: Program, file_path: string) -> TestEntry[] {
         if i >= program.statements.length { break; }
         let stmt = program.statements[i];
         if stmt.variant == "TestDeclaration" {
-            let mut line: number = 0;
+            let mut line: int = 0;
             if stmt.name_span != null {
                 let span: SourceSpan? = stmt.name_span;
                 line = span.start_line;

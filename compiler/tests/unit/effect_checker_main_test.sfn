@@ -22,7 +22,7 @@ import { EffectViolation, is_program_entry_point, validate_effects } from "../..
 // Builder helpers — local copies of the shape used in
 // `effect_checker_test.sfn` so this file stays self-contained.
 // -------------------------------------------------------------------
-fn _span(line: number, column: number) -> SourceSpan {
+fn _span(line: int, column: int) -> SourceSpan {
     return SourceSpan {
         start_line: line,
         start_column: column,

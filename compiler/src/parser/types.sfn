@@ -31,7 +31,7 @@ import { Token } from "../token";
 // ============================================================================
 struct Parser {
     tokens: Token[];
-    index: number;
+    index: int;
 }
 
 // ============================================================================
@@ -175,7 +175,7 @@ struct MatchCaseTokenSplit {
 // ============================================================================
 struct ExpressionTokens {
     tokens: Token[];
-    index: number;
+    index: int;
 }
 
 struct ExpressionParseResult {

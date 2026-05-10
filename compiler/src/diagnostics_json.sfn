@@ -39,10 +39,10 @@ struct CheckJsonEvent {
 // `events` is empty, so consumers checking "did anything happen" can
 // read `summary.errors` without scanning the array.
 struct CheckJsonSummary {
-    files_checked: number;
-    errors: number;
-    warnings: number;
-    duration_ms: number;
+    files_checked: int;
+    errors: int;
+    warnings: int;
+    duration_ms: int;
 }
 
 // -------------------------------------------------------------------

@@ -36,7 +36,7 @@ fn _empty_block() -> Block {
     return Block { tokens: [], text: "", statements: [] };
 }
 
-fn _span(line: number, column: number) -> SourceSpan {
+fn _span(line: int, column: int) -> SourceSpan {
     return SourceSpan {
         start_line: line,
         start_column: column,
@@ -61,7 +61,7 @@ fn _signature(name: string, effects: string[], span: SourceSpan?) -> FunctionSig
 // effects on its signature, with an empty body and no decorators.
 // Used to fixture the "function declares effects ![…]" half of the
 // capability cross-check.
-fn _function_declaring(name: string, effects: string[], span_line: number) -> Statement {
+fn _function_declaring(name: string, effects: string[], span_line: int) -> Statement {
     let mut empty_decorators: Decorator[] = [];
     return Statement.FunctionDeclaration {
         signature: _signature(name, effects, _span(span_line, 4)),

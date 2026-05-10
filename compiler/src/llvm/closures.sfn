@@ -73,7 +73,7 @@ import { join_with_separator, number_to_string, trim_text } from "./utils";
 struct ClosureEnvField {
     name: string;
     llvm_type: string;
-    index: number;
+    index: int;
     by_value: boolean;
     mutable: boolean;
 }
@@ -82,7 +82,7 @@ struct ClosureEnvField {
 // the emit helpers when the lambda has no captures — non-capturing
 // lambdas skip env-struct emission entirely (regression guard).
 struct ClosureEnvLayout {
-    lambda_id: number;
+    lambda_id: int;
     type_name: string;
     type_decl: string;
     fields: ClosureEnvField[];
@@ -110,7 +110,7 @@ struct ClosureEnvAllocResult {
     lines: string[];
     env_raw_var: string;
     env_typed_var: string;
-    next_temp: number;
+    next_temp: int;
 }
 
 // One loaded capture, ready to splice into the lambda body's
@@ -129,7 +129,7 @@ struct ClosureEnvLoadedBinding {
 struct ClosureEnvPrologueResult {
     lines: string[];
     bindings: ClosureEnvLoadedBinding[];
-    next_temp: number;
+    next_temp: int;
 }
 
 // `%sfn_closure_env_<id>` — the LLVM type name for one lambda's
@@ -165,7 +165,7 @@ fn synthesize_closure_env_struct(captures: Capture[], lambda_id: number) -> Clos
     if captures.length == 0 {
         let empty_fields: ClosureEnvField[] = [];
         return ClosureEnvLayout {
-            lambda_id: lambda_id,
+            lambda_id: lambda_id as int,
             type_name: type_name,
             type_decl: "",
             fields: empty_fields,
@@ -181,7 +181,7 @@ fn synthesize_closure_env_struct(captures: Capture[], lambda_id: number) -> Clos
         let capture = captures[index];
         let llvm_type = closure_field_llvm_type(capture);
         fields.push(ClosureEnvField {
-            name: capture.name, llvm_type: llvm_type, index: index, by_value: capture.by_value, mutable: capture.mutable
+            name: capture.name, llvm_type: llvm_type, index: index as int, by_value: capture.by_value, mutable: capture.mutable
         });
         field_types.push(llvm_type);
         index += 1;
@@ -190,7 +190,7 @@ fn synthesize_closure_env_struct(captures: Capture[], lambda_id: number) -> Clos
     let type_decl = type_name + " = type { " + join_with_separator(field_types, ", ")
         + " }";
     return ClosureEnvLayout {
-        lambda_id: lambda_id,
+        lambda_id: lambda_id as int,
         type_name: type_name,
         type_decl: type_decl,
         fields: fields,
@@ -245,7 +245,7 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
             lines: lines,
             env_raw_var: "",
             env_typed_var: "",
-            next_temp: current_temp
+            next_temp: current_temp as int
         };
     }
 
@@ -309,7 +309,7 @@ fn emit_closure_env_alloc(layout: ClosureEnvLayout, operands: ClosureCaptureOper
         lines: lines,
         env_raw_var: env_raw,
         env_typed_var: env_typed,
-        next_temp: current_temp
+        next_temp: current_temp as int
     };
 }
 
@@ -334,7 +334,7 @@ fn emit_closure_env_load_prologue(layout: ClosureEnvLayout, env_param_name: stri
         return ClosureEnvPrologueResult {
             lines: lines,
             bindings: bindings,
-            next_temp: current_temp
+            next_temp: current_temp as int
         };
     }
 
@@ -373,7 +373,7 @@ fn emit_closure_env_load_prologue(layout: ClosureEnvLayout, env_param_name: stri
     return ClosureEnvPrologueResult {
         lines: lines,
         bindings: bindings,
-        next_temp: current_temp
+        next_temp: current_temp as int
     };
 }
 

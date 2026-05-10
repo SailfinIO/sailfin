@@ -27,7 +27,7 @@ import { Token } from "./token";
 
 struct TextBuilder {
     lines: string[];
-    indent: number;
+    indent: int;
 }
 
 fn quote_string(value: string) -> string {

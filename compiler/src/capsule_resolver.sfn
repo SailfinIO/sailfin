@@ -234,7 +234,7 @@ struct WorkspaceMember {
 // should consume for cross-module interface conformance.
 struct CheckCapsuleResolution {
     asm_paths: string[];  // build/native/import-context/<slug>.sfn-asm
-    capsule_count: number;  // post-dedupe count, for diagnostic output
+    capsule_count: int;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision or stage-write failure
     // Phase F (`docs/proposals/effect-validation.md` §5): the
     // project manifest's `[capabilities] required = [...]`. Empty
@@ -261,7 +261,7 @@ struct TestCapsuleResolution {
     // build/sailfin/capsules/<mangled>.ll fallback). See
     // `CapsuleSource.ll_path` for the routing rules.
     ll_paths: string[];
-    capsule_count: number;  // post-dedupe count, for diagnostic output
+    capsule_count: int;  // post-dedupe count, for diagnostic output
     staging_failed: boolean;  // true on slug collision, stage-write, or compile failure
     // Phase F: same `[capabilities] required` surfacing as
     // `CheckCapsuleResolution`. The test runner threads this into
@@ -3779,7 +3779,7 @@ fn prepare_project_capsules_for_check(entry_paths: string[], consumer: ResolverC
 
     return CheckCapsuleResolution {
         asm_paths: asm_paths,
-        capsule_count: resolved.sources.length,
+        capsule_count: resolved.sources.length as int,
         staging_failed: false,
         capabilities_required: resolved.capabilities_required
     };
@@ -3877,7 +3877,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
         return TestCapsuleResolution {
             asm_paths: asm_paths,
             ll_paths: empty_paths,
-            capsule_count: resolved.sources.length,
+            capsule_count: resolved.sources.length as int,
             staging_failed: true,
             capabilities_required: resolved.capabilities_required
         };
@@ -3886,7 +3886,7 @@ fn prepare_project_capsules_for_test(entry_paths: string[], consumer: ResolverCo
     return TestCapsuleResolution {
         asm_paths: asm_paths,
         ll_paths: result.ll_paths,
-        capsule_count: resolved.sources.length,
+        capsule_count: resolved.sources.length as int,
         staging_failed: false,
         capabilities_required: resolved.capabilities_required
     };

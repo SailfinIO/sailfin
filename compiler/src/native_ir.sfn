@@ -53,10 +53,10 @@ enum NativeInstruction {
 }
 
 struct NativeSourceSpan {
-    start_line: number;
-    start_column: number;
-    end_line: number;
-    end_column: number;
+    start_line: int;
+    start_column: int;
+    end_line: int;
+    end_column: int;
 }
 
 struct NativeParameter {
@@ -181,7 +181,7 @@ struct NativeBinding {
 
 struct EnumParseResult {
     definition: NativeEnum?;
-    next_index: number;
+    next_index: int;
     diagnostics: string[];
 }
 
@@ -198,26 +198,26 @@ struct InstructionParseResult {
 
 struct InstructionGatherResult {
     text: string;
-    lines_consumed: number;
+    lines_consumed: int;
 }
 
 struct InstructionDepthState {
-    paren_depth: number;
-    bracket_depth: number;
-    brace_depth: number;
+    paren_depth: int;
+    bracket_depth: int;
+    brace_depth: int;
     in_string: boolean;
     escaping: boolean;
 }
 
 struct StructParseResult {
     definition: NativeStruct?;
-    next_index: number;
+    next_index: int;
     diagnostics: string[];
 }
 
 struct InterfaceParseResult {
     definition: NativeInterface?;
-    next_index: number;
+    next_index: int;
     diagnostics: string[];
 }
 
@@ -296,7 +296,7 @@ struct EnumLayoutPayloadParse {
 
 struct NumberParseResult {
     success: boolean;
-    value: number;
+    value: int;
 }
 
 struct LayoutManifest {

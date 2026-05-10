@@ -193,7 +193,7 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
         diagnostics.push("unable to parse struct header: " + header);
         return StructParseResult {
             definition: null,
-            next_index: start_index + 1,
+            next_index: (start_index + 1) as int,
             diagnostics: diagnostics
         };
     }
@@ -229,7 +229,7 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
                     implements: implements,
                     layout: struct_layout_value
                 },
-                next_index: index,
+                next_index: index as int,
                 diagnostics: diagnostics
             };
         }
@@ -493,7 +493,7 @@ fn parse_struct_definition(lines: string[], start_index: number, include_instruc
             implements: implements,
             layout: struct_layout_value
         },
-        next_index: index,
+        next_index: index as int,
         diagnostics: diagnostics
     };
 }
@@ -512,7 +512,7 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
         diagnostics.push("unable to parse enum header: " + header);
         return EnumParseResult {
             definition: null,
-            next_index: start_index + 1,
+            next_index: (start_index + 1) as int,
             diagnostics: diagnostics
         };
     }
@@ -547,7 +547,7 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
                     variants: variants,
                     layout: enum_layout_value
                 },
-                next_index: index,
+                next_index: index as int,
                 diagnostics: diagnostics
             };
         }
@@ -702,7 +702,7 @@ fn parse_enum_definition(lines: string[], start_index: number) -> EnumParseResul
             variants: variants,
             layout: enum_layout_value
         },
-        next_index: index,
+        next_index: index as int,
         diagnostics: diagnostics
     };
 }
