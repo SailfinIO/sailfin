@@ -1550,17 +1550,39 @@ i64 length helper).
        the new `compiler/tests/e2e/test_numeric_int_default.sh`
        and `compiler/tests/unit/numeric_int_default_test.sfn`.
        Closes scalar L1; array L1 closes after E.2.
-    2. **E.2 (next):** Audit-and-migrate every `: number`
+    2. **E.1.5 (2026-05-10, #528):** Refuse silent
+       `float → int` coercion at ABI boundaries. Adds
+       `numeric_type_kind` to `compiler/src/llvm/type_mapping.sfn`
+       (returns `"int"` / `"float"` / `"other"`) and extends
+       `coerce_operand_to_type` in
+       `compiler/src/llvm/expression_lowering/native/core_operands.sfn`
+       so call-arg coercion and struct-field writes default to a
+       strict mode that rejects mismatch with a `[fatal]` ABI
+       primitive diagnostic. The rule is asymmetric — only
+       `caller=double, callee=i64` fires today, because the
+       reverse direction (`arr.length` into a `: number` slot)
+       still happens pervasively in the existing tree and is
+       deferred to E.3. The new `@[abi_widen]` parameter
+       attribute is parsed by `parse_single_parameter` and
+       plumbed through `NativeParameter.attributes` as a
+       per-parameter opt-out used by Slice E.2 to bridge the
+       small set of legitimate i64↔f64 widens during the partial
+       migration; #489d audits and removes all uses. Verified by
+       `compiler/tests/integration/numeric_abi_mismatch_test.sfn`.
+    3. **E.2 (next):** Audit-and-migrate every `: number`
        annotation in `compiler/src/*.sfn` and
        `runtime/prelude.sfn` to `: int` or `: float` based on
        actual usage. The migration is purely mechanical because
        E.1's alias-as-float keeps every `: number` site lowering
-       as `double`.
-    3. **E.3:** Reapply #296 (`dominant_type` rejection of silent
+       as `double`. Each #489a–d PR rides on E.1.5's diagnostic
+       to fail loudly if it leaves the tree inconsistent — the
+       diagnostic must be in the seed, so cut a new alpha and
+       `/pin-seed` it before opening any #489a–d PR.
+    4. **E.3:** Reapply #296 (`dominant_type` rejection of silent
        int/float coercion). The rejection lands once both sides
        of every site agree on int-vs-float, which only holds
        after E.2. Closes L2/L3.
-    4. **E.4:** Cut a release; delete `number` everywhere.
+    5. **E.4:** Cut a release; delete `number` everywhere.
 
 **Self-hosting safety (Slice A):** The compiler source uses
 `number` throughout; nothing in `compiler/src/*.sfn` uses `: float`

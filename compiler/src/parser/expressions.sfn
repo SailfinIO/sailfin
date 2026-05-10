@@ -1019,7 +1019,8 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
                 type_annotation: null,
                 default_value: null,
                 mutable: false,
-                span: null
+                span: null,
+                attributes: []
             },
             success: false
         };
@@ -1040,7 +1041,8 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
                         type_annotation: null,
                         default_value: null,
                         mutable: false,
-                        span: null
+                        span: null,
+                        attributes: []
                     },
                     success: false
                 };
@@ -1057,7 +1059,8 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
                 type_annotation: null,
                 default_value: null,
                 mutable: false,
-                span: null
+                span: null,
+                attributes: []
             },
             success: false
         };
@@ -1079,7 +1082,8 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
                         type_annotation: null,
                         default_value: null,
                         mutable: is_mutable,
-                        span: null
+                        span: null,
+                        attributes: []
                     },
                     success: false
                 };
@@ -1106,7 +1110,8 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
                         type_annotation: type_annotation,
                         default_value: null,
                         mutable: is_mutable,
-                        span: null
+                        span: null,
+                        attributes: []
                     },
                     success: false
                 };
@@ -1124,7 +1129,8 @@ fn parse_lambda_parameter(state: ExpressionTokens) -> LambdaParameterParseResult
         type_annotation: type_annotation,
         default_value: default_value,
         mutable: is_mutable,
-        span: span
+        span: span,
+        attributes: []
     };
 
     return LambdaParameterParseResult {

@@ -9,7 +9,7 @@
 import { char_code } from "../../../string_utils";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { trace_lowering } from "../../lowering_debug_state";
-import { ends_with_pointer_suffix, strip_pointer_suffix } from "../../type_mapping";
+import { ends_with_pointer_suffix, numeric_type_kind, strip_pointer_suffix } from "../../type_mapping";
 import {
     BinaryAlignmentResult,
     CoercionResult,
@@ -1826,7 +1826,20 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
     return null;
 }
 
-fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[]) -> CoercionResult ![io] {
+// Slice E.1.5 (#528): `coerce_operand_to_type` is the single chokepoint for
+// numeric ABI shape decisions. When `allow_widen` is false (the default for
+// callsites that cross an ABI boundary — function call arguments, struct field
+// stores, deref/lvalue assignments) and the operand and target disagree on
+// `numeric_type_kind` (one is `int`, the other is `float`), the coercion
+// refuses with a hard diagnostic instead of silently emitting `sitofp` /
+// `fptosi`. Callers that legitimately widen across kinds today (arithmetic
+// harmonisation in `harmonise_operands`, the `arr.push(...)` value shape
+// adjust, the `@[abi_widen]`-annotated parameter opt-out wired up in Slice
+// E.2 by issues #489a–d) pass `allow_widen=true` to keep their existing
+// semantics. The reapply of `#296` in Slice E.3 generalises the rejection
+// to harmonisation as well, once every `: number` site in the compiler
+// source has been migrated to `: int`/`: float`.
+fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[], allow_widen: boolean) -> CoercionResult ![io] {
     let debug_coerce = trace_lowering();
     if debug_coerce {
         print.err("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type
@@ -1852,6 +1865,46 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             operand: operand,
             diagnostics: diagnostics
         };
+    }
+
+    // ABI primitive kind check: refuse silent float → int coercion at
+    // boundaries that don't opt in to widening. The asymmetric rule
+    // (operand kind=float, target kind=int) catches the Slice E.2 partial
+    // migration mismatch — a callee parameter flipped from `: number`
+    // (double) to `: int` (i64) while a caller still has a `double` in
+    // hand. The reverse direction (operand=int, target=float) keeps
+    // silently widening today: every existing `arr.length`-into-`:number`
+    // callsite relies on it, and the symmetric rejection rides on
+    // Slice E.3 (#490) once every `: number` site in the compiler source
+    // has migrated. The `[fatal]` sentinel propagates to the emit-level
+    // entrypoints which scan diagnostics for it and exit non-zero rather
+    // than writing a partial IR file.
+    if !allow_widen {
+        let from_kind = numeric_type_kind(operand_type);
+        let to_kind = numeric_type_kind(target);
+        let mut _kind_check: boolean = false;
+        if from_kind == "float" {
+            if to_kind == "int" { _kind_check = true; }
+        }
+        if _kind_check {
+            let abi_diag = "llvm lowering [fatal]: ABI primitive mismatch: callee expects `"
+                + target
+                + "` ("
+                + to_kind
+                + ") but caller produced `"
+                + operand_type
+                + "` ("
+                + from_kind
+                + ")";
+            print.err(abi_diag);
+            diagnostics.push(abi_diag);
+            return CoercionResult {
+                lines: current_lines,
+                temp_index: temp_index,
+                operand: null,
+                diagnostics: diagnostics
+            };
+        }
     }
 
     let numeric = coerce_numeric_primitive(operand, operand_type, target, temp_index, current_lines);
@@ -1960,7 +2013,11 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
         };
     }
     let target_type = dominant_type(left_operand.llvm_type, right_operand.llvm_type);
-    let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines);
+    // Arithmetic harmonisation is the canonical exempted call site:
+    // `1 + 2.0` or `arr.length + 0.5` legitimately widen i64 → double here.
+    // Slice E.3 (#490) reapplies #296 and removes this opt-out once every
+    // `: number` site in the compiler source has migrated to `: int`/`: float`.
+    let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines, true);
     let mut _ci0: number = 0;
     loop {
         if _ci0 >= left_coercion.diagnostics.length { break; }
@@ -1986,7 +2043,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     current_lines = left_coercion.lines;
     current_temp = left_coercion.temp_index;
 
-    let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines);
+    let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines, true);
     let mut _ci1: number = 0;
     loop {
         if _ci1 >= right_coercion.diagnostics.length { break; }

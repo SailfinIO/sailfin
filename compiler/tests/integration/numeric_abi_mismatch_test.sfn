@@ -1,0 +1,147 @@
+// Slice E.1.5 (#528): regression coverage for the ABI primitive kind
+// diagnostic. Exercises both `numeric_type_kind` (the new helper in
+// `type_mapping.sfn`) and `coerce_operand_to_type`'s strict-mode rejection
+// of int↔float coercion at call boundaries.
+//
+// Today's compiler tree is internally consistent — no `: number` consumer
+// receives an `: int` value — so the diagnostic fires only on a
+// hand-edited mismatch. These tests pin down the helper's classification
+// and the coerce path's behaviour so a future Slice E.2 (#489a–d)
+// migration that leaves the tree inconsistent fails loudly instead of
+// producing corrupt LLVM IR with split ABI shapes.
+import { coerce_operand_to_type } from "../../src/llvm/expression_lowering/native/core_operands";
+import { numeric_type_kind } from "../../src/llvm/type_mapping";
+import { LLVMOperand } from "../../src/llvm/types";
+
+// -------------------------------------------------------------------
+// Helper classification
+// -------------------------------------------------------------------
+test "numeric_type_kind: classifies signed integer LLVM types as int" {
+    assert numeric_type_kind("i64") == "int";
+    assert numeric_type_kind("i32") == "int";
+    assert numeric_type_kind("i16") == "int";
+    assert numeric_type_kind("i8") == "int";
+}
+
+test "numeric_type_kind: classifies floating-point LLVM types as float" {
+    assert numeric_type_kind("double") == "float";
+    assert numeric_type_kind("float") == "float";
+}
+
+test "numeric_type_kind: classifies non-numeric scalars and aggregates as other" {
+    // Booleans deliberately fall outside the int/float partition — the
+    // existing tree relies on silent i1 ↔ double widening in arithmetic
+    // harmonisation and bool-to-string interpolation; classifying them as
+    // `int` would cause spurious diagnostics on today's source.
+    assert numeric_type_kind("i1") == "other";
+    assert numeric_type_kind("i8*") == "other";
+    assert numeric_type_kind("{i8*, i64}") == "other";
+    assert numeric_type_kind("%MyStruct*") == "other";
+    assert numeric_type_kind("void") == "other";
+    assert numeric_type_kind("") == "other";
+}
+
+// -------------------------------------------------------------------
+// `coerce_operand_to_type` strict mode (allow_widen = false)
+// -------------------------------------------------------------------
+fn _make_operand(llvm_type: string, value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: llvm_type, value: value };
+}
+
+test "coerce_operand_to_type: refuses double → i64 when widening is disallowed" ![io] {
+    let operand = _make_operand("double", "%t0");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false);
+    assert result.operand == null;
+    // The diagnostic carries the `[fatal]` sentinel so the emit-level
+    // entrypoints fail the build instead of writing partial IR.
+    let mut found_fatal = false;
+    let mut i: number = 0;
+    loop {
+        if i >= result.diagnostics.length { break; }
+        let diag = result.diagnostics[i];
+        let mut _has_fatal = false;
+        let mut _has_double = false;
+        let mut _has_i64 = false;
+        let mut j: number = 0;
+        loop {
+            if j + 7 > diag.length { break; }
+            if substring(diag, j, j + 7) == "[fatal]" { _has_fatal = true; }
+            j += 1;
+        }
+        j = 0;
+        loop {
+            if j + 6 > diag.length { break; }
+            if substring(diag, j, j + 6) == "double" { _has_double = true; }
+            j += 1;
+        }
+        j = 0;
+        loop {
+            if j + 3 > diag.length { break; }
+            if substring(diag, j, j + 3) == "i64" { _has_i64 = true; }
+            j += 1;
+        }
+        if _has_fatal {
+            if _has_double {
+                if _has_i64 { found_fatal = true; }
+            }
+        }
+        i += 1;
+    }
+    assert found_fatal;
+}
+
+test "coerce_operand_to_type: keeps i64 → double silent in this slice" ![io] {
+    // Slice E.1.5 (#528) is asymmetric: only `float → int` is rejected at
+    // boundaries that don't opt in to widening, because every existing
+    // `arr.length`-into-`:number` callsite in the compiler source relies
+    // on the reverse direction widening silently. Slice E.3 (#490)
+    // tightens the check to symmetric once the migration completes.
+    let operand = _make_operand("i64", "%t1");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "double", 0, lines, false);
+    assert result.operand != null;
+}
+
+// -------------------------------------------------------------------
+// `coerce_operand_to_type` permissive mode (allow_widen = true)
+// -------------------------------------------------------------------
+test "coerce_operand_to_type: silently widens i64 → double when widening is allowed" ![io] {
+    let operand = _make_operand("i64", "%t2");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "double", 0, lines, true);
+    // Existing behaviour (sitofp) preserved for arithmetic harmonisation
+    // and the explicit `arr.push(...)` value-shape adjust.
+    assert result.operand != null;
+}
+
+test "coerce_operand_to_type: silently coerces double → i64 when widening is allowed" ![io] {
+    let operand = _make_operand("double", "%t3");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, true);
+    assert result.operand != null;
+}
+
+// -------------------------------------------------------------------
+// Equal-type fast path
+// -------------------------------------------------------------------
+test "coerce_operand_to_type: same-type passthrough is a no-op in strict mode" ![io] {
+    let operand = _make_operand("i64", "%t4");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false);
+    assert result.operand != null;
+    assert result.diagnostics.length == 0;
+}
+
+// -------------------------------------------------------------------
+// `other`-kind exemption (pointers, aggregates, booleans)
+// -------------------------------------------------------------------
+test "coerce_operand_to_type: i1 → double bypasses the strict diagnostic" ![io] {
+    // Boolean → double widening is common today (interpolation, print,
+    // arithmetic harmonisation). The kind check classifies `i1` as `other`
+    // to keep this path silent until Slice E.3 (#490) tightens it.
+    let operand = _make_operand("i1", "%t5");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "double", 0, lines, false);
+    assert result.operand != null;
+}

@@ -41,7 +41,7 @@ import {
 import { lines_end_with_terminator, strip_enclosing_parentheses } from "./core_operators";
 
 fn lower_logical_not_with_operand(operand: LLVMOperand, temp_index: number, lines: string[], diagnostics: string[], string_constants: StringConstant[]) -> ExpressionResult {
-    let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines);
+    let coerced = coerce_operand_to_type(operand, "i1", temp_index, lines, true);
     let mut current_diagnostics: string[] = diagnostics;
     let mut _ci0: number = 0;
     loop {
@@ -123,7 +123,7 @@ fn lower_ternary_expression(parse: TernaryParseResult, bindings: ParameterBindin
         };
     }
 
-    let cond_bool = coerce_operand_to_type(cond_result.operand, "i1", cond_result.temp_index, cond_result.lines);
+    let cond_bool = coerce_operand_to_type(cond_result.operand, "i1", cond_result.temp_index, cond_result.lines, true);
     diagnostics = extend_string_array(diagnostics, cond_bool.diagnostics);
     if cond_bool.operand == null {
         return ExpressionResult {
@@ -357,7 +357,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             // operands so we don't pay the unnecessary extract.
             let mut lhs_at_string = lhs;
             if lhs_type != "{i8*, i64}" {
-                let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines);
+                let lhs_coerced = coerce_operand_to_type(lhs, "i8*", current_temp, current_lines, true);
                 diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics);
                 current_lines = lhs_coerced.lines;
                 current_temp = lhs_coerced.temp_index;
@@ -374,7 +374,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             }
             let mut rhs_at_string = rhs;
             if rhs_type != "{i8*, i64}" {
-                let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines);
+                let rhs_coerced = coerce_operand_to_type(rhs, "i8*", current_temp, current_lines, true);
                 diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics);
                 current_lines = rhs_coerced.lines;
                 current_temp = rhs_coerced.temp_index;
@@ -391,7 +391,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
             }
 
             // Step 2: lift both sides to the {i8*, i64} aggregate.
-            let lhs_agg = coerce_operand_to_type(lhs_at_string, "{i8*, i64}", current_temp, current_lines);
+            let lhs_agg = coerce_operand_to_type(lhs_at_string, "{i8*, i64}", current_temp, current_lines, true);
             diagnostics = extend_string_array(diagnostics, lhs_agg.diagnostics);
             current_lines = lhs_agg.lines;
             current_temp = lhs_agg.temp_index;
@@ -404,7 +404,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     string_constants: string_constants
                 };
             }
-            let rhs_agg = coerce_operand_to_type(rhs_at_string, "{i8*, i64}", current_temp, current_lines);
+            let rhs_agg = coerce_operand_to_type(rhs_at_string, "{i8*, i64}", current_temp, current_lines, true);
             diagnostics = extend_string_array(diagnostics, rhs_agg.diagnostics);
             current_lines = rhs_agg.lines;
             current_temp = rhs_agg.temp_index;
@@ -455,7 +455,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                 let mut current_lines = right_result.lines;
                 let mut current_temp = right_result.temp_index;
 
-                let lhs_coerced = coerce_operand_to_type(lhs, "double", current_temp, current_lines);
+                let lhs_coerced = coerce_operand_to_type(lhs, "double", current_temp, current_lines, true);
                 diagnostics = extend_string_array(diagnostics, lhs_coerced.diagnostics);
                 current_lines = lhs_coerced.lines;
                 current_temp = lhs_coerced.temp_index;
@@ -469,7 +469,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     };
                 }
 
-                let rhs_coerced = coerce_operand_to_type(rhs, "double", current_temp, current_lines);
+                let rhs_coerced = coerce_operand_to_type(rhs, "double", current_temp, current_lines, true);
                 diagnostics = extend_string_array(diagnostics, rhs_coerced.diagnostics);
                 current_lines = rhs_coerced.lines;
                 current_temp = rhs_coerced.temp_index;
@@ -529,7 +529,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     let mut current_temp = right_result.temp_index;
                     let mut rhs_i64 = rhs;
                     if rhs_type != "i64" {
-                        let coerced = coerce_operand_to_type(rhs, "i64", current_temp, current_lines);
+                        let coerced = coerce_operand_to_type(rhs, "i64", current_temp, current_lines, true);
                         diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
@@ -612,7 +612,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
         if should_concat_aligned {
             let mut current_lines = harmonised.lines;
             let mut current_temp = harmonised.temp_index;
-            let lhs_agg = coerce_operand_to_type(left_aligned, "{i8*, i64}", current_temp, current_lines);
+            let lhs_agg = coerce_operand_to_type(left_aligned, "{i8*, i64}", current_temp, current_lines, true);
             diagnostics = extend_string_array(diagnostics, lhs_agg.diagnostics);
             current_lines = lhs_agg.lines;
             current_temp = lhs_agg.temp_index;
@@ -625,7 +625,7 @@ fn lower_binary_operation(expression: string, match: OperatorMatch, bindings: Pa
                     string_constants: string_constants
                 };
             }
-            let rhs_agg = coerce_operand_to_type(right_aligned, "{i8*, i64}", current_temp, current_lines);
+            let rhs_agg = coerce_operand_to_type(right_aligned, "{i8*, i64}", current_temp, current_lines, true);
             diagnostics = extend_string_array(diagnostics, rhs_agg.diagnostics);
             current_lines = rhs_agg.lines;
             current_temp = rhs_agg.temp_index;
@@ -949,7 +949,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                     if right_is_pointer { _if109 = true; }
                 }
                 if _if109 {
-                    let coercion = coerce_operand_to_type(right_operand, "i8", alignment_temp, alignment_lines);
+                    let coercion = coerce_operand_to_type(right_operand, "i8", alignment_temp, alignment_lines, true);
                     diagnostics = extend_string_array(diagnostics, coercion.diagnostics);
                     if coercion.operand == null {
                         return ExpressionResult {
@@ -969,7 +969,7 @@ fn lower_comparison_operation(expression: string, match: OperatorMatch, bindings
                         if left_is_pointer { _elif111 = true; }
                     }
                     if _elif111 {
-                        let coercion = coerce_operand_to_type(left_operand, "i8", alignment_temp, alignment_lines);
+                        let coercion = coerce_operand_to_type(left_operand, "i8", alignment_temp, alignment_lines, true);
                         diagnostics = extend_string_array(diagnostics, coercion.diagnostics);
                         if coercion.operand == null {
                             return ExpressionResult {
@@ -1067,7 +1067,7 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
         };
     }
 
-    let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines);
+    let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines, true);
     diagnostics = extend_string_array(diagnostics, left_bool.diagnostics);
     string_constants = merge_string_constants(string_constants, left_result.string_constants);
     if left_bool.operand == null {
@@ -1116,7 +1116,7 @@ fn lower_logical_and(expression: string, match: OperatorMatch, bindings: Paramet
         };
     }
 
-    let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines);
+    let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines, true);
     diagnostics = extend_string_array(diagnostics, right_bool.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_bool.operand == null {
@@ -1198,7 +1198,7 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
         };
     }
 
-    let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines);
+    let left_bool = coerce_operand_to_type(left_result.operand, "i1", left_result.temp_index, left_result.lines, true);
     diagnostics = extend_string_array(diagnostics, left_bool.diagnostics);
     string_constants = merge_string_constants(string_constants, left_result.string_constants);
     if left_bool.operand == null {
@@ -1250,7 +1250,7 @@ fn lower_logical_or(expression: string, match: OperatorMatch, bindings: Paramete
         };
     }
 
-    let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines);
+    let right_bool = coerce_operand_to_type(right_result.operand, "i1", right_result.temp_index, right_result.lines, true);
     diagnostics = extend_string_array(diagnostics, right_bool.diagnostics);
     string_constants = merge_string_constants(string_constants, right_result.string_constants);
     if right_bool.operand == null {

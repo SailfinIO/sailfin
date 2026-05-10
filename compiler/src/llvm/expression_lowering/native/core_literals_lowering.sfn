@@ -452,7 +452,9 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
                 }
             }
         }
-        let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines);
+        // Slice E.1.5 (#528): array literal element coerce — exempt
+        // (array-element store is not in the slice's strict scope).
+        let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines, true);
         diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
@@ -756,7 +758,9 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
             current_temp = lowered.temp_index;
             collected_string_constants = merge_string_constants(collected_string_constants, lowered.string_constants);
             if lowered.operand != null {
-                let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines);
+                // Slice E.1.5 (#528): struct literal field initialization is
+                // a struct-field write; strict ABI primitive kind check.
+                let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines, false);
                 let mut _ci6: number = 0;
                 loop {
                     if _ci6 >= coerced.diagnostics.length { break; }
@@ -1109,7 +1113,9 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                             }
                         }
                     }
-                    let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines);
+                    // Slice E.1.5 (#528): struct literal field write (boxed
+                    // payload path) — strict ABI primitive kind check.
+                    let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines, false);
                     let mut _ci9: number = 0;
                     loop {
                         if _ci9 >= coerced.diagnostics.length { break; }
