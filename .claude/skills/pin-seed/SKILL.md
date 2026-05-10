@@ -12,13 +12,7 @@ Updates the seed pin in `.seed-version`, downloads the new binary, and verifies 
 
 ### 1. Parse and normalize the version
 
-Strip any leading `v` from the argument — `.seed-version` stores bare versions like `0.5.10-alpha.12`.
-
-```
-VERSION="${1#v}"   # strip leading v if present
-```
-
-Fail immediately if no version is provided.
+The version comes from `$ARGUMENTS` (what the user typed after `/pin-seed`). Strip any leading `v` or `V` — `.seed-version` stores bare versions like `0.5.10-alpha.12`. Fail immediately if no version is provided or if the result after stripping is empty.
 
 ### 2. Check current pin
 
@@ -31,7 +25,7 @@ Print the current pin so the user can confirm they're moving in the right direct
 ### 3. Update the pin file
 
 ```bash
-.claude/skills/pin-seed/scripts/pin.sh <VERSION>
+.claude/skills/pin-seed/scripts/pin.sh $ARGUMENTS
 ```
 
 The script writes the normalized version to `.seed-version` (single line, no trailing newline issues).
