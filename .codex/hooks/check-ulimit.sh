@@ -4,6 +4,14 @@
 
 set -euo pipefail
 
+# Fail open if python3 isn't available: a missing dependency must not block every
+# Bash tool call. Surface a one-time breadcrumb on stderr so the user can
+# install python3 and restore the safety guard.
+if ! command -v python3 >/dev/null 2>&1; then
+  echo "[check-ulimit] python3 not found — compiler-safety guard disabled. Install python3 to re-enable." >&2
+  exit 0
+fi
+
 payload=$(cat || true)
 cmd=$(
   PAYLOAD="$payload" python3 - <<'PY'
