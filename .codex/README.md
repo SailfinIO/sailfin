@@ -5,7 +5,7 @@ This directory mirrors the high-value parts of the Claude Code setup using Codex
 ## What is configured
 
 - `config.toml` enables repo-local hooks, hierarchical `AGENTS.md` handling, long-running goals, and the two Sailfin skills.
-- `hooks.json` wires lifecycle events to small shell scripts under `hooks/`.
+- `config.toml` wires lifecycle events to small shell scripts under `hooks/`.
 - `skills/` contains reusable Sailfin workflows for safe verification and issue pickup.
 - `prompts/` contains copy/paste prompts for Codex web or CLI sessions.
 
