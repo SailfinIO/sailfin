@@ -70,7 +70,8 @@ The self-hosted native compiler (`build/native/sailfin`, installed as
 - Functions, structs, enums (with payloads), interfaces, type aliases, and
   generics (type-parameter capture; full inference is partial)
 - `let` / `let mut`, pattern matching (`match` with guards and
-  destructuring), `if` / `else`, `for`, `while`, `try` / `catch` / `finally`
+  destructuring), `if` / `else`, `for`, `loop` / `break` / `continue`,
+  `try` / `catch` / `finally`
 - `int` (i64) and `float` (f64) numeric types, alongside `bool`, `string`,
   and arrays. `number` remains as an alias for `float`.
 - Bitwise and shift operators (`&`, `|`, `^`, `<<`, `>>`) and explicit

@@ -630,7 +630,8 @@ feature availability.
 | Enums / ADTs | Shipped | Variants with payloads |
 | Type aliases | Shipped | Including generic params |
 | `if`/`else` | Shipped | |
-| `for` / `while` loops | Shipped | |
+| `for` loops | Shipped | |
+| `loop { … }` / `break` / `continue` | Shipped | The infinite-loop primitive — `while` is intentionally not a keyword; `parser/statements.sfn` rejects it at statement position so users get `E0411` with a `loop`/`break` fix-it instead of silent misparse |
 | `match` | Shipped | Literals, `_` wildcard, guards; destructuring enum variants |
 | `try`/`catch`/`finally` | Shipped | Maps to runtime exceptions |
 | String interpolation (`{{ }}`) | Shipped | |
