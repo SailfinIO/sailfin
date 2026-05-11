@@ -1,14 +1,16 @@
-// Slice E.1.5 (#528): regression coverage for the ABI primitive kind
-// diagnostic. Exercises both `numeric_type_kind` (the new helper in
-// `type_mapping.sfn`) and `coerce_operand_to_type`'s strict-mode rejection
-// of int↔float coercion at call boundaries.
+// Slice E.1.5 (#528, relaxed by #550): regression coverage for the ABI
+// primitive kind diagnostic. Exercises both `numeric_type_kind` (the
+// helper in `type_mapping.sfn`) and `coerce_operand_to_type`'s
+// boundary-mode behaviour on int↔float coercion.
 //
-// Today's compiler tree is internally consistent — no `: number` consumer
-// receives an `: int` value — so the diagnostic fires only on a
-// hand-edited mismatch. These tests pin down the helper's classification
-// and the coerce path's behaviour so a future Slice E.2 (#489a–d)
-// migration that leaves the tree inconsistent fails loudly instead of
-// producing corrupt LLVM IR with split ABI shapes.
+// During the Slice E.2 source migration window the boundary-mode
+// kind check emits a `[warning]` diagnostic and falls through to silent
+// `round + fptosi` widening. The fatal refusal landed in #528 was
+// downgraded by #550 — the cluster-internal boundary turned out to span
+// all of `compiler/src/llvm/` and could not be flipped atomically, so
+// the diagnostic provides visibility without aborting emission. Slice
+// E.3 (#490) re-promotes the diagnostic to `[fatal]` symmetrically once
+// every `: number` site has migrated.
 import { coerce_operand_to_type, harmonise_operands } from "../../src/llvm/expression_lowering/native/core_operands";
 import { numeric_type_kind } from "../../src/llvm/type_mapping";
 import { LLVMOperand } from "../../src/llvm/types";
@@ -48,22 +50,36 @@ fn _make_operand(llvm_type: string, value: string) -> LLVMOperand {
     return LLVMOperand { llvm_type: llvm_type, value: value };
 }
 
-test "coerce_operand_to_type: refuses double → i64 when widening is disallowed" ![io] {
+test "coerce_operand_to_type: warns + silently widens double → i64 in boundary mode" ![io] {
     let operand = _make_operand("double", "%t0");
     let mut lines: string[] = [];
     let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
-    assert result.operand == null;
-    // The diagnostic carries the `[fatal]` sentinel so the emit-level
-    // entrypoints fail the build instead of writing partial IR.
+    // #550: the kind-check now logs a warning and falls through to
+    // `round + fptosi`. Coercion succeeds with a non-null operand and
+    // the i64 LLVM type. The fatal refusal returns in #490 once Slice
+    // E.2 completes the source migration.
+    assert result.operand != null;
+    assert result.operand.llvm_type == "i64";
+    // The diagnostic carries the `[warning]` tag — NOT `[fatal]` —
+    // so `has_fatal_lowering_diagnostic` (lowering_core.sfn:294) does
+    // not trip and emission continues.
+    let mut found_warning = false;
     let mut found_fatal = false;
     let mut i: number = 0;
     loop {
         if i >= result.diagnostics.length { break; }
         let diag = result.diagnostics[i];
+        let mut _has_warning = false;
         let mut _has_fatal = false;
         let mut _has_double = false;
         let mut _has_i64 = false;
         let mut j: number = 0;
+        loop {
+            if j + 9 > diag.length { break; }
+            if substring(diag, j, j + 9) == "[warning]" { _has_warning = true; }
+            j += 1;
+        }
+        j = 0;
         loop {
             if j + 7 > diag.length { break; }
             if substring(diag, j, j + 7) == "[fatal]" { _has_fatal = true; }
@@ -81,14 +97,16 @@ test "coerce_operand_to_type: refuses double → i64 when widening is disallowed
             if substring(diag, j, j + 3) == "i64" { _has_i64 = true; }
             j += 1;
         }
-        if _has_fatal {
+        if _has_warning {
             if _has_double {
-                if _has_i64 { found_fatal = true; }
+                if _has_i64 { found_warning = true; }
             }
         }
+        if _has_fatal { found_fatal = true; }
         i += 1;
     }
-    assert found_fatal;
+    assert found_warning;
+    assert ! found_fatal;
 }
 
 test "coerce_operand_to_type: keeps i64 → double silent in this slice" ![io] {

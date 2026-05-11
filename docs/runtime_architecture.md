@@ -1550,24 +1550,41 @@ i64 length helper).
        the new `compiler/tests/e2e/test_numeric_int_default.sh`
        and `compiler/tests/unit/numeric_int_default_test.sfn`.
        Closes scalar L1; array L1 closes after E.2.
-    2. **E.1.5 (2026-05-10, #528):** Refuse silent
-       `float → int` coercion at ABI boundaries. Adds
-       `numeric_type_kind` to `compiler/src/llvm/type_mapping.sfn`
-       (returns `"int"` / `"float"` / `"other"`) and extends
-       `coerce_operand_to_type` in
-       `compiler/src/llvm/expression_lowering/native/core_operands.sfn`
-       so call-arg coercion and struct-field writes default to a
-       strict mode that rejects mismatch with a `[fatal]` ABI
-       primitive diagnostic. The rule is asymmetric — only
-       `caller=double, callee=i64` fires today, because the
-       reverse direction (`arr.length` into a `: number` slot)
-       still happens pervasively in the existing tree and is
-       deferred to E.3. The new `@[abi_widen]` parameter
-       attribute is parsed by `parse_single_parameter` and
-       plumbed through `NativeParameter.attributes` as a
-       per-parameter opt-out used by Slice E.2 to bridge the
-       small set of legitimate i64↔f64 widens during the partial
-       migration; #489d audits and removes all uses. Verified by
+    2. **E.1.5 (2026-05-10, #528; relaxed 2026-05-11, #550):**
+       Observe (not refuse) silent `float → int` coercion at ABI
+       boundaries. Adds `numeric_type_kind` to
+       `compiler/src/llvm/type_mapping.sfn` (returns `"int"` /
+       `"float"` / `"other"`) and extends `coerce_operand_to_type`
+       in `compiler/src/llvm/expression_lowering/native/core_operands.sfn`
+       so call-arg coercion and struct-field writes log a
+       `[warning]` ABI primitive diagnostic on mismatch. The
+       rule is asymmetric — only `caller=double, callee=i64`
+       fires today.
+
+       The original #528 design refused the mismatch with a
+       `[fatal]` diagnostic, on the theory that the existing
+       internally-consistent tree wouldn't trigger it and the
+       refusal would catch partial-migration mistakes during
+       E.2. Three #530 pickup attempts proved this assumption
+       wrong: the cluster-internal boundary spans effectively
+       all of `compiler/src/llvm/` (~100 files, not the named
+       cluster of ~30), so a staged flip cannot avoid
+       mixed-kind boundaries mid-migration (302 unique
+       `float → i64` mismatches observed against a 23-file
+       cluster scope on 2026-05-11). #550 downgraded the
+       diagnostic to `[warning]` and routed control through the
+       existing `coerce_numeric_primitive` `round + fptosi`
+       path, preserving visibility without aborting emission.
+       The fatal refusal re-promotes symmetrically in #490 once
+       E.2 completes. See lines 1399–1411 above for the original
+       sequencing constraint that #528 violated.
+
+       The `@[abi_widen]` parameter attribute is parsed by
+       `parse_single_parameter` and plumbed through
+       `NativeParameter.attributes` as a per-parameter opt-out
+       used by Slice E.2 to bridge the small set of legitimate
+       i64↔f64 widens during the partial migration; #489d
+       audits and removes all uses. Verified by
        `compiler/tests/integration/numeric_abi_mismatch_test.sfn`.
     3. **E.2 (next):** Audit-and-migrate every `: number`
        annotation in `compiler/src/*.sfn` and

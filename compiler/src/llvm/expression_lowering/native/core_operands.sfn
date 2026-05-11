@@ -1838,18 +1838,25 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
     return null;
 }
 
-// Slice E.1.5 (#528): `coerce_operand_to_type` is the single chokepoint for
-// numeric ABI shape decisions. `allow_widen` selects the slice's strict scope:
+// Slice E.1.5 (#528, relaxed by #550): `coerce_operand_to_type` is the
+// single chokepoint for numeric ABI shape decisions. `allow_widen`
+// selects the kind-check's strictness:
 //
-//   • `allow_widen = false` — the strict mode used by ABI-boundary callsites:
-//     function call arguments (`core_call_emission.sfn`), struct-field
-//     assignment (`statement_assignment.sfn`), and struct-literal field
-//     initialization (`core_literals_lowering.sfn`). When the operand and
-//     target disagree on `numeric_type_kind` along the asymmetric direction
-//     (operand=`float`, target=`int`), the coercion refuses with a `[fatal]`
-//     diagnostic instead of silently emitting `fptosi`.
+//   • `allow_widen = false` — the boundary mode used by call args
+//     (`core_call_emission.sfn`), struct-field assignment
+//     (`statement_assignment.sfn`), and struct-literal field
+//     initialization (`core_literals_lowering.sfn`). When operand and
+//     target disagree on `numeric_type_kind` along the asymmetric
+//     direction (operand=`float`, target=`int`), the coercion logs a
+//     `[warning]` diagnostic and FALLS THROUGH to silent `round +
+//     fptosi` widening via `coerce_numeric_primitive`. The fatal
+//     refusal landed in #528 was downgraded in #550 because the
+//     cluster-internal boundary is effectively all of `compiler/src/
+//     llvm/` (~100 files) and cannot be flipped atomically during the
+//     Slice E.2 source migration — see `docs/runtime_architecture.md`
+//     §3.7 line 1404 and the #530 cluster-flip post-mortem.
 //
-//   • `allow_widen = true` — the permissive mode used by every other
+//   • `allow_widen = true` — permissive mode used by every other
 //     callsite, including arithmetic harmonisation (`harmonise_operands`),
 //     the `arr.push(...)` value-shape adjust, pointer-deref stores, lvalue
 //     assignments to locals, array-element stores, array-index → i64
@@ -1859,9 +1866,11 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
 //     #489a–d) flips the call-arg site to permissive mode for the small set
 //     of legitimate i64 ↔ f64 widens during the partial migration.
 //
-// Slice E.3 (#490) re-applies #296 — once every `: number` site in the
-// compiler source has migrated to `: int`/`: float`, the symmetric rejection
-// generalises to the permissive sites above as well.
+// Slice E.3 (#490) re-applies #296 symmetrically — once every `: number`
+// site in the compiler source has migrated to `: int`/`: float`, the
+// rejection re-promotes to `[fatal]` and extends to the permissive
+// sites above. The `numeric_type_kind` helper stays in place as the
+// chokepoint for that re-enablement.
 fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
     let debug_coerce = trace_lowering();
     if debug_coerce {
@@ -1890,18 +1899,32 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
         };
     }
 
-    // ABI primitive kind check: refuse silent float → int coercion at
+    // ABI primitive kind check: observe silent float → int coercion at
     // boundaries that don't opt in to widening. The asymmetric rule
     // (operand kind=float, target kind=int) catches the Slice E.2 partial
     // migration mismatch — a callee parameter flipped from `: number`
     // (double) to `: int` (i64) while a caller still has a `double` in
-    // hand. The reverse direction (operand=int, target=float) keeps
-    // silently widening today: every existing `arr.length`-into-`:number`
-    // callsite relies on it, and the symmetric rejection rides on
-    // Slice E.3 (#490) once every `: number` site in the compiler source
-    // has migrated. The `[fatal]` sentinel propagates to the emit-level
-    // entrypoints which scan diagnostics for it and exit non-zero rather
-    // than writing a partial IR file.
+    // hand.
+    //
+    // #550 (relief valve): the diagnostic is emitted as `[warning]`
+    // (NOT `[fatal]`) and control falls through to the normal
+    // `coerce_numeric_primitive` path below, which emits `round +
+    // fptosi` for `double → i64`. `has_fatal_lowering_diagnostic`
+    // (lowering_core.sfn:294) scans for `[fatal]` only, so emission
+    // continues. The fatal refusal landed in #528 turned out to be
+    // intractable during the Slice E.2 source migration — the cluster
+    // boundary spans the entire `compiler/src/llvm/` tree (~100 files),
+    // not the named cluster of ~30 the original plan assumed, so a
+    // staged flip cannot avoid mixed-kind boundaries mid-migration.
+    // See `docs/runtime_architecture.md:1404` for the original
+    // sequencing constraint (strict refusal rides on E.3) that #528
+    // violated. #490 (Slice E.3) re-promotes the diagnostic to
+    // `[fatal]` symmetrically once E.2 completes.
+    //
+    // The reverse direction (operand=int, target=float) keeps silently
+    // widening today: every existing `arr.length`-into-`:number`
+    // callsite relies on it; the symmetric rejection also rides on
+    // #490.
     if !allow_widen {
         let from_kind = numeric_type_kind(operand_type);
         let to_kind = numeric_type_kind(target);
@@ -1910,11 +1933,10 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             if to_kind == "int" { _kind_check = true; }
         }
         if _kind_check {
-            // Slice E.2 follow-up (#540): when the caller threads a
-            // `NativeSourceSpan`, attach it to the diagnostic so the
-            // failing site is locatable in the source. Pre-#540 callers
-            // pass `null` and continue producing the bare message.
-            let mut abi_diag = "llvm lowering [fatal]: ABI primitive mismatch: callee expects `"
+            // #540 threads a `NativeSourceSpan` so the failing site is
+            // locatable in source; pre-#540 callers pass `null` and
+            // continue producing the bare message.
+            let mut abi_diag = "llvm lowering [warning]: ABI primitive mismatch: callee expects `"
                 + target
                 + "` ("
                 + to_kind
@@ -1928,40 +1950,54 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             }
             print.err(abi_diag);
             diagnostics.push(abi_diag);
-            return CoercionResult {
-                lines: current_lines,
-                temp_index: recover_temp_from_lines(current_lines, temp_index),
-                operand: null,
-                diagnostics: diagnostics
-            };
+            // Fall through to coerce_numeric_primitive below — see #550.
         }
     }
 
     let numeric = coerce_numeric_primitive(operand, operand_type, target, temp_index, current_lines);
     if numeric != null {
+        // Merge so any kind-check warning pushed above survives (#550).
+        let mut _nd_i: number = 0;
+        loop {
+            if _nd_i >= numeric.diagnostics.length { break; }
+            diagnostics.push(numeric.diagnostics[_nd_i]);
+            _nd_i += 1;
+        }
         return CoercionResult {
             lines: numeric.lines,
             temp_index: recover_temp_from_lines(numeric.lines, numeric.temp_index),
             operand: numeric.operand,
-            diagnostics: numeric.diagnostics
+            diagnostics: diagnostics
         };
     }
     let pointer = coerce_pointer_or_struct(operand, operand_type, target, temp_index, current_lines);
     if pointer != null {
+        let mut _pd_i: number = 0;
+        loop {
+            if _pd_i >= pointer.diagnostics.length { break; }
+            diagnostics.push(pointer.diagnostics[_pd_i]);
+            _pd_i += 1;
+        }
         return CoercionResult {
             lines: pointer.lines,
             temp_index: recover_temp_from_lines(pointer.lines, pointer.temp_index),
             operand: pointer.operand,
-            diagnostics: pointer.diagnostics
+            diagnostics: diagnostics
         };
     }
     let general = coerce_general_fallback(operand, operand_type, target, temp_index, current_lines);
     if general != null {
+        let mut _gd_i: number = 0;
+        loop {
+            if _gd_i >= general.diagnostics.length { break; }
+            diagnostics.push(general.diagnostics[_gd_i]);
+            _gd_i += 1;
+        }
         return CoercionResult {
             lines: general.lines,
             temp_index: recover_temp_from_lines(general.lines, general.temp_index),
             operand: general.operand,
-            diagnostics: general.diagnostics
+            diagnostics: diagnostics
         };
     }
     diagnostics.push("llvm lowering: unable to coerce operand of type `"
