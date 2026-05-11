@@ -124,7 +124,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                     }
                 }
             }
-            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines, _arg_allow_widen);
+            let coerced = coerce_operand_to_type(operand, target_type, result_temp, result_lines, _arg_allow_widen, null);
             result_diagnostics = extend_string_array(result_diagnostics, coerced.diagnostics);
             result_lines = coerced.lines;
             result_temp = coerced.temp_index;
@@ -235,7 +235,7 @@ fn coerce_and_emit_call(trimmed_target: string, operands: LLVMOperand[], expecte
                 // widens i64 literals to double[] receivers (see Slice E.1
                 // comment above). Slice E.1.5 (#528) leaves this site exempt
                 // from the ABI primitive kind check.
-                let push_value_coerced = coerce_operand_to_type(final_operands[1], array_push_element_type, result_temp, result_lines, true);
+                let push_value_coerced = coerce_operand_to_type(final_operands[1], array_push_element_type, result_temp, result_lines, true, null);
                 let mut _ci_apc: number = 0;
                 loop {
                     if _ci_apc >= push_value_coerced.diagnostics.length {

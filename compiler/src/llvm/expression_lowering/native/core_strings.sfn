@@ -120,7 +120,7 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     // forwards to the legacy NUL-terminated impl until M2.4 ships
     // length-aware bodies. Return type stays `i8*` so downstream
     // legacy-shape consumers don't need updating in this PR.
-    let left_aligned = coerce_operand_to_type(harmonised.left, "{i8*, i64}", harmonised.temp_index, harmonised.lines, true);
+    let left_aligned = coerce_operand_to_type(harmonised.left, "{i8*, i64}", harmonised.temp_index, harmonised.lines, true, null);
     let mut diagnostics: string[] = harmonised.diagnostics;
     let mut _ci0: number = 0;
     loop {
@@ -128,7 +128,7 @@ fn emit_string_concat(left: LLVMOperand, right: LLVMOperand, temp_index: number,
         diagnostics.push(left_aligned.diagnostics[_ci0]);
         _ci0 += 1;
     }
-    let right_aligned = coerce_operand_to_type(harmonised.right, "{i8*, i64}", left_aligned.temp_index, left_aligned.lines, true);
+    let right_aligned = coerce_operand_to_type(harmonised.right, "{i8*, i64}", left_aligned.temp_index, left_aligned.lines, true, null);
     let mut _ci1: number = 0;
     loop {
         if _ci1 >= right_aligned.diagnostics.length { break; }

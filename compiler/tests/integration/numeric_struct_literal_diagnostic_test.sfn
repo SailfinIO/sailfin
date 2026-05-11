@@ -1,0 +1,94 @@
+// Slice E.2 follow-up (#540): regression coverage for the location-aware
+// ABI primitive mismatch diagnostic threaded through
+// `coerce_operand_to_type`, `lower_struct_literal`, and `lower_enum_literal`.
+//
+// The plumbing exists so that — once `lower_expression` learns to forward
+// the enclosing source span (deferred per the issue's `Out:` section) — the
+// 938 bare diagnostics observed during the #529 attempt automatically gain
+// `line:col` enrichment. These tests pin down the chokepoint behaviour now:
+// when a caller threads a span, the diagnostic carries `start:col-end:col`;
+// when the span is `null`, the existing bare format is preserved.
+import { coerce_operand_to_type } from "../../src/llvm/expression_lowering/native/core_operands";
+import { LLVMOperand } from "../../src/llvm/types";
+import { NativeSourceSpan } from "../../src/native_ir";
+
+fn _operand(llvm_type: string, value: string) -> LLVMOperand {
+    return LLVMOperand { llvm_type: llvm_type, value: value };
+}
+
+fn _span(line: int, col: int) -> NativeSourceSpan {
+    return NativeSourceSpan {
+        start_line: line,
+        start_column: col,
+        end_line: line,
+        end_column: col + 1
+    };
+}
+
+fn _contains(text: string, needle: string) -> boolean {
+    if needle.length == 0 { return true; }
+    if needle.length > text.length { return false; }
+    let mut i: number = 0;
+    let limit = text.length - needle.length;
+    loop {
+        if i > limit { break; }
+        if substring(text, i, i + needle.length) == needle { return true; }
+        i += 1;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------------
+// `coerce_operand_to_type` span enrichment
+// -------------------------------------------------------------------
+test "coerce_operand_to_type: bare diagnostic when span is null" ![io] {
+    let operand = _operand("double", "%t0");
+    let mut lines: string[] = [];
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
+    assert result.operand == null;
+    assert result.diagnostics.length >= 1;
+    let mut saw_bare: boolean = false;
+    let mut idx: number = 0;
+    loop {
+        if idx >= result.diagnostics.length { break; }
+        let diag = result.diagnostics[idx];
+        if _contains(diag, "ABI primitive mismatch") {
+            // The bare form does NOT include the " at " suffix.
+            if !_contains(diag, " at ") { saw_bare = true; }
+        }
+        idx += 1;
+    }
+    assert saw_bare;
+}
+
+test "coerce_operand_to_type: span-aware diagnostic carries line:col" ![io] {
+    let operand = _operand("double", "%t1");
+    let mut lines: string[] = [];
+    let span = _span(42, 17);
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false, span);
+    assert result.operand == null;
+    let mut saw_location: boolean = false;
+    let mut idx: number = 0;
+    loop {
+        if idx >= result.diagnostics.length { break; }
+        let diag = result.diagnostics[idx];
+        if _contains(diag, "ABI primitive mismatch") {
+            // Expect "...at 42:17-42:18" with the threaded span.
+            if _contains(diag, " at 42:17") { saw_location = true; }
+        }
+        idx += 1;
+    }
+    assert saw_location;
+}
+
+test "coerce_operand_to_type: span ignored when widening is allowed" ![io] {
+    // The span only enriches the strict-mode refusal. Permissive coercion
+    // succeeds and returns no diagnostic regardless of whether a span was
+    // threaded.
+    let operand = _operand("double", "%t2");
+    let mut lines: string[] = [];
+    let span = _span(7, 3);
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, true, span);
+    assert result.operand != null;
+    assert result.diagnostics.length == 0;
+}

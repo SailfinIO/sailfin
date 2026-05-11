@@ -125,7 +125,7 @@ fn lower_call_expression(target: string, arguments: string[], bindings: Paramete
                 diagnostics: []
             };
 
-            return lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, "");
+            return lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, "", null);
         }
     }
 

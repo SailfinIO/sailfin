@@ -169,7 +169,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         // Pass `allow_widen=true` to preserve today's silent int↔float
         // coercion behaviour. The reapply of #296 in Slice E.3 (#490)
         // generalises the rejection here too.
-        let coerced = coerce_operand_to_type(lowered_value.operand, element_type, current_temp, current_lines, true);
+        let coerced = coerce_operand_to_type(lowered_value.operand, element_type, current_temp, current_lines, true, null);
         let mut _ci2: number = 0;
         loop {
             if _ci2 >= coerced.diagnostics.length { break; }
@@ -326,7 +326,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                     // (`arr[index]` with `index: number` is
                                     // common). Exempt from the ABI primitive
                                     // kind diagnostic.
-                                    let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true);
+                                    let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true, null);
                                     let mut _sci2: number = 0;
                                     loop {
                                         if _sci2 >= coerced_index.diagnostics.length {
@@ -457,7 +457,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         // migration that flips one struct field's type from
                         // `: number` to `: int` while its writers still
                         // produce doubles surfaces here loudly.
-                        let coerced = coerce_operand_to_type(lowered.operand, field_info.llvm_type, current_temp, current_lines, false);
+                        let coerced = coerce_operand_to_type(lowered.operand, field_info.llvm_type, current_temp, current_lines, false, null);
                         let mut _ci5: number = 0;
                         loop {
                             if _ci5 >= coerced.diagnostics.length { break; }
@@ -602,7 +602,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         // `allow_widen=true` to preserve today's behaviour;
                         // Slice E.3 (#490) tightens this once the migration
                         // completes.
-                        let coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines, true);
+                        let coerced = coerce_operand_to_type(lowered.operand, element_type, current_temp, current_lines, true, null);
                         let mut _ci9: number = 0;
                         loop {
                             if _ci9 >= coerced.diagnostics.length { break; }
@@ -616,7 +616,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             // Slice E.1.5 (#528): array index coerce, exempt
                             // (see comment at the subscripted-lvalue site
                             // above).
-                            let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true);
+                            let coerced_index = coerce_operand_to_type(index_result.operand, "i64", current_temp, current_lines, true, null);
                             let mut _ci10: number = 0;
                             loop {
                                 if _ci10 >= coerced_index.diagnostics.length {
