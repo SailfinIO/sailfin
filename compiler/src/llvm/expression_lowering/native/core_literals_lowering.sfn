@@ -1,7 +1,7 @@
 // compiler/src/llvm/expression_lowering/native/core_literals_lowering.sfn
 //
 // Literal/cast/interpolation lowering extracted from core.sfn.
-import { NativeFunction } from "../../../native_ir";
+import { NativeFunction, NativeSourceSpan } from "../../../native_ir";
 import { substring } from "../../../string_utils";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
@@ -67,6 +67,15 @@ import {
     emit_runtime_call,
     empty_runtime_call_overrides
 } from "./runtime_call";
+
+// Slice E.2 follow-up (#540): mirrors `format_coerce_span_location` in
+// `core_operands.sfn`. Inline rather than imported to avoid a cyclic
+// dependency through `core_ownership.sfn`.
+fn _format_literal_span(span: NativeSourceSpan) -> string {
+    let start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column);
+    let end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column);
+    return start + "-" + end;
+}
 
 fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
     let mut diagnostics: string[] = [];
@@ -454,7 +463,7 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
         }
         // Slice E.1.5 (#528): array literal element coerce — exempt
         // (array-element store is not in the slice's strict scope).
-        let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines, true);
+        let coerced = coerce_operand_to_type(prepared_operand, element_type, current_temp, current_lines, true, null);
         diagnostics = extend_string_array(diagnostics, coerced.diagnostics);
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
@@ -674,7 +683,13 @@ fn lower_array_literal(text: string, bindings: ParameterBinding[], locals: Local
     };
 }
 
-fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+// Slice E.2 follow-up (#540): `span` carries the struct-literal site's
+// source location so the ABI primitive mismatch diagnostic emitted by
+// `coerce_operand_to_type` (and the local follow-up below) can name a
+// `line:col` instead of firing bare. Pre-#540 callers (every `lower_expression`
+// fan-out) thread `null` until they pick up an enclosing span — see the
+// issue's `Out:` section for the deferred plumbing.
+fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut current_lines: string[] = lines;
     let mut current_temp: number = temp_index;
@@ -762,7 +777,10 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                 // a struct-field write; strict ABI primitive kind check, with
                 // a location-aware follow-up so the failing struct + field
                 // is in the build log next to the type-shape detail.
-                let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines, false);
+                // Slice E.2 follow-up (#540): thread the struct-literal site
+                // span so the bare ABI primitive mismatch diagnostic from
+                // `coerce_operand_to_type` carries a `line:col`.
+                let coerced = coerce_operand_to_type(lowered.operand, expected.llvm_type, current_temp, current_lines, false, span);
                 let mut _ci6: number = 0;
                 loop {
                     if _ci6 >= coerced.diagnostics.length { break; }
@@ -792,7 +810,10 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                     // this push enriches the diagnostic stream for future
                     // renderers that surface non-fatal-yet-fatal-tagged
                     // entries in the build report.
-                    diagnostics.push(_lit_diag_prefix
+                    // Slice E.2 follow-up (#540): when the caller threaded a
+                    // span, attach the same `line:col` here so the follow-up
+                    // diagnostic colocates with the bare mismatch detail.
+                    let mut _lit_diag = _lit_diag_prefix
                         + "unable to coerce value (got `"
                         + lowered.operand.llvm_type
                         + "`) into struct literal field `"
@@ -801,7 +822,11 @@ fn lower_struct_literal(parse: StructLiteralParse, bindings: ParameterBinding[],
                         + expected.name
                         + "` (expected `"
                         + expected.llvm_type
-                        + "`)");
+                        + "`)";
+                    if span != null {
+                        _lit_diag = _lit_diag + " at " + _format_literal_span(span);
+                    }
+                    diagnostics.push(_lit_diag);
                 }
                 if coerced.operand != null {
                     value_operand = coerced.operand;
@@ -996,7 +1021,9 @@ fn box_aggregate_operand(operand: LLVMOperand, expected_pointer_type: string, te
     };
 }
 
-fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string) -> ExpressionResult {
+// Slice E.2 follow-up (#540): `span` mirrors the threading in
+// `lower_struct_literal`. Pre-#540 callers pass `null`.
+fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], locals: LocalBinding[], temp_index: number, lines: string[], functions: NativeFunction[], context: TypeContext, expected_type: string, span: NativeSourceSpan?) -> ExpressionResult {
     let mut diagnostics: string[] = parse.diagnostics;
     let mut current_lines: string[] = lines;
     let mut current_temp: number = temp_index;
@@ -1152,7 +1179,9 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                     // a location-aware follow-up that names the enum +
                     // variant + field so partial-migration breakage is
                     // self-locating.
-                    let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines, false);
+                    // Slice E.2 follow-up (#540): thread the enum-literal
+                    // site span; same shape as the struct-literal branch.
+                    let coerced = coerce_operand_to_type(field_operand, expected.llvm_type, current_temp, current_lines, false, span);
                     let mut _ci9: number = 0;
                     loop {
                         if _ci9 >= coerced.diagnostics.length { break; }
@@ -1180,7 +1209,7 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                         // the diagnostic stream rather than stderr. The
                         // ABI-shape detail itself is already on stderr from
                         // `coerce_operand_to_type`.
-                        diagnostics.push(_payload_diag_prefix
+                        let mut _payload_diag = _payload_diag_prefix
                             + "unable to coerce value (got `"
                             + field_operand.llvm_type
                             + "`) into enum payload field `"
@@ -1191,7 +1220,12 @@ fn lower_enum_literal(parse: EnumLiteralParse, bindings: ParameterBinding[], loc
                             + expected.name
                             + "` (expected `"
                             + expected.llvm_type
-                            + "`)");
+                            + "`)";
+                        if span != null {
+                            _payload_diag = _payload_diag + " at "
+                                + _format_literal_span(span);
+                        }
+                        diagnostics.push(_payload_diag);
                     }
                     if coerced.operand != null {
                         if alloca_ptr != null {

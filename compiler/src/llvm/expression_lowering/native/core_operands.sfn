@@ -6,6 +6,7 @@
 // `harmonise_operands`), emits comparison instructions for equality and
 // relational operators (`emit_comparison_instruction`, `emit_boolean_and`),
 // and provides local variable loading (`load_local_operand`).
+import { NativeSourceSpan } from "../../../native_ir";
 import { char_code } from "../../../string_utils";
 import { default_return_literal, format_temp_name } from "../../expressions_helpers";
 import { trace_lowering } from "../../lowering_debug_state";
@@ -35,6 +36,16 @@ import {
     empty_runtime_call_overrides
 } from "./runtime_call";
 import { recover_temp_from_lines } from "./temp_recovery";
+
+// Slice E.2 follow-up (#540): tiny inline formatter so coerce diagnostics
+// can attach a source span without crossing the `core_ownership` →
+// `core_operands` boundary (which would introduce a cyclic import).
+// Mirrors `format_span_location` in shape — `start_line:start_col-end_line:end_col`.
+fn format_coerce_span_location(span: NativeSourceSpan) -> string {
+    let start = number_to_string(span.start_line) + ":" + number_to_string(span.start_column);
+    let end = number_to_string(span.end_line) + ":" + number_to_string(span.end_column);
+    return start + "-" + end;
+}
 
 fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: number, lines: string[]) -> ComparisonEmission {
     let mut diagnostics: string[] = [];
@@ -1851,7 +1862,7 @@ fn coerce_general_fallback(operand: LLVMOperand, operand_type: string, target: s
 // Slice E.3 (#490) re-applies #296 — once every `: number` site in the
 // compiler source has migrated to `: int`/`: float`, the symmetric rejection
 // generalises to the permissive sites above as well.
-fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[], allow_widen: boolean) -> CoercionResult ![io] {
+fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index: number, lines: string[], allow_widen: boolean, span: NativeSourceSpan?) -> CoercionResult ![io] {
     let debug_coerce = trace_lowering();
     if debug_coerce {
         print.err("emit-llvm: coerce_operand entry operand_type=" + operand.llvm_type
@@ -1899,7 +1910,11 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             if to_kind == "int" { _kind_check = true; }
         }
         if _kind_check {
-            let abi_diag = "llvm lowering [fatal]: ABI primitive mismatch: callee expects `"
+            // Slice E.2 follow-up (#540): when the caller threads a
+            // `NativeSourceSpan`, attach it to the diagnostic so the
+            // failing site is locatable in the source. Pre-#540 callers
+            // pass `null` and continue producing the bare message.
+            let mut abi_diag = "llvm lowering [fatal]: ABI primitive mismatch: callee expects `"
                 + target
                 + "` ("
                 + to_kind
@@ -1908,6 +1923,9 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
                 + "` ("
                 + from_kind
                 + ")";
+            if span != null {
+                abi_diag = abi_diag + " at " + format_coerce_span_location(span);
+            }
             print.err(abi_diag);
             diagnostics.push(abi_diag);
             return CoercionResult {
@@ -2050,7 +2068,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     // `1 + 2.0` or `arr.length + 0.5` legitimately widen i64 → double here.
     // Slice E.3 (#490) reapplies #296 and removes this opt-out once every
     // `: number` site in the compiler source has migrated to `: int`/`: float`.
-    let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines, true);
+    let left_coercion = coerce_operand_to_type(left_operand, target_type, current_temp, current_lines, true, null);
     let mut _ci0: number = 0;
     loop {
         if _ci0 >= left_coercion.diagnostics.length { break; }
@@ -2076,7 +2094,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     current_lines = left_coercion.lines;
     current_temp = left_coercion.temp_index;
 
-    let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines, true);
+    let right_coercion = coerce_operand_to_type(right_operand, target_type, current_temp, current_lines, true, null);
     let mut _ci1: number = 0;
     loop {
         if _ci1 >= right_coercion.diagnostics.length { break; }

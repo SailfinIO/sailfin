@@ -1005,7 +1005,11 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
             // Verify this is actually an enum by checking context
             let enum_info = resolve_enum_info_for_literal(context, enum_parse.enum_name);
             if enum_info != null {
-                let lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
+                // Slice E.2 follow-up (#540): `lower_expression` does not
+                // yet carry the enclosing source span — wiring it through is
+                // out of scope per the issue's `Out:` section. Pass `null`;
+                // the ABI mismatch diagnostic falls back to its bare form.
+                let lowered_enum = lower_enum_literal(enum_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
                 let mut _ci2: number = 0;
                 loop {
                     if _ci2 >= lowered_enum.diagnostics.length { break; }
@@ -1040,7 +1044,7 @@ fn lower_expression(expression: string, bindings: ParameterBinding[], locals: Lo
                 string_constants: empty_constants
             };
         }
-        let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type);
+        let lowered_struct = lower_struct_literal(struct_parse, bindings, locals, temp_index, lines, functions, context, expected_type, null);
         let mut _ci4: number = 0;
         loop {
             if _ci4 >= lowered_struct.diagnostics.length { break; }

@@ -51,7 +51,7 @@ fn _make_operand(llvm_type: string, value: string) -> LLVMOperand {
 test "coerce_operand_to_type: refuses double → i64 when widening is disallowed" ![io] {
     let operand = _make_operand("double", "%t0");
     let mut lines: string[] = [];
-    let result = coerce_operand_to_type(operand, "i64", 0, lines, false);
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
     assert result.operand == null;
     // The diagnostic carries the `[fatal]` sentinel so the emit-level
     // entrypoints fail the build instead of writing partial IR.
@@ -99,7 +99,7 @@ test "coerce_operand_to_type: keeps i64 → double silent in this slice" ![io] {
     // tightens the check to symmetric once the migration completes.
     let operand = _make_operand("i64", "%t1");
     let mut lines: string[] = [];
-    let result = coerce_operand_to_type(operand, "double", 0, lines, false);
+    let result = coerce_operand_to_type(operand, "double", 0, lines, false, null);
     assert result.operand != null;
 }
 
@@ -109,7 +109,7 @@ test "coerce_operand_to_type: keeps i64 → double silent in this slice" ![io] {
 test "coerce_operand_to_type: silently widens i64 → double when widening is allowed" ![io] {
     let operand = _make_operand("i64", "%t2");
     let mut lines: string[] = [];
-    let result = coerce_operand_to_type(operand, "double", 0, lines, true);
+    let result = coerce_operand_to_type(operand, "double", 0, lines, true, null);
     // Existing behaviour (sitofp) preserved for arithmetic harmonisation
     // and the explicit `arr.push(...)` value-shape adjust.
     assert result.operand != null;
@@ -118,7 +118,7 @@ test "coerce_operand_to_type: silently widens i64 → double when widening is al
 test "coerce_operand_to_type: silently coerces double → i64 when widening is allowed" ![io] {
     let operand = _make_operand("double", "%t3");
     let mut lines: string[] = [];
-    let result = coerce_operand_to_type(operand, "i64", 0, lines, true);
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, true, null);
     assert result.operand != null;
 }
 
@@ -157,7 +157,7 @@ test "harmonise_operands: recovers temp_index from existing emitted lines" {
 test "coerce_operand_to_type: same-type passthrough is a no-op in strict mode" ![io] {
     let operand = _make_operand("i64", "%t4");
     let mut lines: string[] = [];
-    let result = coerce_operand_to_type(operand, "i64", 0, lines, false);
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false, null);
     assert result.operand != null;
     assert result.diagnostics.length == 0;
 }
@@ -171,6 +171,6 @@ test "coerce_operand_to_type: i1 → double bypasses the strict diagnostic" ![io
     // to keep this path silent until Slice E.3 (#490) tightens it.
     let operand = _make_operand("i1", "%t5");
     let mut lines: string[] = [];
-    let result = coerce_operand_to_type(operand, "double", 0, lines, false);
+    let result = coerce_operand_to_type(operand, "double", 0, lines, false, null);
     assert result.operand != null;
 }
