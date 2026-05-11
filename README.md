@@ -7,7 +7,7 @@
 <h1 align="center">Sailfin</h1>
 
 <p align="center">
-  <strong>A compiled systems language with compile-time capability enforcement.</strong>
+  <strong>A systems language with compile-time capability enforcement.</strong>
 </p>
 
 <p align="center">

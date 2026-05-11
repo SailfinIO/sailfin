@@ -32,7 +32,7 @@
   <g font-family="'Inter', -apple-system, 'Segoe UI', sans-serif" fill="#f4eefb">
     <text x="72" y="420" font-size="44" font-weight="700" letter-spacing="-1">Know what your code can do</text>
     <text x="72" y="472" font-size="44" font-weight="700" letter-spacing="-1" fill="url(#accent)">before it runs.</text>
-    <text x="72" y="548" font-size="22" font-weight="500" fill="#cfc4e0">A compiled systems language with compile-time effect checking.</text>
+    <text x="72" y="548" font-size="22" font-weight="500" fill="#cfc4e0">A systems language with compile-time effect checking.</text>
   </g>
 
   <!-- Guillermo, placed on the right. The source viewBox is 0 0 256 256; we

@@ -3,7 +3,7 @@
 > Version: 0.5.9 | Updated: 2026-04-26 (Phase F)
 > Source: https://github.com/SailfinIO/sailfin | Site: https://sailfin.dev
 
-Sailfin is a compiled systems language with compile-time capability enforcement
+Sailfin is a systems language with compile-time capability enforcement
 via effect types. The compiler is self-hosted (written in Sailfin), targets LLVM,
 and produces native single-binary executables. Licensed under GPLv2 with a
 runtime library exception.
