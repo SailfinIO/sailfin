@@ -3,7 +3,7 @@
 // Assignment handling extracted from statement.sfn to keep each function
 // under ~500 .sfn-asm instructions (avoids seed OOM).
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../../native_ir";
-import { index_of, substring } from "../../../string_utils";
+import { substring } from "../../../string_utils";
 import { default_return_literal, format_temp_name, is_simple_identifier } from "../../expressions_helpers";
 import { empty_string_constant_set, merge_string_constants } from "../../strings";
 import { find_struct_field_index, find_struct_info_by_llvm_type } from "../../type_context_queries";
@@ -52,55 +52,7 @@ import {
 } from "./core_scopes";
 import { find_substring_from } from "./core_text";
 import { emit_runtime_call, empty_runtime_call_overrides } from "./runtime_call";
-
-// Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
-// when returned from cross-module calls. Scan lines for the highest %tN
-// definition and use max(found+1, floor) as the recovered counter.
-fn _recover_assign_temp(lines: string[], floor: number) -> number {
-    let mut result: number = floor;
-    let mut ri: number = 0;
-    loop {
-        if ri >= lines.length { break; }
-        let rl = lines[ri];
-        if starts_with(rl, "  %t") {
-            let after_t = substring(rl, 4, rl.length);
-            let space = index_of(after_t, " ");
-            if space > 0 {
-                let num_str = substring(after_t, 0, space);
-                let rn = _assign_parse_int(num_str);
-                if rn >= result { result = rn + 1; }
-            }
-        }
-        ri += 1;
-    }
-    return result;
-}
-
-fn _assign_parse_int(text: string) -> number {
-    let len = text.length;
-    if len == 0 { return 0; }
-    let mut result: number = 0;
-    let mut i: number = 0;
-    loop {
-        if i >= len { break; }
-        let ch = substring(text, i, i + 1);
-        let mut digit: number = -1;
-        if ch == "0" { digit = 0; }
-        if ch == "1" { digit = 1; }
-        if ch == "2" { digit = 2; }
-        if ch == "3" { digit = 3; }
-        if ch == "4" { digit = 4; }
-        if ch == "5" { digit = 5; }
-        if ch == "6" { digit = 6; }
-        if ch == "7" { digit = 7; }
-        if ch == "8" { digit = 8; }
-        if ch == "9" { digit = 9; }
-        if digit < 0 { break; }
-        result = result * 10 + digit;
-        i += 1;
-    }
-    return result;
-}
+import { recover_temp_from_lines } from "./temp_recovery";
 
 // Handles deref (*ptr = value), member access (obj.field = value), and
 // array index (arr[i] = value) assignments. Returns ExpressionStatementResult.
@@ -133,7 +85,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         string_constants = lowered_value.string_constants;
         current_lines = lowered_value.lines;
         current_temp = lowered_value.temp_index;
-        current_temp = _recover_assign_temp(current_lines, current_temp);
+        current_temp = recover_temp_from_lines(current_lines, current_temp);
         if lowered_value.operand == null {
             diagnostics.push("llvm lowering: failed to lower assignment value for deref target `"
                 + assign_target
@@ -176,7 +128,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         }
         current_lines = lowered_ptr.lines;
         current_temp = lowered_ptr.temp_index;
-        current_temp = _recover_assign_temp(current_lines, current_temp);
+        current_temp = recover_temp_from_lines(current_lines, current_temp);
         if lowered_ptr.operand == null {
             diagnostics.push("llvm lowering: deref assignment pointer `"
                 + pointer_text
@@ -226,7 +178,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         }
         current_lines = coerced.lines;
         current_temp = coerced.temp_index;
-        current_temp = _recover_assign_temp(current_lines, current_temp);
+        current_temp = recover_temp_from_lines(current_lines, current_temp);
         if coerced.operand == null {
             diagnostics.push("llvm lowering: unable to coerce deref assignment value to `"
                 + element_type
@@ -281,7 +233,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         string_constants = lowered.string_constants;
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
-        current_temp = _recover_assign_temp(current_lines, current_temp);
+        current_temp = recover_temp_from_lines(current_lines, current_temp);
         if lowered.operand == null {
             diagnostics.push("llvm lowering: failed to lower assignment value for member `"
                 + assign_target
@@ -296,7 +248,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             }
             current_lines = base_result.lines;
             current_temp = base_result.temp_index;
-            current_temp = _recover_assign_temp(current_lines, current_temp);
+            current_temp = recover_temp_from_lines(current_lines, current_temp);
             if base_result.operand == null {
                 diagnostics.push("llvm lowering: member access assignment base `"
                     + member_parse.base
@@ -351,7 +303,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         }
                         current_lines = array_result.lines;
                         current_temp = array_result.temp_index;
-                        current_temp = _recover_assign_temp(current_lines, current_temp);
+                        current_temp = recover_temp_from_lines(current_lines, current_temp);
                         if array_result.operand != null {
                             let array_operand = array_result.operand;
                             let element_type = array_pointer_element_type(array_operand.llvm_type);
@@ -367,7 +319,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                 }
                                 current_lines = index_result.lines;
                                 current_temp = index_result.temp_index;
-                                current_temp = _recover_assign_temp(current_lines, current_temp);
+                                current_temp = recover_temp_from_lines(current_lines, current_temp);
                                 if index_result.operand != null {
                                     // Slice E.1.5 (#528): array index coercion
                                     // legitimately widens double → i64 today
@@ -385,7 +337,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                                     }
                                     current_lines = coerced_index.lines;
                                     current_temp = coerced_index.temp_index;
-                                    current_temp = _recover_assign_temp(current_lines, current_temp);
+                                    current_temp = recover_temp_from_lines(current_lines, current_temp);
                                     if coerced_index.operand != null {
                                         let data_field_ptr = format_temp_name(current_temp);
                                         current_temp += 1;
@@ -514,7 +466,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         }
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
-                        current_temp = _recover_assign_temp(current_lines, current_temp);
+                        current_temp = recover_temp_from_lines(current_lines, current_temp);
                         // Slice E.1.5 (#528): location-aware follow-up so the
                         // struct + field name is in the build log alongside
                         // the type-shape detail emitted by `coerce_operand_to_type`.
@@ -603,7 +555,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
         string_constants = lowered.string_constants;
         current_lines = lowered.lines;
         current_temp = lowered.temp_index;
-        current_temp = _recover_assign_temp(current_lines, current_temp);
+        current_temp = recover_temp_from_lines(current_lines, current_temp);
         if lowered.operand == null {
             diagnostics.push("llvm lowering: failed to lower assignment value for array index `"
                 + assign_target
@@ -618,7 +570,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
             }
             current_lines = base_result.lines;
             current_temp = base_result.temp_index;
-            current_temp = _recover_assign_temp(current_lines, current_temp);
+            current_temp = recover_temp_from_lines(current_lines, current_temp);
             if base_result.operand == null {
                 diagnostics.push("llvm lowering: array index assignment base `"
                     + index_parse.base
@@ -633,7 +585,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                 }
                 current_lines = index_result.lines;
                 current_temp = index_result.temp_index;
-                current_temp = _recover_assign_temp(current_lines, current_temp);
+                current_temp = recover_temp_from_lines(current_lines, current_temp);
                 if index_result.operand == null {
                     diagnostics.push("llvm lowering: array index `"
                         + index_parse.index
@@ -659,7 +611,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                         }
                         current_lines = coerced.lines;
                         current_temp = coerced.temp_index;
-                        current_temp = _recover_assign_temp(current_lines, current_temp);
+                        current_temp = recover_temp_from_lines(current_lines, current_temp);
                         if coerced.operand != null {
                             // Slice E.1.5 (#528): array index coerce, exempt
                             // (see comment at the subscripted-lvalue site
@@ -675,7 +627,7 @@ fn lower_lvalue_assignment_stmt(assign_target: string, assign_value: string, ass
                             }
                             current_lines = coerced_index.lines;
                             current_temp = coerced_index.temp_index;
-                            current_temp = _recover_assign_temp(current_lines, current_temp);
+                            current_temp = recover_temp_from_lines(current_lines, current_temp);
                             if coerced_index.operand == null {
                                 diagnostics.push("llvm lowering: unable to coerce array index to i64 for `"
                                     + assign_target

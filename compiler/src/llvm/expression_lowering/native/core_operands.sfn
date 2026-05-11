@@ -34,6 +34,7 @@ import {
     emit_runtime_call,
     empty_runtime_call_overrides
 } from "./runtime_call";
+import { recover_temp_from_lines } from "./temp_recovery";
 
 fn emit_comparison_instruction(symbol: string, left_operand: LLVMOperand, right_operand: LLVMOperand, temp_index: number, lines: string[]) -> ComparisonEmission {
     let mut diagnostics: string[] = [];
@@ -1864,7 +1865,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     if target.length == 0 {
         return CoercionResult {
             lines: current_lines,
-            temp_index: temp_index,
+            temp_index: recover_temp_from_lines(current_lines, temp_index),
             operand: operand,
             diagnostics: diagnostics
         };
@@ -1872,7 +1873,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     if operand_type == target {
         return CoercionResult {
             lines: current_lines,
-            temp_index: temp_index,
+            temp_index: recover_temp_from_lines(current_lines, temp_index),
             operand: operand,
             diagnostics: diagnostics
         };
@@ -1911,7 +1912,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
             diagnostics.push(abi_diag);
             return CoercionResult {
                 lines: current_lines,
-                temp_index: temp_index,
+                temp_index: recover_temp_from_lines(current_lines, temp_index),
                 operand: null,
                 diagnostics: diagnostics
             };
@@ -1919,11 +1920,32 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
     }
 
     let numeric = coerce_numeric_primitive(operand, operand_type, target, temp_index, current_lines);
-    if numeric != null { return numeric; }
+    if numeric != null {
+        return CoercionResult {
+            lines: numeric.lines,
+            temp_index: recover_temp_from_lines(numeric.lines, numeric.temp_index),
+            operand: numeric.operand,
+            diagnostics: numeric.diagnostics
+        };
+    }
     let pointer = coerce_pointer_or_struct(operand, operand_type, target, temp_index, current_lines);
-    if pointer != null { return pointer; }
+    if pointer != null {
+        return CoercionResult {
+            lines: pointer.lines,
+            temp_index: recover_temp_from_lines(pointer.lines, pointer.temp_index),
+            operand: pointer.operand,
+            diagnostics: pointer.diagnostics
+        };
+    }
     let general = coerce_general_fallback(operand, operand_type, target, temp_index, current_lines);
-    if general != null { return general; }
+    if general != null {
+        return CoercionResult {
+            lines: general.lines,
+            temp_index: recover_temp_from_lines(general.lines, general.temp_index),
+            operand: general.operand,
+            diagnostics: general.diagnostics
+        };
+    }
     diagnostics.push("llvm lowering: unable to coerce operand of type `"
         + operand.llvm_type
         + "` to `"
@@ -1931,7 +1953,7 @@ fn coerce_operand_to_type(operand: LLVMOperand, target_type: string, temp_index:
         + "`");
     return CoercionResult {
         lines: current_lines,
-        temp_index: temp_index,
+        temp_index: recover_temp_from_lines(current_lines, temp_index),
         operand: null,
         diagnostics: diagnostics
     };
@@ -2016,7 +2038,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
     if left_operand.llvm_type == right_operand.llvm_type {
         return BinaryAlignmentResult {
             lines: current_lines,
-            temp_index: current_temp,
+            temp_index: recover_temp_from_lines(current_lines, current_temp),
             left: left_operand,
             right: right_operand,
             diagnostics: diagnostics,
@@ -2043,7 +2065,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
             + "`");
         return BinaryAlignmentResult {
             lines: left_coercion.lines,
-            temp_index: left_coercion.temp_index,
+            temp_index: recover_temp_from_lines(left_coercion.lines, left_coercion.temp_index),
             left: null,
             right: null,
             diagnostics: diagnostics,
@@ -2069,7 +2091,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
             + "`");
         return BinaryAlignmentResult {
             lines: right_coercion.lines,
-            temp_index: right_coercion.temp_index,
+            temp_index: recover_temp_from_lines(right_coercion.lines, right_coercion.temp_index),
             left: null,
             right: null,
             diagnostics: diagnostics,
@@ -2082,7 +2104,7 @@ fn harmonise_operands(left: LLVMOperand, right: LLVMOperand, temp_index: number,
 
     return BinaryAlignmentResult {
         lines: current_lines,
-        temp_index: current_temp,
+        temp_index: recover_temp_from_lines(current_lines, current_temp),
         left: left_operand,
         right: right_operand,
         diagnostics: diagnostics,

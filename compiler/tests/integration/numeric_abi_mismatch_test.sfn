@@ -9,7 +9,7 @@
 // and the coerce path's behaviour so a future Slice E.2 (#489a–d)
 // migration that leaves the tree inconsistent fails loudly instead of
 // producing corrupt LLVM IR with split ABI shapes.
-import { coerce_operand_to_type } from "../../src/llvm/expression_lowering/native/core_operands";
+import { coerce_operand_to_type, harmonise_operands } from "../../src/llvm/expression_lowering/native/core_operands";
 import { numeric_type_kind } from "../../src/llvm/type_mapping";
 import { LLVMOperand } from "../../src/llvm/types";
 
@@ -120,6 +120,35 @@ test "coerce_operand_to_type: silently coerces double → i64 when widening is a
     let mut lines: string[] = [];
     let result = coerce_operand_to_type(operand, "i64", 0, lines, true);
     assert result.operand != null;
+}
+
+// -------------------------------------------------------------------
+// Temp-index recovery across module boundaries (#543)
+// -------------------------------------------------------------------
+test "coerce_operand_to_type: recovers temp_index from existing emitted lines" ![io] {
+    let operand = _make_operand("i64", "%t1");
+    let mut lines: string[] = [];
+    lines.push("  %t0 = add i64 1, 2");
+    lines.push("  %t1 = add i64 %t0, 3");
+
+    let result = coerce_operand_to_type(operand, "i64", 0, lines, false);
+
+    assert result.operand != null;
+    assert result.temp_index == 2;
+}
+
+test "harmonise_operands: recovers temp_index from existing emitted lines" {
+    let left = _make_operand("i64", "%t0");
+    let right = _make_operand("i64", "%t1");
+    let mut lines: string[] = [];
+    lines.push("  %t0 = add i64 1, 2");
+    lines.push("  %t1 = add i64 %t0, 3");
+
+    let result = harmonise_operands(left, right, 0, lines);
+
+    assert result.left != null;
+    assert result.right != null;
+    assert result.temp_index == 2;
 }
 
 // -------------------------------------------------------------------

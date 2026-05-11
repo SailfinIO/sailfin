@@ -2,9 +2,10 @@
 //
 // Shared condition-lowering utilities used by if, loop, and match instruction handlers.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../native_ir";
-import { char_code, grapheme_at, substring } from "../../string_utils";
+import { substring } from "../../string_utils";
 import { lower_expression } from "../expression_lowering/native/core";
 import { detect_suspension_conflicts } from "../expression_lowering/native/statement_suspension";
+import { recover_temp_from_lines } from "../expression_lowering/native/temp_recovery";
 import { find_local_binding, find_parameter_binding } from "../expressions_bindings";
 import { default_return_literal, format_temp_name } from "../expressions_helpers";
 import { is_number_literal, normalise_number_literal } from "../expressions_literals";
@@ -17,13 +18,7 @@ import {
     StringConstant,
     TypeContext
 } from "../types";
-import {
-    index_of,
-    number_to_string,
-    starts_with,
-    trim_text
-} from "../utils";
-import { _parse_int_from_string } from "./instructions_helpers";
+import { number_to_string, starts_with, trim_text } from "../utils";
 
 fn allocate_block_label(prefix: string, counter: number) -> BlockLabelResult {
     return BlockLabelResult {
@@ -43,25 +38,7 @@ fn lower_condition_to_i1(function_name: string, expression: string, bindings: Pa
     }
     let mut current_lines: string[] = lowered.lines;
     let mut current_temp: number = lowered.temp_index;
-    // Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0.
-    // Scan lines for the highest %tN assignment and use that to recover current_temp.
-    {
-        let mut _scan_i: number = 0;
-        loop {
-            if _scan_i >= current_lines.length { break; }
-            let _scan_line = current_lines[_scan_i];
-            if starts_with(_scan_line, "  %t") {
-                let _after_t = substring(_scan_line, 4, _scan_line.length);
-                let _space = index_of(_after_t, " ");
-                if _space > 0 {
-                    let _num_str = substring(_after_t, 0, _space);
-                    let _num = _parse_int_from_string(_num_str);
-                    if _num >= current_temp { current_temp = _num + 1; }
-                }
-            }
-            _scan_i += 1;
-        }
-    }
+    current_temp = recover_temp_from_lines(current_lines, current_temp);
 
     let string_constants = lowered.string_constants;
 
