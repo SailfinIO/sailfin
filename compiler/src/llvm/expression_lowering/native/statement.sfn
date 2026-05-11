@@ -6,12 +6,6 @@
 // `prepare_parameters`.  Type mapping, suspension detection, async ABI helpers,
 // and expression parsing live in sibling submodules.
 import { NativeFunction, NativeInstruction, NativeSourceSpan } from "../../../native_ir";
-import {
-    char_at,
-    char_code,
-    find_last_index_of_char,
-    substring
-} from "../../../string_utils";
 import { test_runner_trace } from "../../../test_runner_state";
 import { default_return_literal, is_simple_identifier } from "../../expressions_helpers";
 // `format_root_scope_id` lives in the lifetime utilities module; the
@@ -75,6 +69,7 @@ import { lower_lvalue_assignment_stmt } from "./statement_assignment";
 import { parse_assignment_expression, parse_inline_let_expression } from "./statement_parsing";
 import { detect_suspension_conflicts } from "./statement_suspension";
 import { map_parameter_type, map_struct_type_annotation } from "./statement_type_mapping";
+import { recover_temp_from_lines } from "./temp_recovery";
 
 fn find_parameter_binding(bindings: ParameterBinding[], name: string) -> ParameterBinding? {
     return bindings_find_parameter_binding(bindings, name);
@@ -94,41 +89,6 @@ fn reset_local_consumption(locals: LocalBinding[], name: string) -> LocalBinding
 
 fn update_local_ownership(locals: LocalBinding[], name: string, ownership: OwnershipInfo?) -> LocalBinding[] {
     return bindings_update_local_ownership(locals, name, ownership);
-}
-
-// ---------------------------------------------------------------------------
-// SSA temp counter recovery
-// ---------------------------------------------------------------------------
-// Recover from v0.1.1 seed ABI corruption: lowered.temp_index may be 0
-// when returned from cross-module calls (e.g. lower_expression,
-// coerce_operand_to_type). Scan emitted lines for the highest %tN
-// definition and use max(found+1, floor) as the recovered counter.
-fn _recover_temp_from_lines(lines: string[], floor: number) -> number {
-    let mut result: number = floor;
-    let mut ri: number = 0;
-    loop {
-        if ri >= lines.length { break; }
-        let rl = lines[ri];
-        if starts_with(rl, "  %t") {
-            let mut rn: number = 0;
-            let mut rj: number = 4;
-            let mut rvalid: boolean = false;
-            loop {
-                if rj >= rl.length { break; }
-                let rc = char_code(char_at(rl, rj));
-                if rc < 48 { break; }
-                if rc > 57 { break; }
-                rn = rn * 10 + (rc - 48);
-                rvalid = true;
-                rj += 1;
-            }
-            if rvalid {
-                if rn >= result { result = rn + 1; }
-            }
-        }
-        ri += 1;
-    }
-    return result;
 }
 
 // Helpers: build binding structs for the IPC read-back loops.
@@ -261,7 +221,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
             string_constants = lowered.string_constants;
             current_lines = lowered.lines;
             current_temp = lowered.temp_index;
-            current_temp = _recover_temp_from_lines(current_lines, current_temp);
+            current_temp = recover_temp_from_lines(current_lines, current_temp);
             if lowered.operand == null {
                 diagnostics.push("llvm lowering: failed to lower assignment expression for `"
                     + trimmed_assign_target
@@ -276,7 +236,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
                 }
                 current_lines = coerced.lines;
                 current_temp = coerced.temp_index;
-                current_temp = _recover_temp_from_lines(current_lines, current_temp);
+                current_temp = recover_temp_from_lines(current_lines, current_temp);
                 if coerced.operand == null {
                     diagnostics.push("llvm lowering: unable to coerce assignment value for `"
                         + trimmed_assign_target
@@ -386,7 +346,7 @@ fn lower_expression_statement(function_name: string, instruction: NativeInstruct
     let consumption = ownership_analysis.consumption;
 
     let _lowered = lower_expression(expression, current_bindings, current_locals, current_temp, current_lines, functions, context, "");
-    current_temp = _recover_temp_from_lines(current_lines, current_temp);
+    current_temp = recover_temp_from_lines(current_lines, current_temp);
     if consumption != null {
         if consumption.kind == "local" {
             current_locals = mark_local_consumed(current_locals, consumption.name);
@@ -539,7 +499,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
             bind_i += 1;
         }
     }
-    current_temp = _recover_temp_from_lines(current_lines, current_temp);
+    current_temp = recover_temp_from_lines(current_lines, current_temp);
     let lowered = lower_expression(instr_expression, current_bindings, current_locals, current_temp, current_lines, functions, context, safe_llvm_return);
     if debug_lowering {
         print.err("emit-llvm: lower_return post_lower_expr fn=" + fn_name);
@@ -552,7 +512,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     }
     current_lines = lowered.lines;
     current_temp = lowered.temp_index;
-    current_temp = _recover_temp_from_lines(current_lines, current_temp);
+    current_temp = recover_temp_from_lines(current_lines, current_temp);
     let string_constants = lowered.string_constants;
 
     if debug_lowering {
@@ -645,7 +605,7 @@ fn lower_return_instruction(function: NativeFunction, instruction: NativeInstruc
     }
     current_lines = coerced.lines;
     current_temp = coerced.temp_index;
-    current_temp = _recover_temp_from_lines(current_lines, current_temp);
+    current_temp = recover_temp_from_lines(current_lines, current_temp);
     if coerced.operand == null {
         diagnostics.push("llvm lowering: unable to coerce return expression to `"
             + safe_llvm_return

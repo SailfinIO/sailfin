@@ -1,0 +1,37 @@
+// compiler/src/llvm/expression_lowering/native/temp_recovery.sfn
+//
+// Shared SSA temp counter recovery for LLVM lowering paths that cross the
+// self-hosted compiler's module ABI boundary.
+import { char_at, char_code } from "../../../string_utils";
+import { starts_with } from "../../utils";
+
+// Recover from seed ABI corruption: result temp_index fields can be stale when
+// returned from cross-module calls. Scan emitted lines for the highest %tN
+// definition and use max(found+1, floor) as the recovered counter.
+fn recover_temp_from_lines(lines: string[], floor: number) -> number {
+    let mut result: number = floor;
+    let mut ri: number = 0;
+    loop {
+        if ri >= lines.length { break; }
+        let rl = lines[ri];
+        if starts_with(rl, "  %t") {
+            let mut rn: number = 0;
+            let mut rj: number = 4;
+            let mut rvalid: boolean = false;
+            loop {
+                if rj >= rl.length { break; }
+                let rc = char_code(char_at(rl, rj));
+                if rc < 48 { break; }
+                if rc > 57 { break; }
+                rn = rn * 10 + (rc - 48);
+                rvalid = true;
+                rj += 1;
+            }
+            if rvalid {
+                if rn >= result { result = rn + 1; }
+            }
+        }
+        ri += 1;
+    }
+    return result;
+}
