@@ -54,8 +54,9 @@
   and `--json` output for tooling and agents. Designed to be readable by
   humans and machines.
 - **Self-hosted native compiler.** Sailfin compiles itself to LLVM IR — a
-  real native toolchain, not an interpreter wrapper. Releases ship as
-  single-binary `sailfin` / `sfn` artifacts per OS/arch.
+  real native toolchain, not an interpreter wrapper. Releases ship per
+  OS/arch as a `sailfin` / `sfn` binary alongside the runtime bundle
+  (`sfn run` / `sfn build` resolve runtime sources from it).
 - **Structured concurrency (planned).** Routines, channels, and parallel
   blocks as first-class language constructs with deterministic scoping —
   on the critical path to 1.0.
@@ -199,7 +200,7 @@ curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh |
 To pin a specific version:
 
 ```sh
-VERSION=0.5.10-alpha.13 curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/SailfinIO/sailfin/main/install.sh | VERSION=0.5.10-alpha.13 bash
 ```
 
 ### Windows (PowerShell)
