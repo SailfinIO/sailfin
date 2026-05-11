@@ -1,0 +1,35 @@
+{
+  "SessionStart": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": ".codex/hooks/session-start.sh"
+        }
+      ]
+    }
+  ],
+  "UserPromptSubmit": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": ".codex/hooks/inject-git-context.sh"
+        }
+      ]
+    }
+  ],
+  "PreToolUse": [
+    {
+      "matcher": "Bash|Shell|LocalShell|exec_command",
+      "hooks": [
+        {
+          "type": "command",
+          "command": ".codex/hooks/check-ulimit.sh"
+        }
+      ]
+    }
+  ]
+}

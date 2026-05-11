@@ -28,3 +28,10 @@
 - History mixes imperative commits and Conventional Commit prefixes; favor `feat(compiler): …`, `fix(bootstrap): …`, etc., for clarity.
 - Keep commits atomic, mention touched capsules, and co-author doc changes in the same PR.
 - Pull requests should summarize scope, link issues, list verification commands, and attach screenshots or trace snippets when behavior shifts.
+
+## Codex Workflow Notes
+
+- Codex-specific repository setup lives under `.codex/`: `config.toml` enables hooks/skills, `hooks/` mirrors the Claude session and memory-cap safeguards, `skills/` holds reusable Sailfin workflows, and `prompts/` contains web/CLI prompt templates.
+- For autonomous issue pickup in Codex web or CLI, use `.codex/prompts/pickup.md`; it mirrors the Claude `/pickup` flow but branches as `codex/<issue>-<slug>`.
+- Before running Sailfin compiler or make verification commands from Codex, preserve the safety invariant: `ulimit -v 8388608 && <command>`.
+- If Codex does not auto-load repo-local skills/hooks in a given environment, explicitly mention the relevant `.codex/skills/*/SKILL.md` file in the prompt and follow `.codex/README.md`.

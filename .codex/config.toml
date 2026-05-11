@@ -1,0 +1,50 @@
+# Sailfin project-local Codex configuration.
+#
+# Codex reads AGENTS.md automatically. This file enables the repo-local
+# affordances that mirror the existing Claude Code setup where current Codex
+# builds support them.
+
+[features]
+# Preserve nested AGENTS.md scoping/precedence when future child AGENTS.md files
+# are added under compiler/, runtime/, docs/, or site/.
+child_agents_md = true
+# Hide the expected warning for the intentionally enabled child-agent feature.
+suppress_unstable_features_warning = true
+# Enables the hook tables below in CLI builds that still gate hooks behind a flag.
+hooks = true
+# Useful for long-running web/CLI sessions that are driving an issue to PR.
+goals = true
+
+# Repo-local skills are intentionally duplicated from the Claude workflow at a
+# smaller granularity. If your Codex build does not auto-discover repo skills,
+# mention the relevant SKILL.md file explicitly in the prompt.
+[[skills.config]]
+path = ".codex/skills/sailfin-check/SKILL.md"
+enabled = true
+
+[[skills.config]]
+path = ".codex/skills/sailfin-pickup/SKILL.md"
+enabled = true
+
+# Lifecycle hooks are intentionally small wrappers around scripts in
+# .codex/hooks/ so the behavior can be reviewed and tested outside Codex.
+[[hooks.SessionStart]]
+matcher = ""
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = ".codex/hooks/session-start.sh"
+
+[[hooks.UserPromptSubmit]]
+matcher = ""
+
+[[hooks.UserPromptSubmit.hooks]]
+type = "command"
+command = ".codex/hooks/inject-git-context.sh"
+
+[[hooks.PreToolUse]]
+matcher = "Bash|Shell|LocalShell|exec_command"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = ".codex/hooks/check-ulimit.sh"
