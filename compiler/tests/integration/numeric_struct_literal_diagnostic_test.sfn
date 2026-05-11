@@ -89,9 +89,9 @@ test "coerce_operand_to_type: span-aware diagnostic carries line:col" ![io] {
 }
 
 test "coerce_operand_to_type: span ignored when widening is allowed" ![io] {
-    // The span only enriches the strict-mode refusal. Permissive coercion
-    // succeeds and returns no diagnostic regardless of whether a span was
-    // threaded.
+    // The span only enriches the boundary-mode warning (#550). Permissive
+    // coercion bypasses the kind check entirely, so it succeeds and
+    // returns no diagnostic regardless of whether a span was threaded.
     let operand = _operand("double", "%t2");
     let mut lines: string[] = [];
     let span = _span(7, 3);
